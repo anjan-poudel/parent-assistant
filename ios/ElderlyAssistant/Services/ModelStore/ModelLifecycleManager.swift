@@ -77,6 +77,13 @@ enum EvictionReason: String, Equatable {
     case idle
     /// Caller asked (model swap, explicit teardown).
     case explicit
+    /// [MODEL-WARDEN] Step 2 — the bytes were taken after the owner was
+    /// *asked* and either agreed or was overruled by the release contract
+    /// (`PreemptionOutcome.forced`). Distinct from `.budget` on purpose:
+    /// `.budget` is the ledger taking an idle resident's bytes, `.preemption`
+    /// is a conversation, and only the second one costs a feature a handle
+    /// it was actively holding.
+    case preemption
 }
 
 /// [MODEL-WARDEN] Step 0 — the kernel's memory-pressure levels, as reported
@@ -129,6 +136,18 @@ enum ModelLifecycleEvent: Equatable {
     /// [MODEL-WARDEN] Step 1 — a granted reservation was handed back
     /// unspent, or reaped.
     case reservationAbandoned(slot: ModelSlot, reason: ReservationAbandonReason)
+    /// [MODEL-WARDEN] Step 2 — a resident was *asked* for its bytes, and
+    /// this is what it said. Emitted once per ask, including the refusals
+    /// the warden obeyed: a capture that only saw the successful takes
+    /// could not tell a slot that never refuses from a warden that never
+    /// asks, which is the property the revocation protocol exists to make
+    /// observable.
+    case preempted(slot: ModelSlot, outcome: PreemptionOutcome)
+    /// [MODEL-WARDEN] Step 2 — the thrash guard refused a load. See
+    /// `ReservationDenial.thrashGuarded`; this is the same fact in the
+    /// ledger's own vocabulary so a capture can count guard firings without
+    /// having to join them against the reservation events.
+    case thrashGuarded(slot: ModelSlot, kind: ThrashGuardKind, count: Int)
     /// [MODEL-WARDEN] Step 0 — a `phys_footprint` sample, taken at the
     /// moments the ledger changes shape (an admission, an eviction, a
     /// pressure level). The numbers ride together because neither is
@@ -159,6 +178,15 @@ struct ModelLifecycleSnapshot: Equatable {
     let physFootprintBytes: UInt64
     let resident: [ModelSlot]
     let pinned: [ModelSlot]
+    /// [MODEL-WARDEN] Step 2 — the ladder position each registered slot
+    /// holds. Reported so the field capture can say what the ordering was
+    /// *of*, rather than inferring it from which slot happened to be
+    /// evicted.
+    let priorities: [ModelSlot: ModelPriority]
+    /// [MODEL-WARDEN] Step 2 — slots the thrash guard is currently sparing
+    /// from the load-driven victim order (cooldown or quarantine). The
+    /// guard's firing is otherwise only visible in the denials it causes.
+    let quarantined: [ModelSlot]
 }
 
 // MARK: - The manager
@@ -222,6 +250,42 @@ final class ModelLifecycleManager {
         var loadedAt: Date
         var lastUse: Date
         var pinCount: Int
+        /// [MODEL-WARDEN] Step 2 — where this resident sits on the ladder.
+        /// Defaults to `.foreground`, which is what every registration that
+        /// predates Step 2 meant: a feature's own handle, not a prefetch.
+        let priority: ModelPriority
+        /// [MODEL-WARDEN] Step 2 — the owner as something that can be
+        /// *asked* (`ModelResident`), when it registered as one. The **box**
+        /// is owned by the ledger; the resident inside it is weak, for the
+        /// same reason `owner` is: a dead resident must not be kept alive by
+        /// the ledger that noticed it died. (`entry.resident?.value` is the
+        /// resident, and it is `nil` once the owner is gone.)
+        ///
+        /// `nil` is the normal case for most slots and is not a defect: a
+        /// slot whose owner has no in-flight state to protect has nothing
+        /// to say about being evicted, and the warden takes it through the
+        /// registration's release closure exactly as it did before.
+        var resident: ModelResidentBox?
+
+        /// Whether the release contract permits the force fallback. Read
+        /// from the footprint at registration so a decision never has to
+        /// re-resolve the catalog.
+        var allowsForcedUnload: Bool { footprint.releaseContract.allowsForcedUnload }
+    }
+
+    /// `ModelResident` is a class-only protocol that `Entry` wants to hold
+    /// weakly, and the box is what makes that possible without making the
+    /// ledger's own bookkeeping depend on the owner's lifetime.
+    ///
+    /// The direction matters and is the whole reason this is a class: the
+    /// ledger holds the **box** strongly and the box holds the **resident**
+    /// weakly. `weak var resident: ModelResident?` directly on `Entry` would
+    /// look equivalent and is not — with nothing else retaining the box, the
+    /// weak reference would be cleared on the way out of `register`, and
+    /// every ask would silently find `nil`.
+    final class ModelResidentBox {
+        weak var value: ModelResident?
+        init(_ value: ModelResident) { self.value = value }
     }
 
     /// [MODEL-WARDEN] A reservation's owner, held weakly so a dead owner's
@@ -251,6 +315,34 @@ final class ModelLifecycleManager {
     /// proposal's `peak_footprint = M + T + W`.
     private var reservations: [UUID: ModelReservation] = [:]
     private var reservationOwners: [UUID: WeakOwner] = [:]
+    /// [MODEL-WARDEN] Step 2 — the thrash guard's memory of load-driven
+    /// evictions, per slot, all of it pruned by the window on every read.
+    ///
+    /// It counts *load-driven* evictions only (`.budget` and `.preemption`):
+    /// from the victim's side, being taken to make room for someone else is
+    /// one event whatever reason is recorded on it, while the idle sweep
+    /// (a slot nobody is using) and the pressure sweeps (the OS asking) are
+    /// different facts and dampening either would be the guard fighting the
+    /// wrong thing.
+    private struct ThrashRecord {
+        /// Load-driven evictions inside `preemptionQuarantineSeconds`.
+        var evictions: [Date] = []
+        /// After a preemption the slot is kept out of the victim order
+        /// until this instant — `preemptionCooldownSeconds`.
+        var cooldownUntil: Date?
+        /// After a refusal that cannot be forced, the slot is spared the
+        /// ask until this instant — `unloadAckDeadlineSeconds`.
+        var refusalGraceUntil: Date?
+        /// Latched by `preemptionsBeforeQuarantine` evictions inside the
+        /// window; lasts `preemptionQuarantineSeconds`.
+        var quarantineUntil: Date?
+    }
+
+    private var thrash: [ModelSlot: ThrashRecord] = [:]
+    /// Large-load reservations granted inside the rolling minute, for
+    /// `ModelWardenConfig.maxLoadsPerMinute`.
+    private var largeLoadAdmissions: [Date] = []
+
     /// The dispatch memory-pressure source (`.warning` / `.critical`), which
     /// the proposal records as "the closer-to-the-kernel signal" and which
     /// the tree did not use anywhere before Step 0.
@@ -284,10 +376,13 @@ final class ModelLifecycleManager {
                   modelID: ModelID?,
                   owner: AnyObject?,
                   evictable: Bool = true,
+                  priority: ModelPriority = .foreground,
+                  resident: ModelResident? = nil,
                   unload: @escaping () -> Void) {
         let footprint = ModelLifecycleInventory.footprint(for: slot, modelID: modelID)
         lock.lock()
         let now = clock()
+        let box = resident.map(ModelResidentBox.init)
         if var existing = entries[slot] {
             existing = Entry(footprint: footprint,
                              owner: owner,
@@ -296,7 +391,9 @@ final class ModelLifecycleManager {
                              isResident: existing.isResident,
                              loadedAt: existing.loadedAt,
                              lastUse: existing.lastUse,
-                             pinCount: existing.pinCount)
+                             pinCount: existing.pinCount,
+                             priority: priority,
+                             resident: box)
             entries[slot] = existing
         } else {
             entries[slot] = Entry(footprint: footprint,
@@ -306,7 +403,9 @@ final class ModelLifecycleManager {
                                   isResident: false,
                                   loadedAt: now,
                                   lastUse: now,
-                                  pinCount: 0)
+                                  pinCount: 0,
+                                  priority: priority,
+                                  resident: box)
         }
         lock.unlock()
     }
@@ -316,9 +415,12 @@ final class ModelLifecycleManager {
                   modelID: ModelID?,
                   owner: AnyObject?,
                   evictable: Bool = true,
+                  priority: ModelPriority = .foreground,
+                  resident: ModelResident? = nil,
                   release: @escaping (AnyObject) -> Void) {
         register(slot: slot, modelID: modelID, owner: owner,
-                 evictable: evictable) { [weak owner] in
+                 evictable: evictable, priority: priority,
+                 resident: resident) { [weak owner] in
             guard let owner else { return }
             release(owner)
         }
@@ -402,10 +504,13 @@ final class ModelLifecycleManager {
         switch denial {
         case .insufficientHeadroom:
             return .insufficientHeadroom
-        case .budgetExhausted, .alreadyReserved, .loadInFlight:
-            // Something is holding the bytes or the queue. Both are "retry
-            // after the in-flight work settles", which is what
-            // `budgetExhausted` already means to every caller.
+        case .budgetExhausted, .alreadyReserved, .loadInFlight, .thrashGuarded:
+            // Something is holding the bytes or the queue. All of them are
+            // "retry after the in-flight work settles", which is what
+            // `budgetExhausted` already means to every caller — and the
+            // thrash guard's refusals are the same sentence with a reason
+            // (the `reservationDenied` event carries the guard's own
+            // vocabulary for a capture that wants to count them).
             return .budgetExhausted
         case .overBudgetAlone:
             // Unreachable from `prepareLoad` (a replacing load is admitted
@@ -438,9 +543,10 @@ final class ModelLifecycleManager {
     ///    exceed the headroom that remains;
     /// 5. record the reservation and hand back the permit.
     ///
-    /// Step 2's priority ladder slots in at step 2 (victim selection) and
-    /// step 4 (preemption); Step 3's cost model reads the events. Neither
-    /// is built here.
+    /// Step 2 adds the ladder to step 2 (victim selection) and the
+    /// preemption ask between steps 2 and 3; Step 3's cost model reads the
+    /// events. See the seam note at the foot of this file for what is
+    /// deliberately not built.
     func reserve(_ request: ModelLoadRequest) -> Result<ModelReservation, ReservationDenial> {
         reserveInternal(request, emittingEvents: true)
     }
@@ -454,11 +560,24 @@ final class ModelLifecycleManager {
         let now = clock()
 
         var victims: [ModelSlot] = []
+        var preemptions: [PreemptionRecord] = []
+        /// Slots whose bytes the warden must not take: their owner refused
+        /// and the release contract does not permit overruling it. They are
+        /// excluded from the rebuilt victim order, which is the whole
+        /// difference between "the refusal was heard" and "the refusal was
+        /// logged".
+        var withheld: Set<ModelSlot> = []
         var denial: ReservationDenial?
         var soloOverBudget = false
         var budgetUsed: UInt64 = 0
         var reaped: [(reservation: ModelReservation,
                       reason: ReservationAbandonReason)] = []
+        /// The state the SECOND victim walk must start from: everything the
+        /// first walk decided is already reflected in `entries`, so the
+        /// rebuild has to be told the arithmetic rather than re-derive it.
+        var residentAfterFirstPlan: UInt64 = 0
+        var transientLive: UInt64 = 0
+        var excluding: ModelSlot?
 
         lock.lock()
         pruneDeadOwnersLocked()
@@ -475,73 +594,89 @@ final class ModelLifecycleManager {
             // The serial load queue. Fail fast rather than queue: see the
             // method comment.
             denial = .loadInFlight(holder: holder)
+        } else if let guarded = loadRateDenialLocked(for: request,
+                                                     incoming: incoming,
+                                                     now: now,
+                                                     config: config) {
+            // [MODEL-WARDEN] Step 2 — the global half of the thrash guard,
+            // checked before any victim is chosen: a minute in which the
+            // app has already admitted `maxLoadsPerMinute` large models is
+            // not a minute in which one more will be the last.
+            denial = guarded
         } else {
             let deviceClass = currentDeviceClassLocked()
             // See `ModelLoadRequest.replacesSlotContents`: a replacing load
             // excludes the slot's own residency (one position being
             // refilled); a peer load does not (the bytes are additive).
-            var residentLive = request.replacesSlotContents
+            let residentLive = request.replacesSlotContents
                 ? residentLiveBytesLocked(excluding: request.slot)
                 : residentLiveBytesLocked()
-            let transientLive = transientLiveBytesLocked()
+            transientLive = transientLiveBytesLocked()
+            excluding = request.replacesSlotContents ? request.slot : nil
             let budget = budgetOverrideBytes
                 ?? ModelLifecycleBudget.effectiveBudgetBytes(
                     deviceClass: deviceClass,
                     availableBytes: probe.availableProcessMemoryBytes,
                     residentLiveBytes: residentLive)
+            budgetUsed = budget
 
-            let victimOrder = lruEvictionOrderLocked(
-                excluding: request.replacesSlotContents ? request.slot : nil)
-            let heavyVictims = victimOrder.filter {
-                entries[$0]?.footprint.isHeavy ?? false
-            }
-            // Light models are only candidates when evicting them can
-            // actually close the gap. If the incoming model is over budget
-            // on its own, nothing light can help, and taking the encoder
-            // would cost a CoreML specialization for zero bytes — see the
-            // `soloOverBudget` branch below.
-            let lightVictims = incoming.liveBytes > budget
-                ? []
-                : victimOrder.filter { !(entries[$0]?.footprint.isHeavy ?? false) }
-
-            for victim in heavyVictims + lightVictims
-            where residentLive + transientLive + incoming.liveBytes > budget {
-                victims.append(victim)
-                residentLive -= entries[victim]?.footprint.liveBytes ?? 0
+            let plan = planVictimsLocked(excluding: excluding,
+                                         residentLive: residentLive,
+                                         transientLive: transientLive,
+                                         incomingLiveBytes: incoming.liveBytes,
+                                         budget: budget,
+                                         priority: request.priority,
+                                         now: now,
+                                         config: config,
+                                         withheld: [])
+            victims = plan.victims
+            for victim in victims {
                 // Marking non-resident here (rather than after the unload)
                 // keeps the arithmetic honest even though the owner's free
-                // may land later, and keeps a second concurrent gate from
-                // evicting the same slot twice.
+                // may land later, keeps a second concurrent gate from
+                // evicting the same slot twice, and — Step 2 — is what the
+                // rebuilt victim order reads if an owner below refuses.
+                //
+                // The thrash counter is deliberately NOT bumped here: this
+                // list can still lose members to a refusal below, and an
+                // eviction that never happened must not count toward a
+                // quarantine. The count is taken once, on the final list.
                 markNonResidentLocked(victim)
             }
+            residentAfterFirstPlan = plan.residentLive
 
-            if residentLive + transientLive + incoming.liveBytes > budget {
+            if !plan.fits {
                 if incoming.liveBytes > budget {
-                    if request.replacesSlotContents {
+                    if request.replacesSlotContents && request.slot.admitsSoloOverBudget {
                         // Over budget on its own. Nothing we can evict
                         // changes that, and refusing would make the app's
                         // own default brain unloadable — admit it and
                         // announce the fact.
                         soloOverBudget = true
                     } else {
-                        // A PEER load over budget on its own has no such
-                        // escape hatch to invoke: it is a second copy of
-                        // something the device already cannot hold beside
-                        // its neighbours, and the user did not ask for it.
+                        // No escape hatch to invoke. Either a PEER load —
+                        // a second copy of something the device already
+                        // cannot hold beside its neighbours, which the user
+                        // did not ask for — or a replacing load on a
+                        // position whose artifact the app can live without
+                        // (`ModelSlot.admitsSoloOverBudget`), where the
+                        // feature's own fallback is a working answer.
                         denial = .overBudgetAlone(liveBytes: incoming.liveBytes,
                                                   budgetBytes: budget)
                     }
                 } else {
                     // It fits alone, but unevictable bytes are in the way:
-                    // a resident is pinned (an inference is in flight) or
-                    // is not idle-evictable. Admitting here would cross the
-                    // budget silently, which is the one thing this whole
-                    // mechanism exists to prevent — so refuse instead.
-                    denial = .budgetExhausted(by: blockerLocked(victims: victims,
-                                                                slot: request.slot))
+                    // a resident is pinned (an inference is in flight), is
+                    // not idle-evictable, or is being spared by the thrash
+                    // guard. Admitting here would cross the budget
+                    // silently, which is the one thing this whole mechanism
+                    // exists to prevent — so refuse instead.
+                    denial = budgetDenialLocked(victims: victims,
+                                                slot: request.slot,
+                                                now: now,
+                                                config: config)
                 }
             }
-            budgetUsed = budget
         }
         lock.unlock()
 
@@ -552,13 +687,114 @@ final class ModelLifecycleManager {
                                                reason: entry.reason))
             }
         }
-        for victim in victims { performEviction(victim, reason: .budget) }
+
+        // ---- Phase 2b — [MODEL-WARDEN] Step 2: ask before taking.
+        //
+        // The victims above are already marked non-resident, so a concurrent
+        // gate sees them gone exactly as it did before Step 2. What is new
+        // is that the ones whose owner registered as a `ModelResident` — and
+        // whose priority is below the request's — get a say first. The ask
+        // is outside the lock because a resident that called back in would
+        // deadlock on the non-recursive lock, and the answer is what decides
+        // whether the registered release closure is invoked unconditionally
+        // (`.budget`) or only where the contract allows (`PreemptionOutcome`).
+        //
+        // A `.safetyCritical` request never asks: there is nothing above it
+        // on the ladder, so `askableVictims` returns nothing for it and the
+        // victims go through the Step 1 path unchanged.
+        if denial == nil {
+            let askable = askableVictims(victims: victims,
+                                         above: request.priority)
+            for (slot, resident) in askable {
+                let outcome = resolvePreemption(slot: slot,
+                                                resident: resident,
+                                                now: now,
+                                                config: config)
+                preemptions.append(PreemptionRecord(slot: slot, outcome: outcome))
+                if emittingEvents {
+                    onEvent?(.preempted(slot: slot, outcome: outcome))
+                }
+                if !outcome.reclaimed { withheld.insert(slot) }
+            }
+        }
+
+        // ---- Phase 2c — rebuild the victims around what was refused.
+        //
+        // Only the refusals that could not be forced change anything, and
+        // when there are none this block is skipped entirely: the common path
+        // asks nothing, rebuilds nothing, and pays one lock acquisition at
+        // the end for the thrash count.
+        //
+        // One bound worth naming: the ask happens once per reservation,
+        // against the FIRST plan's victim list. A slot that only becomes a
+        // victim because a refusal pushed the order past it is evicted the
+        // Step 1 way, without being asked — which is exactly where it would
+        // have gone without Step 2, and the alternative (an ask-loop that
+        // can cascade) buys a rarer guarantee at the cost of a path with no
+        // fixed number of lock acquisitions.
+        if !withheld.isEmpty {
+            lock.lock()
+            var withheldLive: UInt64 = 0
+            for slot in withheld {
+                // The warden is giving the bytes back to the ledger,
+                // because it did not get them. Leaving them marked
+                // non-resident would be the ledger counting memory it was
+                // just told it cannot have.
+                markResidentLocked(slot)
+                withheldLive += entries[slot]?.footprint.liveBytes ?? 0
+            }
+            let rebuilt = planVictimsLocked(excluding: excluding,
+                                            residentLive: residentAfterFirstPlan + withheldLive,
+                                            transientLive: transientLive,
+                                            incomingLiveBytes: incoming.liveBytes,
+                                            budget: budgetUsed,
+                                            priority: request.priority,
+                                            now: now,
+                                            config: config,
+                                            withheld: withheld)
+            victims += rebuilt.victims
+            for victim in rebuilt.victims {
+                markNonResidentLocked(victim)
+            }
+            // The first plan's victims included the refusals. They are not
+            // victims any more: the registered release closure is exactly
+            // what the owner just declined to have called, and Step 1's
+            // unconditional path is what this protocol exists to replace.
+            victims.removeAll { withheld.contains($0) }
+            if !rebuilt.fits {
+                denial = budgetDenialLocked(victims: victims,
+                                            slot: request.slot,
+                                            now: now,
+                                            config: config)
+            }
+            lock.unlock()
+        }
+
+        // The thrash count, taken once on the final list — see the note in
+        // phase 1. `withheld` slots are not in `victims` any more, so a
+        // refusal is never counted as an eviction.
+        lock.lock()
+        for victim in victims {
+            noteLoadDrivenEvictionLocked(victim, now: now, config: config)
+        }
+        lock.unlock()
+
+        let handled: Set<ModelSlot> = Set(preemptions.filter { $0.outcome.reclaimed }
+            .map(\.slot))
+        for victim in victims where !handled.contains(victim) {
+            performEviction(victim, reason: .budget)
+        }
 
         if let denial {
             if emittingEvents {
                 onEvent?(.reservationDenied(slot: request.slot,
                                             reason: denial,
                                             purpose: request.purpose))
+                if let firing = denial.thrashGuardFiring {
+                    onEvent?(.thrashGuarded(slot: firing.slot,
+                                            kind: firing.kind,
+                                            count: firing.count))
+                }
             }
             return .failure(denial)
         }
@@ -593,7 +829,9 @@ final class ModelLifecycleManager {
             expiresAt: now.addingTimeInterval(config.reservationTTLSeconds),
             evicted: victims,
             soloOverBudget: soloOverBudget,
-            budgetBytes: budgetUsed)
+            budgetBytes: budgetUsed,
+            priority: request.priority,
+            preempted: preemptions)
 
         // Record under the lock, re-checking the two conditions another
         // caller could have created while the lock was down.
@@ -620,6 +858,13 @@ final class ModelLifecycleManager {
             return .failure(denial)
         }
         reservations[reservation.id] = reservation
+        if reservation.isLargeLoad {
+            // [MODEL-WARDEN] Step 2 — the rolling minute behind
+            // `maxLoadsPerMinute`. Counted here, where the grant is real:
+            // a reservation that is granted and immediately abandoned still
+            // cost the page-in the cap exists to bound.
+            largeLoadAdmissions.append(now)
+        }
         // Only an owner that exists can be observed to have died. A
         // reservation taken without one (a maintenance path, `prepareLoad`)
         // is reaped by the TTL, never by the owner check — recording a nil
@@ -791,6 +1036,299 @@ final class ModelLifecycleManager {
         }
         return blocked.max { $0.value.footprint.liveBytes < $1.value.footprint.liveBytes }?.key
             ?? slot
+    }
+
+    // MARK: - [MODEL-WARDEN] Step 2 — the ladder, preemption, the thrash guard
+
+    /// The load-driven victim order: **lowest priority first, then heavy
+    /// before light, least-recently-used within that, bigger frees more.**
+    ///
+    /// This is `lruEvictionOrderLocked` with the ladder in front of it, and
+    /// the two are deliberately separate functions. The pressure sweeps keep
+    /// the plain LRU order: a level-2 warning is the OS asking for memory
+    /// back and the honest response is "the biggest, least used thing
+    /// first", not "re-litigate what each resident is for". The ladder is
+    /// about *who the warden prefers to inconvenience*, which is a question
+    /// only a load-driven eviction is asking.
+    ///
+    /// With every resident at the default `.foreground` — i.e. every
+    /// registration written before Step 2, and every one that has no reason
+    /// to say otherwise — this reduces exactly to the Step 1 order.
+    private func loadEvictionOrderLocked(excluding excluded: ModelSlot?,
+                                         priority: ModelPriority,
+                                         now: Date,
+                                         config: ModelWardenConfig,
+                                         withheld: Set<ModelSlot>) -> [ModelSlot] {
+        let spared = guardSparedLocked(now: now, config: config, priority: priority)
+        return entries.compactMap {
+            slot, entry -> (ModelSlot, ModelPriority, Bool, Date, UInt64)? in
+            guard entry.isResident, entry.evictable,
+                  entry.pinCount == 0, slot != excluded,
+                  entry.owner != nil, !withheld.contains(slot),
+                  spared[slot] == nil else { return nil }
+            return (slot, entry.priority, entry.footprint.isHeavy,
+                    entry.lastUse, entry.footprint.liveBytes)
+        }
+        .sorted { lhs, rhs in
+            if lhs.1 != rhs.1 { return lhs.1 < rhs.1 }     // lowest priority first
+            if lhs.2 != rhs.2 { return lhs.2 && !rhs.2 }   // heavy before light
+            if lhs.3 != rhs.3 { return lhs.3 < rhs.3 }     // least recent first
+            return lhs.4 > rhs.4                           // bigger frees more
+        }
+        .map { $0.0 }
+    }
+
+    /// One walk of the victim order, **pure**: it decides, it does not
+    /// mutate.
+    ///
+    /// Splitting the walk from the marking is what makes the refusal
+    /// protocol possible without provisional state: a refusal invalidates
+    /// the plan, and the answer is to walk again from the same inputs with
+    /// the refused slots withheld — not to take the plan back.
+    private func planVictimsLocked(excluding excluded: ModelSlot?,
+                                   residentLive: UInt64,
+                                   transientLive: UInt64,
+                                   incomingLiveBytes: UInt64,
+                                   budget: UInt64,
+                                   priority: ModelPriority,
+                                   now: Date,
+                                   config: ModelWardenConfig,
+                                   withheld: Set<ModelSlot>)
+    -> (victims: [ModelSlot], fits: Bool, residentLive: UInt64) {
+        var resident = residentLive
+        let order = loadEvictionOrderLocked(excluding: excluded,
+                                            priority: priority,
+                                            now: now,
+                                            config: config,
+                                            withheld: withheld)
+        let heavy = order.filter { entries[$0]?.footprint.isHeavy ?? false }
+        // Light models are only candidates when evicting them can actually
+        // close the gap. If the incoming model is over budget on its own,
+        // nothing light can help, and taking the encoder would cost a CoreML
+        // specialization for zero bytes — see the `soloOverBudget` branch.
+        let light = incomingLiveBytes > budget
+            ? []
+            : order.filter { !(entries[$0]?.footprint.isHeavy ?? false) }
+
+        var victims: [ModelSlot] = []
+        for victim in heavy + light
+        where resident + transientLive + incomingLiveBytes > budget {
+            victims.append(victim)
+            let bytes = entries[victim]?.footprint.liveBytes ?? 0
+            // Saturating: the caller passes the resident total explicitly so
+            // a second walk can be run against a ledger the first one has
+            // already spent, and an under-count in either direction must not
+            // be able to trap.
+            resident = resident >= bytes ? resident - bytes : 0
+        }
+        return (victims,
+                resident + transientLive + incomingLiveBytes <= budget,
+                resident)
+    }
+
+    /// The victims whose owner can be asked, in victim order.
+    ///
+    /// Two conditions, both required: the owner registered as a
+    /// `ModelResident`, and the resident's priority is **strictly below**
+    /// the request's. The second is the ladder doing its job — a boot warm
+    /// does not get to ask the camera's translation brain to stand down,
+    /// because that trades a user-visible feature for a prefetch. It also
+    /// means a `.safetyCritical` request is the only one that can ask
+    /// anything at all: there is nothing above it.
+    /// Not `…Locked`: it takes the lock itself, because its one caller reads
+    /// the answer *before* the ask and the asks must happen outside the lock.
+    /// Reading `entries` from the caller's side of that boundary would be the
+    /// manager's only unsynchronised view of its own state.
+    private func askableVictims(victims: [ModelSlot],
+                                above priority: ModelPriority) -> [(ModelSlot, ModelResident)] {
+        lock.lock()
+        defer { lock.unlock() }
+        return victims.compactMap { slot in
+            guard let entry = entries[slot],
+                  entry.priority < priority,
+                  let resident = entry.resident?.value else { return nil }
+            // A slot inside a refusal grace never reaches here: the grace is
+            // enforced where every other sparing is, in the victim order
+            // (`guardSparedLocked`). One mechanism, so a slot cannot be
+            // spared from the order and then asked anyway.
+            return (slot, resident)
+        }
+    }
+
+    /// Ask, then decide what the answer permits.
+    ///
+    /// The call itself is outside the lock (see `ModelResident`); the
+    /// bookkeeping that follows is under it. `forced` is legal exactly
+    /// because `ModelReleaseContract.allowsForcedUnload` says the runtime
+    /// survives the drop — which is the one rule this whole protocol will
+    /// not bend, and the reason whisper.cpp's `perAttemptContext` can refuse
+    /// and be *obeyed* while an `actorDeferredFree` llama handle cannot.
+    private func resolvePreemption(slot: ModelSlot,
+                                   resident: ModelResident,
+                                   now: Date,
+                                   config: ModelWardenConfig) -> PreemptionOutcome {
+        let ack = resident.releaseForWarden()
+        switch ack {
+        case .released:
+            lock.lock()
+            notePreemptionLocked(slot, now: now, config: config)
+            lock.unlock()
+            return .released
+        case .notHolding:
+            // Nothing was there to drop. The bytes are accounted for either
+            // way, and the cooldown is not owed: no handle was lost.
+            return .alreadyReleased
+        case .refused(let reason):
+            lock.lock()
+            let forceable = entries[slot]?.allowsForcedUnload ?? false
+            if !forceable {
+                noteRefusalGraceLocked(slot, now: now, config: config)
+            }
+            lock.unlock()
+            guard forceable else { return .refused(reason: reason) }
+            performEviction(slot, reason: .preemption)
+            lock.lock()
+            notePreemptionLocked(slot, now: now, config: config)
+            lock.unlock()
+            return .forced(reason: reason)
+        }
+    }
+
+    /// The refusal a budget shortfall deserves, told apart from the guard's
+    /// own refusal.
+    ///
+    /// When the only thing standing in the way is a slot the thrash guard is
+    /// sparing, `.budgetExhausted` would be true but unhelpful: the field
+    /// capture would read "something held the bytes" and could not tell a
+    /// pin from the loop-breaker. The guard says so under its own name
+    /// instead — and it is still a deferral, not a verdict.
+    private func budgetDenialLocked(victims: [ModelSlot],
+                                    slot: ModelSlot,
+                                    now: Date,
+                                    config: ModelWardenConfig) -> ReservationDenial {
+        let blocker = blockerLocked(victims: victims, slot: slot)
+        if let record = thrash[blocker] {
+            let quarantined = record.quarantineUntil.map { $0 > now } ?? false
+            let cooling = record.cooldownUntil.map { $0 > now } ?? false
+            if quarantined || cooling {
+                return .thrashGuarded(slot: blocker,
+                                      kind: .victimSpared,
+                                      count: record.evictions.count)
+            }
+        }
+        return .budgetExhausted(by: blocker)
+    }
+
+    /// The global half of the guard: large loads admitted inside the rolling
+    /// minute. Returns a denial when the window is already full.
+    ///
+    /// Exempt, both deliberately: a `.maintenance` load (the synchronous
+    /// `prepareLoad` fast path, which is not a feature loop) and a
+    /// `.safetyCritical` one (a live voice turn — the household is waiting,
+    /// and the guard exists to damp churn, not to stand between the user and
+    /// an answer).
+    private func loadRateDenialLocked(for request: ModelLoadRequest,
+                                      incoming: ModelFootprint,
+                                      now: Date,
+                                      config: ModelWardenConfig) -> ReservationDenial? {
+        guard config.thrashGuardEnabled,
+              incoming.liveBytes >= config.largeLoadThresholdBytes,
+              request.purpose != .maintenance,
+              request.priority != .safetyCritical else { return nil }
+        pruneLargeLoadAdmissionsLocked(now: now)
+        let window = largeLoadAdmissions.count
+        guard window >= config.maxLoadsPerMinute else { return nil }
+        return .thrashGuarded(slot: request.slot,
+                              kind: .loadRateExceeded,
+                              count: window)
+    }
+
+    /// Slots the guard is currently keeping out of the load-driven victim
+    /// order, and the number behind it.
+    ///
+    /// Three things spare a slot, and they are different sentences:
+    /// a **quarantine** (evicted too often inside the window), a
+    /// **cooldown** (just preempted — taking the bytes straight back is the
+    /// loop), and a **refusal grace** (the owner said no and the contract
+    /// agreed). All three are load-driven-only: a memory warning or an idle
+    /// sweep ignores them, because the guard damps feature churn and not the
+    /// OS's request for memory.
+    private func guardSparedLocked(now: Date,
+                                   config: ModelWardenConfig,
+                                   priority: ModelPriority) -> [ModelSlot: Int] {
+        guard config.thrashGuardEnabled, priority != .safetyCritical else {
+            // A live voice turn is never refused for the guard's sake. See
+            // `loadRateDenialLocked`.
+            return [:]
+        }
+        var spared: [ModelSlot: Int] = [:]
+        for (slot, record) in thrash {
+            let held = (record.quarantineUntil.map { $0 > now } ?? false)
+                || (record.cooldownUntil.map { $0 > now } ?? false)
+                || (record.refusalGraceUntil.map { $0 > now } ?? false)
+            if held { spared[slot] = record.evictions.count }
+        }
+        return spared
+    }
+
+    /// One load-driven eviction of `slot`, for the quarantine count.
+    ///
+    /// Counted here and nowhere else: `didUnload`, the idle sweep and the
+    /// pressure sweeps also clear residency, and none of them is the loop
+    /// the guard exists to break.
+    private func noteLoadDrivenEvictionLocked(_ slot: ModelSlot,
+                                              now: Date,
+                                              config: ModelWardenConfig) {
+        guard config.thrashGuardEnabled else { return }
+        var record = thrash[slot] ?? ThrashRecord()
+        record.evictions = record.evictions.filter {
+            now.timeIntervalSince($0) < config.preemptionQuarantineSeconds
+        }
+        record.evictions.append(now)
+        if record.evictions.count >= config.preemptionsBeforeQuarantine {
+            record.quarantineUntil = now.addingTimeInterval(
+                config.preemptionQuarantineSeconds)
+            // Cleared on latch, so the quarantine does not re-arm itself the
+            // moment it expires.
+            record.evictions.removeAll()
+        }
+        thrash[slot] = record
+    }
+
+    /// A slot was preempted: keep it out of the victim order for the
+    /// cooldown, so the bytes cannot be taken back the instant they were
+    /// given up.
+    private func notePreemptionLocked(_ slot: ModelSlot,
+                                      now: Date,
+                                      config: ModelWardenConfig) {
+        guard config.thrashGuardEnabled else { return }
+        var record = thrash[slot] ?? ThrashRecord()
+        record.cooldownUntil = now.addingTimeInterval(config.preemptionCooldownSeconds)
+        thrash[slot] = record
+    }
+
+    /// A refusal the warden obeyed: spare the slot the ask for the ack
+    /// deadline, so a busy owner is not asked once per pipeline tick.
+    private func noteRefusalGraceLocked(_ slot: ModelSlot,
+                                        now: Date,
+                                        config: ModelWardenConfig) {
+        guard config.thrashGuardEnabled else { return }
+        var record = thrash[slot] ?? ThrashRecord()
+        record.refusalGraceUntil = now.addingTimeInterval(config.unloadAckDeadlineSeconds)
+        thrash[slot] = record
+    }
+
+    private func pruneLargeLoadAdmissionsLocked(now: Date) {
+        largeLoadAdmissions.removeAll { now.timeIntervalSince($0) >= 60 }
+    }
+
+    /// The inverse of `markNonResidentLocked`, and it exists for exactly one
+    /// caller: a refusal hands the bytes *back* to the ledger, and the
+    /// second walk has to see them.
+    private func markResidentLocked(_ slot: ModelSlot) {
+        guard var entry = entries[slot] else { return }
+        entry.isResident = true
+        entries[slot] = entry
     }
 
     /// Record that the load actually happened. Called by the owner once the
@@ -1153,7 +1691,12 @@ final class ModelLifecycleManager {
             resident: entries.filter { $0.value.isResident }
                 .map { $0.key }.sorted { $0.rawValue < $1.rawValue },
             pinned: entries.filter { $0.value.pinCount > 0 }
-                .map { $0.key }.sorted { $0.rawValue < $1.rawValue })
+                .map { $0.key }.sorted { $0.rawValue < $1.rawValue },
+            priorities: entries.mapValues(\.priority),
+            quarantined: guardSparedLocked(now: clock(),
+                                           config: wardenConfig,
+                                           priority: .foreground)
+                .keys.sorted { $0.rawValue < $1.rawValue })
     }
 
     /// [MODEL-WARDEN] Step 0 — report the app's actual footprint alongside
@@ -1271,4 +1814,36 @@ final class ModelLifecycleManager {
         unload?()
         onEvent?(.evicted(slot: slot, reason: reason))
     }
+
+    // MARK: - [MODEL-WARDEN] Step 3 seams (documented, NOT built)
+    //
+    // Step 2 leaves three things deliberately unfinished, recorded here
+    // rather than implied by their absence, because each is a *policy*
+    // question and Step 3 is where policy lives:
+    //
+    // 1. **The cost model.** The ladder is ordinal; Step 3's
+    //    `ModelBudgetPolicy` is where "what is this resident worth" becomes
+    //    a number — the seconds to reload it, the ANE specialization it
+    //    costs, whether it can be reloaded at all. `ModelReservation`
+    //    already carries `priority` and `preempted`, and the events carry
+    //    the outcomes, so the evidence that policy would be tuned against
+    //    is being recorded now. The ladder's ordering is the seam: a cost
+    //    model replaces `loadEvictionOrderLocked`'s sort, nothing else.
+    //
+    // 2. **Asynchronous acks.** `ModelResident.releaseForWarden` is
+    //    synchronous by construction, which is what makes it callable from
+    //    the reservation's fail-fast path. An owner whose drop is genuinely
+    //    deferred (a decode that must reach a safe point first) cannot use
+    //    it, and today says `.refused(.cannotReleaseNow)` instead. Making
+    //    the ack awaitable means a two-phase reservation whose `reserve`
+    //    suspends — a different API shape, and
+    //    `ModelWardenConfig.unloadAckDeadlineSeconds` is already the bound
+    //    it would be judged against.
+    //
+    // 3. **Owner-side conformance.** The tier's generator registers a
+    //    `ModelResident`; the recognizers do not yet, so their residency is
+    //    still taken through the Step 1 path. Adding it is a per-owner
+    //    change with its own test surface (whisper.cpp's perAttemptContext
+    //    refusal is the interesting one) and it does not change any
+    //    arithmetic here.
 }

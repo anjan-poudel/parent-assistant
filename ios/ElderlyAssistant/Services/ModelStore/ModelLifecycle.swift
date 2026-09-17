@@ -111,6 +111,34 @@ enum ModelReleaseContract: String, Codable {
     case actorDeferredFree
     /// Never released.
     case processLifetime
+
+    /// [MODEL-WARDEN] Step 2 — whether the warden may take this slot's bytes
+    /// back by calling the registered release closure *after the owner has
+    /// said no*.
+    ///
+    /// This is the one rule the preemption protocol will not bend, and it is
+    /// a property of the runtime rather than of the owner's mood:
+    ///
+    ///  - `synchronousDrop` — the closure is a reference drop and the runtime
+    ///    frees on the way out. Forcing is exactly what the owner would do.
+    ///  - `actorDeferredFree` — the closure drops the *resident* claim; a
+    ///    decode already in flight holds its own strong reference, so the
+    ///    handle stays alive for the work using it and frees when that work
+    ///    ends. Forcing cannot free memory out from under a running decode,
+    ///    which is why every existing LRU eviction of a llama slot is safe.
+    ///  - `perAttemptContext` — whisper.cpp's context. `whisper_free` under a
+    ///    running `whisper_full` **crashes**, and a context whose
+    ///    `whisper_full` was killed by the watchdog can never be freed at all
+    ///    (`whisperCPPWedgedReserveBytes` is the 1 GB that leak is bounded
+    ///    at). An owner that refuses here is describing a fact the warden
+    ///    must not overrule: **never force this one.**
+    ///  - `processLifetime` — there is no release path to call.
+    var allowsForcedUnload: Bool {
+        switch self {
+        case .synchronousDrop, .actorDeferredFree: return true
+        case .perAttemptContext, .processLifetime: return false
+        }
+    }
 }
 
 /// One row of the inventory: what a slot costs while it is resident.
@@ -198,6 +226,50 @@ enum ModelSlot: String, CaseIterable, Codable {
     /// Ort session is built once by the audio graph and there is no unload
     /// API to call. At 0.9 MB it is the cheapest row in the ledger.
     case vad
+    /// [MODEL-WARDEN] Step 2 — the live-translate tier's own llama handle
+    /// (`LlamaBrainTextGenerator.handle`).
+    ///
+    /// **A position of its own, not a second `.brain`.** A slot is one
+    /// handle per pipeline position, and the tier's generator shares the
+    /// `.brain` *role* with the voice interpreter while being an
+    /// independently-owned handle: registering `.brain` from the tier would
+    /// replace the voice interpreter's release closure, so an eviction
+    /// would free the wrong handle. That was the tier's original "cannot
+    /// register" blocker (see the tier's file header) and it is what this
+    /// slot removes — the tier now owns a position the warden can name,
+    /// count, and preempt.
+    ///
+    /// The bytes are a brain's bytes (a 1.7B at ~1.98 GB or a 4B at
+    /// ~3.40 GB, pageable, `actorDeferredFree`), so the row is the brain
+    /// class arithmetic with the tier's shipped default as the unnamed
+    /// fallback.
+    case translateBrain
+
+    /// [MODEL-WARDEN] Step 2 — whether a *replacing* load that exceeds the
+    /// device-class budget **on its own** is admitted anyway, announced as
+    /// `soloOverBudget`.
+    ///
+    /// The escape hatch exists for one reason, and it is not "replacing":
+    /// refusing the user's own chosen brain would make the app's primary
+    /// function unloadable on a device the picker has already agreed to run
+    /// it on. That argument holds for the two positions the picker and the
+    /// intent interpreter own, and it does **not** hold for the live
+    /// translation brain: a 4B that does not fit falls through to the cloud
+    /// tier, which is a working answer rather than a broken feature.
+    ///
+    /// This is also what preserves the tier's shipped admission behaviour
+    /// across the Step 2 migration: while the generator reserved as a peer
+    /// on `.brain`, an over-budget ask was refused
+    /// (`ReservationDenial.overBudgetAlone`); moving it to its own slot must
+    /// not quietly turn that refusal into a 3.4 GB admission on a 6 GB
+    /// phone.
+    var admitsSoloOverBudget: Bool {
+        switch self {
+        case .brain, .intentBrain: return true
+        case .speechToText, .intentEncoder, .sttCorrector,
+             .ttsVoices, .wakeWord, .vad, .translateBrain: return false
+        }
+    }
 }
 
 /// Static inventory lookup. Numbers here are *derived*, with the derivation
@@ -339,6 +411,8 @@ enum ModelLifecycleInventory {
             return sttFootprint(modelID: modelID)
         case .brain:
             return brainFootprint(modelID: modelID)
+        case .translateBrain:
+            return translateBrainFootprint(modelID: modelID)
         case .intentBrain:
             return intentBrainFootprint(modelID: modelID)
         case .intentEncoder:
@@ -448,6 +522,29 @@ enum ModelLifecycleInventory {
     /// artifact size; the catalog resolves the live value).
     private static func intentBrainFootprint(modelID: ModelID?) -> ModelFootprint {
         brainFootprint(modelID: modelID, fallbackWeights: 1_107_408_576)
+    }
+
+    /// [MODEL-WARDEN] Step 2 — the live-translate tier's own brain handle.
+    ///
+    /// Same arithmetic as `.brain` (a 1.7B at ~1.98 GB or a 4B at ~3.40 GB,
+    /// pageable, `actorDeferredFree` — the bytes the tier allocates are a
+    /// brain's bytes), but a separate function so the *fallback* is the
+    /// tier's own model and not the picker's. `brainFootprint(modelID:)`'s
+    /// fallback is the 807 MB shipped picker default; the tier's first-choice
+    /// model is the 4B slot-canon (`LiveTranslateConfig.brainTranslationModelIDs`,
+    /// `ModelCatalog.intentQwen4BSlotCanon`), whose catalog-declared
+    /// 2,497,278,784 B is the value an unknown/sideloaded id must not
+    /// under-count to. With no id at all the ledger has no slot contents to
+    /// describe, so it resolves the tier's installed default through the
+    /// catalog exactly as a real load would.
+    ///
+    /// Field notes §2: the 4B is `roomy`-only, and this position is **not**
+    /// in `admitsSoloOverBudget` — a tier brain that does not fit the device
+    /// is refused, and the strings go to the cloud tier, which is the
+    /// behaviour it had while it reserved as a peer on `.brain`.
+    private static func translateBrainFootprint(modelID: ModelID?) -> ModelFootprint {
+        brainFootprint(modelID: modelID ?? ModelCatalog.intentQwen4BSlotCanon,
+                       fallbackWeights: 2_497_278_784)
     }
 
     private static func brainFootprint(modelID: ModelID?,

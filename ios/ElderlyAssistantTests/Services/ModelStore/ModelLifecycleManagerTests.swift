@@ -81,9 +81,12 @@ final class ModelLifecycleManagerTests: XCTestCase {
     private func register(_ slot: ModelSlot,
                           modelID: ModelID?,
                           owner: FakeOwner,
-                          evictable: Bool = true) -> FakeOwner {
+                          evictable: Bool = true,
+                          priority: ModelPriority = .foreground,
+                          resident: ModelResident? = nil) -> FakeOwner {
         manager.register(slot: slot, modelID: modelID, owner: owner,
-                         evictable: evictable) { [weak owner] in
+                         evictable: evictable, priority: priority,
+                         resident: resident) { [weak owner] in
             owner?.unload()
         }
         return owner
@@ -972,6 +975,316 @@ final class ModelLifecycleManagerTests: XCTestCase {
             transientLiveBytes: 0)),
             "a committed load must report the kernel's own footprint")
         XCTAssertEqual(manager.snapshot().physFootprintBytes, 1_234_000_000)
+    }
+
+    // MARK: - 13. [MODEL-WARDEN] Step 2 — priority, preemption, the thrash guard
+    //
+    // Step 1 made a load a *permit*; Step 2 makes the permit recallable. Three
+    // properties are pinned here, and each one is a rule rather than a
+    // mechanism:
+    //
+    //  - the victim walk reads the **ladder** before the clock (a background
+    //    resident goes before a foreground one, however recently it was used);
+    //  - an owner can be **asked** before its bytes are taken, and the answer
+    //    decides whether the registered release path runs at all — with the
+    //    one hard exception that `perAttemptContext` (whisper.cpp) is never
+    //    forced, because `whisper_free` under a running `whisper_full`
+    //    crashes;
+    //  - an evict-then-reload loop is **damped** rather than served, so the
+    //    warden cannot spend the session thrashing one slot.
+
+    /// An owner that can be asked rather than only told. Records every ask so
+    /// a case can prove the ask happened — including the refusals the warden
+    /// obeyed, which are the ones no closure call would otherwise reveal.
+    private final class FakeResident: ModelResident {
+        private(set) var askCount = 0
+        var ack: UnloadAck = .released
+        func releaseForWarden() -> UnloadAck {
+            askCount += 1
+            return ack
+        }
+    }
+
+    private func footprint(_ slot: ModelSlot, _ modelID: ModelID? = nil) -> UInt64 {
+        ModelLifecycleInventory.footprint(for: slot, modelID: modelID).liveBytes
+    }
+
+    private func preemptedEvents(_ events: [ModelLifecycleEvent]) -> [PreemptionOutcome] {
+        events.compactMap {
+            if case .preempted(_, let outcome) = $0 { return outcome }
+            return nil
+        }
+    }
+
+    func testTheLadderIsThePurposeLadder() {
+        // The priorities are derived from the purpose, not passed in beside
+        // it: a load site cannot claim a `.voiceTurn` and carry a background
+        // rung, which is the shape that would let a prefetch preempt a turn.
+        XCTAssertEqual(ReservationPurpose.voiceTurn.priority, .safetyCritical)
+        XCTAssertEqual(ReservationPurpose.liveTranslate.priority, .foreground)
+        XCTAssertEqual(ReservationPurpose.warm.priority, .background)
+        XCTAssertEqual(ReservationPurpose.maintenance.priority, .background)
+        XCTAssertLessThan(ModelPriority.background, .foreground)
+        XCTAssertLessThan(ModelPriority.foreground, .safetyCritical)
+
+        XCTAssertEqual(request(.brain, modelID: brain17B, owner: nil,
+                               purpose: .liveTranslate).priority,
+                       .foreground)
+        XCTAssertEqual(request(.brain, modelID: brain17B, owner: nil,
+                               purpose: .voiceTurn).priority,
+                       .safetyCritical)
+    }
+
+    func testTheVictimWalkReadsTheLadderBeforeTheClock() {
+        var events: [ModelLifecycleEvent] = []
+        manager.onEvent = { events.append($0) }
+
+        let ttsLive = footprint(.ttsVoices)
+        let correctorLive = footprint(.sttCorrector)
+        let vadLive = footprint(.vad)
+        // One byte short of holding everything: exactly one eviction is
+        // enough, so WHICH resident goes is the whole assertion.
+        let tight = makeManager(budget: ttsLive + correctorLive + vadLive - 1)
+
+        // The corrector is the least recently used — Step 1's LRU walk would
+        // take it. It is also `.foreground`, which is why the ladder does not.
+        let correctorOwner = FakeOwner()
+        tight.register(slot: .sttCorrector, modelID: nil, owner: correctorOwner,
+                       priority: .foreground) { [weak correctorOwner] in
+            correctorOwner?.unload()
+        }
+        tight.didLoad(.sttCorrector, owner: correctorOwner)
+        now = now.addingTimeInterval(600)
+
+        let ttsOwner = FakeOwner()
+        tight.register(slot: .ttsVoices, modelID: nil, owner: ttsOwner,
+                       priority: .background) { [weak ttsOwner] in
+            ttsOwner?.unload()
+        }
+        tight.didLoad(.ttsVoices, owner: ttsOwner)
+
+        let vadOwner = FakeOwner()
+        guard let reservation = reserveOrFail(
+            tight, request(.vad, modelID: nil, owner: vadOwner)) else { return }
+
+        XCTAssertEqual(reservation.evicted, [.ttsVoices],
+                       "a background resident's bytes go before a foreground "
+                       + "one's, however recently used")
+        XCTAssertEqual(ttsOwner.unloadCount, 1)
+        XCTAssertEqual(correctorOwner.unloadCount, 0)
+        XCTAssertFalse(tight.isResident(.ttsVoices))
+        XCTAssertTrue(tight.isResident(.sttCorrector))
+    }
+
+    func testAPreemptedOwnerThatReleasesIsNotAlsoUnloaded() {
+        var events: [ModelLifecycleEvent] = []
+        let tight = makeManager(budget: footprint(.ttsVoices) + footprint(.brain, brain17B) - 1)
+        // The case's manager, not `setUp`'s: the asks are made by the ledger
+        // the reservation was taken on, and an event sink on the other one
+        // would observe nothing at all.
+        tight.onEvent = { events.append($0) }
+
+        let ttsOwner = FakeOwner()
+        let resident = FakeResident()   // .released
+        tight.register(slot: .ttsVoices, modelID: nil, owner: ttsOwner,
+                       priority: .background, resident: resident) { [weak ttsOwner] in
+            ttsOwner?.unload()
+        }
+        tight.didLoad(.ttsVoices, owner: ttsOwner)
+
+        guard let reservation = reserveOrFail(
+            tight, request(.brain, modelID: brain17B, owner: ttsOwner)) else { return }
+
+        XCTAssertEqual(resident.askCount, 1, "the warden must ask, not only take")
+        XCTAssertEqual(ttsOwner.unloadCount, 0,
+                       "the owner gave the bytes back on the ask; invoking the "
+                       + "registered release path as well would drop a handle "
+                       + "that is already gone")
+        XCTAssertEqual(reservation.preempted,
+                       [PreemptionRecord(slot: .ttsVoices, outcome: .released)])
+        XCTAssertEqual(preemptedEvents(events), [.released])
+        XCTAssertFalse(tight.isResident(.ttsVoices))
+    }
+
+    func testARefusalOnADeferredFreeSlotIsForced() {
+        var events: [ModelLifecycleEvent] = []
+        let intentID = ModelCatalog.intentNepali1B
+        let sttID = ModelCatalog.whisperMediumFinetunedNepali
+        let tight = makeManager(budget: footprint(.intentBrain, intentID)
+                                + footprint(.speechToText, sttID) - 1)
+        tight.onEvent = { events.append($0) }
+
+        let intentOwner = FakeOwner()
+        let resident = FakeResident()
+        resident.ack = .refused(.inUse)
+        tight.register(slot: .intentBrain, modelID: intentID, owner: intentOwner,
+                       priority: .background, resident: resident) { [weak intentOwner] in
+            intentOwner?.unload()
+        }
+        tight.didLoad(.intentBrain, owner: intentOwner)
+
+        guard let reservation = reserveOrFail(
+            tight, request(.speechToText, modelID: sttID, owner: intentOwner)) else { return }
+
+        XCTAssertEqual(resident.askCount, 1)
+        XCTAssertEqual(intentOwner.unloadCount, 1,
+                       "a llama handle is `actorDeferredFree`: the free is "
+                       + "deferred by ARC, so a refusal can be overruled")
+        XCTAssertEqual(reservation.preempted,
+                       [PreemptionRecord(slot: .intentBrain,
+                                         outcome: .forced(reason: .inUse))])
+        XCTAssertEqual(preemptedEvents(events), [.forced(reason: .inUse)])
+        XCTAssertFalse(tight.isResident(.intentBrain))
+    }
+
+    func testARefusalOnAPerAttemptContextSlotIsObeyed() {
+        var events: [ModelLifecycleEvent] = []
+        let sttID = ModelCatalog.whisperMediumFinetunedNepali
+        let tight = makeManager(budget: footprint(.speechToText, sttID)
+                                + footprint(.brain, brain17B) - 1)
+        tight.onEvent = { events.append($0) }
+
+        let sttOwner = FakeOwner()
+        let resident = FakeResident()
+        resident.ack = .refused(.inUse)
+        tight.register(slot: .speechToText, modelID: sttID, owner: sttOwner,
+                       priority: .background, resident: resident) { [weak sttOwner] in
+            sttOwner?.unload()
+        }
+        tight.didLoad(.speechToText, owner: sttOwner)
+
+        guard case .failure(let denial) = tight.reserve(
+            request(.brain, modelID: brain17B, owner: sttOwner)) else {
+            return XCTFail("whisper_free under a running whisper_full crashes: "
+                           + "a refusal that cannot be forced has to become a "
+                           + "refused LOAD, not a freed handle")
+        }
+
+        XCTAssertEqual(denial, .budgetExhausted(by: .speechToText))
+        XCTAssertEqual(denial.token, "budget_exhausted")
+        XCTAssertEqual(resident.askCount, 1)
+        XCTAssertEqual(sttOwner.unloadCount, 0,
+                       "the one rule this protocol will not bend: "
+                       + "`perAttemptContext` is never forced")
+        XCTAssertTrue(tight.isResident(.speechToText),
+                      "a refusal the warden obeys hands the bytes back to the "
+                      + "ledger — they were never taken")
+        XCTAssertEqual(preemptedEvents(events), [.refused(reason: .inUse)])
+        XCTAssertFalse(events.contains(.evicted(slot: .speechToText, reason: .budget)),
+                       "a refusal is not an eviction")
+        XCTAssertFalse(events.contains(.evicted(slot: .speechToText, reason: .preemption)))
+    }
+
+    func testTheThrashGuardDampsAnEvictAndReloadLoop() {
+        var events: [ModelLifecycleEvent] = []
+        let config = ModelWardenConfig.default
+        let tight = makeManager(budget: footprint(.ttsVoices)
+                                + footprint(.brain, brain17B) - 1)
+        tight.onEvent = { events.append($0) }
+
+        let ttsOwner = FakeOwner()
+        tight.register(slot: .ttsVoices, modelID: nil, owner: ttsOwner) { [weak ttsOwner] in
+            ttsOwner?.unload()
+        }
+        let brainOwner = FakeOwner()
+
+        // The loop the guard exists to break: take the voices for a translate
+        // load, hand them back, take them again — each round a load-driven
+        // eviction of the SAME resident. The purpose is `.liveTranslate`
+        // rather than `.voiceTurn` on purpose: a live voice turn is exempt
+        // from the guard (see `guardSparedLocked`), so a turn would evict the
+        // fourth time too and this case would pin the exemption instead of
+        // the damping.
+        for _ in 0..<config.preemptionsBeforeQuarantine {
+            tight.didLoad(.ttsVoices, owner: ttsOwner)
+            guard let reservation = reserveOrFail(tight, request(
+                .brain, modelID: brain17B, owner: brainOwner,
+                purpose: .liveTranslate)) else { return }
+            tight.abandon(reservation, reason: .cancelled)
+        }
+        XCTAssertEqual(ttsOwner.unloadCount, config.preemptionsBeforeQuarantine)
+
+        tight.didLoad(.ttsVoices, owner: ttsOwner)
+        guard case .failure(let denial) = tight.reserve(request(
+            .brain, modelID: brain17B, owner: brainOwner,
+            purpose: .liveTranslate)) else {
+            return XCTFail("the guard must refuse the load rather than evict "
+                           + "the same resident for the fourth time")
+        }
+
+        XCTAssertEqual(denial.token, "thrash_guarded")
+        XCTAssertEqual(denial.thrashGuardFiring?.slot, .ttsVoices)
+        XCTAssertEqual(denial.thrashGuardFiring?.kind, .victimSpared)
+        XCTAssertEqual(ttsOwner.unloadCount, config.preemptionsBeforeQuarantine,
+                       "the spared resident was not evicted for the load that "
+                       + "was refused")
+        XCTAssertTrue(tight.isResident(.ttsVoices))
+        XCTAssertTrue(events.contains {
+            if case .thrashGuarded(.ttsVoices, .victimSpared, _) = $0 { return true }
+            return false
+        }, "the firing is reported in the ledger's own vocabulary")
+
+        // Damping, not a wedge: the quarantine expires and the same load is
+        // judged on its merits again.
+        now = now.addingTimeInterval(config.preemptionQuarantineSeconds + 1)
+        XCTAssertNotNil(reserveOrFail(tight, request(
+            .brain, modelID: brain17B, owner: brainOwner,
+            purpose: .liveTranslate)))
+    }
+
+    func testTheLoadRateCapBoundsLargePageInsInsideTheMinute() {
+        var events: [ModelLifecycleEvent] = []
+        manager.onEvent = { events.append($0) }
+        let owner = FakeOwner()
+        register(.brain, modelID: brain17B, owner: owner)
+        let cap = ModelWardenConfig.default.maxLoadsPerMinute
+
+        for _ in 0..<cap {
+            guard let reservation = reserveOrFail(manager, request(
+                .brain, modelID: brain17B, owner: owner,
+                purpose: .liveTranslate)) else { return }
+            manager.abandon(reservation, reason: .loadFailed)
+        }
+
+        guard case .failure(let denial) = manager.reserve(request(
+            .brain, modelID: brain17B, owner: owner, purpose: .liveTranslate)) else {
+            return XCTFail("\(cap) large page-ins inside one rolling minute is "
+                           + "the churn the cap exists to bound")
+        }
+        XCTAssertEqual(denial.token, "thrash_guarded")
+        XCTAssertEqual(denial.thrashGuardFiring?.kind, .loadRateExceeded)
+        XCTAssertEqual(denial.thrashGuardFiring?.count, cap)
+        XCTAssertTrue(events.contains {
+            if case .thrashGuarded(_, .loadRateExceeded, let count) = $0 {
+                return count == cap
+            }
+            return false
+        }, "the firing is reported in the ledger's own vocabulary")
+
+        // The guard is a config surface, not a constant in the branch.
+        manager.wardenConfig.thrashGuardEnabled = false
+        guard let unguarded = reserveOrFail(manager, request(
+            .brain, modelID: brain17B, owner: owner,
+            purpose: .liveTranslate)) else { return }
+        manager.abandon(unguarded, reason: .loadFailed)
+        manager.wardenConfig.thrashGuardEnabled = true
+
+        // Two exemptions, both deliberate: the synchronous maintenance path
+        // (not a feature loop) and a live voice turn (the household is
+        // waiting — the guard damps churn, it does not stand between the
+        // user and an answer).
+        guard let maintenance = reserveOrFail(manager, request(
+            .brain, modelID: brain17B, owner: owner, purpose: .maintenance)) else { return }
+        manager.abandon(maintenance, reason: .loadFailed)
+        guard let turn = reserveOrFail(manager, request(
+            .brain, modelID: brain17B, owner: owner, purpose: .voiceTurn)) else { return }
+        XCTAssertEqual(turn.priority, .safetyCritical)
+        manager.abandon(turn, reason: .loadFailed)
+
+        // …and the window is rolling, not a latch.
+        now = now.addingTimeInterval(61)
+        XCTAssertNotNil(reserveOrFail(manager, request(
+            .brain, modelID: brain17B, owner: owner, purpose: .liveTranslate)))
     }
 
     func testAProbeThatCannotReadTheFootprintReportsSilence() {

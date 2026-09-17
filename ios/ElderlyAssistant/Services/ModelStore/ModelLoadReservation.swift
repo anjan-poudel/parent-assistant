@@ -20,6 +20,21 @@ import Foundation
 //   ReservationAbandonReason  why a granted reservation was handed back
 //   ModelWardenConfig    the bounds, all of them configurable
 //
+// [MODEL-WARDEN] Step 2 adds three more, and they are the ones that make a
+// resident's claim on its bytes *negotiable* rather than absolute:
+//
+//   ModelPriority        where a request, and a resident, sit on the ladder
+//   ModelResident        an owner that can be ASKED to stand down
+//   UnloadAck            what it says — and `PreemptionOutcome`, what the
+//                        warden did about it
+//   ThrashGuardKind      which half of the loop-breaker refused a load
+//
+// The Step 1 kernel's one asymmetry is what makes Step 2 possible: a
+// reservation is already a *permit*, and a permit that can be refused can
+// also be *recalled*. Preemption is that recall, and it is deliberately the
+// narrowest one that works — an ask, an ack, and a force fallback that the
+// release contract can veto (`ModelReleaseContract.allowsForcedUnload`).
+//
 // The kernel is Option C's, not Option B's: **the warden owns permission and
 // the queue; the handles stay with their owners.** No shared pool, no
 // refcounts, no cross-tenant `LLM.stop()` — a reservation is a *permit to
@@ -83,6 +98,12 @@ struct ModelLoadRequest {
         self.purpose = purpose
         self.replacesSlotContents = replacesSlotContents
     }
+
+    /// [MODEL-WARDEN] Step 2 — the ladder position this request carries.
+    /// Derived from the purpose rather than passed separately, so a load
+    /// site cannot ask for the carve-out of one purpose while claiming
+    /// another: the two fields are one field.
+    var priority: ModelPriority { purpose.priority }
 }
 
 /// What a load is for. Step 1 records it; Step 2 (the priority ladder)
@@ -97,6 +118,160 @@ enum ReservationPurpose: String, Sendable {
     case warm
     /// Anything else (a Settings probe, a maintenance path).
     case maintenance
+
+    /// [MODEL-WARDEN] Step 2 — the ladder. See `ModelPriority`.
+    var priority: ModelPriority {
+        switch self {
+        case .voiceTurn: return .safetyCritical
+        case .liveTranslate: return .foreground
+        case .warm, .maintenance: return .background
+        }
+    }
+}
+
+// MARK: - [MODEL-WARDEN] Step 2 — the priority ladder
+
+/// How reluctant the warden is to take a resident's bytes back.
+///
+/// The ladder is the *ordering* the victim walk uses, not a veto: whatever
+/// else is true, a background prefetch's bytes go before a foreground
+/// feature's, and a foreground feature's before the thing a live voice turn
+/// is waiting on. It is also the gate on preemption — an owner is only
+/// *asked* to stand down by a request above it on the ladder, because a
+/// boot warm asking the camera translation to give up its handle is the
+/// warden spending a user-visible feature on a prefetch.
+///
+/// Ordering is by `rawValue`, so `Comparable` reads the way the ladder is
+/// written. The cases are ordered lowest-first deliberately: a `sort` on
+/// the raw value puts the first evictions where they belong without a
+/// second mapping to keep in sync.
+enum ModelPriority: Int, Comparable, CaseIterable, Sendable {
+    /// A boot warm, a post-turn re-warm, a maintenance probe. Nobody is
+    /// waiting on it and a refusal costs a later latency spike, not an
+    /// answer.
+    case background = 0
+    /// A foreground feature's resident: the camera session's translation
+    /// brain, the picker's brain, the recognizer's weights. Repaying these
+    /// bytes costs a user-visible feature its handle.
+    case foreground = 1
+    /// A live voice turn. The household is waiting on an answer, and the
+    /// budget arithmetic comes second — which is why the thrash guard's
+    /// rate limit never refuses one (`ModelWardenConfig.maxLoadsPerMinute`).
+    case safetyCritical = 2
+
+    static func < (lhs: ModelPriority, rhs: ModelPriority) -> Bool {
+        lhs.rawValue < rhs.rawValue
+    }
+}
+
+// MARK: - [MODEL-WARDEN] Step 2 — the revocable lease
+
+/// What an owner says when the warden asks for its bytes back.
+///
+/// The ask exists because the ledger's release closures are *unconditional*
+/// — the warden calls one and the handle is gone — while the owners know
+/// things the ledger does not: whether an inference is mid-flight on that
+/// handle, whether the drop would free memory or merely mark it for a free
+/// that cannot happen yet. The ack is the owner's sentence; the
+/// `ModelReleaseContract` is the runtime's, and where the two disagree the
+/// contract wins (`allowsForcedUnload`).
+enum UnloadAck: Equatable {
+    /// The handle is dropped on the way out of this call.
+    case released
+    /// The owner refuses. The reason is content-free and travels on the
+    /// event; the warden decides whether to force (see
+    /// `PreemptionOutcome.forced`) or to leave the bytes where they are.
+    case refused(UnloadRefusal)
+    /// There was nothing to give back — the owner had already dropped it.
+    /// Distinct from `released` so a capture does not read a
+    /// reclamation for a handle that was never resident.
+    case notHolding
+}
+
+/// Why an owner said no. Closed vocabulary, one word each, no values.
+enum UnloadRefusal: String, Equatable {
+    /// An inference is running on the handle. Dropping the reference is
+    /// safe for the runtime (the running call holds its own) but it is not
+    /// *free*: the next use pays a full reload.
+    case inUse
+    /// The owner cannot reach a safe point to let go of it — a load or a
+    /// hand-off is in progress and the handle is mid-assignment.
+    case cannotReleaseNow
+}
+
+/// An owner that can be asked rather than only told.
+///
+/// Held by the manager as `AnyObject` and called **outside the lock**, so
+/// the requirement is synchronous and must not re-enter the manager: the
+/// manager's lock is non-recursive and a resident that called
+/// `didUnload` from inside this method would deadlock. Dropping a
+/// reference, or reading a flag the owner already keeps under its own
+/// lock, is the whole of the expected body.
+protocol ModelResident: AnyObject {
+    /// Called on the caller's thread, outside the manager's lock.
+    func releaseForWarden() -> UnloadAck
+}
+
+/// What actually happened to a preemption ask. The distinction between
+/// `.refused` and `.forced` is the one the field capture needs: an owner
+/// that refuses and is overruled is describing a contract that is doing
+/// work, and one that refuses and is obeyed is describing a slot the
+/// ledger cannot reclaim right now.
+enum PreemptionOutcome: Equatable {
+    /// The owner dropped the handle on the ask. Nothing else was called;
+    /// the bytes are accounted for.
+    case released
+    /// Nothing to drop — the resident had already let go.
+    case alreadyReleased
+    /// The owner refused and the release contract does not permit forcing
+    /// (whisper.cpp's `perAttemptContext`), so the bytes stayed where they
+    /// were and the victim was skipped.
+    case refused(reason: UnloadRefusal)
+    /// The owner refused and the contract allows it, so the registered
+    /// release path was invoked anyway. Legal exactly because
+    /// `releaseContract.allowsForcedUnload` says the runtime survives it.
+    case forced(reason: UnloadRefusal)
+
+    /// Whether the warden got the bytes back.
+    var reclaimed: Bool {
+        switch self {
+        case .released, .alreadyReleased, .forced: return true
+        case .refused: return false
+        }
+    }
+
+    /// The observability token for this outcome — closed vocabulary, one
+    /// word, no values. `refused`/`forced` carry the refusal reason with
+    /// them (`reason`), because "which refusal" is the whole diagnostic
+    /// value of the pair.
+    var token: String {
+        switch self {
+        case .released: return "released"
+        case .alreadyReleased: return "already_released"
+        case .refused: return "refused"
+        case .forced: return "forced"
+        }
+    }
+
+    /// The refusal that produced this outcome, if the owner said no.
+    var refusalReason: UnloadRefusal? {
+        switch self {
+        case .released, .alreadyReleased: return nil
+        case .refused(let reason), .forced(let reason): return reason
+        }
+    }
+}
+
+/// Which half of the thrash guard refused a load.
+enum ThrashGuardKind: String, Equatable {
+    /// One slot is being kept out of the victim order — quarantined,
+    /// cooling down after a preemption, or inside a refusal grace (see
+    /// `ModelLifecycleManager.guardSparedLocked`) — and the load that wanted
+    /// its bytes is refused instead of the loop continuing.
+    case victimSpared = "victim_spared"
+    /// More large loads were admitted in the last minute than
+    /// `maxLoadsPerMinute` allows. The blunt, global half of the guard.
+    case loadRateExceeded = "load_rate_exceeded"
 }
 
 /// Why a load may not proceed, in a closed vocabulary.
@@ -111,10 +286,13 @@ enum ReservationPurpose: String, Sendable {
 enum ReservationDenial: Error, Equatable {
     /// The incoming model's own live footprint exceeds the class budget, so
     /// no eviction could make room. This is the `soloOverBudget` case seen
-    /// from the reservation's side: a replacing load is still admitted (the
-    /// user's explicit pick must not become unloadable) and announced; a
-    /// *peer* load is refused, because a second copy of something already
-    /// over budget has no escape hatch to invoke.
+    /// from the reservation's side: a load that is allowed to invoke the
+    /// escape hatch is still admitted and announced; everything else is
+    /// refused. The hatch is a *peer* load never (a second copy of something
+    /// already over budget has no argument to make) and a replacing load
+    /// only where `ModelSlot.admitsSoloOverBudget` — the two positions whose
+    /// artifact is the user's own pick, and whose refusal would make the
+    /// app's primary function unloadable.
     case overBudgetAlone(liveBytes: UInt64, budgetBytes: UInt64)
     /// The model would fit alone, but the bytes in its way are not
     /// evictable right now (pinned by an in-flight inference, or held by a
@@ -138,6 +316,15 @@ enum ReservationDenial: Error, Equatable {
     /// against a position that can only hold one model — the exact
     /// double-book the ledger exists to prevent.
     case alreadyReserved(slot: ModelSlot, holder: ReservationPurpose)
+    /// [MODEL-WARDEN] Step 2 — the thrash guard. Admitting this load would
+    /// keep an evict-then-reload loop running, so the warden refuses
+    /// instead of feeding it. See `ThrashGuardKind` for which half of the
+    /// guard spoke and `count` for the number it counted.
+    ///
+    /// The refusal is a *deferral*: the loop breaks because the load takes
+    /// its degraded path and stops re-asking, and the window rolls off on
+    /// its own. Nothing here is sticky.
+    case thrashGuarded(slot: ModelSlot, kind: ThrashGuardKind, count: Int)
 
     /// The content-free token this denial travels as on the observability
     /// bus. `String(describing:)` would be the obvious spelling and is
@@ -153,7 +340,20 @@ enum ReservationDenial: Error, Equatable {
         case .insufficientHeadroom: return "insufficient_headroom"
         case .loadInFlight: return "load_in_flight"
         case .alreadyReserved: return "already_reserved"
+        case .thrashGuarded: return "thrash_guarded"
         }
+    }
+
+    /// The guard firing behind this denial, if it is one. Lets the ledger
+    /// emit the same fact in its own vocabulary without a second switch
+    /// over the denial, which is where the two would drift apart.
+    var thrashGuardFiring: (slot: ModelSlot,
+                            kind: ThrashGuardKind,
+                            count: Int)? {
+        guard case .thrashGuarded(let slot, let kind, let count) = self else {
+            return nil
+        }
+        return (slot, kind, count)
     }
 }
 
@@ -236,6 +436,66 @@ struct ModelWardenConfig: Equatable {
     /// TTL is housekeeping, the watchdog is evidence.
     var loadWatchdogSeconds: TimeInterval = 120
 
+    // MARK: [MODEL-WARDEN] Step 2 — the preemption and thrash-guard bounds
+
+    /// How long a refusal that cannot be forced buys the refused slot.
+    ///
+    /// The ack is synchronous by construction (`ModelResident`), so there
+    /// is nothing to wait for — what the deadline bounds is how long the
+    /// warden *believes* the refusal before asking again. Without it, a
+    /// load that cannot evict a busy whisper.cpp context would re-ask on
+    /// every cycle of the pipeline and emit a refusal per attempt, which is
+    /// a log storm around a slot that is simply in use. Two seconds is
+    /// shorter than any batch the app runs and longer than a pipeline tick,
+    /// so the grace is over before the next real attempt.
+    ///
+    /// It is also the deadline a future *asynchronous* ack would have to
+    /// answer within; Step 2's is synchronous, and moving to async is a
+    /// Step 3 concern (see the seam note on `ModelLifecycleManager`).
+    var unloadAckDeadlineSeconds: TimeInterval = 2
+
+    /// After a slot is preempted, it is kept out of the load-driven victim
+    /// order for this long. Short and targeted: the loop this breaks is
+    /// "give the bytes back, then take them again two seconds later", and
+    /// twenty seconds is longer than a pipeline tick and shorter than the
+    /// idle window, so a slot that is genuinely unused still gets evicted
+    /// by the idle sweep inside the cooldown.
+    var preemptionCooldownSeconds: TimeInterval = 20
+
+    /// How many load-driven evictions of ONE slot inside
+    /// `preemptionQuarantineSeconds` quarantine it.
+    ///
+    /// From the victim's side, being taken to make room for someone else is
+    /// one event whatever the reason recorded on it, so this counts every
+    /// load-driven eviction (`.budget` and `.preemption`) and never the
+    /// memory-pressure or idle sweeps — those are the OS asking and the slot
+    /// being unused, and dampening either of them would be the guard
+    /// fighting the wrong thing.
+    var preemptionsBeforeQuarantine: Int = 3
+
+    /// The thrash window, and the quarantine it latches. A slot evicted
+    /// `preemptionsBeforeQuarantine` times inside this window is spared from
+    /// the load-driven victim order for the same length. Two minutes is
+    /// deliberately longer than the cooldown: the cooldown is "let it
+    /// settle", the quarantine is "one of these two features has to take
+    /// its degraded path".
+    var preemptionQuarantineSeconds: TimeInterval = 120
+
+    /// Large loads admitted per rolling minute before the guard refuses the
+    /// next one. The blunt half: the per-slot quarantine catches a loop
+    /// between two specific features, this catches N features churning at
+    /// once. Four is the proposal's number.
+    ///
+    /// It never refuses a live voice turn (the household is waiting), and
+    /// it never refuses a `.maintenance` load — that purpose is the
+    /// synchronous `prepareLoad` fast path, not a feature loop.
+    var maxLoadsPerMinute: Int = 4
+
+    /// Master switch. Off restores Step 1's behaviour exactly: no cooldown,
+    /// no quarantine, no rate limit. Kept because a guard that can only be
+    /// disabled by a rebuild is a guard nobody can field-test against.
+    var thrashGuardEnabled: Bool = true
+
     static let `default` = ModelWardenConfig()
 }
 
@@ -274,15 +534,39 @@ struct ModelReservation: Equatable, Identifiable {
     /// budget on its own, because refusing would make the app's own default
     /// model unloadable. See `ReservationDenial.overBudgetAlone` — the two
     /// are the same condition seen from the two sides of the decision, and
-    /// only a *replacing* load is allowed to invoke it.
+    /// only a *replacing* load on a slot that `admitsSoloOverBudget` may
+    /// invoke it.
     let soloOverBudget: Bool
 
     /// The budget the decision was made against, for the event and for the
-    /// caller's degraded-path reasoning.
+    /// caller's degraded path reasoning.
     let budgetBytes: UInt64
+
+    /// [MODEL-WARDEN] Step 2 — where this request sat on the ladder. Copied
+    /// from the request at grant time so the decision, the event and the
+    /// caller all report the same position rather than re-deriving it from
+    /// the purpose.
+    let priority: ModelPriority
+
+    /// [MODEL-WARDEN] Step 2 — the victims the warden had to ask for, and
+    /// what they said. Empty when nothing was preempted (the ordinary
+    /// case), and carried on the reservation so the load site reports the
+    /// same conversation the decision was made with.
+    let preempted: [PreemptionRecord]
 
     /// Age at a given instant, for the reaper and for the events.
     func heldSeconds(at now: Date) -> TimeInterval {
         now.timeIntervalSince(reservedAt)
     }
+}
+
+/// [MODEL-WARDEN] Step 2 — one ask, and its answer.
+///
+/// `slot` names the resident that was asked; `outcome` is what it said and
+/// what the warden did about it. The pair is the evidence that the
+/// revocation protocol is real: a capture that never sees a `.refused`
+/// either has no slot that can refuse, or has a warden that never asks.
+struct PreemptionRecord: Equatable {
+    let slot: ModelSlot
+    let outcome: PreemptionOutcome
 }

@@ -76,18 +76,26 @@ import LLM
 //   - **It does not sanitise its input for egress.** C07's quarantine exists
 //     to stop content leaving the device; nothing here leaves it. The batch
 //     bounds and the prompt budget guard are what keep the context safe.
-//   - **It does not take a residency slot.** `ModelLifecycleManager` has one
-//     entry per slot and both llama slots (`.brain`, `.intentBrain`) belong to
-//     the voice interpreters: registering one from here would replace their
-//     release closure, so an eviction would free the wrong handle and this
-//     tier's resident would go on being invisible to the budget — worse, not
-//     better. Its mitigation is that this tier holds nothing between uses: the
-//     handle is loaded lazily on the first attempt and released
-//     `brainTranslationIdleUnloadSeconds` after the last one, so the ledger's
-//     total is never silently crossed by a handle this tier parked. The only
-//     thing it asks the ledger is whether someone else's brain is live
-//     (`isResident`, a lock-guarded read safe from any queue); it never
-//     registers, evicts or pins.
+//   - **It takes its own residency slot, and only its own.** [MODEL-WARDEN]
+//     Step 2 gives the tier `.translateBrain` — a pipeline position of its
+//     own, distinct from the voice interpreters' `.brain` and
+//     `.intentBrain`. Before that slot existed the tier could not register
+//     at all: one entry per slot, and registering `.brain` from here would
+//     have replaced the voice interpreter's release closure, so an eviction
+//     would have freed the wrong handle while this tier's resident went on
+//     being invisible to the budget. `.translateBrain` removes exactly that
+//     obstacle, and Step 2's reservation kernel is what makes registering
+//     safe: the handle is reserved on the way in, counted while it is
+//     resident, and the ledger can *ask* for it back
+//     (`TranslateBrainHandleSlot.releaseForWarden`) rather than only take
+//     it. The idle rule is unchanged — the handle is loaded lazily on the
+//     first attempt and released `brainTranslationIdleUnloadSeconds` after
+//     the last one — so the slot is empty between sessions, and now the
+//     ledger can see that it is.
+//
+//     What it still never does is touch another owner's position: the
+//     ledger is read for `.brain` / `.intentBrain` residency (the deferral
+//     rule) and written only for `.translateBrain`.
 
 // MARK: - The seam the pipeline drives
 
@@ -403,9 +411,13 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
     ///     or `.intentBrain` while the household is talking to it; a second 4B
     ///     decode alongside it is the shape that gets the app killed, and the
     ///     translation is the workload that can afford to wait — the elder is
-    ///     reading a sign, not waiting on an answer. Asked of the ledger and
-    ///     never told to it: this tier takes no slot, so it may not evict,
-    ///     register or claim.
+    ///     reading a sign, not waiting on an answer. Asked of the ledger, and
+    ///     asked about the *other* owners' positions: the tier owns
+    ///     `.translateBrain` since Step 2, and this rule is why it never has
+    ///     to look at its own row to decide — a live `.brain` or
+    ///     `.intentBrain` means the voice pipeline is mid-conversation, and
+    ///     that is a different question from whether this tier's own handle
+    ///     is resident (which is the very next line).
     ///
     ///  2. **There is not enough headroom for the load.** The comparison is
     ///     `ModelFootprint.hardBytes` against the app's own reading of its
@@ -701,6 +713,118 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
 
 // MARK: - The production generator
 
+/// The tier's handle, boxed so a warden can take it away from outside the
+/// actor.
+///
+/// **Why a box and not three stored properties.** [MODEL-WARDEN] Step 2 makes
+/// the tier's handle *preemptible*: the ledger registers `.translateBrain`
+/// with a `resident:`, and the manager may call `releaseForWarden()` on the
+/// caller's thread (never on this actor, and never holding its own lock). An
+/// actor's isolated state cannot be reached that way, so the one thing both
+/// sides must agree on — "is there a runtime here, and which URL is it" —
+/// lives in this lock-guarded box instead, and the actor reads it through
+/// `currentHandle` / `heldModelURL`.
+///
+/// **What it protects.** Three facts, always read together: the handle, the
+/// URL it was loaded from (so a re-load for the same artifact is a no-op and a
+/// load for a different one is a reload), and whether a decode is running.
+///
+/// **The lease.** While `beginDecode`/`endDecode` bracket is open the box
+/// answers `.refused(.inUse)`. A refusal is not a veto — `.translateBrain`'s
+/// release contract is `actorDeferredFree`, which `allowsForcedUnload`, so a
+/// higher-priority reservation that cannot fit may invoke the registered
+/// release path anyway. That is safe rather than merely convenient: the free
+/// is deferred by ARC, and the running decode holds the runtime itself, so
+/// forcing here drops the *ledger's* claim on bytes that come back the moment
+/// the existing `stopDecode` ends the decode. The ledger's count is
+/// momentarily low by that one handle for exactly as long as the decode it
+/// already bounded takes to stop.
+///
+/// It conforms to `ModelResident` and **must not re-enter the manager**: the
+/// manager's lock is non-recursive, and `releaseForWarden` runs outside it.
+/// Nothing here calls back into `lifecycle` — the tier does that itself, from
+/// its own path (`dropHandle`).
+final class TranslateBrainHandleSlot: ModelResident, @unchecked Sendable {
+
+    private let lock = NSLock()
+    private var handle: Any?
+    private var handleModelURL: URL?
+    /// Depth, not a flag: `beginDecode`/`endDecode` are paired across a
+    /// `defer`, and a depth that leaks upward would make the box refuse a
+    /// preemption for the rest of the session.
+    private var decodeDepth = 0
+
+    /// The runtime, if one is resident. `Any?` because this type is compiled
+    /// in builds that do not link the llama runtime at all — the cast to
+    /// `LLM` belongs at the call site, inside `#if canImport(LLM)`.
+    var currentHandle: Any? {
+        lock.lock()
+        defer { lock.unlock() }
+        return handle
+    }
+
+    var heldModelURL: URL? {
+        lock.lock()
+        defer { lock.unlock() }
+        return handleModelURL
+    }
+
+    var isHoldingHandle: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return handle != nil
+    }
+
+    func store(_ handle: Any, url: URL) {
+        lock.lock()
+        defer { lock.unlock() }
+        self.handle = handle
+        self.handleModelURL = url
+    }
+
+    /// Drops the reference without telling the ledger. Called by the tier's
+    /// own idle/session release (which reports `didUnload` itself) and as the
+    /// warden's registered force fallback (where the ledger has already
+    /// marked the row non-resident and a callback would be a re-entry).
+    func drop() {
+        lock.lock()
+        defer { lock.unlock() }
+        handle = nil
+        handleModelURL = nil
+    }
+
+    func beginDecode() {
+        lock.lock()
+        defer { lock.unlock() }
+        decodeDepth += 1
+    }
+
+    func endDecode() {
+        lock.lock()
+        defer { lock.unlock() }
+        decodeDepth = max(0, decodeDepth - 1)
+    }
+
+    // MARK: ModelResident
+
+    /// The warden's ask. Synchronous by contract, and called outside the
+    /// manager's lock — so this takes only its own.
+    ///
+    /// A decode in flight is an honest refusal: the bytes would come back, but
+    /// the *next* use pays a full reload, and the warden is the one that gets
+    /// to decide whether that trade is worth it (`PreemptionOutcome.forced`).
+    /// An idle handle is simply handed over.
+    func releaseForWarden() -> UnloadAck {
+        lock.lock()
+        defer { lock.unlock() }
+        guard handle != nil else { return .notHolding }
+        guard decodeDepth == 0 else { return .refused(.inUse) }
+        handle = nil
+        handleModelURL = nil
+        return .released
+    }
+}
+
 /// The app's own llama.cpp runtime (`LLM.swift`), used the way the rest of the
 /// app uses it: one handle per owner, created lazily, sampled deterministically
 /// (`OnDeviceSampling`, shared with the voice interpreters so the same prompt
@@ -713,18 +837,19 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
 ///    (`brainTranslationIdleUnloadSeconds`). The camera feature has no turn
 ///    boundary to release at, and a 4B resident parked between scenes is
 ///    exactly the invisible-resident shape the residency ledger exists to
-///    prevent. The tier takes no ledger slot (see the file header), so this is
-///    its own honest answer to the same problem.
+///    prevent. The tier's `.translateBrain` row means the ledger sees the same
+///    release (`dropHandle` → `didUnload`); this timer is what makes it
+///    happen without a turn boundary, and it is unchanged by Step 2 — the
+///    slot is preemptible *in addition to* the idle rule, never instead of it.
 ///  - **It interrupts on the deadline.** `LLM.stop()` breaks the decode loop,
 ///    so a generation that outlives `timeout` costs the deadline and not the
 ///    session, and the next batch is not queued behind a runaway decode.
 actor LlamaBrainTextGenerator: BrainTextGenerating {
 
     private let config: LiveTranslateConfig
-    /// Held as `Any?` so this file compiles when the LLM package is absent,
-    /// exactly like the app's other guarded interpreters.
-    private var handle: Any?
-    private var handleModelURL: URL?
+    /// The handle, and the ledger's view of it. Not an actor-stored property
+    /// any more — see `TranslateBrainHandleSlot`.
+    private let slot = TranslateBrainHandleSlot()
     private var lastUse: Date?
     /// The armed idle release, if one is. Cancelled and re-armed by every use,
     /// so the handle's lifetime is measured from the last batch and not from
@@ -763,7 +888,7 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
         #endif
     }
 
-    func isHoldingHandle() async -> Bool { handle != nil }
+    func isHoldingHandle() async -> Bool { slot.isHoldingHandle }
 
     func release() async {
         idleRelease?.cancel()
@@ -802,9 +927,20 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
         dropHandle()
     }
 
+    /// Drops the handle and tells the ledger its bytes are back.
+    ///
+    /// `didUnload` is owner-scoped on the slot's `TranslateBrainHandleSlot`,
+    /// which is the object the registration was made with — so a
+    /// re-registration by anyone else cannot make this call clear a
+    /// residency it does not own (the same rule `.speechToText`'s two
+    /// engines already live under).
+    ///
+    /// A handle the warden already took is not dropped twice: `didUnload` is
+    /// a no-op on a slot that is not resident, and `slot.drop()` is a no-op
+    /// with nothing in it.
     private func dropHandle() {
-        handle = nil
-        handleModelURL = nil
+        slot.drop()
+        lifecycle.didUnload(.translateBrain, owner: slot)
         lastUse = nil
     }
 
@@ -820,17 +956,42 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
     /// place the rule was ever consulted, and a session that stopped asking
     /// never got there.
     private func loadHandle(modelURL: URL) throws -> LLM {
-        if let existing = handle as? LLM, handleModelURL == modelURL { return existing }
+        if let existing = slot.currentHandle as? LLM,
+           slot.heldModelURL == modelURL { return existing }
+
+        let modelID = Self.modelID(forURL: modelURL)
+
+        // [MODEL-WARDEN] Step 2 — declare the position before asking for the
+        // bytes. `resident:` is what makes this handle *preemptible* rather
+        // than merely evictable: the warden can ask the slot to stand down
+        // (`releaseForWarden`) and the contract on the row — a brain's
+        // `actorDeferredFree` — is what decides whether a refusal may be
+        // overruled. The closure is the force fallback, and it is the same
+        // body as the slot's own release: drop the reference, keep the
+        // ledger's books straight later via `dropHandle`.
+        lifecycle.register(slot: .translateBrain,
+                           modelID: modelID,
+                           owner: slot,
+                           evictable: true,
+                           priority: ReservationPurpose.liveTranslate.priority,
+                           resident: slot) { [weak slot] in
+            slot?.drop()
+        }
 
         // [MODEL-WARDEN] Step 1 — ask the warden BEFORE allocating.
         //
-        // `replacesSlotContents: false`: this is a PEER load. The tier
-        // deliberately takes no slot (§ the file header — registering
-        // `.brain` from here would clobber the voice interpreter's release
-        // closure and free the wrong handle), so the bytes reserved here
-        // are *additional* to whatever `.brain` already holds. Saying so is
-        // what stops a second 4B from slipping past a budget the first one
-        // already spent.
+        // `replacesSlotContents: true`: this is the tier's OWN position now
+        // (`ModelSlot.translateBrain`, § the file header). One handle per
+        // pipeline position is the rule this expresses — the load is the
+        // same position being refilled, so counting the slot's own prior
+        // residency against it would double-book one position and evict an
+        // innocent bystander.
+        //
+        // The bytes are still additive to everyone ELSE's, which is what
+        // keeps a second 4B from slipping past a budget the voice brain
+        // already spent — and `.translateBrain` does not
+        // `admitSoloOverBudget`, so an over-budget ask is refused here
+        // exactly as it was when this reserved as a peer on `.brain`.
         //
         // The refusal is thrown, not awaited: this generator has no queue to
         // wait in, and the tier's answer to "cannot load now" is already
@@ -840,11 +1001,11 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
         // exactly as before.
         let reservation: ModelReservation
         switch lifecycle.reserve(ModelLoadRequest(
-            slot: .brain,
-            modelID: Self.modelID(forURL: modelURL),
-            owner: self,
+            slot: .translateBrain,
+            modelID: modelID,
+            owner: slot,
             purpose: .liveTranslate,
-            replacesSlotContents: false)) {
+            replacesSlotContents: true)) {
         case .success(let granted):
             reservation = granted
         case .failure(let denial):
@@ -876,13 +1037,17 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
                                 maxTokenCount: Int32(LocalIntentInterpreter.contextTokenBudget)) else {
             throw BrainGenerationFailure.loadFailed
         }
-        handle = created
-        handleModelURL = modelURL
+        slot.store(created, url: modelURL)
         // The bytes are in memory: the transient term retires into the
-        // ledger's resident total. Committed even when the caller's stage
-        // deadline has already expired — the 2.5 GB IS resident, and a
-        // ledger that declined to count it would be exactly the undercount
-        // this migration exists to remove.
+        // ledger's resident total, and the row is marked resident under the
+        // same owner the reservation was made with — the handle box, not the
+        // generator, so a preemption that lands between here and the next
+        // `noteUse` still finds the row it asked about.
+        lifecycle.didLoad(.translateBrain, owner: slot)
+        // Committed even when the caller's stage deadline has already
+        // expired — the 2.5 GB IS resident, and a ledger that declined to
+        // count it would be exactly the undercount this migration exists to
+        // remove.
         lifecycle.commit(reservation)
         committed = true
         return created
@@ -966,6 +1131,16 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
                             - LocalIntentInterpreter.outputHeadroomTokens else {
                         throw BrainGenerationFailure.promptOverflow
                     }
+                    // [MODEL-WARDEN] Step 2 — the lease is held, not merely
+                    // taken. While this bracket is open the box answers a
+                    // warden's `releaseForWarden` with `.refused(.inUse)`, so
+                    // a preemption cannot free a runtime mid-decode; the
+                    // decode's own `stopDecode` is what ends the window, and
+                    // the contract's deferred free is what makes even a
+                    // forced drop of the box's reference safe (the local
+                    // `llm` keeps the runtime alive until this returns).
+                    slot.beginDecode()
+                    defer { slot.endDecode() }
                     return try await llm.core.generateWithConstraints(from: prompt,
                                                                      jsonSchema: jsonSchema)
                 }
@@ -995,8 +1170,14 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
 
     /// Stops the decode in flight on the resident handle, if there is one.
     /// Safe with nothing in flight, and with no handle at all.
+    ///
+    /// Reads the handle through the box rather than a stored property: the
+    /// warden can drop the box's reference out from under this actor
+    /// (`TranslateBrainHandleSlot.releaseForWarden`, or its force fallback),
+    /// so the only safe way to ask "is there a live runtime to interrupt?" is
+    /// the box's own locked read.
     private func stopDecode() {
-        (handle as? LLM)?.stop()
+        (slot.currentHandle as? LLM)?.stop()
     }
 
     #endif
