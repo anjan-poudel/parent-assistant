@@ -1356,6 +1356,19 @@ enum ModelCatalog {
     ///   3. the first curated entry (the list's own preference order — the
     ///      honest answer when the catalog ships nothing for the language).
     /// Nil only when the kind has no curated entry at all.
+    ///
+    /// **[MODEL-WARDEN] This is the LANGUAGE answer, not the device one.**
+    /// The catalog is deliberately device-blind: nothing here reads
+    /// `physicalMemoryBytes`, `minDeviceRAMBytes` or the class policy, so a
+    /// 6 GB phone still resolves the ne brain to the 4B (`languageDefaultPicks`)
+    /// even though `ModelBudgetPolicy.standard` refuses it beside a warm ANE
+    /// STT. The memory-aware question — *which* of these can this class
+    /// actually hold? — is `LanguageModelResolver.resolvedAutomaticPick
+    /// (kind:language:policy:physicalMemoryBytes:warmSTTLiveBytes:)`, which
+    /// takes this function's answer as step 1 and steps down the ladder from
+    /// there. Keeping the two apart is what lets a caller ask for the
+    /// language default on purpose (the Settings picker's own ordering) and
+    /// keeps a device probe out of a pure catalog lookup.
     static func defaultEntry(kind: ModelKind, language: String) -> ModelCatalogEntry? {
         if let explicit = explicitDefaultEntry(kind: kind, language: language) {
             return explicit

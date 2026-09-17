@@ -353,6 +353,90 @@ final class ModelBudgetPolicyTests: XCTestCase {
         XCTAssertEqual(refused.reason, .overClassBudget)
     }
 
+    // MARK: - 6. The automatic pick asks the same gate the rows read
+
+    /// [MODEL-WARDEN] Closing the D1 hole: the resolution
+    /// (`LanguageModelResolver.resolvedAutomaticPick`) must decide with the
+    /// same verdict the Settings rows render through
+    /// `ModelLifecycleManager.availability(of:)`. A household that reads
+    /// "not for this phone" on a row must not then get that model from an
+    /// automatic device, and a model the pick lands on must be one the
+    /// ledger itself would offer. Both go through `ModelBudgetPolicy`, and
+    /// this pins that they agree on the two classes where it matters.
+    func testTheAutomaticPickAgreesWithTheLedgerTheRowsRead() throws {
+        let standard = ModelLifecycleManager(probe: FixedProbe(
+            physicalMemoryBytes: standardPhone))
+        let pick = try XCTUnwrap(LanguageModelResolver.resolvedAutomaticPick(
+            kind: .llamaBase,
+            language: "ne",
+            policy: ModelBudgetPolicy.policy(for: .standard),
+            physicalMemoryBytes: standardPhone))
+        XCTAssertEqual(pick.entry.id, ModelCatalog.qwen3_1_7BInstruct)
+        XCTAssertEqual(standard.availability(of: pick.entry), .available,
+                       "the model Automatic picks must be one the ledger offers")
+        // The default it stepped off is refused, with exactly the reason the
+        // pick records as its explanation — one sentence, one vocabulary.
+        XCTAssertEqual(pick.declinedDefaultReason, .overClassBudget)
+        XCTAssertEqual(standard.availability(of: entry(brain4B)),
+                       .unavailable(reason: .overClassBudget))
+
+        // The compact class: the ledger refuses the pick too, and that
+        // refusal IS the honest degradation — no crash, no loop, and no
+        // silent admit of what the policy refused.
+        let compact = ModelLifecycleManager(probe: FixedProbe(
+            physicalMemoryBytes: compactPhone))
+        let degraded = try XCTUnwrap(LanguageModelResolver.resolvedAutomaticPick(
+            kind: .llamaBase,
+            language: "ne",
+            policy: ModelBudgetPolicy.policy(for: .compact),
+            physicalMemoryBytes: compactPhone))
+        XCTAssertEqual(compact.availability(of: degraded.entry),
+                       .unavailable(reason: .requiresEvictingWarmSTT))
+        XCTAssertEqual(degraded.recordedReason, .requiresEvictingWarmSTT)
+    }
+
+    func testNoBrainTheAutomaticPickMayDrawFromFitsTheCompactClass() {
+        // The compact finding from the picker's side: the resolution's step
+        // 2 (the largest artifact that fits beside the warm STT) has NO
+        // candidate on this class, so step 3 is the only honest answer
+        // there. Pinned over the CURATED list — the entries a pick may
+        // actually draw from — rather than the whole catalog, so a
+        // decluttered entry that would fit cannot make this vacuous.
+        let policy = ModelBudgetPolicy.compact
+        for entry in ModelCatalog.availableBrainEntries {
+            XCTAssertFalse(policy.availability(of: entry,
+                                               physicalMemoryBytes: compactPhone)
+                .isAvailable,
+                           "\(entry.id.rawValue) on the 4 GB class")
+        }
+    }
+
+    func testTheRecordedReasonIsContentFreeAndRidesAnAllowedKey() throws {
+        // "Recorded honestly" has two halves, and the second is the one that
+        // fails silently: the token has to be content-free (no artifact, no
+        // size, no path — the closed vocabulary already pins the spelling)
+        // AND it has to survive the sanitiser, which drops every metadata key
+        // it does not know. A model id, a filename or a size would be dropped
+        // (or, worse, carried); the reason token rides `reason`, which the
+        // allow-list already blesses, so a field capture can say WHY
+        // Automatic moved without saying what it moved to.
+        let pick = try XCTUnwrap(LanguageModelResolver.resolvedAutomaticPick(
+            kind: .llamaBase,
+            language: "ne",
+            policy: ModelBudgetPolicy.standard,
+            physicalMemoryBytes: standardPhone))
+        let token = try XCTUnwrap(pick.recordedReason).rawValue
+        XCTAssertEqual(token, "over_class_budget")
+        XCTAssertTrue(LogSanitiser.allowedKeys.contains("reason"),
+                      "the key the token rides is already allow-listed")
+        XCTAssertTrue(ModelUnavailabilityReason.allCases.map(\.rawValue).contains(token),
+                      "the record is drawn from the closed vocabulary, not composed")
+        for leak in [pick.entry.id.rawValue, ".gguf", "/", "GB", "qwen", "1_7B"] {
+            XCTAssertFalse(token.contains(leak),
+                           "the recorded reason leaks \(leak): \(token)")
+        }
+    }
+
     func testTheBatchGateAnswersForEveryEntryAsTheSingleGateDoes() {
         // The picker asks for a whole list at once; the answer must be the
         // same one the single-entry call gives, or a row's state would

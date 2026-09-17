@@ -180,6 +180,26 @@ final class ModelCatalogLanguageTests: XCTestCase {
         }
     }
 
+    // MARK: - The catalog stays device-blind ([MODEL-WARDEN] 2026-09-18)
+
+    /// The language default is a statement about LANGUAGE, never about the
+    /// phone: the ne brain default is the 4B even though
+    /// `ModelBudgetPolicy.standard` refuses it beside a warm ANE STT on a
+    /// 6 GB device. That is deliberate, not an oversight — the memory-aware
+    /// question is `LanguageModelResolver.resolvedAutomaticPick(…)`, which
+    /// takes THIS answer as its first rung and steps down the ladder from
+    /// there. Moving a device probe into the catalog would make one lookup
+    /// answer differently on two phones and break the picker ordering this
+    /// file pins from `[DEFAULTS 2026-09-16]`.
+    func testTheDefaultEntryStaysDeviceBlind() {
+        XCTAssertEqual(ModelCatalog.defaultEntry(kind: .llamaBase, language: "ne")?.id,
+                       ModelCatalog.intentQwen4BSlotCanon,
+                       "the ne brain default is unchanged — the policy gate "
+                       + "lives in the resolver, not in the catalog lookup")
+        XCTAssertEqual(ModelCatalog.defaultEntry(kind: .whisperBase, language: "ne")?.id,
+                       ModelCatalog.whisperKitMediumV6)
+    }
+
     func testKindsWithoutAnExplicitPickStillResolve() {
         // VAD / KWS / LoRAs are not in the map — the generic path answers.
         XCTAssertNotNil(ModelCatalog.curatedEntries(kind: .vad).first)

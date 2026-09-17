@@ -512,4 +512,217 @@ final class LanguageModelResolverTests: XCTestCase {
                        current,
                        "a compatible current voice is never disturbed")
     }
+
+    // MARK: - [MODEL-WARDEN] The policy-aware AUTOMATIC pick (2026-09-18)
+    //
+    // The D1 hole: "Automatic" resolved through the catalog's LANGUAGE
+    // default, which knows nothing about memory — so a 6 GB Nepali phone
+    // landed on the 4B the class policy refuses beside a warm ANE STT, the
+    // ledger admitted it through `soloOverBudget` anyway, and every turn
+    // paid a cold STT load. The resolution now consults the policy and
+    // steps down the ladder; these are the rungs, per class.
+
+    private let compactPhone: UInt64 = 4_000_000_000     // < 5 GB
+    private let standardPhone: UInt64 = 6_000_000_000    // 5–7 GB
+    private let roomyPhone: UInt64 = 8_000_000_000       // ≥ 7 GB
+
+    private func automaticPick(_ kind: ModelKind,
+                               _ language: String,
+                               on memory: UInt64,
+                               warmSTTLiveBytes: UInt64? = nil)
+    -> LanguageModelResolver.AutomaticPick? {
+        LanguageModelResolver.resolvedAutomaticPick(
+            kind: kind,
+            language: language,
+            policy: ModelBudgetPolicy.policy(forPhysicalMemoryBytes: memory),
+            physicalMemoryBytes: memory,
+            warmSTTLiveBytes: warmSTTLiveBytes)
+    }
+
+    private func automaticBrain(_ language: String,
+                                on memory: UInt64,
+                                warmSTTLiveBytes: UInt64? = nil)
+    -> ModelID? {
+        automaticPick(.llamaBase, language, on: memory,
+                      warmSTTLiveBytes: warmSTTLiveBytes)?.entry.id
+    }
+
+    /// The headline: on the class the mechanism exists for, Automatic no
+    /// longer lands on the 4B the policy refuses.
+    func testAutomaticPickOnASixGBPhoneStepsDownToTheLighterBrain() throws {
+        let pick = try XCTUnwrap(automaticPick(.llamaBase, "ne", on: standardPhone))
+        // The language default is still the 4B — the catalog is device-blind
+        // (pinned in `ModelCatalogLanguageTests`) …
+        XCTAssertEqual(ModelCatalog.defaultEntry(kind: .llamaBase, language: "ne")?.id,
+                       ModelCatalog.intentQwen4BSlotCanon)
+        // … and Automatic is what moves off it, to the 1.7B the class CAN
+        // hold beside the warm ANE STT.
+        XCTAssertEqual(pick.entry.id, ModelCatalog.qwen3_1_7BInstruct)
+        XCTAssertNotEqual(pick.entry.id, ModelCatalog.intentQwen4BSlotCanon)
+        XCTAssertTrue(pick.availability.isAvailable,
+                      "the model Automatic lands on must be one the class can hold")
+        // The record: WHY it is not the 4B. The 3.40 GB live footprint is
+        // over the 3.2 GB budget on its own, which is `over_class_budget` —
+        // not the STT-co-residency sentence, and the two lead a household
+        // to different choices.
+        XCTAssertEqual(pick.declinedDefaultReason, .overClassBudget)
+        XCTAssertEqual(pick.recordedReason, .overClassBudget)
+    }
+
+    /// The class that CAN hold the pairing keeps it: nothing about this
+    /// change may move the pick on a device that was already right.
+    func testAutomaticPickOnARoomyPhoneKeepsTheFourB() throws {
+        let pick = try XCTUnwrap(automaticPick(.llamaBase, "ne", on: roomyPhone))
+        XCTAssertEqual(pick.entry.id, ModelCatalog.intentQwen4BSlotCanon)
+        XCTAssertEqual(pick.entry.id,
+                       ModelCatalog.defaultEntry(kind: .llamaBase, language: "ne")?.id)
+        XCTAssertTrue(pick.availability.isAvailable)
+        XCTAssertNil(pick.declinedDefaultReason)
+        XCTAssertNil(pick.recordedReason,
+                     "a resolution that took the default has nothing to explain")
+    }
+
+    /// The ladder only ever steps DOWN. The explicit `en` pick is the light
+    /// 1.7B precisely so an app-language switch never kicks off a multi-GB
+    /// download (fix 1), and a roomy device must not "upgrade" it back to
+    /// the 4B — the policy gate is a memory question, not a taste one.
+    func testAutomaticPickNeverUpgradesPastTheLanguageDefault() throws {
+        let pick = try XCTUnwrap(automaticPick(.llamaBase, "en", on: roomyPhone))
+        XCTAssertEqual(pick.entry.id, ModelCatalog.qwen3_1_7BInstruct)
+        XCTAssertEqual(pick.entry.id,
+                       ModelCatalog.defaultEntry(kind: .llamaBase, language: "en")?.id)
+        XCTAssertNil(pick.recordedReason)
+    }
+
+    /// The compact-class finding, seen from the resolver: no shipped brain
+    /// fits a 4 GB phone beside the STT its voice turn needs, so there is no
+    /// "fits" to resolve to. The pick degrades to the lightest brain and
+    /// says what it costs — it does not crash, loop, or silently admit the
+    /// model the policy refused.
+    func testAutomaticPickOnACompactPhoneDegradesToTheLightestBrainAndSaysSo() throws {
+        let pick = try XCTUnwrap(automaticPick(.llamaBase, "ne", on: compactPhone))
+        // The lightest language-compatible CURATED brain — 1.11 GB against
+        // the 1.28 GB 1.7B and the 2.50 GB 4B class. It is a real model the
+        // device can run; the point is that it cannot run it *and* keep the
+        // STT warm, which is exactly what the pick's reason says.
+        XCTAssertEqual(pick.entry.id, ModelCatalog.intentQwenS43)
+        XCTAssertEqual(pick.entry.id,
+                       ModelCatalog.availableBrainEntries
+                           .filter { LanguageModelResolver.isLanguageCompatible($0,
+                                                                               language: "ne") }
+                           .min { $0.sizeBytes < $1.sizeBytes }?.id,
+                       "…and it is the smallest of the entries a pick may draw from")
+        XCTAssertFalse(pick.availability.isAvailable,
+                       "the compact finding: nothing this class can hold")
+        XCTAssertEqual(pick.availability.reason, .requiresEvictingWarmSTT)
+        XCTAssertEqual(pick.recordedReason, .requiresEvictingWarmSTT,
+                       "the STT-eviction consequence is stated, not hidden")
+        // The default it declined was refused for its own reason — the
+        // pick's own sentence is the more useful one, so it wins.
+        XCTAssertEqual(pick.declinedDefaultReason, .overClassBudget)
+    }
+
+    /// A step-down may never land the household on a model that cannot
+    /// serve its language: the lightest BRAIN on the ne path is a Nepali
+    /// fine-tune, and an English household must not be handed one.
+    func testAutomaticPickServesTheLanguageItResolvesFor() throws {
+        let english = try XCTUnwrap(automaticPick(.llamaBase, "en", on: compactPhone))
+        XCTAssertTrue(LanguageModelResolver.isLanguageCompatible(english.entry,
+                                                                 language: "en"))
+        XCTAssertEqual(english.entry.id, ModelCatalog.qwen3_1_7BInstruct)
+        // The ne path's lightest brain is a Nepali-only fine-tune, and the
+        // en path must NOT degrade onto it: an English household talking to
+        // an ne-tagged intent model is the failure the language rule is
+        // there to prevent.
+        let nepali = try XCTUnwrap(automaticPick(.llamaBase, "ne", on: compactPhone))
+        XCTAssertEqual(nepali.entry.languages, ["ne"])
+        XCTAssertNotEqual(nepali.entry.id, english.entry.id)
+        XCTAssertTrue(LanguageModelResolver.isLanguageCompatible(nepali.entry,
+                                                                 language: "ne"))
+        XCTAssertTrue(english.entry.languages.isEmpty,
+                      "the en pick is the language-neutral 1.7B")
+    }
+
+    /// The warm-STT footprint is a real input, not a decoration: it is the
+    /// quantity that decides whether a brain fits BESIDE the resident the
+    /// latency contract insists stays warm. A heavier STT than the ANE
+    /// graph's 1.0 GB pushes the 1.7B out of the 6 GB class and the pick
+    /// steps down again to the 1.1 GB intent fine-tune.
+    func testTheWarmSTTFootprintMovesThePick() throws {
+        let ane = try XCTUnwrap(automaticBrain("ne", on: standardPhone))
+        XCTAssertEqual(ane, ModelCatalog.qwen3_1_7BInstruct)
+        let heavier = try XCTUnwrap(automaticBrain("ne", on: standardPhone,
+                                                   warmSTTLiveBytes: 1_300_000_000))
+        XCTAssertEqual(heavier, ModelCatalog.intentQwenS43,
+                       "1.98 GB + 1.3 GB is over the 3.2 GB budget; 1.81 GB + 1.3 GB is not")
+        XCTAssertNotEqual(heavier, ane)
+    }
+
+    /// Only brains are the policy's business. The light residents — the
+    /// reply voice, the VAD, the wake-word spotter — co-reside by design,
+    /// so the automatic pick must hand them straight through on every class
+    /// (refusing one would be the failure mode the gate exists to avoid).
+    func testAutomaticPickLeavesTheLightResidentsAlone() throws {
+        let voice = try XCTUnwrap(automaticPick(.tts, "ne", on: compactPhone))
+        XCTAssertEqual(voice.entry.id, ModelCatalog.piperNepali)
+        XCTAssertEqual(voice.availability, .available)
+        XCTAssertNil(voice.recordedReason)
+        let vad = try XCTUnwrap(automaticPick(.vad, "ne", on: compactPhone))
+        XCTAssertTrue(vad.availability.isAvailable)
+        XCTAssertNil(vad.declinedDefaultReason)
+    }
+
+    /// The STT ladder is not re-pointed. The recognizer's own default is
+    /// the best-accuracy ANE build on every class — the policy has no
+    /// business choosing a worse recognizer because a brain is not
+    /// resident, and the automatic pick must not "help" by moving it.
+    func testAutomaticPickDoesNotRePointTheSTTDefault() throws {
+        let pick = try XCTUnwrap(automaticPick(.whisperBase, "ne", on: compactPhone))
+        XCTAssertEqual(pick.entry.id, ModelCatalog.whisperKitMediumV6)
+        XCTAssertTrue(pick.availability.isAvailable)
+        XCTAssertNil(pick.recordedReason)
+    }
+
+    /// The explicit path is untouched: the policy gates Automatic, never a
+    /// stored preference. A household that picked the 4B on a 6 GB phone
+    /// keeps it (the ledger's `soloOverBudget` escape hatch is what serves
+    /// it), and a nil preference stays nil — Automatic is not rewritten
+    /// into a stored pick.
+    func testThePolicyDoesNotOverrideAnExplicitPreference() {
+        XCTAssertEqual(LanguageModelResolver.resolvedPreference(
+            current: ModelCatalog.intentQwen4BSlotCanon, language: "ne"),
+                       ModelCatalog.intentQwen4BSlotCanon,
+                       "an explicit over-budget pick keeps today's semantics")
+        XCTAssertEqual(LanguageModelResolver.resolvedPreference(
+            current: ModelCatalog.qwen3_4BInstruct, language: "ne"),
+                       ModelCatalog.qwen3_4BInstruct)
+        XCTAssertNil(LanguageModelResolver.resolvedPreference(current: nil,
+                                                              language: "ne"),
+                     "Automatic stays Automatic — the resolver never invents a pick")
+    }
+
+    /// Pure and deterministic: same device, same language, same answer —
+    /// no clock, no ledger, no accumulated state, so two calls (and two
+    /// devices of the same class) cannot disagree.
+    func testTheAutomaticPickIsDeterministic() {
+        XCTAssertEqual(automaticPick(.llamaBase, "ne", on: standardPhone),
+                       automaticPick(.llamaBase, "ne", on: standardPhone))
+        XCTAssertEqual(automaticPick(.llamaBase, "ne", on: compactPhone),
+                       automaticPick(.llamaBase, "ne", on: compactPhone))
+        // The class boundary, not the exact byte count, is what decides:
+        // two phones on the same side of it resolve identically.
+        XCTAssertEqual(automaticPick(.llamaBase, "ne", on: 5_000_000_000),
+                       automaticPick(.llamaBase, "ne", on: 6_900_000_000))
+        XCTAssertEqual(automaticPick(.llamaBase, "ne", on: 7_000_000_000),
+                       automaticPick(.llamaBase, "ne", on: 8_000_000_000))
+    }
+
+    /// A kind that ships nothing has no pick to invent.
+    func testAnEmptyKindResolvesToNothing() {
+        XCTAssertNil(LanguageModelResolver.resolvedAutomaticPick(
+            kind: .whisperLoRA,
+            language: "ne",
+            policy: ModelBudgetPolicy.standard,
+            physicalMemoryBytes: standardPhone))
+    }
 }
