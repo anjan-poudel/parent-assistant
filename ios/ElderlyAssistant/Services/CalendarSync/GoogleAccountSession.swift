@@ -346,6 +346,90 @@ final class GoogleAccountSession: GoogleAccountSessionProtocol {
         await interactiveFlow(event: "calendar_share_session_create_account")
     }
 
+    // MARK: - Scope ledger (2026-09-17)
+
+    var requiredScopes: [String] { Self.requiredScopes }
+
+    /// [SCOPE-LEDGER] Asks Google for the SPECIFIC scopes the ledger
+    /// found missing — the card's Grant button. Presents the consent
+    /// sheet for exactly those scopes; the fresh post-grant token is
+    /// cached the same way sign-in caches it, so the very next gateway
+    /// call carries the new grant.
+    func grantScopes(_ scopes: [String]) async -> Bool {
+        guard !scopes.isEmpty else { return true }
+        guard let clientID else {
+            emit("calendar_share_session_scopes_grant_failed",
+                 outcome: "failure", errorCode: "not_configured")
+            return false
+        }
+        guard let controller = presenter?() else {
+            emit("calendar_share_session_scopes_grant_failed",
+                 outcome: "failure", errorCode: "no_presenter")
+            return false
+        }
+        let flow = self.flow
+        let outcome = await Self.runScopeGrant(clientID: clientID, flow: flow,
+                                               controller: controller, scopes: scopes)
+        switch outcome {
+        case .granted(let auth):
+            remember(auth)
+            emit("calendar_share_session_scopes_granted", outcome: "success")
+            return true
+        case .declined:
+            // The elder's decision, not a failure — the card keeps the
+            // Grant button and the console names the choice.
+            emit("calendar_share_session_scopes_declined", outcome: "cancelled")
+            return false
+        case .failed(let code):
+            emit("calendar_share_session_scopes_grant_failed",
+                 outcome: "failure", errorCode: code)
+            return false
+        }
+    }
+
+    /// The three ways a scope grant can land. `.granted` carries the
+    /// post-grant auth result (token included) so the session's cache is
+    /// updated from the same value the flow handed over.
+    private enum ScopeGrantOutcome {
+        case granted(GoogleAuthResult)
+        case declined
+        case failed(String)
+    }
+
+    /// Presents the consent sheet for `scopes` and reduces the SDK's
+    /// answer to the outcome. Main-actor confined like every other flow.
+    @MainActor private static func runScopeGrant(clientID: String,
+                                                 flow: GoogleAuthFlow,
+                                                 controller: UIViewController,
+                                                 scopes: [String]) async -> ScopeGrantOutcome {
+        configureSDK(clientID: clientID)
+        do {
+            let result = try await flow.addScopes(scopes, presenting: controller)
+            // Same judgement as the sign-in flow: the sheet succeeded but
+            // the grant did not land is a refusal to report, not a grant
+            // to pretend at.
+            return grantsRequiredScopes(result.grantedScopes)
+                ? .granted(result)
+                : .declined
+        } catch {
+            let code = (error as NSError).code
+            // The SDK's "already granted" arrives through the error
+            // channel when its own record lags the auth state — that IS
+            // a grant (the token cache is left alone: there is no fresh
+            // token to remember, and the existing one is the granted
+            // one).
+            if code == GIDSignInError.scopesAlreadyGranted.rawValue {
+                return .granted(GoogleAuthResult(grantedScopes: scopes,
+                                                 accessToken: "",
+                                                 expiresAt: nil))
+            }
+            if code == GIDSignInError.canceled.rawValue {
+                return .declined
+            }
+            return .failed("sdk_\(code)")
+        }
+    }
+
     /// Brings back the account a previous launch connected (2026-09-17).
     ///
     /// This is the SDK's own documented app-start entry point: its header

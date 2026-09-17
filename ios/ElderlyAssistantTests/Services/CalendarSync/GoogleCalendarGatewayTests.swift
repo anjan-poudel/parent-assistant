@@ -35,6 +35,35 @@ final class GoogleCalendarGatewayTests: XCTestCase {
                               now: { [now] in now })
     }
 
+    // MARK: - Scope ledger (2026-09-17)
+
+    func testFetchTokenScopesParsesTheTokeninfoScopeList() async {
+        transport.enqueue(json: [
+            "scope": "https://www.googleapis.com/auth/calendar "
+                + "https://www.googleapis.com/auth/contacts openid"
+        ])
+        let gateway = makeGateway()
+
+        let scopes = await gateway.fetchTokenScopes()
+
+        XCTAssertEqual(scopes, [
+            "https://www.googleapis.com/auth/calendar",
+            "https://www.googleapis.com/auth/contacts",
+            "openid",
+        ])
+    }
+
+    func testFetchTokenScopesReportsFailureWithoutABody() async {
+        transport.enqueue(json: ["scope": ""])
+        let gateway = makeGateway()
+
+        let scopes = await gateway.fetchTokenScopes()
+
+        XCTAssertNil(scopes)
+        XCTAssertTrue(bus.events(named: "calendar_share_token_scope_check")
+            .contains { $0.outcome == "failure" })
+    }
+
     // MARK: - Family calendar
 
     func testEnsureFamilyCalendarReturnsTheExistingCalendarAndCachesIt() async {
@@ -737,6 +766,11 @@ private final class FakeSession: GoogleAccountSessionProtocol {
     /// decided (`GoogleAccountSessionTests`, `CalendarShareServiceTests`).
     var hasRequiredScopes = true
     var token: String? = "fake-access-token"
+    /// [SCOPE-LEDGER] The required baseline — the gateway tests never
+    /// compare against it, the service tests do.
+    var requiredScopes: [String] = []
+    var grantScopesResult = true
+    func grantScopes(_ scopes: [String]) async -> Bool { grantScopesResult }
 
     func signIn() async -> GoogleSessionOutcome { isSignedIn ? .connected : .cancelled }
     func createAccount() async -> GoogleSessionOutcome { isSignedIn ? .connected : .cancelled }

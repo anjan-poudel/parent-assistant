@@ -294,4 +294,7 @@ private final class FakeCancellingSession: GoogleAccountSessionProtocol {
     func restorePreviousSession() async -> GoogleSessionOutcome { .unavailable }
     func signOut() {}
     func accessToken() async -> String? { nil }
+    /// [SCOPE-LEDGER] The ledger members, inert for this file's flow.
+    var requiredScopes: [String] = []
+    func grantScopes(_ scopes: [String]) async -> Bool { false }
 }
