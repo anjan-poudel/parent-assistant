@@ -315,6 +315,18 @@ enum NepaliFestivalCatalog {
                        rule: .lunar(month: 6, tithi: PakshaTithi(isShukla: true, number: 1),
                                     table: VerifiedDates.ghatasthapana),
                        tithiNepali: "प्रतिपदा", isImportant: true),
+        // [FESTIVAL-DATE] (2026-09-17) The umbrella names the elder
+        // actually asks with — "दशैँ कहिले हो" names no DAY, and a name
+        // group built from this catalog must contain the name or the
+        // question falls back to the model (the exact 2026-09-17 field
+        // failure this entry removes). "When is Dashain" is answered
+        // with the day Dashain BEGINS — Ghatasthapana — the same anchor
+        // the day-entry carries, so the two can never disagree.
+        NepaliFestival(id: "dashain", nameNepali: "दशैँ",
+                       nameEnglish: "Dashain",
+                       rule: .lunar(month: 6, tithi: PakshaTithi(isShukla: true, number: 1),
+                                    table: VerifiedDates.ghatasthapana),
+                       tithiNepali: "प्रतिपदा", isImportant: true),
         NepaliFestival(id: "sambidhan_diwas", nameNepali: "संविधान दिवस",
                        nameEnglish: "Constitution Day",
                        rule: .fixedBS(month: 6, day: 3)),
@@ -344,6 +356,14 @@ enum NepaliFestivalCatalog {
                        rule: .lunar(month: 7, tithi: PakshaTithi(isShukla: false, number: 13),
                                     table: VerifiedDates.kagTihar),
                        tithiNepali: "त्रयोदशी"),
+        // [FESTIVAL-DATE] (2026-09-17) The Tihar umbrella, mirroring the
+        // Dashain one: "तिहार कहिले हो" must resolve a name, and Tihar
+        // begins with Kag Tihar.
+        NepaliFestival(id: "tihar", nameNepali: "तिहार",
+                       nameEnglish: "Tihar",
+                       rule: .lunar(month: 7, tithi: PakshaTithi(isShukla: false, number: 13),
+                                    table: VerifiedDates.kagTihar),
+                       tithiNepali: "त्रयोदशी", isImportant: true),
         NepaliFestival(id: "kukur_tihar", nameNepali: "कुकुर तिहार",
                        nameEnglish: "Kukur Tihar (Dog)",
                        rule: .lunar(month: 7, tithi: PakshaTithi(isShukla: false, number: 14),

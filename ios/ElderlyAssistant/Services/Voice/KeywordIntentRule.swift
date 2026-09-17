@@ -56,6 +56,13 @@ enum KeywordIntentRule {
         /// ("क्यामेरा खोल", "open WhatsApp", "फोटो खिच्न"). The matched
         /// rule carries the catalog id in `Match.appID`.
         case appLaunch
+        /// [FESTIVAL-DATE] (2026-09-17) A festival date question
+        /// ("दशैँ कहिले हो", "when is Dashain") — answered
+        /// deterministically from the festival catalog, so the answer
+        /// never depends on encoder availability, band policy or model
+        /// calibration. The matched rule carries the catalog id in
+        /// `Match.festivalID`.
+        case festivalDate
     }
 
     /// A fired rule: which domain resolved, and the FIRST matching
@@ -70,11 +77,17 @@ enum KeywordIntentRule {
         /// catalog and the `launcher.open` entity are both keyed by.
         /// nil for every other domain (and only for that reason).
         let appID: String?
+        /// [FESTIVAL-DATE] (2026-09-17) The festival catalog id a
+        /// `.festivalDate` match resolved to ("dashain", "tihar", …).
+        /// nil for every other domain.
+        let festivalID: String?
 
-        init(domain: Domain, matchedKeys: [String], appID: String? = nil) {
+        init(domain: Domain, matchedKeys: [String],
+             appID: String? = nil, festivalID: String? = nil) {
             self.domain = domain
             self.matchedKeys = matchedKeys
             self.appID = appID
+            self.festivalID = festivalID
         }
     }
 
@@ -99,8 +112,14 @@ enum KeywordIntentRule {
                     matched.append(key)
                 }
                 if complete {
+                    // [FESTIVAL-DATE] The festival id comes from WHICH
+                    // festival name matched (the group's own key), not
+                    // from the rule — one rule covers the whole catalog.
+                    let festivalID = rule.domain == .festivalDate
+                        ? Self.festivalID(forNameKey: matched.last ?? "")
+                        : nil
                     return Match(domain: rule.domain, matchedKeys: matched,
-                                 appID: rule.appID)
+                                 appID: rule.appID, festivalID: festivalID)
                 }
             }
         }
@@ -220,8 +239,25 @@ enum KeywordIntentRule {
         ]),
         Rule(domain: .appLaunch, appID: "calendar", variants: [
             [calendarWords, openVerbFamily]
+        ]),
+        // [FESTIVAL-DATE] (2026-09-17) Ordered after EVERY rule, so a
+        // festival question can never shadow an existing claim — and the
+        // when-word ∧ festival-name conjunction keeps false fires to
+        // near zero ("दशैँमा के खाने?" names a festival with no when
+        // word, so it falls through to the interpreter as before).
+        Rule(domain: .festivalDate, variants: [
+            [whenQuestionWords, festivalNamesGroup]
         ])
     ]
+
+    /// Festival name keys resolved back to catalog ids — the name
+    /// string is the group key (canonicalized), the id is what the
+    /// router's answer path looks up.
+    private static func festivalID(forNameKey key: String) -> String? {
+        NepaliFestivalCatalog.all.first {
+            canonical($0.nameNepali) == key || canonical($0.nameEnglish) == key
+        }?.id
+    }
 
     // MARK: - Keyword groups
 
@@ -344,6 +380,30 @@ enum KeywordIntentRule {
     private static let healthWords = appWords("health")
     private static let instagramWords = appWords("instagram")
     private static let calendarWords = appWords("calendar")
+
+    /// [FESTIVAL-DATE] (2026-09-17) The "when" question family — whole
+    /// tokens for the single words, phrase-containment for the
+    /// Devanagari/romanized two-word forms (whitespace collapse is the
+    /// canonicalizer's only transform, so "कुन दिन" survives it).
+    /// Deliberately NOT a substring family for the bare words: "when"
+    /// must not fire on "whenever" any more than "open" on "opened".
+    private static let whenQuestionWords: Group = [
+        .token("when"), .token("कहिले"), .token("kahile"),
+        .phrase("कुन दिन"), .phrase("kun din"),
+        .phrase("कुन गते"), .phrase("kun gate"),
+    ]
+
+    /// [FESTIVAL-DATE] (2026-09-17) Every festival name in the catalog,
+    /// both languages, phrase-matched — Devanagari postpositions fuse
+    /// onto names ("दशैँमा" ⊃ "दशैँ"), and phrase containment covers
+    /// the fusion exactly as it covers the app words'. A name alone
+    /// fires nothing; the when-family is the other required group.
+    private static let festivalNamesGroup: Group = NepaliFestivalCatalog.all
+        .flatMap { festival in
+            [festival.nameNepali, festival.nameEnglish]
+                .filter { !$0.isEmpty }
+                .map { Alternative.phrase(canonical($0)) }
+        }
     /// The YouTube APP word — deliberately separate from
     /// `youtubeKeywords` above: that group is substring-matched for the
     /// postposition-fused "युट्युबमा" of a PLAY request, while a launch

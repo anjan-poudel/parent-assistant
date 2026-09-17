@@ -1507,7 +1507,8 @@ final class AppCoordinator: ObservableObject {
             config: .default,
             artifactInstaller: IntentEncoderSpikeInstaller(
                 modelStore: modelStore,
-                observabilityBus: observabilityBus),
+                observabilityBus: observabilityBus,
+                downloadService: modelDownloadService),
             // [TURN-TIMING-BREAKDOWN] The encoder's three stage spans
             // (tokenizer / CoreML forward / decode). Non-nil exactly when
             // this build compiles `INTENT_ENCODER` in — the encoder is

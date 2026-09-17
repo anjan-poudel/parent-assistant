@@ -323,6 +323,15 @@ final class GoogleCalendarGateway: GoogleCalendarGatewayProtocol {
                                               event: event, kind: nil) else { return nil }
         guard let page = try? JSONDecoder().decode(EventListResponse.self, from: data) else {
             recordMalformed(event, kind: nil)
+            // [INBOUND-DEBUG] (2026-09-17) Debug builds print the first
+            // bytes of a 2xx body the decoder rejected, so the real
+            // Google response shape can be seen on a device run and the
+            // decoder fixed to the actual contract. Release builds print
+            // nothing (the log-safety gate forbids upstream bodies).
+            #if DEBUG
+            let prefix = String(data: data.prefix(200), encoding: .utf8) ?? "<binary>"
+            print("[calendar-share] inbound 2xx decode failed; body prefix: \(prefix)")
+            #endif
             return nil
         }
         let events: [GoogleIncomingEvent] = (page.items ?? []).compactMap { item in

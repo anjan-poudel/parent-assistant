@@ -163,6 +163,12 @@ enum GoldenCorpus {
         .init("भोलि मौसम कस्तो छ", intent: "query"),
         .init("आज कति बजे छ", intent: "query"),
         .init("मौसम कस्तो छ", intent: "query"),
+        // [FESTIVAL-DATE] (2026-09-17) Regression row: the local brain
+        // once classified this as set_reminder with a fabricated 10:30
+        // slot (device field report). The deterministic festival rule
+        // answers it before any model; the corpus row pins the MODEL's
+        // side at `query` so a retrain can never regress it either.
+        .init("दशैँ कहिले हो", intent: "query"),
         .init("भोलि पानी पर्छ कि", intent: "query"),
         .init("आजको खबर सुनाऊ", intent: "query"),
         .init("काठमाडौंको मौसम कस्तो छ", intent: "query"),
