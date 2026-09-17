@@ -113,6 +113,16 @@ final class LiveTranslateSessionModelTests: XCTestCase {
         await waitUntil("the delivered frame to be recognised", file: file, line: line) {
             harness.engine.recognizeCallCount > passesBefore
         }
+        // The recognition call marks the *start* of the pass, and the tap drops
+        // samples while one is in flight (`LiveCameraSession.ocrPassInFlight`,
+        // T-026). Handing the next frame over at this instant would hand it to
+        // a drop — the tap shedding a sample, which is the feature working, not
+        // a recognition that did not happen. So the helper waits for the pass
+        // it triggered to be free again: the frame source's own "ready for the
+        // next sample" signal, and the guarantee this helper's contract names.
+        await waitUntil("the recognition pass to finish", file: file, line: line) {
+            !harness.camera.ocrPassInFlight
+        }
     }
 
     /// Delivers `count` frames.
