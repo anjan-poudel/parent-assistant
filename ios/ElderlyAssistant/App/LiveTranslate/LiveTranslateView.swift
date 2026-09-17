@@ -36,12 +36,16 @@ import UIKit
 //     the model, and disappearing closes: capture stops, the microphone is
 //     released, speech is drained.
 //
-//  6. **A frozen frame is drawn here, and nothing else about the view changes
-//     (T-033).** The preview branch draws the held picture in place of the
-//     camera layer — the letterbox the callouts are mapped through is the
-//     frozen frame's own — and the capture control sits in the same reserved
-//     strip as the exit and the indicator. The view keeps no freeze state: it
-//     reads `model.frozenFrameImage`, `model.surface` and
+//  6. **A frozen frame is drawn here, and it lands on the results card
+//     (T-033; owner UX rework, 2026-09-17).** The preview branch draws the held
+//     picture in place of the camera layer — the letterbox the placements are
+//     mapped through is the frozen frame's own — and the capture control sits
+//     in the same reserved strip as the exit and the indicator. While a frame
+//     is held, `LiveTranslateResultsCardView` is drawn under that strip
+//     *instead of* the overlay: no bubbles over the picture, nothing moving,
+//     one scrollable column of large type whose rows speak on tap. The control
+//     in the strip is the way back to live ("Go live again"). The view keeps
+//     no freeze state: it reads `model.frozenFrameImage`, `model.surface` and
 //     `model.snapshotSurface`, exactly as it reads the live ones.
 
 struct LiveTranslateView: View {
@@ -60,10 +64,16 @@ struct LiveTranslateView: View {
 
                 preview
 
-                LiveTranslateOverlayView(
-                    surface: model.surface,
-                    onTapRegion: { model.tapRegion($0) },
-                    onSetAlwaysShowOriginal: { model.setAlwaysShowOriginal($0) })
+                // The live overlay, and *only* the live overlay: while a frame
+                // is held the card below is the reading surface, so no box is
+                // drawn over the picture at all. Card mode has no moving parts
+                // by construction, not by an animation being switched off.
+                if !model.isFrozen {
+                    LiveTranslateOverlayView(
+                        surface: model.surface,
+                        onTapRegion: { model.tapRegion($0) },
+                        onSetAlwaysShowOriginal: { model.setAlwaysShowOriginal($0) })
+                }
 
                 chrome(in: proxy)
 
@@ -128,6 +138,13 @@ struct LiveTranslateView: View {
                 // edge or the indicator on the trailing one.
                 snapshotControl
             }
+            // While a frame is held, the card is the surface — there are no
+            // bubbles over the picture in this mode at all (see `preview`'s
+            // frozen branch and `resultsCard`) — and the control in the strip
+            // above is what takes the elder back to the live view.
+            if model.isFrozen {
+                resultsCard(in: proxy)
+            }
             Spacer()
         }
         .padding(DesignTokens.interElementSpacing)
@@ -135,6 +152,28 @@ struct LiveTranslateView: View {
         .padding(.leading, proxy.safeAreaInsets.leading)
         .padding(.trailing, proxy.safeAreaInsets.trailing)
     }
+
+    /// The frozen frame's reading surface (owner UX rework, 2026-09-17): the
+    /// snapshot's *results card*, over the held picture.
+    ///
+    /// Shown in place of the bubbles rather than beside them — the elder came
+    /// here to read, and a box floating over a still picture is exactly what
+    /// the owner's device feedback rejected. It is bounded to a share of the
+    /// container so the held frame stays visible behind it, and it is a pure
+    /// function of the model: the rows are the placements the pipeline
+    /// measured, so tapping a row speaks the very region the placement named.
+    private func resultsCard(in proxy: GeometryProxy) -> some View {
+        LiveTranslateResultsCardView(
+            surface: LiveTranslateResultsCardSurface(overlay: model.surface),
+            onSpeak: { model.tapRegion($0) })
+            .frame(maxHeight: proxy.size.height * Self.resultsCardHeightFraction)
+            .padding(.top, DesignTokens.interElementSpacing)
+    }
+
+    /// The results card's share of the container's height: enough for a
+    /// readable list of rows, short enough that the held picture is still
+    /// there behind it — the card is *over* the frame, not instead of it.
+    static let resultsCardHeightFraction: CGFloat = 0.7
 
     /// The capture control (T-033). It lives in this strip — the one
     /// `topChromeRects` reserves and the placement is told to keep clear — so
@@ -248,6 +287,125 @@ struct LiveTranslateView: View {
         guard containerSize.width > 0, containerSize.height > height else { return [] }
         return [CGRect(x: 0, y: 0, width: containerSize.width, height: height)]
     }
+}
+
+/// The frozen frame as a list to read (owner UX rework, 2026-09-17).
+///
+/// The opposite of the overlay, deliberately. The overlay is the *glance*
+/// surface — a few opaque boxes standing where the text stood — and this is
+/// the *reading* surface: no boxes over the picture, no motion, one scrollable
+/// column whose rows are the app's body size with the original underneath, and
+/// every row a real tap target that speaks through the same path the overlay's
+/// bubbles use. It is a pure function of its surface, so what it lists is
+/// exactly what was placed, in the order the placement put it in (reading
+/// order, top to bottom) — and a frame with nothing on it says so in words
+/// rather than showing an empty list.
+struct LiveTranslateResultsCardView: View {
+
+    let surface: LiveTranslateResultsCardSurface
+    /// Tap-to-hear (C12), on the held frame's own placements: the row hands
+    /// back the region it was built from.
+    let onSpeak: (TextRegionStabilizer.RegionIdentity) -> Void
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: DesignTokens.interElementSpacing) {
+                ForEach(surface.rows) { row in
+                    self.row(row)
+                }
+                if surface.isEmpty {
+                    emptyState
+                }
+            }
+            .padding(DesignTokens.interElementSpacing)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .accessibilityIdentifier("livetranslate.results.card")
+    }
+
+    /// The calm sentence for a held frame with no text on it. The same catalog
+    /// line the overlay's empty state uses: one situation, one sentence.
+    private var emptyState: some View {
+        Text(surface.emptyHint)
+            .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize))
+            .foregroundColor(DesignTokens.textPrimary)
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(DesignTokens.interElementSpacing * 2)
+            .frame(maxWidth: .infinity)
+            .accessibilityIdentifier("livetranslate.results.card.empty")
+    }
+
+    /// One row. A row with a translation to hear is a button; one without is
+    /// the same content as text, not a button that does nothing.
+    @ViewBuilder
+    private func row(_ row: LiveTranslateResultsCardSurface.Row) -> some View {
+        if row.speaksTranslation {
+            Button {
+                onSpeak(row.regionID)
+            } label: {
+                rowContent(row).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(row.translation))
+            .accessibilityValue(Text(row.source ?? ""))
+            .accessibilityIdentifier("livetranslate.results.row.\(row.regionID.rawValue)")
+        } else {
+            rowContent(row)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(Text(row.translation))
+                .accessibilityValue(Text(row.source ?? ""))
+                .accessibilityIdentifier("livetranslate.results.row.\(row.regionID.rawValue)")
+        }
+    }
+
+    /// The row's content: the translation large, the text it came from small
+    /// beneath it, and — for a row that can speak — the glyph that says so.
+    /// The tap target is the token's minimum in both directions; the type is
+    /// the token table's body and caption floors, never a literal.
+    private func rowContent(_ row: LiveTranslateResultsCardSurface.Row) -> some View {
+        HStack(alignment: .top, spacing: DesignTokens.interElementSpacing) {
+            VStack(alignment: .leading, spacing: DesignTokens.interElementSpacing / 2) {
+                HStack(alignment: .firstTextBaseline,
+                       spacing: DesignTokens.interElementSpacing / 2) {
+                    if let symbol = row.symbolName {
+                        Image(systemName: symbol)
+                            .foregroundColor(DesignTokens.textSecondary)
+                    }
+                    Text(row.translation)
+                        .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize,
+                                                    weight: .semibold))
+                        .foregroundColor(DesignTokens.textPrimary)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let source = row.source, !source.isEmpty {
+                    Text(source)
+                        .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize))
+                        .foregroundColor(DesignTokens.textSecondary)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 0)
+            if row.speaksTranslation {
+                Image(systemName: Self.speakSymbolName)
+                    .foregroundColor(DesignTokens.accent)
+            }
+        }
+        .padding(DesignTokens.interElementSpacing)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(minWidth: DesignTokens.minTapTargetSize,
+               minHeight: DesignTokens.minTapTargetSize)
+        .background(DesignTokens.background)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+    }
+
+    /// The hear-this glyph. An SF Symbol name is a system identifier, not
+    /// user-visible copy, so it is a constant here.
+    static let speakSymbolName = "speaker.wave.2.fill"
 }
 
 /// The camera preview, hosted.

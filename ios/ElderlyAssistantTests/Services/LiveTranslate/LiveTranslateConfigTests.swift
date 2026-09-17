@@ -26,12 +26,15 @@ final class LiveTranslateConfigTests: XCTestCase {
         XCTAssertEqual(config.regionAppearPasses, 2)
         XCTAssertEqual(config.regionMissPasses, 2)
 
-        // Decluttering (OD5)
-        XCTAssertEqual(config.declutterMergeCentroidDistance, 0.06)
-        XCTAssertEqual(config.declutterMaxRegions, 8)
+        // Decluttering (OD5), both re-tuned by the 2026-09-17 UX rework: a
+        // wider merge (clustered same-string boxes become one overlay) and a
+        // smaller cap (fewer, larger, stable elements on the glance surface).
+        XCTAssertEqual(config.declutterMergeCentroidDistance, 0.12)
+        XCTAssertEqual(config.declutterMaxRegions, 6)
 
         // Overlay (D1, OD2)
-        XCTAssertEqual(config.inPlaceMaxSourceWordCount, 3)
+        XCTAssertEqual(config.inPlaceMinPointSize, 16)
+        XCTAssertEqual(config.inPlaceMaxGrowth, 1.4)
         XCTAssertEqual(config.overlayMinPointSize, 18)
         XCTAssertFalse(config.alwaysShowOriginalDefault)
 

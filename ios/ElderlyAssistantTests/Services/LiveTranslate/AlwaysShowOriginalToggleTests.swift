@@ -150,7 +150,8 @@ final class AlwaysShowOriginalToggleTests: XCTestCase {
         let off = LiveTranslateOverlaySurface.policy(config: config, alwaysShowOriginal: false)
         let on = LiveTranslateOverlaySurface.policy(config: config, alwaysShowOriginal: true)
 
-        XCTAssertEqual(off.maxSourceWordCount, on.maxSourceWordCount)
+        XCTAssertEqual(off.inPlaceMinPointSize, on.inPlaceMinPointSize)
+        XCTAssertEqual(off.inPlaceMaxGrowth, on.inPlaceMaxGrowth)
         XCTAssertEqual(off.minPointSize, on.minPointSize)
         XCTAssertEqual(off.secondaryPointSize, on.secondaryPointSize)
         XCTAssertEqual(off.pillPadding, on.pillPadding)
@@ -167,6 +168,7 @@ final class AlwaysShowOriginalToggleTests: XCTestCase {
         let result = TranslationResult.resolved(originalText: sign.text,
                                                 translation: "Opening hours", tier: .dictionary)
 
+        var identities: [String] = []
         for preference in [false, true] {
             let settings = makeSettings()
             settings.setAlwaysShowOriginal(preference)
@@ -180,8 +182,16 @@ final class AlwaysShowOriginalToggleTests: XCTestCase {
             XCTAssertEqual(surface.placements.first?.result.sourceTier, .dictionary,
                            "tier attribution is the tier's, not the display preference's")
             XCTAssertEqual(placement.accessibilityLabel, "Opening hours")
-            XCTAssertEqual(placement.id, sign.id)
+            XCTAssertEqual(placement.regionID, sign.id, "the same region, in both states")
+            identities.append(placement.id)
         }
+
+        // The view identity is the normalized string, so toggling the
+        // preference re-renders the region's one view in its new form rather
+        // than tearing it down and building the other one (owner UX rework,
+        // 2026-09-17).
+        XCTAssertEqual(Set(identities).count, 1,
+                       "the form changed; the identity did not")
     }
 
     // MARK: - Scenario: the preference survives relaunch

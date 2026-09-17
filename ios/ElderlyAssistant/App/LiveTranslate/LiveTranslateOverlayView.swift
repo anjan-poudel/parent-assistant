@@ -20,9 +20,18 @@ import UIKit
 //    task and observes nothing: a frame is a pure function of the surface, so
 //    a translation arriving re-renders only the region whose placement
 //    changed (NFR-LCT-002).
-//  - **Identity-keyed, hence bounded.** One `ForEach` keyed by the region's
-//    stable identity, and no array that accumulates across cycles: a long
-//    session cannot grow the view tree (NFR-LCT-005).
+//  - **Identity-keyed, hence bounded.** One `ForEach`, keyed by the region's
+//    normalized *string* rather than by its region id, and no array that
+//    accumulates across cycles: a long session cannot grow the view tree
+//    (NFR-LCT-005). Keying by string is what stops a moving region from being
+//    torn down and rebuilt every pass (owner UX rework, 2026-09-17: "the
+//    bubbles are everywhere and shaky"); the geometry then glides, because
+//    the view it glides is the same view.
+//  - **Dark, opaque, and readable over a photograph.** The in-place box and
+//    the callout pill are filled with the app's ink and lettered in the app's
+//    background (the secondary line in the brand's light tone), so a
+//    translation never sits on a white slab over the picture it is
+//    translating.
 //  - **Accessibility is structural.** Text is drawn at the size and weight the
 //    placement measured it at, through the feature's one font constructor
 //    (`LiveOverlayTextMetrics`); colours and the minimum hit target come from
@@ -56,6 +65,21 @@ struct RegionPresentation: Equatable, Identifiable {
     static let degradedSymbolName = "info.circle"
 
     let regionID: TextRegionStabilizer.RegionIdentity
+    /// The normalized string this region's text resolves to — the **view
+    /// identity**.
+    ///
+    /// Keying the drawn list by the string rather than by the region id is
+    /// what makes a moving region reuse its view: the stabiliser re-issues
+    /// region ids as boxes are re-matched frame to frame, so an id-keyed list
+    /// tears down and rebuilds a view on nearly every pass — the flicker and
+    /// the jumpiness the owner saw on the live preview. A string-keyed one
+    /// keeps the view and `LiveTranslateOverlayView` animates it to its new
+    /// rect, so a box *glides* and its text never blinks out.
+    let identityKey: String
+    /// Disambiguates two on-screen regions carrying the same string — the
+    /// declutter pass merges the nearby ones, but two far-apart signs of the
+    /// same word stay two regions — so the list's keys stay unique.
+    let identityOrdinal: Int
     let state: State
     let form: LiveOverlayPlacement.Form
     /// The lines to draw, exactly as the placement measured them.
@@ -74,7 +98,11 @@ struct RegionPresentation: Equatable, Identifiable {
     /// with nothing to say is not a button that does nothing.
     let speaksTranslation: Bool
 
-    var id: TextRegionStabilizer.RegionIdentity { regionID }
+    /// The identity the drawn list is keyed by: the normalized string, with an
+    /// ordinal only when a second region on screen carries the same string.
+    var id: String {
+        identityOrdinal == 0 ? identityKey : "\(identityKey)#\(identityOrdinal)"
+    }
 
     /// The rect the bubble is drawn in: the region itself for the in-place
     /// form, the anchored pill otherwise.
@@ -111,6 +139,14 @@ struct LiveTranslateOverlaySurface: Equatable {
     /// token of its own; it lives here so it is stated once.
     static let leaderLineWidth: CGFloat = 1.5
 
+    /// How long a box takes to move to a new rect, in seconds. A rendering
+    /// constant, not an operational one — and a *short* one: it exists to
+    /// absorb the detector's per-pass jitter (a point or two of movement, which
+    /// un-smoothed reads as the whole overlay shaking), not to stage an
+    /// animation the elder has to wait for. Text stays readable throughout,
+    /// because the view is not rebuilt: only its geometry is interpolated.
+    static let positionSmoothingSeconds: TimeInterval = 0.14
+
     init(placements: [LiveOverlayPlacement.PlacedOverlay],
          policy: LiveOverlayPlacement.Policy,
          locale: Locale) {
@@ -135,7 +171,11 @@ struct LiveTranslateOverlaySurface: Equatable {
         let supporting = min(max(config.overlayMinPointSize, DesignTokens.minCaptionPointSize),
                              primary)
         return LiveOverlayPlacement.Policy(
-            maxSourceWordCount: config.inPlaceMaxSourceWordCount,
+            // In-place text may stand below the body floor — it stands where
+            // type of roughly that size already stood — but never above it,
+            // however the two values move relative to each other.
+            inPlaceMinPointSize: min(config.inPlaceMinPointSize, primary),
+            inPlaceMaxGrowth: config.inPlaceMaxGrowth,
             minPointSize: primary,
             secondaryPointSize: supporting,
             pillPadding: DesignTokens.interElementSpacing,
@@ -175,12 +215,32 @@ struct LiveTranslateOverlaySurface: Equatable {
     // MARK: Presentations
 
     /// One presentation per placement, in the placement's order (reading
-    /// order, top to bottom).
+    /// order, top to bottom), each carrying the view identity it is drawn
+    /// under. The ordinal is assigned in that same order, so two regions that
+    /// share a string get the same two identities every frame: the list cannot
+    /// swap them and make the two views' contents trade places.
     var presentations: [RegionPresentation] {
-        placements.map(presentation(for:))
+        var ordinals: [String: Int] = [:]
+        return placements.map { placement in
+            let key = LiveTranslateTextNormalization.normalized(placement.region.text)
+            let ordinal = ordinals[key, default: 0]
+            ordinals[key] = ordinal + 1
+            return presentation(for: placement, identityKey: key, identityOrdinal: ordinal)
+        }
     }
 
+    /// One region's placement as what is drawn and announced. The single-region
+    /// call: no ordinal is needed because there is no second region to
+    /// disambiguate from.
     func presentation(for placement: LiveOverlayPlacement.PlacedOverlay) -> RegionPresentation {
+        presentation(for: placement,
+                     identityKey: LiveTranslateTextNormalization.normalized(placement.region.text),
+                     identityOrdinal: 0)
+    }
+
+    func presentation(for placement: LiveOverlayPlacement.PlacedOverlay,
+                      identityKey: String,
+                      identityOrdinal: Int) -> RegionPresentation {
         let state: RegionPresentation.State
         switch placement.result.outcome {
         case .pending: state = .pending
@@ -192,9 +252,23 @@ struct LiveTranslateOverlaySurface: Equatable {
         // the placement measured — so the announcement cannot claim a
         // translation the pixels do not show.
         let primary = placement.lines.first?.text ?? placement.result.text
-        let supporting = placement.lines.count > 1 ? placement.lines[1].text : nil
+        var supporting = placement.lines.count > 1 ? placement.lines[1].text : nil
+        if supporting == nil, placement.result.sourceTier != nil {
+            // An in-place box draws the translation alone — the original is
+            // *covered* by design — so the supporting line is not drawn and has
+            // no place in `lines`. It is still what a screen reader should hear
+            // beside the translation, and it is what the snapshot's results
+            // card lists under every row (the card is built from these
+            // presentations): so it is the value, and the box's announcement
+            // carries both texts. A string identical to the label is not
+            // repeated.
+            let original = placement.result.originalText
+            supporting = original.isEmpty || original == primary ? nil : original
+        }
 
         return RegionPresentation(regionID: placement.region.id,
+                                  identityKey: identityKey,
+                                  identityOrdinal: identityOrdinal,
                                   state: state,
                                   form: placement.form,
                                   lines: placement.lines,
@@ -267,6 +341,14 @@ struct LiveTranslateOverlayView: View {
                     .frame(width: presentation.frameRect.width,
                            height: presentation.frameRect.height)
                     .offset(x: presentation.frameRect.minX, y: presentation.frameRect.minY)
+                    // A box glides to its new rect instead of jumping: the
+                    // detector's rect moves by a point or two every pass, and a
+                    // per-frame jump reads as the whole overlay shaking. The
+                    // view is identified by its *string*, so this animates the
+                    // geometry of the same view — nothing is rebuilt, and the
+                    // text never blinks out between frames (NFR-LCT-002).
+                    .animation(.easeOut(duration: LiveTranslateOverlaySurface.positionSmoothingSeconds),
+                               value: presentation.frameRect)
                     .accessibilityIdentifier("livetranslate.overlay.region.\(presentation.regionID.rawValue)")
             }
 
@@ -317,26 +399,34 @@ struct LiveTranslateOverlayView: View {
     private func drawn(_ presentation: RegionPresentation) -> some View {
         switch presentation.form {
         case .inPlace:
-            // Sized to the region, and laid out with no inset: the fit
+            // Sized to the region's box, and laid out with no inset: the fit
             // condition measured the translation against the whole rect, so a
             // padding here would be a second, smaller box than the one the
             // measurement was made against (risk R2).
-            line(presentation.lines.first, colour: DesignTokens.textPrimary)
+            //
+            // The fill is the app's ink and the text is the app's background —
+            // an opaque dark box, never a white one: it *replaces* the printed
+            // text it covers, and the elder reads it against whatever the
+            // camera sees, so the pair has to carry its own contrast (owner UX
+            // rework, 2026-09-17). Being a colour *pair* from the token table,
+            // it is equally high-contrast in either appearance mode; there is
+            // no scheme-dependent branch that could go pale in light mode.
+            line(presentation.lines.first, colour: DesignTokens.background)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(DesignTokens.card)
+                .background(DesignTokens.textPrimary)
                 .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
 
         case .callout:
             // Laid out with the *same* policy values the pill was sized with.
             VStack(spacing: surface.policy.lineSpacing) {
-                line(presentation.lines.first, colour: DesignTokens.textPrimary)
+                line(presentation.lines.first, colour: DesignTokens.background)
                 if presentation.lines.count > 1 {
                     stateRow(presentation)
                 }
             }
             .padding(surface.policy.pillPadding)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(DesignTokens.card)
+            .background(DesignTokens.textPrimary)
             .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
         }
     }
@@ -351,12 +441,15 @@ struct LiveTranslateOverlayView: View {
                 Image(systemName: symbol)
                     .font(LiveOverlayTextMetrics.font(pointSize: supporting.pointSize,
                                                       weight: supporting.weight))
-                    .foregroundColor(DesignTokens.textSecondary)
+                    .foregroundColor(DesignTokens.brandBlush)
             }
             Text(supporting.text)
                 .font(LiveOverlayTextMetrics.font(pointSize: supporting.pointSize,
                                                   weight: supporting.weight))
-                .foregroundColor(DesignTokens.textSecondary)
+                // The supporting line on a dark pill: the brand's light tone,
+                // which clears the fill by a wide margin where the grey
+                // secondary ink would not.
+                .foregroundColor(DesignTokens.brandBlush)
                 .multilineTextAlignment(.center)
         }
         .fixedSize(horizontal: false, vertical: true)

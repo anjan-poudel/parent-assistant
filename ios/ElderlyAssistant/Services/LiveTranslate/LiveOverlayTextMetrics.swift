@@ -54,20 +54,46 @@ enum LiveOverlayTextMetrics {
     }
 
     /// How much room `text` needs when the view draws it at `pointSize` in
-    /// `weight`. Deliberately the whole line box (`NSString.size` includes
-    /// ascender, descender and leading), not the ink extent: a pill sized to
-    /// ink would clip the line it holds.
+    /// `weight`, wrapped to at most `width` points. Deliberately the whole
+    /// line box (`NSString.size` includes ascender, descender and leading),
+    /// not the ink extent: a pill sized to ink would clip the line it holds.
     ///
     /// The result is rounded **up** to whole points so a fractional advance
     /// can never make a "fitting" translation land a hair outside its region,
     /// and an empty string measures as nothing rather than as a line.
+    ///
+    /// `width` is the wrapping constraint, and it defaults to "no wrapping":
+    /// the callout's pill is sized to its lines as written, while the
+    /// in-place box — which covers a region of printed text and must draw the
+    /// translation *inside* it — measures the translation wrapped to the box
+    /// it will be drawn in. Both go through this one call, so the wrap the fit
+    /// was decided on is the wrap the view performs (risk R2).
     static func measure(_ text: String,
                         pointSize: CGFloat,
-                        weight: LiveOverlayTextWeight) -> CGSize {
+                        weight: LiveOverlayTextWeight,
+                        width: CGFloat = .greatestFiniteMagnitude) -> CGSize {
         guard !text.isEmpty, pointSize > 0 else { return .zero }
-        let size = (text as NSString).size(withAttributes: [
+        let attributes: [NSAttributedString.Key: Any] = [
             .font: uiFont(pointSize: pointSize, weight: weight)
-        ])
-        return CGSize(width: size.width.rounded(.up), height: size.height.rounded(.up))
+        ]
+
+        guard width.isFinite, width > 0 else {
+            let size = (text as NSString).size(withAttributes: attributes)
+            return CGSize(width: size.width.rounded(.up), height: size.height.rounded(.up))
+        }
+
+        // `usesLineFragmentOrigin` is what makes this a wrapped-block
+        // measurement rather than a single-line one; `usesFontLeading` keeps
+        // the line boxes the same height the drawn text will use.
+        let block = (text as NSString).boundingRect(
+            with: CGSize(width: width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: attributes,
+            context: nil)
+        // The block can never be wider than the constraint it wrapped to, and
+        // rounding up cannot push it past that: the drawn box is the
+        // constraint, so the measurement stays inside it.
+        return CGSize(width: min(block.width, width).rounded(.up),
+                      height: block.height.rounded(.up))
     }
 }

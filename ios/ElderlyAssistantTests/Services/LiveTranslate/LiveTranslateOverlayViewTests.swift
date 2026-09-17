@@ -108,13 +108,15 @@ final class LiveTranslateOverlayViewTests: XCTestCase {
                        "nothing to speak yet: the bubble is not a button that does nothing")
 
         // Resolved: the translation, marked by being a translation rather than
-        // by a badge.
+        // by a badge. It stands where the text stood — the tier that answered
+        // it is not a reason to float a bubble over the picture (owner UX
+        // rework, 2026-09-17).
         XCTAssertNil(presentations[1].symbolName)
         XCTAssertEqual(presentations[1].accessibilityLabel, "No entry")
         XCTAssertEqual(presentations[1].accessibilityValue, resolved.text)
         XCTAssertTrue(presentations[1].speaksTranslation)
-        guard case .callout = presentations[1].form else {
-            XCTFail("a cloud translation is never drawn in place (CL-3)")
+        guard case .inPlace = presentations[1].form else {
+            XCTFail("a resolved translation is drawn in place")
             return
         }
 
@@ -167,7 +169,7 @@ final class LiveTranslateOverlayViewTests: XCTestCase {
         XCTAssertEqual(surface.presentations.count, regions.count,
                        "degradation is never a removed overlay (NFR-LCT-010)")
         for region in regions {
-            guard let presentation = surface.presentations.first(where: { $0.id == region.id }),
+            guard let presentation = surface.presentations.first(where: { $0.regionID == region.id }),
                   let result = results[region.id] else {
                 XCTFail("\(region.id) disappeared after its tier failed")
                 continue
@@ -213,11 +215,16 @@ final class LiveTranslateOverlayViewTests: XCTestCase {
             return
         }
         guard case .inPlace(_, let inPlaceRect) = inPlace.form else {
-            XCTFail("a dictionary translation of two words that fits is drawn in place")
+            XCTFail("a dictionary translation that fits is drawn in place")
             return
         }
         XCTAssertEqual(inPlace.lines.map(\.text), ["Opening hours"])
-        XCTAssertEqual(inPlaceRect, screenRect(of: inPlaceRegion))
+        XCTAssertTrue(inPlaceRect.insetBy(dx: -1e-9, dy: -1e-9).contains(screenRect(of: inPlaceRegion)),
+                      "in place, the translation covers the text it replaced")
+        XCTAssertLessThanOrEqual(inPlaceRect.width,
+                                 screenRect(of: inPlaceRegion).width
+                                 * CGFloat(LiveTranslateConfig.default.inPlaceMaxGrowth) + 1e-9,
+                                 "and takes only the free space around it")
 
         let askedForOriginal = makeSurface(regions: [inPlaceRegion], results: results,
                                            alwaysShowOriginal: true)
@@ -267,7 +274,9 @@ final class LiveTranslateOverlayViewTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(policy.secondaryPointSize, DesignTokens.minCaptionPointSize,
                                     "the supporting line is still elder-readable")
 
-        let resolved = region(0, "खुल्ने समय", box: box(0.2, 0.3, 0.8, 0.4))
+        // A sign too small for its translation: the two-line callout, where
+        // both floors are visible at once.
+        let resolved = region(0, "खुल्ने समय बिहान", box: box(0.2, 0.3, 0.24, 0.32))
         let surface = makeSurface(regions: [resolved],
                                   results: [resolved.id: .resolved(originalText: resolved.text,
                                                                    translation: "Opening hours",
@@ -276,9 +285,28 @@ final class LiveTranslateOverlayViewTests: XCTestCase {
             XCTFail("the region must be placed")
             return
         }
+        guard case .callout = presentation.form else {
+            XCTFail("the premise is a callout: the translation cannot be read in that box")
+            return
+        }
         XCTAssertEqual(presentation.lines[0].pointSize, policy.minPointSize)
         XCTAssertEqual(presentation.lines[1].pointSize, policy.secondaryPointSize)
         XCTAssertEqual(presentation.lines[0].weight, .primary)
+
+        // …and in place, the line is at the body floor — the largest size the
+        // fit is tried at — and never below the configured in-place floor.
+        let roomy = region(1, "गेट खोल्नुहोस्", box: box(0.2, 0.6, 0.8, 0.7))
+        let inPlace = makeSurface(regions: [roomy],
+                                  results: [roomy.id: .resolved(originalText: roomy.text,
+                                                                translation: "Opening hours",
+                                                                tier: .cloud)])
+        guard let inPlaceLine = inPlace.presentations.first?.lines.first else {
+            XCTFail("the roomy region must be placed")
+            return
+        }
+        XCTAssertEqual(inPlaceLine.pointSize, policy.minPointSize)
+        XCTAssertGreaterThanOrEqual(inPlaceLine.pointSize,
+                                    LiveTranslateConfig.default.inPlaceMinPointSize)
 
         // The weight is real, not a name: the font the measurer builds for the
         // primary line is bold, and the two weights do not measure alike (a
@@ -315,13 +343,13 @@ final class LiveTranslateOverlayViewTests: XCTestCase {
                                       tier: .cloud)
         let after = makeSurface(regions: regions, results: results)
 
-        let byIdentity = Dictionary(uniqueKeysWithValues: before.presentations.map { ($0.id, $0) })
+        let byIdentity = Dictionary(uniqueKeysWithValues: before.presentations.map { ($0.regionID, $0) })
         for presentation in after.presentations {
-            if presentation.id == first.id {
+            if presentation.regionID == first.id {
                 XCTAssertNotEqual(presentation, byIdentity[first.id],
                                   "the region whose result arrived must change")
             } else {
-                XCTAssertEqual(presentation, byIdentity[presentation.id],
+                XCTAssertEqual(presentation, byIdentity[presentation.regionID],
                                "an unchanged region's presentation must compare equal, so a "
                                + "translation arriving re-renders only its own region (NFR-LCT-002)")
             }
@@ -413,11 +441,15 @@ final class LiveTranslateOverlayViewTests: XCTestCase {
     // MARK: - The overlay's own chrome
 
     func testCalloutsStayClearOfTheOverlaysChrome() {
-        let control = region(0, "प्रवेश निषेध", box: box(0.15, 0.86, 0.85, 0.92))
+        // A small sign near the bottom strip whose translation cannot be read
+        // in place: the callout is the fallback, and it must not land on the
+        // FR-LCT-017 control the strip reserves for.
+        let control = region(0, "प्रवेश निषेध गरिएको छ", box: box(0.15, 0.86, 0.30, 0.88))
         let surface = makeSurface(regions: [control],
-                                  results: [control.id: .resolved(originalText: control.text,
-                                                                  translation: "No entry",
-                                                                  tier: .cloud)])
+                                  results: [control.id: .resolved(
+                                    originalText: control.text,
+                                    translation: "Entry is restricted beyond this point",
+                                    tier: .cloud)])
 
         guard let strip = chrome.first else {
             XCTFail("a normal container reserves a strip for the overlay's control")
@@ -428,7 +460,7 @@ final class LiveTranslateOverlayViewTests: XCTestCase {
         XCTAssertEqual(strip.maxY, container.height)
         guard let presentation = surface.presentations.first,
               case .callout(_, let anchor, let pillRect) = presentation.form else {
-            XCTFail("a cloud translation is a callout")
+            XCTFail("a translation that cannot be read in its box is a callout")
             return
         }
         XCTAssertFalse(pillRect.intersects(strip),
@@ -496,25 +528,25 @@ final class LiveTranslateOverlayViewTests: XCTestCase {
 
     func testAResolvedTranslationIsTheBubblesAccessibilityLabel() {
         let inPlace = region(0, "खुल्ने समय", box: box(0.2, 0.20, 0.8, 0.30))
-        let callout = region(1, "प्रवेश निषेध क्षेत्र", box: box(0.2, 0.45, 0.8, 0.55))
+        let cloud = region(1, "प्रवेश निषेध क्षेत्र", box: box(0.2, 0.45, 0.8, 0.55))
         let same = region(2, "Wi-Fi", box: box(0.2, 0.70, 0.8, 0.80))
         let surface = makeSurface(
-            regions: [inPlace, callout, same],
+            regions: [inPlace, cloud, same],
             results: [inPlace.id: .resolved(originalText: inPlace.text,
                                             translation: "Opening hours", tier: .dictionary),
-                      callout.id: .resolved(originalText: callout.text,
-                                            translation: "Restricted area", tier: .cloud),
+                      cloud.id: .resolved(originalText: cloud.text,
+                                          translation: "Restricted area", tier: .cloud),
                       same.id: .resolved(originalText: same.text,
                                          translation: same.text, tier: .dictionary)])
 
         let labels = Dictionary(uniqueKeysWithValues:
-            surface.presentations.map { ($0.id, $0.accessibilityLabel) })
+            surface.presentations.map { ($0.regionID, $0.accessibilityLabel) })
         XCTAssertEqual(labels[inPlace.id], "Opening hours")
-        XCTAssertEqual(labels[callout.id], "Restricted area")
+        XCTAssertEqual(labels[cloud.id], "Restricted area")
         XCTAssertEqual(labels[same.id], same.text,
                        "a translation identical to the original is announced once, not twice")
 
-        let samePresentation = surface.presentations.first { $0.id == same.id }
+        let samePresentation = surface.presentations.first { $0.regionID == same.id }
         XCTAssertEqual(samePresentation?.lines.map(\.text), [same.text],
                        "the same string is not drawn twice")
     }
@@ -532,5 +564,145 @@ final class LiveTranslateOverlayViewTests: XCTestCase {
         XCTAssertNotEqual(englishSurface.emptyHint, nepaliSurface.emptyHint)
         XCTAssertEqual(englishSurface.presentations.first?.accessibilityLabel, "खुल्ने समय",
                        "the recognized text is shown as it was read, in either language")
+    }
+
+    // MARK: - Scenario: a moving region keeps its view (owner UX rework)
+
+    /// The identity the drawn list is keyed by is the region's **normalized
+    /// string**, not its region id. Region ids are re-issued as boxes are
+    /// re-matched frame to frame, so an id-keyed list tears the view down and
+    /// builds a new one on nearly every pass — the flicker and jumpiness the
+    /// owner saw on the device. A string-keyed list keeps the view, and only
+    /// its geometry moves, which is what lets the overlay interpolate it.
+    func testAMovingRegionKeepsItsViewIdentityWhileItsRectMoves() {
+        let before = makeSurface(regions: [region(0, "खुल्ने समय", box: box(0.2, 0.30, 0.8, 0.38))],
+                                 results: [identity(0): .resolved(originalText: "खुल्ने समय",
+                                                                  translation: "Opening hours",
+                                                                  tier: .cloud)])
+        let after = makeSurface(regions: [region(7, "खुल्ने समय", box: box(0.2, 0.34, 0.8, 0.42))],
+                                results: [identity(7): .resolved(originalText: "खुल्ने समय",
+                                                                 translation: "Opening hours",
+                                                                 tier: .cloud)])
+
+        guard let first = before.presentations.first, let second = after.presentations.first else {
+            XCTFail("both frames must place the region")
+            return
+        }
+        XCTAssertNotEqual(first.regionID, second.regionID,
+                          "the premise: the stabiliser re-issued the region's identity between frames")
+        XCTAssertEqual(first.id, second.id,
+                       "the view identity is the string, so the region's view survives the move: "
+                       + "same id ⇒ SwiftUI reuses it and animates the rect instead of rebuilding")
+        XCTAssertEqual(first.id, LiveTranslateTextNormalization.normalized("खुल्ने समय"))
+        XCTAssertNotEqual(first.frameRect, second.frameRect,
+                          "and the geometry is what changed — the thing the view interpolates")
+        XCTAssertEqual(first.accessibilityLabel, second.accessibilityLabel)
+    }
+
+    /// Two regions on screen carrying the same string stay two views: the
+    /// second gets an ordinal, and ordinals are assigned in placement (reading)
+    /// order, so the same scene numbers them the same way every frame and the
+    /// two views cannot trade places.
+    func testTwoRegionsWithTheSameStringGetDistinctStableIdentities() {
+        let upper = region(0, "Wi-Fi", box: box(0.1, 0.20, 0.5, 0.26))
+        let lower = region(1, "Wi-Fi", box: box(0.1, 0.70, 0.5, 0.76))
+        let surface = makeSurface(regions: [upper, lower])
+
+        let ids = surface.presentations.map(\.id)
+        XCTAssertEqual(ids.count, 2)
+        XCTAssertEqual(Set(ids).count, 2, "two views, two keys: a duplicate key would collapse them")
+        XCTAssertEqual(surface.presentations.map(\.identityOrdinal), [0, 1],
+                       "assigned in reading order, so the same scene numbers them identically every frame")
+        XCTAssertEqual(surface.presentations[0].id,
+                       LiveTranslateTextNormalization.normalized("Wi-Fi"))
+        XCTAssertEqual(surface.presentations[1].id,
+                       LiveTranslateTextNormalization.normalized("Wi-Fi") + "#1")
+
+        // Handed the same two regions in the other order, the identities follow
+        // the geometry, not the array: the numbering is a property of where the
+        // text is on screen.
+        let reversed = makeSurface(regions: [lower, upper])
+        XCTAssertEqual(reversed.presentations.map(\.id), ids)
+    }
+
+    // MARK: - Scenario: the snapshot's results card (owner UX rework)
+
+    /// The card is the snapshot's reading surface, and it is derived from the
+    /// overlay's own presentations — so the row count is the placement count by
+    /// construction, and no row can say something the overlay would not.
+    func testTheResultsCardHasOneRowPerPlacementAndItsRowsCarryTheSameFacts() {
+        let resolved = region(0, "खुल्ने समय", box: box(0.2, 0.10, 0.8, 0.16))
+        let tiny = region(1, "प्रवेश निषेध", box: box(0.2, 0.40, 0.26, 0.42))
+        let degraded = region(2, "बाहिर निस्कनुहोस्", box: box(0.2, 0.70, 0.8, 0.76))
+        let surface = makeSurface(
+            regions: [resolved, tiny, degraded],
+            results: [resolved.id: .resolved(originalText: resolved.text,
+                                             translation: "Opening hours", tier: .cloud),
+                      tiny.id: .resolved(originalText: tiny.text,
+                                         translation: "No entry beyond this point, thank you",
+                                         tier: .cloud),
+                      degraded.id: .degraded(originalText: degraded.text, reason: .noNetwork)])
+
+        let card = LiveTranslateResultsCardSurface(overlay: surface)
+
+        XCTAssertEqual(card.rows.count, surface.placements.count,
+                       "the row count is the placement count: nothing dropped, nothing invented")
+        XCTAssertEqual(card.rows.count, surface.presentations.count)
+        XCTAssertFalse(card.isEmpty)
+        XCTAssertEqual(card.emptyHint, surface.emptyHint,
+                       "one situation, one sentence: the card reuses the overlay's calm hint")
+
+        for (row, presentation) in zip(card.rows, surface.presentations) {
+            XCTAssertEqual(row.id, presentation.id,
+                           "the card is keyed by the same identity the boxes are")
+            XCTAssertEqual(row.regionID, presentation.regionID)
+            XCTAssertEqual(row.translation, presentation.accessibilityLabel,
+                           "the large line is what a screen reader announces: the two cannot drift")
+            XCTAssertEqual(row.source, presentation.accessibilityValue)
+            XCTAssertEqual(row.symbolName, presentation.symbolName)
+            XCTAssertEqual(row.speaksTranslation, presentation.speaksTranslation)
+        }
+
+        XCTAssertEqual(card.rows.map(\.translation),
+                       ["Opening hours", "No entry beyond this point, thank you", degraded.text],
+                       "in reading order, and never a translated-looking string for a region "
+                       + "that was not translated (FR-LCT-018)")
+        XCTAssertEqual(card.rows.map(\.speaksTranslation), [true, true, false],
+                       "a row with nothing to hear is not a button that does nothing")
+        XCTAssertEqual(card.rows[2].source,
+                       L10n.str("livetranslate.state.unavailable", locale: nepali))
+    }
+
+    func testAnEmptyFrameGivesAnEmptyCardWithTheCalmSentence() {
+        let card = LiveTranslateResultsCardSurface(overlay: makeSurface(regions: []))
+
+        XCTAssertTrue(card.rows.isEmpty)
+        XCTAssertTrue(card.isEmpty)
+        XCTAssertEqual(card.emptyHint, L10n.str("livetranslate.empty.hint", locale: nepali))
+    }
+
+    /// The card's type scale and hit target, at the values the view draws with:
+    /// the translation at the app's body floor (≥18pt by the token table's own
+    /// test), the original smaller beneath it, and every row a legal tap
+    /// target. The view half is a source scan, so an edit that swapped a token
+    /// for a literal would fail here.
+    func testTheResultsCardDrawsAtTheAppsTypeScaleAndTapTarget() {
+        XCTAssertGreaterThanOrEqual(DesignTokens.minBodyPointSize, 18,
+                                    "the card's translation line is elder-readable")
+        XCTAssertLessThan(DesignTokens.minCaptionPointSize, DesignTokens.minBodyPointSize,
+                          "the original is the smaller line")
+        XCTAssertGreaterThanOrEqual(DesignTokens.minTapTargetSize, 44,
+                                    "a row is a target an elder-sized thumb can hit")
+
+        let view = FeatureSourceScan.codeText(of: FeatureSourceScan.iosDirectory()
+            .appendingPathComponent("ElderlyAssistant/App/LiveTranslate/LiveTranslateView.swift"))
+        XCTAssertTrue(view.contains("Text(row.translation)"),
+                      "the card draws the translation as the large line")
+        XCTAssertTrue(view.contains("DesignTokens.warmFont(size: DesignTokens.minBodyPointSize"),
+                      "and at the app's body floor, not a literal size")
+        XCTAssertTrue(view.contains("DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize"),
+                      "with the original at the app's caption floor beneath it")
+        XCTAssertTrue(view.contains("minWidth: DesignTokens.minTapTargetSize"))
+        XCTAssertTrue(view.contains("minHeight: DesignTokens.minTapTargetSize"))
     }
 }

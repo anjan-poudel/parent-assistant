@@ -132,6 +132,69 @@ enum LiveTranslateFrozenRaster {
     }
 }
 
+// MARK: - The results card
+
+/// A frozen frame as a list to read (owner UX rework, 2026-09-17).
+///
+/// The owner's words after the first device demo: the bubbles "are everywhere
+/// and shaky and get stacked and clustered depending on text", and what an
+/// elder actually wants from a still is to *read* it. So the snapshot's
+/// landing surface is this card, and the overlay goes back to being the
+/// glance: no boxes over the picture, no motion, one scrollable column of
+/// large type with the original underneath each line and a target an
+/// elder-sized thumb can hit to hear it.
+///
+/// Pure and `Equatable`, like every other surface in the feature, and derived
+/// from the overlay's own presentations — so the card and the overlay cannot
+/// disagree about what a region says, and the row count is the placement count
+/// by construction rather than by convention.
+struct LiveTranslateResultsCardSurface: Equatable {
+
+    /// One row: a translation, the text it came from, and whether there is
+    /// something to hear.
+    struct Row: Equatable, Identifiable {
+        /// The overlay's own view identity — the normalized string — so the
+        /// card's list is keyed by the same thing the overlay keys its boxes
+        /// by, and a moving region keeps its row as well as its box.
+        let id: String
+        /// The large line: the translation for a resolved region, and the
+        /// recognized text otherwise — never a translated-looking string for a
+        /// region that was not translated (FR-LCT-018).
+        let translation: String
+        /// The small line beneath it: the original text beside a translation,
+        /// or the honest state sentence when there is none.
+        let source: String?
+        /// The glyph for a state that needs one, or `nil` for a translation.
+        let symbolName: String?
+        /// Whether tapping the row speaks (C12's tap-to-hear). A row with
+        /// nothing to say is not a button that does nothing.
+        let speaksTranslation: Bool
+        /// The region this row came from: what a tap hands back.
+        let regionID: TextRegionStabilizer.RegionIdentity
+    }
+
+    let rows: [Row]
+    /// The calm sentence for a frozen frame with no text on it. Reused from
+    /// the overlay's empty state: one sentence for one situation.
+    let emptyHint: String
+
+    init(overlay: LiveTranslateOverlaySurface) {
+        self.rows = overlay.presentations.map { presentation in
+            Row(id: presentation.id,
+                translation: presentation.accessibilityLabel,
+                source: presentation.accessibilityValue,
+                symbolName: presentation.symbolName,
+                speaksTranslation: presentation.speaksTranslation,
+                regionID: presentation.regionID)
+        }
+        self.emptyHint = overlay.emptyHint
+    }
+
+    /// Whether the card has read anything. A frozen frame with no text shows
+    /// the empty hint instead of an empty list.
+    var isEmpty: Bool { rows.isEmpty }
+}
+
 // MARK: - The snapshot path
 
 /// The snapshot path: freeze one frame, read it once, place what it says.
