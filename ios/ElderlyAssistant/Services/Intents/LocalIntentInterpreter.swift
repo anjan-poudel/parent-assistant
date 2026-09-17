@@ -8,32 +8,36 @@ import LLM
 /// (`ModelCatalog.intentNepali1B`) via the vendored LLM.swift (llama.cpp
 /// + Metal), constrained at decode time by a JSON Schema — the v1 lesson
 /// (grammar defined but never enforced at the sampler) resolved by using
-/// `LLM.generateWithConstraints(from:jsonSchema:)`, which converts the
-/// schema to a llama.cpp grammar and samples through it. Malformed JSON
-/// is structurally impossible; `LlamaCommandInterpreter.parse(json:)`
+/// `LLMCore.generateWithConstraints(from:jsonSchema:)`, which converts
+/// the schema to a llama.cpp grammar and samples through it. Malformed
+/// JSON is structurally impossible; `LlamaCommandInterpreter.parse(json:)`
 /// remains as defense-in-depth.
 ///
 /// Inference feeds the RAW prompt (`IntentPrompt.build`) with no chat
 /// template — training used the identical plain-text format (see
 /// tools/train-intent README §Training: training/inference prompt
-/// identity). `generateWithConstraints` consumes raw input the same way.
+/// identity). `generateWithConstraints` consumes raw input the same way,
+/// with the schema handed to the grammar converter as a PARAMETER — never
+/// appended to the prompt.
+///
+/// [TRUNCATION-FIX] (2026-09-17) The former `respond(to:as:)` call
+/// wrapped the prompt with the full JSON schema (+308 tokens), leaving
+/// ~15 tokens of generation budget inside the shared 1,024-token
+/// context — every Devanagari answer truncated mid-JSON ("दशैँ कहिले
+/// हो" device failure), and the temp-0 fixed-seed retry replayed the
+/// identical truncation. The fix:
+///   - the raw prompt goes straight to `generateWithConstraints`
+///     (composed prompt ≈ 700 tokens, ~320 of headroom),
+///   - a pre-generation budget guard tokenizes the prompt and fails fast
+///     (`inference_prompt_overflow`) instead of discovering the wall via
+///     a truncated decode,
+///   - ONLY timeouts retry (transient under CPU load); a budget-truncated
+///     or failed generation is deterministic and fails honestly,
+///     escalatable by `IntentRouter` — never a bare apology.
 ///
 /// Conforms to `CommandInterpreter` exactly like the LLaMA interpreter it
 /// replaces as local brain — the router and band policy don't know or
 /// care which model answered.
-///
-/// [LAT-EVIDENCE] (2026-09-12) Device log: `inference_timeout
-/// outcome=failure` after ~3 s + `JSON Decoding failed ... Unexpected
-/// end of file` — the 3 s timeout contradicted the coupled-numbers
-/// family (llama ≤ 10 s) and clipped real generations; the truncated
-/// decode produced a bare apology. The fix:
-///   - the timeout aligns to 10 s (the llama family bound),
-///   - a timeout OR a truncated/malformed JSON output retries ONCE (a
-///     truncated decode is often transient),
-///   - after a still-failing attempt the interpreter reports the honest
-///     failure reason through `InterpreterFailureReporting`, and
-///     `IntentRouter` escalates to the cloud when one is configured
-///     (`local_failed_fallback`) — never a bare apology.
 final class LocalIntentInterpreter: CommandInterpreter, InterpreterFailureReporting {
 
     struct Config {
@@ -53,6 +57,11 @@ final class LocalIntentInterpreter: CommandInterpreter, InterpreterFailureReport
     private let observabilityBus: ObservabilityBus
     private let modelId: ModelID
     private let config: Config
+    /// [TRUNCATION-FIX] The residency ledger — the 1B handle is a REAL
+    /// resident (the device log proved it), and an unregistered handle
+    /// is invisible to every budget: the escalation then admitted the 4B
+    /// brain on top of it and the pair got jetsam'd.
+    private let lifecycle: ModelLifecycleManager
     private let inferenceQueue = DispatchQueue(label: "local.intent", qos: .userInitiated)
 
     /// Cached LLM handle, held as `Any?` so this file compiles without
@@ -80,11 +89,13 @@ final class LocalIntentInterpreter: CommandInterpreter, InterpreterFailureReport
     init(modelStore: ModelStore,
          observabilityBus: ObservabilityBus,
          modelId: ModelID = ModelCatalog.intentNepali1B,
-         config: Config = .default) {
+         config: Config = .default,
+         lifecycle: ModelLifecycleManager = .shared) {
         self.modelStore = modelStore
         self.observabilityBus = observabilityBus
         self.modelId = modelId
         self.config = config
+        self.lifecycle = lifecycle
     }
 
     // MARK: - CommandInterpreter
@@ -114,18 +125,43 @@ final class LocalIntentInterpreter: CommandInterpreter, InterpreterFailureReport
         }
     }
 
-    // MARK: - Attempts + retry ([LAT-EVIDENCE])
+    /// [TRUNCATION-FIX] Drop the resident handle. Called by the ledger's
+    /// eviction closure and by the cascade before a heavier brain takes
+    /// the turn. Mirrors `LlamaCommandInterpreter.unloadModel()`: a
+    /// generation in flight is NOT interrupted — that stays the timeout's
+    /// job (`llm.stop()`), because dropping the handle under a live
+    /// decode pulls the context out from under it.
+    func unload() {
+        guard llmInstance != nil else { return }
+        llmInstance = nil
+        lifecycle.didUnload(.intentBrain, owner: self)
+        emit("model_unloaded", outcome: "info")
+    }
+
+    // MARK: - Attempts + retry ([LAT-EVIDENCE] + [TRUNCATION-FIX])
+
+    /// [TRUNCATION-FIX] The context budget the handle is created with —
+    /// SHARED by prompt and output (n_ctx), so the prompt must leave
+    /// generation headroom.
+    static let contextTokenBudget = 1024
+    /// Headroom reserved for the JSON answer: a complete 12-field reply
+    /// with a Devanagari `reply` measures ~99 tokens; 128 leaves margin.
+    static let outputHeadroomTokens = 128
 
     /// One inference attempt's terminal state.
     private enum AttemptResult {
         /// The generation produced raw text (validity is decided at
         /// parse time).
         case rawOutput(String)
-        /// The generation threw (the real path's truncated-JSON decode
-        /// class) — or the seam threw.
+        /// The generation threw — a runtime failure (the former
+        /// truncated-JSON decode class) or the seam threw.
         case generationFailed
         /// The attempt outlived the 10 s bound.
         case timedOut
+        /// [TRUNCATION-FIX] The composed prompt would leave less than
+        /// `outputHeadroomTokens` of the shared context — fail fast, the
+        /// attempt is doomed before the first token.
+        case promptOverflow
     }
 
     /// Runs ONE generation attempt (seam or real llama.cpp) and reports
@@ -155,6 +191,22 @@ final class LocalIntentInterpreter: CommandInterpreter, InterpreterFailureReport
             if let existing = llmInstance as? LLM {
                 llm = existing
             } else {
+                // [TRUNCATION-FIX] Gate + register with the residency
+                // ledger BEFORE constructing the handle — the picker
+                // brain's own contract. The gate can refuse for budget,
+                // and the ledger now SEES this handle: evictions and
+                // budget math stop pretending it does not exist.
+                lifecycle.register(slot: .intentBrain, modelID: modelId,
+                                   owner: self) { [weak self] in
+                    self?.unload()
+                }
+                if case .denied(let reason) =
+                    lifecycle.prepareLoad(of: .intentBrain, modelID: modelId) {
+                    emit("model_load_denied:" + reason.rawValue, outcome: "failure")
+                    lastInferenceFailureReason = "model_load_denied"
+                    completion(.promptOverflow)
+                    return
+                }
                 // Passthrough template: generation calls
                 // `generateWithConstraints` with the raw prompt — the
                 // template's chat framing is only used by `respond(to:)`,
@@ -177,13 +229,14 @@ final class LocalIntentInterpreter: CommandInterpreter, InterpreterFailureReport
                                         temp: OnDeviceSampling.temperature,
                                         repeatPenalty: OnDeviceSampling.repeatPenalty,
                                         repetitionLookback: OnDeviceSampling.repetitionLookback,
-                                        maxTokenCount: 1024) else {
+                                        maxTokenCount: Int32(Self.contextTokenBudget)) else {
                     emit("model_load_failed", outcome: "failure")
                     completion(.generationFailed)
                     return
                 }
                 llm = created
                 llmInstance = llm
+                lifecycle.didLoad(.intentBrain, owner: self)
                 emit("model_loaded", outcome: "success")
             }
 
@@ -191,17 +244,43 @@ final class LocalIntentInterpreter: CommandInterpreter, InterpreterFailureReport
                 let result = await withTaskGroup(of: AttemptResult.self) { group in
                     group.addTask {
                         do {
-                            // Grammar-constrained decoding (spec §8 /
-                            // decision #4): `respond(to:as:)` drives the
-                            // vendored fork's json-schema→grammar sampler
-                            // — malformed JSON is structurally impossible.
-                            let output = try await llm.respond(
-                                to: prompt, as: StructuredIntent.self)
-                            return .rawOutput(output.rawOutput ?? "")
+                            // [TRUNCATION-FIX] Budget guard BEFORE the
+                            // attempt: tokenize the composed prompt and
+                            // fail fast when it would strangle the shared
+                            // context — a near-full context truncates the
+                            // generation mid-JSON, and under temp-0
+                            // fixed-seed sampling that outcome is
+                            // deterministic, not transient.
+                            let tokenCount = await llm.encode(prompt).count
+                            guard tokenCount <= Self.contextTokenBudget - Self.outputHeadroomTokens else {
+                                self.emit("inference_prompt_overflow",
+                                          outcome: "failure",
+                                          metadata: ["reason": "prompt_overflow"])
+                                self.lastInferenceFailureReason = "prompt_overflow"
+                                return .promptOverflow
+                            }
+                            // [TRUNCATION-FIX] Pin the resident handle for
+                            // the whole generation — a memory-pressure
+                            // sweep must never pull it out from under the
+                            // live decode.
+                            self.lifecycle.beginUse(of: .intentBrain)
+                            defer {
+                                self.lifecycle.endUse(of: .intentBrain)
+                                self.lifecycle.noteUse(of: .intentBrain)
+                            }
+                            // [TRUNCATION-FIX] Grammar-constrained decoding
+                            // (spec §8 / decision #4) on the RAW prompt:
+                            // the schema reaches the grammar converter as
+                            // a PARAMETER, never appended to the prompt —
+                            // `respond(to:as:)` wrapped the prompt with
+                            // the full schema (+308 tokens of the shared
+                            // 1,024 context), which was the "दशैँ कहिले
+                            // हो" truncation root cause.
+                            let output = try await llm.core.generateWithConstraints(
+                                from: prompt,
+                                jsonSchema: StructuredIntent.jsonSchema)
+                            return .rawOutput(output)
                         } catch {
-                            // [LAT-EVIDENCE] The truncated-decode class:
-                            // `JSON Decoding failed ... Unexpected end of
-                            // file` — a failed generation, retried once.
                             return .generationFailed
                         }
                     }
@@ -224,7 +303,9 @@ final class LocalIntentInterpreter: CommandInterpreter, InterpreterFailureReport
     }
 
     /// Decides what one attempt's terminal state means: parse + band, or
-    /// ONE retry on the failure classes, or the honest final failure.
+    /// ONE retry — timeouts only ([TRUNCATION-FIX]: under temp 0 + fixed
+    /// seed every other failure class deterministically repeats, so
+    /// retrying them only delays the honest escalation).
     private func settleAttempt(prompt: String,
                                attempt: Int,
                                result: AttemptResult,
@@ -240,40 +321,51 @@ final class LocalIntentInterpreter: CommandInterpreter, InterpreterFailureReport
                     DispatchQueue.main.async { completion(parsed) }
                 }
             } else if Self.isTruncatedJSON(json) {
-                // [LAT-EVIDENCE] A brace-led partial emission — the
-                // device-log truncated class. Retry once; a second
-                // truncation is an honest failure the router escalates.
-                retryOrFail(prompt: prompt, attempt: attempt,
-                            reason: "truncated_json",
-                            completion: completion)
+                // [TRUNCATION-FIX] A brace-led partial emission is a
+                // budget cut, not noise — deterministic, so no retry:
+                // report the honest reason and let the router escalate.
+                fail(reason: "truncated_json",
+                     completion: completion)
             } else {
                 // Complete garbage — an abstention, exactly as before.
                 DispatchQueue.main.async { completion(nil) }
             }
         case .generationFailed:
-            retryOrFail(prompt: prompt, attempt: attempt,
-                        reason: "truncated_json",
-                        completion: completion)
+            fail(reason: "inference_failed",
+                 completion: completion)
         case .timedOut:
+            // [LAT-EVIDENCE] Timeouts stay retried once — CPU contention
+            // IS transient, unlike a budget cut or a runtime failure.
             retryOrFail(prompt: prompt, attempt: attempt,
-                        reason: "inference_timeout",
                         completion: completion)
+        case .promptOverflow:
+            // Already reported by the guard in `runAttempt` — nothing
+            // further to try.
+            DispatchQueue.main.async { completion(nil) }
         }
+    }
+
+    /// The honest final failure: no retry, an event, and a nil result
+    /// the router escalates (`local_failed_fallback`).
+    private func fail(reason: String,
+                      completion: @escaping (InterpretedCommand?) -> Void) {
+        emit(reason == "inference_timeout" ? "inference_timeout"
+             : reason == "truncated_json" ? "inference_truncated"
+             : "inference_failed",
+             outcome: "failure",
+             metadata: ["reason": reason])
+        lastInferenceFailureReason = reason
+        DispatchQueue.main.async { completion(nil) }
     }
 
     private func retryOrFail(prompt: String,
                              attempt: Int,
-                             reason: String,
                              completion: @escaping (InterpretedCommand?) -> Void) {
         guard attempt == 0 else {
-            emit(reason == "inference_timeout" ? "inference_timeout" : "inference_truncated",
-                 outcome: "failure",
-                 metadata: ["reason": reason])
-            lastInferenceFailureReason = reason
-            DispatchQueue.main.async { completion(nil) }
+            fail(reason: "inference_timeout", completion: completion)
             return
         }
-        emit("inference_retry", outcome: "info", metadata: ["reason": reason])
+        emit("inference_retry", outcome: "info", metadata: ["reason": "inference_timeout"])
         runAttempt(prompt: prompt, attempt: 1) { [weak self] result in
             guard let self else { return }
             self.settleAttempt(prompt: prompt, attempt: 1, result: result,

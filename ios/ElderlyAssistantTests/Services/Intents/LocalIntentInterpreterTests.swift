@@ -73,7 +73,7 @@ final class LocalIntentInterpreterTests: XCTestCase {
         XCTAssertNil(interpret(interpreter, "anything"))
     }
 
-    // MARK: - [LAT-EVIDENCE] Timeout bound + truncated-JSON retry
+    // MARK: - [LAT-EVIDENCE] Timeout bound + [TRUNCATION-FIX] no-retry failures
 
     func testDefaultTimeoutAlignsWithLlamaFamilyBound() {
         // Coupled numbers: the local interpreter shares the llama
@@ -83,32 +83,11 @@ final class LocalIntentInterpreterTests: XCTestCase {
                        "the local intent interpreter runs under the llama family's 10 s bound")
     }
 
-    func testTruncatedJSONRetriesOnceAndSucceeds() {
-        let storage = StubEncryptedStorage()
-        let store = try! ModelStore(observabilityBus: NullObservabilityBus())
-        let interpreter = LocalIntentInterpreter(
-            modelStore: store, observabilityBus: NullObservabilityBus())
-        var calls = 0
-        interpreter.generateOverride = { _ in
-            calls += 1
-            if calls == 1 {
-                // The device-log truncated class: a partial emission.
-                return "{\"action\": \"query\", \"confidence\": 0.9"
-            }
-            return """
-            {"action":"query","entryId":null,"contact":null,"time":null,
-             "medication":null,"message":null,"callType":null,"requestedApp":null,
-             "topic":null,"steps":null,"confidence":0.9,"reply":"ठीक छ"}
-            """
-        }
-
-        let cmd = interpret(interpreter, "मौसम कस्तो छ")
-        XCTAssertEqual(calls, 2, "a truncated JSON output retries exactly once")
-        XCTAssertEqual(cmd?.action, .query)
-        XCTAssertNil(interpreter.lastInferenceFailureReason)
-    }
-
-    func testTruncatedJSONTwiceIsAnHonestFailureNotAnApology() {
+    func testTruncatedJSONFailsFastWithoutRetry() {
+        // [TRUNCATION-FIX] A brace-led partial emission is a budget cut
+        // (the "दशैँ कहिले हो" class), and under temp 0 + fixed seed it
+        // deterministically repeats — the retry only delayed the honest
+        // escalation. One attempt, honest failure reason.
         let storage = StubEncryptedStorage()
         let store = try! ModelStore(observabilityBus: NullObservabilityBus())
         let bus = RecordingObservabilityBus()
@@ -116,23 +95,27 @@ final class LocalIntentInterpreterTests: XCTestCase {
         var calls = 0
         interpreter.generateOverride = { _ in
             calls += 1
-            return "{\"action\": \"query\", \"conf"
+            return "{\"action\": \"query\", \"confidence\": 0.9"
         }
 
         let cmd = interpret(interpreter, "मौसम कस्तो छ")
         XCTAssertNil(cmd)
-        XCTAssertEqual(calls, 2, "one retry, then the failure is reported")
+        XCTAssertEqual(calls, 1, "a truncated JSON output is deterministic — no retry")
         XCTAssertEqual(interpreter.lastInferenceFailureReason, "truncated_json",
                        "the router reads this to escalate to the cloud — never a bare apology")
-        XCTAssertTrue(bus.contains("inference_retry"))
         XCTAssertTrue(bus.contains("inference_truncated"))
+        XCTAssertFalse(bus.contains("inference_retry"),
+                       "the deterministic replay retry is gone")
     }
 
-    func testGenerationErrorRetriesOnceThenFailsHonestly() {
+    func testGenerationErrorFailsHonestlyWithoutRetry() {
+        // [TRUNCATION-FIX] A thrown generation reports its own honest
+        // reason (the truncated-JSON class no longer reaches this path)
+        // and does not retry — the failure is not transient.
         let storage = StubEncryptedStorage()
         let store = try! ModelStore(observabilityBus: NullObservabilityBus())
-        let interpreter = LocalIntentInterpreter(
-            modelStore: store, observabilityBus: NullObservabilityBus())
+        let bus = RecordingObservabilityBus()
+        let interpreter = LocalIntentInterpreter(modelStore: store, observabilityBus: bus)
         var calls = 0
         interpreter.generateOverride = { _ in
             calls += 1
@@ -140,8 +123,10 @@ final class LocalIntentInterpreterTests: XCTestCase {
         }
 
         XCTAssertNil(interpret(interpreter, "anything"))
-        XCTAssertEqual(calls, 2, "a thrown generation (the real path's truncated-decode class) retries once")
-        XCTAssertEqual(interpreter.lastInferenceFailureReason, "truncated_json")
+        XCTAssertEqual(calls, 1, "a thrown generation does not retry")
+        XCTAssertEqual(interpreter.lastInferenceFailureReason, "inference_failed")
+        XCTAssertTrue(bus.contains("inference_failed"))
+        XCTAssertFalse(bus.contains("inference_retry"))
     }
 
     func testGarbageIsAnAbstentionNotARetry() {

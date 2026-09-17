@@ -206,6 +206,21 @@ final class ModelLifecycleManagerTests: XCTestCase {
         XCTAssertEqual(corrector.releaseContract, .processLifetime)
     }
 
+    func testIntentBrainIsAHeavyBrainWithItsOwnSlot() {
+        // [TRUNCATION-FIX] The local intent interpreter's 1B handle now
+        // has a ledger row of its own — the same 1.7B arithmetic as the
+        // picker brain, and heavy, so budget math can never again admit
+        // a 4B on top of it as if it did not exist.
+        let intent = ModelLifecycleInventory.footprint(for: .intentBrain,
+                                                       modelID: ModelCatalog.intentNepali1B)
+        XCTAssertEqual(intent.role, .brain)
+        XCTAssertTrue(intent.isHeavy)
+        XCTAssertEqual(intent.residency, .pageableWeights)
+        XCTAssertEqual(intent.releaseContract, .actorDeferredFree)
+        XCTAssertGreaterThan(intent.liveBytes, 1_000_000_000,
+                             "the 1.1 GB artifact plus runtime overhead is a >1 GB resident")
+    }
+
     // MARK: - 3. The no-two-heavy invariant
 
     func testFourBBrainEvictsResidentSTT() {

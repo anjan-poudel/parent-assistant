@@ -123,6 +123,54 @@ final class VoiceSessionStateMachineTests: XCTestCase {
     /// is already open keeps the ORIGINAL budget (no re-arm, no second
     /// timer racing the first).
     @MainActor
+    func testTransitionViaIdleBridgesErrorToSpeaking() {
+        // [LAUNCH-TRANSITION-FIX] The device log asserted `error →
+        // speaking` at launch: the pipeline reported `.error` (mic boot),
+        // then `.idle` while push speech still played. Both bridge edges
+        // are legal — `error → idle`, `idle → speaking` — so the bridge
+        // travels them instead of hitting the illegal direct edge.
+        let machine = VoiceSessionStateMachine()
+        machine.transition(to: .error)
+        XCTAssertEqual(machine.state, .error)
+
+        machine.transitionViaIdle(to: .speaking)
+        XCTAssertEqual(machine.state, .speaking,
+                       "error → speaking must bridge through idle")
+    }
+
+    /// [LAUNCH-TRANSITION-FIX] A capture event landing while the session
+    /// is still `.stopped` (recycle + immediate capture) has no direct
+    /// edge to `.listening` — the bridge travels `stopped → idle →
+    /// listening`, both legal.
+    @MainActor
+    func testTransitionViaIdleBridgesStoppedToListening() {
+        let machine = VoiceSessionStateMachine()
+        XCTAssertEqual(machine.state, .stopped)
+
+        machine.transitionViaIdle(to: .listening)
+        XCTAssertEqual(machine.state, .listening,
+                       "stopped → listening must bridge through idle")
+    }
+
+    /// [LAUNCH-TRANSITION-FIX] Direct legal edges are untouched by the
+    /// bridge — no spurious `.idle` hop in the middle of a live cycle.
+    @MainActor
+    func testTransitionViaIdleLeavesLegalEdgesUntouched() {
+        let machine = VoiceSessionStateMachine()
+        machine.transition(to: .idle)
+        machine.transitionViaIdle(to: .listening)
+        XCTAssertEqual(machine.state, .listening,
+                       "an idle → listening edge needs no bridge")
+
+        machine.transitionViaIdle(to: .transcribing)
+        XCTAssertEqual(machine.state, .transcribing,
+                       "an already-legal edge must land in ONE step")
+    }
+
+    /// [F14] The window is idempotent: a flow that pends while the window
+    /// is already open keeps the ORIGINAL budget (no re-arm, no second
+    /// timer racing the first).
+    @MainActor
     func testOpenConfirmationWindowIsIdempotent() {
         let machine = VoiceSessionStateMachine(
             config: .init(confirmationTimeoutSeconds: 1))

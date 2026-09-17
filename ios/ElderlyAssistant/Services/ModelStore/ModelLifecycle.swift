@@ -136,13 +136,14 @@ enum ModelSlot: String, CaseIterable, Codable {
     case speechToText
     /// The llama.cpp command interpreter's GGUF. Owned by
     /// `LlamaCommandInterpreter`.
-    ///
-    /// `LocalIntentInterpreter` holds a SECOND llama handle for the same
-    /// role, with no unload path at all. It is not registered here because
-    /// its only model id (`intentNepali1B`) is a never-downloadable
-    /// placeholder, so it is unreachable in practice — see the "Known gaps"
-    /// section of `docs/architecture/model-lifecycle.md`.
     case brain
+    /// The fine-tuned local intent brain (`intentNepali1B`) held by
+    /// `LocalIntentInterpreter` — a SECOND llama handle for the same
+    /// role, which used to live outside the ledger entirely ([TRUNCATION-
+    /// FIX], 2026-09-17: that blindness is what let an escalated turn
+    /// hold ~5.2 GB of models and get jetsam'd). Owned by
+    /// `LocalIntentInterpreter`.
+    case intentBrain
     /// The CoreML intent encoder. Owned by `IntentEncoderInterpreter`,
     /// which already implements the unload/re-arm contract on its own
     /// (level-2 observer → `handleMemoryPressure()`).
@@ -251,6 +252,8 @@ enum ModelLifecycleInventory {
             return sttFootprint(modelID: modelID)
         case .brain:
             return brainFootprint(modelID: modelID)
+        case .intentBrain:
+            return intentBrainFootprint(modelID: modelID)
         case .intentEncoder:
             return ModelFootprint(
                 role: .encoder,
@@ -298,7 +301,19 @@ enum ModelLifecycleInventory {
     }
 
     private static func brainFootprint(modelID: ModelID?) -> ModelFootprint {
-        let weights = artifactBytes(modelID, fallback: 807_694_464)
+        brainFootprint(modelID: modelID, fallbackWeights: 807_694_464)
+    }
+
+    /// The local intent brain (1.7B Qwen GGUF) — same arithmetic as the
+    /// picker brain, different fallback (the shipped `intentNepali1B`
+    /// artifact size; the catalog resolves the live value).
+    private static func intentBrainFootprint(modelID: ModelID?) -> ModelFootprint {
+        brainFootprint(modelID: modelID, fallbackWeights: 1_107_408_576)
+    }
+
+    private static func brainFootprint(modelID: ModelID?,
+                                       fallbackWeights: UInt64) -> ModelFootprint {
+        let weights = artifactBytes(modelID, fallback: fallbackWeights)
         let matched = brainClasses.first { weights <= $0.maxFileBytes }
             ?? brainClasses[brainClasses.count - 1]
         return ModelFootprint(
