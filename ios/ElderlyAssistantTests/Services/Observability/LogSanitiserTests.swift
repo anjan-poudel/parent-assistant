@@ -38,6 +38,17 @@ final class LogSanitiserTests: XCTestCase {
                      "unknown metadata keys are still dropped outright")
     }
 
+    func testScopeLedgerNamesSurviveTheSanitiser() {
+        // [SCOPE-LEDGER] The console must be able to say which Google
+        // scope is granted or missing — fixed vocabulary names, no PII.
+        let clean = sanitiser.sanitise(event(metadata: [
+            "calendar": "granted",
+            "contacts": "missing",
+        ]))
+        XCTAssertEqual(clean.metadata["calendar"], "granted")
+        XCTAssertEqual(clean.metadata["contacts"], "missing")
+    }
+
     func testStagesMetadataIsPreservedVerbatim() {
         let stages = #"[{"stage":"asr","ms":812},{"stage":"llm","ms":1430}]"#
         let clean = sanitiser.sanitise(event(metadata: ["stages": stages]))

@@ -115,6 +115,62 @@ enum LiveOverlayPlacement {
         /// every resolved region shows its original alongside its translation
         /// (pure callout mode, T-022).
         let alwaysShowOriginal: Bool
+        /// [BRAINTIER-MERGE-GAP] (2026-09-17) The word ceiling for the
+        /// in-place form (D1). PR #33's merge kept the braintier TESTS but
+        /// dropped the app-side half of the decision; this field restores
+        /// the half the tests exercise. Defaulted (against the struct's
+        /// usual no-defaults rule) so the shipped app-layer constructor
+        /// kept compiling — the config-driven plumbing is the braintier
+        /// session's follow-up.
+        let maxSourceWordCount: Int = 4
+    }
+
+    // MARK: - Braintier eligibility seam (merge-gap patch, 2026-09-17)
+
+    /// The braintier tests' entry point into the in-place decision
+    /// (`worktree-live-translate-ux-braintier`, commit 37647f8). PR #33's
+    /// merge kept those tests but dropped the app-side half of the API;
+    /// this seam restores the shape the tests pin, implemented over the
+    /// tier rule and the word bound the branch designed. The shipped
+    /// `inPlaceOutcome` machinery above is untouched — this is an
+    /// additive entry point, not a replacement.
+    enum InPlaceEligibility: Equatable {
+        case eligible
+        case ineligible
+    }
+
+    /// The braintier total decision: only the curated dictionary tier may
+    /// stand in place, the normalized source stays within the word bound,
+    /// the translation fits the region at the floor size, and the
+    /// always-show-original preference is off. No growth-budget condition
+    /// (the fit at the floor *is* the bound, D1).
+    static func inPlaceEligibility(source: String,
+                                   translation: String,
+                                   regionRect: CGRect,
+                                   policy: Policy,
+                                   tier: TranslationTier?,
+                                   measure: Measure = LiveOverlayTextMetrics.measure) -> InPlaceEligibility {
+        guard tier == .dictionary else { return .ineligible }
+
+        guard wordCount(source) <= policy.maxSourceWordCount else { return .ineligible }
+
+        let measured = measure(translation, policy.minPointSize, .primary, regionRect.width)
+        guard measured.width <= regionRect.width, measured.height <= regionRect.height else {
+            return .ineligible
+        }
+
+        guard !policy.alwaysShowOriginal else { return .ineligible }
+
+        return .eligible
+    }
+
+    /// The word count the source bound is measured against: the feature's
+    /// one normalization (trim, collapse, case-fold), split on spaces. An
+    /// empty source counts as no words.
+    static func wordCount(_ source: String) -> Int {
+        LiveTranslateTextNormalization.normalized(source)
+            .split(separator: " ", omittingEmptySubsequences: true)
+            .count
     }
 
     // MARK: - Outputs
