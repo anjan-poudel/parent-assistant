@@ -662,6 +662,229 @@ final class LiveCameraSessionTests: XCTestCase {
         XCTAssertTrue(reasons.allSatisfy { ["backgrounded", "system_interruption", "thermal"].contains($0) })
     }
 
+    // MARK: Zoom and focus (owner report, 2026-09-17)
+
+    func testASessionAdoptsTheZoomItsDeviceIsAlreadyAtAndStampsItOnItsFrames() async throws {
+        // A device that was left zoomed by whoever held the phone before this
+        // session (the opening zoom is the layer's, applied under the device's
+        // own lock, and the device's range may have clamped it).
+        layer.videoZoomFactorValue = 3
+        let session = makeSession()
+
+        _ = await session.start()
+
+        XCTAssertEqual(session.currentVideoZoom, 3,
+                       "the zoom is read back from the device, not assumed to be 1")
+
+        try layer.deliverFrame(width: 64, height: 48, pts: CMTime(value: 1, timescale: 1))
+        let awaited = await nextFrameFromStream(of: session)
+        let frame = try XCTUnwrap(awaited)
+        XCTAssertEqual(frame.zoomFactor, 3,
+                       "the frame says what it is a picture of — the device's own crop of the sensor")
+    }
+
+    func testTheZoomTheDeviceAppliedIsTheZoomTheSessionHolds() async throws {
+        let session = makeSession()
+        _ = await session.start()
+        // The device's own range is narrower than the app's: the platform
+        // clamps, and the question is whether the session notices.
+        layer.appliedZoomClamp = 1...2
+
+        let applied = session.setZoom(6)
+
+        XCTAssertEqual(applied, 2, "the answer is the device's, never the argument's")
+        XCTAssertEqual(session.currentVideoZoom, 2,
+                       "a readout built from the request would say 6× over a picture at 2×")
+        XCTAssertEqual(layer.setZoomRequests, [6],
+                       "the elder's number is what is asked for; the clamping is the platform's business")
+    }
+
+    func testASetZoomDropsTheFrameDiffBaselineSoTheZoomedPictureIsReadAtOnce() async throws {
+        let session = makeSession()
+        _ = await session.start()
+        var frames = session.frames.makeAsyncIterator()
+
+        try layer.deliver(paintedFrame(luma: 0, pts: 1))
+        _ = await frames.next()
+
+        // The gate's baseline is now the picture at 1×. The elder zooms: the
+        // same scene is a *different picture* from here, and the frame that
+        // shows the small print they just enlarged is the one frame the gate
+        // must never drop as "unchanged" — so the baseline goes with the zoom.
+        clock.advance(by: interval)
+        session.setZoom(2)
+
+        // Byte-identical pixels, one nominal interval later, and still read:
+        // without the forgotten baseline this frame is a still scene and waits
+        // for the reduced cadence.
+        clock.advance(by: interval)
+        try layer.deliver(paintedFrame(luma: 0, pts: 2))
+
+        let awaited = await nextFrame(frames, within: 1.0)
+        let zoomed = try XCTUnwrap(awaited, "the frame after a zoom is news, whatever the pixels said")
+        XCTAssertEqual(zoomed.timestamp, CMTime(value: 2, timescale: 1))
+        XCTAssertEqual(zoomed.zoomFactor, 2, "and it carries the zoom it was taken at")
+    }
+
+    func testASetZoomBeforeAStartClampsToTheAppBoundsAndLeavesTheDeviceAlone() async throws {
+        let session = makeSession()
+        layer.videoZoomFactorValue = 1
+
+        let applied = session.setZoom(99)
+
+        XCTAssertEqual(applied, LiveTranslateConfig.default.maxVideoZoom,
+                       "a caller always gets a factor it can draw")
+        XCTAssertTrue(layer.setZoomRequests.isEmpty,
+                      "there is no configured device to zoom, so nothing is asked of one")
+        XCTAssertEqual(session.currentVideoZoom, 1,
+                       "and no frame has been taken at anything else, so nothing is claimed")
+    }
+
+    func testTheZoomCapabilitiesAreTheRunningDevicesAndNothingWhenThereIsNoDevice() async throws {
+        let session = makeSession()
+        XCTAssertEqual(session.zoomCapabilities, .unknown,
+                       "with no device the model works from the app's own bounds alone")
+
+        _ = await session.start()
+        XCTAssertEqual(session.zoomCapabilities, layer.zoomCapabilitiesValue)
+
+        // The valid range follows the device's active *format*, which the
+        // platform can change under a running session: the seam is asked again
+        // rather than read once.
+        layer.zoomCapabilitiesValue = CameraZoomCapabilities(range: 1...4,
+                                                             switchOverFactors: [2])
+        XCTAssertEqual(session.zoomCapabilities.switchOverFactors, [2])
+
+        session.stop()
+        XCTAssertEqual(session.zoomCapabilities, .unknown,
+                       "a torn-down session has no device and says so")
+    }
+
+    func testTheSurfaceTakesTheRunningDevicesBoundsOnItsFirstInteraction() async throws {
+        let session = makeSession()
+        _ = await session.start()   // the stub device reports 1...6, narrower than the app's 1...8
+
+        session.zoomSurface.zoom(.closer)
+
+        XCTAssertEqual(session.zoomSurface.model.bounds, 1...6,
+                       "the first interaction asks the device what it can do")
+        XCTAssertEqual(layer.setZoomRequests, [1.5])
+        XCTAssertEqual(session.zoomSurface.model.factor, 1.5,
+                       "and the control shows the factor the device took")
+    }
+
+    /// The whole zoom path on a virtual multi-lens device, in the unit the elder
+    /// reads and the unit the device takes — the owner's iPhone 14 Pro Max,
+    /// where the two differ by a factor of two.
+    ///
+    /// The config's keys are readout numbers ("the wide camera's view is 1×"),
+    /// and this stub device is a triple: its own factor 1 is the ultra-wide the
+    /// system camera prints as 0.5×, the wide camera is its factor 2, and its
+    /// published hand-overs are 2 (wide) and 6 (the telephoto, which the readout
+    /// calls 3×). Nothing between the view and the device may convert, and the
+    /// session may convert exactly once.
+    func testAReadoutZoomOnAVirtualDeviceIsConvertedIntoTheDevicesOwnFactors() async throws {
+        let virtualDevice = CameraZoomCapabilities(range: 1...16, switchOverFactors: [2, 6],
+                                                   widestLensIsUltraWide: true)
+        layer.zoomCapabilitiesValue = virtualDevice
+        layer.videoZoomFactorValue = 2   // where the layer's own opening left the device
+        let session = makeSession()
+
+        // At rest, before any device is running: the config's 1× in this
+        // device's factors, not the raw 1 that would mean the ultra-wide.
+        XCTAssertEqual(session.currentVideoZoom, 2,
+                       "the session's at-rest factor is the config's opening view as this device takes it")
+
+        _ = await session.start()
+        XCTAssertEqual(session.zoomCapabilities.displayMultiplier, 0.5)
+        XCTAssertEqual(session.currentVideoZoom, 2, "the device's own answer is adopted as it stands")
+
+        session.zoomSurface.zoom(.closer)      // the elder presses +: 1× → 1.5×
+        session.zoomSurface.zoom(.closer)      // 1.5× → 2×
+
+        XCTAssertEqual(layer.setZoomRequests, [3, 4],
+                       "the presses are the readout's half steps, asked for in the device's own factors")
+        XCTAssertEqual(session.currentVideoZoom, 4, "and the device is where the readout says it is")
+        XCTAssertEqual(session.zoomSurface.model.label, "2×",
+                       "the control prints the elder's unit back to them")
+        XCTAssertEqual(session.zoomSurface.model.bounds, 2...16,
+                       "the config's 1×...8×, as this device's factors")
+    }
+
+    func testATapFocusesTheDeviceAndTheReArmKeepsLookingAtTheSamePoint() async throws {
+        let session = makeSession()
+        _ = await session.start()
+        let point = CGPoint(x: 0.25, y: 0.75)
+
+        session.setFocusLocked(true)
+        session.focus(at: point)
+
+        XCTAssertEqual(layer.focusRequests, [point],
+                       "the tap's point reaches the device unchanged — the layer already converted it")
+        XCTAssertFalse(session.zoomSurface.isFocusLocked,
+                       "tapping a new label is asking to look at it, not to hold the last lock")
+
+        // The device reports the subject area changed: the packet was turned
+        // over, brought closer, or moved out of the light.
+        layer.subjectAreaDidChange()
+        XCTAssertEqual(layer.continuousFocusRequests, [point],
+                       "the re-arm searches continuously at the point the elder last aimed at — "
+                       + "a different mode from the tap's one-shot, or it would be a no-op")
+
+        // While focus is held, the re-arm is exactly what must not happen: the
+        // elder has said "do not move it".
+        session.setFocusLocked(true)
+        layer.subjectAreaDidChange()
+        XCTAssertEqual(layer.continuousFocusRequests, [point], "a held focus is not re-armed")
+    }
+
+    func testTheReArmStartsFromTheConfiguredFocusPoint() async throws {
+        let session = makeSession()
+        _ = await session.start()
+
+        layer.subjectAreaDidChange()
+
+        XCTAssertEqual(layer.continuousFocusRequests,
+                       [LiveTranslateConfig.default.focusPointOfInterest],
+                       "with no tap yet, the configured point is where the camera looks")
+    }
+
+    func testTheFocusLockReachesTheDeviceAndIsMirroredOnTheControl() async throws {
+        let session = makeSession()
+        _ = await session.start()
+
+        session.setFocusLocked(true)
+        XCTAssertEqual(layer.focusLockRequests, [true])
+        XCTAssertTrue(session.zoomSurface.isFocusLocked,
+                      "the control and the device are never drawn disagreeing")
+
+        session.setFocusLocked(false)
+        XCTAssertEqual(layer.focusLockRequests, [true, false])
+        XCTAssertFalse(session.zoomSurface.isFocusLocked)
+    }
+
+    func testALockPressedWithNoRunningCameraStillMovesTheControl() throws {
+        let session = makeSession()
+
+        session.setFocusLocked(true)
+
+        XCTAssertTrue(session.zoomSurface.isFocusLocked,
+                      "the elder pressed the control; one that flipped back because the camera "
+                      + "happened to be between states would be the app arguing with itself")
+        XCTAssertTrue(layer.focusLockRequests.isEmpty, "and there is no device to tell yet")
+    }
+
+    func testADeviceThatCannotBeToldWhereToFocusIsNotAsked() async throws {
+        layer.supportsFocusPointOfInterest = false
+        let session = makeSession()
+        _ = await session.start()
+
+        session.focus(at: CGPoint(x: 0.5, y: 0.5))
+
+        XCTAssertTrue(layer.focusRequests.isEmpty,
+                      "a device with no focus point of interest is not sent one")
+    }
+
     // MARK: Helpers
 
     /// Awaits the next frame, or `nil` if none arrives within `seconds`. Used

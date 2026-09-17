@@ -1,6 +1,23 @@
 import CoreGraphics
 import Foundation
 
+/// How large a frame the capture stack asks the platform for.
+///
+/// A two-case intent rather than an `AVCaptureSession.Preset` value: this type
+/// is read by the pipeline, the placement and the view, none of which import
+/// AVFoundation, and the mapping from "how big a picture does the elder need"
+/// to a preset — including the ordered fallback when a device cannot deliver
+/// one — belongs at the capture seam that owns the session. The shipped layer
+/// reads it through `AVFoundationCaptureLayer.presets(for:)`.
+enum LiveTranslateCaptureQuality: String, Equatable {
+    /// The pre-change behaviour: `vga640x480`, 307,200 pixels per frame.
+    case standard
+    /// The default: `hd1280x720`, 921,600 pixels per frame — four times the
+    /// detail for the recognition pass, and the size this feature's CPU budget
+    /// was re-measured against.
+    case high
+}
+
 /// C14 — the single `Equatable` value that owns **every** operational
 /// constant the live camera translation feature introduces (NFR-LCT-011),
 /// with the defaults from the design's parameter table
@@ -90,6 +107,181 @@ struct LiveTranslateConfig: Equatable {
     /// (the counter resets on any change), so a live pan is never mistaken for
     /// a stale scene.
     var stalePassesBeforeReducedCadence: Int = 3
+
+    // MARK: Camera quality — zoom, lens switching and focus (owner report, 2026-09-17)
+
+    /// How large a frame the capture stack asks the platform for.
+    ///
+    /// The owner's report is "blurry and not sharp enough for small packaging
+    /// text", and the shipped stack was asking for `vga640x480`: a 4 mm line of
+    /// print on a packet is a handful of pixels at that size, and no amount of
+    /// downstream work puts detail back into a frame that never had it. `.high`
+    /// asks for 1280 × 720 — four times the pixels, four times the detail
+    /// handed to Vision, and past the point where the frame is the limiting
+    /// term for small print.
+    ///
+    /// Explicitly **not** `.photo` (4032 × 3024). That is ~48 MB per frame in
+    /// the 32BGRA the detector reads, and Vision's cost scales with pixels: it
+    /// would trade away the resource work this feature just landed (the
+    /// frame-diff gate, the reduced cadence, the tracking bound — all of it
+    /// written against crash reports showing ~99 % CPU and 1.4 GB) for detail
+    /// the recognition pass cannot afford to look at. Enlarging the *view* is
+    /// the zoom's job, and the zoom costs the CPU nothing extra: the device
+    /// crops the sensor before the data output ever sees the frame. A device
+    /// whose active format cannot deliver 720p falls back in the order
+    /// `AVFoundationCaptureLayer.presets(for:)` states, which ends at the size
+    /// every back camera has delivered since iOS 4.
+    ///
+    /// Named `cameraQuality`, not `captureQuality`, so the label does not read
+    /// as a spend limit: `LiveTranslateConfigTests` fails if any member's name
+    /// contains "cap" (OD7 — this feature owns no cost cap), and a legitimate
+    /// knob that trips a name-based guard is a knob that has to move, not a
+    /// guard that has to weaken.
+    var cameraQuality: LiveTranslateCaptureQuality = .high
+
+    /// The widest zoom the elder can reach, **in the readout's unit**: the
+    /// number on the control, which is the number the system camera's own
+    /// readout would print for the same picture (1 = the wide camera's native
+    /// field of view, 0.5 = the ultra-wide, 3 = the telephoto on a 14 Pro Max).
+    ///
+    /// The unit is the elder's, not the device's, and the conversion between
+    /// the two is one rule (`CameraZoomCapabilities.deviceFactor(forReadout:)`,
+    /// via `displayMultiplier`): a virtual device's own `videoZoomFactor` calls
+    /// its wide camera 2, so a key read in the device's unit would put the
+    /// control's "1×" on a factor that is not 1 in the numbers the platform
+    /// switches lenses at. Every zoom key here is in this one unit.
+    ///
+    /// 1, not the device's own minimum, on purpose. A triple camera reaches
+    /// down to 0.5 — the ultra-wide — and the ultra-wide is the *worst* of the
+    /// three lenses for a line of small print: the smallest sensor, the widest
+    /// distortion, the most of the frame spent on things that are not the
+    /// label. Zooming *out* is offered as far as the wide camera, which is
+    /// where the reading is done; a household that wants the ultra-wide's field
+    /// of view (a whole shelf rather than one packet) lowers this key to 0.5.
+    /// The model never widens past the running device's own report, so this is
+    /// a floor and not a promise.
+    var minVideoZoom: Double = 1.0
+
+    /// The longest zoom factor the elder can reach, as a ceiling only: the
+    /// running device's `maxAvailableVideoZoomFactor` — the active format's
+    /// `videoMaxZoomFactor`, which the platform may report as anything from 4
+    /// to 120 depending on the device and the format it is in — narrows it, and
+    /// the model clamps to whichever is smaller. Asking for a factor above the
+    /// device's own maximum is an `NSRangeException`, not a clamp, which is why
+    /// the effective bound is always `min(config, device)` and never the
+    /// config's number alone.
+    ///
+    /// 8 is past what a packet needs: on a 14 Pro Max, 8× is the telephoto
+    /// digitally extended past its optical range (the telephoto's own view is
+    /// the 3× this key's unit calls 3), and the usable end of the
+    /// zoom for print on a packet is well before it. The bound exists so a
+    /// pinch cannot wander into a factor where the picture is mush and the
+    /// readout is the only thing still changing.
+    var maxVideoZoom: Double = 8.0
+
+    /// The zoom a session starts at, in the readout's unit: the wide camera's
+    /// native view, which is the whole frame and the sharpest thing the device
+    /// can show.
+    var initialVideoZoom: Double = 1.0
+
+    /// One press of **+** or **−**, in the readout's unit: half a factor, so
+    /// 1× → 1.5× → 2× on the control, and no press can jump over a lens
+    /// switch-over factor without landing on it (the model pulls a step that
+    /// crosses one back onto it).
+    ///
+    /// Half a step rather than the system camera's snap between its lens
+    /// buttons, because the elder who cannot see the small print is also
+    /// judging *how much* bigger they need it, and one big press that overshoots
+    /// leaves them hunting in the other direction.
+    var zoomStep: Double = 0.5
+
+    /// How near a pinch **release** has to stop to a lens switch-over factor,
+    /// as a fraction of that factor, before the release lands on the factor
+    /// itself. 0.08 ⇒ within 8 % — 1.84–2.16 around a device whose published
+    /// switch-over factor is 2.0. A fraction, so it needs no unit: it is
+    /// applied to the factors the device itself publishes.
+    ///
+    /// The two halves of the rule are different on purpose: a press *snaps*
+    /// (deterministic, one lens change per press), a pinch *settles* (the
+    /// elder's own fingers chose the number). Snapping a release that stopped
+    /// just short of a switch is what stops the readout and the picture
+    /// disagreeing about which lens is live. `0` disables the settle.
+    var zoomSwitchSnapTolerance: Double = 0.08
+
+    /// The focus point a session starts at, in the device's normalized
+    /// coordinates (0,0 top-left … 1,1 bottom-right): the centre of the frame,
+    /// which is where a package being held up for the camera is.
+    ///
+    /// A tap on the picture replaces it; this is only the starting point, and
+    /// it is set for the same reason the mode below is: focus left wherever the
+    /// previous session put it is focus on nothing in particular.
+    var focusPointOfInterest: CGPoint = CGPoint(x: 0.5, y: 0.5)
+
+    /// Whether the autofocus scan is restricted to the near range
+    /// (`AVCaptureAutoFocusRangeRestrictionNear`).
+    ///
+    /// This is the single most useful line in this section for the owner's
+    /// complaint. The elder holds a packet 20–40 cm from the lens; the pattern
+    /// behind them — a window, a shelf, a television — is what an unrestricted
+    /// autofocus loves to find, and a camera that has focused on the far wall
+    /// draws the packet as a soft blur. Restricting the scan to near subjects
+    /// removes the far wall from the search space entirely, so the only way the
+    /// focus can land is on something the elder's own arm can reach. It takes
+    /// effect only in `.autoFocus`/`.continuousAutoFocus`, which is why the
+    /// focus mode is always set after it.
+    var focusNearRangeRestriction: Bool = true
+
+    /// Whether smooth autofocus is asked for where the device supports it.
+    ///
+    /// **Off**, from the SDK's own guidance: "disabling smooth autofocus is
+    /// more appropriate for video processing where a fast autofocus is
+    /// necessary" — and this pipeline is video processing, where the pass that
+    /// follows a focus change is the one that reads the small print. Smooth
+    /// autofocus is slower by design (it trades speed for a cine-like
+    /// transition), which is the wrong trade when the elder is waiting to hear
+    /// what the packet says. The key exists because smooth focus also hunts
+    /// less on a shaking handheld, and a device check may prefer it.
+    var smoothAutoFocus: Bool = false
+
+    /// Whether the session starts with focus held at its current lens position
+    /// (`.locked`) rather than searching.
+    ///
+    /// Off: a lock at a distance nobody chose is a lock on the wrong distance,
+    /// and the elder's first sight of the screen should already be focused. It
+    /// is the focus-lock control's *initial* state; the control itself (a tap
+    /// on the lock) is what the elder uses while reading.
+    var focusLockDefault: Bool = false
+
+    /// Whether the device reports substantial changes to the subject area
+    /// (`AVCaptureDevice.subjectAreaDidChangeNotification`).
+    ///
+    /// On, and this is the half of "keep it sharp" that a tap cannot do. A tap
+    /// focuses where the elder pointed; a packet that is then turned over, held
+    /// closer, or moved into a shadow is a different subject area at a
+    /// different distance, and the device's own report is what brings the focus
+    /// search back to the close range without the elder having to tap again.
+    /// The response is deliberately *continuous* focus at the near range and not
+    /// another one-shot scan: a one-shot on every report would pump the lens
+    /// every time a hand crossed the frame, which is the hunting that makes a
+    /// picture look worse than it is.
+    var subjectAreaChangeMonitoring: Bool = true
+
+    /// Whether the platform may turn video HDR on for the active format
+    /// (`automaticallyAdjustsVideoHDREnabled`).
+    ///
+    /// On — which is also the platform's own default, stated here rather than
+    /// inherited so the choice is the feature's. HDR is *for* the owner's
+    /// complaint: a glossy packet under a kitchen light is exactly the scene
+    /// that clips its highlights and buries its small print, and the platform's
+    /// tone mapping recovers both ends of that range before the frame reaches
+    /// Vision.
+    ///
+    /// The escape hatch matters more than the default: an adaptive tone map is
+    /// a luma remap, and luma is what the frame-change gate compares (see
+    /// `frameChangeThreshold`). If a device check ever shows the reduced cadence
+    /// not engaging on a still scene — the gate reading HDR adaptation as the
+    /// picture changing — this is the first key to turn off.
+    var automaticVideoHDR: Bool = true
 
     // MARK: Tracking / stabilisation
 

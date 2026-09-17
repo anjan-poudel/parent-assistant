@@ -96,6 +96,38 @@ final class SessionCaptureLayer: LiveCameraCaptureLayer {
         lock.lock(); let sink = self.sink; lock.unlock()
         sink?(sampleBuffer)
     }
+
+    // MARK: Zoom and focus (owner report, 2026-09-17)
+
+    /// The harness's device is a single-lens one: the pipeline tests are about
+    /// recognition and translation, and a device that reports switch-over
+    /// factors would only be scenery here. (The zoom *maths* is where switching
+    /// is exercised — `LiveCameraZoomModelTests` — and the seam's calls are
+    /// logged here for the ones that touch them.)
+    var zoomCapabilities = CameraZoomCapabilities.unknown
+    var videoZoomFactor: Double = 1
+    var supportsFocusPointOfInterest = true
+
+    @discardableResult
+    func setVideoZoomFactor(_ factor: Double) -> Double {
+        videoZoomFactor = factor
+        log.append("camera.zoom")
+        return factor
+    }
+
+    func focus(atDevicePoint point: CGPoint) {
+        log.append("camera.focus")
+    }
+
+    func focusContinuously(atDevicePoint point: CGPoint) {
+        log.append("camera.focusContinuously")
+    }
+
+    func setFocusLocked(_ locked: Bool) {
+        log.append("camera.focusLock")
+    }
+
+    func observeSubjectAreaChanges(_ handler: @escaping () -> Void) {}
 }
 
 /// T-007's recognition seam, stubbed: scripted regions, logged lifecycle.

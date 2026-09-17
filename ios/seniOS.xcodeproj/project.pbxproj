@@ -81,6 +81,7 @@
 		230CEC8F8DD9E013062224E6 /* InterpreterSelectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1A8F4202C570AB8F399728 /* InterpreterSelectorTests.swift */; };
 		23CB2025BF1FCD04600B9D9F /* YouTubeTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = C074CAB06970C46E5B8D1BEE /* YouTubeTool.swift */; };
 		24063BA0F9864FEA4F692324 /* LeafViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1161B9D8F9059F5D5881DF1C /* LeafViews.swift */; };
+		246223CB44AA3F1D3FEB409D /* LiveCameraZoomModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0AC946B96FF0A409765B8CE /* LiveCameraZoomModelTests.swift */; };
 		24B4AA4B81484DAC236FD7FB /* LiveCameraSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EFB3EB7B234BE0D88A4D750 /* LiveCameraSessionTests.swift */; };
 		24FC7CD6D9377AB0FC52B3FE /* LiveOverlayPlacement.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15E17666ABFBC03903FA54C /* LiveOverlayPlacement.swift */; };
 		251CB309C418E266CFB4B4AF /* XlmrUnigramTokenizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A61F0E9B07D88E8F258E591 /* XlmrUnigramTokenizer.swift */; };
@@ -451,6 +452,7 @@
 		B88D485B89EA0B1BD272C660 /* ElderlyAssistantUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7819E4D2F60A8F4142CCF548 /* ElderlyAssistantUITests.swift */; };
 		B918DF80233F3689FA25C9EA /* SwiftWhisper in Frameworks */ = {isa = PBXBuildFile; productRef = 78120995D110095344005A8D /* SwiftWhisper */; };
 		B959556DF8BD50A27574C072 /* FeedSettingsStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 953034AEF26B09C5F6DE6F36 /* FeedSettingsStoreTests.swift */; };
+		B9C99F762312A46AE9002081 /* LiveCameraZoomModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF743E8E227065F1E4868918 /* LiveCameraZoomModel.swift */; };
 		B9E74095264C78DEF214CF66 /* GeminiCommandInterpreter.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB0AD257D28FBCF5949AC60D /* GeminiCommandInterpreter.swift */; };
 		BB48343C3752042D74512389 /* LiveTranslateSessionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7AD9281901B134268D25B3C7 /* LiveTranslateSessionModel.swift */; };
 		BD2315D81F3F042A819A5420 /* FeedMediaResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = C162389E74311BF3301489B1 /* FeedMediaResolver.swift */; };
@@ -1135,6 +1137,7 @@
 		AE5A7A7BF2077907CF177EDF /* LiveTranslationPipelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTranslationPipelineTests.swift; sourceTree = "<group>"; };
 		AEC123B9E266E9C6B1C45131 /* OverlayRenderProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlayRenderProbe.swift; sourceTree = "<group>"; };
 		AF94EF103968B07445324A94 /* CallLinks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallLinks.swift; sourceTree = "<group>"; };
+		B0AC946B96FF0A409765B8CE /* LiveCameraZoomModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveCameraZoomModelTests.swift; sourceTree = "<group>"; };
 		B1335E0760DD3A920FB22D80 /* FeedsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedsView.swift; sourceTree = "<group>"; };
 		B1FDEF634A12A4E179A53F21 /* ResponseVoiceSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResponseVoiceSelectionTests.swift; sourceTree = "<group>"; };
 		B23ED5C6DE4D8B5D3F32756C /* FreeFormEventServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FreeFormEventServiceTests.swift; sourceTree = "<group>"; };
@@ -1314,6 +1317,7 @@
 		FDADF751C3E88E7BCE67D6AD /* LLM.swift */ = {isa = PBXFileReference; lastKnownFileType = folder; name = LLM.swift; path = vendor/LLM.swift; sourceTree = SOURCE_ROOT; };
 		FE811FACF80BAA62A9F6C1D9 /* WarmStart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WarmStart.swift; sourceTree = "<group>"; };
 		FED1E5343F765632EF56FEBE /* TimerAlarmEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerAlarmEngineTests.swift; sourceTree = "<group>"; };
+		FF743E8E227065F1E4868918 /* LiveCameraZoomModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveCameraZoomModel.swift; sourceTree = "<group>"; };
 		FF81CDFC6907A32734288D91 /* AlarmTimerCommandParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlarmTimerCommandParserTests.swift; sourceTree = "<group>"; };
 		FF8A64B10D6831804634E41B /* ChannelPreferenceStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelPreferenceStoreTests.swift; sourceTree = "<group>"; };
 		FFD2F93E4848F1F25F54E66A /* ElderlyAssistantTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = ElderlyAssistantTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -1476,6 +1480,7 @@
 				CEA430E7C93589A5A4FA2877 /* ConsentPromptController.swift */,
 				BD05F007969D8708FE505596 /* LabelTranslationCache.swift */,
 				88D9D46058BAC93AFFEAD8F8 /* LiveCameraSession.swift */,
+				FF743E8E227065F1E4868918 /* LiveCameraZoomModel.swift */,
 				F15E17666ABFBC03903FA54C /* LiveOverlayPlacement.swift */,
 				566FA01A61825783A01FCDB5 /* LiveOverlayTextMetrics.swift */,
 				AA9706D1E82290044EBC4FCB /* LiveTextDetector.swift */,
@@ -2017,6 +2022,7 @@
 				BCDEA02AEEA777BEAA79B1F7 /* LiveCameraCaptureGuaranteeTests.swift */,
 				6213F9675D88C5FB097FF3E8 /* LiveCameraCaptureStub.swift */,
 				3EFB3EB7B234BE0D88A4D750 /* LiveCameraSessionTests.swift */,
+				B0AC946B96FF0A409765B8CE /* LiveCameraZoomModelTests.swift */,
 				CA0DDE4F6987CD014EA2C533 /* LiveOverlayPlacementGeometryTests.swift */,
 				DD045949BD2562B861577461 /* LiveOverlayPlacementTests.swift */,
 				5EE75C0B25470981950BCD44 /* LiveTextDetectorTests.swift */,
@@ -2891,6 +2897,7 @@
 				24063BA0F9864FEA4F692324 /* LeafViews.swift in Sources */,
 				2AF6ABDD1D9AA240DBCDA1F9 /* LiveCallDetector.swift in Sources */,
 				E0D4FBD1C9136469FF7BD93B /* LiveCameraSession.swift in Sources */,
+				B9C99F762312A46AE9002081 /* LiveCameraZoomModel.swift in Sources */,
 				24FC7CD6D9377AB0FC52B3FE /* LiveOverlayPlacement.swift in Sources */,
 				8DD43D31A4B39C90EF4B3B46 /* LiveOverlayTextMetrics.swift in Sources */,
 				9D9B1293775CA119A5152382 /* LiveTextDetector.swift in Sources */,
@@ -3195,6 +3202,7 @@
 				68C7D9D01D89F63CC01103B0 /* LiveCameraCaptureGuaranteeTests.swift in Sources */,
 				7BC7E7C76546C31FF3E1D68F /* LiveCameraCaptureStub.swift in Sources */,
 				24B4AA4B81484DAC236FD7FB /* LiveCameraSessionTests.swift in Sources */,
+				246223CB44AA3F1D3FEB409D /* LiveCameraZoomModelTests.swift in Sources */,
 				6B3D9B0F017F7D37A9D1FA1B /* LiveOverlayPlacementGeometryTests.swift in Sources */,
 				6D7F86BF179DB59112E73473 /* LiveOverlayPlacementTests.swift in Sources */,
 				1812AD99862723B5C2128B26 /* LiveTextDetectorTests.swift in Sources */,

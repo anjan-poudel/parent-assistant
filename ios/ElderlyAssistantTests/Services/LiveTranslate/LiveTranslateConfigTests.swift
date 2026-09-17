@@ -146,6 +146,93 @@ final class LiveTranslateConfigTests: XCTestCase {
         XCTAssertEqual(config, LiveTranslateConfig(cloudMaxRetries: 0))
     }
 
+    // MARK: The camera quality knobs (owner report, 2026-09-17)
+
+    /// The zoom, lens-switching and focus defaults, in one place. The owner's
+    /// report is "blurry and not sharp enough for small packaging text", so
+    /// the shipped values are the *sharper* ones: the bigger frame, the wide
+    /// camera's native view as the floor, and the near-range focus search on.
+    func testTheCameraQualityDefaultsAreTheShippedOnes() {
+        let config = LiveTranslateConfig.default
+
+        XCTAssertEqual(config.cameraQuality, .high)
+        XCTAssertEqual(config.minVideoZoom, 1.0)
+        XCTAssertEqual(config.maxVideoZoom, 8.0)
+        XCTAssertEqual(config.initialVideoZoom, 1.0)
+        XCTAssertEqual(config.zoomStep, 0.5)
+        XCTAssertEqual(config.zoomSwitchSnapTolerance, 0.08)
+
+        // The zoom keys are in the *readout's* unit — the numbers the elder
+        // reads, which are the numbers the system camera prints for the same
+        // lens — and the shipped floor is the wide camera's own view: 0.5 there
+        // is the ultra-wide, which is the worst of the three lenses for a line
+        // of small print. The conversion into the device's factors is the
+        // model's (`LiveCameraZoomModelTests`).
+        XCTAssertGreaterThanOrEqual(config.minVideoZoom, 1.0,
+                                    "the floor is the wide camera's view, never the ultra-wide")
+
+        XCTAssertEqual(config.focusPointOfInterest, CGPoint(x: 0.5, y: 0.5))
+        XCTAssertTrue(config.focusNearRangeRestriction,
+                      "the owner's report is small print on a packet held close: the near range is where it is")
+        XCTAssertFalse(config.smoothAutoFocus,
+                       "a smooth focus is an unhurried focus; reading a label is not video")
+        XCTAssertFalse(config.focusLockDefault,
+                       "the camera searches until the elder says hold still")
+        XCTAssertTrue(config.subjectAreaChangeMonitoring)
+        XCTAssertTrue(config.automaticVideoHDR,
+                      "HDR keeps highlights on a glossy packet from swallowing dark type")
+    }
+
+    /// The values have to be *coherent*, not merely present: a range that runs
+    /// backwards, a step that is not a step or a focus point outside the
+    /// device's own normalized space is a configuration defect no test of one
+    /// number would catch.
+    func testTheZoomAndFocusDefaultsAreInternallyCoherent() {
+        let config = LiveTranslateConfig.default
+
+        XCTAssertLessThan(config.minVideoZoom, config.maxVideoZoom,
+                          "an upside-down range traps the model's clamp")
+        XCTAssertGreaterThan(config.zoomStep, 0, "a zero step is a dead control")
+        XCTAssertLessThanOrEqual(config.zoomStep, config.maxVideoZoom - config.minVideoZoom,
+                                 "a step larger than the whole range is not a step")
+        XCTAssertTrue((config.minVideoZoom...config.maxVideoZoom).contains(config.initialVideoZoom),
+                      "the session must open inside the range it will be held to")
+        XCTAssertGreaterThan(config.zoomSwitchSnapTolerance, 0,
+                             "0 would make the release-snap to a lens switch-over a no-op")
+        XCTAssertLessThan(config.zoomSwitchSnapTolerance, 1,
+                          "1 would snap every release onto the nearest switch, however far")
+        for axis in ["x", "y"] {
+            let value = axis == "x" ? config.focusPointOfInterest.x : config.focusPointOfInterest.y
+            XCTAssertTrue((0...1).contains(value),
+                          "a device point is normalized: \(axis) is \(value), outside 0...1")
+        }
+    }
+
+    /// The knobs are knobs: a household with a different phone, or an owner who
+    /// wants the ultra-wide's field of view, changes one value here and not an
+    /// expression in a component.
+    func testTheCameraQualityKnobsAreConfigurableAndNotLiterals() {
+        var config = LiveTranslateConfig.default
+        config.cameraQuality = .standard
+        config.minVideoZoom = 0.5
+        config.maxVideoZoom = 4
+        config.initialVideoZoom = 2
+        config.zoomStep = 0.25
+        config.zoomSwitchSnapTolerance = 0.02
+        config.focusPointOfInterest = CGPoint(x: 0.25, y: 0.25)
+        config.focusNearRangeRestriction = false
+        config.smoothAutoFocus = true
+        config.focusLockDefault = true
+        config.subjectAreaChangeMonitoring = false
+        config.automaticVideoHDR = false
+
+        XCTAssertNotEqual(config, LiveTranslateConfig.default)
+        XCTAssertEqual(config.minVideoZoom, 0.5)
+        XCTAssertEqual(config.zoomStep, 0.25)
+        XCTAssertEqual(config.focusPointOfInterest, CGPoint(x: 0.25, y: 0.25))
+        XCTAssertFalse(config.automaticVideoHDR)
+    }
+
     // MARK: OD7 — the cost cap is not owned here
 
     /// Mirror-based, so it fails if a second cap is added under any name:
