@@ -46,13 +46,16 @@ final class LiveTranslateCopyTests: XCTestCase {
         "livetranslate.command.hideOriginal",
         "livetranslate.command.repeatLast",
         "livetranslate.command.close",
-        // T-033: the freeze-frame control's two labels (one control, two
-        // states). **These two keys are the only feature copy added after the
-        // OD3 draft review, and they are drafts awaiting it** — see
+        // T-033: the freeze-frame control's three labels (one control, two
+        // states, and the wait between the tap and the held picture — the
+        // owner's device-testing follow-up: "could not tell if it was working,
+        // slow, or broken"). **These three keys are the only feature copy added
+        // after the OD3 draft review, and they are drafts awaiting it** — see
         // `specs/T-033-notes.md`'s open items. They are listed here because
         // the pinned inventory is what makes that debt visible: an entry
         // without a surface, or a surface without an entry, is a drift.
         "livetranslate.snapshot.capture",
+        "livetranslate.snapshot.holding",
         "livetranslate.snapshot.live"
     ]
 
