@@ -686,7 +686,7 @@ final class CommandRouter {
                         // Cache learning keys the ORIGINAL utterance, not
                         // the "हो" that confirmed it.
                         pendingTranscript = taken.sourceTranscript
-                        dispatchInterpreted(taken.command)
+                        dispatchInterpreted(taken.command, raw: raw)
                         pendingTranscript = nil
                     }
                     return .unrecognised(transcript: raw)
@@ -1100,6 +1100,35 @@ final class CommandRouter {
                     speak(text: line)
                 }
                 return .unrecognised(transcript: raw)
+            case .festivalDate:
+                // [FESTIVAL-DATE] (2026-09-17) Deterministic festival
+                // date answers ("दशैँ कहिले हो") — resolved from the
+                // festival catalog for the CURRENT Bikram Sambat year,
+                // so the answer never depends on encoder availability,
+                // band policy or model calibration. An unresolvable date
+                // (no panchang table, no astronomy fallback) says so
+                // honestly rather than guessing a day.
+                guard let festivalID = relaxed.festivalID,
+                      let festival = NepaliFestivalCatalog.all.first(where: { $0.id == festivalID }),
+                      let bsYear = BikramSambat.bsDate(from: clock())?.year,
+                      let resolved = festival.resolvedDate(inBSYear: bsYear),
+                      let gregorian = BikramSambat.adDate(from: resolved.bsDate) else {
+                    emit(eventType: "festival_date_unknown", outcome: "info")
+                    speak(key: "festival.dateUnknown")
+                    return .unrecognised(transcript: raw)
+                }
+                emitIntentKeywordMatch(relaxed)
+                let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+                let spokenName = locale.identifier.hasPrefix("ne")
+                    ? festival.nameNepali : festival.nameEnglish
+                let formatter = DateFormatter()
+                formatter.locale = locale
+                formatter.dateStyle = .long
+                formatter.timeStyle = .none
+                emit(eventType: "festival_date_answered", outcome: "success")
+                speak(text: L10n.fmt("festival.fallsOn", locale: locale,
+                                     spokenName, formatter.string(from: gregorian)))
+                return .unrecognised(transcript: raw)
             }
         }
 
@@ -1255,7 +1284,7 @@ final class CommandRouter {
                         self.emit(eventType: "rephrase_question_started", outcome: "info")
                     } else {
                         self.pendingTranscript = raw
-                        self.dispatchInterpreted(command)
+                        self.dispatchInterpreted(command, raw: raw)
                         self.pendingTranscript = nil
                     }
                 } else {
@@ -2347,7 +2376,7 @@ final class CommandRouter {
     /// sentence without depending on the wall clock.
     var clock: () -> Date = { Date() }
 
-    private func dispatchInterpreted(_ command: InterpretedCommand) {
+    private func dispatchInterpreted(_ command: InterpretedCommand, raw: String) {
         switch command.action {
         case .ackMed:
             // [NO-GIBBERISH] (2026-09-07) The model's ack text is flavor
@@ -2363,7 +2392,7 @@ final class CommandRouter {
         case .call:
             handleCall(command)
         case .setReminder:
-            handleSetReminder(command)
+            handleSetReminder(command, raw: raw)
         case .healthQuery:
             // First-class stub intent — honest "not yet" (spec §5.1).
             emit(eventType: "command_health_query_stub", outcome: "info")
@@ -2379,7 +2408,7 @@ final class CommandRouter {
         case .createCalendarEvent:
             // [CALENDAR-EVENTS] (2026-09-13) Real executor — splits off
             // the stub this action shared with `suggest_video`.
-            handleCreateCalendarEvent(command)
+            handleCreateCalendarEvent(command, raw: raw)
         case .suggestVideo:
             // Honest not-yet stub (spec §7.3): the video executor lands
             // with the video phase — never pretend a video was queued.
@@ -2436,7 +2465,17 @@ final class CommandRouter {
     /// `set_reminder`: parse the spoken time expression, create the
     /// reminder via scheduler storage, and confirm with the time spoken
     /// back (spec §5.1, §5.2).
-    private func handleSetReminder(_ command: InterpretedCommand) {
+    private func handleSetReminder(_ command: InterpretedCommand, raw: String) {
+        // [SLOT-PROVENANCE] (2026-09-17) A time the transcript never
+        // contained is an invention (the "दशैँ कहिले हो" → fabricated
+        // १०:३० case). Treat it as missing and ask — the elder's real
+        // answer costs one extra line, a hallucinated reminder costs
+        // their trust.
+        guard TimeSlotProvenance.timeSlotIsDefensible(raw: raw, time: command.time) else {
+            emit(eventType: "command_set_reminder_time_fabricated", outcome: "info")
+            speak(key: "router.reminderNoTime")
+            return
+        }
         guard let timeString = command.time,
               let time = NepaliTimeParser.parse(timeString) else {
             emit(eventType: "command_set_reminder_no_time", outcome: "info")
@@ -2474,11 +2513,20 @@ final class CommandRouter {
     ///
     /// The `clock()` seam (not `Date()`) feeds "now", so the
     /// bare-time-rolls-to-tomorrow decision is deterministic under test.
-    private func handleCreateCalendarEvent(_ command: InterpretedCommand) {
+    private func handleCreateCalendarEvent(_ command: InterpretedCommand, raw: String) {
         guard let topic = command.topic?.trimmingCharacters(in: .whitespacesAndNewlines),
               !topic.isEmpty else {
             emit(eventType: "command_calendar_event_no_title", outcome: "info")
             speak(key: "router.calendarEventNoTitle")
+            return
+        }
+
+        // [SLOT-PROVENANCE] Same fabrication guard as set_reminder: a
+        // calendar event time the transcript never contained is an
+        // invention — ask for the time instead of writing it.
+        guard TimeSlotProvenance.timeSlotIsDefensible(raw: raw, time: command.time) else {
+            emit(eventType: "command_calendar_event_time_fabricated", outcome: "info")
+            speak(key: "router.calendarEventNoTime")
             return
         }
 

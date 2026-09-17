@@ -1159,14 +1159,18 @@ enum ModelCatalog {
             // The installed DIRECTORY name inside the ModelStore; the zip
             // contains exactly this directory at its top level.
             filename: "t033-encoder-int8.mlmodelc",
-            // The tester's own copy of the zip: the app's Documents copy by
-            // default, or the INTENT_ENCODER_SPIKE_ZIP path when one is set
-            // (the reserved-TLD placeholder only if the override is
-            // explicitly blanked). The 109 MB spike zip itself is
-            // deliberately not committed and is installed by passing it to
-            // `installCoreMLEncoder(fromZip:for:)`. See
-            // `intentEncoderSpikeZipURL(environment:)`.
-            downloadURL: intentEncoderSpikeZipURL(),
+            // [ENCODER-REPROVISION] (2026-09-17) The REMOTE zip — the
+            // models-release copy the standard downloader fetches when the
+            // tester's local Documents copy is gone (an app update that
+            // replaced the container wiped it; the encoder then silently
+            // stopped serving). The local Documents/env handshake
+            // (`intentEncoderSpikeZipURL`) remains the installer's
+            // preferred source; this URL is the self-healing path. The
+            // zip must be PUBLISHED to the models repo release `v4`
+            // (server-side step, owned by Anjan) — until then the
+            // download fails honestly and the installer retries on the
+            // next readiness check.
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v4/t033-encoder-int8-mlmodelc.zip")!,
             sizeBytes: 109_079_441,
             sha256: "d8f549ecb2e37b44bbcf21a243cbfc00f917d47f7f4e7187d547f51168afbcdc",
             // int8 encoder body ~118 MB; ~2 GB device floor is generous

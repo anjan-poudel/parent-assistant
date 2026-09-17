@@ -11387,6 +11387,40 @@
         }
       }
     },
+    "festival.fallsOn": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ falls on %2$@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ %2$@ मा पर्छ।"
+          }
+        }
+      }
+    },
+    "festival.dateUnknown": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I couldn't work out the date for that one."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "त्यसको मिति पत्ता लगाउन सकिन।"
+          }
+        }
+      }
+    },
     "router.reminderSet": {
       "extractionState": "manual",
       "localizations": {
