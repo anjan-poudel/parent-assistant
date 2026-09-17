@@ -190,7 +190,20 @@ final class LiveOverlayPlacementGeometryTests: XCTestCase {
             // and nothing else (owner UX rework, 2026-09-17).
             XCTAssertTrue(inPlaceRect.insetBy(dx: -1e-9, dy: -1e-9).contains(own),
                           "the in-place box must cover the printed text it replaces")
-            XCTAssertGreaterThan(inPlaceRect.width, own.width)
+            XCTAssertGreaterThanOrEqual(inPlaceRect.width, own.width,
+                                        "and it is never narrower than the text it replaces")
+            XCTAssertGreaterThanOrEqual(inPlaceRect.height, own.height)
+            // The box the fit was decided on is a ceiling, not a promise: the
+            // drawn box hugs the translation (`inPlaceTightBox`), so for a
+            // translation that needs no more room than the sign it is the
+            // sign's own rect — and it can never exceed what was proved clear
+            // of the region's neighbours.
+            let ceiling = LiveOverlayPlacement.inPlaceMaxBox(regionRect: own, obstacles: [],
+                                                             bounds: CGRect(origin: .zero,
+                                                                            size: portraitContainer),
+                                                             growth: policy().inPlaceMaxGrowth)
+            XCTAssertTrue(ceiling.insetBy(dx: -1e-9, dy: -1e-9).contains(inPlaceRect),
+                          "the drawn box stays inside the ceiling the fit was measured against")
             let surface = LiveTranslateOverlaySurface(placements: placements, policy: policy(),
                                                       locale: Locale(identifier: "ne-NP"))
 

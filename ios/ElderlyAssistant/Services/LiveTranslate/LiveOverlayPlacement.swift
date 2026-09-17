@@ -36,6 +36,13 @@ import Foundation
 //    grow meet at the midpoint and can touch but never overlap. That is the
 //    "stacked and clustered" complaint answered with a property rather than a
 //    tuning pass.
+//  - **The box hugs the text it replaces.** `inPlaceMaxBox` is where the box
+//    may reach; `inPlaceTightBox` is where it stops — the union of the
+//    region's own printed rect and the measured text block plus the policy's
+//    padding, and nothing more. A short translation is not left centred in a
+//    slab of empty ink (the owner's device verdict, 2026-09-17), and because
+//    the union can only shrink a box that was already proved clear of its
+//    neighbours, the no-stacking property is untouched.
 //  - **A callout never covers its own region's printed text.** That hard
 //    constraint outranks the preferences (fewest other regions covered, then
 //    nearest). A conflict is never resolved by covering the text it is about.
@@ -97,8 +104,26 @@ enum LiveOverlayPlacement {
         let inPlaceMinPointSize: CGFloat
         /// The ceiling on how far the in-place box may grow past the region's
         /// own text box, as a factor (`inPlaceMaxGrowth`). A ceiling, not an
-        /// entitlement: the growth is taken only from free space.
+        /// entitlement: the growth is taken only from free space, and only as
+        /// far as the measured translation actually reaches.
         let inPlaceMaxGrowth: Double
+        /// The room between the in-place box's edge and the text block it
+        /// holds, in points (`inPlacePadding`). The in-place box is a
+        /// replacement rather than a bubble, so this is the whole margin the
+        /// translation has: tight enough that the box reads as the sign's own
+        /// type replaced.
+        let inPlacePadding: CGFloat
+        /// The in-place box's corner radius, in points (`inPlaceCornerRadius`):
+        /// a corner that hugs the text line height rather than the bubble
+        /// token's pill radius.
+        let inPlaceCornerRadius: CGFloat
+        /// How far a region's rect may drift from the rect last rendered for
+        /// it before the overlay adopts the new geometry, as a fraction of the
+        /// container dimension (`overlayGeometryStickiness`). Carried in the
+        /// policy because it is measured in the same container the rects were
+        /// measured in; consumed by the overlay's geometry memory, not by the
+        /// placement itself.
+        let geometryStickiness: Double
         /// The rendered point size floor for the primary line
         /// (`overlayMinPointSize`, floored by the app's body minimum).
         let minPointSize: CGFloat
@@ -289,13 +314,62 @@ enum LiveOverlayPlacement {
         for pointSize in inPlacePointSizes(policy: policy) {
             let measured = measure(result.text, pointSize, .primary, box.width)
             guard measured.width <= box.width, measured.height <= box.height else { continue }
-            return .fits(box: box,
+            return .fits(box: inPlaceTightBox(regionRect: regionRect,
+                                              textSize: measured,
+                                              ceiling: box,
+                                              padding: policy.inPlacePadding),
                          line: LiveOverlayTextLine(text: result.text,
                                                    pointSize: pointSize,
                                                    weight: .primary))
         }
 
         return .ineligible(.translationDoesNotFitRegion)
+    }
+
+    /// The box the in-place form is **drawn** in: the region's own printed rect
+    /// and the measured text block — plus the policy's padding — and nothing
+    /// else.
+    ///
+    /// `inPlaceMaxBox` is where the box *may* reach; this is where it *stops*.
+    /// Until 2026-09-17 the drawn box was the ceiling itself, so a short
+    /// translation sat centred in a slab of empty ink — which is exactly what
+    /// the owner saw and named ("the bubbles are blue background with white
+    /// text … they still jump around"). Making the box hug its own text is the
+    /// second half of the answer, and the first is the geometry memory that
+    /// stops the box moving at all.
+    ///
+    /// Three properties, all of them load-bearing:
+    ///
+    ///  1. **The region's own rect is always covered.** The box is the union
+    ///     with it, never a rect placed inside it: the translation *replaces*
+    ///     the printed text, so the printed text is under an opaque fill, and
+    ///     the box never reveals the original around its own edges.
+    ///  2. **The text block and its padding are always inside.** The union
+    ///     contains the padded block, so the view cannot clip what the fit
+    ///     condition just measured — and the width is additionally floored at
+    ///     the width the text was *measured* at, so the drawn box can never be
+    ///     narrower than the wrap the measurement used (a narrower box would
+    ///     re-wrap the text taller and clip it vertically).
+    ///  3. **The ceiling still bounds it.** The union of two rects inside
+    ///     `ceiling` is inside `ceiling`, so the no-two-boxes-stack property
+    ///     `inPlaceMaxBox` establishes is untouched: the tight box is a subset
+    ///     of the box that was proved not to overlap its neighbours.
+    static func inPlaceTightBox(regionRect: CGRect,
+                                textSize: CGSize,
+                                ceiling: CGRect,
+                                padding: CGFloat) -> CGRect {
+        guard regionRect.width > 0, regionRect.height > 0,
+              ceiling.width > 0, ceiling.height > 0 else { return ceiling }
+
+        // Never narrower than the measurement width, never wider than the
+        // ceiling, and never narrower than the text it replaces.
+        let width = min(max(textSize.width + 2 * padding, regionRect.width), ceiling.width)
+        let height = min(max(textSize.height + 2 * padding, regionRect.height), ceiling.height)
+        let block = clamp(CGRect(x: regionRect.midX - width / 2,
+                                 y: regionRect.midY - height / 2,
+                                 width: width, height: height),
+                          into: ceiling)
+        return regionRect.union(block)
     }
 
     /// The point sizes the in-place form is tried at, **largest first**: the

@@ -324,7 +324,14 @@ final class LiveOverlayPlacementTests: XCTestCase {
         }
         XCTAssertEqual(line.pointSize, policy.inPlaceMinPointSize)
         XCTAssertEqual(line.text, translation)
-        XCTAssertEqual(fittedBox, box)
+        // The box the fit was decided on is the box that is drawn — as the
+        // ceiling, not as the rect: the drawn box hugs the text it holds
+        // (`inPlaceTightBox`), so it is the same box *at most*, never a box
+        // that reaches past what was proved clear of its neighbours.
+        XCTAssertLessThanOrEqual(fittedBox.width, box.width + 1e-9)
+        XCTAssertLessThanOrEqual(fittedBox.height, box.height + 1e-9)
+        XCTAssertTrue(box.insetBy(dx: -1e-9, dy: -1e-9).contains(fittedBox),
+                      "the drawn box stays inside the ceiling the fit was measured against")
         XCTAssertGreaterThanOrEqual(line.pointSize, LiveTranslateConfig.default.inPlaceMinPointSize,
                                     "the 16pt floor the owner asked to be configurable")
     }
@@ -348,6 +355,141 @@ final class LiveOverlayPlacementTests: XCTestCase {
         XCTAssertEqual(box.midY, regionRect.midY, accuracy: 1e-9)
     }
 
+    // MARK: Scenario: the box hugs the text it replaces (owner device verdict)
+
+    /// The drawn box is the **text block plus the configured padding**, not the
+    /// ceiling the fit was decided on: a short translation is no longer centred
+    /// in a slab of empty ink, which is what the owner saw and named ("the
+    /// bubbles are blue background with white text"). The ceiling is still the
+    /// bound — the box never reaches past what was proved clear of its
+    /// neighbours — and the region's own printed rect is still covered.
+    func testTheInPlaceBoxIsTheTextBlockAndItsPaddingAndNothingElse() {
+        let policy = surfacePolicy()
+        let padding = policy.inPlacePadding
+        let translation = "Members only beyond this point"
+        let text = LiveOverlayTextMetrics.measure(translation, pointSize: policy.minPointSize,
+                                                  weight: .primary)
+        // A sign comfortably narrower and shorter than its own translation, so
+        // the box has to grow — and must stop at the text, not at the ceiling.
+        let regionRect = CGRect(x: 100, y: 300, width: text.width - 40, height: text.height)
+        let ceiling = LiveOverlayPlacement.inPlaceMaxBox(regionRect: regionRect, obstacles: [],
+                                                         bounds: bounds,
+                                                         growth: policy.inPlaceMaxGrowth)
+        let box = LiveOverlayPlacement.inPlaceTightBox(regionRect: regionRect,
+                                                       textSize: text,
+                                                       ceiling: ceiling,
+                                                       padding: padding)
+
+        XCTAssertGreaterThan(text.width + 2 * padding, regionRect.width,
+                             "the premise: the translation needs more room than the sign has")
+        XCTAssertGreaterThan(ceiling.width, regionRect.width,
+                             "the premise: there is free space to grow into")
+        // The floor: never narrower or shorter than the text (within the
+        // ceiling) needs, so the view cannot clip what the fit measured.
+        XCTAssertGreaterThanOrEqual(box.width + 1e-9, min(text.width + 2 * padding, ceiling.width))
+        XCTAssertGreaterThanOrEqual(box.height + 1e-9, min(text.height + 2 * padding, ceiling.height))
+        // …and the ceiling of the ceiling: never bigger than the padded block,
+        // so the box is a replacement rather than a slab.
+        XCTAssertLessThanOrEqual(box.width,
+                                 max(regionRect.width, min(text.width + 2 * padding, ceiling.width)) + 1e-9,
+                                 "a box wider than the text it holds is the bubble the owner rejected")
+        XCTAssertLessThanOrEqual(box.height,
+                                 max(regionRect.height,
+                                     min(text.height + 2 * padding, ceiling.height)) + 1e-9)
+        XCTAssertLessThan(box.width, ceiling.width,
+                          "the box stops well inside the ceiling the fit was measured against")
+        // The two properties the rework must not have traded away.
+        XCTAssertTrue(box.insetBy(dx: -1e-9, dy: -1e-9).contains(regionRect),
+                      "the printed text it replaces is covered")
+        XCTAssertTrue(ceiling.insetBy(dx: -1e-9, dy: -1e-9).contains(box),
+                      "and the box can only shrink a rect already proved clear of its neighbours")
+    }
+
+    /// A translation shorter than the sign it replaces: the box is the sign's
+    /// own rect — it never shrinks below the printed text and never pads it out
+    /// into a bubble.
+    func testAShortTranslationInABigSignDrawsTheSignsOwnRect() {
+        let policy = surfacePolicy()
+        let (region, result) = resolvedScene()
+        let own = rect(of: region)
+
+        guard case .fits(let box, _) = outcome(own, result: result) else {
+            return XCTFail("the premise: the translation fits in place")
+        }
+        // Component-wise, to a millionth of a point: the box is the printed
+        // rect *unioned* with the text block, and a union is a new rectangle
+        // whose edges may land one unit in the last place away from the rect it
+        // was made from. The claim is geometric — "the box is the sign's own
+        // rect" — so the comparison is too.
+        XCTAssertEqual(box.minX, own.minX, accuracy: 1e-6)
+        XCTAssertEqual(box.minY, own.minY, accuracy: 1e-6)
+        XCTAssertEqual(box.width, own.width, accuracy: 1e-6)
+        XCTAssertEqual(box.height, own.height, accuracy: 1e-6)
+    }
+
+    /// The in-place look is the config's, and it is deliberately not the
+    /// bubble token's: the owner's verdict was that the boxes read as bubbles
+    /// floating over the picture. Tight padding, a corner that hugs a line of
+    /// type, and no leader line — the callout keeps the pill's values because
+    /// it *is* a surface beside the text.
+    func testTheInPlacePaddingAndCornerAreTheConfigsAndNotTheBubbleTokens() {
+        let policy = surfacePolicy()
+        let config = LiveTranslateConfig.default
+
+        XCTAssertEqual(policy.inPlacePadding, config.inPlacePadding,
+                       "the drawn inset is the configured one (NFR-LCT-011)")
+        XCTAssertEqual(policy.inPlaceCornerRadius, config.inPlaceCornerRadius)
+        XCTAssertGreaterThanOrEqual(policy.inPlacePadding, 4,
+                                    "the translation still needs breathing room")
+        XCTAssertLessThanOrEqual(policy.inPlacePadding, 6,
+                                 "more than this and a short translation floats in a bubble again "
+                                 + "(owner device verdict, 2026-09-17)")
+        XCTAssertLessThan(policy.inPlaceCornerRadius, DesignTokens.bubbleCornerRadius,
+                          "the in-place corner hugs the text line; the pill's radius is a bubble's")
+        XCTAssertNotEqual(policy.inPlacePadding, policy.pillPadding,
+                          "the callout and the in-place box are different surfaces: one value "
+                          + "cannot serve both")
+    }
+
+    /// The geometry stickiness is the config's too, and it is carried in the
+    /// policy because it is measured in the same container the rects were: the
+    /// overlay reads it from there rather than spelling a threshold of its own.
+    func testTheGeometryStickinessIsTheConfigsValue() {
+        let config = LiveTranslateConfig.default
+        XCTAssertEqual(surfacePolicy().geometryStickiness, config.overlayGeometryStickiness,
+                       "one threshold, and the config owns it")
+        XCTAssertGreaterThan(config.overlayGeometryStickiness, 0)
+        XCTAssertLessThan(config.overlayGeometryStickiness, 0.1,
+                          "a threshold that big would let a box sit half a screen from its sign")
+
+        var looser = config
+        looser.overlayGeometryStickiness = 0.08
+        XCTAssertEqual(LiveTranslateOverlaySurface.policy(config: looser,
+                                                          alwaysShowOriginal: false).geometryStickiness,
+                       0.08,
+                       "moving the config moves what the overlay holds")
+    }
+
+    /// The placement **carries** the threshold and never **reads** it: the
+    /// policy is where a value measured in the container's own dimensions
+    /// belongs, so the overlay reads it from one place (`LiveTranslateOverlaySurface.policy`)
+    /// rather than spelling a threshold of its own — but holding a rect is the
+    /// overlay's business, so no function of the placement may consult it. A
+    /// read is a member access; the declaration is not one, and neither is the
+    /// doc comment above it (the scan sees comment-stripped code).
+    func testThePlacementDoesNotUseTheGeometryStickiness() {
+        let file = FeatureSourceScan.iosDirectory().appendingPathComponent(
+            "ElderlyAssistant/Services/LiveTranslate/LiveOverlayPlacement.swift")
+        let code = FeatureSourceScan.codeText(of: file)
+        XCTAssertFalse(code.isEmpty)
+        XCTAssertNotNil(FeatureSourceScan.firstMatch(of: "let geometryStickiness: Double", in: code),
+                        "the policy carries the configured threshold, so the overlay reads it from "
+                        + "the config's one construction site")
+        XCTAssertNil(FeatureSourceScan.firstMatch(of: "\\.geometryStickiness", in: code),
+                     "and the placement never reads it: the placement is a pure function of its "
+                     + "inputs, and holding a rect is the overlay's business, not the placement's")
+    }
+
     /// The measurement is made at the width the box will draw at: a fit decided
     /// unwrapped would pass for a translation the view then clips.
     func testTheFitIsMeasuredThroughTheInjectedClosureAtTheBoxesWidth() {
@@ -365,8 +507,14 @@ final class LiveOverlayPlacementTests: XCTestCase {
 
         XCTAssertFalse(seen.isEmpty)
         for measurement in seen {
-            XCTAssertEqual(measurement.width, box.width, accuracy: 1e-9,
-                           "the text is measured against the box it is drawn in, not an unbounded line")
+            // At least the drawn box's width, never less: the fit is measured
+            // against the ceiling it may reach, and the drawn box is that
+            // ceiling (or the text's own tight box inside it). A measurement
+            // *narrower* than the drawn box would be a wrap the view does not
+            // reproduce, which is risk R2 (owner UX rework, 2026-09-17).
+            XCTAssertGreaterThanOrEqual(measurement.width, box.width - 1e-9,
+                                        "the text is measured against the box it is drawn in, "
+                                        + "not an unbounded line")
         }
         XCTAssertTrue(seen.contains { $0.text == result.text
             && $0.pointSize == policy.minPointSize && $0.weight == .primary },
