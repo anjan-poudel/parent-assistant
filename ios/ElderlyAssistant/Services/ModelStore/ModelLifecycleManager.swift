@@ -187,6 +187,18 @@ struct ModelLifecycleSnapshot: Equatable {
     /// from the load-driven victim order (cooldown or quarantine). The
     /// guard's firing is otherwise only visible in the denials it causes.
     let quarantined: [ModelSlot]
+
+    /// [MODEL-WARDEN] Step 3 — the seconds the ordering prices each
+    /// registered slot's reload at, measured p95 where a `load_ms` exists
+    /// and the documented prior otherwise. Reported because the eviction
+    /// order is otherwise invisible: a capture can see *who* was evicted
+    /// but not what the warden thought it was trading away.
+    let reloadCostSeconds: [ModelSlot: TimeInterval]
+
+    /// [MODEL-WARDEN] Step 3 — the measured `W(t)` for the current class
+    /// (the kernel's `phys_footprint` minus the ledger's own total), or
+    /// `nil` before any sample. The class budget's premise, observable.
+    let measuredWorkingSetBytes: UInt64?
 }
 
 // MARK: - The manager
@@ -243,6 +255,13 @@ final class ModelLifecycleManager {
 
     private struct Entry {
         let footprint: ModelFootprint
+        /// [MODEL-WARDEN] Step 3 — *which* artifact currently backs this
+        /// slot. A slot is a pipeline position, not a file: `.speechToText`
+        /// is the ANE WhisperKit graph (77 s to reload) on one run and a
+        /// whisper.cpp q5 (2 s) on another, and the cost model's prior
+        /// switches on exactly that. Without the id the two are the same
+        /// row and the ordering would price them identically.
+        var modelID: ModelID?
         weak var owner: AnyObject?
         let unload: () -> Void
         let evictable: Bool
@@ -306,6 +325,18 @@ final class ModelLifecycleManager {
     /// Test hook: pins the class budget so arithmetic is not at the mercy of
     /// the host machine's RAM. `nil` in production.
     private let budgetOverrideBytes: UInt64?
+
+    /// [MODEL-WARDEN] Step 3 — what each resident costs to bring back, from
+    /// measurements the app already takes.
+    ///
+    /// It lives here, behind this lock, rather than as a separate service,
+    /// for one reason: **the reader and the writer must not be able to
+    /// disagree**. The victim order and the idle sweep are computed under
+    /// the same lock the readings are recorded under, so an ordering is
+    /// always made against the same numbers a capture would report. A
+    /// standalone cost service would need its own queue and would make
+    /// "which cost did this decision use" a question with two answers.
+    private var costModel = ModelCostModel()
 
     private let lock = NSLock()
     private var entries: [ModelSlot: Entry] = [:]
@@ -385,6 +416,7 @@ final class ModelLifecycleManager {
         let box = resident.map(ModelResidentBox.init)
         if var existing = entries[slot] {
             existing = Entry(footprint: footprint,
+                             modelID: modelID,
                              owner: owner,
                              unload: unload,
                              evictable: evictable,
@@ -397,6 +429,7 @@ final class ModelLifecycleManager {
             entries[slot] = existing
         } else {
             entries[slot] = Entry(footprint: footprint,
+                                  modelID: modelID,
                                   owner: owner,
                                   unload: unload,
                                   evictable: evictable,
@@ -1041,7 +1074,8 @@ final class ModelLifecycleManager {
     // MARK: - [MODEL-WARDEN] Step 2 — the ladder, preemption, the thrash guard
 
     /// The load-driven victim order: **lowest priority first, then heavy
-    /// before light, least-recently-used within that, bigger frees more.**
+    /// before light, then — Step 3 — the lowest residency value per second
+    /// of reload cost.**
     ///
     /// This is `lruEvictionOrderLocked` with the ladder in front of it, and
     /// the two are deliberately separate functions. The pressure sweeps keep
@@ -1051,27 +1085,69 @@ final class ModelLifecycleManager {
     /// about *who the warden prefers to inconvenience*, which is a question
     /// only a load-driven eviction is asking.
     ///
-    /// With every resident at the default `.foreground` — i.e. every
-    /// registration written before Step 2, and every one that has no reason
-    /// to say otherwise — this reduces exactly to the Step 1 order.
+    /// ### What Step 3 replaced, and what it deliberately did not
+    ///
+    /// The first two keys are Step 2's and are unchanged: the ladder is the
+    /// ordering's first word, and heavy-before-light is still true here *in
+    /// addition* to being enforced structurally in `planVictimsLocked`
+    /// (`heavy + light`). What used to follow them was
+    /// `(least recent first, bigger frees more)` — an ordinal rule that
+    /// prices every resident's reload at zero, which is how an LRU sweep
+    /// ends up buying 1 GB back for 77 s. It is now one scalar,
+    /// `ModelCostModel.evictionPressure`: `idleSeconds × liveBytes ÷
+    /// reloadCostSeconds`, descending. LRU and size are still both *in*
+    /// there, weighted; the reload term is what is new.
+    ///
+    /// The two properties that follow are the ones the tests pin:
+    ///
+    ///  - **The ANE STT goes last among victims of equal residency value.**
+    ///    Its 77 s reload makes its pressure ~15× smaller than a 2 GB
+    ///    brain's at equal idleness, so it is not taken while a cheaper
+    ///    heavy resident can close the gap. §7.4's accepted default ("only
+    ///    under pressure or an explicit swap; never for an LRU sweep"), as
+    ///    arithmetic rather than as a special case in the comparator.
+    ///  - **It is still a victim when nothing else can close the gap.** The
+    ///    order is a preference, not a protection: the 4B swap that needs
+    ///    3.4 GB still walks past a sleeping brain and takes the STT, which
+    ///    is the "STT and the 4B never co-reside" invariant the suite
+    ///    already encodes.
+    ///
+    /// `config.costAwareEvictionEnabled == false` restores Step 2's exact
+    /// comparator — the field-test switch for a capture that needs to A/B
+    /// the ordering without a rebuild.
     private func loadEvictionOrderLocked(excluding excluded: ModelSlot?,
                                          priority: ModelPriority,
                                          now: Date,
                                          config: ModelWardenConfig,
                                          withheld: Set<ModelSlot>) -> [ModelSlot] {
         let spared = guardSparedLocked(now: now, config: config, priority: priority)
+        let deviceClass = currentDeviceClassLocked()
         return entries.compactMap {
-            slot, entry -> (ModelSlot, ModelPriority, Bool, Date, UInt64)? in
+            slot, entry -> (ModelSlot, ModelPriority, Bool, Date, UInt64,
+                            Double)? in
             guard entry.isResident, entry.evictable,
                   entry.pinCount == 0, slot != excluded,
                   entry.owner != nil, !withheld.contains(slot),
                   spared[slot] == nil else { return nil }
+            let pressure = costModel.evictionPressure(
+                slot: slot,
+                modelID: entry.modelID,
+                footprint: entry.footprint,
+                deviceClass: deviceClass,
+                idleSeconds: now.timeIntervalSince(entry.lastUse))
             return (slot, entry.priority, entry.footprint.isHeavy,
-                    entry.lastUse, entry.footprint.liveBytes)
+                    entry.lastUse, entry.footprint.liveBytes, pressure)
         }
         .sorted { lhs, rhs in
             if lhs.1 != rhs.1 { return lhs.1 < rhs.1 }     // lowest priority first
             if lhs.2 != rhs.2 { return lhs.2 && !rhs.2 }   // heavy before light
+            if config.costAwareEvictionEnabled {
+                // Step 3: the lowest residency value per second of reload
+                // pain goes first. The ordinal pair below is still the
+                // tie-break, so two residents with identical pressure (zero
+                // idle time, say) order exactly as they did in Step 2.
+                if lhs.5 != rhs.5 { return lhs.5 > rhs.5 }
+            }
             if lhs.3 != rhs.3 { return lhs.3 < rhs.3 }     // least recent first
             return lhs.4 > rhs.4                           // bigger frees more
         }
@@ -1431,8 +1507,37 @@ final class ModelLifecycleManager {
     }
 
     /// Idle sweep: unload every evictable heavy model whose last use is
-    /// older than `idleEvictionSeconds`. The clock is injected, so tests
+    /// older than its own idle threshold. The clock is injected, so tests
     /// drive this directly instead of waiting.
+    ///
+    /// [MODEL-WARDEN] Step 3 — the threshold is **per resident** and derived,
+    /// not one constant for every slot:
+    ///
+    ///     threshold = max(idleEvictionSeconds, reloadCostSeconds / penalty)
+    ///
+    /// A resident whose reload outlasts the shipped window is worth holding
+    /// through it, and the resident where that bites is the ANE STT (77 s
+    /// prior, and 135 s after a failed ANE compile) sitting under a 120 s
+    /// sweep that would otherwise pick the one moment the household is
+    /// between turns to throw away a graph it will then wait 77 s to rebuild.
+    ///
+    /// Two properties keep this honest and keep Step 3 out of the TTL's way,
+    /// both pinned by tests:
+    ///
+    ///  - **The configured base is a floor.** With the prior at 77 s and the
+    ///    penalty at 1.0 the derived window is *below* 120 s, so every
+    ///    shipped threshold and every existing idle-sweep test is unmoved;
+    ///    only a measurement longer than the base moves anything.
+    ///  - **A pressed working set suppresses the extension entirely** —
+    ///    see `workingSetIsPressedLocked`. An app whose own footprint has
+    ///    grown past the class's assumption must not respond by holding
+    ///    models longer.
+    ///
+    /// The sweep is also the one place the warden releases a resident for
+    /// *no* reason, which is why §7.4's "never for an LRU sweep" is about
+    /// the ordering rather than about disabling this path: the sweep still
+    /// takes the ANE STT at 120 s in the shipped configuration, and what the
+    /// cost model adds is a reason for a measured resident to be held longer.
     @discardableResult
     func evictIdle(now: Date? = nil) -> [ModelSlot] {
         let reference = now ?? clock()
@@ -1443,11 +1548,22 @@ final class ModelLifecycleManager {
         reapExpiredReservations(now: reference)
         lock.lock()
         pruneDeadOwnersLocked()
+        let deviceClass = currentDeviceClassLocked()
+        let pressed = workingSetIsPressedLocked(for: deviceClass)
+        let penalty = wardenConfig.idleEvictionPenalty
         let idle = entries.compactMap { slot, entry -> ModelSlot? in
             guard entry.isResident, entry.evictable,
                   entry.pinCount == 0, entry.footprint.isHeavy else { return nil }
             let unusedFor = reference.timeIntervalSince(entry.lastUse)
-            return unusedFor >= idleEvictionSeconds ? slot : nil
+            let threshold = costModel.idleThresholdSeconds(
+                slot: slot,
+                modelID: entry.modelID,
+                footprint: entry.footprint,
+                deviceClass: deviceClass,
+                configuredBase: idleEvictionSeconds,
+                idleEvictionPenalty: penalty,
+                workingSetIsPressed: pressed)
+            return unusedFor >= threshold ? slot : nil
         }
         idle.forEach { markNonResidentLocked($0) }
         lock.unlock()
@@ -1696,7 +1812,26 @@ final class ModelLifecycleManager {
             quarantined: guardSparedLocked(now: clock(),
                                            config: wardenConfig,
                                            priority: .foreground)
-                .keys.sorted { $0.rawValue < $1.rawValue })
+                .keys.sorted { $0.rawValue < $1.rawValue },
+            reloadCostSeconds: reloadCostsLocked(deviceClass: deviceClass),
+            measuredWorkingSetBytes: costModel.workingSetBytes(for: deviceClass))
+    }
+
+    /// The reload cost the ordering would use for each registered slot.
+    /// Finite entries only: `.processLifetime` slots have no reload to price
+    /// and reporting them as `infinity` would put a value in the snapshot
+    /// that no arithmetic can consume.
+    private func reloadCostsLocked(
+        deviceClass: ModelLifecycleBudget.DeviceClass) -> [ModelSlot: TimeInterval] {
+        var costs: [ModelSlot: TimeInterval] = [:]
+        for (slot, entry) in entries {
+            let cost = costModel.reloadCostSeconds(slot: slot,
+                                                   modelID: entry.modelID,
+                                                   footprint: entry.footprint,
+                                                   deviceClass: deviceClass)
+            if cost.isFinite { costs[slot] = cost }
+        }
+        return costs
     }
 
     /// [MODEL-WARDEN] Step 0 — report the app's actual footprint alongside
@@ -1720,11 +1855,151 @@ final class ModelLifecycleManager {
         lock.unlock()
         let footprint = probe.physFootprintBytes
         guard footprint > 0 else { return }
+        let ceiling = probe.availableProcessMemoryBytes + footprint
+        // [MODEL-WARDEN] Step 3 — the same reading, kept. Two things read it:
+        // `workingSetBytes(for:)` is the measured `W(t)` the class budget was
+        // derived from, and `workingSetIsPressed` is what stops the cost
+        // model from *lengthening* holds on a device whose non-model
+        // footprint has already grown past the assumption. Recording here
+        // rather than at a call site means the sample the events carry and
+        // the sample the ordering uses are the same one.
+        lock.lock()
+        costModel.record(ModelFootprintCostSample(
+            deviceClass: currentDeviceClassLocked(),
+            physFootprintBytes: footprint,
+            ceilingBytes: ceiling,
+            residentLiveBytes: resident,
+            transientLiveBytes: transient,
+            at: clock()))
+        lock.unlock()
         onEvent?(.footprintSample(
             physFootprintBytes: footprint,
-            ceilingBytes: probe.availableProcessMemoryBytes + footprint,
+            ceilingBytes: ceiling,
             residentLiveBytes: resident,
             transientLiveBytes: transient))
+    }
+
+    // MARK: - [MODEL-WARDEN] Step 3 — the cost model's surface
+
+    /// Record one measured load. Load sites call this the moment the model
+    /// lands, with the same `load_ms` they already put on the observability
+    /// bus (`WhisperKitSpeechRecognizer` and `WhisperSpeechRecognizer` both
+    /// measure it around their own construction).
+    ///
+    /// It is fire-and-forget by design: a load that succeeds and reports its
+    /// cost a moment late must not fail, and the *next* eviction decision is
+    /// the first thing that can use it. A reading that never arrives leaves
+    /// the key on its documented prior, which is a state the ordering
+    /// handles — see `ModelReloadPrior`.
+    ///
+    /// `slot`/`modelID` are the caller's own, not looked up: the caller
+    /// knows which artifact it just built, and a re-derivation from the
+    /// catalog here would be a second answer to a question that has one.
+    func noteLoadCost(loadMs: Double, slot: ModelSlot, modelID: ModelID?) {
+        lock.lock()
+        costModel.record(loadMs: loadMs,
+                         slot: slot,
+                         modelID: modelID,
+                         deviceClass: currentDeviceClassLocked(),
+                         at: clock())
+        lock.unlock()
+    }
+
+    /// Seconds to bring the slot's current resident back. `nil` when the
+    /// slot is unregistered.
+    ///
+    /// The reader is the manager's own ordering, but it is public because
+    /// the honest thing to show a household or a capture is the number the
+    /// decision was made with, not a re-derivation — and the answer only
+    /// exists under this lock.
+    func reloadCostSeconds(for slot: ModelSlot) -> Double? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let entry = entries[slot] else { return nil }
+        return costModel.reloadCostSeconds(slot: slot,
+                                           modelID: entry.modelID,
+                                           footprint: entry.footprint,
+                                           deviceClass: currentDeviceClassLocked())
+    }
+
+    /// What has been measured for one slot: sample count and percentiles.
+    func measuredLoadCost(for slot: ModelSlot) -> LoadCost {
+        lock.lock()
+        defer { lock.unlock() }
+        return costModel.cost(slot: slot,
+                              modelID: entries[slot]?.modelID,
+                              deviceClass: currentDeviceClassLocked())
+    }
+
+    /// The measured working set `W(t)` for the current class, or `nil`
+    /// before any `footprintSample`. This is the number the class budget
+    /// assumed was ~300 MB; a capture that shows otherwise is a capture
+    /// saying the budget's premise moved.
+    func measuredWorkingSetBytes() -> UInt64? {
+        lock.lock()
+        defer { lock.unlock() }
+        return costModel.workingSetBytes(for: currentDeviceClassLocked())
+    }
+
+    // MARK: [MODEL-WARDEN] Step 3 — the class policy
+
+    /// Whether this device may be **offered** `entry` at all, and if not, the
+    /// reason to show. This is the check the Settings rows call.
+    ///
+    /// It lives on the ledger rather than in the view for the reason the
+    /// whole file exists: the class comes from `currentDeviceClassLocked()`,
+    /// i.e. the same probe and the same boundaries the admissions are made
+    /// against. A view reading `ProcessInfo.processInfo.physicalMemory`
+    /// would be answering about a different device than the one being
+    /// budgeted, and would disagree with the ledger on exactly the phones
+    /// where the answer matters.
+    ///
+    /// The warm STT is likewise read from the ledger's own registration —
+    /// `.speechToText`'s `modelID`, which is the model it will actually load
+    /// — rather than reconstructed by the caller from a preference. That
+    /// matters on the STT's two backends: the ANE graph and the whisper.cpp
+    /// context differ by 0.1 GB, which is enough to change a 3B's sentence
+    /// on the standard class.
+    ///
+    /// **Advisory by construction: it refuses nothing.** The policy says what
+    /// a class may be offered; enforcement stays where Step 2 put it (the
+    /// `soloOverBudget` escape hatch for a preference already stored, then
+    /// the ledger's own gate). Nothing here can make a resident model
+    /// unloadable, which is the property that keeps a stored preference
+    /// reachable no matter what the row says.
+    ///
+    /// `physicalMemoryBytes` is the probe's. `budgetOverrideBytes` is a test
+    /// hook that pins the *class* only, so a test host whose RAM disagrees
+    /// with the pinned class gets the probe's device in this answer — the
+    /// truthful reading, since the catalog's `minDeviceRAMBytes` is a claim
+    /// about the phone and not about the class.
+    func availability(of entry: ModelCatalogEntry) -> ModelAvailability {
+        lock.lock()
+        let deviceClass = currentDeviceClassLocked()
+        let warmSTTModelID = entries[.speechToText]?.modelID
+        lock.unlock()
+        return ModelBudgetPolicy.policy(for: deviceClass)
+            .availability(of: entry,
+                          physicalMemoryBytes: probe.physicalMemoryBytes,
+                          warmSTTLiveBytes: ModelBudgetPolicy.warmSTTLiveBytes(
+                              forSTTModelID: warmSTTModelID))
+    }
+
+    /// Whether the measured working set has outgrown what the class budget
+    /// assumed for it. When true the cost model stops extending idle holds:
+    /// the app, not the models, is what has grown, and holding models longer
+    /// would make that worse rather than better.
+    private func workingSetIsPressedLocked(
+        for deviceClass: ModelLifecycleBudget.DeviceClass)
+    -> Bool {
+        guard let measured = costModel.workingSetBytes(for: deviceClass) else {
+            return false
+        }
+        // The policy's own figure is the assumption being checked, and it is
+        // per-class (0.30 GB on compact/standard, 0.40 GB on roomy) rather
+        // than a constant here — the class is the thing that was sized.
+        let assumed = ModelBudgetPolicy.policy(for: deviceClass).workingSetIdleBytes
+        return measured > assumed
     }
 
     /// Whether a slot currently counts as resident. Test/observability seam.
@@ -1815,22 +2090,56 @@ final class ModelLifecycleManager {
         onEvent?(.evicted(slot: slot, reason: reason))
     }
 
-    // MARK: - [MODEL-WARDEN] Step 3 seams (documented, NOT built)
+    // MARK: - [MODEL-WARDEN] Step 3 — what is built, and what is still a seam
     //
-    // Step 2 leaves three things deliberately unfinished, recorded here
-    // rather than implied by their absence, because each is a *policy*
-    // question and Step 3 is where policy lives:
+    // ### Built in Step 3
     //
-    // 1. **The cost model.** The ladder is ordinal; Step 3's
-    //    `ModelBudgetPolicy` is where "what is this resident worth" becomes
-    //    a number — the seconds to reload it, the ANE specialization it
-    //    costs, whether it can be reloaded at all. `ModelReservation`
-    //    already carries `priority` and `preempted`, and the events carry
-    //    the outcomes, so the evidence that policy would be tuned against
-    //    is being recorded now. The ladder's ordering is the seam: a cost
-    //    model replaces `loadEvictionOrderLocked`'s sort, nothing else.
+    // 1. **The cost model** (`ModelCostModel`). The ladder is still ordinal
+    //    and still the victim order's first key; what sits behind it is now
+    //    `idleSeconds × liveBytes ÷ reloadCostSeconds` instead of the pair
+    //    "(least recent, bigger)". The readings come from the app's own
+    //    `load_ms` (`noteLoadCost`) and the ledger's `footprintSample`
+    //    (`sampleFootprint`), both of which existed before this step — Step
+    //    3 gave them a reader.
+    // 2. **The derived idle threshold.** `evictIdle` uses
+    //    `max(idleEvictionSeconds, reloadCost / idleEvictionPenalty)` per
+    //    resident, so a measured reload longer than the configured base
+    //    holds a resident through it. Nothing shipped moves: the ANE prior
+    //    (77 s) and the brain priors are all under 120 s.
+    // 3. **The class policy** (`ModelBudgetPolicy`) — what may be *chosen*,
+    //    as distinct from what may be *resident*. The two are deliberately
+    //    different questions and this class answers only the first: the
+    //    ledger admits, the policy offers. It acts in two places, both of
+    //    them *choice* surfaces: `availability(of:)` here (the seam the
+    //    Settings rows and picker options ask, so the answer comes from the
+    //    class this ledger admits against rather than from a second guess
+    //    about the device) and the Settings screen itself, where an
+    //    unavailable model is shown, marked, and not selectable, and its
+    //    download is not offered.
     //
-    // 2. **Asynchronous acks.** `ModelResident.releaseForWarden` is
+    //    **What it deliberately does not do: re-point what gets loaded.**
+    //    The catalog's language defaults do not consult the policy, so
+    //    "Automatic" on a Nepali 6 GB phone still resolves to the 4B
+    //    (`ModelCatalog.languageDefaultPicks[.llamaBase]["ne"]`) and a
+    //    preference stored before this step is still served — through the
+    //    ledger's `soloOverBudget` escape hatch, which is the path that
+    //    exists so a resident is never unloadable. Closing that gap means
+    //    either moving the ladder into `LanguageModelResolver` /
+    //    `defaultEntry` (a per-class accuracy-for-latency trade the proposal
+    //    leaves open as §7 Q1) or refusing a stored preference at load time
+    //    (which the escape hatch exists to prevent). Both are product
+    //    decisions with a rollback path, and both are named in the Step 3
+    //    report rather than taken here.
+    // 4. **§7.4's ANE default**, as arithmetic rather than as a special
+    //    case. See `loadEvictionOrderLocked`. "Evict the ANE STT last among
+    //    victims of equal residency value" is what the 77 s denominator
+    //    *produces*; "never for an LRU sweep" is honoured in the ordering
+    //    (the sweep does not consult the cost model's order) while the
+    //    sweep's own 120 s threshold stays where the shipped tests pin it.
+    //
+    // ### Still a seam
+    //
+    // 5. **Asynchronous acks.** `ModelResident.releaseForWarden` is
     //    synchronous by construction, which is what makes it callable from
     //    the reservation's fail-fast path. An owner whose drop is genuinely
     //    deferred (a decode that must reach a safe point first) cannot use
@@ -1838,12 +2147,32 @@ final class ModelLifecycleManager {
     //    the ack awaitable means a two-phase reservation whose `reserve`
     //    suspends — a different API shape, and
     //    `ModelWardenConfig.unloadAckDeadlineSeconds` is already the bound
-    //    it would be judged against.
+    //    it would be judged against. **What the upgrade has to preserve**,
+    //    in the order it will discover them: (a) `reserve` is called from
+    //    synchronous paths today (`prepareLoad` on the boot warm, the
+    //    recognizers' load sites), so an `async` overload cannot replace the
+    //    existing one — it has to be a second entry point; (b) the refusal
+    //    grace (`refusalGraceUntil`) becomes a *real* deadline rather than a
+    //    remembered opinion, which means the slot must be re-askable when it
+    //    expires rather than on the next load's walk; (c) the cost model
+    //    gains nothing from it — reload cost is measured from `load_ms`,
+    //    not from how the ack arrived.
     //
-    // 3. **Owner-side conformance.** The tier's generator registers a
+    // 6. **Owner-side conformance.** The tier's generator registers a
     //    `ModelResident`; the recognizers do not yet, so their residency is
     //    still taken through the Step 1 path. Adding it is a per-owner
     //    change with its own test surface (whisper.cpp's perAttemptContext
     //    refusal is the interesting one) and it does not change any
     //    arithmetic here.
+    //
+    // 7. **The camera session's reduced budget.** `ModelBudgetPolicy`
+    //    carries `workingSetCameraBytes` and
+    //    `sessionModelBudgetBytes(session: .cameraLive)` computes the number
+    //    (§3.3), and nothing calls it: lowering the model budget for the
+    //    duration of a live-translate session is a `LiveTranslateConfig`
+    //    change and Step 3's non-goals exclude the camera pipeline. The
+    //    arithmetic is here so the wiring is a call and not a derivation.
+    //    Until it is wired, a camera session holds a brain the class budget
+    //    has not reserved room for — which the ledger's reservation path
+    //    still bounds at load time.
 }

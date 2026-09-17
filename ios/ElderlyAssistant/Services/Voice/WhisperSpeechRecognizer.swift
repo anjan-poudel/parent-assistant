@@ -782,6 +782,15 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         lifecycle.commit(reservation)
         lifecycle.didLoad(.speechToText, owner: self)
         let loadMs = Int((CFAbsoluteTimeGetCurrent() - loadStart) * 1000)
+        // [MODEL-WARDEN] Step 3 — this slot is the *other* thing that can
+        // back `.speechToText`, and its reload is a page-in measured in
+        // seconds rather than the ANE graph's 77. Reporting the id here is
+        // what keeps the warden from pricing the two the same: the cost
+        // model's key is `(slot, modelID)`, so the cheap backend does not
+        // inherit the expensive one's prior.
+        lifecycle.noteLoadCost(loadMs: Double(loadMs),
+                               slot: .speechToText,
+                               modelID: modelId)
         // [TURN-TIMING] Model ready — the load ms rides as a point entry
         // when this load happened inside a live turn.
         turnTracer?.mark("asr_loaded", elapsedMs: loadMs)

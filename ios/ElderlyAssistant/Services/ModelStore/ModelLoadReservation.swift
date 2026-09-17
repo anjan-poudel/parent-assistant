@@ -496,6 +496,33 @@ struct ModelWardenConfig: Equatable {
     /// disabled by a rebuild is a guard nobody can field-test against.
     var thrashGuardEnabled: Bool = true
 
+    // MARK: [MODEL-WARDEN] Step 3 — the cost model's two knobs
+
+    /// How much a household minds waiting, relative to the warden minding a
+    /// resident's idleness — the §4.4 D2 penalty, and the one number that
+    /// turns the measured reload cost into an idle window.
+    ///
+    ///     hold the resident until   idleSeconds > reloadCostSeconds / penalty
+    ///
+    /// **1.0 is the shipped value and it is chosen to be inert**: with the
+    /// ANE prior at 77 s the derived window stays under the configured
+    /// 120 s base, so every threshold the app actually applies is unmoved by
+    /// Step 3 — the arithmetic only *raises* a window once a device has
+    /// measured a reload longer than the base (the 135 s ANE recompile is
+    /// the case that exists). A penalty below 1 would shorten holds, and the
+    /// cost model is not allowed to evict more eagerly than the shipped
+    /// policy on its own.
+    var idleEvictionPenalty: Double = 1.0
+
+    /// Whether the cost-aware victim score replaces the ordinal comparator
+    /// in `loadEvictionOrderLocked`. On by default — that replacement is
+    /// Step 3's whole point. Off restores Step 2's exact order (ladder,
+    /// heavy-first, LRU, size), which is what a field capture that shows the
+    /// cost model ordering badly needs in order to A/B it without a
+    /// rebuild. It never affects `lruEvictionOrderLocked`: the pressure
+    /// sweeps are not a cost question.
+    var costAwareEvictionEnabled: Bool = true
+
     static let `default` = ModelWardenConfig()
 }
 

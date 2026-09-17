@@ -3425,10 +3425,18 @@ struct AIModelsSettingsView: View {
                            selection: sttSelection) {
                         Text("settings.ai.automatic").tag(Optional<ModelID>.none)
                         ForEach(ModelCatalog.availableSTTEntries, id: \.id) { entry in
-                            Text(Self.sttOptionLabel(entry: entry,
-                                                     downloaded: isInstalled(entry.id),
-                                                     locale: coordinator.activeLocale))
+                            // [MODEL-WARDEN] Step 3 — an engine this device
+                            // class cannot run is shown and marked, not
+                            // hidden (a stored preference must stay visible)
+                            // and not selectable (the policy decides what
+                            // may be chosen at all). See `unavailableNote`.
+                            Text(Self.sttOptionLabel(
+                                entry: entry,
+                                downloaded: isInstalled(entry.id),
+                                unavailable: !availability(of: entry).isAvailable,
+                                locale: coordinator.activeLocale))
                                 .tag(Optional(entry.id))
+                                .disabled(!availability(of: entry).isAvailable)
                         }
                     }
                     .pickerStyle(.menu)
@@ -3470,10 +3478,17 @@ struct AIModelsSettingsView: View {
                            selection: brainSelection) {
                         Text("settings.ai.automatic").tag(Optional<ModelID>.none)
                         ForEach(ModelCatalog.availableBrainEntries, id: \.id) { entry in
-                            Text(Self.sttOptionLabel(entry: entry,
-                                                     downloaded: isInstalled(entry.id),
-                                                     locale: coordinator.activeLocale))
+                            // [MODEL-WARDEN] Step 3 — see the STT picker
+                            // above. On the 6 GB class this is the case the
+                            // policy exists for: the curated list leads with
+                            // the 4B, and only the 1.7B may be chosen.
+                            Text(Self.sttOptionLabel(
+                                entry: entry,
+                                downloaded: isInstalled(entry.id),
+                                unavailable: !availability(of: entry).isAvailable,
+                                locale: coordinator.activeLocale))
                                 .tag(Optional(entry.id))
+                                .disabled(!availability(of: entry).isAvailable)
                         }
                     }
                     .pickerStyle(.menu)
@@ -4026,6 +4041,13 @@ struct AIModelsSettingsView: View {
             ModelManagementRow(
                 entry: entry,
                 state: downloadState(for: entry.id),
+                // [MODEL-WARDEN] Step 3 — the class policy's answer for this
+                // row. Read from the ledger, which derives the class from the
+                // same probe it admits against (`ModelLifecycleManager
+                // .availability(of:)`), never from `ProcessInfo` here: a view
+                // that guessed the device would disagree with the ledger on
+                // exactly the phones where the answer matters.
+                unavailableReason: availability(of: entry).reason,
                 onStart: { downloads.start(entry.id) },
                 onCancel: { downloads.cancel(entry.id) },
                 onDelete: {
@@ -4072,12 +4094,54 @@ struct AIModelsSettingsView: View {
     /// "not downloaded yet" note whenever the artifact isn't installed.
     /// Pure (the view computes `downloaded` from store + service state)
     /// so tests can pin both label states.
+    ///
+    /// [MODEL-WARDEN] Step 3 adds one more honest state: `unavailable`
+    /// (the device class cannot run this model — see `unavailableNote`).
+    /// It takes precedence over the download note, because downloading a
+    /// model this phone cannot hold is not a fix for anything: the row
+    /// would gain a progress bar and end up in exactly the state the
+    /// picker is telling the household to avoid. One suffix at a time
+    /// keeps the menu readable at `minCaptionPointSize`.
     static func sttOptionLabel(entry: ModelCatalogEntry,
                                downloaded: Bool,
+                               unavailable: Bool = false,
                                locale: Locale) -> String {
         let name = entry.displayName(locale: locale)
+        if unavailable {
+            return "\(name) — \(L10n.str("model.unavailable.marker", locale: locale))"
+        }
         guard !downloaded else { return name }
         return "\(name) — \(L10n.str("model.notDownloaded", locale: locale))"
+    }
+
+    // MARK: - [MODEL-WARDEN] Step 3 — the class policy at the point of choice
+
+    /// Whether this device may be offered `entry` at all.
+    ///
+    /// Asked of the ledger (`ModelLifecycleManager.shared`) rather than
+    /// computed here. The ledger owns the device class because it owns the
+    /// probe the admissions are made against; a second derivation in the view
+    /// is a second answer, and the two would differ on precisely the phones
+    /// the policy is about. The lock is uncontended and the arithmetic is a
+    /// handful of comparisons per row.
+    private func availability(of entry: ModelCatalogEntry) -> ModelAvailability {
+        ModelLifecycleManager.shared.availability(of: entry)
+    }
+
+    /// The sentence a row shows when the class refuses the model.
+    ///
+    /// Pure, so a test can pin both halves of the wiring: that the reason
+    /// reaches the row, and that the sentence stays content-free (it names a
+    /// memory fact about the phone — never an artifact, a size or an id).
+    /// Falls back to the policy's English copy rather than to the key when a
+    /// language has no row in the string table: a household must never read
+    /// `model.unavailable.overClassBudget` on a Settings screen.
+    static func unavailableNote(_ reason: ModelUnavailabilityReason,
+                                locale: Locale) -> String {
+        let resolved = L10n.str(reason.localizationKey, locale: locale)
+        return resolved == reason.localizationKey
+            ? ModelBudgetPolicy.displayText(for: reason)
+            : resolved
     }
 }
 
@@ -4085,6 +4149,12 @@ private struct ModelManagementRow: View {
     @Environment(\.locale) private var locale
     let entry: ModelCatalogEntry
     let state: ModelDownloadState
+    /// [MODEL-WARDEN] Step 3 — non-nil when this device class cannot run the
+    /// model. Shown, not hidden: the row names the fact, keeps the artifact
+    /// deletable (the declutter rule: "not offered, but still deletable") and
+    /// stops offering the download, because an artifact this phone cannot
+    /// hold is not something to spend a household's data on.
+    var unavailableReason: ModelUnavailabilityReason? = nil
     let onStart: () -> Void
     let onCancel: () -> Void
     let onDelete: () -> Void
@@ -4094,7 +4164,9 @@ private struct ModelManagementRow: View {
             HStack {
                 Text(entry.displayName(locale: locale))
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .foregroundStyle(unavailableReason == nil
+                                     ? DesignTokens.textPrimary
+                                     : DesignTokens.textSecondary)
                 Spacer()
                 actionButton
                 if case .completed = state {
@@ -4110,24 +4182,47 @@ private struct ModelManagementRow: View {
                 }
             }
             statusLine
+            if let reason = unavailableReason {
+                unavailableLine(reason)
+            }
         }
         .padding(.vertical, 6)
+    }
+
+    /// The reason this class refuses the model — one sentence, resolved
+    /// through `AIModelsSettingsView.unavailableNote` (pure + pinned by
+    /// tests). Dimmed like every other status line; deliberately NOT
+    /// `stateError`, because the model is not broken and the household's
+    /// phone is not in a failed state — it is a fact about this device.
+    private func unavailableLine(_ reason: ModelUnavailabilityReason) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "info.circle")
+                .foregroundStyle(DesignTokens.textSecondary)
+            Text(AIModelsSettingsView.unavailableNote(reason, locale: locale))
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundStyle(DesignTokens.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     @ViewBuilder
     private var actionButton: some View {
         switch state {
         case .notStarted, .failed, .cancelled:
-            Button(action: onStart) {
-                Text("model.download")
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 14)
-                    .frame(minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.accent)
-                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+            if unavailableReason == nil {
+                Button(action: onStart) {
+                    Text("model.download")
+                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .frame(minHeight: DesignTokens.minTapTargetSize)
+                        .background(DesignTokens.accent)
+                        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
+            // else: nothing to offer. `unavailableLine` says why, and the
+            // picker option for this model is disabled for the same reason.
         case .queued, .downloading, .verifying:
             Button(action: onCancel) {
                 Text("model.cancel")
