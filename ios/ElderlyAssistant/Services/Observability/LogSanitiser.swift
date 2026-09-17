@@ -69,6 +69,13 @@ struct LogSanitiser {
         // is granted or missing (the ledger's whole diagnostic value).
         "calendar",
         "contacts",
+        // [DECODE-DIAGNOSTIC] (2026-09-17) The Google SCHEMA field an
+        // inbound decode failed on — e.g. "key_not_found:nextSyncToken".
+        // Fixed schema vocabulary (field names + DecodingError kinds),
+        // never content: the value is built by
+        // `GoogleCalendarGateway.decodeDetail(from:)`, whose only inputs
+        // are the error kind and the coding path.
+        "decode_detail",
         // [TURN-TIMING] The serialized per-turn stage list
         // (`[{stage, ms}, …]`) — stage names and integer durations only,
         // never transcript or reply text (see VoiceTurnLatencyTracer).

@@ -53,6 +53,20 @@ final class GoogleCalendarGatewayTests: XCTestCase {
         ])
     }
 
+    func testInboundDecodeFailureNamesTheSchemaField() async {
+        // A 2xx whose `items` is not an array — the decode must fail
+        // AND name the structure of the mismatch so a Release console
+        // can show exactly which Google field broke it.
+        transport.enqueue(json: ["items": "not-an-array"])
+        let gateway = makeGateway()
+
+        _ = await gateway.listIncoming(syncToken: nil)
+
+        XCTAssertTrue(bus.events(named: "calendar_share_inbound_failed").contains {
+            $0.metadata["decode_detail"] == "type_mismatch:items"
+        })
+    }
+
     func testFetchTokenScopesReportsFailureWithoutABody() async {
         transport.enqueue(json: ["scope": ""])
         let gateway = makeGateway()
