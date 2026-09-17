@@ -369,7 +369,7 @@ struct LiveTranslateOverlaySurface: Equatable {
     /// enough that a box does not visibly lag the sign it is drawn over: a
     /// third of a second is under the time it takes to bring a phone up and
     /// read the sign again, and well over the frame the detector works at.
-    static let positionSmoothingSeconds: TimeInterval = 0.32
+    static let positionSmoothingSeconds: TimeInterval = 0.45
 
     init(placements: [LiveOverlayPlacement.PlacedOverlay],
          policy: LiveOverlayPlacement.Policy,
