@@ -135,6 +135,23 @@ final class LocalBrainChainTests: XCTestCase {
         XCTAssertEqual(reasons, [.subBandConfidence])
     }
 
+    func testCascadeUnloadsThePreferredBrainBeforeTheStandInTakesTheTurn() {
+        // [TRUNCATION-FIX] One turn, one heavy brain: the escalation must
+        // drop the preferred brain's resident model BEFORE the stand-in
+        // loads its own — the 1B + 4B pair is what blew the device budget
+        // and got the app jetsam'd.
+        let subBand = makeCommand(action: .query, confidence: 0.55, reply: "encoder")
+        let answer = makeCommand(action: .query, confidence: 0.9, reply: "standin")
+        let preferred = StubCommandInterpreter(result: subBand)
+        let standIn = StubCommandInterpreter(result: answer)
+        let chain = cascadeChain(preferred: preferred, standIn: standIn) { _ in }
+
+        XCTAssertEqual(interpret(chain, "केही प्रश्न"), answer)
+        XCTAssertEqual(preferred.unloadCount, 1,
+                       "the preferred brain's resident handle must be dropped before escalation")
+        XCTAssertEqual(standIn.callCount, 1)
+    }
+
     func testCascadeServesThePreferredAnswerAtTheBand() {
         // At the band the preferred brain IS the answer: the stand-in is
         // never asked, and nothing is reported as escalated.

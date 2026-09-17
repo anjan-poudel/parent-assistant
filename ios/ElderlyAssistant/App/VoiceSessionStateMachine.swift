@@ -126,6 +126,30 @@ final class VoiceSessionStateMachine: ObservableObject {
         }
     }
 
+    /// Transitions to `newState`, bridging through `.idle` when the
+    /// current state cannot reach it directly — but ONLY when both
+    /// bridge edges are themselves legal (the same legal-edge-only rule
+    /// the awaitingConfirmation opener keeps).
+    ///
+    /// [LAUNCH-TRANSITION-FIX] (2026-09-17) Device/simulator log:
+    /// `Illegal VoiceSessionState transition: error → speaking` asserted
+    /// at launch — the pipeline reported `.error` (mic/audio boot), then
+    /// `.idle` while push speech was still playing
+    /// (`handlePipelineState(.idle)` maps `speakingCount > 0` to
+    /// `.speaking`). `error → speaking` has no direct edge, but
+    /// `error → idle` and `idle → speaking` are both legal. The same
+    /// bridge rescues `stopped → listening` (a capture event landing
+    /// before the session has left `.stopped`).
+    func transitionViaIdle(to newState: VoiceSessionState) {
+        if state != newState,
+           !state.canTransition(to: newState),
+           state.canTransition(to: .idle),
+           VoiceSessionState.idle.canTransition(to: newState) {
+            transition(to: .idle)
+        }
+        transition(to: newState)
+    }
+
     /// Opens the confirmation window unconditionally, bridging through
     /// `.idle` when the current state cannot reach `.awaitingConfirmation`
     /// directly (`.error` and `.stopped` cannot; every state can reach

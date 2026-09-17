@@ -312,6 +312,12 @@ final class LocalBrainChain: CommandInterpreter, InterpreterFailureReporting,
             traceSpan?.finish(output: "escalated to the stand-in",
                               decision: reason.rawValue)
             cascade.onEscalated?(reason)
+            // [TRUNCATION-FIX] One turn, one heavy brain: drop the
+            // preferred brain's resident handle BEFORE the stand-in
+            // loads its own — the 1B + 4B pair is what blew the device
+            // budget and got the app jetsam'd. (Cloud stand-ins have
+            // nothing resident and keep the protocol's no-op.)
+            self.preferred.unload()
             self.dispatch(to: self.standIn, turn: turn, context: context,
                           completion: completion)
         }

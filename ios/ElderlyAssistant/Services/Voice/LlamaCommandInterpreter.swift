@@ -38,6 +38,15 @@ protocol CommandInterpreter: AnyObject {
     func interpret(transcript: String,
                    context: InterpreterContext,
                    completion: @escaping (InterpretedCommand?) -> Void)
+    /// Drop a resident local model before another brain takes the turn
+    /// ([TRUNCATION-FIX]: an escalated turn must never hold two heavy
+    /// brains — the 1B + 4B pair is what got the device jetsam'd).
+    /// Cloud interpreters have nothing resident and keep the no-op.
+    func unload()
+}
+
+extension CommandInterpreter {
+    func unload() {}
 }
 
 /// [LAT-EVIDENCE] (2026-09-12) A local interpreter that distinguishes a
@@ -461,6 +470,13 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
     func unloadModel() {
         llmInstance = nil
         lifecycle.didUnload(.brain, owner: self)
+    }
+
+    /// [TRUNCATION-FIX] `CommandInterpreter.unload()` — the cascade
+    /// drops this brain's handle before a heavier stand-in takes the
+    /// turn.
+    func unload() {
+        unloadModel()
     }
 
     // MARK: - LoRA skeleton
@@ -981,6 +997,16 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
             await withTaskGroup(of: InferenceOutcome.self) { group in
                 group.addTask {
                     do {
+                        // [TRUNCATION-FIX] Pin the resident handle for
+                        // the whole generation — a memory-pressure sweep
+                        // must never pull it out from under the live
+                        // decode (the pinning seam existed, nothing
+                        // production ever called it).
+                        self.lifecycle.beginUse(of: .brain)
+                        defer {
+                            self.lifecycle.endUse(of: .brain)
+                            self.lifecycle.noteUse(of: .brain)
+                        }
                         let output = try await llm.core.generateWithConstraints(
                             from: formattedPrompt,
                             jsonSchema: LlamaGrammar.commandJSONSchema)

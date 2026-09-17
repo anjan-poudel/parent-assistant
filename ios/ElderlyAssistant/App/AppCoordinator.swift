@@ -4039,7 +4039,11 @@ self.noteTalkContractChanged()
             voiceSession.transition(to: .stopped)
             cancelVoiceWatchdog()
         case .idle:
-            voiceSession.transition(to: speakingCount > 0 ? .speaking : .idle)
+            // [LAUNCH-TRANSITION-FIX] `.error → .speaking` has no direct
+            // edge (pipeline error at boot, then `.idle` while push
+            // speech plays); the machine bridges through `.idle`, where
+            // both edges are legal.
+            voiceSession.transitionViaIdle(to: speakingCount > 0 ? .speaking : .idle)
             cancelVoiceWatchdog()
             cancelVoiceStartWatchdog()
             // [VAD-RT] A deferred KWS build that dodged a live capture
@@ -4079,7 +4083,11 @@ self.noteTalkContractChanged()
             // (2026-09-06 field report).
             lastTranscript = nil
             livePartialTranscript = nil
-            voiceSession.transition(to: .listening)
+            // [LAUNCH-TRANSITION-FIX] A capture event can land while the
+            // session is still `.stopped`/`.error` (recycle + immediate
+            // capture); `→ .listening` has no direct edge from either —
+            // bridge through `.idle`, where both edges are legal.
+            voiceSession.transitionViaIdle(to: .listening)
             armVoiceWatchdog()
         case .processing:
             voiceSession.transition(to: .transcribing)
@@ -7876,7 +7884,53 @@ self.noteTalkContractChanged()
             evictable: false
         ) {}
 
+        // [TRUNCATION-FIX] Bridge the ledger's decisions to the
+        // observability bus — `onEvent` used to be assigned only in
+        // tests, so a field capture of the "दशैँ कहिले हो" kill showed
+        // no trace of which model was evicted or admitted.
+        lifecycle.onEvent = { [weak self] event in
+            self?.relayModelLifecycleEvent(event)
+        }
+
         lifecycle.startIdleTimer()
+    }
+
+    /// Observability bridge for `ModelLifecycleEvent` — component
+    /// "model_lifecycle", one event type per decision, metadata carries
+    /// the slot/reason/bytes.
+    private func relayModelLifecycleEvent(_ event: ModelLifecycleEvent) {
+        let type: String
+        let metadata: [String: String]
+        switch event {
+        case .admitted(let slot, let liveBytes, let evicted):
+            type = "admitted"
+            metadata = ["slot": slot.rawValue,
+                        "liveBytes": String(liveBytes),
+                        "evicted": evicted.map(\.rawValue).joined(separator: ",")]
+        case .denied(let slot, let reason):
+            type = "denied"
+            metadata = ["slot": slot.rawValue, "reason": reason.rawValue]
+        case .evicted(let slot, let reason):
+            type = "evicted"
+            metadata = ["slot": slot.rawValue, "reason": reason.rawValue]
+        case .soloOverBudget(let slot, let liveBytes, let budgetBytes):
+            type = "solo_over_budget"
+            metadata = ["slot": slot.rawValue,
+                        "liveBytes": String(liveBytes),
+                        "budgetBytes": String(budgetBytes)]
+        case .memoryPressure(let budgetBytes, let evicted):
+            type = "memory_pressure"
+            metadata = ["budgetBytes": String(budgetBytes),
+                        "evicted": evicted.map(\.rawValue).joined(separator: ",")]
+        }
+        observabilityBus.emit(ObservabilityEvent(
+            component: "model_lifecycle",
+            eventType: type,
+            durationMs: nil,
+            outcome: "info",
+            errorCode: nil,
+            metadata: metadata
+        ))
     }
 
     /// Declares the encoder's ledger row the first time the encoder is
