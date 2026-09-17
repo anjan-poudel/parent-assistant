@@ -25,6 +25,11 @@ final class LiveTranslateConfigTests: XCTestCase {
         XCTAssertEqual(config.regionMatchCentroidDistance, 0.35)
         XCTAssertEqual(config.regionAppearPasses, 2)
         XCTAssertEqual(config.regionMissPasses, 2)
+        // The departure bound (owner device verdict, 2026-09-17): above the
+        // nominal pass interval, so one dropped frame at full cadence is still
+        // not a departure, and well under the 1.4 s two misses cost at the
+        // reduced one.
+        XCTAssertEqual(config.overlayDepartureGraceSeconds, 0.5)
 
         // Decluttering (OD5), both re-tuned by the 2026-09-17 UX rework: a
         // wider merge (clustered same-string boxes become one overlay) and a

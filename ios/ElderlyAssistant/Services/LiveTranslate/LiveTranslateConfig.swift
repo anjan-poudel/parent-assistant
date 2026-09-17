@@ -129,7 +129,42 @@ struct LiveTranslateConfig: Equatable {
 
     /// Consecutive passes a published region must be missed before it is
     /// removed (overlay flicker bound).
+    ///
+    /// This bounds **identity**: how long the stabiliser keeps vouching for a
+    /// region that is no longer seen. It is deliberately not the bound on how
+    /// long the *overlay* may stay — see `overlayDepartureGraceSeconds`, which
+    /// is the elder-visible half of a departure.
     var regionMissPasses: Int = 2
+
+    /// How long a **published** region may stay on screen after its last
+    /// sighting, in seconds (owner device verdict, 2026-09-17: "the
+    /// translation sticks around even when the camera moved away").
+    ///
+    /// `regionMissPasses` bounds departures in *passes*, which is the right
+    /// unit for identity and the wrong one for the overlay. Two consecutive
+    /// misses is 0.5 s at the nominal cadence but **1.4 s** at the reduced
+    /// still-scene cadence (`stableSampleInterval`, 0.7 s) — and the scene is
+    /// still exactly when the elder pans off a sign, so the slow cadence is
+    /// the one a departure almost always runs at. Add the OCR pass and the
+    /// removal's own animation and the translation visibly hangs over text the
+    /// camera left; a *time* bound is the one that matches what the elder
+    /// sees.
+    ///
+    /// A published region whose last sighting is at least this far behind the
+    /// current pass stops being published, so it leaves the emitted set on the
+    /// next pass at the latest: the overlay clears within **one cycle plus
+    /// this grace**, at any cadence. The region keeps its identity, its box
+    /// and its translation until `regionMissPasses` retires it, and re-entering
+    /// the emitted set still costs `regionAppearPasses` fresh consecutive
+    /// sightings — the appearance hysteresis, and with it the anti-jitter the
+    /// two-sided rule exists for, is untouched. Drift-following while visible
+    /// is likewise untouched: a region that is *seen* — recognized or tracked —
+    /// refreshes its last sighting and never comes near this bound.
+    ///
+    /// 0.5 s is deliberately above the nominal pass interval (0.25 s), so one
+    /// dropped pass at full cadence still cannot clear a box, while a camera
+    /// that has genuinely moved on clears it in well under a second.
+    var overlayDepartureGraceSeconds: TimeInterval = 0.5
 
     /// How many passes a region's normalized string stays available as an
     /// identity signal once its box has left every geometry threshold.

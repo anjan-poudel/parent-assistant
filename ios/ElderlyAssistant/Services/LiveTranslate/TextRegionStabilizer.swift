@@ -27,16 +27,31 @@ import Foundation
 //    `regionMissPasses` consecutive misses; one missed pass leaves the region
 //    and its translation intact. The identifier of a removed region is
 //    released and never resurrected.
+//  - **A departure is bounded in time, not only in passes** (owner device
+//    verdict, 2026-09-17: "the translation sticks around even when the camera
+//    moved away"). Pass-count hysteresis is the wrong unit for how long an
+//    overlay may linger: two misses is 0.5 s at the nominal cadence but 1.4 s
+//    at the reduced still-scene cadence, which is the one a scene being panned
+//    off actually runs at. A published region whose last sighting is older
+//    than `overlayDepartureGraceSeconds` therefore stops being published on
+//    that pass — it leaves the emitted set within one cycle plus the grace —
+//    while identity, box and translation stay until `regionMissPasses` retires
+//    them and re-emission still costs `regionAppearPasses` fresh sightings.
 //  - **Readable, bounded output (T-010).** Same-string neighbours closer than
 //    `declutterMergeCentroidDistance` on either axis merge into one region
 //    (longest string, union box), and a scene over `declutterMaxRegions`
 //    keeps the highest-confidence set, tie-broken by centroid y then x.
 //    Decluttering runs **before** emission, so the render and the translation
 //    request always see exactly the same set (FR-LCT-006, OD5).
-//  - **Pure, deterministic, time-free.** A value type with mutating
+//  - **Pure, deterministic, clock-injected.** A value type with mutating
 //    consumption: no I/O, no clock, no camera, no network, no storage. It
 //    consumes whatever passes it is given, which is what makes scripted pass
-//    sequences reproduce exactly in unit tests (NFR-LCT-010).
+//    sequences reproduce exactly in unit tests (NFR-LCT-010). The one fact it
+//    cannot derive from a pass — *when* that pass happened, which the departure
+//    grace is measured against — is a parameter, never a call to `Date()`
+//    inside (the consent gate's `now:` seam, same convention). The default
+//    exists for callers that do not script time; every timing assertion
+//    supplies its own.
 //  - **Content-free changes.** `RegionChangeEvent` carries region identities,
 //    never a recognized string; the text the pipeline requests is read from
 //    `visible`, which is the same set the overlay renders.
@@ -188,6 +203,11 @@ struct TextRegionStabilizer {
         /// region that stops being seen eventually stops being claimable by
         /// its text.
         var lastSeenPass: Int
+        /// When this region was last observed — recognized or tracked — as
+        /// reported by the caller. The departure grace is measured from here;
+        /// only emission reads it, so identity (which is a pass count) cannot
+        /// depend on the clock.
+        var lastSeenAt: Date
         /// Consecutive passes this region was observed in.
         var consecutiveDetections: Int
         /// Consecutive passes it was not observed in.
@@ -218,8 +238,18 @@ struct TextRegionStabilizer {
     /// tracking pass that lost everything and an OCR pass that recognized
     /// nothing both mean "nothing was seen this pass" — so the semantics do
     /// not depend on telling them apart.
+    ///
+    /// `now` is when this pass happened, and it is the caller's to state: the
+    /// only rule that reads it is the departure grace
+    /// (`overlayDepartureGraceSeconds`), which decides when a region that has
+    /// stopped being seen stops being *drawn*. The default keeps every caller
+    /// that does not script time working unchanged, and — because consecutive
+    /// calls then differ by microseconds — leaves the shipped pass-count
+    /// hysteresis in charge for them. Duration assertions pass their own
+    /// clock, so no test depends on how long a line of Swift takes to run.
     mutating func consume(regions observations: [LiveTextDetector.DetectedTextRegion],
-                          tracked: [String: NormalizedBox] = [:]) -> [RegionChangeEvent] {
+                          tracked: [String: NormalizedBox] = [:],
+                          at now: Date = Date()) -> [RegionChangeEvent] {
         passIndex += 1
         var seen: Set<RegionIdentity> = []
 
@@ -240,6 +270,7 @@ struct TextRegionStabilizer {
                 regions[index].detectedLanguage = observation.detectedLanguage
                 regions[index].confidence = observation.confidence
                 regions[index].lastSeenPass = passIndex
+                regions[index].lastSeenAt = now
                 regions[index].consecutiveDetections += 1
                 regions[index].consecutiveMisses = 0
                 seen.insert(regions[index].id)
@@ -252,6 +283,7 @@ struct TextRegionStabilizer {
                     detectedLanguage: observation.detectedLanguage,
                     confidence: observation.confidence,
                     lastSeenPass: passIndex,
+                    lastSeenAt: now,
                     consecutiveDetections: 1,
                     consecutiveMisses: 0,
                     isPublished: false)
@@ -263,12 +295,16 @@ struct TextRegionStabilizer {
 
         // 2. Tracked geometry: the region is still on screen, so it is not a
         //    miss, and its box moves with it. The text is untouched — a
-        //    tracking pass cannot change a recognized string (T-007).
+        //    tracking pass cannot change a recognized string (T-007). A
+        //    followed region is *seen*, so it refreshes the departure clock
+        //    too: the overlay is following its box, and the grace exists for
+        //    the camera having left, not for the OCR having skipped a pass.
         for (text, box) in tracked.sorted(by: { $0.key < $1.key }) {
             guard let index = regions.firstIndex(where: { !seen.contains($0.id) && $0.text == text })
             else { continue }
             regions[index].box = box
             regions[index].lastSeenPass = passIndex
+            regions[index].lastSeenAt = now
             regions[index].consecutiveMisses = 0
             seen.insert(regions[index].id)
         }
@@ -276,6 +312,16 @@ struct TextRegionStabilizer {
         // 3. Hysteresis, in identity order — both directions, so one missed
         //    pass leaves the region (and its translation) intact while a
         //    first sighting does not yet paint an overlay.
+        //
+        //    The two directions are measured in different units on purpose.
+        //    *Appearance* is passes: `regionAppearPasses` consecutive
+        //    sightings, so a single false positive cannot paint a box, and an
+        //    unpublished region that comes back pays that price again.
+        //    *Departure* is bounded by both — `regionMissPasses` retires the
+        //    identity, and `overlayDepartureGraceSeconds` un-publishes, which
+        //    is the one the elder sees. The time bound is what keeps a
+        //    departure honest at the reduced cadence, where two misses are
+        //    1.4 s of translation hanging over text the camera has left.
         var survivors: [TrackedRegion] = []
         survivors.reserveCapacity(regions.count)
         for var region in regions {
@@ -286,6 +332,15 @@ struct TextRegionStabilizer {
             } else {
                 region.consecutiveDetections = 0
                 region.consecutiveMisses += 1
+                if region.isPublished,
+                   now.timeIntervalSince(region.lastSeenAt) >= config.overlayDepartureGraceSeconds {
+                    // Out of the emitted set from this pass on — the next
+                    // pass at the latest, whatever the cadence — while the
+                    // identity, the box and the translation it carries stay
+                    // until `regionMissPasses` retires them. A sighting
+                    // within the grace never reaches here.
+                    region.isPublished = false
+                }
             }
             guard region.consecutiveMisses < config.regionMissPasses else { continue }
             survivors.append(region)
