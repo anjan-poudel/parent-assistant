@@ -389,6 +389,12 @@ struct CalendarShareSettingsView: View {
     /// (`isActionableFromSettings`) — a re-connect offered for a
     /// rate-limit would be a tap that changes nothing.
     ///
+    /// A 403 has its own line (`insufficientScopes`, split from the 401
+    /// later the same day): the token in hand is the wrong one rather
+    /// than a dead one, so its sentence names the extra step that fixes
+    /// it — sign out first, so the SDK cannot hand back the token it
+    /// minted without the grant — and only then the re-connect button.
+    ///
     /// It is PERSISTENT for as long as the failure is: the gateway holds
     /// `lastError` until a call succeeds, so the card stays until the
     /// problem is actually fixed rather than fading on a timer.

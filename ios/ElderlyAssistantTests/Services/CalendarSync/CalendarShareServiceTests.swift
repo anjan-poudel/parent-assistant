@@ -543,6 +543,37 @@ final class CalendarShareServiceTests: XCTestCase {
         XCTAssertEqual(rig.store.googleEventID(for: secondKey), "g-2")
     }
 
+    /// The same pause for the OTHER refusal class (2026-09-17): a 403 is
+    /// refused consent rather than a dead session, so the queue must stop
+    /// exactly as it does for a 401 — and the event must say WHICH one it
+    /// was, because labelling every pause "unauthorized" is the merge
+    /// that hid the wrong-scoped-token bug in the device log.
+    func testInsufficientScopesPausesThePassAndNamesItsOwnReason() async {
+        let rig = makeService()
+        rig.gateway.errorClassAfterFailure = .insufficientScopes
+        let firstKey = slotKey(UUID(), slot: 0)
+        let secondKey = slotKey(UUID(), slot: 1)
+        rig.store.enqueue(queuedCreate(key: firstKey))
+        rig.store.enqueue(queuedCreate(key: secondKey))
+
+        await rig.service.flushPending()
+        await drainMain()
+
+        XCTAssertEqual(rig.gateway.createdDrafts.count, 1,
+                       "a refused grant is not hammered — the pass stops at the first refusal")
+        XCTAssertEqual(rig.store.pendingCount, 2, "the family's pending work is kept")
+        XCTAssertEqual(rig.store.pending.map(\.attempts), [0, 0],
+                       "a paused pass is not a failed attempt — there is nothing for a backoff to do")
+        XCTAssertEqual(rig.service.status.lastError, .insufficientScopes,
+                       "the card shows this class's own sentence, not the 401's")
+
+        let paused = rig.bus.emittedEvents.filter { $0.eventType == "calendar_share_flush_paused" }
+        XCTAssertEqual(paused.count, 1)
+        XCTAssertEqual(paused.first?.outcome, "failure")
+        XCTAssertEqual(paused.first?.metadata["reason"], "insufficient_scopes",
+                       "the log names the refusal that actually happened")
+    }
+
     // MARK: - Flush: delete and update
 
     func testDeleteWithNoKnownTwinIsDroppedWithoutADeleteCall() async {

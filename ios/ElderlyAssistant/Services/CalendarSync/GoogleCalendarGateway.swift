@@ -19,9 +19,13 @@ import Foundation
 ///
 /// Every method returns value-or-nil instead of throwing: the service's
 /// queue asks "did it happen", and the two places that must distinguish
-/// "unauthorized" (pause) from "rate limited" (retry) read
+/// an authorization refusal (pause) from "rate limited" (retry) read
 /// `lastErrorClass`. Nothing about a failure is thrown away — it is
-/// recorded in that one property and emitted as an event.
+/// recorded in that one property and emitted as an event. Since
+/// 2026-09-17 the refusal side is two classes, not one: 401
+/// (`unauthorized`) and 403 (`insufficientScopes`) are told apart all the
+/// way to the card and the log, because "no session" and "the wrong token"
+/// are different faults with different fixes.
 ///
 /// Privacy (constitution C9 / the release-log privacy gate): this type
 /// never writes to a console. Its observability events carry counts, the
@@ -551,10 +555,22 @@ final class GoogleCalendarGateway: GoogleCalendarGatewayProtocol {
     // MARK: - Error classification
 
     /// Status code → failure class, for the statuses that are not 2xx. The
-    /// mapping is total and coarse on purpose: the values reach a log line
-    /// and the Settings status card, so they must not be able to carry a
-    /// body, a title or an address, and the service only needs to know
-    /// "pause" (unauthorized) from "retry" (everything else transient).
+    /// mapping is total and content-free on purpose: the values reach a
+    /// log line and the Settings status card, so they must not be able to
+    /// carry a body, a title or an address, and what the service needs
+    /// from them is "stop the pass" (`isAuthorizationFailure`) versus
+    /// "retry later".
+    ///
+    /// 401 and 403 are SPLIT here (2026-09-17), having been one class
+    /// since this layer was written. Google means different things by
+    /// them — 401 is "this token is not valid" (revoked, expired, no
+    /// session) and 403 is "this token is fine, but it is not allowed to
+    /// do that" — and merging them is how a device log showed one
+    /// `unauthorized` line for two completely different faults. The
+    /// 403-after-consent case is the one that matters here: it means the
+    /// token in hand was minted for the wrong scopes, which is a
+    /// different fix from a dead session, and the card and the log now
+    /// say which one it is.
     ///
     /// 404 gets its own case because it is the one failure with a defined
     /// recovery rather than a retry: what was addressed is GONE. The
@@ -565,7 +581,8 @@ final class GoogleCalendarGateway: GoogleCalendarGatewayProtocol {
     /// a recovery this layer does not know.
     static func errorClass(forStatus status: Int) -> GoogleShareError {
         switch status {
-        case 401, 403: return .unauthorized
+        case 401: return .unauthorized
+        case 403: return .insufficientScopes
         case 404: return .notFound
         case 429: return .rateLimited
         case 500...599: return .server(status)
@@ -618,6 +635,7 @@ final class GoogleCalendarGateway: GoogleCalendarGatewayProtocol {
         case .notSignedIn: return "not_signed_in"
         case .notConfigured: return "not_configured"
         case .unauthorized: return "unauthorized"
+        case .insufficientScopes: return "insufficient_scopes"
         case .rateLimited: return "rate_limited"
         case .server(let status): return "server_\(status)"
         case .notFound: return "not_found"

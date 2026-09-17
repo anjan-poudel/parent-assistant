@@ -36,12 +36,23 @@ import GoogleSignIn
 /// sheet, no user interaction, one Keychain read plus at most one token
 /// refresh, and an honest "nothing was brought back" when it fails.
 ///
+/// The token follows the GRANT, not the refresh (2026-09-17). Google
+/// mints an access token per grant, and the SDK's silent refresh hands
+/// back the cached one for as long as it looks fresh — so for up to an
+/// hour after the elder consented, this session's Calendar calls went out
+/// with the identity-only token minted before `addScopes` ran, and Google
+/// answered 401/403 while the console showed a household that had just
+/// granted everything. The flows now return the token they minted, the
+/// session keeps the freshest one with its expiry (`grantedToken`), and
+/// `accessToken()` prefers it over the SDK's refresh until it expires.
+///
 /// Nothing personal is stored here. The SDK keeps the account and its
 /// tokens in the Keychain; this type adds no storage of its own — in
 /// particular it never mirrors a token into `UserDefaults`, where a
 /// credential would sit in a plaintext plist (the share layer's other
 /// defaults entry — the inbound sync token — is opaque and non-personal by
-/// comparison).
+/// comparison). The cached token is process memory: it dies with the
+/// process, and sign-out and a failed restore drop it explicitly.
 ///
 /// Privacy (constitution C9 / the release-log privacy gate): no console
 /// output anywhere in this file. Its observability events carry an outcome
@@ -135,6 +146,60 @@ final class GoogleAccountSession: GoogleAccountSessionProtocol {
 
     private let observabilityBus: ObservabilityBus
 
+    /// The clock the token cache reads. Injectable for the same reason
+    /// `GoogleCalendarGateway` takes one: expiry has to be a value in a
+    /// test rather than "whatever `Date()` said when the suite ran".
+    private let now: () -> Date
+
+    /// The freshest access token a FLOW handed over in this process, and
+    /// the instant it stops being usable (2026-09-17).
+    ///
+    /// A refresh is not enough to keep this current, which is the whole
+    /// reason the cache exists. Google mints one access token per GRANT,
+    /// and `refreshTokensIfNeeded` hands back the SDK's cached one for as
+    /// long as it looks fresh — so for up to an hour after the elder
+    /// granted Calendar access, every refresh returned the token minted
+    /// BEFORE that grant, the Calendar API was called with an
+    /// identity-scoped token, and Google answered 401/403. The flow's own
+    /// result carries the token minted WITH the grant, so it is kept here
+    /// and preferred while it lasts.
+    ///
+    /// In memory only, and deliberately so: the SDK owns the account's
+    /// Keychain entry and this type adds no storage of its own (see the
+    /// type comment). `private(set)` rather than `private` so the rule
+    /// "the flow's token is what gets kept" is assertable — no test
+    /// process has a signed-in `GIDSignIn`, so the only way to observe
+    /// the choice is to read what was kept.
+    private(set) var grantedToken: GoogleAccessToken?
+
+    /// An access token and the instant it stops being usable.
+    struct GoogleAccessToken: Equatable {
+        /// The token string, exactly as the SDK spelled it.
+        let value: String
+        /// When it expires: the SDK's own estimate when it reports one,
+        /// otherwise the short window this type assumes (see
+        /// `unreportedTokenLifetime`).
+        let expiresAt: Date
+
+        /// Whether the token can still be handed to Google at `instant`.
+        ///
+        /// Strictly `<`: a token whose expiry is exactly now counts as
+        /// gone. The alternative on the other side of the boundary is one
+        /// silent refresh, while a wrong "still good" is a request Google
+        /// answers 401/403 — and this boundary is where that whole class
+        /// of failures lives.
+        func isFresh(at instant: Date) -> Bool { instant < expiresAt }
+    }
+
+    /// How long a token is trusted when no expiry comes with it.
+    ///
+    /// `GIDToken.expirationDate` is nullable in the SDK's header, and an
+    /// expiry this app has to guess is not one it can promise anything
+    /// about: five minutes is short enough that a wrong "still fresh"
+    /// costs a request rather than an hour of them, and long enough to
+    /// cover the gap between a grant and the flush that follows it.
+    static let unreportedTokenLifetime: TimeInterval = 5 * 60
+
     /// Whether `GIDConfiguration` has been handed to the SDK in this
     /// process. Static because the thing being configured — `GIDSignIn`'s
     /// shared instance — is a process singleton: configuring per session
@@ -146,6 +211,7 @@ final class GoogleAccountSession: GoogleAccountSessionProtocol {
          presenter: (() -> UIViewController?)? = GoogleAccountSession.keyWindowPresenter,
          flow: GoogleAuthFlow = GoogleSignInAuthFlow(),
          observabilityBus: ObservabilityBus = GoogleAccountSession.unwiredBus,
+         now: @escaping () -> Date = Date.init,
          defaults: UserDefaults = .standard) {
         // Deliberately NIL-safe: no permission prompt, no SDK call and no
         // network work happens at construction (the coordinator builds
@@ -155,6 +221,7 @@ final class GoogleAccountSession: GoogleAccountSessionProtocol {
         self.presenter = presenter
         self.flow = flow
         self.observabilityBus = observabilityBus
+        self.now = now
         // `defaults` is accepted to keep the share layer's construction
         // shape uniform and is deliberately UNUSED: the SDK owns the
         // account state (Keychain) and nothing about a Google session
@@ -293,21 +360,30 @@ final class GoogleAccountSession: GoogleAccountSessionProtocol {
         let flow = self.flow
         let outcome = await Self.runRestore(clientID: clientID, flow: flow)
         switch outcome {
-        case .restored:
+        case .restored(let auth):
+            remember(auth)
             emit("calendar_share_session_restore", outcome: "success")
             return .connected
-        case .restoredWithoutScopes:
+        case .restoredWithoutScopes(let auth):
             // Restored, and unable to share. Its own event rather than a
             // failure, exactly as on the interactive path: the session
             // is REAL, and what is missing is a grant the family can
             // give from Settings.
+            //
+            // The token is kept even so: it is what the account is
+            // spending right now, and a cache entry the seed of the next
+            // re-connect will overwrite is worth more than an empty one.
+            remember(auth)
             emit("calendar_share_session_restore_scopes_missing",
                  outcome: "failure", errorCode: "scopes_not_granted")
             return .connectedWithoutScopes
         case .noPreviousSession:
             // A fresh install, or an elder who signed out — the ordinary
             // state of a device that never connected, and NOT a failure.
-            // The card's `signedOut` is the truth here.
+            // The card's `signedOut` is the truth here. Nothing is held
+            // either: whatever this process cached belongs to a session
+            // the Keychain no longer has.
+            grantedToken = nil
             emit("calendar_share_session_restore_no_previous", outcome: "success")
             return .unavailable
         case .failed(let code):
@@ -315,7 +391,10 @@ final class GoogleAccountSession: GoogleAccountSessionProtocol {
             // refresh. The session is left exactly as it is — absent —
             // which is the honest degradation: `isSignedIn` stays false,
             // the card says signed out, and the next launch or
-            // activation tries again.
+            // activation tries again. The cached token goes with it: a
+            // credential the restore just failed to re-establish is not
+            // one to keep handing to the gateway.
+            grantedToken = nil
             emit("calendar_share_session_restore_failed", outcome: "failure",
                  errorCode: code)
             return .unavailable
@@ -329,10 +408,16 @@ final class GoogleAccountSession: GoogleAccountSessionProtocol {
     /// next read of `isSignedIn`).
     func signOut() {
         GIDSignIn.sharedInstance.signOut()
+        // The cached token is a credential for the account just dropped,
+        // so it goes in the same breath: keeping it would leave a second,
+        // invisible session behind the one the elder ended.
+        grantedToken = nil
         emit("calendar_share_session_signed_out", outcome: "success")
     }
 
-    /// A currently-valid access token, refreshed silently if needed.
+    /// A currently-valid access token: the one minted for the current
+    /// grant when it is held and still fresh, otherwise a silent refresh
+    /// (2026-09-17).
     ///
     /// nil covers "not configured", "no session" and "refresh failed"
     /// alike, which is what the caller's pause-and-retry decision needs;
@@ -340,24 +425,71 @@ final class GoogleAccountSession: GoogleAccountSessionProtocol {
     /// value.
     func accessToken() async -> String? {
         guard isConfigured else { return nil }
-        guard let user = GIDSignIn.sharedInstance.currentUser else { return nil }
-        let token: String? = await withCheckedContinuation { continuation in
+        guard let user = GIDSignIn.sharedInstance.currentUser else {
+            // No session in memory: whatever was cached belongs to an
+            // account this process can no longer ask Google about, so it
+            // goes with the session rather than outliving it.
+            grantedToken = nil
+            return nil
+        }
+        // The grant-time token FIRST, and the silent refresh only when
+        // there is none or it has expired. Refreshing here is precisely
+        // the call that hands back the pre-grant token for up to an hour
+        // after the elder consented — see `grantedToken` — so it is the
+        // fallback, never the default.
+        let instant = now()
+        if let granted = grantedToken, granted.isFresh(at: instant) {
+            return granted.value
+        }
+        let refreshed: GoogleAccessToken? = await withCheckedContinuation { continuation in
             // The SDK calls back on the main queue; resuming a continuation
             // from there is fine, and the refresh itself is the SDK's
             // business (it owns the Keychain, the expiry and the retry).
-            user.refreshTokensIfNeeded { refreshed, error in
-                continuation.resume(returning: refreshed?.accessToken.tokenString)
+            user.refreshTokensIfNeeded { refreshedUser, _ in
+                guard let refreshedUser,
+                      !refreshedUser.accessToken.tokenString.isEmpty else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                // A refresh that produced a token is the freshest thing
+                // this process has seen, so it is kept under the same
+                // rule as a flow's — including its own expiry, which is
+                // what stops the cache from outliving it.
+                continuation.resume(returning: GoogleAccessToken(
+                    value: refreshedUser.accessToken.tokenString,
+                    expiresAt: refreshedUser.accessToken.expirationDate
+                        ?? instant.addingTimeInterval(Self.unreportedTokenLifetime)))
             }
         }
-        if token == nil {
+        guard let refreshed else {
             // Only the FAILED-refresh case is reported here: "no session"
             // is a normal state that the gateway already reports as
             // `.notSignedIn` when it calls this, and emitting both would
-            // double-count one absence.
+            // double-count one absence. An expired cache entry is left
+            // where it is: it is only ever preferred while it looks
+            // fresh, so the next call retries the refresh either way.
             emit("calendar_share_session_token_refresh_failed", outcome: "failure",
                  errorCode: "no_token")
+            return nil
         }
-        return token
+        grantedToken = refreshed
+        return refreshed.value
+    }
+
+    /// Keeps the token a flow just handed over. LAST write wins: every
+    /// flow result is newer than anything held before it, and the whole
+    /// point of the cache is that the newest one is the one minted for
+    /// the grant the elder just gave.
+    ///
+    /// A result with no usable token string (empty — the gateway rejects
+    /// those anyway) leaves the previous entry alone rather than wiping a
+    /// working token with nothing.
+    private func remember(_ auth: GoogleAuthResult) {
+        guard !auth.accessToken.isEmpty else { return }
+        grantedToken = GoogleAccessToken(
+            value: auth.accessToken,
+            expiresAt: auth.expiresAt
+                ?? now().addingTimeInterval(Self.unreportedTokenLifetime))
     }
 
     // MARK: - Flow internals
@@ -401,10 +533,15 @@ final class GoogleAccountSession: GoogleAccountSessionProtocol {
         // into `self` for state that can change while the sheet is open.
         let presenter = self.presenter
         let flow = self.flow
-        let outcome = await Self.runFlow(clientID: clientID,
-                                         presenter: presenter,
-                                         flow: flow)
-        switch outcome {
+        let report = await Self.runFlow(clientID: clientID,
+                                        presenter: presenter,
+                                        flow: flow)
+        // The token comes back BEFORE the branch below, and for every
+        // ending that has a session: an elder who declined the consent
+        // sheet is still signed in, and the sign-in's own token is the
+        // freshest this process holds for them.
+        if let auth = report.auth { remember(auth) }
+        switch report.outcome {
         case .signedIn:
             emit(event, outcome: "success")
             return .connected
@@ -429,6 +566,20 @@ final class GoogleAccountSession: GoogleAccountSessionProtocol {
         }
     }
 
+    /// One interactive flow's result: how it ended, plus the token the
+    /// session was holding when it did.
+    ///
+    /// The token rides BESIDE the outcome rather than as a case on it,
+    /// because it is not part of that vocabulary: every ending that
+    /// leaves a live session produces one — including both
+    /// "signed in without the scopes" endings — and the cache wants it in
+    /// all of them, while the endings with no session (cancelled, no
+    /// presenter, failed) produce none.
+    private struct FlowReport {
+        let outcome: FlowOutcome
+        let auth: GoogleAuthResult?
+    }
+
     /// How a RESTORE ended.
     ///
     /// Its own type rather than a reuse of `FlowOutcome`, and the two
@@ -440,10 +591,13 @@ final class GoogleAccountSession: GoogleAccountSessionProtocol {
     /// and hoping no reader takes them for live paths.
     private enum RestoreOutcome: Equatable {
         /// A session is back AND holds every scope the share path needs.
-        case restored
+        /// Carries the restored user's scopes-and-token, so the cache
+        /// starts this process with the token the restore refreshed
+        /// rather than asking the SDK for it again.
+        case restored(GoogleAuthResult)
         /// A session is back, without the Calendar/contacts grant. Not
         /// asked for again here — see `restorePreviousSession`.
-        case restoredWithoutScopes
+        case restoredWithoutScopes(GoogleAuthResult)
         /// The SDK held no account to restore.
         case noPreviousSession
         /// The SDK failed. Carries its NUMERIC code only, never the
@@ -468,9 +622,10 @@ final class GoogleAccountSession: GoogleAccountSessionProtocol {
         configureSDK(clientID: clientID)
         guard flow.hasPreviousSignIn() else { return .noPreviousSession }
         do {
-            let granted = try await flow.restorePreviousSignIn()
-            return grantsRequiredScopes(granted) ? .restored
-                                                 : .restoredWithoutScopes
+            let auth = try await flow.restorePreviousSignIn()
+            return grantsRequiredScopes(auth.grantedScopes)
+                ? .restored(auth)
+                : .restoredWithoutScopes(auth)
         } catch {
             // Every failure lands here — a revoked grant
             // (`hasNoAuthInKeychain`), a Keychain error, a cancelled
@@ -497,62 +652,79 @@ final class GoogleAccountSession: GoogleAccountSessionProtocol {
     /// `calendar.events`, and every Calendar call answered 401.
     @MainActor private static func runFlow(clientID: String,
                                            presenter: (() -> UIViewController?)?,
-                                           flow: GoogleAuthFlow) async -> FlowOutcome {
+                                           flow: GoogleAuthFlow) async -> FlowReport {
         // Configure (or re-hand the config to) the SDK before the first
         // presentation. `GIDConfiguration` is the client id and nothing
         // else: this app has no home server to name as a `serverClientID`,
         // and the share path authenticates to Google's own APIs with the
         // user's token, not to a backend of ours.
         configureSDK(clientID: clientID)
-        guard let controller = presenter?() else { return .noPresenter }
+        guard let controller = presenter?() else {
+            return FlowReport(outcome: .noPresenter, auth: nil)
+        }
         do {
-            // The result is reduced to its granted scopes: `GIDSignInResult.user`
+            // The result carries the scopes AND the token: `GIDSignInResult.user`
             // is NON-OPTIONAL in the async interface (verified against 8.0.0 —
             // the Swift importer turns the completion form's `_Nullable`
             // result into a thrown error instead), so returning without
-            // throwing IS a signed-in user, and the only open question is
-            // what it was allowed to do.
-            let granted = try await flow.signIn(presenting: controller)
-            if grantsRequiredScopes(granted) { return .signedIn }
-            return await requestScopes(flow: flow, controller: controller)
+            // throwing IS a signed-in user, and the two open questions are
+            // what it was allowed to do and which token it holds.
+            let auth = try await flow.signIn(presenting: controller)
+            if grantsRequiredScopes(auth.grantedScopes) {
+                return FlowReport(outcome: .signedIn, auth: auth)
+            }
+            return await requestScopes(flow: flow, controller: controller, signIn: auth)
         } catch {
-            return outcome(for: error)
+            return FlowReport(outcome: outcome(for: error), auth: nil)
         }
     }
 
     /// The consent sheet, and the three ways it can land.
+    ///
+    /// `signIn` is the result the sign-in sheet produced, carried in as
+    /// the session's fallback token: the elder who declines this sheet is
+    /// still signed in, and their sign-in token is then the freshest one
+    /// the process holds.
     @MainActor private static func requestScopes(flow: GoogleAuthFlow,
-                                                 controller: UIViewController) async -> FlowOutcome {
+                                                 controller: UIViewController,
+                                                 signIn: GoogleAuthResult) async -> FlowReport {
         do {
-            let granted = try await flow.addScopes(requiredScopes, presenting: controller)
+            let auth = try await flow.addScopes(requiredScopes, presenting: controller)
             // Granted list still short after a SUCCESSFUL call: Google
             // accepted the request and did not add the grant (a
             // workspace admin restriction is the usual reason). Nothing
             // the elder can re-tap fixes that, so it is reported as a
             // refusal rather than as a decline.
-            return grantsRequiredScopes(granted) ? .signedIn
-                                                 : .signedInWithoutScopes(declined: false)
+            //
+            // The token still comes back with it — it is the token the
+            // account is spending, and throwing it away here is how the
+            // NEXT call would end up with the pre-grant one again.
+            return grantsRequiredScopes(auth.grantedScopes)
+                ? FlowReport(outcome: .signedIn, auth: auth)
+                : FlowReport(outcome: .signedInWithoutScopes(declined: false), auth: auth)
         } catch {
             let code = (error as NSError).code
             // The SDK's "these scopes are already granted" — thrown when
             // its own `grantedScopes` record has not caught up with the
             // auth state. That is the SUCCESS case arriving through the
             // error channel, and reporting it as a refusal would leave a
-            // fully-authorized household staring at a warning.
+            // fully-authorized household staring at a warning. No token
+            // comes back through an error, so the sign-in's is the one to
+            // keep — the SDK is asserting the grant predates it.
             if code == GIDSignInError.scopesAlreadyGranted.rawValue {
-                return .signedIn
+                return FlowReport(outcome: .signedIn, auth: signIn)
             }
             // Closing the consent sheet is a DECISION, not a failure:
             // the elder is signed in and chose not to hand over their
             // calendar. Same end state as a refusal, different outcome
             // to report.
             if code == GIDSignInError.canceled.rawValue {
-                return .signedInWithoutScopes(declined: true)
+                return FlowReport(outcome: .signedInWithoutScopes(declined: true), auth: signIn)
             }
             // Anything else is the SDK failing around a real session, so
             // the session is kept and reported honestly rather than
             // discarding a working sign-in over a scope-sheet error.
-            return .signedInWithoutScopes(declined: false)
+            return FlowReport(outcome: .signedInWithoutScopes(declined: false), auth: signIn)
         }
     }
 
@@ -607,12 +779,20 @@ final class GoogleAccountSession: GoogleAccountSessionProtocol {
 // MARK: - The SDK's interactive surface
 
 /// `GIDSignIn` as a `GoogleAuthFlow` — Google's own entry points, with
-/// each result reduced to the granted-scope list this app acts on.
+/// each result reduced to the scopes this app acts on and the token that
+/// carries them.
 ///
 /// Everything here is a translation and nothing else: no policy, no
 /// retries, no interpretation of which scopes matter. The session owns
 /// those decisions, which is what keeps the declined-grant path a unit
 /// test.
+///
+/// The TOKEN is taken off the user each flow RETURNED, never off
+/// `GIDSignIn.sharedInstance.currentUser` afterwards. That is not a
+/// style preference: the two disagree for up to an hour after a grant
+/// (the shared instance keeps its pre-grant token while it still looks
+/// fresh), and reaching for the shared one is precisely the bug this
+/// seam was widened to fix.
 ///
 /// `grantedScopes` is `_Nullable` in the SDK's header, and an absent
 /// list is returned as EMPTY rather than as "assume granted": the cost of
@@ -621,9 +801,9 @@ final class GoogleAccountSession: GoogleAccountSessionProtocol {
 /// line on the Settings card.
 final class GoogleSignInAuthFlow: GoogleAuthFlow {
 
-    func signIn(presenting controller: UIViewController) async throws -> [String] {
+    func signIn(presenting controller: UIViewController) async throws -> GoogleAuthResult {
         let result = try await GIDSignIn.sharedInstance.signIn(withPresenting: controller)
-        return result.user.grantedScopes ?? []
+        return Self.authResult(for: result.user)
     }
 
     /// The SDK's Keychain cache, asked synchronously (there is nothing to
@@ -641,13 +821,17 @@ final class GoogleSignInAuthFlow: GoogleAuthFlow {
     /// Configure-only-when-needed is deliberate, and inside the SDK's
     /// contract: restoring an account whose token is still valid does no
     /// network work at all.
-    func restorePreviousSignIn() async throws -> [String] {
+    func restorePreviousSignIn() async throws -> GoogleAuthResult {
         let user = try await GIDSignIn.sharedInstance.restorePreviousSignIn()
-        return user.grantedScopes ?? []
+        return Self.authResult(for: user)
     }
 
+    /// The consent sheet's result — and the ONLY source of the token
+    /// minted for the grant it just added. `user.addScopes` returns the
+    /// updated user; asking the shared instance for it afterwards is what
+    /// used to hand back the pre-grant token.
     func addScopes(_ scopes: [String],
-                   presenting controller: UIViewController) async throws -> [String] {
+                   presenting controller: UIViewController) async throws -> GoogleAuthResult {
         guard let user = GIDSignIn.sharedInstance.currentUser else {
             // Reachable only if the account vanished between the sign-in
             // sheet and the consent sheet — a sign-out from another
@@ -659,7 +843,15 @@ final class GoogleSignInAuthFlow: GoogleAuthFlow {
                           code: GIDSignInError.hasNoAuthInKeychain.rawValue)
         }
         let result = try await user.addScopes(scopes, presenting: controller)
-        return result.user.grantedScopes ?? []
+        return Self.authResult(for: result.user)
+    }
+
+    /// One SDK user, reduced to the scopes the session acts on and the
+    /// token it holds — the two facts every entry point above returns.
+    private static func authResult(for user: GIDGoogleUser) -> GoogleAuthResult {
+        GoogleAuthResult(grantedScopes: user.grantedScopes ?? [],
+                         accessToken: user.accessToken.tokenString,
+                         expiresAt: user.accessToken.expirationDate)
     }
 }
 
