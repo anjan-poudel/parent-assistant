@@ -53,6 +53,60 @@ final class LiveTranslateConfigTests: XCTestCase {
 
         // Disclosure
         XCTAssertFalse(config.disclosureVersion.isEmpty)
+
+        // The resource rework (2026-09-17). The device's own crash reports are
+        // the parameter table for these: two `cpu_resource_fatal` kills at
+        // ~99% CPU over 49 s and footprints of 1.4 GB, with the hottest stack
+        // in the vision runtime and a 4B brain resident behind it.
+        XCTAssertEqual(config.frameSignatureSide, 64)
+        XCTAssertEqual(config.frameChangeThreshold, 0.02)
+        XCTAssertEqual(config.stableSampleInterval, 0.7)
+        XCTAssertEqual(config.stalePassesBeforeReducedCadence, 3)
+        XCTAssertEqual(config.trackingMaxRectanglesPerPass, 6)
+        XCTAssertEqual(config.brainTranslationIdleUnloadSeconds, 5)
+        XCTAssertEqual(config.brainTranslationHeadroomFactor, 1.0)
+        XCTAssertTrue(config.brainTranslationDefersToResidentBrain)
+    }
+
+    /// The resource knobs have to be *knobs*: a device that idles differently,
+    /// or a scene that changes faster than these assume, is tuned by changing
+    /// one value and not by editing the components.
+    func testTheResourceBoundsAreConfigurableAndNotLiterals() {
+        var config = LiveTranslateConfig.default
+        config.stableSampleInterval = 1.5
+        config.frameChangeThreshold = 0.05
+        config.stalePassesBeforeReducedCadence = 5
+        config.trackingMaxRectanglesPerPass = 2
+        config.brainTranslationIdleUnloadSeconds = 1
+        config.brainTranslationHeadroomFactor = 1.5
+        config.brainTranslationDefersToResidentBrain = false
+
+        XCTAssertNotEqual(config, LiveTranslateConfig.default)
+        XCTAssertEqual(config.stableSampleInterval, 1.5)
+        XCTAssertEqual(config.trackingMaxRectanglesPerPass, 2)
+    }
+
+    /// The brain stage's deadline is derived from the two values that own it,
+    /// the same shape the cloud deadline has — so a caller that bounds its
+    /// wait cannot drift from the timeout the generation was given.
+    func testTheBrainStageDeadlineIsDerivedFromTheTwoOwnedValues() {
+        let config = LiveTranslateConfig.default
+        XCTAssertEqual(config.brainTranslationStageDeadlineSeconds,
+                       config.brainTranslationTimeoutSeconds + config.brainTranslationStageGraceSeconds)
+        XCTAssertEqual(config.brainTranslationStageDeadlineSeconds, 28)
+        XCTAssertGreaterThan(config.brainTranslationStageDeadlineSeconds,
+                             config.brainTranslationTimeoutSeconds,
+                             "the stage must outlive the generation's own timeout, or the "
+                             + "timeout's report would never be the one that lands")
+    }
+
+    /// The reduced cadence is a bound on idling: a value at or under the
+    /// nominal cadence would make it a no-op, and a value at or over the
+    /// snapshot's refresh would make the still scene stop being refreshed.
+    func testTheReducedCadenceIsSlowerThanTheNominalOneAndFinite() {
+        let config = LiveTranslateConfig.default
+        XCTAssertGreaterThan(config.stableSampleInterval, config.ocrSampleInterval,
+                             "the reduced cadence has to be slower than the nominal one to mean anything")
     }
 
     func testDefaultIsTheDocumentedNominalValueBundle() {

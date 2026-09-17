@@ -45,6 +45,32 @@ final class LiveTextDetectorTests: XCTestCase {
             width: 64, height: 48, pts: CMTime(value: 1, timescale: 1))))
     }
 
+    /// A frame painted a solid luminance, so the frame-change gate can tell one
+    /// delivered frame from the next. `SampleBufferFactory.make` paints nothing,
+    /// and two unpainted frames are — correctly — the same picture, which the
+    /// feature now reads as "recognition could not learn anything new".
+    private func frame(luma: UInt8, width: Int = 64, height: Int = 48) throws -> CameraFrame {
+        let sample = try SampleBufferFactory.make(width: width, height: height,
+                                                  pts: CMTime(value: 1, timescale: 1))
+        let surface = try XCTUnwrap(CMSampleBufferGetImageBuffer(sample))
+        CVPixelBufferLockBaseAddress(surface, [])
+        defer { CVPixelBufferUnlockBaseAddress(surface, []) }
+        if let base = CVPixelBufferGetBaseAddress(surface) {
+            let stride = CVPixelBufferGetBytesPerRow(surface)
+            let bytes = base.assumingMemoryBound(to: UInt8.self)
+            for row in 0..<height {
+                for column in 0..<width {
+                    let pixel = bytes + row * stride + column * 4
+                    pixel[0] = luma
+                    pixel[1] = luma
+                    pixel[2] = luma
+                    pixel[3] = 255
+                }
+            }
+        }
+        return try XCTUnwrap(CameraFrame(sampleBuffer: sample))
+    }
+
     private func region(_ text: String, x: Double = 0.2, y: Double = 0.2) -> LiveTextDetector.DetectedTextRegion {
         LiveTextDetector.DetectedTextRegion(
             text: text,
@@ -80,9 +106,9 @@ final class LiveTextDetectorTests: XCTestCase {
         let detector = makeDetector()
         XCTAssertTrue(detector.begin().isSuccess)
 
-        _ = await detector.recognize(try frame())
+        _ = await detector.recognize(try frame(luma: 0))
         clock.advance(by: detector.config.ocrSampleInterval / 2)
-        let result = await detector.recognize(try frame())
+        let result = await detector.recognize(try frame(luma: 90))
 
         guard case .success(let pass) = result else { return XCTFail("expected a pass: \(result)") }
         XCTAssertEqual(engine.trackCallCount, 1, "the second pass is the tracking kind")
@@ -100,14 +126,38 @@ final class LiveTextDetectorTests: XCTestCase {
         let detector = makeDetector()
         _ = detector.begin()
 
-        _ = await detector.recognize(try frame())
+        _ = await detector.recognize(try frame(luma: 0))
         clock.advance(by: detector.config.ocrSampleInterval / 2)
-        let result = await detector.recognize(try frame())
+        let result = await detector.recognize(try frame(luma: 90))
 
         guard case .success(let pass) = result else { return XCTFail("expected a pass: \(result)") }
         XCTAssertEqual(Array(pass.trackedBoxes.keys), ["Exit"],
                        "a lost key is absent, so the stabiliser keeps the last OCR-confirmed geometry")
         XCTAssertEqual(pass.trackedBoxes["Exit"], box(0.25))
+    }
+
+    /// The tracking pass costs one `VNTrackRectangleRequest` per remembered
+    /// rectangle, so a still scene used to buy a burst of Vision requests for
+    /// geometry that could only come back the same. A tracker cannot find
+    /// movement that is not there: the pass is skipped and the frame gets the
+    /// OCR refresh it was delivered for.
+    func testAStillSceneIsNotTrackedAndAChangedOneIs() async throws {
+        engine.regions = [region("Exit")]
+        let detector = makeDetector()
+        _ = detector.begin()
+
+        _ = await detector.recognize(try frame(luma: 0))
+        clock.advance(by: detector.config.ocrSampleInterval / 2)
+        _ = await detector.recognize(try frame(luma: 0))
+        XCTAssertEqual(engine.trackCallCount, 0,
+                       "the same picture as the last OCR'd frame has nothing to follow")
+        XCTAssertEqual(engine.recognizeCallCount, 2,
+                       "the frame is not dropped: it is read again (an OCR refresh)")
+
+        clock.advance(by: detector.config.ocrSampleInterval / 2)
+        _ = await detector.recognize(try frame(luma: 90))
+        XCTAssertEqual(engine.trackCallCount, 1,
+                       "a materially different picture is what tracking exists for")
     }
 
     func testTrackingIsNotEvenAttemptedWhenAnOCRPassRecognizedNothing() async throws {
@@ -228,9 +278,9 @@ final class LiveTextDetectorTests: XCTestCase {
         let detector = makeDetector()
         _ = detector.begin()
 
-        _ = await detector.recognize(try frame())
+        _ = await detector.recognize(try frame(luma: 0))
         clock.advance(by: detector.config.ocrSampleInterval / 2)
-        let tracking = await detector.recognize(try frame())
+        let tracking = await detector.recognize(try frame(luma: 90))
 
         XCTAssertEqual(tracking, .failure(.trackingUnsupported),
                        "the refused request is reported to the caller, which drops it like any failed pass")
@@ -238,7 +288,7 @@ final class LiveTextDetectorTests: XCTestCase {
 
         // Degraded: the next frame runs OCR, and the refusal is not re-reported.
         clock.advance(by: detector.config.ocrSampleInterval / 2)
-        let next = await detector.recognize(try frame())
+        let next = await detector.recognize(try frame(luma: 0))
         guard case .success(let pass) = next else { return XCTFail("expected a pass: \(next)") }
         XCTAssertEqual(pass.regions.map(\.text), ["Exit"])
         XCTAssertEqual(engine.trackCallCount, 1, "tracking is not attempted again after the refusal")
@@ -251,11 +301,17 @@ final class LiveTextDetectorTests: XCTestCase {
         engine.regions = [region("Exit")]
         let detector = makeDetector()
         _ = detector.begin()
-        _ = await detector.recognize(try frame())
+        _ = await detector.recognize(try frame(luma: 0))
+
+        // A changed frame inside the interval is the tracking case.
+        clock.advance(by: detector.config.ocrSampleInterval / 2)
+        _ = await detector.recognize(try frame(luma: 90))
+        XCTAssertEqual(engine.trackCallCount, 1)
 
         let base = LiveTranslateConfig.default.ocrSampleInterval
-        XCTAssertEqual(detector.passKind(at: clock.now + base / 2), .tracking)
-        XCTAssertEqual(detector.passKind(at: clock.now + base), .ocr,
+        XCTAssertEqual(detector.passKind(at: clock.now), .tracking,
+                       "a changed frame inside the interval is followed")
+        XCTAssertEqual(detector.passKind(at: clock.now + base / 2), .ocr,
                        "at the cadence an OCR pass is due")
 
         // The cadence is the config's value, not a literal: doubling it makes
@@ -264,8 +320,11 @@ final class LiveTextDetectorTests: XCTestCase {
         slower.ocrSampleInterval = base * 2
         let relaxed = makeDetector(config: slower)
         _ = relaxed.begin()
-        _ = await relaxed.recognize(try frame())
-        XCTAssertEqual(relaxed.passKind(at: clock.now + base + base / 2), .tracking)
+        _ = await relaxed.recognize(try frame(luma: 0))
+        clock.advance(by: base)
+        _ = await relaxed.recognize(try frame(luma: 90))
+        XCTAssertEqual(engine.trackCallCount, 2,
+                       "one base interval is still inside a doubled cadence: the changed frame is followed")
     }
 
     func testTrackingIsNeverTheFirstPassOfASession() async throws {
@@ -302,10 +361,11 @@ final class LiveTextDetectorTests: XCTestCase {
         XCTAssertEqual(afterEnd.failureError, .ocrUnavailable(.requestCreationFailed))
 
         _ = detector.begin()
-        let result = await detector.recognize(try frame())
+        let result = await detector.recognize(try frame(luma: 0))
         guard case .success = result else { return XCTFail("expected a pass after re-begin: \(result)") }
-        XCTAssertEqual(detector.passKind(at: clock.now + LiveTranslateConfig.default.ocrSampleInterval / 2),
-                       .tracking,
+        clock.advance(by: LiveTranslateConfig.default.ocrSampleInterval / 2)
+        _ = await detector.recognize(try frame(luma: 90))
+        XCTAssertEqual(engine.trackCallCount, 1,
                        "the re-begun session remembers the OCR pass it just made")
     }
 
@@ -333,6 +393,13 @@ final class LiveTextDetectorTests: XCTestCase {
     func testTwoConcurrentCallersAreSerialisedRatherThanRacingTheRequestHandler() async throws {
         let hold = DispatchSemaphore(value: 0)
         let entered = expectation(description: "the first pass reached the engine")
+        // Both callers now run an *OCR* pass: the frames are identical, so the
+        // scene gate declines to track and reads the frame again (see
+        // `testAStillSceneIsNotTrackedAndAChangedOneIs`). The engine's entry
+        // hook therefore fires once per caller, and the wait below is about the
+        // first of them — the second firing is the second caller being served,
+        // not an over-fulfilment to fail on.
+        entered.assertForOverFulfill = false
         engine.hold = hold
         engine.onEnter = { entered.fulfill() }
         engine.regions = [region("Exit")]
@@ -343,6 +410,9 @@ final class LiveTextDetectorTests: XCTestCase {
         let first = Task { await detector.recognize(sample) }
         await fulfillment(of: [entered], timeout: 5)
         let second = Task { await detector.recognize(sample) }
+        // One permit per pass: the first caller is released here, and the
+        // second takes the second permit when the engine hands it the pass.
+        hold.signal()
         hold.signal()
 
         _ = await first.value
@@ -466,6 +536,30 @@ final class VisionTextRecognitionEngineTests: XCTestCase {
         engine.forgetRememberedRectangles()
 
         XCTAssertEqual(try engine.followRememberedRectangles(in: frame.pixelBuffer), [:])
+    }
+
+    /// A tracking pass runs one `VNTrackRectangleRequest` per remembered
+    /// rectangle, one after another on a serial handler: a dense scene is the
+    /// shape that turns one delivered frame into a dozen Vision requests. The
+    /// cap is the shipped policy, and it follows the largest boxes — the ones
+    /// big enough for the overlay to draw.
+    func testTheTrackingPassFollowsTheLargestRectanglesAndOnlySoManyOfThem() {
+        let remembered: [(text: String, area: Double)] = [
+            ("smallest", 0.01), ("largest", 0.09), ("third", 0.05), ("fourth", 0.04),
+            ("fifth", 0.03), ("sixth", 0.02), ("second", 0.08), ("seventh", 0.07)
+        ]
+
+        XCTAssertEqual(VisionTextRecognitionEngine.rectanglesToFollow(remembered, maximum: 3),
+                       ["largest", "second", "seventh"],
+                       "one request per region the elder can see: the surplus is not followed")
+        XCTAssertEqual(VisionTextRecognitionEngine.rectanglesToFollow(remembered, maximum: 8).count, 8,
+                       "a scene under the cap is followed whole")
+        XCTAssertEqual(VisionTextRecognitionEngine.rectanglesToFollow([("b", 0.5), ("a", 0.5)],
+                                                                      maximum: 1),
+                       ["a"],
+                       "equal areas are decided by the string, so one scene has one fixed answer")
+        XCTAssertTrue(VisionTextRecognitionEngine.rectanglesToFollow(remembered, maximum: 0).isEmpty,
+                      "a cap of zero follows nothing rather than everything")
     }
 
     /// The platform gap, made visible in code rather than only in prose: this

@@ -29,6 +29,13 @@ import Vision
 //    detector degrades to OCR-only, says so once with `tracking_unsupported`,
 //    and stays usable. A tracking *loss* is not even a degradation: the key is
 //    omitted, and the stabiliser keeps the last OCR-confirmed geometry.
+//  - **Tracking is bounded and scene-driven (resource rework, 2026-09-17).**
+//    Tracking runs only while regions exist *and* the frame differs from the
+//    last OCR'd one, and never for more than
+//    `trackingMaxRectanglesPerPass` rectangles. Both halves exist because a
+//    tracking pass costs one Vision request per remembered rectangle: an
+//    unchanged scene has no movement to find, and a scene with a dozen strings
+//    has more rectangles than the overlay can draw.
 //  - **No invented language.** `detectedLanguage` is Vision's own report or
 //    nothing; a value is never substituted, and no caller can hard-code a
 //    source language through this API.
@@ -75,7 +82,25 @@ final class VisionTextRecognitionEngine: LiveTextRecognitionEngine {
     /// belong to. A tracking pass follows these; `nil` after `forget`.
     private var rectangles: [String: VNRectangleObservation] = [:]
 
-    init() {
+    /// Rectangles followed per pass, at most
+    /// (`LiveTranslateConfig.trackingMaxRectanglesPerPass`).
+    ///
+    /// A tracking pass runs one `VNTrackRectangleRequest` **per remembered
+    /// rectangle**, one after another on this engine's caller's serial queue,
+    /// and a dense scene can remember a dozen. The requests the cap drops are
+    /// not losses of text and not errors: a key absent from a tracking pass is
+    /// the documented tracking-loss case (FR-LCT-004), which the stabiliser
+    /// answers by holding the last OCR-confirmed geometry. The overlay
+    /// therefore goes on drawing the box it already had, and the scene pays for
+    /// the rectangles the elder can actually see instead of for every string
+    /// Vision found in it.
+    private let maximumRectanglesPerPass: Int
+
+    /// The bound defaults to the shipped config's, so a parameterless
+    /// construction is the same engine the detector builds — the cap is a
+    /// policy of the feature and not a property of one call site.
+    init(maximumRectanglesPerPass: Int = LiveTranslateConfig.default.trackingMaxRectanglesPerPass) {
+        self.maximumRectanglesPerPass = maximumRectanglesPerPass
         textRequest.recognitionLevel = .accurate
         // The capability check the design asks for (C02): automatic language
         // detection is an iOS 16-and-later property, and the deployment target
@@ -127,7 +152,7 @@ final class VisionTextRecognitionEngine: LiveTextRecognitionEngine {
 
         var tracked: [String: NormalizedBox] = [:]
         var refreshed: [String: VNRectangleObservation] = [:]
-        for (text, rectangle) in rectangles {
+        for (text, rectangle) in followed() {
             let request = VNTrackRectangleRequest(rectangleObservation: rectangle)
             do {
                 try sequenceHandler.perform([request], on: pixelBuffer)
@@ -153,6 +178,42 @@ final class VisionTextRecognitionEngine: LiveTextRecognitionEngine {
 
     func forgetRememberedRectangles() {
         rectangles.removeAll()
+    }
+
+    /// The rectangles this pass will follow: at most
+    /// `maximumRectanglesPerPass` of them, largest first.
+    ///
+    /// Largest first, because the overlay is a glance surface with a bounded
+    /// number of regions (`declutterMaxRegions`): the boxes big enough to be
+    /// drawn are the ones whose tracking the elder can see, and a string whose
+    /// box was too small to render is not worth a Vision request. The order is
+    /// by area with the string as the tie-break, so the same scene always
+    /// follows the same rectangles — a set that changed between two identical
+    /// frames would make the overlay's geometry depend on dictionary order.
+    private func followed() -> [(String, VNRectangleObservation)] {
+        let remembered: [(text: String, area: Double)] = rectangles.map {
+            (text: $0.key,
+             area: Double($0.value.boundingBox.width * $0.value.boundingBox.height))
+        }
+        let chosen = Self.rectanglesToFollow(remembered, maximum: maximumRectanglesPerPass)
+        return chosen.compactMap { text in rectangles[text].map { (text, $0) } }
+    }
+
+    /// The rule `followed()` applies, as a function of named rectangles rather
+    /// than of Vision objects: largest first, at most `maximum` of them.
+    ///
+    /// Extracted so the cap is a fact about the scene — which boxes of a dense
+    /// scene cost a request — that a test can pin without a camera, a rendered
+    /// frame or a Vision request.
+    static func rectanglesToFollow(_ remembered: [(text: String, area: Double)],
+                                   maximum: Int) -> [String] {
+        guard maximum >= 0 else { return [] }
+        let ordered = remembered.sorted { left, right in
+            if left.area != right.area { return left.area > right.area }
+            return left.text < right.text
+        }
+        guard ordered.count > maximum else { return ordered.map(\.text) }
+        return ordered.prefix(maximum).map(\.text)
     }
 
     /// Vision's normalized box, converted to the feature's one box
@@ -233,15 +294,32 @@ final class LiveTextDetector {
     private var rememberedKeys: Set<String> = []
     private var passesInFlight = 0
 
+    /// The frame-change gate's state: the signature of the last frame
+    /// recognition ran on, and whether the frame in hand differs from it.
+    ///
+    /// The detector keeps its own gate rather than taking the camera's answer
+    /// because it is the component that decides the pass kind, and the
+    /// decision has to hold for whatever caller delivered the frame — the tap
+    /// today, a test or a future still-frame path tomorrow.
+    private var frameDetector = FrameChangeDetector()
+    /// Whether the frame in hand is materially different from the last OCR'd
+    /// one. Defaults to `true` so a session's first pass is never gated.
+    private var sceneChanged = true
+
     // MARK: Init
 
     init(config: LiveTranslateConfig = .default,
          observabilityBus: ObservabilityBus,
-         engine: LiveTextRecognitionEngine = VisionTextRecognitionEngine(),
+         engine: LiveTextRecognitionEngine? = nil,
          now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
         self.config = config
         self.events = LiveTranslateEvents(bus: observabilityBus, config: config)
+        // The shipped engine takes its per-pass rectangle bound from the same
+        // config as everything else; an injected engine (a test fake) is used
+        // exactly as handed in.
         self.engine = engine
+            ?? VisionTextRecognitionEngine(
+                maximumRectanglesPerPass: config.trackingMaxRectanglesPerPass)
         self.now = now
     }
 
@@ -278,6 +356,8 @@ final class LiveTextDetector {
             trackingAvailable = false
             lastOCRPassAt = nil
             rememberedKeys = []
+            frameDetector.forget()
+            sceneChanged = true
             return true
         }
         guard wasReady else { return }
@@ -298,7 +378,12 @@ final class LiveTextDetector {
     /// The caller drops a failure silently: a failed OCR pass is recorded as
     /// `ocr_pass_failed` and never surfaced, and the next pass tries again.
     func recognize(_ frame: CameraFrame) async -> Result<Pass, LiveTranslateError> {
-        await perform(frame) { [self] in passKind(at: now()) }
+        await perform(frame) { [self] in
+            // Measured before the pass kind is chosen, because the answer is
+            // what chooses it (a still scene has no geometry worth following).
+            noteSceneChange(of: frame)
+            return passKind(at: now())
+        }
     }
 
     /// Runs one **OCR** pass over `frame`, always — T-033's still-frame entry.
@@ -343,19 +428,41 @@ final class LiveTextDetector {
         }
     }
 
-    /// The pass kind this frame gets. OCR when the cadence is due or when there
-    /// is nothing to track; tracking otherwise. The camera's frame tap already
-    /// throttles samples to the same interval, so a sampled frame is normally
-    /// due — the tracking branch is what carries geometry for any frame the
-    /// caller delivers sooner than the cadence.
+    /// The pass kind this frame gets. OCR when the cadence is due, when there
+    /// is nothing to track, or when the scene has not changed; tracking
+    /// otherwise. The camera's frame tap already throttles samples to the same
+    /// interval, so a sampled frame is normally due — the tracking branch is
+    /// what carries geometry for any frame the caller delivers sooner than the
+    /// cadence.
+    ///
+    /// The scene-change condition is the resource fix and it is not a
+    /// micro-optimisation: a tracking pass costs one `VNTrackRectangleRequest`
+    /// per remembered rectangle, so a still scene used to buy a burst of Vision
+    /// requests per delivered frame for geometry that could only come back the
+    /// same. A tracker cannot find movement that is not there, so the whole
+    /// pass is skipped and the frame gets the OCR pass it was delivered for
+    /// (the tap's reduced cadence is what makes that the *refresh* pass and not
+    /// a fourth of a second of wasted Vision).
     func passKind(at time: TimeInterval) -> PassKind {
         let decision: PassKind? = withLock {
             guard trackingAvailable, !rememberedKeys.isEmpty, let last = lastOCRPassAt else {
                 return nil
             }
+            guard sceneChanged else { return .ocr }
             return time - last >= config.ocrSampleInterval ? .ocr : .tracking
         }
         return decision ?? .ocr
+    }
+
+    /// Measures the frame in hand against the last one OCR ran on and records
+    /// the answer. Does **not** move the reference: only an OCR pass does that,
+    /// so a tracking pass compares against the last frame whose strings are
+    /// actually known.
+    private func noteSceneChange(of frame: CameraFrame) {
+        let changed = frameDetector.isMateriallyDifferent(frame,
+                                                          side: config.frameSignatureSide,
+                                                          threshold: config.frameChangeThreshold)
+        withLock { sceneChanged = changed }
     }
 
     // MARK: Pass implementation (visionQueue)
@@ -368,7 +475,16 @@ final class LiveTextDetector {
 
         do {
             let regions = try engine.recognizeText(in: frame.pixelBuffer)
-            withLock { rememberedKeys = Set(regions.map(\.text)) }
+            withLock {
+                rememberedKeys = Set(regions.map(\.text))
+                // This is "the last OCR'd frame" every later comparison is
+                // made against. Committed on success only: a failed pass made
+                // no claim about the scene, and letting a frame Vision could
+                // not read become the baseline would gate the next pass against
+                // a picture nothing was recognized in.
+                frameDetector.remember(frame, side: config.frameSignatureSide)
+                sceneChanged = false
+            }
             events.ocrPass(regionCount: regions.count)
             // An OCR pass has no tracked geometry to report — it is the
             // anchor, not the carrier. Zero regions is the empty-state hint,
