@@ -256,6 +256,80 @@ final class GoogleCalendarGatewayTests: XCTestCase {
         XCTAssertFalse(GoogleShareError.insufficientScopes.isRetryable)
     }
 
+    /// The INBOUND refusal (2026-09-17) — the path a device console showed
+    /// behaving differently from the family-calendar one, and the reason
+    /// the status is classified before the body is read at all.
+    ///
+    /// Google's error document is a JSON object like any other: decoded as
+    /// a page it yields no items and no sync token, so a body-first
+    /// implementation would call a REFUSED listing a successful empty one
+    /// and silently drop every unanswered invitation the elder has. With
+    /// the status gate first, the same response is what it is — a scope
+    /// refusal — and both the card and the log say `insufficient_scopes`.
+    func testAnInbound403IsClassifiedAsInsufficientScopesNotMalformedResponse() async {
+        // A realistic 403 body: the shape Google sends when the token was
+        // minted for the wrong scopes, and one that would decode into the
+        // listing's own shape as "no items".
+        transport.enqueue(json: ["error": ["code": 403,
+                                           "status": "PERMISSION_DENIED",
+                                           "message": "Request had insufficient authentication scopes."]],
+                          status: 403)
+        let gateway = makeGateway()
+
+        let page = await gateway.listIncoming(syncToken: nil)
+
+        XCTAssertNil(page,
+                     "a refused listing is not an empty one — nothing may be reported as 'no invitations'")
+        XCTAssertEqual(gateway.lastErrorClass, .insufficientScopes)
+        XCTAssertNotEqual(gateway.lastErrorClass, .malformedResponse,
+                          "the status decides the class; the body is never parsed as a page")
+        XCTAssertEqual(gateway.lastErrorClass?.isAuthorizationFailure, true,
+                       "and the flush stops the pass rather than retrying a refusal")
+        XCTAssertEqual(bus.events(named: "calendar_share_inbound_failed").last?.errorCode,
+                       "insufficient_scopes")
+        XCTAssertEqual(transport.requests.count, 1)
+    }
+
+    /// The other refusal, on the same path: a 401 is the token itself, and
+    /// it must not be merged with the 403 above any more than it is on the
+    /// outbound path.
+    func testAnInbound401IsClassifiedAsUnauthorized() async {
+        transport.enqueue(json: ["error": ["code": 401]], status: 401)
+        let gateway = makeGateway()
+
+        let page = await gateway.listIncoming(syncToken: nil)
+
+        XCTAssertNil(page)
+        XCTAssertEqual(gateway.lastErrorClass, .unauthorized)
+        XCTAssertEqual(bus.events(named: "calendar_share_inbound_failed").last?.errorCode,
+                       "unauthorized")
+    }
+
+    /// The call the device console actually refused (2026-09-17): with
+    /// `calendar.events` as the only calendar grant, Google answers 403 to
+    /// `calendarList.list`. The refusal has to be classified HERE, because
+    /// finding the family calendar is the first thing every write does —
+    /// and a class that read "malformed response" would send the family
+    /// looking at Google's API instead of at the grant.
+    func testTheFamilyCalendarLookupClassifiesA403AndStopsTheWrite() async {
+        transport.enqueue(json: ["error": ["code": 403,
+                                           "status": "PERMISSION_DENIED"]],
+                          status: 403)
+        let gateway = makeGateway()
+
+        let id = await gateway.createEvent(makeDraft())
+
+        XCTAssertNil(id)
+        XCTAssertEqual(gateway.lastErrorClass, .insufficientScopes)
+        // One request: the write does not go on to address an event to a
+        // calendar the account was just refused.
+        XCTAssertEqual(transport.requests.count, 1)
+        XCTAssertEqual(transport.requests.first?.url?.path(percentEncoded: false),
+                       "/calendar/v3/users/me/calendarList")
+        XCTAssertEqual(bus.events(named: "calendar_share_family_calendar_failed").last?.errorCode,
+                       "insufficient_scopes")
+    }
+
     func testA404OnCreateIsReportedAsNotFound() async {
         transport.enqueue(json: ["items": [["id": familyCalendarID,
                                             "summary": "Sahayak Family"]]])

@@ -1,0 +1,29 @@
+{
+  "id": "75d8d101-44d5-4794-af7c-7f57eefb4cc3",
+  "task_id": "define-requirements",
+  "workflow_id": "live-camera-translation",
+  "status": "RESOLVED",
+  "reason": "Requirements sign-off — live camera translation v1 (hil overlay on define-requirements). Review specs/define-requirements.md and specs/define-requirements.lock.yaml (23 FR, 13 NFR) before design-component starts.",
+  "context": {
+    "task_description": "Elicit and document the live-camera-translation requirements; produce the structured FR/NFR set and the lock snapshot.",
+    "risk_tier": "T1",
+    "agent": "ba",
+    "artifacts": [
+      "specs/define-requirements.md",
+      "specs/define-requirements.lock.yaml",
+      "specs/define-requirements/index.md"
+    ],
+    "open_decisions": [
+      "OD1",
+      "OD2",
+      "OD3",
+      "OD5",
+      "OD7",
+      "OD8"
+    ],
+    "note": "Item created by the task session because the task was dispatched directly (not via `ai-sdd run`), which is the path that normally creates it. Left PENDING for the human."
+  },
+  "created_at": "2026-09-16T06:38:15.433Z",
+  "notes": "Owner-approved 2026-09-16: 23 FR / 13 NFR sign-off. OD7 directive: keep shipped per-day GeminiCostGovernor. OD8 directive: keep name LabelTranslationCache, generalized per design §3.",
+  "resolved_at": "2026-09-16T09:35:51.675Z"
+}

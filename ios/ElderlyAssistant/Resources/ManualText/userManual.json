@@ -410,6 +410,7 @@
       "System tab:",
       "• Appearance — pick a warm background theme: Cream (default), Sage, Sky, Lavender, Dusk. Changes every screen instantly; text and cards keep their contrast.",
       "• Language & region — English or नेपाली; the whole interface and Sahayak's spoken replies follow it.",
+      "• Live translation — the camera translation consent switch: text on the screen is translated on this phone; only when a word isn't in the phone's own dictionary, and only with your agreement, is the text (never the picture) sent to the assistant's cloud service — and it can be stopped any time.",
       "• Privacy — the privacy statement and the app version number.",
       "Technical settings (hidden) — press and hold the word “Settings” at the top for about a second: Gemini AI (API key, daily call limit, model picker), Voice Engine (Gemini cloud or on-device), Web search (its API key), YouTube (the optional YouTube Data API key — with one, voice “play X” plays the top video itself; without one it opens YouTube search), Assistant activity (the intent log), Tool requests (the last 200 requests), and AI models (the speech-recognition and assistant-brain model pickers, and the downloads list with sizes, cancel and delete). After you open it once, a small “…” button appears next to the title and opens the same sheet."
     ],
@@ -438,6 +439,7 @@
       "प्रणाली ट्याब:",
       "• रूप — तातो पृष्ठभूमिका विषयवस्तु: क्रिम (पूर्वनिर्धारित), सेज, स्काई, ल्याभेन्डर, डस्क। हरेक स्क्रिन तुरुन्तै बदलिन्छ; पाठ र कार्डको भिन्नता जोगिन्छ।",
       "• भाषा र क्षेत्र — अंग्रेजी वा नेपाली; पूरै स्क्रिन र सहायकका बोली यसैलाई पछ्याउँछन्।",
+      "• लाइभ अनुवाद — क्यामेरा अनुवादको सहमति स्विच: स्क्रिनको अक्षर यही फोनमा अनुवाद हुन्छ; फोनको शब्दकोशमा नभएको शब्दको लागि मात्र, र तपाईंको मन्जुरीसहित, अक्षर (तस्बिर होइन) असिस्टेन्टको क्लाउडमा पठाइन्छ — जहिले पनि बन्द गर्न सकिन्छ।",
       "• गोपनीयता — गोपनीयताको विवरण र एपको संस्करण नम्बर।",
       "प्राविधिक सेटिङ (लुकेको) — माथिको 'सेटिङ' शब्द करिब एक सेकेन्ड थिचिराख्नुहोस्: जेमिनी AI (कुञ्जी, दैनिक कल-सीमा, मोडेल रोज्ने), आवाज इन्जिन (जेमिनी क्लाउड वा यन्त्रमै), वेब खोज (त्यसको API कुञ्जी), युट्युब (वैकल्पिक YouTube Data API कुञ्जी — भए आवाजको 'चलाऊ' ले आफैं उत्कृष्ट भिडियो चलाउँछ, नभए युट्युबको खोज खुल्छ), सहायकको गतिविधि (आदेश-लग), उपकरण अनुरोधहरू (पछिल्ला २०० अनुरोध), र AI मोडेल (बोली चिन्ने र सहायक दिमागको मोडेल रोज्ने, र साइज, रद्द र मेटाइसहितको डाउनलोड-सूची)। एक पटक खोलेपछि शीर्षकको छेउमा सानो '…' बटन देखिन्छ, जसले त्यही सूची खोल्छ।"
     ],

@@ -690,11 +690,20 @@ struct HomeDock: View {
     /// The appliance vision helper presents app-wide (via
     /// `pendingPluginPresentation`), same as the voice path.
     let onAppliance: () -> Void
+    /// [LIVE-TRANSLATE T-027] Live camera translation presents the same way:
+    /// the tile is the intent, and the session view arrives through
+    /// `pendingPluginPresentation` — the assistant is returned to when it
+    /// closes, with no navigation stack involved (FR-LCT-001).
+    let onLiveTranslate: () -> Void
 
     var body: some View {
         VStack(spacing: 8) {
             HStack(spacing: 6) {
                 applianceItem
+                // The camera family's second tile sits next to the first: both
+                // are "point the camera at something", and an elder looking
+                // for one will find the other (FR-LCT-001's one clear action).
+                translateItem
                 dockItem(.directions, icon: "map.fill", tint: .directions,
                          titleKey: "home.hub.directions")
                 dockItem(.feed, icon: "rectangle.stack.fill", tint: .feeds,
@@ -735,6 +744,18 @@ struct HomeDock: View {
         Button(action: onAppliance) {
             tile(icon: "camera.viewfinder", tint: .appliance,
                  titleKey: "plugin.applianceHelper.name")
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// [LIVE-TRANSLATE T-027] The feature's Home entry (FR-LCT-001). The label
+    /// is the shipped catalog name for the feature — the same one its Settings
+    /// row uses — so the tile, the Settings row and the plugin's display name
+    /// are one string, in the active language (NFR-LCT-004).
+    private var translateItem: some View {
+        Button(action: onLiveTranslate) {
+            tile(icon: LiveTranslateEntry.iconName, tint: .appliance,
+                 titleKey: LiveTranslateEntry.labelKey)
         }
         .buttonStyle(.plain)
     }

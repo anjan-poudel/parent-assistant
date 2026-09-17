@@ -10,13 +10,18 @@ Run the ai-sdd SDD workflow. If you're on a feature branch, ai-sdd uses it.
 Otherwise pass `--feature <name>` or set `AI_SDD_FEATURE` in the environment.
 To switch sessions: `git switch feature/<name>` (session follows the branch).
 
+Project resolution: the CLI defaults `--project` to the current working
+directory — invoke from the repo root or the active worktree and do NOT pass
+`--project` unless the user asks. Pass `--feature <name>` on the default
+branch; on a feature branch the session follows the branch name.
+
 Follow these steps:
 
-1. Run `ai-sdd status --next --json --project /Users/anjan/workspace/projects/ai/ai-sdd/ai-sdd-claude/examples/elderly-ai-assistant` via Bash to find the
+1. Run `ai-sdd status --next --json` via Bash to find the
    next READY task (PENDING with all dependencies COMPLETED) and its agent role.
 
    If `ready_tasks` is empty, check overall status with
-   `ai-sdd status --json --project /Users/anjan/workspace/projects/ai/ai-sdd/ai-sdd-claude/examples/elderly-ai-assistant` — the workflow may be complete
+   `ai-sdd status --json` — the workflow may be complete
    or all remaining tasks may be blocked.
 
 2. Spawn the matching subagent using the Task tool based on the task's `agent` field.
@@ -32,14 +37,14 @@ Follow these steps:
    If multiple tasks are READY simultaneously, spawn them sequentially one at a
    time and collect all results before continuing.
 
-3. After the subagent returns, run `ai-sdd hil list --json --project /Users/anjan/workspace/projects/ai/ai-sdd/ai-sdd-claude/examples/elderly-ai-assistant`.
+3. After the subagent returns, run `ai-sdd hil list --json`.
    If any PENDING HIL items:
    - Show the item context to the developer.
    - Ask: "Approve to continue? [yes/no]"
-   - On yes: run `ai-sdd hil resolve <id> --project /Users/anjan/workspace/projects/ai/ai-sdd/ai-sdd-claude/examples/elderly-ai-assistant`.
-   - On no:  run `ai-sdd hil reject <id> --reason "<reason>" --project /Users/anjan/workspace/projects/ai/ai-sdd/ai-sdd-claude/examples/elderly-ai-assistant`.
+   - On yes: run `ai-sdd hil resolve <id>`.
+   - On no:  run `ai-sdd hil reject <id> --reason "<reason>"`.
 
-4. Run `ai-sdd status --metrics --project /Users/anjan/workspace/projects/ai/ai-sdd/ai-sdd-claude/examples/elderly-ai-assistant` and show the updated table.
+4. Run `ai-sdd status --metrics` and show the updated table.
 
 5. Ask the developer: "Continue to next task? [yes/no/done]"
    - yes  → repeat from step 1

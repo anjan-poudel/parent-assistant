@@ -63,8 +63,14 @@ extension SettingsView {
                 // of plumbing a family member must not be asked to handle.
                 return [.quickApps, .feeds, .manuals, .places]
             case .system:
-                // "Appearance, language, privacy".
-                return [.appearance, .language, .privacy]
+                // "Appearance, language, privacy" + the live-translation
+                // consent row ([LIVE-TRANSLATE T-015], 2026-09-17): the
+                // reorg's System group is where the privacy-shaped
+                // household controls live, and the branch's row sat
+                // immediately above `.privacy` — the elder changing their
+                // mind about translation is the common case, so it is a
+                // plain row here, not a sub-page of Privacy.
+                return [.appearance, .language, .liveTranslate, .privacy]
             }
         }
     }
@@ -83,7 +89,7 @@ extension SettingsView {
         // Tools
         case quickApps, feeds, manuals, places
         // System
-        case appearance, language, privacy
+        case appearance, language, liveTranslate, privacy
         // Hidden sheet (spec §2 decision 2) — moved, not deleted. YouTube
         // rides with them: a provider-key screen, not a household control.
         case geminiAI, voiceEngine, webSearch, intentLog, toolLog, youtube
@@ -114,6 +120,10 @@ extension SettingsView {
             case .places: return "settings.places.title"
             case .appearance: return "settings.appearance.title"
             case .language: return "settings.language.title"
+            // [LIVE-TRANSLATE T-015] The consent leaf's own title key, in
+            // en + ne already (the reorg moves rows, it does not rename
+            // them).
+            case .liveTranslate: return "settings.livetranslate.title"
             case .privacy: return "settings.privacy.title"
             case .geminiAI: return "settings.gemini.title"
             case .voiceEngine: return "settings.voiceEngine.title"
@@ -145,6 +155,7 @@ extension SettingsView {
             case .places: return "mappin.and.ellipse"
             case .appearance: return "paintpalette.fill"
             case .language: return "globe"
+            case .liveTranslate: return "text.viewfinder"
             case .privacy: return "lock.shield.fill"
             case .geminiAI: return "sparkles"
             case .voiceEngine: return "arrow.triangle.2.circlepath"
@@ -398,6 +409,11 @@ struct SettingsDestinationView: View {
         case .youtube: YouTubeSettingsView()
         case .feeds: FeedsSettingsView()
         case .quickApps: QuickAccessAppsView()
+        // [LIVE-TRANSLATE T-015] The leaf drives the coordinator's one
+        // consent controller, so its decision is the session view's
+        // decision with no restart and no second record.
+        case .liveTranslate:
+            LiveTranslateConsentSettingsView(controller: coordinator.liveTranslateConsentController())
         case .privacy: PrivacySettingsView()
         case .intentLog: IntentLogReviewView()
         case .toolLog: ToolLogReviewView()

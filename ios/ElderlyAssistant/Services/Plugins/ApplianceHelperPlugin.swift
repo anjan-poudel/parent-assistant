@@ -30,6 +30,13 @@ final class ApplianceHelperPlugin: AssistantPlugin {
 
     private let cache: ApplianceCache
 
+    /// The app's one shared translation store, handed to the presented view
+    /// so the helper's label seam reads the same dictionary and the same
+    /// persisted layer the live translation path reads (T-013, FR-LCT-020).
+    /// Optional and defaulted: a plugin built without one — every existing
+    /// call site and every test — presents exactly the shipped view.
+    private let labelCache: LabelTranslationCache?
+
     /// Wired by `AppCoordinator.start()` (the speaker is built after the
     /// registry, so it can't be an init parameter). Optional: the feature
     /// works silently without it, and tests never set one.
@@ -57,14 +64,16 @@ final class ApplianceHelperPlugin: AssistantPlugin {
     /// this — the view owns its session from the moment it is built.
     private(set) var lastPresentedSession: ApplianceHelperSession?
 
-    init(storage: EncryptedLocalStorage) {
+    init(storage: EncryptedLocalStorage, labelCache: LabelTranslationCache? = nil) {
         self.cache = ApplianceCache(storage: storage)
+        self.labelCache = labelCache
     }
 
     /// Test seam: the session cache (LRU/keys covered by
     /// `ApplianceCacheTests` directly).
-    init(cache: ApplianceCache) {
+    init(cache: ApplianceCache, labelCache: LabelTranslationCache? = nil) {
         self.cache = cache
+        self.labelCache = labelCache
     }
 
     func isApplicable(locale: Locale) -> Bool { true }   // universal, not geography-gated
@@ -186,7 +195,7 @@ final class ApplianceHelperPlugin: AssistantPlugin {
                                              speaker: speaker,
                                              pendingManualEntryID: request.pendingManualEntryID)
         lastPresentedSession = session
-        return AnyView(ApplianceHelperView(session: session))
+        return AnyView(ApplianceHelperView(session: session, labelCache: labelCache))
     }
 
     private static func event(_ type: String, errorCode: String? = nil) -> ObservabilityEvent {

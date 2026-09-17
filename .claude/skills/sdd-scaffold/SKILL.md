@@ -220,7 +220,7 @@ Scaffold an ai-sdd project or feature. Follow these steps:
 
    b. Run via Bash:
       ```bash
-      ai-sdd scaffold --brief /tmp/sdd-brief-<timestamp>.json --project /Users/anjan/workspace/projects/ai/ai-sdd/ai-sdd-claude/examples/elderly-ai-assistant
+      ai-sdd scaffold --brief /tmp/sdd-brief-<timestamp>.json --project /Users/anjan/workspace/projects/elderly-ai-assistant
       ```
 
       This generates: ai-sdd.yaml, workflow YAML, directory structure, and init-report.

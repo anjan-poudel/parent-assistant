@@ -154,6 +154,13 @@ struct HomeView: View {
                     HomeDock(contactName: homePresentation.primaryContactName,
                              onAppliance: {
                                  coordinator.presentApplianceHelper(question: nil)
+                             },
+                             // [LIVE-TRANSLATE T-027] The same present-app-wide
+                             // shape the appliance tile uses: the session view
+                             // arrives as a sheet and closing it returns to the
+                             // assistant with no prompts (FR-LCT-001).
+                             onLiveTranslate: {
+                                 coordinator.presentLiveTranslate()
                              })
                     .equatable()
                 }

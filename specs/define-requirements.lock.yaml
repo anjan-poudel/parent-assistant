@@ -1,0 +1,451 @@
+# Requirements lock — live camera translation (v1)
+#
+# Contract: requirements_lock (ai-sdd task define-requirements).
+# Snapshot of the feature requirements set produced from
+# specs/define-requirements.md + specs/define-requirements/ (FR/ and NFR/).
+# Downstream tasks (design-component, review-l2, security-design-review,
+# plan-tasks, implement, security-test, final-sign-off) consume this file to
+# stay in scope and to detect drift: if a requirement file's sha256 no longer
+# matches, the requirement set has changed since this lock.
+#
+# Status: snapshot presented for the owner HIL sign-off gate on
+# define-requirements. Re-lock after any sign-off change; the hashes below are
+# the drift-detection baseline.
+#
+# Re-lock 2026-09-16T23:42:56Z (security-test gate). One owner-signed amendment:
+# FR-LCT-003 is narrowed to English source text only, with Nepali/Devanagari
+# source recorded as an explicit v1 non-goal and the reason given as a measured
+# platform fact (specs/hi-in-probe-notes.md) rather than an assumption. All 36
+# hashes were re-derived; FR-LCT-003 is the only one that changed, so the other
+# 35 requirement files are unchanged by this re-lock.
+
+version: "1"
+task: define-requirements
+feature: live-camera-translation
+agent: ba
+contract: requirements_lock
+locked_at: "2026-09-16T06:37:01Z"
+snapshot_of: "specs/define-requirements.md"
+snapshot_sha256: d284a0bb2e85f19908b79b2e52c72e66dd5c145a53871ce37db0cf991bf45a22
+index: "specs/define-requirements/index.md"
+counts:
+  functional_requirements: 23
+  non_functional_requirements: 13
+
+requirements:
+  - id: FR-LCT-001
+    title: "Live camera preview without photo capture"
+    kind: FR
+    area: "Camera Capture"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-LCT-001-live-camera-preview.md
+    sha256: f7952d97801de79d0498c8fbc07391178696023d733306e2a6bfbd30f2cf21c5
+    acceptance_scenarios: 2
+  - id: FR-LCT-002
+    title: "Camera permission and purpose disclosure"
+    kind: FR
+    area: "Camera Capture / Compliance"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-LCT-002-camera-permission-and-disclosure.md
+    sha256: eea2a35464b2edf3649532b661b4216d4c880a542c9265b9c94a2dad1d31ff47
+    acceptance_scenarios: 3
+  - id: FR-LCT-003
+    title: "On-device OCR with automatic language detection"
+    kind: FR
+    area: "Text Detection"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-LCT-003-on-device-ocr-language-detection.md
+    sha256: b1b3206a74b21d9df8bf8fd96fceca3bf4e77ef67afe33484a86f16973388877
+    acceptance_scenarios: 3
+    amended: "2026-09-16T23:42:56Z"
+    amendment: >-
+      Owner-signed at the security-test gate: v1 accepts English source text only
+      (Nepali/Devanagari source is an explicit v1 non-goal). Third acceptance scenario
+      narrowed to a Latin-script non-English sample, which the English control proves
+      is testable. Reason is measured, not assumed — see specs/hi-in-probe-notes.md.
+  - id: FR-LCT-004
+    title: "Region tracking between OCR passes"
+    kind: FR
+    area: "Text Detection"
+    priority: SHOULD
+    file: specs/define-requirements/FR/FR-LCT-004-region-tracking-between-ocr-passes.md
+    sha256: 6b22f3cae2b754f237c8bc0edf24739f15e37ab14db4a0586a31d7d887b926eb
+    acceptance_scenarios: 2
+  - id: FR-LCT-005
+    title: "Stable text regions with hysteresis and change-only events"
+    kind: FR
+    area: "Region Stabilisation"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-LCT-005-region-stabilisation-hysteresis.md
+    sha256: 1c87d1200501b889f588e8207bd8dbe43f1a401ac5a67a0f2e7a1decf4b7293b
+    acceptance_scenarios: 4
+  - id: FR-LCT-006
+    title: "Decluttering for dense multi-region scenes"
+    kind: FR
+    area: "Region Stabilisation"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-LCT-006-decluttering-dense-scenes.md
+    sha256: 1b47f854ac4df88cc112e4a40d8f654fadaebddccee5eba776783f431c95b023
+    acceptance_scenarios: 2
+  - id: FR-LCT-007
+    title: "Tier 0 curated dictionary translation"
+    kind: FR
+    area: "Translation"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-LCT-007-dictionary-tier-0.md
+    sha256: 18aef0b6b29ac878b315cae7b303f30426eb94ab1f6def16f1af1efa2f9c1699
+    acceptance_scenarios: 3
+  - id: FR-LCT-008
+    title: "Truthful tier attribution and no success without translation"
+    kind: FR
+    area: "Translation"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-LCT-008-truthful-tier-attribution.md
+    sha256: c23fb314241b423118d0ad22141ef5e5b6fdcc6c3b6921b8f0565ba57f8684e0
+    acceptance_scenarios: 4
+  - id: FR-LCT-009
+    title: "Tier 2 text-only cloud translation"
+    kind: FR
+    area: "Translation"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-LCT-009-cloud-tier-text-only-translation.md
+    sha256: 0727fa0ea28a5f9f0b6f5f2bd942dad2cdd5ff22cc44205aabe25b02de7913eb
+    acceptance_scenarios: 4
+  - id: FR-LCT-010
+    title: "Consent gate before any cloud translation"
+    kind: FR
+    area: "Privacy & Consent"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-LCT-010-consent-gate.md
+    sha256: 3631b838036bcc77bdd4a94bab242dfd69b3fb9c9f71100ffcfc7e7288f3ba91
+    acceptance_scenarios: 4
+  - id: FR-LCT-011
+    title: "Visible cloud-activity indicator"
+    kind: FR
+    area: "Privacy & Consent"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-LCT-011-cloud-activity-indicator.md
+    sha256: b3473db26fde6e3057fda225770d6e3875b7ea029683529a9f53054e717c6684
+    acceptance_scenarios: 3
+  - id: FR-LCT-012
+    title: "Consent revocation degrades to dictionary-only offline mode"
+    kind: FR
+    area: "Privacy & Consent"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-LCT-012-consent-revocation-offline-mode.md
+    sha256: ebefffb01848cb15c38649d73623ea6596515592585d6744c028bbd5ab695452
+    acceptance_scenarios: 3
+  - id: FR-LCT-013
+    title: "Cost governor bound and fail-closed behaviour"
+    kind: FR
+    area: "Cost Governance"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-LCT-013-cost-governor-fails-closed.md
+    sha256: f284e1dbd007f0e2eb9c3f4402c3aa727020f77a786aed644cb90f1c6bd7b0a4
+    acceptance_scenarios: 3
+  - id: FR-LCT-014
+    title: "Text-only egress guarantee"
+    kind: FR
+    area: "Privacy & Consent"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-LCT-014-text-only-egress.md
+    sha256: 43e4d524680340ce1ff8dffbf6d257d09a683c6278510d90c6394890259f26f1
+    acceptance_scenarios: 3
+  - id: FR-LCT-015
+    title: "Smart-mix in-place replacement (bounded)"
+    kind: FR
+    area: "Overlay"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-LCT-015-smart-mix-in-place-replacement.md
+    sha256: 70d2f227ebac4252f724faa5d25504c897e52a1b748cc2da90473f5241664db1
+    acceptance_scenarios: 3
+  - id: FR-LCT-016
+    title: "Anchored callouts that never obscure the original"
+    kind: FR
+    area: "Overlay"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-LCT-016-anchored-callouts.md
+    sha256: 13376cfc6d9ef07b387966ddc70cd75669376fa396574bb59a6be155bc6a1f2b
+    acceptance_scenarios: 2
+  - id: FR-LCT-017
+    title: "\"Always show original text\" toggle"
+    kind: FR
+    area: "Overlay"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-LCT-017-always-show-original-toggle.md
+    sha256: 4bbc621a2eaab05c838edde03f14270f9c08d55c39361bcfcefe3afe446f9aac
+    acceptance_scenarios: 2
+  - id: FR-LCT-018
+    title: "Pending and failed translation states in the overlay"
+    kind: FR
+    area: "Overlay"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-LCT-018-overlay-progress-and-failure-states.md
+    sha256: 2d32d065621a229d4f61730c640d7fc036ff959d0f3df6e066e0d0db6727fe15
+    acceptance_scenarios: 3
+  - id: FR-LCT-019
+    title: "Persistent encrypted translation cache"
+    kind: FR
+    area: "Caching"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-LCT-019-persistent-encrypted-cache.md
+    sha256: 854709b51187ac1b853314ae65de2a2f24033e0978ab47c00d05e3c983a3a98f
+    acceptance_scenarios: 4
+  - id: FR-LCT-020
+    title: "Shared dictionary and translation cache with the appliance helper"
+    kind: FR
+    area: "Caching"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-LCT-020-shared-cache-and-dictionary.md
+    sha256: bf942e4a53141f7a033745832bfe2a73b6fa6918f93b69c54d9ea965cd5ed32d
+    acceptance_scenarios: 3
+  - id: FR-LCT-021
+    title: "Tap-to-hear and \"read this to me\""
+    kind: FR
+    area: "Voice Output"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-LCT-021-tap-to-hear-and-read-this-to-me.md
+    sha256: 5955648f5e53660b4dfa07fbda3448963ebd3d90733efe686248acb77f44a028
+    acceptance_scenarios: 4
+  - id: FR-LCT-022
+    title: "LiveTranslatePlugin voice entry and session lifecycle"
+    kind: FR
+    area: "Plugin & Session"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-LCT-022-plugin-voice-entry-and-session.md
+    sha256: 69267da2ab4a107a14dc9c1d1b09a5f4e5b225f09879b3af0237438e0c7d51e6
+    acceptance_scenarios: 3
+  - id: FR-LCT-023
+    title: "Honest degradation — never silently report success"
+    kind: FR
+    area: "Error Handling"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-LCT-023-honest-degradation-and-offline.md
+    sha256: 1d93be3b0c7e2ed1fb381b2ec785eddf354a3af0e1c63ba837a8233f8553dd36
+    acceptance_scenarios: 3
+  - id: NFR-LCT-001
+    title: "Overlay responsiveness and translation latency"
+    kind: NFR
+    area: "Performance"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-LCT-001-overlay-responsiveness.md
+    sha256: 11490b416821793e9fddfab53b227b519289187c89b7f3ffab236b0123aeb1ba
+    acceptance_scenarios: 3
+  - id: NFR-LCT-002
+    title: "OCR cadence, battery and thermal budget"
+    kind: NFR
+    area: "Performance"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-LCT-002-ocr-cadence-and-thermal-budget.md
+    sha256: 89bf0cb207b83360bceac64eaab3e080b68944aed4b374093f5635a516cdfa7c
+    acceptance_scenarios: 3
+  - id: NFR-LCT-003
+    title: "Accessibility — tap targets, overlay text, contrast"
+    kind: NFR
+    area: "Accessibility"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-LCT-003-accessibility-standards.md
+    sha256: 57040c44850b60e6b5dad1cfcaf70e72e3b64c7a1ece0456ac6f83ef750cb801
+    acceptance_scenarios: 3
+  - id: NFR-LCT-004
+    title: "Localisation of new UI strings"
+    kind: NFR
+    area: "Localisation"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-LCT-004-localisation.md
+    sha256: 8b589641a932b88c3ac6732b1941d1a6c63e07413be217ee5ef4beb845450374
+    acceptance_scenarios: 2
+  - id: NFR-LCT-005
+    title: "Privacy — no image or unrelated-content egress"
+    kind: NFR
+    area: "Privacy"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-LCT-005-no-image-or-unrelated-content-egress.md
+    sha256: f34b0d4808f266cd5530f18ade52ce5a9579f021f7307dfbb9823cc452efb526
+    acceptance_scenarios: 2
+  - id: NFR-LCT-006
+    title: "Log safety — no recognized or translated text in logs"
+    kind: NFR
+    area: "Privacy / Security"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-LCT-006-log-safety.md
+    sha256: 65785f5da79625730d6940a6bd08e078b529d1378017f7e923da22ca537bbf6f
+    acceptance_scenarios: 2
+  - id: NFR-LCT-007
+    title: "Consent enforcement and auditability"
+    kind: NFR
+    area: "Compliance / Security"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-LCT-007-consent-enforcement-and-auditability.md
+    sha256: f7a6f3569f49674245aba1630cb0dda98303fc32ca5febcbec7c2cb518f8e3bf
+    acceptance_scenarios: 3
+  - id: NFR-LCT-008
+    title: "Cache at rest — encrypted, keyed, bounded"
+    kind: NFR
+    area: "Security / Privacy"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-LCT-008-cache-at-rest.md
+    sha256: 4a5d7a593a00ff3735254104121d6af305a0ce6303b3f09d09575afb21a2149f
+    acceptance_scenarios: 3
+  - id: NFR-LCT-009
+    title: "Untrusted scene text hardening (injection)"
+    kind: NFR
+    area: "Security"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-LCT-009-untrusted-scene-text-hardening.md
+    sha256: fe80664845098c0dcc897d767a8e95ffb7b61684d37c4d525acb75f2460d4011
+    acceptance_scenarios: 3
+  - id: NFR-LCT-010
+    title: "Offline degradation integrity — no false success"
+    kind: NFR
+    area: "Reliability"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-LCT-010-offline-degradation-integrity.md
+    sha256: 59d3bba40d1aa206847c7e02f945c58c68e8eaa7d06ebb72babd02d7be254852
+    acceptance_scenarios: 2
+  - id: NFR-LCT-011
+    title: "Configurable parameters — no hardcoded operational constants"
+    kind: NFR
+    area: "Reliability / Maintainability"
+    priority: SHOULD
+    file: specs/define-requirements/NFR/NFR-LCT-011-configurable-parameters.md
+    sha256: a942aac1baad41ea43c4e24be4031f20be59a9d67f3a714c104bbffcd2d3da06
+    acceptance_scenarios: 2
+  - id: NFR-LCT-012
+    title: "Shared-component integrity — no regression to the appliance helper"
+    kind: NFR
+    area: "Reliability"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-LCT-012-shared-component-integrity.md
+    sha256: c5c5fdc4bafafefcc947bb3c51f518d2e744ac2b1514487aade3b55f906bc3ed
+    acceptance_scenarios: 3
+  - id: NFR-LCT-013
+    title: "Compliance and release gates"
+    kind: NFR
+    area: "Compliance"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-LCT-013-compliance-and-release-gates.md
+    sha256: c2ca92821659fa8516170b3fbfb37d27aaec72949097d234a343f5df47571ad2
+    acceptance_scenarios: 2
+
+assumptions:
+  - id: A1
+    statement: "v1 target language is the app's active language (Nepali at launch) and v1 source text is English; the pipeline stays direction- and language-agnostic so wider source languages and the reverse direction are model/prompt work, not architecture work."
+    source: "design §0, §1; feature constitution rule 9"
+  - id: A2
+    statement: "The cloud tier (Gemini) is the only translation egress and it ships under the recorded project-constitution exception Open Decision 13 (2026-09-16), consent-gated, text-only, bounded by GeminiCostGovernor."
+    source: "constitution Open Decision 13; design §7"
+  - id: A3
+    statement: "Vision (VNRecognizeTextRequest with automatic language detection) on the app's existing deployment target provides on-device OCR with no model download."
+    source: "design §4.2"
+  - id: A4
+    statement: "Piper voices, SpeakQueue, DesignTokens, StoragePlacement/encrypted storage, String Catalog localisation and the plugin registry already exist and are reused."
+    source: "design §3, §6; feature constitution Known integration surface"
+  - id: A5
+    statement: "Accessibility standards of the project constitution (44 pt targets, 18 pt body text, high contrast) bind this feature."
+    source: "project constitution Standards (Accessibility); feature constitution rule 6"
+
+constraints:
+  - id: C1
+    statement: "Architecture Constraint 1 (all AI inference on-device) applies; the tier-2 cloud text call exists only under the recorded exception in Open Decision 13, with consent, indicator and revocation."
+    source: "constitution Architecture Constraint 1; Open Decision 13"
+  - id: C2
+    statement: "No agent may add a cloud call path that is not behind the consent gate; no agent may weaken the contract of ApplianceOverlayMapper or ApplianceLabelLocalizer (extended, not modified)."
+    source: "feature constitution Agent Principles"
+  - id: C3
+    statement: "Deferred work must be absent, not a silent stub: TranslationResult.sourceTier always reports the tier that produced the string and no tier may return success when it did not translate."
+    source: "feature constitution v1 non-goals"
+  - id: C4
+    statement: "Every operational constant this feature adds (OCR throttle, declutter thresholds, hysteresis, timeouts, retry counts, cache bound) is a configurable parameter with a documented default."
+    source: "constitution Agent Principles; feature constitution rule 7"
+  - id: C5
+    statement: "Build and test gate is ios/build.sh (which runs xcodebuild test); release log-safety gate is ios/tools/check-release-log-safety.sh."
+    source: "feature constitution Standards"
+
+open_decisions:
+  - id: OD1
+    statement: "OCR throttle rate: ~4 fps nominal needs a device spike on mid-range hardware before commitment; must land as a configurable parameter."
+    resolves_at: "implementation on device"
+  - id: OD2
+    statement: "In-place replacement default: smart mix approved; the 'always show original text' toggle ships with it; confirm the default at the first device demo."
+    resolves_at: "first device demo"
+  - id: OD3
+    statement: "Consent/disclosure copy: the exception amendment is recorded (Open Decision 13, 2026-09-16); drafting and reviewing the copy remains, alongside the Open Decision 12 review window (2026-10-13)."
+    resolves_at: "before final-sign-off"
+    owner: "Anjan Poudel"
+  - id: OD4
+    statement: "Tier-1 on-device NMT (v1.1 candidate, NLLB-200 distilled 600M): requires revisiting addendum §13.5's non-goal before any model work."
+    resolves_at: "v1.1 planning (not this workflow)"
+  - id: OD5
+    statement: "Menu-mode declutter thresholds (IoU >= 0.3, centroid distance 0.06, 8-region cap, longest-string merge): nominal, validate on device; may become per-scene settings."
+    resolves_at: "manual device testing"
+  - id: OD6
+    statement: "Reverse phrase-card mode (user language -> scene language): out of v1 scope; v1.x extension reusing this pipeline."
+    resolves_at: "not in this workflow"
+  - id: OD7
+    statement: "Cost governor scope: design §4.4 and Open Decision 13 say per-session while the shipped GeminiCostGovernor counts calls per day with a family-editable cap; requirements bind fail-closed behaviour, the mechanism is a design decision."
+    resolves_at: "design-component"
+  - id: OD8
+    statement: "Shared cache ownership: the design names the store LabelTranslationCache while the feature constitution records that the shared translation cache does not exist yet and is new work; requirements state behaviour (one persistent encrypted shared store) without fixing a type name."
+    resolves_at: "design-component"
+
+out_of_scope:
+  - "NE->EN direction (v1 is English source -> Nepali target; no reversed translation delivered)"
+  - "Reverse phrase-card mode (user language -> scene language)"
+  - "ARKit world-anchored 3D rendering (screen-space overlay only)"
+  - "Auto-speak of every new translation (tap-to-hear and \"read this to me\" only)"
+  - "Live full-scene explanation (remains the appliance helper's one-shot identifyAppliance call)"
+  - "The on-device NMT tier (tier 1) - v1.1 candidate, blocked until addendum §13.5's non-goal is revisited"
+  - "Family/caregiver configuration surface for this feature"
+  - "Changes to the existing feed translation path"
+  - "Devanagari source text (Nepali source -> any target, and Nepali/Devanagari OCR). Explicit v1 non-goal, owner-signed at the security-test gate. The pipeline stays language-agnostic by design (FR-LCT-003), but v1 makes no recognition claim for Devanagari. Reason is measured, not assumed: on iOS 26.5 Vision resolves to revision 3 with 30 supported languages and no Devanagari-capable code, a rendered Nepali frame yields zero observations under both the platform default and an explicit hi-IN request, and the API reports no error for an unsupported language. Record: specs/hi-in-probe-notes.md."
+
+divergences:
+  - id: D1
+    prior: "Addendum §13.3/§13.5: callout only, no text replacement"
+    now: "Smart mix: in-place replacement only for short dictionary-known labels whose translation fits at >= 18 pt; anchored callouts otherwise; always-show-original toggle ships with it (FR-LCT-015/016/017)"
+    status: "owner-approved 2026-09-16"
+  - id: D2
+    prior: "Addendum §13.5: no on-device translation model"
+    now: "v1 identical (no model); tier 1 absent from v1, recorded as a v1.1 candidate (FR-LCT-008)"
+    status: "owner-approved 2026-09-16; revisit before v1.1"
+  - id: D3
+    prior: "Addendum §13.2: LabelTranslationCache in-memory, no LRU"
+    now: "Persistent encrypted cache with LRU for general text (~200 entries); labels effectively non-evicting (FR-LCT-019)"
+    status: "new requirement"
+  - id: D4
+    prior: "Base design §0/§5.1: never obscure/redraw reality"
+    now: "Preserved for all non-in-place cases; in-place bounded by D1's rule (FR-LCT-016)"
+    status: "consequence of D1"
+  - id: D5
+    prior: "Addendum scope: appliance labels"
+    now: "Any printed text, including dense multi-region scenes such as a menu page (FR-LCT-006)"
+    status: "owner requirement (abroad scenario)"
+
+security_surfaces:
+  - surface: "Untrusted OCR scene text reaching the cloud prompt (instruction injection)"
+    requirements: ["NFR-LCT-009", "FR-LCT-009"]
+  - surface: "Consent-gate enforcement (no tier-2 call without recorded, explicit, revocable consent)"
+    requirements: ["NFR-LCT-007", "FR-LCT-010", "FR-LCT-012"]
+  - surface: "Egress leakage (images never leave the device; never health/contacts/profile content)"
+    requirements: ["NFR-LCT-005", "FR-LCT-014", "FR-LCT-001"]
+  - surface: "Persistent cache = user content at rest (encrypted, keyed, evictable)"
+    requirements: ["NFR-LCT-008", "FR-LCT-019"]
+  - surface: "Cloud indicator present and not spoofable while tier 2 is active"
+    requirements: ["FR-LCT-011"]
+  - surface: "Offline degradation never silently reports success"
+    requirements: ["NFR-LCT-010", "FR-LCT-023", "FR-LCT-008"]
+  - surface: "Cost governor cap must fail closed"
+    requirements: ["FR-LCT-013"]
+  - surface: "Log surface (no raw OCR or translation text, no upstream error body)"
+    requirements: ["NFR-LCT-006"]
+
+traceability:
+  - gate: review-l2
+    checks: "L2 design folds in D1/D2 and resolves OD1, OD2, OD5, OD7, OD8 where resolvable on paper"
+  - gate: security-design-review
+    checks: "STRIDE for the camera + cloud-egress surface (security_surfaces above)"
+  - gate: security-test
+    checks: "Evidence for consent enforcement, text-only egress, log surface, degradation integrity, governor fail-closed"
+  - gate: final-sign-off
+    checks: "Recorded exception amendment (Open Decision 13), consent copy review, camera purpose string, log-safety gate"

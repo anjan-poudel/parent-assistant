@@ -34,8 +34,12 @@ final class SettingsTabMappingTests: XCTestCase {
                        [.meds, .routines, .alarms, .events, .calendar, .calendarSharing])
         XCTAssertEqual(Section.tools.rows,
                        [.quickApps, .feeds, .manuals, .places])
+        // The System tab carries the live-translation consent row
+        // ([LIVE-TRANSLATE T-015], 2026-09-17) between language and
+        // privacy — the same position the row had pre-reorg, in the group
+        // the privacy-shaped household controls live in.
         XCTAssertEqual(Section.system.rows,
-                       [.appearance, .language, .privacy])
+                       [.appearance, .language, .liveTranslate, .privacy])
     }
 
     func testTabsAreTheDesignsFiveInBarOrder() {
@@ -49,7 +53,7 @@ final class SettingsTabMappingTests: XCTestCase {
         XCTAssertEqual(Set(flattened).count, flattened.count,
                        "a row is listed on two tabs: "
                        + duplicates(in: flattened).map(\.rawValue).joined(separator: ", "))
-        XCTAssertEqual(flattened.count, 19, "the hub's visible row count changed")
+        XCTAssertEqual(flattened.count, 20, "the hub's visible row count changed")
     }
 
     func testTheVisibleAndHiddenHalvesPartitionEveryDestination() {
