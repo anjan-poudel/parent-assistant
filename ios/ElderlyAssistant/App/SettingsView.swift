@@ -2913,13 +2913,17 @@ struct MedicationScheduleSettingsView: View {
                     }
                 }
                 addForm
-                // Native-calendar mirror/two-way/import cards moved to
-                // the Calendar settings leaf (calendar-settings task,
-                // 2026-09-07). The appointment calendar auto-add toggle
-                // moved here from the Meds leaf (menu-audit task,
-                // 2026-09-17) — settings live under Settings.
-                calendarAutoAddCard
-                festivalReminderCard
+                // This leaf edits the household's MEDICINES — nothing else
+                // (calendar-split task, 2026-09-17). The native-calendar
+                // mirror/two-way/import cards left for the Calendar settings
+                // leaf on 2026-09-07, and the two calendar settings that
+                // stayed behind — the appointment → iPhone Calendar write
+                // gate and the festival advance-reminder days — followed
+                // them there. Neither was a medication setting: one is the
+                // EventKit write gate the Calendar leaf's mirror cards
+                // belong to, the other a Bikram Sambat notification rule
+                // that every other BS-calendar control already shares a
+                // screen with.
             }
         }
         // A medicine's photos, edited by the family (medication-visual-aids
@@ -3041,61 +3045,12 @@ struct MedicationScheduleSettingsView: View {
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
     }
 
-    /// Advance-reminder days for important festivals (BS calendar,
-    /// 2026-09-06) — default 2, family-configurable. Changing it
-    /// reschedules festival notifications immediately.
-    /// Calendar auto-add for doctor's appointments (medical task,
-    /// 2026-09-07, moved here from the Meds leaf by the menu-audit task,
-    /// 2026-09-17) — mirrors `appointmentsToCalendar` on the
-    /// coordinator, which persists it and re-syncs the store gate.
-    private var calendarAutoAddCard: some View {
-        Toggle(isOn: Binding(
-            get: { coordinator.appointmentsToCalendar },
-            set: { coordinator.appointmentsToCalendar = $0 }
-        )) {
-            Label("medical.calendarToggle", systemImage: "calendar.badge.plus")
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                .foregroundStyle(DesignTokens.textPrimary)
-        }
-        .tint(DesignTokens.accent)
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-    }
-
-    private var festivalReminderCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("festival.reminderTitle", systemImage: "bell.badge")
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                .foregroundStyle(DesignTokens.textPrimary)
-            HStack {
-                Text("festival.reminderDays")
-                    .font(.system(size: DesignTokens.minBodyPointSize))
-                    .foregroundStyle(DesignTokens.textPrimary)
-                Spacer()
-                Stepper(value: Binding(
-                    get: { coordinator.festivalCalendar.advanceReminderDays },
-                    set: { newValue in
-                        coordinator.festivalCalendar.advanceReminderDays = newValue
-                        coordinator.festivalCalendar.scheduleAll()
-                    }
-                ), in: 0...7) {
-                    Text(BikramSambat.devanagariDigits(coordinator.festivalCalendar.advanceReminderDays))
-                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                        .foregroundStyle(DesignTokens.accent)
-                }
-            }
-            Text("festival.reminderHint")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-    }
-
+    // The two calendar cards that used to close this leaf — the
+    // appointment → iPhone Calendar write gate and the festival
+    // advance-reminder days — live on `CalendarSettingsView` now
+    // (calendar-split task, 2026-09-17). Their bodies were carried over
+    // verbatim; `SettingsTabMappingTests` pins that they are the Calendar
+    // leaf's, and that this one renders no calendar key.
 
     private func timesText(_ times: [DateComponents]) -> String {
         times
