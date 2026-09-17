@@ -500,6 +500,7 @@ enum LiveOverlayPlacement {
                       framePixelSize: CGSize,
                       safeArea: CGRect,
                       occupiedRects: [CGRect] = [],
+                      crop: LiveCameraCrop = .whole,
                       policy: Policy,
                       stateCopy: (TranslationResult) -> String?,
                       measure: Measure = LiveOverlayTextMetrics.measure) -> [PlacedOverlay] {
@@ -514,10 +515,17 @@ enum LiveOverlayPlacement {
         // region needs the others only as rects it should avoid covering, and
         // recomputing them per region would make the cost quadratic in a way
         // that is not visible in the result but is visible in a profile.
+        //
+        // A region the window has moved away from gets no rect at all, so it is
+        // not placed — there is no part of the frame it could be drawn on. It
+        // is not *forgotten*: the region is still recognized, still translated
+        // and still spoken, and it is placed again the moment the window covers
+        // it, because the placement is recomputed for every publication.
         var rects: [TextRegionStabilizer.RegionIdentity: CGRect] = [:]
         for region in regions where region.box.isValid {
+            guard crop.intersects(region.box) else { continue }
             let rect = screenRect(for: region.box, containerSize: containerSize,
-                                  framePixelSize: framePixelSize)
+                                  framePixelSize: framePixelSize, crop: crop)
             if rect.width > 0, rect.height > 0 { rects[region.id] = rect }
         }
 
@@ -642,16 +650,23 @@ enum LiveOverlayPlacement {
     /// The letterboxing is the shipped `ApplianceOverlayMapper`'s math,
     /// called unchanged: the frame is displayed aspect-fit (the preview's
     /// gravity, T-006), so both overlays agree on where a box lands.
+    ///
+    /// `crop` is the window the elder is looking through (owner follow-up,
+    /// 2026-09-18). The mapping is then the *same* affine the preview layer is
+    /// drawn with — `LiveCameraPresentation` — rather than a second copy of the
+    /// arithmetic, which is what makes a callout glued to its region stay glued
+    /// while the picture is zoomed and panned: both are one function of the
+    /// same crop. `.whole` is the identity crop, and it is what every caller
+    /// before the window existed passed.
     static func screenRect(for box: NormalizedBox,
                            containerSize: CGSize,
-                           framePixelSize: CGSize) -> CGRect {
+                           framePixelSize: CGSize,
+                           crop: LiveCameraCrop = .whole) -> CGRect {
         let displayed = ApplianceOverlayMapper.displayedImageRect(containerSize: containerSize,
                                                                   imageSize: framePixelSize)
         guard displayed.width > 0, displayed.height > 0 else { return .zero }
-        return CGRect(x: displayed.minX + CGFloat(box.xMin) * displayed.width,
-                      y: displayed.minY + CGFloat(box.yMin) * displayed.height,
-                      width: CGFloat(box.xMax - box.xMin) * displayed.width,
-                      height: CGFloat(box.yMax - box.yMin) * displayed.height)
+        return LiveCameraPresentation(crop: crop, pictureRect: displayed)
+            .containerRect(ofFrameBox: box)
     }
 
     // MARK: - The lines a presentation draws

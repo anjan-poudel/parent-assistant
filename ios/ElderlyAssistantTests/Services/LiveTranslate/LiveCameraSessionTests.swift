@@ -515,6 +515,64 @@ final class LiveCameraSessionTests: XCTestCase {
                        "the pipeline's stale signal applies to a changing scene too")
     }
 
+    // MARK: The window on the frames (owner follow-up, 2026-09-18)
+
+    func testASessionStampsItsWindowOnItsFramesAndPutsItBackWhenItStops() async throws {
+        let session = makeSession()
+        _ = await session.start()
+        session.zoomSurface.zoom(.closer)
+        let window = session.zoomSurface.model.crop
+        XCTAssertFalse(window.isWhole, "a zoomed session is showing part of its frame, not all of it")
+        XCTAssertEqual(session.currentCrop, window)
+
+        try layer.deliver(paintedFrame(luma: 0, pts: 1))
+        let frame = await nextFrameFromStream(of: session)
+        XCTAssertEqual(frame?.crop, window,
+                       "the frame says which part of itself it is — the pass, the placement and the "
+                       + "preview must not each guess")
+
+        session.stop()
+        XCTAssertEqual(session.currentCrop, .whole, "the window goes home with the session")
+
+        // A surface the view is still holding can ask for a crop after the
+        // teardown began; a stopped session stamps no frame, so the window is
+        // not reopened.
+        session.setCrop(window)
+        XCTAssertEqual(session.currentCrop, .whole)
+    }
+
+    func testAPanForgetsTheGatesBaselineBecauseTheWindowIsADifferentPicture() async throws {
+        let config = LiveTranslateConfig.default
+        let session = makeSession(config: config)
+        _ = await session.start()
+        var frames = session.frames.makeAsyncIterator()
+
+        // Zoom first — a factor change is its own reason to forget the gate —
+        // and let one frame settle the baseline over that window.
+        session.zoomSurface.zoom(.closer)
+        clock.advance(by: interval)
+        try layer.deliver(paintedFrame(luma: 0, pts: 1))
+        _ = await frames.next()
+
+        // The same picture, one nominal interval later: dropped, because
+        // recognition could not learn anything new from it.
+        clock.advance(by: interval)
+        try layer.deliver(paintedFrame(luma: 0, pts: 2))
+
+        // The elder drags: the window is a different rectangle of the same
+        // scene, so those same pixels are a different picture — the gate's
+        // baseline was measured somewhere the elder is no longer looking.
+        session.zoomSurface.pan(to: CGPoint(x: -0.05, y: 0))
+        XCTAssertFalse(session.currentCrop.isWhole)
+
+        clock.advance(by: interval)
+        try layer.deliver(paintedFrame(luma: 0, pts: 3))
+        let reframed = await frames.next()
+        XCTAssertEqual(reframed?.timestamp, CMTime(value: 3, timescale: 1),
+                       "the first frame after a pan is read at the nominal cadence, not the reduced one")
+        XCTAssertEqual(reframed?.crop, session.currentCrop)
+    }
+
     func testTheSignatureRefusesAFormatItCannotReadRatherThanGuessing() throws {
         // The capture layer asks the platform for 32BGRA. A buffer in another
         // format is refused — and a refusal fails open, which is what keeps the

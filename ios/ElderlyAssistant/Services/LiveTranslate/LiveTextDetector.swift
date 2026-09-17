@@ -306,6 +306,11 @@ final class LiveTextDetector {
     /// one. Defaults to `true` so a session's first pass is never gated.
     private var sceneChanged = true
 
+    /// The window the last OCR pass ran on. A pass over a different window is a
+    /// pass over a different picture — its remembered rectangles describe the
+    /// old one (see `noteCropChange`).
+    private var lastPassCrop: LiveCameraCrop = .whole
+
     // MARK: Init
 
     init(config: LiveTranslateConfig = .default,
@@ -358,6 +363,7 @@ final class LiveTextDetector {
             rememberedKeys = []
             frameDetector.forget()
             sceneChanged = true
+            lastPassCrop = .whole
             return true
         }
         guard wasReady else { return }
@@ -378,7 +384,11 @@ final class LiveTextDetector {
     /// The caller drops a failure silently: a failed OCR pass is recorded as
     /// `ocr_pass_failed` and never surfaced, and the next pass tries again.
     func recognize(_ frame: CameraFrame) async -> Result<Pass, LiveTranslateError> {
-        await perform(frame) { [self] in
+        // The frame's own window: what the elder can see is what recognition
+        // reads (owner follow-up, 2026-09-18). A frame from a session that has
+        // neither zoomed nor panned carries `.whole`, and this is then the
+        // whole-buffer pass this feature has always run.
+        await perform(frame, crop: frame.crop) { [self] in
             // Measured before the pass kind is chosen, because the answer is
             // what chooses it (a still scene has no geometry worth following).
             noteSceneChange(of: frame)
@@ -398,14 +408,21 @@ final class LiveTextDetector {
     /// and the same `VNRecognizeTextRequest` as a live OCR pass: the frame's
     /// own buffer is handed to Vision whole, at its full resolution, with no
     /// crop, no downscale and no second request.
+    ///
+    /// "Whole" is the still path's contract and stays it even when the live
+    /// session was showing a window: the frozen picture the elder is looking at
+    /// is drawn from the frame's own buffer (`LiveTranslateSnapshotPath` places
+    /// it with `.whole`), so it is the buffer Vision must read, or the boxes
+    /// would be geometry of a picture that is not on screen.
     func recognizeStillFrame(_ frame: CameraFrame) async -> Result<Pass, LiveTranslateError> {
-        await perform(frame) { .ocr }
+        await perform(frame, crop: .whole) { .ocr }
     }
 
     /// The one pass implementation both entries share, so "a pass" means one
     /// thing: the lifecycle guard, the serial queue and the pass-kind decision
     /// happen here and nowhere else.
     private func perform(_ frame: CameraFrame,
+                         crop: LiveCameraCrop,
                          kind: @escaping () -> PassKind) async -> Result<Pass, LiveTranslateError> {
         guard markPassStarted() else {
             // No OCR request has been created: `begin()` was never called (or
@@ -418,11 +435,18 @@ final class LiveTextDetector {
         // rather than racing the first pass's request handler.
         return await withCheckedContinuation { continuation in
             visionQueue.async { [self] in
+                // The window comes first, before the pass kind is chosen: a
+                // window that moved makes every remembered rectangle a
+                // rectangle of the *old* picture, and a tracking pass would be
+                // handed one of them. Dropping them here is what leaves such a
+                // frame with an OCR pass — the one that can re-anchor on
+                // recognized text.
+                noteCropChange(to: crop)
                 switch kind() {
                 case .ocr:
-                    continuation.resume(returning: runOCRPass(on: frame))
+                    continuation.resume(returning: runOCRPass(on: frame, crop: crop))
                 case .tracking:
-                    continuation.resume(returning: runTrackingPass(on: frame))
+                    continuation.resume(returning: runTrackingPass(on: frame, crop: crop))
                 }
             }
         }
@@ -467,14 +491,26 @@ final class LiveTextDetector {
 
     // MARK: Pass implementation (visionQueue)
 
-    private func runOCRPass(on frame: CameraFrame) -> Result<Pass, LiveTranslateError> {
+    private func runOCRPass(on frame: CameraFrame, crop: LiveCameraCrop) -> Result<Pass, LiveTranslateError> {
         // Stamped at the start, before recognition: the cadence bounds how
         // often Vision runs, on success and on failure alike, so a failing
         // scene cannot become a per-frame retry loop.
         withLock { lastOCRPassAt = now() }
 
         do {
-            let regions = try engine.recognizeText(in: frame.pixelBuffer)
+            let found = try engine.recognizeText(in: frame.cropped(to: crop))
+            let regions = found.map {
+                DetectedTextRegion(text: $0.text,
+                                   // Vision's boxes are normalized to the
+                                   // buffer it was handed — the window — and
+                                   // every consumer of a region box speaks the
+                                   // frame's coordinates, so they are mapped
+                                   // back here, once, where the window is
+                                   // known.
+                                   normalizedBox: crop.frameBox(ofCropBox: $0.normalizedBox),
+                                   detectedLanguage: $0.detectedLanguage,
+                                   confidence: $0.confidence)
+            }
             withLock {
                 rememberedKeys = Set(regions.map(\.text))
                 // This is "the last OCR'd frame" every later comparison is
@@ -497,15 +533,47 @@ final class LiveTextDetector {
         }
     }
 
-    private func runTrackingPass(on frame: CameraFrame) -> Result<Pass, LiveTranslateError> {
+    private func runTrackingPass(on frame: CameraFrame, crop: LiveCameraCrop) -> Result<Pass, LiveTranslateError> {
         do {
-            let tracked = try engine.followRememberedRectangles(in: frame.pixelBuffer)
+            let followed = try engine.followRememberedRectangles(in: frame.cropped(to: crop))
+            let tracked = followed.mapValues { crop.frameBox(ofCropBox: $0) }
             // Geometry only: no region and no string can come out of here.
             return .success(Pass(regions: [], trackedBoxes: tracked))
         } catch {
             degradeTracking()
             return .failure(.trackingUnsupported)
         }
+    }
+
+    /// The window a pass runs on, and what a change of window means.
+    ///
+    /// The engine remembers the last OCR pass's rectangles (`VNRectangleObservation`s,
+    /// normalized to the buffer *that pass saw*), and a tracker follows one of
+    /// them in whatever buffer it is handed next. Two buffers cropped
+    /// differently are two different coordinate spaces, so a window that moves
+    /// makes every remembered rectangle a rectangle of the wrong picture:
+    /// following one would put a region's geometry somewhere the elder never
+    /// pointed, and — worse — the text attached to it would then be drawn over
+    /// a *different* label. The rectangles are dropped before the first pass at
+    /// a new window, which costs the tracker its anchors and nothing else: the
+    /// stabiliser holds the last OCR-confirmed geometry until the next OCR pass
+    /// re-anchors on recognized text (FR-LCT-004's documented tracking loss).
+    ///
+    /// The remembered *keys* go with them, for the same reason at the
+    /// detector's own level: a key whose rectangle is gone must not keep the
+    /// pass-kind decision thinking there is geometry to follow. Both drops
+    /// happen *before* the pass kind is chosen (`perform`), so the first frame
+    /// at a new window cannot come back as a tracking pass carrying an old
+    /// rectangle — it gets the OCR pass that re-anchors on text.
+    private func noteCropChange(to crop: LiveCameraCrop) {
+        let changed = withLock { () -> Bool in
+            guard lastPassCrop != crop else { return false }
+            lastPassCrop = crop
+            rememberedKeys = []
+            return true
+        }
+        guard changed else { return }
+        engine.forgetRememberedRectangles()
     }
 
     /// Turning tracking off for the session, announced exactly once: an honest

@@ -208,6 +208,76 @@ struct LiveTranslateConfig: Equatable {
     /// disagreeing about which lens is live. `0` disables the settle.
     var zoomSwitchSnapTolerance: Double = 0.08
 
+    /// Whether a drag of one finger over the picture moves the visible window
+    /// while the picture is zoomed.
+    ///
+    /// The elder's own reading gesture, and the half of the owner's report
+    /// ("I expected pinch zoom and panning") that a zoom alone does not answer:
+    /// at 3× the label they are chasing may be at the frame's edge, and holding
+    /// the whole phone steady to move a two-centimetre picture is not something
+    /// a hand does. `false` takes the gesture away and leaves the zoom as it
+    /// was — the ± buttons still work, and there is nothing else to move.
+    var panEnabled: Bool = true
+
+    /// The window's size at the far end of its ramp, as a fraction of the
+    /// frame: 0.7 means the elder may narrow the visible picture to 70 % of
+    /// what the frame holds, which is as far as they can push it in either
+    /// direction before the window's edge reaches the frame's.
+    ///
+    /// The window narrows with the **zoom** (see `panStartZoom`/`panFullZoom`)
+    /// and this is where it ends up. It is the feature's one trade between pan
+    /// room and sharpness, and it is a small one: the pan room it buys is
+    /// ±15 % of the frame either way before the clamp, and the display
+    /// magnification it costs is 1 / 0.7 ≈ 1.43× of what the lens delivers —
+    /// the recognition pass reads the *frame*, so the small print is not
+    /// upscaled for Vision, only the picture on the glass is. A household that
+    /// wants more room (0.5: ±25 %, 2× on the display) or less (0.85: ±7.5 %,
+    /// 1.18×) changes this one number.
+    ///
+    /// A value that cannot describe a window — zero, negative, past 1 — is
+    /// read as 1: no window, no pan, and the picture exactly as the sensor
+    /// delivered it, which is the behaviour this feature shipped with.
+    var panWindowFraction: Double = 0.7
+
+    /// The readouts the window's ramp runs between, in the readout's unit (the
+    /// same unit as the zoom keys above): the whole frame at or below
+    /// `panStartZoom`, `panWindowFraction` at or above `panFullZoom`, and
+    /// linear between them.
+    ///
+    /// The ramp exists because a window is only useful once there is something
+    /// to move to. At 1× the whole frame is on screen and panning would only
+    /// crop away content the elder can already see; by the time they have
+    /// zoomed to `panFullZoom` they are reading one label and the window's
+    /// edges are what they are chasing. Tying the window to the zoom rather
+    /// than to the pan also keeps the pinch's own arithmetic stable: the window
+    /// the fingers land on cannot change under them.
+    var panStartZoom: Double = 1.0
+    var panFullZoom: Double = 4.0
+
+    /// The pinch's exponent: the recogniser's cumulative scale raised to this
+    /// power before it moves the zoom. 1 is the scale itself.
+    ///
+    /// A key rather than a constant because pinch feel is a hand's opinion, not
+    /// arithmetic: on a phone held in one hand with the thumb and forefinger of
+    /// the other, the same scale reads as a bigger movement than it does on a
+    /// stand. Below 1 the picture moves less for the same fingers, above 1 more.
+    /// It is applied to the scale only — the anchoring, the lens switches and
+    /// the release settle are all unchanged — and a value that is not a
+    /// positive number is read as 1.
+    var pinchSensitivity: Double = 1.0
+
+    /// Whether the pan goes home when the session exits and when an
+    /// interruption takes the camera away and gives it back.
+    ///
+    /// **True** — the elder's own default state: they put the phone down,
+    /// something else used the camera, and they pick it up again at the middle
+    /// of the frame rather than at whatever corner the last frame happened to
+    /// be in. Also what the system camera does. False suits the elder who is
+    /// interrupted *while* reading one label and wants to come back to the same
+    /// place; the zoom itself is unaffected either way (the session restores
+    /// the factor it opened at).
+    var panResetsOnExit: Bool = true
+
     /// The focus point a session starts at, in the device's normalized
     /// coordinates (0,0 top-left … 1,1 bottom-right): the centre of the frame,
     /// which is where a package being held up for the camera is.

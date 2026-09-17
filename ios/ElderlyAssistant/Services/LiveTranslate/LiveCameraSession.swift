@@ -60,19 +60,97 @@ struct CameraFrame {
     /// that never asked the device for a zoom gets 1, which is the honest
     /// answer for a frame read straight off a sample buffer.
     let zoomFactor: Double
+
+    /// The rectangle of this buffer the elder is actually looking at — the
+    /// display's virtual crop, on top of the sensor's own zoom (owner
+    /// follow-up, 2026-09-18: panning).
+    ///
+    /// The device's zoom has already cropped the *sensor*; this is the second,
+    /// display-side crop the pan and the zoom window ask for, and it is what
+    /// the recognition pass hands itself before Vision sees the picture, so
+    /// that the small print on the glass is the small print in the results.
+    /// `.whole` for a session that has neither zoomed nor panned, which is
+    /// every frame this feature produced before the window existed.
+    let crop: LiveCameraCrop
 }
 
 extension CameraFrame {
     /// Reads a frame's geometry out of a delivered sample buffer. The buffer
     /// is the one `AVCaptureVideoDataOutput` produced under `videoSettings`,
     /// so it is already downscaled, and it is retained only by this value.
-    init?(sampleBuffer: CMSampleBuffer, zoomFactor: Double = 1) {
+    init?(sampleBuffer: CMSampleBuffer, zoomFactor: Double = 1, crop: LiveCameraCrop = .whole) {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return nil }
         self.pixelBuffer = pixelBuffer
         self.pixelSize = CGSize(width: CVPixelBufferGetWidth(pixelBuffer),
                                 height: CVPixelBufferGetHeight(pixelBuffer))
         self.timestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         self.zoomFactor = zoomFactor
+        self.crop = crop
+    }
+
+    /// This frame's pixels, narrowed to a rectangle of it.
+    ///
+    /// A **copy** into a buffer of the crop's own size, not a view over the
+    /// original's memory: a view would be cheaper (an allocation of a buffer
+    /// header and nothing else) but it would make the cropped buffer's validity
+    /// depend on the original's lifetime and on the platform's alignment rules
+    /// for caller-supplied row pointers — a subtle failure mode in exchange for
+    /// a copy of at most a few megabytes, on a pass that already costs tens of
+    /// milliseconds of Vision. What Vision is given is a buffer that is exactly
+    /// the visible picture, at the capture preset's resolution: no downscale,
+    /// no second request, and no frame invented beyond its own edges.
+    ///
+    /// `.whole` returns the frame's own buffer, which is the identity case and
+    /// the one every caller before the window existed takes.
+    func cropped(to crop: LiveCameraCrop) -> CVPixelBuffer {
+        guard !crop.isWhole else { return pixelBuffer }
+
+        let format = CVPixelBufferGetPixelFormatType(pixelBuffer)
+        // The crop's pixel bounds, as whole pixels inside the buffer. A window
+        // that asks for less than a pixel of a row (a two-pixel frame with a
+        // 0.7 window) still gets a pixel rather than an empty buffer, so the
+        // pass always has something well-formed to run on.
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        let minX = Swift.min(width - 1, Swift.max(0, Int(crop.box.xMin * Double(width))))
+        let minY = Swift.min(height - 1, Swift.max(0, Int(crop.box.yMin * Double(height))))
+        let maxX = Swift.min(width, Swift.max(minX + 1, Int((crop.box.xMax * Double(width)).rounded(.up))))
+        let maxY = Swift.min(height, Swift.max(minY + 1, Int((crop.box.yMax * Double(height)).rounded(.up))))
+        let cropWidth = maxX - minX
+        let cropHeight = maxY - minY
+
+        var destination: CVPixelBuffer?
+        let attributes: [CFString: Any] = [
+            kCVPixelBufferIOSurfacePropertiesKey: [:] as CFDictionary,
+        ]
+        guard CVPixelBufferCreate(kCFAllocatorDefault, cropWidth, cropHeight, format,
+                                  attributes as CFDictionary, &destination) == kCVReturnSuccess,
+              let destination else {
+            return pixelBuffer
+        }
+        guard CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly) == kCVReturnSuccess else {
+            return pixelBuffer
+        }
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+        guard CVPixelBufferLockBaseAddress(destination, []) == kCVReturnSuccess else {
+            return pixelBuffer
+        }
+        defer { CVPixelBufferUnlockBaseAddress(destination, []) }
+        guard let sourceBase = CVPixelBufferGetBaseAddress(pixelBuffer),
+              let destinationBase = CVPixelBufferGetBaseAddress(destination) else {
+            return pixelBuffer
+        }
+
+        let sourceStride = CVPixelBufferGetBytesPerRow(pixelBuffer)
+        let destinationStride = CVPixelBufferGetBytesPerRow(destination)
+        let bytesPerPixel = 4
+        let rowBytes = Swift.min(cropWidth * bytesPerPixel, Swift.min(sourceStride, destinationStride))
+        let source = sourceBase.assumingMemoryBound(to: UInt8.self) + minY * sourceStride + minX * bytesPerPixel
+        let destinationBytes = destinationBase.assumingMemoryBound(to: UInt8.self)
+        for row in 0..<cropHeight {
+            memcpy(destinationBytes + row * destinationStride, source + row * sourceStride, rowBytes)
+        }
+        return destination
     }
 }
 
@@ -93,10 +171,20 @@ struct LuminanceSignature: Equatable {
     /// a format this reads (the capture layer asks the platform for 32BGRA; a
     /// test may hand over anything).
     ///
+    /// `region` narrows the read to the part of the buffer the elder can
+    /// actually see — the display's crop — because the gate's question is "did
+    /// *the picture on screen* change", and pixels outside the window are not
+    /// on screen. It costs nothing: the same `side × side` samples, taken from
+    /// a smaller rectangle. `whole` (the default) reads the whole buffer, which
+    /// is the identity and what every caller before the window existed asked
+    /// for.
+    ///
     /// `nil` is not "unchanged" and never means "skip": a frame the gate cannot
     /// measure is a frame recognition runs on, which is the pre-gate behaviour
     /// and the safe direction to fail in.
-    static func of(_ pixelBuffer: CVPixelBuffer, side: Int) -> LuminanceSignature? {
+    static func of(_ pixelBuffer: CVPixelBuffer,
+                   side: Int,
+                   region: LiveCameraCrop = .whole) -> LuminanceSignature? {
         guard side > 0 else { return nil }
 
         let format = CVPixelBufferGetPixelFormatType(pixelBuffer)
@@ -132,12 +220,23 @@ struct LuminanceSignature: Equatable {
         let rOffset = isBGRA ? 2 : 1
         let bOffset = isBGRA ? 0 : 3
 
+        // The sampled rectangle, in whole pixels. `whole`'s bounds are exactly
+        // the buffer's, so the arithmetic below is the one this gate has always
+        // done: `first + (row * extent) / side` with `first` 0 and the full
+        // height.
+        let firstX = Swift.min(width - 1, Swift.max(0, Int(region.box.xMin * Double(width))))
+        let firstY = Swift.min(height - 1, Swift.max(0, Int(region.box.yMin * Double(height))))
+        let endX = Swift.min(width, Swift.max(firstX + 1, Int((region.box.xMax * Double(width)).rounded(.up))))
+        let endY = Swift.min(height, Swift.max(firstY + 1, Int((region.box.yMax * Double(height)).rounded(.up))))
+        let spanX = endX - firstX
+        let spanY = endY - firstY
+
         var samples = [UInt8](repeating: 0, count: side * side)
         for row in 0..<side {
-            let y = (row * height) / side
+            let y = firstY + (row * spanY) / side
             let rowBase = y * bytesPerRow
             for column in 0..<side {
-                let x = (column * width) / side
+                let x = firstX + (column * spanX) / side
                 let pixel = bytes + rowBase + x * 4
                 // BT.601 luma, integer arithmetic: the gate compares one
                 // signature with another, so a fixed-point approximation is
@@ -188,11 +287,19 @@ struct FrameChangeDetector {
     /// not become the new reference, or the gate would slowly walk its own
     /// baseline away from the frame the overlay is actually showing.
     ///
+    /// Measured over the frame's own crop — the part of the picture on screen —
+    /// so a gesture that moves the window is a different picture by
+    /// construction. The window's own edge is dropped when it moves (`LiveCameraSession.setCrop`),
+    /// which is what stops the gate comparing two different rectangles and
+    /// calling them the same scene.
+    ///
     /// The first frame after a start (or after `forget`) is always a change,
     /// and a frame whose signature cannot be read is always a change.
     func isMateriallyDifferent(_ frame: CameraFrame, side: Int, threshold: Double) -> Bool {
         guard let reference else { return true }
-        guard let current = LuminanceSignature.of(frame.pixelBuffer, side: side) else { return true }
+        guard let current = LuminanceSignature.of(frame.pixelBuffer, side: side, region: frame.crop) else {
+            return true
+        }
         guard let difference = current.meanAbsoluteDifference(from: reference) else { return true }
         return difference >= threshold
     }
@@ -200,7 +307,9 @@ struct FrameChangeDetector {
     /// Remembers this frame as the reference the next comparison is made
     /// against. Called for the frames actually handed to recognition.
     mutating func remember(_ frame: CameraFrame, side: Int) {
-        guard let signature = LuminanceSignature.of(frame.pixelBuffer, side: side) else { return }
+        guard let signature = LuminanceSignature.of(frame.pixelBuffer, side: side, region: frame.crop) else {
+            return
+        }
         reference = signature
     }
 
@@ -794,6 +903,9 @@ final class LiveCameraSession {
     /// queue: the device is a seam implementation's business, and one lock
     /// already guards every value the tap reads.
     private var videoZoomFactor: Double
+    /// The window the elder is looking through, told by the zoom surface (see
+    /// `setCrop`): `.whole` until a gesture narrows it.
+    private var crop: LiveCameraCrop = .whole
     /// The focus point the session last asked for (a device point), and whether
     /// the elder has focus held. Both are mirrors of the zoom surface's state,
     /// kept here because the subject-area re-arm runs off the video-adjacent
@@ -939,7 +1051,8 @@ final class LiveCameraSession {
         capabilities: { [weak self] in self?.zoomCapabilities ?? .unknown },
         applyZoom: { [weak self] factor in self?.setZoom(factor) ?? factor },
         applyFocus: { [weak self] point in self?.focus(at: point) },
-        applyFocusLock: { [weak self] locked in self?.setFocusLocked(locked) })
+        applyFocusLock: { [weak self] locked in self?.setFocusLocked(locked) },
+        applyCrop: { [weak self] crop in self?.setCrop(crop) })
 
     /// What the configured device can do about zoom, straight from the capture
     /// seam — `.unknown` before the session is configured and after it is torn
@@ -998,6 +1111,42 @@ final class LiveCameraSession {
             frameDetector.forget()
         }
         return applied
+    }
+
+    /// The window the elder is looking through, told by the zoom surface whose
+    /// gestures produced it (owner follow-up, 2026-09-18).
+    ///
+    /// Told rather than computed here, and deliberately: the window is a
+    /// function of the *readout* the elder sees and the window ramp's config,
+    /// which is the zoom model's business, and the surface is the only object
+    /// that holds the model the device is actually in step with. The session
+    /// keeps what it is given and stamps it on every frame, so the recognition
+    /// pass, the frame-change gate and the overlay all crop the same rectangle
+    /// the preview is drawn through.
+    ///
+    /// The gate's baseline is dropped with every change, for the same reason
+    /// `setZoom` drops it: the gate measures two frames against each other, and
+    /// two different rectangles of the same scene are not the same picture.
+    /// Keeping the old baseline would have the gate compare the new window
+    /// against the old one's pixels and answer "unchanged" about a picture the
+    /// elder has just moved. The cost is at most one extra pass per gesture
+    /// sample that actually moves the window.
+    func setCrop(_ crop: LiveCameraCrop) {
+        withLock {
+            // A stopped session has already put its window back and will never
+            // stamp another frame: a late update from a surface the view is
+            // still holding must not reopen it.
+            guard currentState != .stopped, self.crop != crop else { return }
+            self.crop = crop
+            frameDetector.forget()
+        }
+    }
+
+    /// The window the delivered frames are cropped to. `.whole` until a
+    /// gesture narrows it. Read by a consumer that needs to know what part of
+    /// the frame a frame is showing.
+    var currentCrop: LiveCameraCrop {
+        withLock { crop }
     }
 
     /// Moves the focus point — a *device* point: normalized, top-left origin —
@@ -1153,6 +1302,12 @@ final class LiveCameraSession {
         }
 
         withLock { videoZoomFactor = appliedZoom }
+        // The device's answer is the surface's answer too: a device whose own
+        // range clamped the opening factor would otherwise leave the readout,
+        // and the window computed from it, describing a picture the camera is
+        // not taking. The foreground transition is the session's only other
+        // writer of the surface, and it is on the main thread like this one.
+        zoomSurface.sessionOpened(atDeviceFactor: appliedZoom)
         registerLifecycleObservers()
         registerSubjectAreaObserver()
         onCaptureQueue { capture.startRunning() }
@@ -1227,6 +1382,12 @@ final class LiveCameraSession {
                 lastSampledAt = nil
             }
             setState(.running)
+            // Where the window was pointed is the elder's gesture state, and a
+            // camera that went away and came back is the case the config's
+            // `panResetsOnExit` is written for. This runs on the foreground
+            // transition's thread — the main thread — like every other surface
+            // write.
+            zoomSurface.sessionReleased()
             events.cameraResumed(recoveringFrom: reason)
             return .success(())
 
@@ -1267,6 +1428,7 @@ final class LiveCameraSession {
             // rule: a caller that asks after a teardown gets a factor it can
             // draw, and a restart re-reads the device anyway.
             videoZoomFactor = capture.zoomCapabilities.openingFactor(for: config)
+            crop = .whole
             focusPoint = config.focusPointOfInterest
             focusIsLocked = config.focusLockDefault
             currentState = .stopped
@@ -1280,6 +1442,11 @@ final class LiveCameraSession {
             notificationCenter.removeObserver(observer)
         }
         teardown.continuation?.finish()
+        // The elder has left the picture; the surface's own window state goes
+        // with them when the config says so (the session's own window is
+        // already back to `.whole` above, and `setCrop` refuses a stopped
+        // session, so this cannot reopen it).
+        zoomSurface.sessionReleased()
         // A session that never started has a capture stack that was never
         // started either: stopping it would be a state transition on nothing,
         // and it would announce an end for a session that never existed.
@@ -1315,11 +1482,14 @@ final class LiveCameraSession {
     /// reference only for frames actually delivered, so a dropped sample never
     /// moves the baseline away from the frame the overlay is showing.
     private func sampleArrived(_ sampleBuffer: CMSampleBuffer) {
-        // What the device was zoomed to when this sample was produced: the
-        // buffer is the device's own crop of the sensor, and the frame carries
-        // that fact so the pass knows what it is looking at.
-        let zoom = withLock { videoZoomFactor }
-        guard let frame = CameraFrame(sampleBuffer: sampleBuffer, zoomFactor: zoom) else { return }
+        // What the device was zoomed to when this sample was produced, and
+        // which window of it the elder has moved to: the buffer is the device's
+        // own crop of the sensor, and the frame carries both facts so the pass
+        // knows what it is looking at.
+        let (zoom, crop) = withLock { (videoZoomFactor, self.crop) }
+        guard let frame = CameraFrame(sampleBuffer: sampleBuffer, zoomFactor: zoom, crop: crop) else {
+            return
+        }
 
         let accepted: AsyncStream<CameraFrame>.Continuation? = withLock {
             guard currentState == .running else { return nil }

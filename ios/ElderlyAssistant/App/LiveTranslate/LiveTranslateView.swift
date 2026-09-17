@@ -60,6 +60,20 @@ import UIKit
 //     and a sentence per reachable zoom factor is not a sentence to translate.
 //     All of it is observation: the view calls the session's zoom surface and
 //     renders what the **device** reported back.
+//
+//  8. **The elder can move the window they are looking through (owner report,
+//     2026-09-18: "I expected pinch zoom and panning").** Once the picture is
+//     zoomed past the whole frame, one finger drags the visible region and the
+//     pinch zooms *toward the fingers* rather than the middle of the glass.
+//     Both are the same fact — the camera has a **window** into its own frame,
+//     and the elder moves and resizes it — so the view holds one map for it
+//     (`LiveCameraPresentation`) and every consumer of the picture reads that
+//     map: the preview layer is drawn through it (`PreviewView`'s transform),
+//     the overlay's boxes are placed through it, and the recognition pass crops
+//     to it. Gluing those together is the point: a bubble drawn over a sign
+//     stays over the sign while the elder zooms into it. The window is the
+//     *display's*, not the sensor's — the zoom itself stays the lens's, so the
+//     OCR pass still reads sensor pixels, cropped rather than magnified.
 
 struct LiveTranslateView: View {
 
@@ -81,7 +95,7 @@ struct LiveTranslateView: View {
             ZStack {
                 Color.black
 
-                preview
+                preview(in: proxy)
 
                 // The live overlay, and *only* the live overlay: while a frame
                 // is held the card below is the reading surface, so no box is
@@ -108,6 +122,13 @@ struct LiveTranslateView: View {
                 Task { await model.start() }
             }
             .onChange(of: proxy.size) { _ in reportLayout(proxy) }
+            // The window changed (a pinch, a drag, the ± buttons, a thaw) and
+            // the placement must be told before the next surface is drawn: the
+            // rects the pipeline measured were measured through the *old*
+            // window, and the view is the only reader that knows both. The
+            // crop is `Equatable`, so a render that did not move anything
+            // costs one comparison and no relayout.
+            .onChange(of: zoom.model.crop) { _ in reportLayout(proxy) }
         }
         .ignoresSafeArea()
         .onDisappear {
@@ -121,7 +142,7 @@ struct LiveTranslateView: View {
     // MARK: - The preview
 
     @ViewBuilder
-    private var preview: some View {
+    private func preview(in proxy: GeometryProxy) -> some View {
         if let image = model.frozenFrameImage {
             // The frozen picture (T-033), drawn the way the live preview draws
             // the camera: the whole frame, aspect-fit in the container, so the
@@ -141,8 +162,11 @@ struct LiveTranslateView: View {
             // VoiceOver — the overlay is what describes the frame — and the
             // zoom controls are real controls with their own identifiers.
             LiveTranslatePreviewHost(layer: layer,
-                                     onPinch: { zoom.pinch(to: Double($0)) },
+                                     presentation: presentation(in: proxy),
+                                     onPinch: { zoom.pinch(to: Double($0), at: $1) },
                                      onPinchEnded: { zoom.pinchEnded() },
+                                     onPan: { zoom.pan(to: $0) },
+                                     onPanEnded: { zoom.panEnded() },
                                      onFocusTap: { zoom.focus(atDevicePoint: $0) })
                 .accessibilityHidden(true)
         } else {
@@ -384,10 +408,32 @@ struct LiveTranslateView: View {
 
     // MARK: - Layout
 
+    /// The window the picture is drawn through, at the size the camera is
+    /// delivering — the map every gesture on the picture is read through, and
+    /// the map the preview layer is transformed by.
+    ///
+    /// The picture rect is the app's own aspect-fit arithmetic
+    /// (`ApplianceOverlayMapper.displayedImageRect`), over the frame the camera
+    /// reported, which is the same rect the placement maps its boxes into
+    /// (`framePixelSize` is stamped from the frames themselves, so the view
+    /// draws the aspect the pipeline measured). One map, two readers: a box on
+    /// screen and the picture point under the elder's finger are computed from
+    /// the same numbers, which is what keeps a bubble glued to what it names
+    /// while the elder zooms and pans. Before the first frame arrives the size
+    /// is zero, `isUsable` is false and the transform is the identity — the
+    /// layer is simply the full container, which is what it was before any of
+    /// this existed.
+    private func presentation(in proxy: GeometryProxy) -> LiveCameraPresentation {
+        zoom.model.presentation(in: ApplianceOverlayMapper.displayedImageRect(
+            containerSize: proxy.size, imageSize: model.framePixelSize))
+    }
+
     /// Reports the geometry the pipeline cannot derive: the container, the safe
-    /// area and the chrome a callout must not land under. Called on appear and
-    /// on every size change (rotation, a keyboard, a split view); an unchanged
-    /// layout is dropped by the model.
+    /// area, the chrome a callout must not land under, and the window the
+    /// picture is being read through. Called on appear, on every size change
+    /// (rotation, a keyboard, a split view) and on every change of the window
+    /// (a pinch, a drag, the ± buttons, a thaw); an unchanged layout is dropped
+    /// by the model.
     private func reportLayout(_ proxy: GeometryProxy) {
         let insets = proxy.safeAreaInsets
         let width = max(0, proxy.size.width - insets.leading - insets.trailing)
@@ -401,7 +447,8 @@ struct LiveTranslateView: View {
         model.updateLayout(containerSize: proxy.size,
                            safeArea: safeArea,
                            occupiedRects: Self.occupiedRects(containerSize: proxy.size,
-                                                            bottomInset: insets.bottom))
+                                                            bottomInset: insets.bottom),
+                           crop: zoom.model.crop)
     }
 
     /// The strips the overlay must not draw under: the overlay's own reserved
@@ -595,28 +642,49 @@ struct LiveTranslateResultsCardView: View {
 /// over the capture session and sets the video gravity), so the aspect the
 /// placement maps through — `resizeAspect` over the frame's pixel size — is the
 /// aspect the elder sees. The host never configures capture: it lays a layer
-/// out, and it is also the only place the elder's two gestures can be read off
+/// out, and it is also the only place the elder's three gestures can be read off
 /// the picture.
 ///
-/// **Why the gestures are UIKit's here.** A pinch belongs to the picture and a
-/// tap means "look *there*", and "there" is a point in the *device's*
-/// coordinates: the layer's own `captureDevicePointConverted(fromLayerPoint:)`
-/// is the conversion that accounts for the aspect fit and the frame size, so
-/// the conversion happens here, on the layer, and not in arithmetic the view
-/// would have to re-derive. Attaching the recognisers to this view (rather
-/// than a SwiftUI gesture on the whole container) is also what keeps them off
-/// the chrome: a tap that lands on the overlay's boxes, on a button or on the
-/// results card is handled above this view and never reaches it.
+/// **Why the gestures are UIKit's here.** A pinch belongs to the picture, a
+/// drag moves the window, and a tap means "look *there*" — and "there" is a
+/// point in the *frame's* coordinates, in all three cases through the same map
+/// the picture is drawn with (`LiveCameraPresentation`). The layer's own
+/// `captureDevicePointConverted(fromLayerPoint:)` still does the last step of
+/// the tap, because it is the conversion that knows the aspect fit and the
+/// device's zoom; what the presentation adds is the window the elder has moved
+/// to, which the layer knows nothing about. Attaching the recognisers to this
+/// view (rather than a SwiftUI gesture on the whole container) is also what
+/// keeps them off the chrome: a tap that lands on the overlay's boxes, on a
+/// button or on the results card is handled above this view and never reaches
+/// it.
+///
+/// **Gesture ownership (owner follow-up, 2026-09-18).** One finger drags — never
+/// two, or a pinch would pan the picture while it zooms it — and the drag only
+/// exists once there is a window to move: while the whole frame is visible the
+/// recogniser is switched off, so a finger on the picture does nothing rather
+/// than moving a window that is already the frame. Taps are unaffected either
+/// way (a still finger is not a drag), so a bubble above this view still takes
+/// the tap it always took and a tap on the picture still focuses.
 struct LiveTranslatePreviewHost: UIViewRepresentable {
 
     let layer: AVCaptureVideoPreviewLayer
+    /// The window the picture is drawn and read through, at the frame size the
+    /// camera is delivering.
+    let presentation: LiveCameraPresentation
     /// A pinch in flight: the recogniser's cumulative scale, 1 at the moment
-    /// the fingers landed.
-    let onPinch: (CGFloat) -> Void
+    /// the fingers landed, and where they landed — a point **inside the visible
+    /// window** (0–1 of the crop), which is the anchoring the zoom holds.
+    let onPinch: (CGFloat, CGPoint) -> Void
     /// The pinch's end (lifted, cancelled or failed).
     let onPinchEnded: () -> Void
+    /// A drag in flight, as the window offset it asks for in frame fractions
+    /// (cumulative from the moment the finger landed, the recogniser's own
+    /// convention), converted here through the presentation.
+    let onPan: (CGPoint) -> Void
+    /// The drag's end.
+    let onPanEnded: () -> Void
     /// A tap on the picture, converted to the device's own point of interest
-    /// (normalized, top-left origin) by the layer that knows the aspect fit.
+    /// (normalized, top-left origin) through the window and then the layer.
     let onFocusTap: (CGPoint) -> Void
 
     func makeUIView(context: Context) -> PreviewView {
@@ -626,6 +694,9 @@ struct LiveTranslatePreviewHost: UIViewRepresentable {
         view.previewLayer = layer
         view.isMultipleTouchEnabled = true
         view.addGestureRecognizer(context.coordinator.makePinchRecognizer())
+        let pan = context.coordinator.makePanRecognizer()
+        view.addGestureRecognizer(pan)
+        context.coordinator.panRecognizer = pan
         view.addGestureRecognizer(context.coordinator.makeTapRecognizer())
         return view
     }
@@ -636,28 +707,52 @@ struct LiveTranslatePreviewHost: UIViewRepresentable {
         // are made once, in `makeUIView`.
         context.coordinator.onPinch = onPinch
         context.coordinator.onPinchEnded = onPinchEnded
+        context.coordinator.onPan = onPan
+        context.coordinator.onPanEnded = onPanEnded
         context.coordinator.onFocusTap = onFocusTap
+        context.coordinator.presentation = presentation
+        // The drag exists only while a window does: with the whole frame on
+        // screen there is nothing to move, and a disabled recogniser leaves the
+        // finger to the tap that was already there.
+        context.coordinator.panRecognizer?.isEnabled = !presentation.crop.isWhole
+        view.presentation = presentation
         view.layoutPreviewLayer()
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onPinch: onPinch, onPinchEnded: onPinchEnded, onFocusTap: onFocusTap)
+        Coordinator(presentation: presentation,
+                    onPinch: onPinch,
+                    onPinchEnded: onPinchEnded,
+                    onPan: onPan,
+                    onPanEnded: onPanEnded,
+                    onFocusTap: onFocusTap)
     }
 
-    /// The gesture target: it reads the touch in the preview view's own
-    /// coordinates and converts it on the layer, so nothing here holds session
-    /// state — the closures it calls are the surface's.
+    /// The gesture target: it reads each touch in the preview view's own
+    /// coordinates and converts it through the presentation (and, for the tap,
+    /// on the layer), so nothing here holds session state — the closures it
+    /// calls are the surface's.
     final class Coordinator: NSObject {
 
-        var onPinch: (CGFloat) -> Void
+        var presentation: LiveCameraPresentation
+        var onPinch: (CGFloat, CGPoint) -> Void
         var onPinchEnded: () -> Void
+        var onPan: (CGPoint) -> Void
+        var onPanEnded: () -> Void
         var onFocusTap: (CGPoint) -> Void
+        weak var panRecognizer: UIPanGestureRecognizer?
 
-        init(onPinch: @escaping (CGFloat) -> Void,
+        init(presentation: LiveCameraPresentation,
+             onPinch: @escaping (CGFloat, CGPoint) -> Void,
              onPinchEnded: @escaping () -> Void,
+             onPan: @escaping (CGPoint) -> Void,
+             onPanEnded: @escaping () -> Void,
              onFocusTap: @escaping (CGPoint) -> Void) {
+            self.presentation = presentation
             self.onPinch = onPinch
             self.onPinchEnded = onPinchEnded
+            self.onPan = onPan
+            self.onPanEnded = onPanEnded
             self.onFocusTap = onFocusTap
         }
 
@@ -666,12 +761,23 @@ struct LiveTranslatePreviewHost: UIViewRepresentable {
             return recognizer
         }
 
+        /// One finger, because two are the pinch's: a drag that ran during a
+        /// pinch would move the window while the zoom was moving it too, and
+        /// neither gesture would be doing what the elder's hand meant.
+        func makePanRecognizer() -> UIPanGestureRecognizer {
+            let recognizer = UIPanGestureRecognizer(target: self, action: #selector(handlePan))
+            recognizer.minimumNumberOfTouches = 1
+            recognizer.maximumNumberOfTouches = 1
+            return recognizer
+        }
+
         func makeTapRecognizer() -> UITapGestureRecognizer {
             let recognizer = UITapGestureRecognizer(target: self, action: #selector(handleTap))
             // One finger, one tap: a two-finger touch belongs to the pinch, and
             // focusing in the middle of a zoom would fight it. Nothing else is
-            // configured — a single-tap recogniser and a pinch do not contend,
-            // because they are woken by different numbers of touches.
+            // configured — a single-tap recogniser, a pinch and a one-finger
+            // pan do not contend, because a still finger is not a drag and a
+            // moving one is not a tap.
             recognizer.numberOfTouchesRequired = 1
             recognizer.numberOfTapsRequired = 1
             return recognizer
@@ -680,9 +786,25 @@ struct LiveTranslatePreviewHost: UIViewRepresentable {
         @objc func handlePinch(_ recognizer: UIPinchGestureRecognizer) {
             switch recognizer.state {
             case .began, .changed:
-                onPinch(recognizer.scale)
+                onPinch(recognizer.scale, focusPoint(of: recognizer))
             case .ended, .cancelled, .failed:
                 onPinchEnded()
+            default:
+                break
+            }
+        }
+
+        @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
+            guard let view = recognizer.view else { return }
+            switch recognizer.state {
+            case .began, .changed:
+                // The recogniser's translation is cumulative from the touch
+                // down, and the surface measures it from the window the drag
+                // started at, so a drag that runs past the frame's edge and
+                // comes back resumes where the finger is.
+                onPan(presentation.panOffset(ofContainerTranslation: recognizer.translation(in: view)))
+            case .ended, .cancelled, .failed:
+                onPanEnded()
             default:
                 break
             }
@@ -691,8 +813,25 @@ struct LiveTranslatePreviewHost: UIViewRepresentable {
         @objc func handleTap(_ recognizer: UITapGestureRecognizer) {
             guard let view = recognizer.view as? PreviewView,
                   let layer = view.previewLayer else { return }
-            let layerPoint = recognizer.location(in: view)
-            onFocusTap(layer.captureDevicePointConverted(fromLayerPoint: layerPoint))
+            let point = recognizer.location(in: view)
+            // Two steps, in this order and for this reason: the presentation
+            // says which *frame* point the elder is pointing at (the window
+            // has moved, and the screen position of a frame point moved with
+            // it), and the layer says where in the device's own coordinates
+            // that frame point is.
+            let framePoint = presentation.framePoint(ofContainerPoint: point)
+            let unzoomedPoint = presentation.unzoomedContainerPoint(ofFramePoint: framePoint)
+            onFocusTap(layer.captureDevicePointConverted(fromLayerPoint: unzoomedPoint))
+        }
+
+        /// Where the fingers landed, inside the visible window: 0–1 from the
+        /// window's own top-left corner, which is the coordinate the zoom's
+        /// anchoring is expressed in (the window *is* the picture on screen, so
+        /// this is also the elder's position on the glass).
+        private func focusPoint(of recognizer: UIPinchGestureRecognizer) -> CGPoint {
+            guard let view = recognizer.view else { return LiveCameraCrop.whole.center }
+            let framePoint = presentation.framePoint(ofContainerPoint: recognizer.location(in: view))
+            return presentation.crop.cropPoint(ofFramePoint: framePoint)
         }
     }
 
@@ -701,6 +840,9 @@ struct LiveTranslatePreviewHost: UIViewRepresentable {
     /// follows a rotation without the SwiftUI side scheduling anything.
     final class PreviewView: UIView {
         var previewLayer: AVCaptureVideoPreviewLayer?
+        /// The window the drawing is moved and scaled into, refreshed on every
+        /// SwiftUI pass.
+        var presentation = LiveCameraPresentation(crop: .whole, pictureRect: .zero)
 
         override func layoutSubviews() {
             super.layoutSubviews()
@@ -711,7 +853,16 @@ struct LiveTranslatePreviewHost: UIViewRepresentable {
             guard let previewLayer, window != nil || superview != nil else { return }
             CATransaction.begin()
             CATransaction.setDisableActions(true)
-            previewLayer.frame = bounds
+            // `bounds` and `position`, not `frame`: `frame` is derived from the
+            // transform, so assigning it while one is set would resize the
+            // layer's own drawing area to compensate, and the window would be
+            // drawn through a layer shrunk around it. The anchor point is the
+            // default (0.5, 0.5) — the transform is corrected about the same
+            // point the layer actually rotates around.
+            previewLayer.bounds = CGRect(origin: .zero, size: bounds.size)
+            previewLayer.position = CGPoint(x: bounds.midX, y: bounds.midY)
+            previewLayer.setAffineTransform(
+                presentation.layerTransform(anchor: CGPoint(x: bounds.midX, y: bounds.midY)))
             CATransaction.commit()
         }
     }

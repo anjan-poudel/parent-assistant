@@ -160,6 +160,222 @@ struct CameraZoomCapabilities: Equatable {
                                                 widestLensIsUltraWide: false)
 }
 
+// MARK: - The virtual crop (owner follow-up, 2026-09-18: "rudimentary — I
+// expected pinch zoom and panning")
+
+/// The rectangle of the delivered frame the elder is looking at — the camera's
+/// *virtual crop*: the zoom's window, moved by the pan. Frame-normalized
+/// (0–1, origin top-left), which is the space the detector's boxes, the
+/// stabiliser's regions and `NormalizedBox` all already speak.
+///
+/// One value, three consumers, and the sharing is the point:
+///
+///  - the **recognition pass** crops the frame's buffer to this rectangle
+///    before Vision sees it, so what is recognized is exactly what is on
+///    screen — the small print in the corner, and not the shelf behind it
+///    (`LiveTextDetector`);
+///  - the **placement** maps a region's box through it, so a callout stays
+///    glued to the region it belongs to while the picture is zoomed or moved
+///    (`LiveOverlayPlacement`);
+///  - the **preview** is drawn through it (`LiveCameraPresentation`), so the
+///    picture the elder sees and the picture Vision reads are one picture.
+///
+/// `.whole` is the identity. A session that has not zoomed and has not panned
+/// hands `whole` to all three, and each of them behaves exactly as it did
+/// before this type existed — which is what keeps every shipped geometry test
+/// true rather than merely updated.
+///
+/// The **sensor** zoom stays optical: nothing here re-zooms the device. This is
+/// the display-space half of the framing — a crop of the frame the device
+/// already delivered — so panning costs no lens quality and no second capture
+/// (`LiveCameraZoomModel.cropFraction` owns how big the window may get).
+struct LiveCameraCrop: Equatable {
+
+    /// The visible rectangle, in the frame's own normalized coordinates.
+    let box: NormalizedBox
+
+    /// The whole frame: the identity crop.
+    static let whole = LiveCameraCrop(
+        box: NormalizedBox(xMin: 0, yMin: 0, xMax: 1, yMax: 1))
+
+    var width: Double { box.xMax - box.xMin }
+    var height: Double { box.yMax - box.yMin }
+
+    /// The window's centre, in frame-normalized coordinates. The frame's own
+    /// centre is `(0.5, 0.5)`, so this is also "where the elder has moved the
+    /// window to".
+    var center: CGPoint {
+        CGPoint(x: (box.xMin + box.xMax) / 2, y: (box.yMin + box.yMax) / 2)
+    }
+
+    /// Whether this is the whole frame — the identity mapping, and the answer
+    /// that lets a consumer skip its crop path entirely.
+    var isWhole: Bool { self == .whole }
+
+    /// A frame-normalized point as a point inside this crop: 0–1 from the
+    /// crop's own top-left corner, and outside that range for a point that is
+    /// outside the window.
+    func cropPoint(ofFramePoint point: CGPoint) -> CGPoint {
+        CGPoint(x: (point.x - box.xMin) / width,
+                y: (point.y - box.yMin) / height)
+    }
+
+    /// The inverse of `cropPoint`.
+    func framePoint(ofCropPoint point: CGPoint) -> CGPoint {
+        CGPoint(x: box.xMin + point.x * width,
+                y: box.yMin + point.y * height)
+    }
+
+    /// A frame-normalized box in this crop's coordinates (unbounded: a box
+    /// that extends past the window keeps the part that is outside it, so a
+    /// caller can tell "partly visible" from "not visible").
+    func cropBox(ofFrameBox box: NormalizedBox) -> NormalizedBox {
+        NormalizedBox(xMin: (box.xMin - self.box.xMin) / width,
+                      yMin: (box.yMin - self.box.yMin) / height,
+                      xMax: (box.xMax - self.box.xMin) / width,
+                      yMax: (box.yMax - self.box.yMin) / height)
+    }
+
+    /// The inverse of `cropBox`, clamped into the frame: a box Vision found
+    /// inside the crop cannot describe a region beyond the frame's own edges,
+    /// and a float that lands a hair outside them is a rounding artifact.
+    func frameBox(ofCropBox box: NormalizedBox) -> NormalizedBox {
+        func clamped(_ value: Double) -> Double { Swift.min(1, Swift.max(0, value)) }
+        return NormalizedBox(xMin: clamped(self.box.xMin + box.xMin * width),
+                             yMin: clamped(self.box.yMin + box.yMin * height),
+                             xMax: clamped(self.box.xMin + box.xMax * width),
+                             yMax: clamped(self.box.yMin + box.yMax * height))
+    }
+
+    /// Whether any part of a frame-normalized box is inside this crop — what
+    /// decides whether a region can be drawn at all: the window has been moved
+    /// away from it, so it has no place on screen to be glued to.
+    func intersects(_ box: NormalizedBox) -> Bool {
+        box.xMax > self.box.xMin && box.xMin < self.box.xMax
+            && box.yMax > self.box.yMin && box.yMin < self.box.yMax
+    }
+}
+
+/// How the frame is presented on screen once the camera is zoomed and the
+/// window moved: the visible crop, and the rect (in the container's own
+/// coordinates) the **whole** frame would be drawn in.
+///
+/// `pictureRect` is the aspect-fit rect the feature has always mapped through
+/// (`ApplianceOverlayMapper.displayedImageRect`, NFR-LCT-012) — the crop's
+/// aspect is the frame's, so the crop is drawn in exactly that rect and the
+/// overlay's placement and the preview cannot disagree about where a box is.
+///
+/// The whole mapping is here, and all of it is one affine map:
+/// `containerRect(ofFrameBox:)` is what the placement draws,
+/// `layerTransform(anchor:)` is what the preview layer is drawn with, and the
+/// test that pins the two against each other is what makes "a callout stays
+/// glued to its region while the picture moves" a fact about arithmetic rather
+/// than a hope about two code paths.
+struct LiveCameraPresentation: Equatable {
+
+    /// What part of the frame is visible.
+    let crop: LiveCameraCrop
+
+    /// Where the whole frame would be drawn: the container-space rect an
+    /// unzoomed, unpanned frame would fill. The crop's content fills it.
+    let pictureRect: CGRect
+
+    init(crop: LiveCameraCrop, pictureRect: CGRect) {
+        self.crop = crop
+        self.pictureRect = pictureRect
+    }
+
+    /// Whether there is a picture to map at all: before the first frame, or in
+    /// a container that has not been laid out, there is nothing to show and
+    /// every mapping below is the identity the caller should not apply.
+    var isUsable: Bool {
+        pictureRect.width > 0 && pictureRect.height > 0 && crop.width > 0 && crop.height > 0
+    }
+
+    /// A frame-normalized point's position in the container.
+    func containerPoint(ofFramePoint point: CGPoint) -> CGPoint {
+        CGPoint(x: pictureRect.minX + (point.x - crop.box.xMin) / crop.width * pictureRect.width,
+                y: pictureRect.minY + (point.y - crop.box.yMin) / crop.height * pictureRect.height)
+    }
+
+    /// The inverse of `containerPoint`: where on the frame a point of the
+    /// container is looking. This is also the pinch's focal point — expressed
+    /// in the frame's own coordinates it is the same number whatever the crop
+    /// is, which is what lets the zoom keep the picture under the finger.
+    func framePoint(ofContainerPoint point: CGPoint) -> CGPoint {
+        CGPoint(x: crop.box.xMin + (point.x - pictureRect.minX) / pictureRect.width * crop.width,
+                y: crop.box.yMin + (point.y - pictureRect.minY) / pictureRect.height * crop.height)
+    }
+
+    /// A frame-normalized box's rect in the container — the placement's own
+    /// mapping (`LiveOverlayPlacement.screenRect`), and the one the preview
+    /// layer's transform has to agree with.
+    func containerRect(ofFrameBox box: NormalizedBox) -> CGRect {
+        let origin = containerPoint(ofFramePoint: CGPoint(x: box.xMin, y: box.yMin))
+        let corner = containerPoint(ofFramePoint: CGPoint(x: box.xMax, y: box.yMax))
+        return CGRect(x: origin.x, y: origin.y,
+                      width: corner.x - origin.x, height: corner.y - origin.y)
+    }
+
+    /// Where the *unzoomed* picture would draw this point: the point the
+    /// preview layer knows how to convert. `AVCaptureVideoPreviewLayer`'s
+    /// `captureDevicePointConverted(fromLayerPoint:)` accounts for the aspect
+    /// fit and the device's own zoom and knows nothing about this crop, so a
+    /// tap has to be taken back through the presentation before it is handed
+    /// over — otherwise the camera would focus where the elder pointed *before*
+    /// they zoomed and panned.
+    func unzoomedPoint(ofContainerPoint point: CGPoint) -> CGPoint {
+        unzoomedContainerPoint(ofFramePoint: framePoint(ofContainerPoint: point))
+    }
+
+    /// The pan a drag of `translation` container points asks for.
+    ///
+    /// Two facts in one line: the picture follows the finger (so the window
+    /// moves the other way), and a zoomed window moves less than the finger
+    /// does for the same on-screen movement, because every frame fraction is
+    /// drawn bigger than it was.
+    func panOffset(ofContainerTranslation translation: CGPoint) -> CGPoint {
+        CGPoint(x: -translation.x / pictureRect.width * crop.width,
+                y: -translation.y / pictureRect.height * crop.height)
+    }
+
+    /// The affine the preview layer is drawn with so the crop fills
+    /// `pictureRect`, about `anchor` (the layer's anchor point, in the
+    /// container's coordinates — `CALayer` applies a transform about it, so
+    /// the same maths in a different frame of reference needs this correction).
+    ///
+    /// The presentation's own linear part is a scale: the crop is drawn
+    /// `1 / crop.width` larger than the whole frame was, so the layer is
+    /// scaled by that and moved by whatever the crop's origin and the pan ask
+    /// for. `live` here is the layer's own drawing of the frame — it already
+    /// accounts for the aspect fit and the device's zoom, which is why this
+    /// transform must not try to redo either.
+    ///
+    /// The one contract: for every frame point, `layerTransform` of the
+    /// layer's own drawing of that point is what `containerPoint(ofFramePoint:)`
+    /// returns. That equality is asserted directly in `LiveCameraZoomModelTests`.
+    func layerTransform(anchor: CGPoint) -> CGAffineTransform {
+        guard isUsable else { return .identity }
+        let scale = 1 / CGFloat(crop.width)
+        // The map's translation, fixed by requiring that the frame's origin
+        // lands where the presentation says it does.
+        let liveOrigin = unzoomedContainerPoint(ofFramePoint: .zero)
+        let visibleOrigin = containerPoint(ofFramePoint: .zero)
+        let translation = CGPoint(x: visibleOrigin.x - scale * liveOrigin.x,
+                                  y: visibleOrigin.y - scale * liveOrigin.y)
+        return CGAffineTransform(a: scale, b: 0, c: 0, d: scale,
+                                 tx: translation.x - (1 - scale) * anchor.x,
+                                 ty: translation.y - (1 - scale) * anchor.y)
+    }
+
+    /// Where the *unzoomed* picture draws a frame point: the identity crop's
+    /// own `containerPoint`, which is the current one with no crop applied.
+    func unzoomedContainerPoint(ofFramePoint point: CGPoint) -> CGPoint {
+        CGPoint(x: pictureRect.minX + point.x * pictureRect.width,
+                y: pictureRect.minY + point.y * pictureRect.height)
+    }
+}
+
 /// Which way one press of the zoom controls goes.
 enum ZoomStepDirection: Equatable {
     /// A longer focal length: a larger factor, a narrower view.
@@ -216,15 +432,35 @@ struct LiveCameraZoomModel: Equatable {
     /// otherwise.
     let displayMultiplier: Double
 
+    /// Where the visible window is centred, as an offset from the frame's own
+    /// centre in frame fractions (0 at the centre, `panLimit` at most either
+    /// way). Positive x moves the window right, so the picture moves left.
+    let pan: CGPoint
+
+    /// The window's size at full pan range, as a fraction of the frame (see
+    /// `cropFraction`). 0 means the config does not describe a window.
+    let panWindowFraction: Double
+
+    /// The readouts the window's ramp runs between: the whole frame at or
+    /// below `panStartZoom`, `panWindowFraction` at or above `panFullZoom`.
+    let panStartZoom: Double
+    let panFullZoom: Double
+
+    /// The pinch's exponent: 1 is the recogniser's own scale, and a value
+    /// below 1 makes the same finger movement move the picture less.
+    let pinchSensitivity: Double
+
     /// Builds the model for a config and a device.
     ///
     /// `factor`, `deviceRange` and `deviceSwitchOverFactors` are in the
     /// **device's** space (see "Units"); only the config is in the readout's,
     /// and it is converted here. `factor` is the factor in effect — what the
     /// device was last asked for — not a config value, so it is taken as it
-    /// comes and only clamped.
+    /// comes and only clamped. `pan` is in the frame's own fractions and is
+    /// clamped to the window that factor allows.
     init(config: LiveTranslateConfig,
          factor: Double? = nil,
+         pan: CGPoint = .zero,
          deviceRange: ClosedRange<Double>? = nil,
          deviceSwitchOverFactors: [Double] = [],
          displayMultiplier: Double = 1) {
@@ -241,7 +477,25 @@ struct LiveCameraZoomModel: Equatable {
         self.step = readoutToDevice(config.zoomStep)
         self.switchSnapTolerance = config.zoomSwitchSnapTolerance
         self.displayMultiplier = displayMultiplier
-        self.factor = Self.clamped(factor ?? readoutToDevice(config.initialVideoZoom), to: bounds)
+        let factor = Self.clamped(factor ?? readoutToDevice(config.initialVideoZoom), to: bounds)
+        self.factor = factor
+        // A window fraction that cannot describe a window (zero, negative, past
+        // the frame) is not a window at all: the elder gets the whole frame and
+        // no pan, which is the behaviour this feature shipped with.
+        // `panEnabled` false reaches the same state on purpose — no window means
+        // nothing to move, so the drag has nothing to act on and the preview
+        // stays the sensor's own picture.
+        let window = config.panEnabled ? config.panWindowFraction : 1
+        self.panWindowFraction = (window.isFinite && window > 0 && window <= 1) ? window : 1
+        self.panStartZoom = config.panStartZoom
+        self.panFullZoom = config.panFullZoom
+        let sensitivity = config.pinchSensitivity
+        self.pinchSensitivity = (sensitivity.isFinite && sensitivity > 0) ? sensitivity : 1
+        self.pan = Self.clampedPan(pan, to: Self.panLimit(forFraction: Self.windowFraction(
+            forReadout: factor * displayMultiplier,
+            window: self.panWindowFraction,
+            start: self.panStartZoom,
+            full: self.panFullZoom)))
     }
 
     private init(bounds: ClosedRange<Double>,
@@ -249,13 +503,23 @@ struct LiveCameraZoomModel: Equatable {
                  step: Double,
                  switchSnapTolerance: Double,
                  factor: Double,
-                 displayMultiplier: Double) {
+                 displayMultiplier: Double,
+                 pan: CGPoint,
+                 panWindowFraction: Double,
+                 panStartZoom: Double,
+                 panFullZoom: Double,
+                 pinchSensitivity: Double) {
         self.bounds = bounds
         self.switchOverFactors = switchOverFactors
         self.step = step
         self.switchSnapTolerance = switchSnapTolerance
         self.factor = factor
         self.displayMultiplier = displayMultiplier
+        self.pan = pan
+        self.panWindowFraction = panWindowFraction
+        self.panStartZoom = panStartZoom
+        self.panFullZoom = panFullZoom
+        self.pinchSensitivity = pinchSensitivity
     }
 
     // MARK: Bounds
@@ -301,13 +565,120 @@ struct LiveCameraZoomModel: Equatable {
     }
 
     /// A copy at `value`, clamped to the model's own bounds.
+    ///
+    /// The pan comes along and is re-clamped: a narrower window (a bigger
+    /// factor) allows a bigger pan and a wider one allows less, and a factor
+    /// back at the ramp's floor allows none at all — which is how the window
+    /// recentres itself when the elder zooms back out, exactly as the system
+    /// camera does.
     func withFactor(_ value: Double) -> LiveCameraZoomModel {
+        let factor = Self.clamped(value, to: bounds)
+        return copy(factor: factor,
+                    pan: Self.clampedPan(pan, to: Self.panLimit(forFraction: windowFraction(for: factor))))
+    }
+
+    /// A copy at `offset`, clamped to what the current window allows.
+    func withPan(_ offset: CGPoint) -> LiveCameraZoomModel {
+        copy(pan: Self.clampedPan(offset, to: panLimit))
+    }
+
+    private func copy(factor: Double? = nil, pan: CGPoint? = nil) -> LiveCameraZoomModel {
         LiveCameraZoomModel(bounds: bounds,
                             switchOverFactors: switchOverFactors,
                             step: step,
                             switchSnapTolerance: switchSnapTolerance,
-                            factor: Self.clamped(value, to: bounds),
-                            displayMultiplier: displayMultiplier)
+                            factor: factor ?? self.factor,
+                            displayMultiplier: displayMultiplier,
+                            pan: pan ?? self.pan,
+                            panWindowFraction: panWindowFraction,
+                            panStartZoom: panStartZoom,
+                            panFullZoom: panFullZoom,
+                            pinchSensitivity: pinchSensitivity)
+    }
+
+    // MARK: The window
+
+    /// The visible window's size, as a fraction of the frame: the whole frame
+    /// at or below `panStartZoom`, `panWindowFraction` at or beyond
+    /// `panFullZoom`, and linear in the readout between the two.
+    ///
+    /// A function of the **zoom** rather than of the pan, deliberately. Tied to
+    /// the pan instead, the window could be narrowed to nothing by a drag, and
+    /// the pinch's own anchoring — which reads the window size at the gesture's
+    /// start — would have to solve for a size it was simultaneously changing.
+    /// Ramping with the zoom gives the elder pan room in proportion to how far
+    /// they have zoomed, and none at the bottom of the range where there is
+    /// nothing to pan to.
+    ///
+    /// This is the **display's** magnification, layered on top of the sensor's
+    /// own (`factor`): the picture on screen is the lens's field narrowed to
+    /// this fraction, so at the ramp's full extent it is enlarged by
+    /// `1 / panWindowFraction` beyond what the lens delivers. Vision reads the
+    /// same crop at full sensitivity resolution, so the small print the elder
+    /// zoomed in for is recognized from the sensor's pixels, not from the
+    /// enlarged screen image.
+    var cropFraction: Double {
+        windowFraction(for: factor)
+    }
+
+    /// How far the window may be moved either way from centre, in frame
+    /// fractions: exactly enough that the window stays inside the frame
+    /// (`(1 - size) / 2`), which is why the pan room tapers to nothing as the
+    /// window opens out to the whole frame.
+    var panLimit: Double { Self.panLimit(forFraction: cropFraction) }
+
+    /// The rectangle of the frame the elder is looking at — the window at the
+    /// current factor, moved by the pan.
+    var crop: LiveCameraCrop {
+        let size = cropFraction
+        let center = CGPoint(x: 0.5 + pan.x, y: 0.5 + pan.y)
+        return LiveCameraCrop(box: NormalizedBox(xMin: center.x - size / 2,
+                                                 yMin: center.y - size / 2,
+                                                 xMax: center.x + size / 2,
+                                                 yMax: center.y + size / 2))
+    }
+
+    /// The crop and the container rect together, which is everything the
+    /// preview, the placement and the gestures map through.
+    func presentation(in pictureRect: CGRect) -> LiveCameraPresentation {
+        LiveCameraPresentation(crop: crop, pictureRect: pictureRect)
+    }
+
+    /// Whether the window shows the whole frame — at which point nothing is
+    /// cropped, nothing can be panned, and every consumer takes its
+    /// uncropped path.
+    var showsWholeFrame: Bool { crop.isWhole }
+
+    /// The window's size at an arbitrary factor: the ramp, as a pure function
+    /// of what the elder reads. A degenerate or missing ramp (a config with the
+    /// two ends the wrong way round) is no window at all rather than a window
+    /// the elder cannot see out of.
+    func windowFraction(for factor: Double) -> Double {
+        Self.windowFraction(forReadout: factor * displayMultiplier,
+                            window: panWindowFraction,
+                            start: panStartZoom,
+                            full: panFullZoom)
+    }
+
+    private static func windowFraction(forReadout readout: Double,
+                                       window: Double,
+                                       start: Double,
+                                       full: Double) -> Double {
+        guard start.isFinite, full.isFinite, full > start, readout.isFinite else { return 1 }
+        let progress = Swift.min(1, Swift.max(0, (readout - start) / (full - start)))
+        return 1 - (1 - window) * progress
+    }
+
+    private static func panLimit(forFraction fraction: Double) -> Double {
+        Swift.max(0, (1 - fraction) / 2)
+    }
+
+    private static func clampedPan(_ pan: CGPoint, to limit: Double) -> CGPoint {
+        func clamped(_ value: CGFloat) -> CGFloat {
+            guard value.isFinite else { return 0 }
+            return Swift.min(CGFloat(limit), Swift.max(-CGFloat(limit), value))
+        }
+        return CGPoint(x: clamped(pan.x), y: clamped(pan.y))
     }
 
     // MARK: Stepping
@@ -345,14 +716,42 @@ struct LiveCameraZoomModel: Equatable {
 
     // MARK: Pinching
 
-    /// A pinch in flight, measured from the factor the gesture started at.
+    /// A pinch in flight, measured from the model the gesture started at, and
+    /// anchored at the point of the picture the fingers landed on.
     ///
     /// Cumulative from the gesture's own start rather than from the last
     /// delivered value: a pinch is one gesture, and compounding it on itself
     /// would make the same movement travel further the more often it was
     /// sampled.
-    func pinched(by magnification: Double, from base: Double) -> LiveCameraZoomModel {
-        withFactor(base * magnification)
+    ///
+    /// **The anchoring.** `focus` is the finger's position inside the visible
+    /// window (0–1 of the crop), taken once, when the fingers landed. The
+    /// elder's fingers are holding a *place in the picture*, and that place has
+    /// to stay under them: if the window narrows by `size - startSize` around a
+    /// point that is not the centre, the whole window has to move by that
+    /// difference weighted by how far the point is from the centre. At the
+    /// centre the weight is zero — zooming from the middle of the picture needs
+    /// no pan at all, which is why the buttons and a centre pinch agree. At an
+    /// edge it is the full difference — the window slides so that edge's
+    /// content is held still. A finger in a corner does both axes at once.
+    ///
+    /// The pan this asks for can be past what the window allows, in which case
+    /// `withPan` clamps it: near the frame's edge the picture stops following
+    /// the fingers, which is the only honest answer — the alternative is
+    /// showing the elder frame that the camera never captured.
+    ///
+    /// `magnification` is the recogniser's cumulative scale; `pinchSensitivity`
+    /// raises it to a power, so a value below 1 asks for a gentler pinch
+    /// without changing what any given scale means.
+    func pinched(by magnification: Double,
+                 from base: LiveCameraZoomModel,
+                 at focus: CGPoint = LiveCameraCrop.whole.center) -> LiveCameraZoomModel {
+        guard magnification.isFinite, magnification > 0 else { return self }
+        let scale = pinchSensitivity == 1 ? magnification : pow(magnification, pinchSensitivity)
+        let zoomed = withFactor(base.factor * scale)
+        let drift = (zoomed.cropFraction - base.cropFraction)
+        return zoomed.withPan(CGPoint(x: base.pan.x + drift * (0.5 - focus.x),
+                                      y: base.pan.y + drift * (0.5 - focus.y)))
     }
 
     /// Where a pinch release lands: on a switch-over factor when the fingers
@@ -446,32 +845,45 @@ final class LiveCameraZoomSurface: ObservableObject {
     private let applyFocus: (CGPoint) -> Void
     /// Holds focus, or releases it.
     private let applyFocusLock: (Bool) -> Void
+    /// Tells the session which rectangle of the frame is visible: the same
+    /// value the preview is drawn through and the recognition pass is cropped
+    /// to, so that what the elder sees and what Vision reads are one picture.
+    private let applyCrop: (LiveCameraCrop) -> Void
 
-    /// The factor the pinch in flight started from, or `nil` between pinches:
+    /// The model the pinch in flight started from, or `nil` between pinches:
     /// one gesture, one base, however many times the recogniser samples it.
-    private var pinchBase: Double?
+    /// The whole model rather than just the factor, because the anchoring needs
+    /// the pan and the window size the fingers landed with.
+    private var pinchBase: LiveCameraZoomModel?
+
+    /// The pan the drag in flight started from, or `nil` between drags.
+    private var panBase: CGPoint?
 
     init(config: LiveTranslateConfig,
          capabilities: @escaping () -> CameraZoomCapabilities = { .unknown },
          applyZoom: @escaping (Double) -> Double = { $0 },
          applyFocus: @escaping (CGPoint) -> Void = { _ in },
-         applyFocusLock: @escaping (Bool) -> Void = { _ in }) {
+         applyFocusLock: @escaping (Bool) -> Void = { _ in },
+         applyCrop: @escaping (LiveCameraCrop) -> Void = { _ in }) {
         self.config = config
         self.capabilities = capabilities
         self.applyZoom = applyZoom
         self.applyFocus = applyFocus
         self.applyFocusLock = applyFocusLock
+        self.applyCrop = applyCrop
         // Built against the device when there already is one, so the readout
         // and the pinch's base begin in the device's own factor space: a
         // surface that opened from the config's readout numbers alone would
         // print the wrong unit, and its first pinch would spend itself closing
         // the gap between the two spaces instead of moving the picture.
         let current = capabilities()
-        self.model = LiveCameraZoomModel(config: config,
-                                         deviceRange: current.range,
-                                         deviceSwitchOverFactors: current.switchOverFactors,
-                                         displayMultiplier: current.displayMultiplier)
+        let model = LiveCameraZoomModel(config: config,
+                                        deviceRange: current.range,
+                                        deviceSwitchOverFactors: current.switchOverFactors,
+                                        displayMultiplier: current.displayMultiplier)
+        self.model = model
         self.isFocusLocked = config.focusLockDefault
+        self.applyCrop(model.crop)
     }
 
     // MARK: Zoom
@@ -482,11 +894,14 @@ final class LiveCameraZoomSurface: ObservableObject {
     }
 
     /// A pinch in flight. `magnification` is the recogniser's cumulative scale
-    /// — 1 at the moment the fingers landed.
-    func pinch(to magnification: Double) {
-        if pinchBase == nil { pinchBase = model.factor }
+    /// — 1 at the moment the fingers landed — and `focus` is where they landed,
+    /// in the visible window's own coordinates (0–1). The default is the
+    /// window's centre, the anchoring the buttons have: a pinch that does not
+    /// say where it started zooms about the middle of the picture.
+    func pinch(to magnification: Double, at focus: CGPoint = LiveCameraCrop.whole.center) {
+        if pinchBase == nil { pinchBase = model }
         guard let base = pinchBase else { return }
-        apply(rebuilt().pinched(by: magnification, from: base))
+        apply(rebuilt().pinched(by: magnification, from: base, at: focus))
     }
 
     /// The pinch's end: the release snaps onto a lens switch when it stopped
@@ -495,6 +910,46 @@ final class LiveCameraZoomSurface: ObservableObject {
         guard pinchBase != nil else { return }
         pinchBase = nil
         apply(rebuilt().snappedForRelease())
+    }
+
+    // MARK: Panning
+
+    /// A drag of one finger while the picture is zoomed. `offset` is the
+    /// drag's translation since it began, converted into frame fractions by
+    /// the caller (the view, through the presentation) — the recogniser's own
+    /// cumulative convention, measured from the moment the finger landed.
+    ///
+    /// Nothing happens while the whole frame is visible: there is no window to
+    /// move, `panLimit` is zero, and the clamp is the entire enforcement.
+    /// Dragging past the frame's edge stops the picture there and keeps the
+    /// base, so the elder's finger comes back to it rather than having to
+    /// retrace the overshoot.
+    func pan(to offset: CGPoint) {
+        if panBase == nil { panBase = model.pan }
+        guard let base = panBase else { return }
+        apply(rebuilt().withPan(CGPoint(x: base.x + offset.x, y: base.y + offset.y)))
+    }
+
+    /// The drag's end. The pan stays where the finger left it — a gesture that
+    /// moved the picture must not move it back.
+    func panEnded() {
+        panBase = nil
+    }
+
+    /// The session let go of the picture: it stopped, or an interruption ended
+    /// and the camera came back.
+    ///
+    /// Told rather than inferred, and idempotent, like the focus lock's mirror.
+    /// The zoom itself is the session's to restore — it is the one holding the
+    /// device — but where the window was pointed is the elder's gesture state,
+    /// and this is where it goes home. Whether it does is the config's answer
+    /// (`panResetsOnExit`), because an elder who was reading a label, was
+    /// interrupted by a call, and came back to the same shelf may reasonably
+    /// want to be looking at the same place.
+    func sessionReleased() {
+        panBase = nil
+        guard config.panResetsOnExit else { return }
+        apply(model.withPan(.zero))
     }
 
     // MARK: Focus
@@ -535,23 +990,56 @@ final class LiveCameraZoomSurface: ObservableObject {
     // MARK: Plumbing
 
     /// The model rebuilt against what the device reports *now*, at the factor
-    /// in effect: the bounds and the switch-over factors are the running
-    /// device's, never a previous session's.
+    /// and pan in effect: the bounds and the switch-over factors are the
+    /// running device's, never a previous session's.
     private func rebuilt() -> LiveCameraZoomModel {
         let current = capabilities()
         return LiveCameraZoomModel(config: config,
                                    factor: model.factor,
+                                   pan: model.pan,
                                    deviceRange: current.range,
                                    deviceSwitchOverFactors: current.switchOverFactors,
                                    displayMultiplier: current.displayMultiplier)
     }
 
-    /// Hands a candidate to the device and republishes what came back. A
-    /// candidate that moves nothing is not applied at all: a gesture that has
-    /// stopped moving must not keep asking the platform to lock, configure and
-    /// unlock a device.
+    /// Hands a candidate to the device and republishes what came back.
+    ///
+    /// The device answers the zoom — it is the one that may clamp a factor to
+    /// what the running format can deliver — and the **window is then computed
+    /// from that answer**, so the readout, the crop the preview is drawn
+    /// through and the crop the recognition pass is given are all the picture
+    /// that is actually being captured. A candidate that moves neither the
+    /// zoom nor the window is not applied at all: a gesture that has stopped
+    /// moving must not keep asking the platform to lock, configure and unlock a
+    /// device.
     private func apply(_ candidate: LiveCameraZoomModel) {
-        guard candidate.factor != model.factor else { return }
-        model = candidate.withFactor(applyZoom(candidate.factor))
+        var settled = candidate
+        if candidate.factor != model.factor {
+            settled = candidate.withFactor(applyZoom(candidate.factor))
+        }
+        settle(settled)
+    }
+
+    /// Publishes a model the device is already at — the session's own read-back
+    /// after a start, or the reset after a stop — and hands its window to the
+    /// recognition path. Publishing only: the device is not asked for anything,
+    /// because it is where this model says it is.
+    private func settle(_ settled: LiveCameraZoomModel) {
+        guard settled != model else { return }
+        model = settled
+        applyCrop(settled.crop)
+    }
+
+    /// The device actually opened at `factor`: the session's read-back, told
+    /// rather than inferred, so the readout and the window describe the picture
+    /// the camera is really taking even when the platform clamped the opening
+    /// zoom to the active format's range.
+    ///
+    /// The pan comes along and is re-clamped by `withFactor`, like any other
+    /// factor change: the window that factor allows is the window the elder
+    /// gets.
+    func sessionOpened(atDeviceFactor factor: Double) {
+        pinchBase = nil
+        settle(model.withFactor(factor))
     }
 }
