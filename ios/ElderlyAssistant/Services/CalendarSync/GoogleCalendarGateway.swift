@@ -334,18 +334,31 @@ final class GoogleCalendarGateway: GoogleCalendarGatewayProtocol {
     func listIncoming(syncToken: String?) async -> GoogleIncomingPage? {
         let event = "calendar_share_inbound"
         guard let token = await authorizedToken(event: event, kind: nil) else { return nil }
-        var query = [URLQueryItem(name: "singleEvents", value: "true"),
-                     URLQueryItem(name: "maxResults", value: String(Self.eventsPageSize)),
-                     // Deleted occurrences must not arrive as imports. The
-                     // cost is that a cancellation reaches the elder only
-                     // as "the event is gone from the listing", which is
-                     // the truth the local mirror can act on anyway.
-                     URLQueryItem(name: "showDeleted", value: "false")]
+        // [SYNCTOKEN-FIX] (2026-09-17) Google's events.list REFUSES the
+        // `syncToken` + `singleEvents` combination with HTTP 400 — and
+        // the gateway's classifier maps 400 to `malformedResponse`, so
+        // every inbound call since the first stored token failed as a
+        // "body did not decode" that was really a rejected query. The
+        // two modes are therefore exclusive: a sync-token page never
+        // carries `singleEvents` (incremental sync already answers in
+        // the sync state's shape), and only the initial timeMin page
+        // asks for expanded occurrences.
+        //
+        // Deleted occurrences must not arrive as imports, in both modes.
+        // The cost is that a cancellation reaches the elder only as "the
+        // event is gone from the listing", which is the truth the local
+        // mirror can act on anyway.
+        var query: [URLQueryItem]
         if let syncToken, !syncToken.isEmpty {
-            query.append(URLQueryItem(name: "syncToken", value: syncToken))
+            query = [URLQueryItem(name: "syncToken", value: syncToken),
+                     URLQueryItem(name: "maxResults", value: String(Self.eventsPageSize)),
+                     URLQueryItem(name: "showDeleted", value: "false")]
         } else {
-            query.append(URLQueryItem(name: "timeMin", value: Self.rfc3339String(
-                from: now().addingTimeInterval(Self.inboundWindowSeconds))))
+            query = [URLQueryItem(name: "singleEvents", value: "true"),
+                     URLQueryItem(name: "maxResults", value: String(Self.eventsPageSize)),
+                     URLQueryItem(name: "showDeleted", value: "false"),
+                     URLQueryItem(name: "timeMin", value: Self.rfc3339String(
+                         from: now().addingTimeInterval(Self.inboundWindowSeconds)))]
         }
         guard let url = Self.eventsURL(calendarID: "primary", query: query) else {
             recordMalformed(event, kind: nil)
