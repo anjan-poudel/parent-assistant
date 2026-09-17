@@ -36,6 +36,61 @@ struct LiveTranslateConfig: Equatable {
     /// The thermal state at which the reduced cadence takes effect.
     var thermalStateThreshold: ProcessInfo.ThermalState = .serious
 
+    // MARK: Frame-change gate (resource rework, 2026-09-17)
+
+    /// Side of the square luminance signature the frame-change gate reduces
+    /// each frame to before comparing it with the last frame recognition ran
+    /// on: 64 × 64 = 4,096 samples.
+    ///
+    /// The gate is *three orders of magnitude* cheaper than the work it exists
+    /// to skip — 4,096 strided byte reads and subtractions (tens of
+    /// microseconds) against a Vision OCR pass (tens of milliseconds), which is
+    /// the only reason it may run on every delivered sample.
+    ///
+    /// 64 is also the point past which the answer stops changing: recognition
+    /// is a high-level decision about a scene, and a finer signature detects
+    /// sensor noise rather than a different picture.
+    var frameSignatureSide: Int = 64
+
+    /// Mean absolute luminance difference (0–1, per sampled pixel) at or above
+    /// which the incoming frame counts as a materially different scene.
+    ///
+    /// Below the threshold the two frames are "the same picture" as far as
+    /// recognition is concerned: sensor noise, the last digit of a hand's
+    /// tremor, and an auto-exposure settling all measure under 2 %. A real
+    /// change — a sign entering frame, the camera panning — moves the mean by
+    /// far more, because it moves whole regions of pixels rather than a
+    /// fraction of a level.
+    var frameChangeThreshold: Double = 0.02
+
+    /// The cadence the frame tap falls back to while the scene is not
+    /// changing: 0.7 s ≈ 1.4 fps.
+    ///
+    /// Not zero, and not a hard stop. The stabiliser publishes a region only
+    /// after `regionAppearPasses` consecutive sightings, so a gate that dropped
+    /// *every* unchanged frame would leave a sign discovered on its first
+    /// sighting unpublished for ever — a functional regression traded for a
+    /// CPU win, which is not a trade this feature makes. An unchanged frame is
+    /// therefore still delivered at this interval; the reduced cadence *is* the
+    /// refresh rate. A still scene costs ~1.4 OCR passes a second instead of
+    /// the nominal 4 (a 65 % cut in the feature's dominant CPU term) and a
+    /// moving one keeps the full cadence.
+    var stableSampleInterval: TimeInterval = 0.7
+
+    /// Consecutive OCR passes that produced no new or changed region before the
+    /// pipeline reports the scene stale and the cadence drops to
+    /// `stableSampleInterval`.
+    ///
+    /// This is the signal a frame change cannot see: a scene that keeps
+    /// *moving* without containing any new *text* — a hand, a reflection, a
+    /// screen playing video behind the sign — is churn the elder cannot use,
+    /// and it would otherwise hold the full cadence open indefinitely. Three
+    /// passes is under a second at the nominal cadence, and a tracking pass
+    /// interleaved between two text-bearing OCR passes cannot reach it
+    /// (the counter resets on any change), so a live pan is never mistaken for
+    /// a stale scene.
+    var stalePassesBeforeReducedCadence: Int = 3
+
     // MARK: Tracking / stabilisation
 
     /// Whether region tracking is requested at all. Tracking is a SHOULD
@@ -45,6 +100,24 @@ struct LiveTranslateConfig: Equatable {
 
     /// IoU above which two observations are considered the same region.
     var regionMatchIoU: Double = 0.3
+
+    /// Rectangles followed per tracking pass, at most.
+    ///
+    /// A tracking pass costs **one `VNTrackRectangleRequest` per remembered
+    /// rectangle**, run one after another on the detector's serial Vision
+    /// queue, so an unbounded pass over a dense scene is the most expensive
+    /// thing this feature can do per frame — more than the OCR pass it exists
+    /// to avoid, and the reason a static scene used to burn a full core while
+    /// nothing on screen was moving.
+    ///
+    /// The surplus is not an error and not a loss of text. A key the tracker
+    /// was not asked about is simply absent from the pass, which is the
+    /// documented tracking-loss path (FR-LCT-004): the stabiliser holds the
+    /// last OCR-confirmed geometry, so the overlay keeps drawing the box it
+    /// already had. 6 matches `declutterMaxRegions` — the number of overlays
+    /// the elder can actually see — so nothing that is not rendered can cost a
+    /// request.
+    var trackingMaxRectanglesPerPass: Int = 6
 
     /// Normalised centroid distance below which two observations are
     /// considered the same region.
@@ -188,6 +261,37 @@ struct LiveTranslateConfig: Equatable {
     /// Nominal, not frozen: the device spike to come may move it.
     var brainTranslationTimeoutSeconds: TimeInterval = 25
 
+    /// Grace added to `brainTranslationTimeoutSeconds` to form the pipeline's
+    /// own deadline for the whole brain stage.
+    ///
+    /// The tier bounds itself (the deadline above stops the decode), but a
+    /// bound a component enforces on itself only helps the caller if the call
+    /// *returns*: a stage that failed to end — a 4B load thrashing through a
+    /// pressured device's page cache is the realistic one, and it is not
+    /// covered by the decode deadline at all — would hold the strings it
+    /// claimed for the rest of the session, and every tick after it would skip
+    /// them as "already dispatched". The region would sit on the pending copy
+    /// while the cloud could have answered it in the same cycle.
+    ///
+    /// So the pipeline waits on its own clock too, and this is the slack it
+    /// allows the tier's bound to land in. It is deliberately short: the tier's
+    /// answer should always win when it is coming at all, and the grace only
+    /// has to cover the difference between "the decode stopped" and "the call
+    /// came back".
+    var brainTranslationStageGraceSeconds: TimeInterval = 3
+
+    /// The pipeline's deadline for one brain stage. Derived from the two values
+    /// above, so it can drift from neither — the same shape the cloud deadline
+    /// uses (`cloudRequestTimeout + cloudDeadlineGraceSeconds`).
+    ///
+    /// On expiry the pipeline stops waiting: the strings it handed over go on
+    /// to the gate in that same cycle, and the generation finishes (or does
+    /// not) with nobody listening. A deferred translation is a worse
+    /// translation; a stranded region is a worse product.
+    var brainTranslationStageDeadlineSeconds: TimeInterval {
+        brainTranslationTimeoutSeconds + brainTranslationStageGraceSeconds
+    }
+
     /// Strings per brain request. Everything unresolved in one cycle goes to
     /// the brain in ONE generation (the tier's whole point is one call, not
     /// one per region), so this is the point at which a scene is too big for
@@ -212,7 +316,58 @@ struct LiveTranslateConfig: Equatable {
     /// it until the app dies. A batch arriving after a longer gap pays one
     /// model load inside its own timeout — which is what the generous
     /// `brainTranslationTimeoutSeconds` is sized for.
-    var brainTranslationIdleUnloadSeconds: TimeInterval = 30
+    ///
+    /// Re-tuned 2026-09-17 (30 s → 5 s) against the device's own crash
+    /// reports. The 30 s window was sized for "one model load inside the
+    /// timeout", which it does buy; what it also bought was a 2.5 GB GGUF
+    /// resident across *every* scene the elder looked at for half a minute
+    /// after the last generation — and on a 5.5 GB device whose live camera
+    /// footprint was already measured at 1.18–1.41 GB, that residency is what
+    /// the memory-pressure crashes were made of. 5 s is still longer than any
+    /// inter-region gap inside one scene (the pipeline batches one generation
+    /// per cycle, not per region), so it does not reload between regions of
+    /// the same sign; it only stops the tier from holding GBs through the
+    /// elder's next ten glances at nothing.
+    ///
+    /// Deliberately *not* "release after every batch": a 4B GGUF costs a full
+    /// file page-in to re-load, and paying that per batch is the CPU burn the
+    /// watchdog kills for. Freeing the memory quickly and keeping the reload
+    /// rare is the pairing that satisfies both pressure and the CPU limit.
+    var brainTranslationIdleUnloadSeconds: TimeInterval = 5
+
+    /// Headroom floor, as a multiple of the brain's declared **hard**
+    /// footprint (`ModelFootprint.hardBytes` — the part of a model's cost the
+    /// OS cannot reclaim on our behalf, i.e. the KV and output buffers rather
+    /// than the pageable weights), below which the tier does not load at all
+    /// and the batch is deferred to the cloud.
+    ///
+    /// This is the device's own arithmetic, not a new number: `hardBytes` is
+    /// exactly what `ModelLifecycleInventory` declares, and the ledger's own
+    /// hard-headroom rule is that this is the quantity to compare against the
+    /// probe. Requiring 1.0× means "only add the brain's non-pageable cost if
+    /// the app currently has that much headroom under its jetsam ceiling";
+    /// the weights themselves are mmap'd and pageable, so they are not charged
+    /// twice.
+    ///
+    /// It exists because the alternative on a pressured device is worse than a
+    /// missing translation: crossing the ceiling gets the whole app killed, and
+    /// a killed app translates nothing at all. The strings are not lost — they
+    /// go to the next tier, which is the same honest outcome as any other
+    /// brain unavailability.
+    var brainTranslationHeadroomFactor: Double = 1.0
+
+    /// Whether the tier defers to a brain that is already resident for another
+    /// owner — the voice pipeline's `.brain` or `.intentBrain` slot — rather
+    /// than running a second multi-GB generation alongside it.
+    ///
+    /// Read-only, and deliberately so: this tier takes no residency slot (see
+    /// the tier's header), so it must never evict, register or claim. It only
+    /// asks the ledger whether a brain is live and, if one is, hands its
+    /// strings to the cloud. Two 4B workloads at once on a 5.5 GB device is
+    /// the single fastest way to get killed, and a deferred translation beats a
+    /// dead app; the voice brain is the resident the household is actively
+    /// talking to, so it is the one that keeps the device.
+    var brainTranslationDefersToResidentBrain: Bool = true
 
     // MARK: Tier 2
 

@@ -19,6 +19,16 @@ import UIKit
 //    sample instead of queueing it. That single rule is simultaneously the
 //    OCR cadence control and the memory bound (NFR-LCT-002): the effective
 //    rate degrades under load, and at most one frame is ever buffered.
+//  - **The cadence follows the scene, not the clock.** The tap measures each
+//    sample against the last frame recognition ran on (`FrameChangeDetector`,
+//    a 64 × 64 luminance signature — tens of microseconds against Vision's
+//    tens of milliseconds) and drops a still scene to `stableSampleInterval`
+//    (~1.4 fps), returning to the nominal cadence the moment the picture
+//    changes. A sample the tap does not deliver costs nothing downstream: no
+//    pass, no Vision request, no tracking request, no publication. The gate
+//    never *stops* the stream, because the stabiliser needs
+//    `regionAppearPasses` consecutive sightings to publish a region — the
+//    reduced cadence is the refresh rate that keeps that hysteresis honest.
 //  - **Never running in the background.** Backgrounding (or a system
 //    interruption) pauses the session; the next foreground transition resumes
 //    it at most once. A torn-down session is never restarted implicitly.
@@ -49,6 +59,142 @@ extension CameraFrame {
         self.pixelSize = CGSize(width: CVPixelBufferGetWidth(pixelBuffer),
                                 height: CVPixelBufferGetHeight(pixelBuffer))
         self.timestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+    }
+}
+
+// MARK: - The frame-change gate
+
+/// One frame's luminance signature: `side × side` mean-luma samples on a 0–255
+/// scale, read straight out of the delivered pixel buffer.
+///
+/// Nothing is allocated but the samples themselves (4,096 bytes at the default
+/// side): the frame is not copied, not resized and not retained, so the
+/// signature costs a scan and no memory — which is the whole point of putting
+/// the gate in front of Vision rather than in a scaled copy of the frame.
+struct LuminanceSignature: Equatable {
+    let side: Int
+    let samples: [UInt8]
+
+    /// Reads a signature off a pixel buffer, or `nil` when the buffer is not in
+    /// a format this reads (the capture layer asks the platform for 32BGRA; a
+    /// test may hand over anything).
+    ///
+    /// `nil` is not "unchanged" and never means "skip": a frame the gate cannot
+    /// measure is a frame recognition runs on, which is the pre-gate behaviour
+    /// and the safe direction to fail in.
+    static func of(_ pixelBuffer: CVPixelBuffer, side: Int) -> LuminanceSignature? {
+        guard side > 0 else { return nil }
+
+        let format = CVPixelBufferGetPixelFormatType(pixelBuffer)
+        // Packed 32-bit RGB layouts only: the loop below reads four 8-bit
+        // components per pixel, and that is true of these and not of a planar
+        // buffer (whose luma plane is one byte per pixel). A planar buffer is
+        // refused rather than mis-read, and a refusal fails open — recognition
+        // runs.
+        guard format == kCVPixelFormatType_32BGRA || format == kCVPixelFormatType_32ARGB,
+              !CVPixelBufferIsPlanar(pixelBuffer) else {
+            return nil
+        }
+        guard CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly) == kCVReturnSuccess else {
+            return nil
+        }
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+        guard width > 0, height > 0, bytesPerRow > 0,
+              let base = CVPixelBufferGetBaseAddress(pixelBuffer) else {
+            return nil
+        }
+        let bytes = base.assumingMemoryBound(to: UInt8.self)
+
+        // The two packed layouts differ in channel order; both are read as
+        // (c0, c1, c2) at the pixel's first three bytes, and a luminance
+        // average is order-independent for this purpose — what the gate
+        // compares is the same channel of the same pixel on the next frame,
+        // and that is stable for a fixed format.
+        let isBGRA = format == kCVPixelFormatType_32BGRA
+        let rOffset = isBGRA ? 2 : 1
+        let bOffset = isBGRA ? 0 : 3
+
+        var samples = [UInt8](repeating: 0, count: side * side)
+        for row in 0..<side {
+            let y = (row * height) / side
+            let rowBase = y * bytesPerRow
+            for column in 0..<side {
+                let x = (column * width) / side
+                let pixel = bytes + rowBase + x * 4
+                // BT.601 luma, integer arithmetic: the gate compares one
+                // signature with another, so a fixed-point approximation is
+                // not merely adequate, it is the same function on both sides.
+                let value = (Int(pixel[bOffset]) * 29
+                             + Int(pixel[1]) * 150
+                             + Int(pixel[rOffset]) * 77) >> 8
+                samples[row * side + column] = UInt8(clamping: value)
+            }
+        }
+        return LuminanceSignature(side: side, samples: samples)
+    }
+
+    /// Mean absolute difference per sample, as a fraction of full scale.
+    /// `nil` when the two signatures do not describe the same grid.
+    func meanAbsoluteDifference(from other: LuminanceSignature) -> Double? {
+        guard side == other.side, samples.count == other.samples.count,
+              !samples.isEmpty else { return nil }
+        var total = 0
+        for index in samples.indices {
+            total += abs(Int(samples[index]) - Int(other.samples[index]))
+        }
+        return Double(total) / Double(samples.count) / 255.0
+    }
+}
+
+/// The frame-change gate: "is this frame a materially different picture from
+/// the last one recognition ran on?"
+///
+/// It exists to be cheap enough to run on every delivered sample, so that
+/// Vision — the feature's dominant CPU term, and the thing the device's own
+/// crash reports show burning a core while nothing on screen was changing —
+/// can be skipped when its answer could not differ. Recognition over an
+/// unchanged frame cannot produce a different set of strings: the input is the
+/// same and Vision is deterministic for a fixed input, so the pass is pure
+/// cost.
+///
+/// Held by value and mutated under the owner's own lock (`LiveCameraSession`
+/// taps on one video queue and reads later frames through the same lock), so
+/// the gate adds no second synchronisation story to reason about.
+struct FrameChangeDetector {
+
+    /// The signature of the last frame that was handed to recognition.
+    private var reference: LuminanceSignature?
+
+    /// Whether `frame` is materially different from the remembered one. Does
+    /// **not** mutate: a frame that is dropped by the cadence afterwards must
+    /// not become the new reference, or the gate would slowly walk its own
+    /// baseline away from the frame the overlay is actually showing.
+    ///
+    /// The first frame after a start (or after `forget`) is always a change,
+    /// and a frame whose signature cannot be read is always a change.
+    func isMateriallyDifferent(_ frame: CameraFrame, side: Int, threshold: Double) -> Bool {
+        guard let reference else { return true }
+        guard let current = LuminanceSignature.of(frame.pixelBuffer, side: side) else { return true }
+        guard let difference = current.meanAbsoluteDifference(from: reference) else { return true }
+        return difference >= threshold
+    }
+
+    /// Remembers this frame as the reference the next comparison is made
+    /// against. Called for the frames actually handed to recognition.
+    mutating func remember(_ frame: CameraFrame, side: Int) {
+        guard let signature = LuminanceSignature.of(frame.pixelBuffer, side: side) else { return }
+        reference = signature
+    }
+
+    /// Drops the reference: the next frame is a change, whatever it shows.
+    /// Used on a resume, where the scene the session returns to is not the one
+    /// it left.
+    mutating func forget() {
+        reference = nil
     }
 }
 
@@ -259,6 +405,13 @@ final class LiveCameraSession {
     private var startHasRun = false
     private var pendingInterruption: CameraInterruption?
 
+    /// The frame-change gate's state. Lock-guarded with the rest of the tap
+    /// state, because the tap is the only writer and the tap is where the
+    /// cadence decision is made.
+    private var frameDetector = FrameChangeDetector()
+    /// The pipeline's stale-scene signal (see `ocrSceneStale`).
+    private var sceneStale = false
+
     private let stream: AsyncStream<CameraFrame>
     private var continuation: AsyncStream<CameraFrame>.Continuation?
 
@@ -310,14 +463,64 @@ final class LiveCameraSession {
         }
     }
 
+    /// The pipeline's stale-scene signal. `true` means the last
+    /// `stalePassesBeforeReducedCadence` recognition passes contained no new or
+    /// changed region, so the tap runs at the reduced cadence from now on.
+    ///
+    /// Written by the pipeline (which owns the pass and is the only component
+    /// that can tell a pass with no text from a pass that did not run), read
+    /// here on the video-output queue, exactly like `ocrPassInFlight`. The
+    /// session does not infer it: a scene that is moving without containing new
+    /// text is a fact about the recognition results, not about the pixels.
+    var ocrSceneStale: Bool {
+        get {
+            lock.lock(); defer { lock.unlock() }
+            return sceneStale
+        }
+        set {
+            lock.lock(); defer { lock.unlock() }
+            sceneStale = newValue
+        }
+    }
+
     /// The tap's interval after the thermal response (NFR-LCT-002 scenario 3):
     /// at or above the configured threshold the cadence slows by the configured
     /// factor, so a hot device degrades instead of stopping.
+    ///
+    /// This is the **nominal** cadence — the one a scene that is actively
+    /// producing new text runs at. The reduce-when-idle half is
+    /// `effectiveSampleInterval(changed:stale:)`.
     var effectiveSampleInterval: TimeInterval {
         let thermal = capture.thermalState
         let reduced = thermal.rawValue >= config.thermalStateThreshold.rawValue
         return reduced ? config.ocrSampleInterval * config.thermalCadenceFactor
                        : config.ocrSampleInterval
+    }
+
+    /// The interval this sample gets, given what the frame-change gate and the
+    /// pipeline's staleness signal say about the scene.
+    ///
+    /// **Lock-free by contract**: the tap calls this while it already holds the
+    /// lock, so it may only read values the caller has read. Two ways to end up
+    /// at the reduced cadence — the frame is materially the same picture as the
+    /// last one recognition ran on, or the pipeline reports that recent passes
+    /// found no new text — and the difference between them is the point: the
+    /// first is cheap to measure and catches a still camera, the second catches
+    /// motion that carries no information (a hand, a reflection, a screen
+    /// playing video behind the sign) and is the one that would otherwise hold
+    /// the full cadence open for as long as the elder kept pointing the camera
+    /// at the same sign.
+    ///
+    /// A *changed* frame in a scene the pipeline has not called stale runs at
+    /// the full cadence, because a new sign must be read as soon as it appears:
+    /// the reduced cadence is a bound on idling, never a lag on news.
+    func effectiveSampleInterval(changed: Bool, stale: Bool) -> TimeInterval {
+        let nominal = effectiveSampleInterval
+        guard !changed || stale else { return nominal }
+        // `max` rather than the reduced value alone: on a hot device the nominal
+        // cadence may already be slower than the reduced one, and the thermal
+        // response is a floor on how much the feature slows down, not a ceiling.
+        return Swift.max(nominal, config.stableSampleInterval)
     }
 
     // MARK: Preview
@@ -472,6 +675,14 @@ final class LiveCameraSession {
         switch state {
         case .interrupted(let reason):
             onCaptureQueue { capture.startRunning() }
+            // The first frame after a resume is a change by construction: the
+            // scene the elder returns to is not the one the session left, and
+            // the reduced cadence must not survive the interruption.
+            withLock {
+                frameDetector.forget()
+                sceneStale = false
+                lastSampledAt = nil
+            }
             setState(.running)
             events.cameraResumed(recoveringFrom: reason)
             return .success(())
@@ -507,6 +718,8 @@ final class LiveCameraSession {
             pendingInterruption = nil
             lastSampledAt = nil
             passInFlight = false
+            frameDetector.forget()
+            sceneStale = false
             currentState = .stopped
             let removed = observers
             observers = []
@@ -537,19 +750,37 @@ final class LiveCameraSession {
     ///     frame the elder has already left, and a sample already in flight
     ///     when `stopRunning()` lands still arrives here;
     ///  2. a pass in flight drops the sample — no queue, no backlog;
-    ///  3. a sample inside the (thermal-adjusted) interval is dropped;
-    ///  4. otherwise the frame is yielded to the stream, which itself holds at
+    ///  3. the frame-change gate measures the sample against the last frame
+    ///     recognition ran on, and the answer chooses the interval (full
+    ///     cadence for a changed scene, the reduced one otherwise);
+    ///  4. a sample inside that interval is dropped;
+    ///  5. otherwise the frame is yielded to the stream, which itself holds at
     ///     most one frame.
+    ///
+    /// Step 3 is where the feature's largest cost is avoided: a frame that is
+    /// materially the same picture as the last one recognition saw cannot
+    /// produce a different set of strings, so running Vision on it is pure
+    /// cost — and it is a cost the device's own crash reports show being paid
+    /// at ~4 Hz over a scene that was not changing. The gate runs *before* the
+    /// interval check because it chooses the interval, and it commits its
+    /// reference only for frames actually delivered, so a dropped sample never
+    /// moves the baseline away from the frame the overlay is showing.
     private func sampleArrived(_ sampleBuffer: CMSampleBuffer) {
         guard let frame = CameraFrame(sampleBuffer: sampleBuffer) else { return }
 
         let accepted: AsyncStream<CameraFrame>.Continuation? = withLock {
             guard currentState == .running else { return nil }
             guard !passInFlight else { return nil }
-            let interval = effectiveSampleInterval
+            let changed = frameDetector.isMateriallyDifferent(frame,
+                                                             side: config.frameSignatureSide,
+                                                             threshold: config.frameChangeThreshold)
+            let interval = effectiveSampleInterval(changed: changed, stale: sceneStale)
             let timestamp = now()
             if let last = lastSampledAt, timestamp - last < interval { return nil }
             lastSampledAt = timestamp
+            // Delivered, therefore recognized (or tracked): this frame is the
+            // gate's new baseline.
+            frameDetector.remember(frame, side: config.frameSignatureSide)
             return continuation
         }
         accepted?.yield(frame)

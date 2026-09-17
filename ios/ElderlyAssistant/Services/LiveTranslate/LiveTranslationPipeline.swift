@@ -43,13 +43,35 @@ import Foundation
 //      session-scoped task, so the OCR cadence continues while a request or a
 //      generation is in flight, and the next tick is the retry.
 //
-//   4. **Ordering is a monotone counter, never a clock (AM-6).** Each
+//      That task is also what keeps a *slow* stage from becoming a lost
+//      region. Both tiers bound themselves, but a bound a component enforces
+//      on itself only reaches the elder if the call returns, and a stage that
+//      claimed strings and never came back would strand them: every later tick
+//      sees the claim and skips them, so the region sits pending while the
+//      tier behind it is never asked. The brain stage therefore runs under the
+//      pipeline's own deadline (`brainTranslationStageDeadlineSeconds`) and
+//      hands its strings to the gate when that deadline wins.
+//
+//   4. **The cadence follows the scene, not the clock (resource rework,
+//      2026-09-17).** The frame source reduces every delivered frame to a
+//      luminance signature and runs recognition on it only when the picture
+//      materially changed, and this actor is the second half of that rule: it
+//      is the only component that knows whether a pass produced anything, so
+//      it is the one that reports a scene stale (no new region, no box moving)
+//      and lets the tap fall back to `stableSampleInterval`. Both halves are
+//      needed. The frame source alone cannot see that a *moving* scene
+//      contains no new text; this actor alone cannot see the frames the gate
+//      never delivered. Neither of them stops work: a scene that holds still
+//      is still recognized, just less often, because the stabiliser needs
+//      consecutive sightings to publish a region at all.
+//
+//   5. **Ordering is a monotone counter, never a clock (AM-6).** Each
 //      publication carries `sequence`, incremented in memory under actor
 //      isolation. Two same-millisecond cycles cannot invert, and no consumer
 //      anywhere needs to look at a time. The counter starts at 1, so 0 means
 //      "nothing has been published".
 //
-//   5. **One terminal outcome per region per cycle (AM-8, CL-1).** An outcome
+//   6. **One terminal outcome per region per cycle (AM-8, CL-1).** An outcome
 //      is terminal while the region's text is unchanged: a resolved region
 //      never returns to pending, and a settled string is not re-sent on every
 //      tick. The answer is held **per string**, so a region the stabiliser
@@ -60,13 +82,13 @@ import Foundation
 //      The one re-attempt the design asks for is a *resume*, which restarts
 //      the stabiliser from empty and clears the settled set.
 //
-//   6. **A component failure degrades one region, not the session.** Every
+//   7. **A component failure degrades one region, not the session.** Every
 //      path in this file ends in a rendered state: resolved, degraded with the
 //      original text, or the empty-state hint. There is no `return` that
 //      leaves a region unaccounted for, and no failure of the detector, the
 //      cache or the cloud layer can stop the next cycle from publishing.
 //
-//   7. **Closing is structural cancellation.** One session-scoped task tree;
+//   8. **Closing is structural cancellation.** One session-scoped task tree;
 //      `close()` cancels it, releases recognition and drops every outcome.
 //      Each merge re-checks `isClosed` after its `await`, so a cancellation
 //      that lands mid-request can never publish, and `publish()` itself
@@ -80,6 +102,25 @@ import Foundation
 /// under a dense scene (NFR-LCT-011).
 protocol LiveTranslateBackpressure: AnyObject {
     var ocrPassInFlight: Bool { get set }
+
+    /// The pipeline's stale-scene signal: recent passes contained no new or
+    /// changed region, so the tap may run at the reduced cadence.
+    ///
+    /// It is a second flag rather than a reuse of the first because the two
+    /// mean different things and have different lifetimes: `ocrPassInFlight`
+    /// is per-pass and is cleared the moment Vision returns, while this one
+    /// describes the *scene* and stays set until a pass finds something new.
+    /// A consumer that does not care about cadence (a test spy) gets a no-op
+    /// default, so the flag cannot break a conformance that never asked for it.
+    var ocrSceneStale: Bool { get set }
+}
+
+extension LiveTranslateBackpressure {
+    /// Default: the cadence is none of this conformer's business.
+    var ocrSceneStale: Bool {
+        get { false }
+        set { _ = newValue }
+    }
 }
 
 extension LiveCameraSession: LiveTranslateBackpressure {}
@@ -300,6 +341,21 @@ actor LiveTranslationPipeline {
     private var isClosed = false
     private var cycleInFlight = false
 
+    /// Consecutive passes that produced no new information (see
+    /// `noteSceneActivity`). Drives the reduced cadence: at
+    /// `stalePassesBeforeReducedCadence` the pipeline tells the frame source
+    /// the scene is stale and the tap drops from the nominal cadence to
+    /// `stableSampleInterval`.
+    private var idlePasses = 0
+    /// The visible regions' boxes as of the last cycle, for the one question
+    /// the stabiliser's change events cannot answer: a scene can publish no
+    /// new *region* while every box in it is still moving, which is exactly
+    /// what a pan over text the session already knows looks like. Movement is
+    /// activity — the overlay is following it and the elder expects it to keep
+    /// following — so it resets the idle count rather than earning a slower
+    /// cadence.
+    private var lastCycleBoxes: [TextRegionStabilizer.RegionIdentity: NormalizedBox] = [:]
+
     // MARK: Init
 
     /// The pilot's translation target, stated once.
@@ -341,7 +397,8 @@ actor LiveTranslationPipeline {
         // is reported by the tier as `runtime_missing` rather than swallowed.
         self.brain = brain ?? LocalBrainTranslationTier(config: config,
                                                         modelStore: try? ModelStore(observabilityBus: observabilityBus),
-                                                        events: events)
+                                                        events: events,
+                                                        targetLanguage: targetLanguage)
         self.publishToSink = publish
         self.stabilizer = TextRegionStabilizer(config: config)
     }
@@ -393,12 +450,74 @@ actor LiveTranslationPipeline {
             // degraded on its account.
             return
         case .success(let result):
-            record(stabilizer.consume(regions: result.regions, tracked: result.trackedBoxes))
+            let changes = stabilizer.consume(regions: result.regions, tracked: result.trackedBoxes)
+            record(changes)
+            noteSceneActivity(changed: !changes.isEmpty)
             reconcile()
             resolveFromTheDevice()
             await publish()
             dispatchResolutionNeeds()
         }
+    }
+
+    /// The pipeline's half of the cadence rule: it is the only component that
+    /// knows whether a pass produced anything, so it is the one that decides a
+    /// scene has gone stale and says so on the frame source's backpressure
+    /// flag.
+    ///
+    /// A pass is *active* when the stabiliser published a change (a region
+    /// appeared, changed text or went away) **or** when a box already on
+    /// screen moved. The second half is what keeps a pan honest: panning across
+    /// text the session already knows produces no change event — the identities
+    /// are stable — but every box is moving, the overlay is following them, and
+    /// dropping to a slower cadence there would make the boxes lag the picture.
+    /// Movement is therefore activity, and only a scene that is producing
+    /// nothing new *and* holding still earns the reduced rate.
+    ///
+    /// The flag is only written when it changes, so a steady scene is not a
+    /// steady stream of cross-thread writes.
+    private func noteSceneActivity(changed: Bool) {
+        let moved = boxesMovedSinceLastCycle()
+        idlePasses = (changed || moved) ? 0 : idlePasses + 1
+        let stale = idlePasses >= config.stalePassesBeforeReducedCadence
+        if backpressure?.ocrSceneStale != stale {
+            backpressure?.ocrSceneStale = stale
+        }
+    }
+
+    /// Drops the stale-scene claim and everything it was counted from. The flag
+    /// is cleared unconditionally (rather than "only if it was set") because
+    /// the caller may be a close, where the last thing the frame source should
+    /// be left holding is a claim about a scene nobody is watching.
+    private func forgetSceneActivity() {
+        idlePasses = 0
+        lastCycleBoxes.removeAll()
+        backpressure?.ocrSceneStale = false
+    }
+
+    /// Whether any region still on screen has moved since the last cycle — the
+    /// question the stabiliser's change events do not answer.
+    ///
+    /// Only regions present in *both* cycles count: a box that arrived or left
+    /// is already a change event, and comparing against a box that is gone
+    /// would report movement for a region that simply disappeared. The
+    /// movement threshold is the publication epsilon, the same "a wobble the
+    /// elder cannot see" the jitter gate uses, so the two cannot disagree about
+    /// what counts as motion.
+    private func boxesMovedSinceLastCycle() -> Bool {
+        var moved = false
+        var next: [TextRegionStabilizer.RegionIdentity: NormalizedBox] = [:]
+        for region in stabilizer.visible {
+            next[region.id] = region.box
+            guard let previous = lastCycleBoxes[region.id] else { continue }
+            let deltas = [abs(previous.xMin - region.box.xMin),
+                          abs(previous.yMin - region.box.yMin),
+                          abs(previous.xMax - region.box.xMax),
+                          abs(previous.yMax - region.box.yMax)]
+            if deltas.contains(where: { $0 > config.publishBoxEpsilon }) { moved = true }
+        }
+        lastCycleBoxes = next
+        return moved
     }
 
     /// The pipeline's half of the resume rule: the stabiliser restarts from
@@ -419,6 +538,11 @@ actor LiveTranslationPipeline {
         brainAttemptedKeys.removeAll()
         stabilizer.reset()
         outcomes.removeAll()
+        // A resume restarts the scene as well as the regions: the frame source
+        // has dropped its own remembered frame too, so the cadence starts from
+        // the nominal rate rather than inheriting the staleness of a scene the
+        // session was interrupted in the middle of.
+        forgetSceneActivity()
 
         await publish()
     }
@@ -429,6 +553,9 @@ actor LiveTranslationPipeline {
     func pause() {
         guard !isClosed else { return }
         isPaused = true
+        // The stale flag is a claim about a scene the session is no longer
+        // looking at, so it is dropped rather than parked for the resume.
+        forgetSceneActivity()
     }
 
     /// The session's close. Cancels the task tree, releases recognition and
@@ -438,6 +565,7 @@ actor LiveTranslationPipeline {
         guard !isClosed else { return }
         isClosed = true
         backpressure?.ocrPassInFlight = false
+        forgetSceneActivity()
         cancelResolutionTasks()
         recogniser.end()
         // Closing gives the brain's memory back: a session that is over must
@@ -656,9 +784,33 @@ actor LiveTranslationPipeline {
     ///
     /// Nothing to ask is not an attempt: an empty hand-over asks the brain for
     /// nothing at all, rather than for everything and nothing.
+    ///
+    /// The stage is waited on under the pipeline's own deadline
+    /// (`brainTranslationStageDeadlineSeconds`), and the reason is the caller's
+    /// whole contract: this method's return value is what the gate is handed.
+    /// A stage that never returned would keep its strings claimed, every later
+    /// tick would skip them as already dispatched, and the region would hold on
+    /// the pending copy for the rest of the session. The deadline makes "did
+    /// not answer" and "did not return" the same thing: the strings go onward.
     private func resolveThroughTheBrain(_ items: [CloudTranslationTier.Item]) async -> [CloudTranslationTier.Item] {
         guard !items.isEmpty else { return [] }
-        let outcome = await brain.translate(items.map(\.text))
+
+        let brain = self.brain
+        let generation = Task { await brain.translate(items.map(\.text)) }
+        let outcome = await Self.waiting(for: generation,
+                                         upTo: config.brainTranslationStageDeadlineSeconds)
+        generation.cancel()
+
+        guard let outcome else {
+            // The clock won. The tier is not being waited on any more, so it
+            // cannot report this itself — it has not come back to report
+            // anything — and a stage that falls through to the cloud without a
+            // record is exactly the silent degradation this feature must not
+            // have. The reason is the timeout token, which is what happened.
+            events.brainTranslationUnavailable(.inferenceTimeout)
+            return items
+        }
+
         // The cancellation contract: a close that lands mid-generation wins.
         // The keys were released by `cancelResolutionTasks`, so nothing is left
         // claimed by this attempt.
@@ -681,6 +833,31 @@ actor LiveTranslationPipeline {
         apply(items: answered)
         await publish()
         return remainder
+    }
+
+    /// Waits for a generation up to `seconds`, and answers `nil` when the clock
+    /// gets there first.
+    ///
+    /// Not a task group, and deliberately so. A group **awaits its remaining
+    /// children before it returns**, cancellation or not, so racing the
+    /// generation against a sleep inside one would leave the caller waiting for
+    /// exactly the thing the deadline exists to stop waiting for. What is
+    /// wanted here is weaker and simpler than cancellation — stop waiting, let
+    /// the loser finish into nothing — so the two arrivals are raced against a
+    /// continuation that only the first of them may resume.
+    private static func waiting(for work: Task<LocalBrainTranslationOutcome, Never>,
+                                upTo seconds: TimeInterval) async -> LocalBrainTranslationOutcome? {
+        await withCheckedContinuation { continuation in
+            let race = BrainStageRace(continuation)
+            Task {
+                let outcome = await work.value
+                race.finish(with: outcome)
+            }
+            Task {
+                try? await Task.sleep(for: .seconds(seconds))
+                race.finish(with: nil)
+            }
+        }
     }
 
     /// One attempt, in the order AM-1 and FR-LCT-011 fix: the gate decides
@@ -948,3 +1125,36 @@ actor LiveTranslationPipeline {
 /// and neither of them the stabiliser's. Nothing else is exposed, so the
 /// snapshot cannot reach the live cycle's state even by accident.
 extension LiveTranslationPipeline: LiveTranslateLiveCycle {}
+
+/// The arbiter of the brain stage's race: the first of the two arrivals — the
+/// generation, or the clock — resumes the continuation, and the second is a
+/// no-op.
+///
+/// A lock rather than an actor, for two reasons. The wait it arbitrates exists
+/// to *end* a suspension, so an actor hop on the deadline's path would be a
+/// suspension added to the machinery that bounds one; and the arrivals are two
+/// unstructured tasks' tails, not two pieces of state with rules between them.
+/// Resuming a continuation twice is a crash rather than a bug, which is what
+/// makes this a type with one method instead of a flag two closures set. It is
+/// the same tool, for the same reason, as the residency ledger's own lock.
+///
+/// `@unchecked Sendable` is exact here rather than a convenience: the only
+/// mutable state is the continuation, and every read and write of it is inside
+/// the lock.
+private final class BrainStageRace: @unchecked Sendable {
+
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<LocalBrainTranslationOutcome?, Never>?
+
+    init(_ continuation: CheckedContinuation<LocalBrainTranslationOutcome?, Never>) {
+        self.continuation = continuation
+    }
+
+    func finish(with outcome: LocalBrainTranslationOutcome?) {
+        lock.lock()
+        let waiting = continuation
+        continuation = nil
+        lock.unlock()
+        waiting?.resume(returning: outcome)
+    }
+}

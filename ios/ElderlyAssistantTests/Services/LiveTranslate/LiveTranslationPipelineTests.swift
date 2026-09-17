@@ -73,12 +73,22 @@ final class LiveTranslationPipelineTests: XCTestCase {
 
     /// T-006's flag, watched: the transitions are the evidence that the tap
     /// stops accepting frames for exactly the Vision pass and nothing else.
+    ///
+    /// `ocrSceneStale` is recorded here too, and for the same reason: the
+    /// protocol's own default is a no-op, so this spy is the only place the
+    /// pipeline's staleness claim is observable. Only transitions are written
+    /// by the pipeline, so the recorded list is a list of announcements.
     final class BackpressureSpy: LiveTranslateBackpressure {
         private(set) var transitions: [Bool] = []
         var ocrPassInFlight = false {
             didSet { transitions.append(ocrPassInFlight) }
         }
         var isSet: Bool { ocrPassInFlight }
+
+        private(set) var staleAnnouncements: [Bool] = []
+        var ocrSceneStale = false {
+            didSet { staleAnnouncements.append(ocrSceneStale) }
+        }
     }
 
     /// Tier 1, scripted — the on-device brain the pipeline asks before the
@@ -101,6 +111,7 @@ final class LiveTranslationPipelineTests: XCTestCase {
         private let lock = NSLock()
         private var storedAnswers: [String: String] = [:]
         private var storedUnavailable = false
+        private var storedHangs = false
         private var storedCalls: [[String]] = []
         private var storedReleaseCount = 0
         private var events: LiveTranslateEvents?
@@ -116,6 +127,14 @@ final class LiveTranslationPipelineTests: XCTestCase {
         var unavailable: Bool {
             get { lock.lock(); defer { lock.unlock() }; return storedUnavailable }
             set { lock.lock(); defer { lock.unlock() }; storedUnavailable = newValue }
+        }
+
+        /// When true, the generation never comes back on its own: it sleeps
+        /// until it is cancelled. The shape of a 4B decode that is still
+        /// thinking — or stuck — when the stage deadline passes.
+        var hangs: Bool {
+            get { lock.lock(); defer { lock.unlock() }; return storedHangs }
+            set { lock.lock(); defer { lock.unlock() }; storedHangs = newValue }
         }
 
         /// Every batch this brain was handed, in order.
@@ -140,8 +159,17 @@ final class LiveTranslationPipelineTests: XCTestCase {
             storedCalls.append(strings)
             let answers = storedAnswers
             let unavailable = storedUnavailable
+            let hangs = storedHangs
             let events = self.events
             lock.unlock()
+
+            if hangs {
+                // Cancellation-aware, like a real generation: the pipeline
+                // cancels the stage when its deadline passes, so this returns
+                // into nothing rather than blocking the test.
+                try? await Task<Never, Never>.sleep(for: .seconds(30))
+                return .none
+            }
 
             guard !unavailable else {
                 events?.brainTranslationUnavailable(.modelNotInstalled)
@@ -1737,6 +1765,113 @@ final class LiveTranslationPipelineTests: XCTestCase {
         let remainder = try XCTUnwrap(region(secondCloudText, in: publication))
         XCTAssertEqual(publication.result(for: answered).sourceTier, .onDeviceBrain)
         XCTAssertEqual(publication.result(for: remainder).sourceTier, .cloud)
+    }
+
+    @MainActor
+    func testScenarioAHungBrainDoesNotAbsorbTheCycle() async throws {
+        // The generation is the one step with no upper bound of its own: a 4B
+        // decode on a phone can still be running when the next frame arrives.
+        // The stage deadline is the pipeline's own, and what it buys is this
+        // test's claim — a brain that does not come back does not keep the
+        // region pending for the rest of the session. The strings go to the
+        // cloud in the same cycle, and the stage that lost the race is named.
+        var config = LiveTranslateConfig.default
+        config.brainTranslationTimeoutSeconds = 0.05
+        config.brainTranslationStageGraceSeconds = 0.05
+        let brain = RecordingBrain()
+        brain.hangs = true
+        let harness = makeHarness(consent: true,
+                                  transport: Self.respondingTransport(),
+                                  brain: brain,
+                                  config: config)
+        await harness.pipeline.updateLayout(layout)
+        harness.recogniser.defaultStep = .regions([detected(cloudText)])
+
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        let asked = cloudText
+        await waitUntil("the cloud answer to be published") {
+            guard let latest = await harness.recorder.latest,
+                  let region = latest.regions.first(where: { $0.text == asked }) else {
+                return false
+            }
+            return latest.result(for: region).sourceTier == .cloud
+        }
+
+        XCTAssertEqual(brain.calls, [[cloudText]],
+                       "the stage was attempted: the deadline is a bound on waiting, not a veto")
+        let timeout = harness.bus.events(named: "brain_translation_unavailable")
+        XCTAssertEqual(timeout.first?.metadata["reason"], "inference_timeout",
+                       "a stage that never returned is reported with the token that says what happened")
+        XCTAssertEqual(requests(carrying: cloudText, in: harness), 1,
+                       "the region is not stranded: what the brain did not answer reaches the gate")
+        let attempts = await inFlightAttempts(harness)
+        XCTAssertEqual(attempts, 0, "the abandoned attempt releases its claim")
+
+        let publication = try await latest(harness)
+        let region = try XCTUnwrap(region(cloudText, in: publication))
+        XCTAssertEqual(publication.result(for: region).sourceTier, .cloud)
+    }
+
+    @MainActor
+    func testScenarioTheRequestLeavesOnlyAfterTheBrainWasAsked() async throws {
+        // The dispatch chain, pinned in order rather than in counts: at the
+        // moment the cloud request arrives, the brain has already been asked
+        // and has already answered (with nothing). Consent is granted here, so
+        // the gate is a pass-through and the claim is about the tiers above it.
+        let brain = RecordingBrain()
+        let transport = Self.respondingTransport()
+        var brainAtSend: [[[String]]] = []
+        transport.onRequest = { _ in brainAtSend.append(brain.calls) }
+        let harness = makeHarness(consent: true, transport: transport, brain: brain)
+        await harness.pipeline.updateLayout(layout)
+        harness.recogniser.defaultStep = .regions([detected(cloudText)])
+
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        let asked = cloudText
+        await waitUntil("the cloud answer to be published") {
+            guard let latest = await harness.recorder.latest,
+                  let region = latest.regions.first(where: { $0.text == asked }) else {
+                return false
+            }
+            return latest.result(for: region).sourceTier == .cloud
+        }
+
+        XCTAssertEqual(brainAtSend, [[[cloudText]]],
+                       "the brain is asked first, once, for exactly what left the device")
+        XCTAssertFalse(harness.controller.isPromptPresented,
+                       "a granted decision is recorded, so nothing is re-asked of the elder")
+        XCTAssertEqual(requests(carrying: cloudText, in: harness), 1,
+                       "a granted decision is a request that actually fires")
+    }
+
+    @MainActor
+    func testThePipelineAnnouncesAStaleSceneOnlyAfterTheConfiguredIdleCycles() async throws {
+        // The reduced cadence belongs to the frame source, but the *decision*
+        // belongs to the pipeline: only the pipeline can see that the OCR
+        // passes are finding nothing. The threshold is the config's, and the
+        // announcement is a transition — said once, not once per frame.
+        var config = LiveTranslateConfig.default
+        config.stalePassesBeforeReducedCadence = 3
+        let harness = makeHarness(consent: true,
+                                  transport: Self.respondingTransport(),
+                                  config: config)
+        await harness.pipeline.updateLayout(layout)
+        harness.recogniser.defaultStep = .regions([detected(cloudText)])
+        let frame = try makeFrame()
+
+        for _ in 0..<2 { await harness.pipeline.ingest(frame) }
+        XCTAssertEqual(harness.backpressure.staleAnnouncements, [],
+                       "two idle cycles are not yet staleness")
+
+        for _ in 0..<3 { await harness.pipeline.ingest(frame) }
+        XCTAssertEqual(harness.backpressure.staleAnnouncements, [true],
+                       "the third idle cycle announces staleness, and announces it once")
     }
 
     @MainActor
