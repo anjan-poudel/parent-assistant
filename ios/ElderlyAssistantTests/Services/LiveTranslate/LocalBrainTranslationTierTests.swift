@@ -924,4 +924,178 @@ final class LocalBrainTranslationTierTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(outcome.durationMs, 0)
         }
     }
+
+    // MARK: [MODEL-WARDEN] Step 2 — the tier's own position
+
+    /// The tier's residency contract, in one place.
+    ///
+    /// The load path itself (`LlamaBrainTextGenerator.loadHandle`) is under
+    /// `#if canImport(LLM)` and needs a real GGUF to run, so what a unit test
+    /// can hold to account is the *position* that path registers: the
+    /// footprint it is counted as, the priority it carries, and the release
+    /// contract that decides whether the warden may overrule a refusal.
+    func testTheTranslatePositionIsABrainClassRowOfItsOwn() {
+        let id = Self.modelID
+        let translate = ModelLifecycleInventory.footprint(for: .translateBrain,
+                                                          modelID: id)
+        let brain = ModelLifecycleInventory.footprint(for: .brain, modelID: id)
+
+        // The same bytes as the voice brain: it is the same artifact class,
+        // and charging it anything else would make the ledger's total
+        // unreconcilable against `phys_footprint`.
+        XCTAssertEqual(translate.liveBytes, brain.liveBytes)
+        XCTAssertEqual(translate.hardBytes, brain.hardBytes)
+        XCTAssertEqual(translate.role, .brain)
+        XCTAssertEqual(translate.residency, .pageableWeights)
+        // A llama handle survives being dropped while a decode runs (ARC
+        // keeps the runtime alive), which is what lets the warden force it.
+        XCTAssertEqual(translate.releaseContract, .actorDeferredFree)
+        XCTAssertTrue(translate.releaseContract.allowsForcedUnload)
+        // …and the one that may never be forced, for contrast: freeing a
+        // whisper.cpp context under a running `whisper_full` crashes.
+        XCTAssertFalse(ModelReleaseContract.perAttemptContext.allowsForcedUnload)
+        XCTAssertFalse(ModelReleaseContract.processLifetime.allowsForcedUnload)
+    }
+
+    /// The tier's handle is registered as a *resident the warden can ask*, and
+    /// the answer is honest about what is in flight: a decode means the
+    /// handle is in use, and an idle handle is handed straight over.
+    func testTheTierHandleSlotAnswersTheWardenHonestly() {
+        let box = TranslateBrainHandleSlot()
+        let url = URL(fileURLWithPath: "/tmp/not-a-real-model.gguf")
+
+        XCTAssertEqual(box.releaseForWarden(), .notHolding,
+                       "no handle: nothing to give back, and the warden is told which")
+
+        box.store("a handle", url: url)
+        XCTAssertTrue(box.isHoldingHandle)
+        XCTAssertEqual(box.releaseForWarden(), .released)
+        XCTAssertFalse(box.isHoldingHandle)
+        XCTAssertNil(box.currentHandle)
+        XCTAssertNil(box.heldModelURL, "the URL goes with the handle it named")
+
+        box.store("a handle", url: url)
+        box.beginDecode()
+        XCTAssertEqual(box.releaseForWarden(), .refused(.inUse),
+                       "an inference is running on it")
+        XCTAssertTrue(box.isHoldingHandle,
+                      "a refusal is not a partial drop: the handle is still there")
+        XCTAssertEqual(box.currentHandle as? String, "a handle")
+
+        box.endDecode()
+        XCTAssertEqual(box.releaseForWarden(), .released,
+                       "the lease is held for the decode and released after it")
+    }
+
+    /// The two rows are distinct positions: registering the tier's does not
+    /// replace the voice interpreter's, which is exactly why the tier could
+    /// not register at all before `.translateBrain` existed (one entry per
+    /// slot, so its release closure would have freed the interpreter's
+    /// handle).
+    func testRegisteringTheTierPositionLeavesTheVoiceBrainsReleaseClosureAlone() {
+        let manager = ModelLifecycleManager(
+            probe: ScriptedProbe(),
+            budgetOverrideBytes: ModelLifecycleBudget.standardModelsBudgetBytes)
+        let voiceOwner = FakeOwner()
+        let tierOwner = FakeOwner()
+        var voiceUnloads = 0
+        var tierUnloads = 0
+
+        manager.register(slot: .brain, modelID: Self.modelID, owner: voiceOwner,
+                         priority: .foreground) { [weak voiceOwner] in
+            _ = voiceOwner
+            voiceUnloads += 1
+        }
+        manager.didLoad(.brain, owner: voiceOwner)
+
+        let box = TranslateBrainHandleSlot()
+        manager.register(slot: .translateBrain, modelID: Self.modelID, owner: tierOwner,
+                         priority: ReservationPurpose.liveTranslate.priority,
+                         resident: box) { [weak tierOwner] in
+            _ = tierOwner
+            tierUnloads += 1
+        }
+        manager.didLoad(.translateBrain, owner: tierOwner)
+
+        XCTAssertNotEqual(ModelSlot.brain, ModelSlot.translateBrain)
+        XCTAssertTrue(manager.isResident(.brain))
+        XCTAssertTrue(manager.isResident(.translateBrain))
+        XCTAssertEqual(manager.snapshot().priorities[.brain], .foreground)
+        XCTAssertEqual(manager.snapshot().priorities[.translateBrain], .foreground)
+
+        // Evicting the voice position runs the voice interpreter's release,
+        // not the tier's.
+        manager.evict(.brain, reason: .explicit)
+        XCTAssertEqual(voiceUnloads, 1)
+        XCTAssertEqual(tierUnloads, 0,
+                       "the tier's handle is not what a `.brain` eviction frees")
+        XCTAssertTrue(manager.isResident(.translateBrain),
+                      "…and the tier's resident is still counted")
+        _ = (voiceOwner, tierOwner)
+    }
+
+    /// The tier does not defer to its own position.
+    ///
+    /// A self-deferral would be a deadlock, not a policy: the handle can only
+    /// become resident by way of a batch, so a batch that refused to run
+    /// while `.translateBrain` was resident could never run again. The rule
+    /// is about the *other* owners' brains, and the two cases here differ
+    /// only in which slot holds the row.
+    func testTheTierDoesNotDeferToItsOwnResidentPosition() async throws {
+        let (ledger, owner) = makeLedger(residing: .translateBrain)
+        try await withTier(ledger: ledger) { tier, generator, _ in
+            generator.output = answer([self.brainAnswer])
+            let outcome = await tier.translate([self.brainText])
+
+            XCTAssertNil(outcome.deferral,
+                         "its own resident handle is the load being reused, not a reason to wait")
+            XCTAssertEqual(generator.prompts.count, 1)
+            XCTAssertEqual(outcome.translations, [self.brainText: self.brainAnswer])
+            _ = owner
+        }
+        // The contrast case, unchanged from Step 1: the SAME residency on the
+        // voice interpreter's position does defer.
+        let (voiceLedger, voiceOwner) = makeLedger(residing: .brain)
+        try await withTier(ledger: voiceLedger) { tier, generator, _ in
+            let outcome = await tier.translate([self.brainText])
+            XCTAssertEqual(outcome.deferral, .residentBrain)
+            XCTAssertTrue(generator.prompts.isEmpty)
+            _ = voiceOwner
+        }
+    }
+
+    /// `.translateBrain` does not admit itself over budget alone.
+    ///
+    /// Before Step 2 the tier reserved as a PEER on `.brain`, so an artifact
+    /// that did not fit beside the voice brain was refused and the strings
+    /// went to the cloud. Moving it to its own position must not quietly
+    /// turn that refusal into a 3.4 GB admission on a 6 GB phone — which is
+    /// what the `soloOverBudget` escape hatch would do if the position
+    /// admitted it.
+    func testTheTierPositionCannotSoloOverBudget() {
+        XCTAssertFalse(ModelSlot.translateBrain.admitsSoloOverBudget)
+        XCTAssertFalse(ModelSlot.speechToText.admitsSoloOverBudget)
+        // The two that may: the app cannot run without a default brain.
+        XCTAssertTrue(ModelSlot.brain.admitsSoloOverBudget)
+        XCTAssertTrue(ModelSlot.intentBrain.admitsSoloOverBudget)
+
+        let live = ModelLifecycleInventory.footprint(for: .translateBrain,
+                                                     modelID: ModelCatalog.intentQwen4BSlotCanon).liveBytes
+        let manager = ModelLifecycleManager(probe: ScriptedProbe(),
+                                            budgetOverrideBytes: live / 2)
+        let owner = FakeOwner()
+        manager.register(slot: .translateBrain, modelID: ModelCatalog.intentQwen4BSlotCanon,
+                         owner: owner, priority: .foreground) { [weak owner] in _ = owner }
+
+        guard case .failure(let denial) = manager.reserve(ModelLoadRequest(
+            slot: .translateBrain,
+            modelID: ModelCatalog.intentQwen4BSlotCanon,
+            owner: owner,
+            purpose: .liveTranslate,
+            replacesSlotContents: true)) else {
+            return XCTFail("a 4B that does not fit the device is not made to fit "
+                           + "by calling it the camera's brain")
+        }
+        XCTAssertEqual(denial.token, "over_budget_alone")
+    }
 }

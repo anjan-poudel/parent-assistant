@@ -8148,6 +8148,27 @@ self.noteTalkContractChanged()
                         "ceiling_bytes": String(ceilingBytes),
                         "liveBytes": String(residentLiveBytes),
                         "transientLiveBytes": String(transientLiveBytes)]
+        // [MODEL-WARDEN] Step 2 — the priority ladder's two decisions. Both
+        // carry only tokens: a slot name, a closed outcome word, a refusal
+        // reason from `UnloadRefusal`'s two cases, the guard's kind and a
+        // count. `reason` is the same key the denial events already use, and
+        // `outcome` is the bus's own key — so the ladder is legible in a
+        // capture without a single new allow-list entry.
+        case .preempted(let slot, let outcome):
+            type = "preempted"
+            // `metadata` is assigned once per case (the switch binds a
+            // `let`), so the optional refusal reason is folded into the
+            // literal rather than added to it afterwards.
+            metadata = outcome.refusalReason.map { refusal in
+                ["slot": slot.rawValue,
+                 "outcome": outcome.token,
+                 "reason": refusal.rawValue]
+            } ?? ["slot": slot.rawValue, "outcome": outcome.token]
+        case .thrashGuarded(let slot, let kind, let count):
+            type = "thrash_guarded"
+            metadata = ["slot": slot.rawValue,
+                        "reason": kind.rawValue,
+                        "count": String(count)]
         }
         observabilityBus.emit(ObservabilityEvent(
             component: "model_lifecycle",

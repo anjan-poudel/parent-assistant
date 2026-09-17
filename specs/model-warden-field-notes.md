@@ -1,4 +1,4 @@
-# Model Warden — Step 0/1 field notes
+# Model Warden — Step 0/1/2 field notes
 
 Numbers for `docs/superpowers/specs/2026-09-18-model-memory-manager-proposal.md`
 (increments 0 and 1), collected 2026-09-18 on the development host and the iOS
@@ -126,7 +126,73 @@ Load bounds (Step 1): `maxConcurrentLargeLoads = 1`,
   `whisperCPPWedgedReserveBytes`; the bound is a declared reserve, not a
   measurement.
 
-## 6. Deferred, with the reason
+## 6. Step 2 — the ladder, the recall, the guard
+
+### 6.1 The slot Step 2 adds
+
+`.translateBrain` is the live-translate tier's own llama handle. Before Step 2
+the tier could not register at all: it shares the `.brain` *role* with the
+voice interpreter while being a separate handle, so registering `.brain` from
+the tier would have replaced the interpreter's release closure and an eviction
+would have freed the wrong model. The row is brain-class arithmetic (a 1.7B at
+~1.98 GB or the 4B at ~3.40 GB, pageable weights, `actorDeferredFree`) with the
+tier's own first-choice artifact as the unnamed fallback, so a sideloaded id
+cannot resolve to zero.
+
+| Resident | Artifact | Catalog (DECLARED) | Ledger row (DERIVED) | Release |
+|---|---|---|---|---|
+| `.translateBrain` | `ModelCatalog.intentQwen4BSlotCanon` (the tier's first choice) | 2,497,278,784 B | brain-class: weights + brain-class runtime overhead, `residency: .pageableWeights` | `actorDeferredFree` |
+
+**Behaviour preserved, deliberately:** the tier is **not** in
+`ModelSlot.admitsSoloOverBudget`. While it reserved as a peer on `.brain` an
+over-budget 4B was refused (`overBudgetAlone`); a row of its own must not
+quietly turn that refusal into a 3.4 GB admission on a 6 GB phone. The tier's
+idle unload (5 s) and its deferral semantics (it still defers to `.brain` /
+`.intentBrain` residency, never to its own row) are unchanged.
+
+### 6.2 The ladder (as implemented)
+
+| Rung | Purposes | Who is on it | Guard behaviour |
+|---|---|---|---|
+| `safetyCritical` (2) | `.voiceTurn` | the live turn's brain and STT | never rate-capped, never spared — a waiting household is not a churn loop |
+| `foreground` (1) | `.liveTranslate` | the camera translation brain; **the default** for every registration that predates Step 2 or says nothing | capped and spared |
+| `background` (0) | `.warm`, `.maintenance` | prefetch / re-warm | capped; `.maintenance` is exempt from the rate cap (it is the synchronous `prepareLoad` path, not a feature loop) |
+
+The ladder is the **victim order's first key** (before heavy-first, LRU and
+size) and the **gate on the ask**: a resident is only asked to stand down by a
+request strictly above it, so a boot warm cannot spend the camera's translation
+brain on a prefetch. The idle and memory-pressure sweeps keep the plain LRU
+order — the ladder is about who the warden prefers to inconvenience, which only
+a load-driven eviction is asking.
+
+### 6.3 The recall, and the one rule it will not bend
+
+`ModelResident.releaseForWarden()` is synchronous and called outside the
+ledger's lock. The answer decides whether the registered release path runs at
+all:
+
+| Release contract | Forced after a refusal? | Why |
+|---|---|---|
+| `.synchronousDrop` | yes | the closure is a reference drop; forcing is what the owner would do |
+| `.actorDeferredFree` (llama) | yes | ARC defers the free, so a running decode keeps its own strong reference and the memory is not freed under it |
+| `.perAttemptContext` (whisper.cpp) | **never** | `whisper_free` under a running `whisper_full` crashes; a wedged context cannot be freed at all |
+| `.processLifetime` | n/a | there is no release path to call |
+
+A refusal that is obeyed hands the bytes back to the ledger (`isResident` is
+restored) and buys the slot `unloadAckDeadlineSeconds` before it is asked
+again; the load that wanted them is refused instead.
+
+### 6.4 Guard bounds (owner-accepted defaults, not measurements)
+
+`unloadAckDeadlineSeconds = 2`, `preemptionCooldownSeconds = 20`,
+`preemptionsBeforeQuarantine = 3`, `preemptionQuarantineSeconds = 120`,
+`maxLoadsPerMinute = 4`, `thrashGuardEnabled = true` — `ModelWardenConfig`
+(`ModelLoadReservation.swift`), all mutable at runtime on
+`ModelLifecycleManager.wardenConfig`. The windows are sized against the app's
+own rhythms (longer than a pipeline tick, shorter than the idle window), not
+against a capture; the first device capture is what should move them.
+
+## 7. Deferred, with the reason
 
 - **The proposal's §7.4 accepted default on ANE STT eviction** is deliberately
   not implemented in Steps 0/1. It contradicts the "STT and the 4B never
