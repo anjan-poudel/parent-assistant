@@ -219,6 +219,99 @@ final class InterpreterAvailabilityTests: XCTestCase {
         }
     }
 
+    // MARK: - (d) [MODEL-WARDEN] what "Automatic" resolves to on THIS device
+
+    /// A probe that answers one RAM number. The resolution reads only
+    /// `physicalMemoryBytes` (the class), so the headroom is the same
+    /// stand-in the ledger suites use.
+    private struct FixedRAMProbe: MemoryProbing {
+        let physicalMemoryBytes: UInt64
+        var availableProcessMemoryBytes: UInt64 { 3_400_000_000 }
+    }
+
+    private func ledger(ram: UInt64) -> ModelLifecycleManager {
+        ModelLifecycleManager(probe: FixedRAMProbe(physicalMemoryBytes: ram))
+    }
+
+    func testAutomaticBrainStepsOffTheFourBDefaultOnASixGBPhone() {
+        // The D1 hole, at the seam that loads the model: with no stored
+        // preference the app runs what `resolveBrainModelID` returns, and on
+        // the standard class the catalogue's 4B default is over budget
+        // beside the warm STT — loading it would evict the ANE STT on every
+        // turn. Automatic must therefore step down to the 1.7B.
+        let ledger = ledger(ram: 6_000_000_000)
+        XCTAssertEqual(
+            AppCoordinator.resolveBrainModelID(storedPreference: nil,
+                                               language: "ne",
+                                               ledger: ledger),
+            ModelCatalog.qwen3_1_7BInstruct)
+        // ...and the default it stepped off is exactly the one the Settings
+        // rows refuse, so the row and the pick are one answer.
+        XCTAssertEqual(ledger.availability(
+            of: ModelCatalog.entry(for: ModelCatalog.intentQwen4BSlotCanon)!),
+                       .unavailable(reason: .overClassBudget))
+        // The catalogue constant itself does NOT move: it is the artifact
+        // the default is pinned to, device-blind by design.
+        XCTAssertEqual(AppCoordinator.defaultBrainModelID,
+                       ModelCatalog.intentQwen4BSlotCanon)
+    }
+
+    func testAutomaticBrainIsUnchangedWhereTheClassCanHoldTheDefault() {
+        // The no-behaviour-change half: a roomy device resolves to the same
+        // brain it always did, so nothing about this fix touches the phones
+        // that were already fine.
+        let ledger = ledger(ram: 8_000_000_000)
+        XCTAssertEqual(
+            AppCoordinator.resolveBrainModelID(storedPreference: nil,
+                                               language: "ne",
+                                               ledger: ledger),
+            ModelCatalog.intentQwen4BSlotCanon)
+        XCTAssertEqual(ledger.availability(
+            of: ModelCatalog.entry(for: ModelCatalog.intentQwen4BSlotCanon)!),
+                       .available)
+    }
+
+    func testAnExplicitBrainPreferenceIsNeverRePointed() {
+        // The escape hatch, at the load seam: a household that stored the
+        // 4B keeps the 4B on a class that refuses it — `soloOverBudget`, the
+        // path that exists so a resident is never unloadable. The policy
+        // gates the automatic path only.
+        let ledger = ledger(ram: 6_000_000_000)
+        XCTAssertEqual(
+            AppCoordinator.resolveBrainModelID(
+                storedPreference: ModelCatalog.intentQwen4BSlotCanon,
+                language: "ne",
+                ledger: ledger),
+            ModelCatalog.intentQwen4BSlotCanon)
+        // A stored id the catalogue no longer has is not a pick any more:
+        // it falls through to the automatic resolution rather than wedging
+        // the interpreter on a model that cannot be downloaded.
+        XCTAssertEqual(
+            AppCoordinator.resolveBrainModelID(
+                storedPreference: ModelID("retired-brain-id"),
+                language: "ne",
+                ledger: ledger),
+            ModelCatalog.qwen3_1_7BInstruct)
+    }
+
+    func testAutomaticBrainOnACompactPhoneDegradesHonestly() {
+        // The compact finding at the seam: no shipped brain fits beside an
+        // STT at all on the 4 GB class, so the resolution degrades to the
+        // lightest compatible brain instead of looping, crashing, or
+        // silently admitting the 4B. The model it lands on is still a real
+        // catalogue entry of the right kind — degradation, not a dead end.
+        let ledger = ledger(ram: 4_000_000_000)
+        let resolved = AppCoordinator.resolveBrainModelID(storedPreference: nil,
+                                                          language: "ne",
+                                                          ledger: ledger)
+        XCTAssertEqual(resolved, ModelCatalog.intentQwenS43)
+        let entry = ModelCatalog.entry(for: resolved)
+        XCTAssertNotNil(entry)
+        XCTAssertEqual(entry?.kind, .llamaBase)
+        XCTAssertTrue(entry?.languages.contains("ne") ?? false,
+                      "the degraded pick must still serve the household's language")
+    }
+
     func testAutoDownloadPolicyDownloadsWhenChainNeedsTheModel() {
         // On-device stack: cloud stays out of the chain even with a key
         // configured — the local model is required regardless.

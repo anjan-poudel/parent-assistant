@@ -292,6 +292,39 @@ final class ModelBudgetPolicyTests: XCTestCase {
                     forSTTModelID: ModelCatalog.whisperMediumFinetunedNepali)))
     }
 
+    func testTheAvailabilityInputsAreTheOnesTheRowsAnswerWith() {
+        // [MODEL-WARDEN] `availabilityInputs` is the triple the AUTOMATIC
+        // pick walks its ladder with (one reading, many questions);
+        // `availability(of:)` is the same policy applied to one entry, which
+        // is what a Settings row asks. They must be the same answer, or a row
+        // could refuse a model the picker then loads.
+        let manager = ModelLifecycleManager(probe: FixedProbe(
+            physicalMemoryBytes: standardPhone))
+        var inputs = manager.availabilityInputs
+        XCTAssertEqual(inputs.physicalMemoryBytes, standardPhone)
+        XCTAssertEqual(inputs.policy.deviceClass, .standard)
+        // No STT registered → the class's own reserve, exactly as
+        // `availability(of:)` falls back.
+        XCTAssertNil(inputs.warmSTTLiveBytes)
+
+        // With the ledger's STT registered, both sides move together.
+        manager.register(slot: .speechToText,
+                         modelID: ModelCatalog.whisperMediumFinetunedNepali,
+                         owner: nil) {}
+        inputs = manager.availabilityInputs
+        XCTAssertEqual(inputs.warmSTTLiveBytes,
+                       ModelBudgetPolicy.warmSTTLiveBytes(
+                           forSTTModelID: ModelCatalog.whisperMediumFinetunedNepali))
+        for entry in ModelCatalog.availableBrainEntries {
+            XCTAssertEqual(
+                inputs.policy.availability(of: entry,
+                                           physicalMemoryBytes: inputs.physicalMemoryBytes,
+                                           warmSTTLiveBytes: inputs.warmSTTLiveBytes),
+                manager.availability(of: entry),
+                "\(entry.id.rawValue): the inputs and the row disagree")
+        }
+    }
+
     func testTheRowSentenceIsNeverTheBareKey() {
         // The wiring the Settings row and the picker marker use. Whichever
         // path answers — the string table or the English fallback — a
@@ -429,6 +462,10 @@ final class ModelBudgetPolicyTests: XCTestCase {
         XCTAssertEqual(token, "over_class_budget")
         XCTAssertTrue(LogSanitiser.allowedKeys.contains("reason"),
                       "the key the token rides is already allow-listed")
+        // The two keys the coordinator's `automatic_brain_pick` event
+        // carries (this token under `reason`, the ledger's slot under
+        // `slot`): both existing entries, no allow-list growth for this fix.
+        XCTAssertTrue(LogSanitiser.allowedKeys.contains("slot"))
         XCTAssertTrue(ModelUnavailabilityReason.allCases.map(\.rawValue).contains(token),
                       "the record is drawn from the closed vocabulary, not composed")
         for leak in [pick.entry.id.rawValue, ".gguf", "/", "GB", "qwen", "1_7B"] {

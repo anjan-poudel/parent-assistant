@@ -158,6 +158,12 @@ enum LanguageModelResolver {
     // metadata key. The Settings sentence for it already ships in both
     // languages (`ModelUnavailabilityReason.localizationKey`), so this
     // resolution needs no new copy.
+    //
+    // Wired 2026-09-18: the load path calls this through
+    // `AppCoordinator.resolveBrainModelID(storedPreference:language:ledger:)`
+    // (the ledger supplies the inputs) and the coordinator emits the record
+    // once per launch as `automatic_brain_pick` — only when the choice
+    // moved, so a device the policy left alone says nothing at all.
 
     /// What "Automatic" resolves to, and the policy facts behind it.
     struct AutomaticPick: Equatable {

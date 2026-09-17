@@ -1975,14 +1975,48 @@ final class ModelLifecycleManager {
     /// about the phone and not about the class.
     func availability(of entry: ModelCatalogEntry) -> ModelAvailability {
         lock.lock()
+        let inputs = availabilityInputsLocked()
+        lock.unlock()
+        return inputs.policy.availability(of: entry,
+                                          physicalMemoryBytes: inputs.physicalMemoryBytes,
+                                          warmSTTLiveBytes: inputs.warmSTTLiveBytes)
+    }
+
+    /// [MODEL-WARDEN 2026-09-18] The three numbers `availability(of:)`
+    /// answers with, handed to callers that must ask the policy *many*
+    /// questions against one reading — `LanguageModelResolver`'s automatic
+    /// pick walks a whole ladder, and re-deriving the class per rung would
+    /// let a probe that moved mid-walk answer two questions about two
+    /// devices.
+    ///
+    /// Exposed rather than re-derived by the caller for the reason the doc
+    /// above gives: the class must be THIS ledger's, from the probe and the
+    /// boundaries the admissions use, and the warm STT must be the ledger's
+    /// own registration. It is the same triple either way — `availability(of:)`
+    /// is now literally this struct applied to one entry — so a row and an
+    /// automatic pick cannot drift apart.
+    struct AvailabilityInputs {
+        let policy: ModelBudgetPolicy
+        let physicalMemoryBytes: UInt64
+        let warmSTTLiveBytes: UInt64?
+    }
+
+    /// The current inputs, under the lock. Cheap (a probe read + one
+    /// dictionary lookup) and side-effect free.
+    var availabilityInputs: AvailabilityInputs {
+        lock.lock()
+        defer { lock.unlock() }
+        return availabilityInputsLocked()
+    }
+
+    private func availabilityInputsLocked() -> AvailabilityInputs {
         let deviceClass = currentDeviceClassLocked()
         let warmSTTModelID = entries[.speechToText]?.modelID
-        lock.unlock()
-        return ModelBudgetPolicy.policy(for: deviceClass)
-            .availability(of: entry,
-                          physicalMemoryBytes: probe.physicalMemoryBytes,
-                          warmSTTLiveBytes: ModelBudgetPolicy.warmSTTLiveBytes(
-                              forSTTModelID: warmSTTModelID))
+        return AvailabilityInputs(
+            policy: ModelBudgetPolicy.policy(for: deviceClass),
+            physicalMemoryBytes: probe.physicalMemoryBytes,
+            warmSTTLiveBytes: ModelBudgetPolicy.warmSTTLiveBytes(
+                forSTTModelID: warmSTTModelID))
     }
 
     /// Whether the measured working set has outgrown what the class budget
@@ -2117,19 +2151,27 @@ final class ModelLifecycleManager {
     //    unavailable model is shown, marked, and not selectable, and its
     //    download is not offered.
     //
-    //    **What it deliberately does not do: re-point what gets loaded.**
-    //    The catalog's language defaults do not consult the policy, so
-    //    "Automatic" on a Nepali 6 GB phone still resolves to the 4B
-    //    (`ModelCatalog.languageDefaultPicks[.llamaBase]["ne"]`) and a
-    //    preference stored before this step is still served — through the
-    //    ledger's `soloOverBudget` escape hatch, which is the path that
-    //    exists so a resident is never unloadable. Closing that gap means
-    //    either moving the ladder into `LanguageModelResolver` /
-    //    `defaultEntry` (a per-class accuracy-for-latency trade the proposal
-    //    leaves open as §7 Q1) or refusing a stored preference at load time
-    //    (which the escape hatch exists to prevent). Both are product
-    //    decisions with a rollback path, and both are named in the Step 3
-    //    report rather than taken here.
+    //    **The gap this note used to leave open — what "Automatic" runs —
+    //    is closed (2026-09-18, [MODEL-WARDEN] policy picks).** The
+    //    catalog's language defaults stay device-blind
+    //    (`ModelCatalog.languageDefaultPicks[.llamaBase]["ne"]` is still the
+    //    4B), but the *resolution* now consults this same policy:
+    //    `LanguageModelResolver.resolvedAutomaticPick` takes the language
+    //    default as its first rung and steps down the curated ladder to the
+    //    largest artifact that fits beside the warm STT, so a Nepali 6 GB
+    //    phone resolves to the 1.7B. It asks the policy through
+    //    `availabilityInputs` above — this ledger's class and this ledger's
+    //    registered STT — which is what keeps the ledger and the pick
+    //    answering as one.
+    //
+    //    Two things deliberately did NOT move with it: the ledger's own
+    //    behaviour (this is a *choice* seam — nothing here admits or refuses
+    //    differently) and an EXPLICIT stored preference, which is still
+    //    served unchanged through the `soloOverBudget` escape hatch, the
+    //    path that exists so a resident is never unloadable. The gate is on
+    //    the automatic path only. §7 Q1 (a per-class accuracy-for-latency
+    //    trade) remains open for the picker's ordering; it is no longer a
+    //    precondition for automatic selection.
     // 4. **§7.4's ANE default**, as arithmetic rather than as a special
     //    case. See `loadEvictionOrderLocked`. "Evict the ANE STT last among
     //    victims of equal residency value" is what the 77 s denominator

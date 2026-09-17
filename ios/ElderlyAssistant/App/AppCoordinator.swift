@@ -1769,14 +1769,60 @@ final class AppCoordinator: ObservableObject {
     // straddles a superseded entry (`intentQwen4BS43`, kept in the catalog
     // for devices that cached it). The pre-Qwen LLaMA 1B this comment used
     // to describe is hidden from the picker.
+    //
+    // [MODEL-WARDEN 2026-09-18] This is the CATALOG-level default: the
+    // answer when no device is in the question (the artifact the catalogue
+    // and the hosted release are judged by, which is why the tests pin it).
+    // What a given phone should actually RUN under "Automatic" is
+    // `resolveBrainModelID` below — on a 6 GB class this entry is
+    // `over_class_budget` beside a warm ANE STT, so the automatic path steps
+    // down to the 1.7B while this constant stays the catalogue's claim.
     static let defaultBrainModelID = ModelCatalog.intentQwen4BSlotCanon
 
     /// The brain model the interpreter actually uses: the stored
-    /// preference when it names a real catalog entry, else the default.
-    /// (A stale stored value — model removed from the catalog — falls
-    /// back rather than wedge the picker.)
+    /// preference when it names a real catalog entry, else what
+    /// "Automatic" resolves to on THIS device. (A stale stored value —
+    /// model removed from the catalog — falls back rather than wedge the
+    /// picker.)
     var resolvedBrainModelID: ModelID {
-        brainModelPreference.flatMap { ModelCatalog.entry(for: $0) != nil ? $0 : nil }
+        Self.resolveBrainModelID(storedPreference: brainModelPreference,
+                                 language: appLanguage.rawValue,
+                                 ledger: ModelLifecycleManager.shared)
+    }
+
+    /// [MODEL-WARDEN] The resolution above as a pure function of (stored
+    /// preference, language, device), the house static seam — testable
+    /// without an `AppCoordinator` instance, like
+    /// `shouldAutoDownloadAssistantBrain`.
+    ///
+    /// Two rules, in order:
+    ///
+    ///  1. **An explicit pick wins, unconditionally.** A stored id that is
+    ///     still in the catalog is returned even when the class refuses it —
+    ///     that is the `soloOverBudget` contract (a resident is never
+    ///     unloadable), and the policy gates the automatic path only. A
+    ///     stored id the catalog no longer has is not a pick any more, so it
+    ///     falls through to rule 2 exactly as `nil` ("Automatic") does.
+    ///  2. **Otherwise the policy decides**
+    ///     (`LanguageModelResolver.resolvedAutomaticPick`), asked with the
+    ///     LEDGER's inputs — the same class and the same registered warm STT
+    ///     the Settings rows are rendered from — so a row that says "not for
+    ///     this phone" can never be the model Automatic runs. The
+    ///     catalogue's `defaultBrainModelID` remains the floor for the case
+    ///     the resolution has nothing to say (a kind with no curated entry).
+    static func resolveBrainModelID(storedPreference: ModelID?,
+                                    language: String,
+                                    ledger: ModelLifecycleManager) -> ModelID {
+        if let stored = storedPreference, ModelCatalog.entry(for: stored) != nil {
+            return stored
+        }
+        let inputs = ledger.availabilityInputs
+        return LanguageModelResolver.resolvedAutomaticPick(
+            kind: .llamaBase,
+            language: language,
+            policy: inputs.policy,
+            physicalMemoryBytes: inputs.physicalMemoryBytes,
+            warmSTTLiveBytes: inputs.warmSTTLiveBytes)?.entry.id
             ?? Self.defaultBrainModelID
     }
 
@@ -5245,12 +5291,51 @@ self.noteTalkContractChanged()
     /// brain is live (nothing needs it).
     private func ensureAssistantBrainDownloadIfNeeded() {
         guard Self.isLLMRuntimeLinked else { return }
+        recordAutomaticBrainResolutionIfMoved()
         guard Self.shouldAutoDownloadAssistantBrain(
             modelCached: modelStore.isCached(resolvedBrainModelID),
             cloudEnabled: intentRouter?.cloudEnabled ?? false,
             cloudBrainAvailable: geminiCommandInterpreter?.isAvailable ?? false
         ) else { return }
         modelDownloadService.start(resolvedBrainModelID)
+    }
+
+    /// [MODEL-WARDEN 2026-09-18] Records the automatic brain resolution when
+    /// the class policy had to move it off the catalogue's language default —
+    /// the one fact a field capture needs to explain why this phone is
+    /// running the lighter brain, emitted once per launch and ONLY when the
+    /// choice moved.
+    ///
+    /// Nothing here identifies a model: the payload is this ledger's slot
+    /// name and the closed-vocabulary reason (`over_class_budget` /
+    /// `requires_evicting_warm_stt`), both already in
+    /// `LogSanitiser.allowedKeys`. Which artifact the pick landed on is a
+    /// catalogue fact the reader can look up; what the capture could not
+    /// otherwise say is *why* it is not the one the language asked for.
+    ///
+    /// Silent for an explicit pick: that is the household's own choice, not
+    /// an automatic resolution, and `recordedReason` is nil whenever the
+    /// resolution simply agreed with the language default.
+    private func recordAutomaticBrainResolutionIfMoved() {
+        if let stored = brainModelPreference, ModelCatalog.entry(for: stored) != nil {
+            return
+        }
+        let inputs = ModelLifecycleManager.shared.availabilityInputs
+        guard let pick = LanguageModelResolver.resolvedAutomaticPick(
+            kind: .llamaBase,
+            language: appLanguage.rawValue,
+            policy: inputs.policy,
+            physicalMemoryBytes: inputs.physicalMemoryBytes,
+            warmSTTLiveBytes: inputs.warmSTTLiveBytes),
+              let reason = pick.recordedReason else { return }
+        observabilityBus.emit(ObservabilityEvent(
+            component: "model_lifecycle",
+            eventType: "automatic_brain_pick",
+            durationMs: nil,
+            outcome: "info",
+            errorCode: nil,
+            metadata: ["slot": ModelSlot.brain.rawValue,
+                       "reason": reason.rawValue]))
     }
 
     /// A newly-configured Gemini key makes the local brain model redundant
