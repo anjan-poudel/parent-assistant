@@ -625,6 +625,263 @@ final class LiveTranslateOverlayViewTests: XCTestCase {
         XCTAssertEqual(reversed.presentations.map(\.id), ids)
     }
 
+    // MARK: - Scenario: a box holds still until it has genuinely moved
+    //
+    // The owner's second device verdict: "they still jump around, though not as
+    // much as before. Not usable." What was still moving are boxes whose
+    // *string* never changed — the detector's per-pass jitter, and the fact
+    // that an in-place box is derived from its region's rect *and its
+    // neighbours'*, so one sign drifting re-measures every box near it.
+    //
+    // These are asserted on `LiveOverlayGeometryMemory` rather than through
+    // pixels, and deliberately: `OverlayRenderProbe.render` builds a fresh view
+    // every call, so a rendered frame is always a *first* frame — the pixel
+    // path cannot show a sequence. The memory is the value the view's body
+    // calls on every frame, so scripting its input is scripting the render.
+
+    /// One frame: the memory's answer for the surface, as the view draws it.
+    private func drawn(_ memory: LiveOverlayGeometryMemory,
+                       _ surface: LiveTranslateOverlaySurface) -> [RegionPresentation] {
+        memory.held(surface.presentations, container: container,
+                    stickiness: config.overlayGeometryStickiness)
+    }
+
+    /// A one-region surface whose sign is resolved and drawn in place, at the
+    /// normalized box given — the scripted frame the jitter tests move.
+    private func surface(box rectangle: NormalizedBox,
+                         region rawValue: Int = 0,
+                         text: String = "खुल्ने समय",
+                         translation: String = "Opening hours") -> LiveTranslateOverlaySurface {
+        makeSurface(regions: [region(rawValue, text, box: rectangle)],
+                    results: [identity(rawValue): .resolved(originalText: text,
+                                                            translation: translation,
+                                                            tier: .dictionary)])
+    }
+
+    /// A presentation built by hand, so a test can script two geometries that
+    /// the shipped placement would not produce for the same sign — the form
+    /// guard is about the *value*, and this is how it is exercised directly.
+    private func presentation(_ text: String,
+                             form: LiveOverlayPlacement.Form,
+                             id rawValue: Int = 0) -> RegionPresentation {
+        RegionPresentation(regionID: identity(rawValue),
+                           identityKey: LiveTranslateTextNormalization.normalized(text),
+                           identityOrdinal: 0,
+                           state: .resolved,
+                           form: form,
+                           lines: [LiveOverlayTextLine(text: "Opening hours",
+                                                       pointSize: DesignTokens.minBodyPointSize,
+                                                       weight: .primary)],
+                           isClampedFallback: false,
+                           accessibilityLabel: "Opening hours",
+                           accessibilityValue: text,
+                           speaksTranslation: true)
+    }
+
+    /// The detector's box for a sign that has not changed its text jitters by
+    /// ±2 % of the container every pass. The drawn box must not move at all.
+    /// This is the complaint, scripted.
+    func testASubThresholdJitterNeverMovesTheDrawnBox() {
+        let memory = LiveOverlayGeometryMemory()
+        let offsets: [(Double, Double)] = [(0, 0), (0.02, -0.02), (-0.02, 0.01),
+                                           (0.01, 0.02), (-0.02, -0.02)]
+        var rects: [CGRect] = []
+
+        for (dx, dy) in offsets {
+            let frame = surface(box: box(0.2 + dx, 0.30 + dy, 0.8 + dx, 0.38 + dy))
+            guard let presentation = drawn(memory, frame).first else {
+                return XCTFail("the region must be placed on every frame")
+            }
+            rects.append(presentation.frameRect)
+        }
+
+        XCTAssertEqual(rects.count, offsets.count)
+        XCTAssertTrue(rects.allSatisfy { $0 == rects[0] },
+                      "±2 % of the container is recognition jitter, not a move: the drawn box holds "
+                      + "exactly where it was on every frame: \(rects)")
+        XCTAssertEqual(memory.count, 1, "one region, one held rect")
+        // The held rect is the sign's own printed rect — compared component by
+        // component, because the box is the printed rect *unioned* with the
+        // (here, smaller) text block, and a union is a fresh rectangle whose
+        // origin can differ from the rect it was made from by one unit in the
+        // last place. A tolerance of a millionth of a point is not a loosening
+        // of the claim: it is the claim, "the box is where the sign is", spelled
+        // in a way floating point can honour.
+        let printed = screenRect(of: region(0, "खुल्ने समय", box: box(0.2, 0.30, 0.8, 0.38)))
+        XCTAssertEqual(rects[0].minX, printed.minX, accuracy: 1e-6)
+        XCTAssertEqual(rects[0].minY, printed.minY, accuracy: 1e-6)
+        XCTAssertEqual(rects[0].width, printed.width, accuracy: 1e-6)
+        XCTAssertEqual(rects[0].height, printed.height, accuracy: 1e-6)
+    }
+
+    /// Above the threshold the box follows, and it follows **on the frame that
+    /// notices**: nothing is drawn from a value the memory has discarded, and
+    /// the move is the view's to glide (T-021's smoothing).
+    func testADriftBeyondTheThresholdIsAdoptedOnTheFrameItCrosses() {
+        let memory = LiveOverlayGeometryMemory()
+        let before = drawn(memory, surface(box: box(0.2, 0.30, 0.8, 0.38))).first
+        let moved = surface(box: box(0.2, 0.30, 0.8, 0.44))
+        let after = drawn(memory, moved).first
+
+        guard let before, let after, let placed = moved.presentations.first else {
+            return XCTFail("both frames must place the region")
+        }
+        XCTAssertNotEqual(after.frameRect, before.frameRect,
+                          "6 % of the container is a move the elder can see, and it lands")
+        XCTAssertEqual(after.frameRect, placed.frameRect,
+                       "the frame that notices the move draws it: the memory is never one frame behind")
+        XCTAssertEqual(memory.count, 1, "the same identity, at a new rect")
+    }
+
+    /// A creep too slow to cross the threshold in one pass still lands, because
+    /// the comparison is against the rect **on screen**: the difference
+    /// accumulates until it is one the elder could see. Six frames of the
+    /// detector's 1.5 %-per-pass creep draw two rects, not six.
+    func testASteadyCreepAccumulatesUntilItIsOneTheElderCanSee() {
+        let memory = LiveOverlayGeometryMemory()
+        var rects: [CGRect] = []
+        for step in 0..<6 {
+            let dy = 0.015 * Double(step)
+            rects.append(drawn(memory, surface(box: box(0.2, 0.30 + dy, 0.8, 0.38 + dy))).first!.frameRect)
+        }
+
+        XCTAssertEqual(rects[0], rects[1], "1.5 % is below the threshold: held")
+        XCTAssertEqual(rects[0], rects[2], "and again: the drift is measured against the drawn rect, "
+                       + "not against the last measurement")
+        XCTAssertNotEqual(rects[0], rects[3], "by the third step the accumulated drift is past the "
+                          + "threshold, so the box lands where the sign is")
+        XCTAssertEqual(rects[3], rects[5], "and then holds again at its new rect")
+        XCTAssertEqual(Set(rects).count, 2,
+                       "six frames, two drawn rects: the box moves less often than the detector does")
+    }
+
+    /// Size hysteresis, on the same rule: a 2 % change in the box's height is
+    /// not a resize the elder can see, an 8 % one is.
+    func testAHeightChangeBelowTheThresholdIsHeldAndOneAboveItLands() {
+        let memory = LiveOverlayGeometryMemory()
+        let base = drawn(memory, surface(box: box(0.2, 0.30, 0.8, 0.38))).first!
+        let taller = surface(box: box(0.2, 0.30, 0.8, 0.40))
+        let held = drawn(memory, taller).first!
+
+        XCTAssertEqual(held.frameRect.height, base.frameRect.height, accuracy: 1e-9,
+                       "a 2 % resize is not worth a redraw")
+        XCTAssertEqual(held.frameRect, base.frameRect)
+
+        let muchTaller = surface(box: box(0.2, 0.30, 0.8, 0.46))
+        let landed = drawn(memory, muchTaller).first!
+        XCTAssertEqual(landed.frameRect, muchTaller.presentations.first?.frameRect,
+                       "8 % is a resize, and it is drawn immediately")
+        XCTAssertGreaterThan(landed.frameRect.height, base.frameRect.height)
+    }
+
+    /// The memory is keyed by the *string*, so it survives the stabiliser
+    /// re-issuing the region's identity — while the announcement and the tap
+    /// keep addressing the region that is on screen now (`onTapRegion` takes
+    /// the current id; a held rect must never hold a stale one).
+    func testAHeldBoxSurvivesTheRegionIdentityBeingReissued() {
+        let memory = LiveOverlayGeometryMemory()
+        let first = drawn(memory, surface(box: box(0.2, 0.30, 0.8, 0.38), region: 0)).first!
+        let second = drawn(memory, surface(box: box(0.2, 0.31, 0.8, 0.39), region: 7)).first!
+
+        XCTAssertNotEqual(first.regionID, second.regionID,
+                          "the premise: the stabiliser re-issued the region's identity")
+        XCTAssertEqual(first.id, second.id, "the view identity is the string")
+        XCTAssertEqual(second.frameRect, first.frameRect,
+                       "a 1 % move under a re-issued id is not a move: the box holds")
+        XCTAssertEqual(second.regionID, identity(7),
+                       "but everything the elder reads or taps is the region on screen now")
+        XCTAssertEqual(second.accessibilityLabel, first.accessibilityLabel)
+    }
+
+    /// A change of *form kind* is never held, however close the two rects
+    /// happen to be: which form a region is drawn in is a decision the
+    /// placement made (the translation fits in place, or the preference wants
+    /// the original kept visible), not a position that can be stale. The rects
+    /// here are a few points apart on purpose — a rect-only rule would hold
+    /// them.
+    func testAChangeOfFormIsNeverHeldHoweverCloseTheRectsAre() {
+        let memory = LiveOverlayGeometryMemory()
+        let sign = "खुल्ने समय"
+        let inPlace = CGRect(x: 100, y: 300, width: 120, height: 40)
+        let pill = CGRect(x: 100, y: 330, width: 120, height: 40)
+        let anchor = CGPoint(x: 160, y: 320)
+
+        let inPlaceForm = LiveOverlayPlacement.Form.inPlace(regionID: identity(0), rect: inPlace)
+        let calloutForm = LiveOverlayPlacement.Form.callout(regionID: identity(0), anchor: anchor,
+                                                            pillRect: pill)
+        XCTAssertLessThanOrEqual(LiveOverlayFormGeometry(calloutForm).drift(
+            from: LiveOverlayFormGeometry(inPlaceForm), in: container),
+                                 CGFloat(config.overlayGeometryStickiness),
+                                 "the premise: these two geometries are within the threshold of each other")
+
+        // In place → callout: the elder asked for the original, so the box must
+        // not stay on the text it would hide.
+        _ = memory.held([presentation(sign, form: inPlaceForm)], container: container,
+                        stickiness: config.overlayGeometryStickiness)
+        let becameCallout = memory.held([presentation(sign, form: calloutForm)], container: container,
+                                        stickiness: config.overlayGeometryStickiness)
+        guard case .callout(_, let heldAnchor, let heldPill) = becameCallout.first?.form else {
+            return XCTFail("an in-place box was held where the callout belongs: that hides the "
+                           + "original the elder asked to see (FR-LCT-017)")
+        }
+        XCTAssertEqual(heldPill, pill)
+        XCTAssertEqual(heldAnchor, anchor)
+
+        // …and back again, when the translation fits in place once more.
+        let becameInPlace = memory.held([presentation(sign, form: inPlaceForm)], container: container,
+                                        stickiness: config.overlayGeometryStickiness)
+        guard case .inPlace(_, let heldRect) = becameInPlace.first?.form else {
+            return XCTFail("a callout was held where the in-place box belongs")
+        }
+        XCTAssertEqual(heldRect, inPlace)
+    }
+
+    /// The memory holds the identities that are on screen and releases the ones
+    /// that left, so a long session cannot grow it (NFR-LCT-005).
+    func testAnIdentityThatLeavesTheFrameIsReleased() {
+        let memory = LiveOverlayGeometryMemory()
+        _ = drawn(memory, surface(box: box(0.2, 0.30, 0.8, 0.38)))
+        XCTAssertEqual(memory.count, 1)
+
+        _ = drawn(memory, makeSurface(regions: []))
+        XCTAssertEqual(memory.count, 0, "the region left the frame; so did its rect")
+    }
+
+    /// With no container to measure in there is no fraction to measure against,
+    /// so nothing is held: the placement's own rects are drawn, never a frozen
+    /// frame.
+    func testADegenerateContainerHoldsNothing() {
+        let memory = LiveOverlayGeometryMemory()
+        let frame = surface(box: box(0.2, 0.30, 0.8, 0.38))
+        let first = LiveOverlayFormGeometry(frame.presentations.first!.form)
+        let second = LiveOverlayFormGeometry(surface(box: box(0.2, 0.35, 0.8, 0.43))
+            .presentations.first!.form)
+        XCTAssertEqual(first.drift(from: second, in: .zero), .infinity,
+                       "no container, no fraction: nothing may be held")
+
+        _ = memory.held(frame.presentations, container: .zero, stickiness: config.overlayGeometryStickiness)
+        let again = memory.held(frame.presentations, container: .zero,
+                                stickiness: config.overlayGeometryStickiness)
+        XCTAssertEqual(again.first?.frameRect, frame.presentations.first?.frameRect)
+    }
+
+    /// What is left for the view to animate is a move the elder can see: the
+    /// glide is a third of a second and eases out, and it is keyed on the drawn
+    /// rect — the one the memory just adopted.
+    func testTheDrawnBoxGlidesRatherThanJumping() {
+        XCTAssertGreaterThanOrEqual(LiveTranslateOverlaySurface.positionSmoothingSeconds, 0.30,
+                                    "shorter than this and a landing still reads as a jump")
+        XCTAssertLessThanOrEqual(LiveTranslateOverlaySurface.positionSmoothingSeconds, 0.35,
+                                 "longer and the box visibly lags the sign it is drawn over")
+
+        let overlay = FeatureSourceScan.codeText(of: FeatureSourceScan.iosDirectory()
+            .appendingPathComponent("ElderlyAssistant/App/LiveTranslate/LiveTranslateOverlayView.swift"))
+        XCTAssertTrue(overlay.contains(".easeOut(duration: LiveTranslateOverlaySurface.positionSmoothingSeconds)"),
+                      "the glide eases out: the box decelerates into its new rect")
+        XCTAssertTrue(overlay.contains("value: presentation.frameRect"),
+                      "and it is keyed on the rect that was drawn, so a held box does not animate")
+    }
+
     // MARK: - Scenario: the snapshot's results card (owner UX rework)
 
     /// The card is the snapshot's reading surface, and it is derived from the

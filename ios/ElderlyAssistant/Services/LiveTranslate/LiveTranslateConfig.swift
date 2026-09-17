@@ -117,6 +117,41 @@ struct LiveTranslateConfig: Equatable {
     /// 0.02 is 2% of the container dimension.
     var publishBoxEpsilon: Double = 0.02
 
+    /// How far a region's newly measured box may drift from the box **last
+    /// rendered** for it before the overlay adopts the new geometry —
+    /// expressed, as box coordinates are, as a fraction of the container
+    /// dimension.
+    ///
+    /// The publish epsilon above decides whether a *cycle* is worth
+    /// publishing; this one decides whether a **drawn box** is worth moving,
+    /// and it is the elder's complaint that asked for it (owner device
+    /// verdict, 2026-09-17, after the first rework shipped: "they still jump
+    /// around, though not as much as before. Not usable"). Two things move a
+    /// box that has not changed its string:
+    ///
+    ///  - the detector's own per-pass jitter, which the publish gate holds at
+    ///    2 % *per coordinate* but still delivers whenever any box crosses
+    ///    it, and which accumulates: the gate's baseline is the last
+    ///    delivered publication, so a slow creep republishes;
+    ///  - everything a box's geometry is *derived* from. The in-place box is
+    ///    the region's rect grown into the free space its neighbours leave
+    ///    (`inPlaceMaxBox`), so one sign drifting re-measures every box near
+    ///    it, and a background region that never moved a pixel can still be
+    ///    handed a different rect.
+    ///
+    /// While a region's normalized string is unchanged, the overlay therefore
+    /// holds the rect it last drew and adopts the new one only when the
+    /// difference is above this threshold. A steady drift still lands — the
+    /// comparison is against the rects on screen, so the difference
+    /// accumulates until it is one the elder could see — and the move then
+    /// glides rather than snaps (T-021's position smoothing).
+    ///
+    /// 0.04 is 4 % of the container dimension: on a phone-held-portrait
+    /// container that is roughly 16 pt across and 34 pt down, comfortably
+    /// above the detector's jitter and well below a move an elder would
+    /// follow with their eyes.
+    var overlayGeometryStickiness: Double = 0.04
+
     // MARK: Overlay (D1, OD2)
 
     /// The point size floor for the **in-place** form — the box that covers a
@@ -139,6 +174,30 @@ struct LiveTranslateConfig: Equatable {
     /// (see `LiveOverlayPlacement.inPlaceBox`), so a box surrounded by other
     /// text keeps the region's own size and wraps its translation into it.
     var inPlaceMaxGrowth: Double = 1.4
+
+    /// The padding between an in-place box's edge and the text block inside
+    /// it, in points.
+    ///
+    /// The in-place form is a *replacement*, not a bubble: the box is the
+    /// region's own printed rect, grown only as far as the translation needs
+    /// (see `LiveOverlayPlacement.inPlaceTightBox`), so this is the whole
+    /// breathing room between the type and the box that replaces the sign's
+    /// type. Deliberately much tighter than the callout's `pillPadding` — a
+    /// wide margin around a short translation is what made the owner read the
+    /// in-place boxes as bubbles floating over the picture (owner device
+    /// verdict, 2026-09-17: "the bubbles are blue background with white text …
+    /// they still jump around"). The callout keeps the token spacing: it is a
+    /// separate surface beside the text, and it has to read as one.
+    var inPlacePadding: CGFloat = 5
+
+    /// The corner radius of an in-place box, in points.
+    ///
+    /// Corners that hug the text line height, so the box reads as the sign's
+    /// own type replaced rather than as a rounded pill: `DesignTokens`'
+    /// `bubbleCornerRadius` (14) is a *bubble* corner, right for a callout
+    /// that floats over the picture and wrong for a box standing where a line
+    /// of print stood. The callout keeps the token's radius.
+    var inPlaceCornerRadius: CGFloat = 6
 
     /// Minimum rendered point size for overlay text: the accessibility floor
     /// for the elder-facing surface.

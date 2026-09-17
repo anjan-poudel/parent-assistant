@@ -16,10 +16,14 @@ import UIKit
 //    quarantined region still has a bubble with its recognized text; the only
 //    state without bubbles is "no text was detected", and that state says so
 //    in words (NFR-LCT-010).
-//  - **The render path never waits.** The view holds no `@State`, starts no
-//    task and observes nothing: a frame is a pure function of the surface, so
-//    a translation arriving re-renders only the region whose placement
-//    changed (NFR-LCT-002).
+//  - **The render path never waits.** The view holds no translation, starts
+//    no task and observes nothing: a frame is a function of the surface and of
+//    the geometry memory — which holds rects and nothing else — so a
+//    translation arriving re-renders only the region whose placement changed
+//    (NFR-LCT-002). The memory is the one piece of state the render path owns,
+//    it is written only while a frame is being built, and it can neither await
+//    a tier nor outlive the model's own publication: an identity that is no
+//    longer placed is dropped from it on that same frame.
 //  - **Identity-keyed, hence bounded.** One `ForEach`, keyed by the region's
 //    normalized *string* rather than by its region id, and no array that
 //    accumulates across cycles: a long session cannot grow the view tree
@@ -27,11 +31,23 @@ import UIKit
 //    torn down and rebuilt every pass (owner UX rework, 2026-09-17: "the
 //    bubbles are everywhere and shaky"); the geometry then glides, because
 //    the view it glides is the same view.
+//  - **A box holds still until it has genuinely moved.** `LiveOverlayGeometryMemory`
+//    keeps, per view identity, the rect that was last *drawn* for it, and a
+//    newly measured rect is adopted only when it differs by more than
+//    `overlayGeometryStickiness` of the container. This is the owner's second
+//    device verdict answered (2026-09-17, after the first rework shipped:
+//    "they still jump around, though not as much as before. Not usable"): the
+//    in-place box is derived from the region's rect *and its neighbours'*, so
+//    one sign drifting re-measures every box near it, and the detector's own
+//    jitter accumulates past the pipeline's publish gate. Holding the drawn
+//    rect is what makes a sign that has not changed read as still.
 //  - **Dark, opaque, and readable over a photograph.** The in-place box and
 //    the callout pill are filled with the app's ink and lettered in the app's
 //    background (the secondary line in the brand's light tone), so a
 //    translation never sits on a white slab over the picture it is
-//    translating.
+//    translating. The in-place box hugs its own text — the policy's
+//    `inPlacePadding` and `inPlaceCornerRadius`, not the bubble token's — so
+//    it reads as the sign's type replaced rather than as a bubble beside it.
 //  - **Accessibility is structural.** Text is drawn at the size and weight the
 //    placement measured it at, through the feature's one font constructor
 //    (`LiveOverlayTextMetrics`); colours and the minimum hit target come from
@@ -121,6 +137,207 @@ struct RegionPresentation: Equatable, Identifiable {
         case .degraded: return Self.degradedSymbolName
         }
     }
+
+    /// The same presentation drawn at a different geometry — everything the
+    /// elder reads, hears or taps is carried over unchanged, and only the rect
+    /// moves. This is how the geometry memory holds a box still without
+    /// touching a single word: what the region *says* is the placement's, and
+    /// only where it says it is the memory's (see
+    /// `LiveOverlayGeometryMemory`).
+    func withForm(_ form: LiveOverlayPlacement.Form) -> RegionPresentation {
+        RegionPresentation(regionID: regionID,
+                           identityKey: identityKey,
+                           identityOrdinal: identityOrdinal,
+                           state: state,
+                           form: form,
+                           lines: lines,
+                           isClampedFallback: isClampedFallback,
+                           accessibilityLabel: accessibilityLabel,
+                           accessibilityValue: accessibilityValue,
+                           speaksTranslation: speaksTranslation)
+    }
+}
+
+/// The geometry one region's form occupies on screen: the whole of what the
+/// elder sees move, and nothing else — no text, no outcome, no tier.
+///
+/// A callout carries its leader line's target as well as its pill, because the
+/// anchor is derived from the region's rect and would otherwise jitter under a
+/// pill that is holding still, waving a line at a text that has not moved
+/// (FR-LCT-016).
+enum LiveOverlayFormGeometry: Equatable {
+    case inPlace(rect: CGRect)
+    case callout(anchor: CGPoint, pillRect: CGRect)
+
+    init(_ form: LiveOverlayPlacement.Form) {
+        switch form {
+        case .inPlace(_, let rect):
+            self = .inPlace(rect: rect)
+        case .callout(_, let anchor, let pillRect):
+            self = .callout(anchor: anchor, pillRect: pillRect)
+        }
+    }
+
+    /// The rect the elder sees: the box for the in-place form, the pill for a
+    /// callout — the same rect `RegionPresentation.frameRect` reports, so the
+    /// two can never disagree about what "the box" is.
+    var rect: CGRect {
+        switch self {
+        case .inPlace(let rect): return rect
+        case .callout(_, let pillRect): return pillRect
+        }
+    }
+
+    /// The anchor, when this is a callout: the point the leader line is drawn
+    /// to. Nil for an in-place box, which has no line.
+    var anchor: CGPoint? {
+        guard case .callout(let anchor, _) = self else { return nil }
+        return anchor
+    }
+
+    /// Whether this is the callout form. The form *kind* is never a thing the
+    /// memory may hold: which form a region is drawn in is a decision the
+    /// placement made (the translation fits in place, or the preference wants
+    /// the original kept visible), not a position that can be stale. So the
+    /// memory compares kinds first and adopts on any change of kind, however
+    /// near the two rects happen to be — an in-place box and the pill that
+    /// would stand beside it can be a few points apart on a small region, and
+    /// holding one for the other would draw the wrong form.
+    var isCallout: Bool {
+        if case .callout = self { return true }
+        return false
+    }
+
+    /// How far this geometry differs from `other`, as a fraction of the
+    /// container dimension: the largest per-coordinate difference across both
+    /// edges of the rect — so a move *and* a resize are the same measure — and,
+    /// for callouts, the leader target's own movement.
+    ///
+    /// A degenerate container has no dimension to be a fraction of, and the
+    /// honest answer there is "infinitely far": nothing is held, which is the
+    /// behaviour of a caller that has no container to measure against.
+    func drift(from other: LiveOverlayFormGeometry, in container: CGSize) -> CGFloat {
+        guard container.width > 0, container.height > 0 else { return .infinity }
+        let horizontal = abs(rect.minX - other.rect.minX) / container.width
+        let vertical = max(abs(rect.minY - other.rect.minY), abs(rect.maxY - other.rect.maxY)) / container.height
+        let widest = max(abs(rect.maxX - other.rect.maxX) / container.width,
+                         max(abs(rect.width - other.rect.width) / container.width,
+                             abs(rect.height - other.rect.height) / container.height))
+        var drift = max(max(horizontal, vertical), widest)
+
+        if let anchor, let otherAnchor = other.anchor {
+            drift = max(drift,
+                        max(abs(anchor.x - otherAnchor.x) / container.width,
+                            abs(anchor.y - otherAnchor.y) / container.height))
+        }
+        return drift
+    }
+
+    /// This geometry as the form a region is drawn in.
+    func form(for regionID: TextRegionStabilizer.RegionIdentity) -> LiveOverlayPlacement.Form {
+        switch self {
+        case .inPlace(let rect):
+            return .inPlace(regionID: regionID, rect: rect)
+        case .callout(let anchor, let pillRect):
+            return .callout(regionID: regionID, anchor: anchor, pillRect: pillRect)
+        }
+    }
+}
+
+/// The rects the overlay is **drawing**, per view identity — the memory that
+/// makes a box hold still (owner device verdict, 2026-09-17: "they still jump
+/// around, though not as much as before. Not usable").
+///
+/// Why this exists at all: a region whose *string* has not changed can still be
+/// handed a different rect, for two reasons neither of which is a move the
+/// elder made.
+///
+///  - The pipeline's publish gate (`LiveTranslateConfig.publishBoxEpsilon`)
+///    suppresses a cycle whose boxes all moved by at most 2 % — but only when
+///    the *whole* cycle is that quiet, and against the last delivered
+///    publication, so a steady creep republishes and one sign crossing the
+///    threshold carries every other box's fresh measurement with it.
+///  - An in-place box is not a function of its own region alone: it is the
+///    region's rect grown into the free space its neighbours leave
+///    (`LiveOverlayPlacement.inPlaceMaxBox`), then cut to the text it holds
+///    (`inPlaceTightBox`). A sign walking across the frame therefore re-measures
+///    the boxes *around* it, and those regions jump without moving.
+///
+/// So the memory is keyed by the view identity (the normalized string, plus an
+/// ordinal where two regions share one) and holds the geometry that was last
+/// drawn for that identity. A newly measured geometry is adopted only when its
+/// `drift` from the drawn one exceeds `overlayGeometryStickiness` of the
+/// container — which is the same rule for a move and for a resize, because
+/// both are measured on the rect's own edges — and the comparison is against
+/// the rects *on screen*, so a slow drift accumulates until it is one the
+/// elder could see and then lands (gliding, through `positionSmoothingSeconds`).
+///
+/// The one thing this must never do is draw a rect the placement did not ask
+/// for: a held geometry is by construction within the threshold of the
+/// measured one (or it would have been adopted), and a change of form kind is
+/// never held at all. That bound is also why the memory needs no reset of its
+/// own: a container that changed under it — a rotation, a new session — hands
+/// it rects that differ by far more than the threshold, so the first frame in
+/// the new container is drawn from the placement's own geometry, and no frame
+/// is ever drawn from a rect that points at nothing.
+///
+/// A reference type, deliberately: the memory is written while the frame is
+/// being built, and a value type would have to be written back through view
+/// state — an extra render pass per pass, for a cache that changes nothing the
+/// elder reads. Nothing else here is stateful: every entry is a `CGRect` or a
+/// point, an identity that is no longer placed is dropped on the frame that
+/// drops it (so a long session cannot grow it, NFR-LCT-005), and no text,
+/// outcome or tier is ever stored.
+final class LiveOverlayGeometryMemory {
+
+    /// The geometry last drawn for each view identity.
+    private var drawn: [String: LiveOverlayFormGeometry] = [:]
+
+    /// How many identities the memory is holding. A test reads it to show that
+    /// an identity which left the frame is released rather than accumulated.
+    var count: Int { drawn.count }
+
+    /// The presentations **as they are drawn**: each one at the geometry the
+    /// memory holds for its identity, or at the placement's own geometry when
+    /// the drift past the threshold has been adopted.
+    ///
+    /// This is the view's one call per frame, and it is where adoption happens:
+    /// a geometry that has drifted beyond the threshold replaces the held one
+    /// here, so the very frame that notices the move is the frame that draws
+    /// it — there is no second pass, and no frame is ever drawn from a value
+    /// the memory has already discarded.
+    func held(_ presentations: [RegionPresentation],
+              container: CGSize,
+              stickiness: Double) -> [RegionPresentation] {
+        var next: [String: LiveOverlayFormGeometry] = [:]
+        next.reserveCapacity(presentations.count)
+        let limit = CGFloat(stickiness)
+
+        let resolved = presentations.map { presentation -> RegionPresentation in
+            let measured = LiveOverlayFormGeometry(presentation.form)
+            guard let held = drawn[presentation.id] else {
+                // Nothing held: this identity is drawn where the placement put
+                // it, and that is now what "still" means for it.
+                next[presentation.id] = measured
+                return presentation
+            }
+            // A degenerate container measures every drift as infinite, so
+            // nothing is ever held: a caller with no container to measure
+            // against gets the placement's own rects, never a frozen frame.
+            // A change of form kind is adopted for the same reason, whatever
+            // the rects say.
+            guard held.isCallout == measured.isCallout,
+                  held.drift(from: measured, in: container) <= limit else {
+                next[presentation.id] = measured
+                return presentation
+            }
+            next[presentation.id] = held
+            return presentation.withForm(held.form(for: presentation.regionID))
+        }
+
+        drawn = next
+        return resolved
+    }
 }
 
 /// The pure surface behind `LiveTranslateOverlayView`: the placements, the
@@ -140,12 +357,19 @@ struct LiveTranslateOverlaySurface: Equatable {
     static let leaderLineWidth: CGFloat = 1.5
 
     /// How long a box takes to move to a new rect, in seconds. A rendering
-    /// constant, not an operational one — and a *short* one: it exists to
-    /// absorb the detector's per-pass jitter (a point or two of movement, which
-    /// un-smoothed reads as the whole overlay shaking), not to stage an
-    /// animation the elder has to wait for. Text stays readable throughout,
-    /// because the view is not rebuilt: only its geometry is interpolated.
-    static let positionSmoothingSeconds: TimeInterval = 0.14
+    /// constant, not an operational one: it exists to absorb what movement is
+    /// left after the geometry memory has held everything it can — a move that
+    /// is genuinely above the stickiness threshold, and so a move the elder
+    /// would follow with their eyes — not to stage an animation the elder has
+    /// to wait for. Text stays readable throughout, because the view is not
+    /// rebuilt: only its geometry is interpolated.
+    ///
+    /// Long enough to read as a glide rather than a jump (the owner's device
+    /// verdict, 2026-09-17: "they still jump around … Not usable"), and short
+    /// enough that a box does not visibly lag the sign it is drawn over: a
+    /// third of a second is under the time it takes to bring a phone up and
+    /// read the sign again, and well over the frame the detector works at.
+    static let positionSmoothingSeconds: TimeInterval = 0.32
 
     init(placements: [LiveOverlayPlacement.PlacedOverlay],
          policy: LiveOverlayPlacement.Policy,
@@ -165,6 +389,13 @@ struct LiveTranslateOverlaySurface: Equatable {
     /// the configured `overlayMinPointSize`), the supporting line is at least
     /// the caption minimum, and the supporting line never outgrows the primary
     /// one however those two floors move.
+    ///
+    /// The in-place box's own padding, corner radius and the geometry
+    /// stickiness are the config's, unchanged: none of the three is an
+    /// accessibility floor, and the in-place padding and corner are
+    /// deliberately *not* the pill token's — a replacement of the sign's type
+    /// is tight and square-cornered where a pill that floats beside the text
+    /// is neither.
     static func policy(config: LiveTranslateConfig,
                        alwaysShowOriginal: Bool) -> LiveOverlayPlacement.Policy {
         let primary = max(config.overlayMinPointSize, DesignTokens.minBodyPointSize)
@@ -176,6 +407,9 @@ struct LiveTranslateOverlaySurface: Equatable {
             // however the two values move relative to each other.
             inPlaceMinPointSize: min(config.inPlaceMinPointSize, primary),
             inPlaceMaxGrowth: config.inPlaceMaxGrowth,
+            inPlacePadding: config.inPlacePadding,
+            inPlaceCornerRadius: config.inPlaceCornerRadius,
+            geometryStickiness: config.overlayGeometryStickiness,
             minPointSize: primary,
             secondaryPointSize: supporting,
             pillPadding: DesignTokens.interElementSpacing,
@@ -312,6 +546,13 @@ struct LiveTranslateOverlayView: View {
     /// `LiveTranslateSettings`, the same setting the voice command writes.
     let onSetAlwaysShowOriginal: (Bool) -> Void
 
+    /// The rects this view is currently drawing, per region identity — the one
+    /// piece of state the render path owns, and the reason a box whose text has
+    /// not changed holds still (`LiveOverlayGeometryMemory`). It holds
+    /// geometry and nothing else: no translation, no outcome, no tier, so it
+    /// cannot keep a stale *word* on screen even in principle.
+    @State private var geometry = LiveOverlayGeometryMemory()
+
     init(surface: LiveTranslateOverlaySurface,
          onTapRegion: @escaping (TextRegionStabilizer.RegionIdentity) -> Void,
          onSetAlwaysShowOriginal: @escaping (Bool) -> Void) {
@@ -321,49 +562,62 @@ struct LiveTranslateOverlayView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            Color.clear
+        // The container is read, not assumed: the memory measures a drift
+        // against the same dimensions the placement measured its rects in, so
+        // the threshold means the same fraction of the screen in both places.
+        GeometryReader { proxy in
+            let presentations = geometry.held(surface.presentations,
+                                              container: proxy.size,
+                                              stickiness: surface.policy.geometryStickiness)
+            ZStack(alignment: .topLeading) {
+                Color.clear
 
-            // The leader lines are one layer under every bubble: one `Path`,
-            // so a callout cannot draw a second one, and none is drawn for an
-            // in-place region (there is nothing to point at).
-            Path { path in
-                for presentation in surface.presentations {
-                    guard case .callout(_, let anchor, let pillRect) = presentation.form else { continue }
-                    path.move(to: leaderStart(pillRect: pillRect, anchor: anchor))
-                    path.addLine(to: anchor)
+                // The leader lines are one layer under every bubble: one
+                // `Path`, so a callout cannot draw a second one, and none is
+                // drawn for an in-place region (there is nothing to point at).
+                // The line follows the *drawn* pill and anchor, so a held pill
+                // holds its leader too instead of waving at a rect it has left.
+                Path { path in
+                    for presentation in presentations {
+                        guard case .callout(_, let anchor, let pillRect) = presentation.form
+                        else { continue }
+                        path.move(to: leaderStart(pillRect: pillRect, anchor: anchor))
+                        path.addLine(to: anchor)
+                    }
                 }
-            }
-            .stroke(DesignTokens.textSecondary, lineWidth: Self.leaderLineWidth)
+                .stroke(DesignTokens.textSecondary, lineWidth: Self.leaderLineWidth)
 
-            ForEach(surface.presentations) { presentation in
-                bubble(presentation)
-                    .frame(width: presentation.frameRect.width,
-                           height: presentation.frameRect.height)
-                    .offset(x: presentation.frameRect.minX, y: presentation.frameRect.minY)
-                    // A box glides to its new rect instead of jumping: the
-                    // detector's rect moves by a point or two every pass, and a
-                    // per-frame jump reads as the whole overlay shaking. The
-                    // view is identified by its *string*, so this animates the
-                    // geometry of the same view — nothing is rebuilt, and the
-                    // text never blinks out between frames (NFR-LCT-002).
-                    .animation(.easeOut(duration: LiveTranslateOverlaySurface.positionSmoothingSeconds),
-                               value: presentation.frameRect)
-                    .accessibilityIdentifier("livetranslate.overlay.region.\(presentation.regionID.rawValue)")
-            }
+                ForEach(presentations) { presentation in
+                    bubble(presentation)
+                        .frame(width: presentation.frameRect.width,
+                               height: presentation.frameRect.height)
+                        .offset(x: presentation.frameRect.minX, y: presentation.frameRect.minY)
+                        // A box glides to its new rect instead of jumping. The
+                        // view is identified by its *string*, so this animates
+                        // the geometry of the same view — nothing is rebuilt,
+                        // and the text never blinks out between frames
+                        // (NFR-LCT-002). The memory has already absorbed every
+                        // move below the stickiness threshold; what is left to
+                        // glide is a move the elder can see.
+                        .animation(.easeOut(duration: LiveTranslateOverlaySurface.positionSmoothingSeconds),
+                                   value: presentation.frameRect)
+                        .accessibilityIdentifier("livetranslate.overlay.region.\(presentation.regionID.rawValue)")
+                }
 
-            if surface.presentations.isEmpty {
-                emptyState
-            }
+                if presentations.isEmpty {
+                    emptyState
+                }
 
-            AlwaysShowOriginalControl(
-                surface: AlwaysShowOriginalSurface(isOn: surface.policy.alwaysShowOriginal,
-                                                   locale: surface.locale),
-                onSet: onSetAlwaysShowOriginal)
-                .padding(DesignTokens.interElementSpacing)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                AlwaysShowOriginalControl(
+                    surface: AlwaysShowOriginalSurface(isOn: surface.policy.alwaysShowOriginal,
+                                                       locale: surface.locale),
+                    onSet: onSetAlwaysShowOriginal)
+                    .padding(DesignTokens.interElementSpacing)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height)
+            .accessibilityIdentifier("livetranslate.overlay")
         }
-        .accessibilityIdentifier("livetranslate.overlay")
     }
 
     // MARK: Bubbles
@@ -399,10 +653,13 @@ struct LiveTranslateOverlayView: View {
     private func drawn(_ presentation: RegionPresentation) -> some View {
         switch presentation.form {
         case .inPlace:
-            // Sized to the region's box, and laid out with no inset: the fit
-            // condition measured the translation against the whole rect, so a
-            // padding here would be a second, smaller box than the one the
-            // measurement was made against (risk R2).
+            // Laid out with the *same* tight inset the box was sized with: the
+            // box is the region's own rect unioned with the measured text
+            // block plus this padding (`LiveOverlayPlacement.inPlaceTightBox`),
+            // so insetting by it gives the text back exactly the block that was
+            // measured — no re-wrap, nothing clipped (risk R2), and no slab of
+            // empty ink around a short translation (the owner's device verdict,
+            // 2026-09-17: "the bubbles are blue background with white text").
             //
             // The fill is the app's ink and the text is the app's background —
             // an opaque dark box, never a white one: it *replaces* the printed
@@ -411,10 +668,16 @@ struct LiveTranslateOverlayView: View {
             // rework, 2026-09-17). Being a colour *pair* from the token table,
             // it is equally high-contrast in either appearance mode; there is
             // no scheme-dependent branch that could go pale in light mode.
+            //
+            // The corner is the config's own, not the bubble token's: a radius
+            // that hugs a line of type reads as the sign's own lettering
+            // replaced, where the pill radius reads as a bubble laid over the
+            // picture. The callout below keeps the token's.
             line(presentation.lines.first, colour: DesignTokens.background)
+                .padding(surface.policy.inPlacePadding)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(DesignTokens.textPrimary)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                .clipShape(RoundedRectangle(cornerRadius: surface.policy.inPlaceCornerRadius))
 
         case .callout:
             // Laid out with the *same* policy values the pill was sized with.

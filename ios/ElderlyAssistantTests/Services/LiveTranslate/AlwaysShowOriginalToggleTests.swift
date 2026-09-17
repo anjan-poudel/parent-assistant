@@ -464,12 +464,19 @@ final class LiveTranslateAppLayerHygieneTests: XCTestCase {
         }
     }
 
-    /// The render path holds no state and starts no work: a frame is a
-    /// function of the surface it is handed, so it can neither await a tier
-    /// nor keep a translation alive after the model dropped it (NFR-LCT-002).
+    /// The render path starts no work and observes nothing: a frame is a
+    /// function of the surface it is handed and of the geometry memory, so it
+    /// can neither await a tier nor keep a translation alive after the model
+    /// dropped it (NFR-LCT-002).
+    ///
+    /// One piece of state **is** allowed, and it is exactly one: the geometry
+    /// memory that holds a box still while its string is unchanged (the owner
+    /// device verdict, 2026-09-17). It holds rects — see
+    /// `testTheGeometryMemoryHoldsRectsAndNothingElse` — so it is not a second
+    /// source of truth for what a region *says*.
     func testTheRenderPathHoldsNoStateAndStartsNoWork() {
         let patterns = [
-            "@State\\b", "@StateObject", "@ObservedObject", "@EnvironmentObject", "@Environment\\(",
+            "@StateObject", "@ObservedObject", "@EnvironmentObject", "@Environment\\(",
             "\\.task\\b", "onAppear", "onDisappear", "onReceive",
             "\\bawait\\b", "\\basync\\b", "\\bTask\\b",
             "DispatchQueue", "\\bTimer\\b", "URLSession", "NotificationCenter", "FileManager",
@@ -483,6 +490,46 @@ final class LiveTranslateAppLayerHygieneTests: XCTestCase {
                              + "overlay renders only from main-confined placement state")
             }
         }
+
+        let overlay = FeatureSourceScan.iosDirectory()
+            .appendingPathComponent("ElderlyAssistant/App/LiveTranslate/LiveTranslateOverlayView.swift")
+        let code = FeatureSourceScan.codeText(of: overlay)
+        let declarations = code.split(separator: "\n")
+            .map(String.init)
+            .filter { $0.contains("@State") }
+        XCTAssertEqual(declarations.count, 1,
+                       "the render path may own one piece of state — the geometry memory — and no "
+                       + "more: saw \(declarations)")
+        XCTAssertEqual(declarations.first?.trimmingCharacters(in: .whitespaces),
+                       "@State private var geometry = LiveOverlayGeometryMemory()",
+                       "and the one piece of state it owns is the memory, not a value the "
+                       + "placement should be the only source of")
+    }
+
+    /// The geometry memory is geometry: no translation, no outcome, no tier, so
+    /// it cannot keep a stale *word* on screen even in principle — the only
+    /// thing it can hold is where a box was drawn (NFR-LCT-002).
+    func testTheGeometryMemoryHoldsRectsAndNothingElse() {
+        let url = FeatureSourceScan.iosDirectory()
+            .appendingPathComponent("ElderlyAssistant/App/LiveTranslate/LiveTranslateOverlayView.swift")
+        let code = FeatureSourceScan.codeText(of: url)
+        guard let start = code.range(of: "final class LiveOverlayGeometryMemory") else {
+            return XCTFail("the geometry memory is not declared in the overlay view")
+        }
+        let tail = code[start.lowerBound...]
+        guard let end = tail.range(of: "\n}\n") else {
+            return XCTFail("the geometry memory's declaration has no end")
+        }
+        let memory = String(tail[..<end.upperBound])
+        XCTAssertTrue(memory.contains("private var drawn: [String: LiveOverlayFormGeometry]"),
+                      "the memory's one store is geometry per view identity, held privately: \(memory)")
+        for forbidden in ["TranslationResult", "TranslationOutcome", "LiveOverlayTextLine",
+                          "translation", "outcome", "tier"] {
+            XCTAssertNil(FeatureSourceScan.firstMatch(of: forbidden, in: memory),
+                         "the geometry memory mentions '\(forbidden)': it must hold geometry and "
+                         + "nothing else, or it becomes a second source of truth for what a "
+                         + "region says")
+        }
     }
 
     func testTheOverlayDrawsOneIdentityKeyedListPerFrame() {
@@ -490,11 +537,37 @@ final class LiveTranslateAppLayerHygieneTests: XCTestCase {
             .appendingPathComponent("ElderlyAssistant/App/LiveTranslate/LiveTranslateOverlayView.swift")
         let code = FeatureSourceScan.codeText(of: url)
 
-        XCTAssertNotNil(FeatureSourceScan.firstMatch(of: "ForEach\\(surface\\.presentations\\)", in: code),
+        XCTAssertNotNil(FeatureSourceScan.firstMatch(of: "ForEach\\(presentations\\)", in: code),
                         "one list, keyed by the region's identity, is what bounds the layer count")
+        XCTAssertNotNil(FeatureSourceScan.firstMatch(of: "geometry\\.held\\(surface\\.presentations", in: code),
+                        "and the list it draws is the one the geometry memory resolved: the rects on "
+                        + "screen are the memory's answer, not a second computation")
         let occurrences = code.components(separatedBy: "ForEach(").count - 1
         XCTAssertEqual(occurrences, 1,
                        "a second ForEach over anything that accumulates is how the view cost grows")
+    }
+
+    /// The in-place box is drawn as a *replacement*, not as a bubble: its inset
+    /// and its corner come from the policy (which took them from the config),
+    /// the callout keeps the pill's token values, and the in-place branch draws
+    /// no leader line at all (owner device verdict, 2026-09-17: "the bubbles are
+    /// blue background with white text … they still jump around").
+    func testTheInPlaceBoxIsDrawnTightAndTheCalloutKeepsThePillTokens() {
+        let url = FeatureSourceScan.iosDirectory()
+            .appendingPathComponent("ElderlyAssistant/App/LiveTranslate/LiveTranslateOverlayView.swift")
+        let code = FeatureSourceScan.codeText(of: url)
+
+        XCTAssertNotNil(FeatureSourceScan.firstMatch(of: "\\.padding\\(surface\\.policy\\.inPlacePadding\\)",
+                                                     in: code),
+                        "the drawn box is inset by the very padding the box was sized with")
+        XCTAssertNotNil(FeatureSourceScan.firstMatch(
+            of: "cornerRadius: surface\\.policy\\.inPlaceCornerRadius", in: code),
+                        "and cornered with the config's radius, not the bubble token's")
+        XCTAssertNotNil(FeatureSourceScan.firstMatch(
+            of: "cornerRadius: DesignTokens\\.bubbleCornerRadius", in: code),
+                        "while the callout — a surface beside the text — keeps the pill's radius")
+        XCTAssertNotNil(FeatureSourceScan.firstMatch(of: "guard case \\.callout", in: code),
+                        "only a callout draws a leader line; the in-place box points at nothing")
     }
 
     func testEveryColourAndSizeComesFromTheTokenTable() {
