@@ -43,6 +43,32 @@ final class LiveCameraSessionTests: XCTestCase {
 
     private var interval: TimeInterval { LiveTranslateConfig.default.ocrSampleInterval }
 
+    /// A real frame painted a solid luminance, so the frame-change gate has two
+    /// different pictures to compare. `SampleBufferFactory` paints nothing, and
+    /// two unpainted frames are — correctly — the same picture.
+    private func paintedFrame(luma: UInt8, pts: Int,
+                              width: Int = 64, height: Int = 48) throws -> CMSampleBuffer {
+        let sample = try SampleBufferFactory.make(width: width, height: height,
+                                                  pts: CMTime(value: CMTimeValue(pts), timescale: 1))
+        let surface = try XCTUnwrap(CMSampleBufferGetImageBuffer(sample))
+        CVPixelBufferLockBaseAddress(surface, [])
+        defer { CVPixelBufferUnlockBaseAddress(surface, []) }
+        if let base = CVPixelBufferGetBaseAddress(surface) {
+            let stride = CVPixelBufferGetBytesPerRow(surface)
+            let bytes = base.assumingMemoryBound(to: UInt8.self)
+            for row in 0..<height {
+                for column in 0..<width {
+                    let pixel = bytes + row * stride + column * 4
+                    pixel[0] = luma
+                    pixel[1] = luma
+                    pixel[2] = luma
+                    pixel[3] = 255
+                }
+            }
+        }
+        return sample
+    }
+
     /// The next frame the session hands a consumer, with a short timeout so a
     /// regression that delivers nothing fails a test instead of hanging the
     /// suite. `AsyncSequence` has no parameterless `first()`.
@@ -397,6 +423,151 @@ final class LiveCameraSessionTests: XCTestCase {
 
         let first = await frames.next()
         XCTAssertEqual(first?.timestamp, CMTime(value: 1, timescale: 1))
+    }
+
+    // MARK: The frame-change gate (NFR-LCT-002)
+
+    func testAStillSceneDropsToTheReducedCadenceAndAChangedOneDoesNot() async throws {
+        let session = makeSession()
+        _ = await session.start()
+        var frames = session.frames.makeAsyncIterator()
+
+        // The first frame of a session is always a change: there is nothing to
+        // compare it with.
+        try layer.deliver(paintedFrame(luma: 0, pts: 1))
+        _ = await frames.next()
+
+        // The same picture, one nominal interval later: recognition could not
+        // learn anything new from it, so the sample is dropped rather than
+        // recognized. This is the cost the device's own crash reports show
+        // being paid at ~4 Hz over a scene that was not changing.
+        clock.advance(by: interval)
+        try layer.deliver(paintedFrame(luma: 0, pts: 2))
+
+        // A different picture at the same cadence is news, and runs at the full
+        // cadence: the reduced cadence is a bound on idling, never a lag on news.
+        clock.advance(by: interval)
+        try layer.deliver(paintedFrame(luma: 90, pts: 3))
+        let news = await frames.next()
+        XCTAssertEqual(news?.timestamp, CMTime(value: 3, timescale: 1),
+                       "a materially different frame is delivered at the nominal cadence")
+    }
+
+    func testAStillSceneIsStillReadJustSlower() async throws {
+        let config = LiveTranslateConfig.default
+        let session = makeSession(config: config)
+        _ = await session.start()
+        var frames = session.frames.makeAsyncIterator()
+
+        try layer.deliver(paintedFrame(luma: 0, pts: 1))
+        _ = await frames.next()
+
+        clock.advance(by: interval)
+        try layer.deliver(paintedFrame(luma: 0, pts: 2))
+
+        // The reduced cadence is still a cadence: at `stableSampleInterval` the
+        // still scene is read again, so a sign that has been sitting there is
+        // refreshed rather than forgotten.
+        clock.advance(by: config.stableSampleInterval)
+        try layer.deliver(paintedFrame(luma: 0, pts: 3))
+        let refresh = await frames.next()
+        XCTAssertEqual(refresh?.timestamp, CMTime(value: 3, timescale: 1),
+                       "a still scene is read at the reduced interval, not never")
+    }
+
+    func testAStaleSceneSignalDropsTheCadenceEvenWhileTheFramesChange() async throws {
+        // Motion that carries no new text — a hand, a reflection, a screen
+        // playing video behind the sign — is the case the frame gate cannot
+        // see: the pixels really do change. The pipeline can see it (it is the
+        // component that sees the recognition results), so its signal is what
+        // slows the tap down.
+        let config = LiveTranslateConfig.default
+        let session = makeSession(config: config)
+        _ = await session.start()
+        var frames = session.frames.makeAsyncIterator()
+
+        try layer.deliver(paintedFrame(luma: 0, pts: 1))
+        _ = await frames.next()
+
+        session.ocrSceneStale = true
+        clock.advance(by: interval)
+        try layer.deliver(paintedFrame(luma: 90, pts: 2))
+        clock.advance(by: config.stableSampleInterval)
+        try layer.deliver(paintedFrame(luma: 180, pts: 3))
+
+        let delivered = await frames.next()
+        XCTAssertEqual(delivered?.timestamp, CMTime(value: 3, timescale: 1),
+                       "under the stale signal a changed frame waits for the reduced interval")
+    }
+
+    func testTheGatesDecisionIsTheIntervalThatApplies() {
+        let config = LiveTranslateConfig.default
+        let session = makeSession(config: config)
+
+        XCTAssertEqual(session.effectiveSampleInterval(changed: true, stale: false),
+                       config.ocrSampleInterval,
+                       "a changed scene in a scene the pipeline has not called stale runs at the nominal cadence")
+        XCTAssertEqual(session.effectiveSampleInterval(changed: false, stale: false),
+                       Swift.max(config.ocrSampleInterval, config.stableSampleInterval),
+                       "an unchanged frame drops to the reduced cadence")
+        XCTAssertEqual(session.effectiveSampleInterval(changed: true, stale: true),
+                       Swift.max(config.ocrSampleInterval, config.stableSampleInterval),
+                       "the pipeline's stale signal applies to a changing scene too")
+    }
+
+    func testTheSignatureRefusesAFormatItCannotReadRatherThanGuessing() throws {
+        // The capture layer asks the platform for 32BGRA. A buffer in another
+        // format is refused — and a refusal fails open, which is what keeps the
+        // gate from turning an unreadable frame into "nothing changed".
+        var pixelBuffer: CVPixelBuffer?
+        let status = CVPixelBufferCreate(kCFAllocatorDefault, 32, 32,
+                                         kCVPixelFormatType_OneComponent8, nil, &pixelBuffer)
+        XCTAssertEqual(status, kCVReturnSuccess)
+        let buffer = try XCTUnwrap(pixelBuffer)
+
+        XCTAssertNil(LuminanceSignature.of(buffer, side: 8),
+                     "a format the gate does not read is refused, never guessed at")
+    }
+
+    func testTheSignatureIsTheFramesMeanLuminanceOnAGrid() throws {
+        let surface = try XCTUnwrap(CMSampleBufferGetImageBuffer(paintedFrame(luma: 100, pts: 1)))
+        let signature = try XCTUnwrap(LuminanceSignature.of(surface, side: 8))
+        XCTAssertEqual(signature.samples.count, 64, "4 KB of samples, and no copy of the frame")
+        XCTAssertTrue(signature.samples.allSatisfy { $0 == 100 },
+                      "a solid picture reads as one luminance value per sample")
+
+        let brighter = try XCTUnwrap(LuminanceSignature.of(
+            try XCTUnwrap(CMSampleBufferGetImageBuffer(paintedFrame(luma: 200, pts: 2))), side: 8))
+        XCTAssertEqual(try XCTUnwrap(signature.meanAbsoluteDifference(from: brighter)),
+                       100.0 / 255.0, accuracy: 0.0001,
+                       "the difference is a fraction of full scale, which is what the threshold is")
+
+        let coarser = try XCTUnwrap(LuminanceSignature.of(surface, side: 4))
+        XCTAssertNil(signature.meanAbsoluteDifference(from: coarser),
+                     "two signatures over different grids are not comparable")
+    }
+
+    func testTheChangeDetectorComparesAgainstTheLastFrameRecognitionRan() throws {
+        var detector = FrameChangeDetector()
+        let first = try XCTUnwrap(CameraFrame(sampleBuffer: paintedFrame(luma: 0, pts: 1)))
+
+        XCTAssertTrue(detector.isMateriallyDifferent(first, side: 64, threshold: 0.02),
+                      "the first frame after a start is always a change")
+        detector.remember(first, side: 64)
+
+        let same = try XCTUnwrap(CameraFrame(sampleBuffer: paintedFrame(luma: 0, pts: 2)))
+        XCTAssertFalse(detector.isMateriallyDifferent(same, side: 64, threshold: 0.02))
+
+        let under = try XCTUnwrap(CameraFrame(sampleBuffer: paintedFrame(luma: 3, pts: 3)))
+        XCTAssertFalse(detector.isMateriallyDifferent(under, side: 64, threshold: 0.02),
+                       "3/255 is under the 2% threshold: not a material change")
+        let over = try XCTUnwrap(CameraFrame(sampleBuffer: paintedFrame(luma: 6, pts: 4)))
+        XCTAssertTrue(detector.isMateriallyDifferent(over, side: 64, threshold: 0.02),
+                      "6/255 is over it")
+
+        detector.forget()
+        XCTAssertTrue(detector.isMateriallyDifferent(same, side: 64, threshold: 0.02),
+                      "a forgotten baseline makes the next frame a change, whatever it shows")
     }
 
     // MARK: Scenario: stopping tears everything down

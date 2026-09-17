@@ -133,7 +133,15 @@ final class LiveCameraCaptureGuaranteeTests: XCTestCase {
         let bus = LiveTranslateSanitisingBus()
         let layer = LiveCameraCaptureStub()
         // The tap samples at the configured cadence, so time has to move for
-        // more than the first frame to be handed on.
+        // more than the first frame to be handed on — and the interval that
+        // applies here is the *reduced* one, because the stub's buffers are all
+        // zero-filled: byte-identical frames are a still scene, and the
+        // frame-change gate is what makes a still scene cost less than a
+        // changing one (LiveCameraSession, `effectiveSampleInterval`). The
+        // nominal 0.25 s would have the gate-driven cadence drop samples 2..4,
+        // which is the feature, not this test's subject.
+        let interval = Swift.max(LiveTranslateConfig.default.ocrSampleInterval,
+                                 LiveTranslateConfig.default.stableSampleInterval)
         var now = 1_000.0
         let session = LiveCameraSession(config: .default,
                                         observabilityBus: bus,
@@ -146,7 +154,7 @@ final class LiveCameraCaptureGuaranteeTests: XCTestCase {
         // A full pass over the path: sampled frames in, consumed by the
         // detector-side consumer, then torn down.
         for index in 1...4 {
-            now += LiveTranslateConfig.default.ocrSampleInterval
+            now += interval
             try layer.deliverFrame(width: 128, height: 96,
                                    pts: CMTime(value: CMTimeValue(index), timescale: 1))
             let frame = await nextFrame(frames, within: 2.0)

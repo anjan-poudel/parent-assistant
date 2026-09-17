@@ -7,17 +7,31 @@ import XCTest
 /// The tier is exercised over a **deterministic fake** for the one thing that
 /// needs a model: the generation. Everything that is a rule rather than a
 /// runtime call — which model runs, what one batch contains, what a malformed
-/// or partial answer means, what a failure is recorded as, and the fact that
-/// nothing but counts ever reaches the log — is driven here without a model on
-/// disk.
+/// or partial answer means, what a failure is recorded as, whether the device
+/// may spend the memory on a load at all, and the fact that nothing but counts
+/// ever reaches the log — is driven here without a model on disk.
+///
+/// **The direction of every fixture is load-bearing.** Sources are English and
+/// answers are Nepali, because that is the shipped direction: the vision
+/// runtime that feeds this feature reads English scene text (it has no
+/// Devanagari recognition language at all), and the elder's language — Nepali
+/// — is the language a translation is a translation *into*. The fixtures this
+/// suite shipped with were the other way round, which is the defect the
+/// 2026-09-17 rules below pin.
 final class LocalBrainTranslationTierTests: XCTestCase {
 
     private let config = LiveTranslateConfig.default
 
-    /// A string no dictionary knows and only the brain can answer.
+    /// Strings no dictionary knows and only the brain can answer: English
+    /// words, printed on a sign, which is what the camera can actually read.
     private let brainText = "Pharmacy"
     private let secondBrainText = "Open"
     private let thirdBrainText = "No entry"
+
+    /// What a Nepali-speaking elder must be shown for those signs.
+    private let brainAnswer = "फार्मेसी"
+    private let secondBrainAnswer = "खुला छ"
+    private let thirdBrainAnswer = "प्रवेश निषेध"
 
     // MARK: - Doubles
 
@@ -27,6 +41,9 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         var output = ""
         /// A failure to throw instead of answering (timeout, load failure, …).
         var failure: BrainGenerationFailure?
+        /// Whether a handle is already open on the model. Drives the one case
+        /// where the memory gate must not refuse: the bytes are spent already.
+        var holdingHandle = false
 
         private(set) var prompts: [String] = []
         private(set) var timeouts: [TimeInterval] = []
@@ -42,8 +59,37 @@ final class LocalBrainTranslationTierTests: XCTestCase {
             return output
         }
 
+        func isHoldingHandle() async -> Bool { holdingHandle }
+
         func release() async { releaseCount += 1 }
     }
+
+    /// The app's headroom reading, scripted. `headroom` is what the resource
+    /// gate compares against the model's hard bytes, so the arithmetic is a
+    /// fact about this file rather than about the machine the suite runs on.
+    /// The read is counted, because "the gate short-circuits before it looks
+    /// at memory" is itself a claim worth pinning.
+    private final class ScriptedProbe: MemoryProbing {
+        var physicalMemoryBytes: UInt64
+        var headroom: UInt64
+        private(set) var headroomReads = 0
+
+        var availableProcessMemoryBytes: UInt64 {
+            headroomReads += 1
+            return headroom
+        }
+
+        init(physicalMemoryBytes: UInt64 = 6_000_000_000,
+             headroom: UInt64 = 8_000_000_000) {
+            self.physicalMemoryBytes = physicalMemoryBytes
+            self.headroom = headroom
+        }
+    }
+
+    /// A slot's owner, kept alive by the test that made it resident: the
+    /// ledger prunes entries whose owner has died, so a resident brain is
+    /// only resident for as long as somebody holds this.
+    private final class FakeOwner {}
 
     // MARK: - Fixtures
 
@@ -102,8 +148,18 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         return url
     }
 
+    /// The tier over a scripted store and generator.
+    ///
+    /// The probe and the ledger default to values that *permit* the load — a
+    /// fresh manager with nothing resident and an abundance of headroom — so
+    /// every test that is not about the resource gate is about the thing it
+    /// says it is about, and none of them depend on how much memory the host
+    /// happens to have free. The tests that are about the gate drive both.
     private func withTier<T>(installed: Bool = true,
                              config: LiveTranslateConfig = .default,
+                             targetLanguage: AppLanguage = .nepali,
+                             memory: MemoryProbing? = nil,
+                             ledger: ModelLifecycleManager? = nil,
                              run: (LocalBrainTranslationTier, ScriptedGenerator, LiveTranslateSanitisingBus) async throws -> T) async rethrows -> T {
         let root = makeRoot()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -114,8 +170,27 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         let tier = LocalBrainTranslationTier(config: config,
                                              modelStore: store,
                                              events: events,
-                                             generator: generator)
+                                             generator: generator,
+                                             targetLanguage: targetLanguage,
+                                             memory: memory ?? ScriptedProbe(),
+                                             ledger: ledger ?? ModelLifecycleManager(probe: ScriptedProbe()))
         return try await run(tier, generator, bus)
+    }
+
+    /// A manager with `slot` fully resident (registered, admitted, marked
+    /// loaded). Returns the owner, which the caller must keep alive.
+    @discardableResult
+    private func makeLedger(residing slot: ModelSlot) -> (ModelLifecycleManager, FakeOwner) {
+        let owner = FakeOwner()
+        let manager = ModelLifecycleManager(probe: ScriptedProbe(),
+                                            budgetOverrideBytes: ModelLifecycleBudget.standardModelsBudgetBytes)
+        manager.register(slot: slot, modelID: Self.modelID, owner: owner,
+                         unload: { [weak owner] in _ = owner })
+        let admission = manager.prepareLoad(of: slot, modelID: Self.modelID)
+        XCTAssertTrue(admission.isAllowed, "the fixture's own load must be admitted: \(admission)")
+        manager.didLoad(slot, owner: owner)
+        XCTAssertTrue(manager.isResident(slot), "the fixture must actually be resident")
+        return (manager, owner)
     }
 
     /// The answer a real generation would produce for these sources, in the
@@ -123,6 +198,12 @@ final class LocalBrainTranslationTierTests: XCTestCase {
     private func answer(_ translations: [String]) -> String {
         String(data: try! JSONSerialization.data(withJSONObject: ["translations": translations]),
                encoding: .utf8)!
+    }
+
+    /// The batch event's metadata, as a dictionary, for the tests that make a
+    /// claim about what was reported rather than about what came back.
+    private func batchEvent(_ bus: LiveTranslateSanitisingBus) -> ObservabilityEvent? {
+        bus.events(named: "brain_translation_batch").first
     }
 
     // MARK: Availability — installed, or honestly not
@@ -155,7 +236,9 @@ final class LocalBrainTranslationTierTests: XCTestCase {
                                              modelStore: store,
                                              events: LiveTranslateEvents(bus: LiveTranslateSanitisingBus(),
                                                                          config: config),
-                                             generator: ScriptedGenerator())
+                                             generator: ScriptedGenerator(),
+                                             memory: ScriptedProbe(),
+                                             ledger: ModelLifecycleManager(probe: ScriptedProbe()))
 
         let model = await tier.installedModel()
         XCTAssertEqual(model, id,
@@ -178,7 +261,9 @@ final class LocalBrainTranslationTierTests: XCTestCase {
                                              modelStore: store,
                                              events: LiveTranslateEvents(bus: LiveTranslateSanitisingBus(),
                                                                          config: config),
-                                             generator: ScriptedGenerator())
+                                             generator: ScriptedGenerator(),
+                                             memory: ScriptedProbe(),
+                                             ledger: ModelLifecycleManager(probe: ScriptedProbe()))
 
         let model = await tier.installedModel()
         XCTAssertEqual(model, preferred, "the preference list is an order, not a set")
@@ -202,7 +287,9 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         let tier = LocalBrainTranslationTier(config: config,
                                              modelStore: nil,
                                              events: LiveTranslateEvents(bus: bus, config: config),
-                                             generator: ScriptedGenerator())
+                                             generator: ScriptedGenerator(),
+                                             memory: ScriptedProbe(),
+                                             ledger: ModelLifecycleManager(probe: ScriptedProbe()))
         let outcome = await tier.translate([brainText])
 
         XCTAssertEqual(outcome, .none)
@@ -225,16 +312,16 @@ final class LocalBrainTranslationTierTests: XCTestCase {
 
     func testEveryUnresolvedStringOfACycleGoesIntoOneGeneration() async throws {
         try await withTier { tier, generator, bus in
-            generator.output = answer(["फार्मेसी", "खुला छ", "प्रवेश निषेध"])
+            generator.output = answer([brainAnswer, secondBrainAnswer, thirdBrainAnswer])
             let sources = [brainText, secondBrainText, thirdBrainText]
 
             let outcome = await tier.translate(sources)
 
             XCTAssertEqual(generator.prompts.count, 1,
                            "N unresolved strings are ONE generation, not N")
-            XCTAssertEqual(outcome.translations, [brainText: "फार्मेसी",
-                                                  secondBrainText: "खुला छ",
-                                                  thirdBrainText: "प्रवेश निषेध"])
+            XCTAssertEqual(outcome.translations, [brainText: brainAnswer,
+                                                  secondBrainText: secondBrainAnswer,
+                                                  thirdBrainText: thirdBrainAnswer])
             let event = bus.events(named: "brain_translation_batch").first
             XCTAssertEqual(event?.metadata["resolvedCount"], "3")
             XCTAssertEqual(event?.metadata["unresolvedCount"], "0")
@@ -244,7 +331,7 @@ final class LocalBrainTranslationTierTests: XCTestCase {
 
     func testThePromptCarriesTheSourcesInOrderAndKeepsTheSchemaOutOfIt() async throws {
         try await withTier { tier, generator, _ in
-            generator.output = answer(["फार्मेसी", "खुला छ"])
+            generator.output = answer([brainAnswer, secondBrainAnswer])
             _ = await tier.translate([brainText, secondBrainText])
 
             let prompt = try XCTUnwrap(generator.prompts.first)
@@ -259,11 +346,47 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         }
     }
 
+    /// The one instruction a generation cannot check for itself is the
+    /// direction, so it has to be *said* — and said as a pair, because the
+    /// prompt that shipped here named the wrong direction ("translate Nepali
+    /// sign text into English"), an instruction the English input already
+    /// satisfied. The model obeyed it, the literature it produced was settled
+    /// as a translation, and the cloud was never asked. This is the pin on the
+    /// pair: English in, Nepali out.
+    func testThePromptAsksForTheSessionsTargetLanguage() async throws {
+        try await withTier { tier, generator, _ in
+            generator.output = answer([brainAnswer])
+            _ = await tier.translate([brainText])
+
+            let prompt = try XCTUnwrap(generator.prompts.first)
+            XCTAssertTrue(prompt.contains("You translate English text into Nepali."),
+                          "the direction is stated as source → target, in words: \(prompt)")
+            XCTAssertFalse(prompt.lowercased().contains("into english"),
+                           "the direction is the session's, never the reverse")
+        }
+    }
+
+    /// The prompt is built from the session's target rather than from a
+    /// hard-coded language, so the one direction the design excludes (OD6's
+    /// phrase card) is still a *stated* direction rather than a wrong one if a
+    /// target ever changes.
+    func testTheStatedDirectionFollowsTheTargetLanguage() {
+        let inNepali = LocalBrainTranslationTier.prompt(for: ["Pharmacy"],
+                                                        targetLanguage: .nepali)
+        XCTAssertTrue(inNepali.hasPrefix("You translate English text into Nepali."),
+                      "shipped direction: \(inNepali)")
+
+        let inEnglish = LocalBrainTranslationTier.prompt(for: ["फार्मेसी"],
+                                                         targetLanguage: .english)
+        XCTAssertTrue(inEnglish.hasPrefix("You translate Nepali text into English."),
+                      "the mirror direction is derived, not duplicated: \(inEnglish)")
+    }
+
     func testTheConfiguredTimeoutIsTheOneTheGenerationGets() async throws {
         var config = LiveTranslateConfig.default
         config.brainTranslationTimeoutSeconds = 7
         try await withTier(config: config) { tier, generator, _ in
-            generator.output = answer(["फार्मेसी"])
+            generator.output = answer([brainAnswer])
             _ = await tier.translate([brainText])
             XCTAssertEqual(generator.timeouts, [7],
                            "the deadline is the config's, not a literal at the call site")
@@ -276,7 +399,7 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         var config = LiveTranslateConfig.default
         config.brainTranslationMaxStrings = 2
         try await withTier(config: config) { tier, generator, bus in
-            generator.output = answer(["फार्मेसी", "खुला छ"])
+            generator.output = answer([brainAnswer, secondBrainAnswer])
             let sources = [brainText, secondBrainText, thirdBrainText]
 
             let outcome = await tier.translate(sources)
@@ -298,7 +421,7 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         config.brainTranslationMaxCharacters = 10
         try await withTier(config: config) { tier, generator, _ in
             let long = String(repeating: "क", count: 8)
-            generator.output = answer(["फार्मेसी", "खुला छ"])
+            generator.output = answer([brainAnswer, secondBrainAnswer])
 
             let outcome = await tier.translate([long, long])
 
@@ -333,10 +456,10 @@ final class LocalBrainTranslationTierTests: XCTestCase {
 
     func testAnAnswerThatStopsEarlyLeavesTheTailUnresolved() async throws {
         try await withTier { tier, generator, _ in
-            generator.output = answer(["फार्मेसी"])
+            generator.output = answer([brainAnswer])
             let outcome = await tier.translate([brainText, secondBrainText])
 
-            XCTAssertEqual(outcome.translations, [brainText: "फार्मेसी"])
+            XCTAssertEqual(outcome.translations, [brainText: brainAnswer])
             XCTAssertNil(outcome.translations[secondBrainText],
                          "a short answer must not shift translations onto the wrong sign")
         }
@@ -355,6 +478,71 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         }
     }
 
+    /// The echo a 4B model actually produces is not byte-identical to its
+    /// source: it is the same words in the model's own typography. Byte
+    /// equality (what shipped) lets `OPEN` → `Open` through, which settles the
+    /// sign as translated while the elder reads no translation at all.
+    func testANearEchoOfTheSourceIsNotATranslation() async throws {
+        try await withTier { tier, generator, bus in
+            generator.output = answer(["pharmacy", "OPEN."])
+            let outcome = await tier.translate([brainText, secondBrainText])
+
+            XCTAssertTrue(outcome.translations.isEmpty,
+                          "case and punctuation are not a translation")
+            let event = batchEvent(bus)
+            XCTAssertEqual(event?.metadata["unresolvedCount"], "2")
+            XCTAssertEqual(event?.outcome, "degraded")
+        }
+    }
+
+    /// The rule the whole fallback depends on: an answer that is not in the
+    /// target's script did not change language, so it cannot settle a region.
+    /// This is the direction defect as a rule rather than as a wording.
+    func testAnAnswerInTheWrongScriptIsUnresolvedEvenWhenItIsNoEcho() async throws {
+        try await withTier { tier, generator, _ in
+            generator.output = answer(["Chemist shop"])
+            let outcome = await tier.translate([brainText])
+
+            XCTAssertTrue(outcome.translations.isEmpty,
+                          "English is not a Nepali translation of an English sign")
+        }
+    }
+
+    /// The script rule is about the *target*, so it is not a rule about
+    /// Nepali: the English target refuses an answer with no Latin letter in it
+    /// and accepts an English one.
+    func testTheScriptRuleFollowsTheTargetLanguage() async throws {
+        try await withTier(targetLanguage: .english) { tier, generator, _ in
+            generator.output = answer([brainAnswer])
+            let outcome = await tier.translate([brainText])
+
+            XCTAssertTrue(outcome.translations.isEmpty,
+                          "Devanagari is not an English translation")
+        }
+        try await withTier(targetLanguage: .english) { tier, generator, _ in
+            generator.output = answer(["Drug store"])
+            let outcome = await tier.translate([brainText])
+
+            XCTAssertEqual(outcome.translations, [brainText: "Drug store"])
+        }
+    }
+
+    /// A source with no letters has no script to be translated into, so the
+    /// script rule is skipped for it — while the echo rule still applies.
+    func testANumeralsOnlySourceIsNotRefusedForItsScript() {
+        XCTAssertNil(LocalBrainTranslationTier.accepts("24",
+                                                      for: "24",
+                                                      targetLanguage: .nepali,
+                                                      config: config),
+                     "the source again is not a translation, numerals or not")
+        XCTAssertEqual(LocalBrainTranslationTier.accepts("२४",
+                                                         for: "24",
+                                                         targetLanguage: .nepali,
+                                                         config: config),
+                       "२४",
+                       "a numerals-only sign is not refused for having no script to translate into")
+    }
+
     func testAnAnswerThatIsNotTheGrammarIsUnresolvedRatherThanRendered() async throws {
         try await withTier { tier, generator, bus in
             generator.output = "I am sorry, I cannot help with that."
@@ -368,9 +556,9 @@ final class LocalBrainTranslationTierTests: XCTestCase {
 
     func testTranslationsAreTrimmedAndAttributedToTheBrainAlone() async throws {
         try await withTier { tier, generator, _ in
-            generator.output = answer(["  फार्मेसी  "])
+            generator.output = answer(["  \(brainAnswer)  "])
             let outcome = await tier.translate([brainText])
-            XCTAssertEqual(outcome.translations[brainText], "फार्मेसी")
+            XCTAssertEqual(outcome.translations[brainText], brainAnswer)
         }
     }
 
@@ -414,17 +602,162 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         }
     }
 
+    // MARK: The device pays for the load only when it can
+
+    /// Another owner's brain is live: the voice pipeline holds one while the
+    /// household is talking to it, and a second 4B decode alongside it is the
+    /// shape that gets the app killed. The translation is the workload that can
+    /// afford to wait, and the strings are left for the cloud.
+    func testTheBatchIsNotAskedWhenAnotherOwnersBrainIsResident() async throws {
+        let (ledger, owner) = makeLedger(residing: .brain)
+        let probe = ScriptedProbe()
+        try await withTier(memory: probe, ledger: ledger) { tier, generator, bus in
+            let outcome = await tier.translate([self.brainText, self.secondBrainText])
+
+            XCTAssertTrue(generator.prompts.isEmpty,
+                          "the 4B is live for the voice pipeline: this batch does not load it")
+            XCTAssertTrue(outcome.translations.isEmpty)
+            XCTAssertEqual(outcome.deferral, .residentBrain)
+            let event = batchEvent(bus)
+            XCTAssertEqual(event?.metadata["resolvedCount"], "0")
+            XCTAssertEqual(event?.metadata["unresolvedCount"], "2",
+                           "every string handed over is reported unresolved, so the caller knows "
+                           + "to send all of them onward")
+            XCTAssertEqual(event?.outcome, "degraded")
+            XCTAssertTrue(bus.events(named: "brain_translation_unavailable").isEmpty,
+                          "nothing was unavailable — the device was busy with something else")
+            XCTAssertEqual(probe.headroomReads, 0,
+                           "the residency rule is asked first: no memory is read to refuse a load "
+                           + "that another owner's brain already forbids")
+            _ = owner
+        }
+    }
+
+    /// The intent brain counts as another owner's brain too: it is a second
+    /// llama handle for the same 4B class, and co-residency is exactly what the
+    /// ledger's budget exists to prevent.
+    func testTheBatchIsNotAskedWhenTheIntentBrainIsResident() async throws {
+        let (ledger, owner) = makeLedger(residing: .intentBrain)
+        try await withTier(ledger: ledger) { tier, generator, _ in
+            let outcome = await tier.translate([self.brainText])
+
+            XCTAssertTrue(generator.prompts.isEmpty)
+            XCTAssertEqual(outcome.deferral, .residentBrain)
+            _ = owner
+        }
+    }
+
+    /// Not enough headroom to hold the model's non-pageable bytes: this is the
+    /// state that gets a phone killed, so the batch goes to the cloud instead.
+    /// The comparison is the app's own declared quantity — the same
+    /// `ModelFootprint.hardBytes` the ledger budgets with — not a number this
+    /// tier invented.
+    func testTheBatchIsNotAskedWhenThereIsNoHeadroomForTheLoad() async throws {
+        let footprint = ModelLifecycleInventory.footprint(for: .brain, modelID: Self.modelID)
+        let probe = ScriptedProbe(headroom: footprint.hardBytes / 2)
+        try await withTier(memory: probe) { tier, generator, bus in
+            let outcome = await tier.translate([self.brainText])
+
+            XCTAssertTrue(generator.prompts.isEmpty, "no load: no generation")
+            XCTAssertEqual(outcome.deferral,
+                           .insufficientHeadroom(requiredBytes: Double(footprint.hardBytes),
+                                                 availableBytes: Double(probe.headroom)))
+            XCTAssertEqual(batchEvent(bus)?.outcome, "degraded")
+            XCTAssertGreaterThan(probe.headroomReads, 0, "the gate read the headroom to decide")
+        }
+    }
+
+    /// The configured factor scales the requirement, so a device can be told to
+    /// keep a margin rather than to spend its last byte.
+    func testTheHeadroomFactorScalesTheRequirement() async throws {
+        var config = LiveTranslateConfig.default
+        config.brainTranslationHeadroomFactor = 2
+        let footprint = ModelLifecycleInventory.footprint(for: .brain, modelID: Self.modelID)
+        let probe = ScriptedProbe(headroom: footprint.hardBytes)
+        try await withTier(config: config, memory: probe) { tier, generator, _ in
+            let outcome = await tier.translate([self.brainText])
+
+            XCTAssertTrue(generator.prompts.isEmpty,
+                          "one model's worth of headroom is not two models' worth")
+            XCTAssertEqual(outcome.deferral,
+                           .insufficientHeadroom(requiredBytes: Double(footprint.hardBytes) * 2,
+                                                 availableBytes: Double(footprint.hardBytes)))
+        }
+    }
+
+    /// With the headroom above the requirement the load is admitted, so the
+    /// gate is a gate rather than a refusal.
+    func testTheBatchIsAskedWhenTheDeviceCanPayForTheLoad() async throws {
+        let footprint = ModelLifecycleInventory.footprint(for: .brain, modelID: Self.modelID)
+        let probe = ScriptedProbe(headroom: footprint.hardBytes * 4)
+        try await withTier(memory: probe) { tier, generator, _ in
+            generator.output = answer([self.brainAnswer])
+            let outcome = await tier.translate([self.brainText])
+
+            XCTAssertEqual(generator.prompts.count, 1)
+            XCTAssertEqual(outcome.translations, [self.brainText: self.brainAnswer])
+            XCTAssertNil(outcome.deferral)
+        }
+    }
+
+    /// A handle is already open on the model: the bytes are spent, so the
+    /// headroom reading is not a reason to refuse the batch that is already
+    /// paying for them.
+    func testAResidentHandleIsNotRefusedForHeadroom() async throws {
+        let probe = ScriptedProbe(headroom: 0)
+        try await withTier(memory: probe) { tier, generator, _ in
+            generator.holdingHandle = true
+            generator.output = answer([self.brainAnswer])
+            _ = await tier.translate([self.brainText])
+
+            XCTAssertEqual(generator.prompts.count, 1,
+                           "the handle is open: the load the gate guards is not going to happen")
+        }
+    }
+
+    /// The deferral to another owner is configurable, so a device that would
+    /// rather queue behind the voice pipeline than skip the tier can say so.
+    func testDeferringToAResidentBrainIsConfigurable() async throws {
+        var config = LiveTranslateConfig.default
+        config.brainTranslationDefersToResidentBrain = false
+        let (ledger, owner) = makeLedger(residing: .brain)
+        try await withTier(config: config, ledger: ledger) { tier, generator, _ in
+            generator.output = answer([self.brainAnswer])
+            let outcome = await tier.translate([self.brainText])
+
+            XCTAssertEqual(generator.prompts.count, 1)
+            XCTAssertEqual(outcome.translations, [self.brainText: self.brainAnswer])
+            _ = owner
+        }
+    }
+
+    /// A gate that fired is not an unavailable tier, and the difference is what
+    /// the caller reads to decide whether the batch is owed to the cloud.
+    func testADeferredBatchReportsItselfAsUnresolvedRatherThanUnavailable() async throws {
+        let (ledger, owner) = makeLedger(residing: .brain)
+        try await withTier(ledger: ledger) { tier, _, bus in
+            _ = await tier.translate([self.brainText])
+
+            XCTAssertEqual(bus.events(named: "brain_translation_batch").count, 1)
+            XCTAssertEqual(bus.events(named: "brain_translation_batch").first?.outcome, "degraded")
+            XCTAssertTrue(bus.events(named: "brain_translation_unavailable").isEmpty)
+            _ = owner
+        }
+    }
+
     // MARK: Nothing but counts and closed tokens reaches the log
 
     func testNoEventCarriesAStringFromTheBatch() async throws {
         try await withTier { tier, generator, bus in
-            generator.output = answer(["फार्मेसी"])
+            generator.output = answer([brainAnswer])
             _ = await tier.translate([brainText, secondBrainText])
 
             for event in bus.events {
                 for (key, value) in event.metadata {
                     XCTAssertFalse(value.contains(brainText) || value.contains(secondBrainText),
                                    "\(event.eventType).\(key) carries a source string")
+                    XCTAssertFalse(value.contains(brainAnswer),
+                                   "\(event.eventType).\(key) carries a translation")
                     XCTAssertFalse(value.unicodeScalars.contains { (0x0900...0x097F).contains($0.value) },
                                    "\(event.eventType).\(key) carries Devanagari — content reached the log")
                 }
@@ -434,7 +767,7 @@ final class LocalBrainTranslationTierTests: XCTestCase {
 
     func testTheBatchEventCarriesTheDurationTheTierMeasured() async throws {
         try await withTier { tier, generator, bus in
-            generator.output = answer(["फार्मेसी"])
+            generator.output = answer([brainAnswer])
             let outcome = await tier.translate([brainText])
 
             let event = try XCTUnwrap(bus.events(named: "brain_translation_batch").first)
@@ -443,29 +776,5 @@ final class LocalBrainTranslationTierTests: XCTestCase {
                           "the top-level duration and the metadata key come from one measurement")
             XCTAssertGreaterThanOrEqual(outcome.durationMs, 0)
         }
-    }
-
-    /// The feature translates English → Nepali. The shipped prompt must ask
-    /// for the Nepali direction — a flipped prompt (Nepali → English) is the
-    /// bug that made non-dictionary text never translate (2026-09-17).
-    func testThePromptAsksForTheNepaliDirection() {
-        let prompt = LocalBrainTranslationTier.prompt(for: ["Start"])
-        XCTAssertTrue(prompt.contains("into Nepali"),
-                      "the prompt must target Nepali, got: \(prompt)")
-        XCTAssertFalse(prompt.contains("into English"),
-                       "the prompt must not target English, got: \(prompt)")
-    }
-
-    /// A Latin-script answer for a Nepali target is a wrong-language or echo
-    /// artifact — it must be unresolved so the cloud tier carries the string.
-    func testALatinScriptAnswerIsUnresolved() {
-        let sources = ["Start"]
-        let parsed = LocalBrainTranslationTier.parse(
-            answer(["Start"]) /* raw JSON */, sources: sources, config: config)
-        XCTAssertNil(parsed[sources[0]],
-                     "a non-Devanagari answer must not be attributed to the source")
-        let parsedOK = LocalBrainTranslationTier.parse(
-            answer(["सुरु गर्ने"]), sources: sources, config: config)
-        XCTAssertEqual(parsedOK[sources[0]], "सुरु गर्ने")
     }
 }
