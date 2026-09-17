@@ -168,8 +168,9 @@ final class SnapshotModeTests: XCTestCase {
         harness.recorder?.recordedPasses.count ?? harness.parts.engine.recognizeCallCount
     }
 
-    /// Delivers one frame and waits for the recognition pass it triggers, so
-    /// the next delivery is not dropped by the backpressure flag.
+    /// Delivers one frame and waits for the whole cycle it triggers: the pass
+    /// runs, the tap is free for the next sample, and the publication this pass
+    /// produced has reached the session model.
     @MainActor
     @discardableResult
     private func deliverPass(_ harness: Harness,
@@ -178,6 +179,7 @@ final class SnapshotModeTests: XCTestCase {
                              file: StaticString = #filePath,
                              line: UInt = #line) async throws -> CMSampleBuffer {
         let passesBefore = recognizeCount(harness)
+        let publishedBefore = harness.model.publication?.sequence ?? 0
         let buffer = try deliverFrame(harness, width: width, height: height)
         await waitUntil("the delivered frame to be recognised", file: file, line: line) {
             self.recognizeCount(harness) > passesBefore
@@ -191,6 +193,24 @@ final class SnapshotModeTests: XCTestCase {
         // next sample" signal, and the guarantee this helper's contract names.
         await waitUntil("the recognition pass to finish", file: file, line: line) {
             !harness.camera.ocrPassInFlight
+        }
+        // Free is not *finished*. The flag is cleared the moment Vision returns
+        // (`LiveTranslationPipeline.ingest`, the statement after
+        // `recogniser.recognize`), and everything the pass is *for* follows it
+        // on the pipeline actor: the stabiliser consumes the pass, the boxes
+        // are placed and the publication is handed to the session model — the
+        // last thing the cycle does. A caller that reads `model.publication` as
+        // soon as the flag clears is racing that hop across two actors, and it
+        // loses whenever the pipeline's own work between the two runs longer
+        // than the caller's turn — the heavier placement on master is what made
+        // the window reachable, and the losing read is the *previous* cycle's
+        // publication ("two passes, no regions" — the identity test's exact
+        // failure). So the wait is for the pass's own publication to land: the
+        // sequence is the session's ordering signal (AM-6), every successful
+        // pass advances it, and only a suppressed jitter-only cycle does not —
+        // which a scripted pass with fixed boxes cannot be.
+        await waitUntil("the pass's publication to reach the session", file: file, line: line) {
+            (harness.model.publication?.sequence ?? 0) > publishedBefore
         }
         return buffer
     }

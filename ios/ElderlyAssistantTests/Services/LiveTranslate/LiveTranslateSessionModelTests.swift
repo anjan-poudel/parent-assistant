@@ -97,8 +97,9 @@ final class LiveTranslateSessionModelTests: XCTestCase {
     }
 
     /// Delivers one frame through the capture layer — the same path
-    /// `AVCaptureVideoDataOutput` uses — and waits for the recognition pass it
-    /// triggers, so the next delivery is not dropped by the backpressure flag.
+    /// `AVCaptureVideoDataOutput` uses — and waits for the whole cycle it
+    /// triggers: the pass runs, the tap is free for the next sample, and the
+    /// publication this pass produced has reached the session model.
     @MainActor
     private func deliverPass(_ harness: Harness,
                              width: Int = 1920,
@@ -106,6 +107,7 @@ final class LiveTranslateSessionModelTests: XCTestCase {
                              file: StaticString = #filePath,
                              line: UInt = #line) async throws {
         let passesBefore = harness.engine.recognizeCallCount
+        let publishedBefore = harness.model.publication?.sequence ?? 0
         harness.clock.advance()
         let pts = CMTime(value: CMTimeValue(harness.clock.now * 600), timescale: 600)
         let buffer = try SampleBufferFactory.make(width: width, height: height, pts: pts)
@@ -122,6 +124,20 @@ final class LiveTranslateSessionModelTests: XCTestCase {
         // next sample" signal, and the guarantee this helper's contract names.
         await waitUntil("the recognition pass to finish", file: file, line: line) {
             !harness.camera.ocrPassInFlight
+        }
+        // Free is not *finished*: the flag is cleared the moment Vision returns
+        // (`LiveTranslationPipeline.ingest`, the statement after
+        // `recogniser.recognize`), and the stabiliser's consumption and the
+        // publication the model renders both follow it — `publish()` is the
+        // last thing the cycle does. A caller that reads the model as soon as
+        // the flag clears is racing that hop across two actors and reads the
+        // previous cycle's publication whenever the pipeline's own work between
+        // them runs long. So the wait is for this pass's publication to land on
+        // the model, ordered by the publication sequence (AM-6): every
+        // successful pass advances it, and only a suppressed jitter-only cycle
+        // does not — which identical scripted boxes cannot be.
+        await waitUntil("the pass's publication to reach the session", file: file, line: line) {
+            (harness.model.publication?.sequence ?? 0) > publishedBefore
         }
     }
 
