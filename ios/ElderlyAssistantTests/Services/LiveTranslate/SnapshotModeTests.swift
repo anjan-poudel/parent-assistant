@@ -1643,6 +1643,166 @@ final class SnapshotModeTests: XCTestCase {
         XCTAssertGreaterThan(ink.count, 400, "only the card's own shape was drawn")
     }
 
+    // MARK: - 11. The wait between the tap and the held picture (owner UX follow-up)
+
+    /// The owner's second device report: the freeze works, but the wait for it
+    /// is silent — "could not tell if it was working, slow, or broken".
+    ///
+    /// So the wait is a state the elder can stand in rather than an instant,
+    /// and this test stands in it: the still pass over the tapped frame is held
+    /// open at the engine's own seam, and while it runs the control's surface
+    /// says a freeze is in flight while the picture is **not** held yet. The
+    /// pass returning is what ends the wait — the readable card the wait was
+    /// for is on screen at the same moment, so "the wait is over" and "there is
+    /// something to read" cannot disagree.
+    @MainActor
+    func testTheWaitIsUpWhileTheStillPassIsRunningAndEndsWithTheHeldPicture() async throws {
+        let harness = makeHarness(recording: true)
+        let recorder = try XCTUnwrap(harness.recorder)
+        reportLayout(harness)
+        recorder.regions = [detected(curatedText, box: (0.08, 0.10, 0.62, 0.20))]
+        await harness.model.start()
+        try await deliverPass(harness, width: 640, height: 480)
+
+        XCTAssertFalse(harness.model.freezeInProgress, "nothing is in flight before the tap")
+
+        // The pass the freeze needs is held open, so the wait is observable
+        // instead of inferred — and released however this test leaves, so a
+        // failure here cannot leave a queue blocked behind it.
+        let passesBeforeTheTap = recorder.recordedPasses.count
+        recorder.hold = DispatchSemaphore(value: 0)
+        defer {
+            recorder.hold?.signal()
+            recorder.hold = nil
+        }
+
+        harness.model.captureSnapshot()
+        // On the tap's own stack: the freeze's work is off it, so this is the
+        // drawing the tap itself produced.
+        XCTAssertTrue(harness.model.freezeInProgress, "the wait starts with the tap, not with the work")
+        XCTAssertTrue(harness.model.snapshotSurface.isLoading)
+
+        // …and it is still up with the still pass actually running.
+        await waitUntil("the still pass over the tapped frame to start") {
+            recorder.recordedPasses.count > passesBeforeTheTap
+        }
+        XCTAssertNil(harness.model.frozen, "the picture is not held while its pass is running")
+        XCTAssertTrue(harness.model.freezeInProgress)
+        XCTAssertTrue(harness.model.snapshotSurface.isLoading)
+        XCTAssertEqual(harness.model.snapshotSurface.label,
+                       L10n.str(LiveTranslateSnapshotSurface.holdingKey, locale: nepali),
+                       "the wait is the catalog's sentence, in the elder's language")
+        XCTAssertNotEqual(harness.model.snapshotSurface.label,
+                          LiveTranslateSnapshotSurface.holdingKey,
+                          "an unresolved catalog key would leave the elder reading the key")
+
+        // The tap is served: the pass returns, the picture is held, the wait is
+        // over — and what it was waited for is on the card.
+        recorder.hold?.signal()
+        recorder.hold = nil
+        await waitUntil("the frame to be frozen and published") { harness.model.frozen != nil }
+
+        XCTAssertFalse(harness.model.freezeInProgress, "the held picture is the end of the wait")
+        XCTAssertFalse(harness.model.snapshotSurface.isLoading)
+        XCTAssertEqual(harness.model.snapshotSurface.label,
+                       L10n.str("livetranslate.snapshot.live", locale: nepali),
+                       "the control is an action again")
+        XCTAssertEqual(harness.model.resultsCard.rows.map(\.translation), [curatedText],
+                       "the wait ends with the picture's text readable, or it ended too early")
+    }
+
+    /// A tap that cannot be served starts nothing, so it must show nothing: no
+    /// frame is in hand, no capture is attempted, and a spinner for work nobody
+    /// is doing would be the same lie in the other direction.
+    @MainActor
+    func testATapWithNoFrameInHandShowsNoWait() async throws {
+        let harness = makeHarness()
+        reportLayout(harness)
+
+        harness.model.captureSnapshot()
+
+        XCTAssertFalse(harness.model.freezeInProgress)
+        XCTAssertFalse(harness.model.snapshotSurface.isLoading)
+        XCTAssertFalse(harness.model.snapshotSurface.isFrozen)
+        XCTAssertEqual(harness.model.snapshotSurface.label,
+                       L10n.str("livetranslate.snapshot.capture", locale: nepali),
+                       "the control still says what the tap would do")
+    }
+
+    /// The wait is bounded by the session that drew it: closing the feature
+    /// while a freeze is in flight cannot leave a control spinning over a
+    /// camera that has stopped — whichever of the two paths (the close itself,
+    /// or the in-flight work noticing) gets there first.
+    @MainActor
+    func testClosingTheSessionEndsTheWait() async throws {
+        let harness = makeHarness()
+        reportLayout(harness)
+        harness.parts.engine.regions = [detected(curatedText)]
+        await harness.model.start()
+        try await deliverPass(harness)
+
+        harness.model.captureSnapshot()
+        XCTAssertTrue(harness.model.freezeInProgress)
+
+        await harness.model.close()
+
+        XCTAssertFalse(harness.model.freezeInProgress,
+                       "no path out of the wait may leave the spinner turning")
+        XCTAssertFalse(harness.model.snapshotSurface.isLoading)
+    }
+
+    /// The wait is *drawn*, not only described. Its words are the catalog's and
+    /// are neither action's, and the control renders differently in the wait
+    /// than in either action — otherwise the tap would still leave the screen
+    /// looking exactly like "nothing happened", which is the report this
+    /// follow-up exists to answer.
+    @MainActor
+    func testTheWaitIsCatalogCopyAndDrawsDifferentlyFromBothActions() throws {
+        let holdingKey = LiveTranslateSnapshotSurface.holdingKey
+        for locale in [english, nepali] {
+            let holding = L10n.str(holdingKey, locale: locale)
+            XCTAssertNotEqual(holding, holdingKey, "\(holdingKey) does not resolve")
+            for actionKey in ["livetranslate.snapshot.capture", "livetranslate.snapshot.live"] {
+                XCTAssertNotEqual(holding, L10n.str(actionKey, locale: locale),
+                                  "the wait needs words of its own, not an action's")
+            }
+        }
+        XCTAssertNotEqual(L10n.str(holdingKey, locale: nepali), L10n.str(holdingKey, locale: english))
+
+        let canvas = CGSize(width: 320, height: 96)
+        func drawn(isFrozen: Bool, isLoading: Bool) throws -> OverlayRenderProbe.Ink {
+            let control = LiveTranslateSnapshotControl(
+                surface: LiveTranslateSnapshotSurface(isFrozen: isFrozen,
+                                                      isPresented: true,
+                                                      isEnabled: true,
+                                                      isLoading: isLoading,
+                                                      locale: english),
+                onToggle: {})
+            let image = try XCTUnwrap(OverlayRenderProbe.render(control, size: canvas),
+                                      "the control produced no bitmap")
+            let ink = try OverlayRenderProbe.ink(in: image)
+            XCTAssertFalse(ink.isEmpty,
+                           "the control drew nothing at all (loading: \(isLoading)): a wait an "
+                           + "elder cannot see is the report this answers")
+            return ink
+        }
+
+        let waiting = try drawn(isFrozen: false, isLoading: true)
+        XCTAssertNotEqual(waiting, try drawn(isFrozen: false, isLoading: false),
+                          "the wait drew the same thing as the freeze action")
+        XCTAssertNotEqual(waiting, try drawn(isFrozen: true, isLoading: false),
+                          "the wait drew the same thing as the go-live action")
+
+        // And the drawing itself is progress, at the app's own hero size, rather
+        // than one of the actions' glyphs: the surface is a pure value, so this
+        // half is read where the pixels are made.
+        let control = code("ElderlyAssistant/Services/LiveTranslate/Views/LiveTranslateSnapshotControl.swift")
+        XCTAssertTrue(control.contains("ProgressView()"),
+                      "the wait must be drawn as progress, not described in words alone")
+        XCTAssertTrue(control.contains("surface.isLoading"),
+                      "the control draws the state the model hands it")
+    }
+
 }
 
 // MARK: - Test doubles
@@ -1666,6 +1826,13 @@ final class SnapshotPassRecorder: LiveTextRecognitionEngine {
     var trackedBoxes: [String: NormalizedBox] = [:]
     var errorToThrow: Error?
 
+    /// Holds a pass open so a test can stand inside it — the pass is recorded
+    /// at its entry (so "the still pass has started" is observable) and only
+    /// then waits. The same shape the detector's own suite uses for the
+    /// in-flight state, because the wait between the tap and the held picture
+    /// is not a state a test can infer from a completion.
+    var hold: DispatchSemaphore?
+
     private let lock = NSLock()
     private var passes: [RecordedPass] = []
 
@@ -1681,6 +1848,7 @@ final class SnapshotPassRecorder: LiveTextRecognitionEngine {
                                    pixelBuffer: pixelBuffer))
         let scripted = regions
         lock.unlock()
+        hold?.wait()
         if let errorToThrow { throw errorToThrow }
         return scripted
     }

@@ -152,6 +152,19 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// and as the guard the lifecycle works through.
     @Published private(set) var isPaused = false
 
+    /// Whether a freeze is in flight: true from the tick of the capture
+    /// control until the picture is held.
+    ///
+    /// The tap buys a wait — the raster, one still pass over the frame, and the
+    /// placement — during which nothing on screen changes: the camera picture
+    /// keeps moving and no card is up. Without this flag "working", "slow" and
+    /// "broken" are the same experience (owner, device testing: "I could not
+    /// tell if it was working, slow, or broken"), so the control draws the wait
+    /// from this one value (`snapshotSurface`). It is `true` for exactly the
+    /// window between the tap and `frozen` being set, on every path out of that
+    /// window — including the ones where nothing is ever held.
+    @Published private(set) var freezeInProgress = false
+
     /// The FR-LCT-017 preference, as the control renders it.
     @Published private(set) var alwaysShowOriginal: Bool
 
@@ -364,6 +377,7 @@ final class LiveTranslateSessionModel: ObservableObject {
         LiveTranslateSnapshotSurface(isFrozen: isFrozen,
                                      isPresented: isCameraPhase,
                                      isEnabled: isFrozen || canCaptureSnapshot,
+                                     isLoading: freezeInProgress,
                                      locale: locale)
     }
 
@@ -526,6 +540,9 @@ final class LiveTranslateSessionModel: ObservableObject {
         snapshotTask = nil
         frozen = nil
         latestFrame = nil
+        // The session is over: a closed model is never mid-capture, and no
+        // spinner may outlive the view that drew it.
+        freezeInProgress = false
 
         // The observation surface returns to the state it had before the first
         // cycle. The last scene is not a claim about a session that has
@@ -673,11 +690,22 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// cloud here would hold the control for up to the tier's deadline before
     /// the picture stopped, which is the opposite of what the tap promises.
     ///
+    /// The tap also opens the wait the control draws (`freezeInProgress`): the
+    /// still pass and the placement take real time on a real frame, and until
+    /// the picture is held the screen shows no other sign of it.
+    ///
     /// Nothing is captured once a frame is held (a second tap means *thaw*,
     /// which is `returnToLive`), and nothing at all is captured before the
-    /// camera is running: with no frame in hand there is no picture to hold.
+    /// camera is running: with no frame in hand there is no picture to hold —
+    /// and no wait is shown either, because nothing is in flight.
     func captureSnapshot() {
         guard !isClosed, frozen == nil, phase == .running, let frame = latestFrame else { return }
+        // The wait starts here, on the tap's own stack, so the control's
+        // loading state is up in the same frame as the tap: the work below is
+        // off the tap's stack, and a spinner that appeared only once the work
+        // began would be a frame late on a fast capture and absent on a slow
+        // one.
+        freezeInProgress = true
         let layout = pendingLayout
         let policy = self.policy
         // The text the live picture is showing at the tap, taken here on the
@@ -710,6 +738,9 @@ final class LiveTranslateSessionModel: ObservableObject {
         snapshotTask?.cancel()
         snapshotTask = nil
         frozen = nil
+        // Thawing ends the wait as surely as holding the picture does: whatever
+        // the cancelled task was doing is no longer being waited for.
+        freezeInProgress = false
         // The frame the freeze was taken from is dropped with it: the next
         // capture waits for a frame delivered *after* the thaw, so a snapshot
         // can never be taken of a buffer the elder has already put away.
@@ -729,14 +760,32 @@ final class LiveTranslateSessionModel: ObservableObject {
                              layout: LiveTranslateLayout,
                              policy: LiveOverlayPlacement.Policy,
                              holdingRegions: [TextRegionStabilizer.StableTextRegion]) async {
-        guard !isClosed, frozen == nil, let path = snapshotPath else { return }
+        guard !isClosed, frozen == nil, let path = snapshotPath else {
+            // Nothing was attempted, so nothing is in flight: no path out of
+            // the loading state may leave the spinner turning.
+            freezeInProgress = false
+            return
+        }
 
         let outcome = await path.freeze(frame,
                                         layout: layout,
                                         policy: policy,
                                         holdingRegions: holdingRegions)
-        guard !isClosed, frozen == nil, case .success(let snapshot) = outcome else { return }
+        guard !isClosed, frozen == nil, case .success(let snapshot) = outcome else {
+            // The frame could not be shown, so it is not held: the live picture
+            // stays where it is and the wait is over. (The failure is the
+            // detector's own, recorded as `ocr_pass_failed`; a *still pass*
+            // that fails is not this path — the freeze then holds the text the
+            // live picture was showing.)
+            freezeInProgress = false
+            return
+        }
         frozen = snapshot
+        // The held picture is on screen, and the card with it: the loading
+        // state's whole life is the tap-to-picture window. The cloud answers
+        // that land afterwards arrive onto a picture that is already readable,
+        // so they are not part of the wait.
+        freezeInProgress = false
 
         // The answers land on the held frame if it is still the frame that is
         // held — compared by the picture itself, so a re-measure in between (a

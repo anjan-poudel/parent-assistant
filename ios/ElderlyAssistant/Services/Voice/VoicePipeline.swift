@@ -185,6 +185,12 @@ final class VoicePipeline {
     /// Held only during the VAD-gated capture phase — how far past silence
     /// onset we've counted before firing `finish()`.
     private var silenceCounter: Int = 0
+    /// [DEAD-TAP-RECOVERY] (2026-09-17) Chunks the CURRENT capture has
+    /// received. Zero at completion = the tap delivered nothing at all —
+    /// the 2026-09-17 device signature (22 s capture, recognizer's
+    /// buffer stayed empty) — and the tap is re-installed before the
+    /// next turn.
+    private var captureChunkCount: Int = 0
     /// [VAD-REGRESSION] True once the current capture's VAD has ever
     /// reported speech. A capture that ends without it (STT timeout or
     /// the wedge guard) means the capture stream never crossed the VAD's
@@ -618,6 +624,11 @@ final class VoicePipeline {
     /// [NOISE-FILTER] Internal for the seam tests (no audio hardware
     /// involved — pure fan-out over caller-supplied PCM).
     func feedCapture(pcm samples: [Int16], buffer: AVAudioPCMBuffer) {
+        // [DEAD-TAP-RECOVERY] (2026-09-17) Count every chunk a capture
+        // actually receives, so a capture that ends with no VAD speech
+        // can be told apart from a capture that received NOTHING (the
+        // dead-tap / dead-route signature). Reset with the capture.
+        captureChunkCount &+= 1
         // [NOISE-FILTER] The denoising stage — applied ONCE here, after
         // the 48→16 kHz conversion and before the fan-out, so the STT
         // push and the endpointing VAD consume the identical enhanced
@@ -760,6 +771,7 @@ final class VoicePipeline {
             vad?.reset()
             vad?.start(endOfUtteranceMs: endOfUtteranceMs)
             wireVADCallbacks()
+            captureChunkCount = 0
         }
         // [VAD-RT] Flip LAST: every handler the processing queue runs
         // from here on is guaranteed to see a primed VAD (above) and
@@ -823,7 +835,19 @@ final class VoicePipeline {
             // a VAD is actually configured (nil VAD = owned-tap legacy,
             // no endpointing expected).
             if self.vad != nil, !self.vadHeardSpeech {
-                self.emit("capture_ended_no_vad_speech", outcome: "info")
+                // [DEAD-TAP-RECOVERY] (2026-09-17) Chunk count rides the
+                // event so a silent capture can be told apart from a
+                // dead one: zero chunks = the tap delivered NOTHING (the
+                // 2026-09-17 device signature) and the tap is
+                // re-installed before the next turn instead of carrying
+                // the dead node into it. A non-zero count = the elder
+                // simply did not speak (or the route was quiet) — no
+                // re-install, nothing to heal.
+                self.emit("capture_ended_no_vad_speech", outcome: "info",
+                          metadata: ["chunks": "\(self.captureChunkCount)"])
+                if self.captureChunkCount == 0 {
+                    self.recoverDeadTap()
+                }
             }
             // [VAD-RT] Captures that end WITHOUT a VAD end (STT timeout,
             // wedge guard) still report their VAD frame-processing cost —
@@ -957,6 +981,29 @@ final class VoicePipeline {
         hold.safetyWork.cancel()
         guard hold.generation == captureGeneration else { return }
         resumeWakeListening()
+    }
+
+    /// [DEAD-TAP-RECOVERY] (2026-09-17) Re-installs the mic tap after a
+    /// capture that received zero chunks — the one case where the tap
+    /// itself is the suspect. Runs on the processing queue (the tap's
+    /// owner); the audio engine stays running, only the node is
+    /// replaced. Failure is honest and non-fatal: the next turn simply
+    /// tries again through the normal path.
+    private func recoverDeadTap() {
+        processingQueue.async { [weak self] in
+            guard let self, self.audioSession.isInputAvailable else {
+                self?.emit("capture_tap_recovery_skipped", outcome: "info",
+                           errorCode: "no_input")
+                return
+            }
+            do {
+                try self.installMicTap()
+                self.emit("capture_tap_reinstalled", outcome: "success")
+            } catch {
+                self.emit("capture_tap_recovery_failed", outcome: "failure",
+                          errorCode: "install_failed")
+            }
+        }
     }
 
     private func resumeWakeListening() {

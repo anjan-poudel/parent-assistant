@@ -8037,6 +8037,24 @@
         }
       }
     },
+    "livetranslate.snapshot.holding": {
+      "comment": "T-033 freeze-frame control, while the tap is being served. DRAFT: awaiting the owner's OD3 copy review at final sign-off.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Holding the picture…"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो दृश्य रोकिँदैछ…"
+          }
+        }
+      }
+    },
     "livetranslate.snapshot.live": {
       "comment": "T-033 freeze-frame control, the way back. DRAFT: awaiting the owner's OD3 copy review at final sign-off.",
       "extractionState": "manual",

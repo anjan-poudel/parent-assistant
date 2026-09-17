@@ -283,14 +283,15 @@ calmly: *"Okay, I'll remind you again later."*
   note and points to the paste button and the voice alternative ("add a doctor
   appointment").
 - **Calendar seam:** the **"Add appointments to the iPhone Calendar"** toggle (default ON,
-  and it lives in Settings → **Medication schedule** — settings stay under Settings) is the
+  and it lives in Settings → **Calendar** — settings stay under Settings) is the
   switch that will write appointments into the iPhone Calendar app. **Honest status
   today:** the writing backend is not yet wired into this build — the toggle and the intent
   are real, but appointments currently live in the app only. Family can mirror the daily
   *routine* to the Calendar app already (see 4c).
 - **Settings → Medication schedule:** where the family types each medicine's name and
-  time(s); duplicate name+time pairs are refused. Below it, **Festival reminders**: how
-  many days early (0–7, default 2) important festivals notify.
+  time(s); duplicate name+time pairs are refused. It holds medicines and nothing else —
+  the appointment-calendar toggle and the festival reminders it used to carry are calendar
+  settings and live in Settings → **Calendar** (see 4c).
 
 **What it will never do:** mark a dose as taken without your yes; accept "नखाए" as "खाए";
 double-count a dose inside the safety window; claim an SMS was read automatically; claim an
@@ -342,10 +343,11 @@ safety-critical).
 
 **Festival notifications.** Every festival gets a day-of notification (08:00); the
 important ones (Dashain, Tihar, Teej, Laxmi Puja, Chhath, New Year…) also notify N days
-early — N is set in Settings → Medication schedule → *Festival reminders* (0–7, default 2).
+early — N is set in Settings → **Calendar** → *Festival reminders* (0–7, default 2).
 
-**The calendar settings leaf** (Settings → **Calendar**) — three switches, each with an
-honest status line beneath it:
+**The calendar settings leaf** (Settings → **Calendar**) — the display card (default
+calendar + BS/tithi overlay toggles), **Festival reminders**, **Add appointments to the
+iPhone Calendar**, and three bridge switches, each with an honest status line beneath it:
 
 1. **Show in Calendar app** (mirror out) — copies your daily routine into the iPhone
    Calendar app so the family can see it there. Calendar access is asked only when you
@@ -358,6 +360,12 @@ honest status line beneath it:
 3. **Import from Calendar & Reminders** — reads your native events and due reminders into
    the app (today's lists + notifications), never writes back. When on, a stepper sets how
    many minutes early to notify (0–30); all-day items always announce at 8:00 AM.
+
+Two further settings sit on this leaf, both moved here off the Medication schedule screen
+(2026-09-17): **Add appointments to the iPhone Calendar** — the write gate for the doctor's
+appointments the Medical screen records (default ON) — and **Festival reminders**, the 0–7
+day advance notice described above. Neither is a medicine, so neither belongs on a screen
+that edits medicines.
 
 **What it will never do:** fabricate a Nepali date outside the verified conversion table;
 warn about a festival on the wrong day (all festival dates are a fixed curated BS-date
@@ -626,11 +634,11 @@ Tap a tab's name, or swipe the page sideways, to move between tabs.
 | **Family** | **Family and friends** | The curated contact list (up to 12) with the 5-step add/edit wizard: search → relationship (+ emergency flag) → photo → Messenger username → nickname + home address. |
 | | **Notify caregivers** | Which events tell the family: medication taken or missed, routines, and calendar events. Every switch is opt-in and off by default. |
 | | **Calling** | The default calling app for call buttons: FaceTime / Phone / Messenger / WhatsApp (Messenger needs a per-person username). |
-| **Reminders** | **Medication schedule** | Medicine names and times (duplicates refused), plus festival advance-reminder days (0–7, default 2). |
+| **Reminders** | **Medication schedule** | Medicine names and times (duplicates refused). Medicines only — every calendar setting lives on the Calendar row. |
 | | **Daily routine** | The household's routines with their own on/off switches and photos; each routine is the thing Sahayak walks through out loud at its time. |
 | | **Alarms & timers** | Every voice-set alarm (toggle/delete) and live countdown timer (cancel), a hand-set alarm form, and the honesty note about the Clock app. |
 | | **Events** | The family's own appointments: what it is, when, how long, whether it repeats (every day / every week / not at all), notes, a photo and a place. Each one lands in the phone's Calendar app too, and with a place it gets a "Go there" button that starts directions. Photos stay in this app. |
-| | **Calendar** | The three bridge switches: Show in Calendar app (mirror out), Mirror routine changes both ways (Sahayak calendar, off by default), Import from Calendar & Reminders (with notify-minutes-before stepper 0–30). |
+| | **Calendar** | Every calendar setting: the display card (default calendar + BS/tithi overlays), Festival reminders (advance days 0–7, default 2), Add appointments to the iPhone Calendar (write gate, default ON), and the three bridge switches: Show in Calendar app (mirror out), Mirror routine changes both ways (Sahayak calendar, off by default), Import from Calendar & Reminders (with notify-minutes-before stepper 0–30). |
 | | **Calendar sharing** | Puts the same reminders on a family member's own Google Calendar; the card states honestly whether sharing is on, and stopping it asks once for confirmation. |
 | **Tools** | **Quick apps** | Pick up to 8 favourite apps for the Home quick-access row; installed apps are detected honestly (apps that aren't on the phone are labelled). |
 | | **Feeds** | Feed sources (add-by-URL with "default" tags), topic chips, and the News sources editor. |

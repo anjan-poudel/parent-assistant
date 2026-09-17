@@ -1,33 +1,58 @@
 import SwiftUI
 
-/// Calendar settings leaf (calendar-settings task, 2026-09-07) — the
-/// three native-calendar bridge cards that used to crowd the Medication
-/// schedule settings leaf, moved here wholesale (the meds leaf now edits
-/// medications and festival advance reminders alone):
+/// Calendar settings leaf (calendar-settings task, 2026-09-07) — every
+/// calendar setting in the app, on the Calendar row's own screen:
 ///   1. `calendarDisplayCard`  — the Calendar display card (added with
 ///                               the calendar-display task, 2026-09-09):
 ///                               the default-calendar picker + the BS and
 ///                               tithi overlay toggles behind the Home
 ///                               top bar's date line.
-///   2. `calendarSyncCard`   — mirror the routine OUT to the Calendar app.
-///   3. `twoWayCard`         — mirror events live in a Sahayak calendar and
+///   2. `festivalReminderCard` — how many days early important festivals
+///                             notify (BS calendar, 2026-09-06). Rescue from
+///                             the Medication schedule leaf (calendar-split
+///                             task, 2026-09-17).
+///   3. `appointmentCalendarCard` — the appointment → iPhone Calendar write
+///                             gate (medical task, 2026-09-07). Rescue from
+///                             the Medication schedule leaf (calendar-split
+///                             task, 2026-09-17).
+///   4. `calendarSyncCard`   — mirror the routine OUT to the Calendar app.
+///   5. `twoWayCard`         — mirror events live in a Sahayak calendar and
 ///                             native edits apply back (default off).
-///   4. `externalCalendarCard` — import native Calendar events / Reminders
+///   6. `externalCalendarCard` — import native Calendar events / Reminders
 ///                             items IN (in-app reminders + lists).
-/// Cards and their status captions are verbatim carries from the meds
-/// leaf — same coordinator calls, same intent-vs-OS-truth split each
-/// card documents on itself.
+///
+/// Cards 1, 4, 5 and 6 bridge the app and the phone's calendar; 2 is the BS
+/// calendar's own notification rule and 3 the write gate for the
+/// appointments the Medical screen records. 2 and 3 are the ones that used
+/// to sit on the Medication schedule leaf — which is a MEDICATION screen,
+/// and neither is a medicine: one gates an EventKit write, the other a
+/// festival reminder. They moved with their kind.
+///
+/// Cards and their status captions are verbatim carries from the meds leaf
+/// — same coordinator calls, same intent-vs-OS-truth split each card
+/// documents on itself.
 struct CalendarSettingsView: View {
     @EnvironmentObject var coordinator: AppCoordinator
 
     var body: some View {
         LeafScreen(titleKey: "settings.calendar.title") {
             VStack(spacing: 12) {
-                calendarDisplayCard
-                calendarSyncCard
-                twoWayCard
-                externalCalendarCard
+                ForEach(Self.cards) { card in
+                    cardView(card)
+                }
             }
+        }
+    }
+
+    @ViewBuilder
+    private func cardView(_ card: Card) -> some View {
+        switch card {
+        case .display: calendarDisplayCard
+        case .festivalReminders: festivalReminderCard
+        case .appointmentCalendar: appointmentCalendarCard
+        case .mirrorOut: calendarSyncCard
+        case .twoWay: twoWayCard
+        case .importExternal: externalCalendarCard
         }
     }
 
@@ -106,6 +131,73 @@ struct CalendarSettingsView: View {
             )
         }
         .buttonStyle(.plain)
+    }
+
+    /// Advance-reminder days for important festivals (BS calendar,
+    /// 2026-09-06) — default 2, family-configurable. Changing it
+    /// reschedules festival notifications immediately.
+    ///
+    /// Rescued from the Medication schedule leaf (calendar-split task,
+    /// 2026-09-17), where the calendar-settings pass of 2026-09-07 had left
+    /// it and the menu-audit pass had left it again: the value is read by
+    /// `FestivalCalendarService` (a CALENDAR service), it gates festival
+    /// notifications rather than anything a medicine does, and every other
+    /// BS-calendar control already lives on this leaf — the display card
+    /// above it.
+    private var festivalReminderCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("festival.reminderTitle", systemImage: "bell.badge")
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .foregroundStyle(DesignTokens.textPrimary)
+            HStack {
+                Text("festival.reminderDays")
+                    .font(.system(size: DesignTokens.minBodyPointSize))
+                    .foregroundStyle(DesignTokens.textPrimary)
+                Spacer()
+                Stepper(value: Binding(
+                    get: { coordinator.festivalCalendar.advanceReminderDays },
+                    set: { newValue in
+                        coordinator.festivalCalendar.advanceReminderDays = newValue
+                        coordinator.festivalCalendar.scheduleAll()
+                    }
+                ), in: 0...7) {
+                    Text(BikramSambat.devanagariDigits(coordinator.festivalCalendar.advanceReminderDays))
+                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                        .foregroundStyle(DesignTokens.accent)
+                }
+            }
+            Text("festival.reminderHint")
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundStyle(DesignTokens.textSecondary)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    /// Calendar auto-add for doctor's appointments (medical task,
+    /// 2026-09-07; moved onto this leaf by the calendar-split task,
+    /// 2026-09-17) — mirrors `appointmentsToCalendar` on the coordinator,
+    /// which persists it and re-syncs the store gate. The gate is on the
+    /// EventKit WRITE path, which is this leaf's subject: the appointment
+    /// is the medical record, but "does it also go to the iPhone Calendar"
+    /// is a calendar setting, and the menu-audit pass that lifted it out of
+    /// the app's menus filed it one screen short of here.
+    private var appointmentCalendarCard: some View {
+        Toggle(isOn: Binding(
+            get: { coordinator.appointmentsToCalendar },
+            set: { coordinator.appointmentsToCalendar = $0 }
+        )) {
+            Label("medical.calendarToggle", systemImage: "calendar.badge.plus")
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .foregroundStyle(DesignTokens.textPrimary)
+        }
+        .tint(DesignTokens.accent)
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
     }
 
     /// EventKit mirror toggle (v2 design §4.1) — requests calendar
@@ -261,4 +353,54 @@ struct CalendarSettingsView: View {
         case .notRequested: return L10n.str("calendarSync.statusHint", locale: coordinator.activeLocale)
         }
     }
+}
+
+// MARK: - The leaf's card table
+
+extension CalendarSettingsView {
+
+    /// The cards this leaf carries, in display order — the hub's own
+    /// convention (`SettingsSection.rows`, `SettingsTabs.swift`) applied to
+    /// a leaf: the body only WALKS the table, which is what makes "which
+    /// settings the Calendar screen owns" a unit test
+    /// (`SettingsTabMappingTests`) rather than a screenshot. A card can
+    /// only move, or leave this screen, deliberately — losing one, or
+    /// listing it twice, fails there.
+    enum Card: String, CaseIterable, Identifiable {
+        /// Default calendar + BS/tithi overlays (calendar-display task,
+        /// 2026-09-09).
+        case display
+        /// Festival advance-reminder days (rescue, 2026-09-17).
+        case festivalReminders
+        /// Appointment → iPhone Calendar write gate (rescue, 2026-09-17).
+        case appointmentCalendar
+        /// Routine mirror OUT to the Calendar app.
+        case mirrorOut
+        /// Two-way mirror through the Sahayak calendar.
+        case twoWay
+        /// Native Calendar/Reminders import IN.
+        case importExternal
+
+        var id: String { rawValue }
+
+        /// The card's own label, as the catalog key the household reads —
+        /// the row-label half of `SettingsDestination.titleKey`. Resolved
+        /// in BOTH languages by `SettingsTabMappingTests`: a card that
+        /// moved house must not arrive in English-only copy.
+        var labelKey: String {
+            switch self {
+            case .display: return "calendarDisplay.sectionTitle"
+            case .festivalReminders: return "festival.reminderTitle"
+            case .appointmentCalendar: return "medical.calendarToggle"
+            case .mirrorOut: return "calendarSync.toggle"
+            case .twoWay: return "calendar.twoWay.title"
+            case .importExternal: return "externalReminders.toggle"
+            }
+        }
+    }
+
+    static let cards: [Card] = [
+        .display, .festivalReminders, .appointmentCalendar, .mirrorOut, .twoWay,
+        .importExternal,
+    ]
 }
