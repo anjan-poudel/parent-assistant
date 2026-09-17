@@ -18,6 +18,14 @@
 # platform fact (specs/hi-in-probe-notes.md) rather than an assumption. All 36
 # hashes were re-derived; FR-LCT-003 is the only one that changed, so the other
 # 35 requirement files are unchanged by this re-lock.
+#
+# Re-lock 2026-09-17T08:59:34Z. One owner directive, recorded as an amendment:
+# FR-LCT-008's deferred-tier clause is retired and the on-device brain lands as
+# tier 1 of the cascade, between the curated dictionary (tier 0) and the
+# consent-gated cloud (tier 2) — no consent, no egress, and the same truthful
+# attribution it always required. All 36 hashes were re-derived; FR-LCT-008 is
+# the only one that changed, so the other 35 requirement files are unchanged by
+# this re-lock.
 
 version: "1"
 task: define-requirements
@@ -101,8 +109,19 @@ requirements:
     area: "Translation"
     priority: MUST
     file: specs/define-requirements/FR/FR-LCT-008-truthful-tier-attribution.md
-    sha256: c23fb314241b423118d0ad22141ef5e5b6fdcc6c3b6921b8f0565ba57f8684e0
-    acceptance_scenarios: 4
+    sha256: b2b9c6fd8a7102e5294160cad5a31ae31edf9a14fd799b858f4f24d801e2b949
+    acceptance_scenarios: 5
+    amended: "2026-09-17T08:59:34Z"
+    amendment: >-
+      Owner directive 2026-09-17: the deferred-tier clause (the on-device tier "must be absent
+      from v1") is retired, and the tier lands as tier 1 — the app's own installed Nepali brain,
+      between the curated dictionary and the consent-gated cloud. The reason is the owner's
+      complaint, not a preference: with only a ~120-label dictionary and a consent-gated cloud in
+      the cascade, every string the dictionary misses degrades to "can't translate" offline or
+      after a declined prompt, and the model that fixes it is already on the device. What the
+      requirement protected is unchanged and still pinned — no success without translation, and no
+      result attributed to a tier that did not translate. No consent and no egress on this tier, so
+      Open Decision 13 is untouched.
   - id: FR-LCT-009
     title: "Tier 2 text-only cloud translation"
     kind: FR

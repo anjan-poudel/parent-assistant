@@ -1,5 +1,6 @@
 import CoreGraphics
 import CoreMedia
+import Foundation
 import XCTest
 @testable import ElderlyAssistant
 
@@ -80,6 +81,85 @@ final class LiveTranslationPipelineTests: XCTestCase {
         var isSet: Bool { ocrPassInFlight }
     }
 
+    /// Tier 1, scripted — the on-device brain the pipeline asks before the
+    /// cloud. It stands in for `LocalBrainTranslationTier` at the same seam
+    /// the pipeline actually takes (`LocalBrainTranslating`), so what these
+    /// tests pin is the *cascade*: which tier answers, in what order, and what
+    /// reaches the gate.
+    ///
+    /// It emits through the shipped event API when it reports itself
+    /// unavailable, exactly as the real tier does, so the pipeline-level
+    /// claim "no brain, event, and on to the cloud" is made against the real
+    /// vocabulary rather than against a fake's own invention.
+    ///
+    /// A class with a lock rather than an actor, so the harness can wire it up
+    /// and the tests can read what it was asked without an `await` at every
+    /// call site: the pipeline is the only writer that matters, and it awaits
+    /// one attempt at a time.
+    final class RecordingBrain: LocalBrainTranslating, @unchecked Sendable {
+
+        private let lock = NSLock()
+        private var storedAnswers: [String: String] = [:]
+        private var storedUnavailable = false
+        private var storedCalls: [[String]] = []
+        private var storedReleaseCount = 0
+        private var events: LiveTranslateEvents?
+
+        /// The strings this brain answers, and what it answers with.
+        var answers: [String: String] {
+            get { lock.lock(); defer { lock.unlock() }; return storedAnswers }
+            set { lock.lock(); defer { lock.unlock() }; storedAnswers = newValue }
+        }
+
+        /// When true, every attempt reports itself unusable, the way the real
+        /// tier does on a device with no model installed.
+        var unavailable: Bool {
+            get { lock.lock(); defer { lock.unlock() }; return storedUnavailable }
+            set { lock.lock(); defer { lock.unlock() }; storedUnavailable = newValue }
+        }
+
+        /// Every batch this brain was handed, in order.
+        var calls: [[String]] {
+            lock.lock(); defer { lock.unlock() }; return storedCalls
+        }
+
+        var releaseCount: Int {
+            lock.lock(); defer { lock.unlock() }; return storedReleaseCount
+        }
+
+        /// The harness wires this to the bus it built, so an unavailable
+        /// brain is reported on the pipeline's own channel with the shipped
+        /// emitter rather than a vocabulary of the fake's own.
+        func attach(events: LiveTranslateEvents) {
+            lock.lock(); defer { lock.unlock() }
+            self.events = events
+        }
+
+        func translate(_ strings: [String]) async -> LocalBrainTranslationOutcome {
+            lock.lock()
+            storedCalls.append(strings)
+            let answers = storedAnswers
+            let unavailable = storedUnavailable
+            let events = self.events
+            lock.unlock()
+
+            guard !unavailable else {
+                events?.brainTranslationUnavailable(.modelNotInstalled)
+                return .none
+            }
+            var translations: [String: String] = [:]
+            for text in strings {
+                if let answer = answers[text] { translations[text] = answer }
+            }
+            return LocalBrainTranslationOutcome(translations: translations, durationMs: 1)
+        }
+
+        func release() async {
+            lock.lock(); defer { lock.unlock() }
+            storedReleaseCount += 1
+        }
+    }
+
     /// The consumer side of the pipeline: a publication arrives whole or not
     /// at all, and only a counter crosses the boundary.
     actor PublicationRecorder {
@@ -114,6 +194,7 @@ final class LiveTranslationPipelineTests: XCTestCase {
         let governor: GeminiCostGovernor
         let bus: LiveTranslateSanitisingBus
         let configStore: GeminiConfigStore
+        let brain: RecordingBrain
         let config: LiveTranslateConfig
     }
 
@@ -127,8 +208,19 @@ final class LiveTranslationPipelineTests: XCTestCase {
                              transport: TierTranslationTransport = TierTranslationTransport(),
                              dictionary: [String: String]? = nil,
                              recogniser: ScriptedFrameRecogniser = ScriptedFrameRecogniser(),
+                             brain: RecordingBrain? = nil,
+                             handsInABrain: Bool = true,
                              config: LiveTranslateConfig = .default) -> Harness {
         let bus = LiveTranslateSanitisingBus()
+        // The brain is behind its own seam, so these tests never build a
+        // `ModelStore` or touch a model file: the cascade is what is under
+        // test here, and the tier's own suite covers inference. A caller that
+        // wants to script answers builds the fake first and hands it in.
+        let brain = brain ?? RecordingBrain()
+        brain.attach(events: LiveTranslateEvents(bus: bus, config: config))
+        // The one test of the production wiring hands in nothing at all, so
+        // the pipeline builds the shipped tier over the process's own store.
+        let handedInBrain: LocalBrainTranslating? = handsInABrain ? brain : nil
         let cacheStorage = LabelTranslationCacheTestStorage()
         let storage = LabelTranslationCacheTestStorage()
         let configStore = GeminiConfigStore(storage: storage)
@@ -168,13 +260,14 @@ final class LiveTranslationPipelineTests: XCTestCase {
                                                alwaysShowOriginal: false,
                                                config: config,
                                                observabilityBus: bus,
+                                               brain: handedInBrain,
                                                publish: { publication in
                                                    await recorder.record(publication)
                                                })
         return Harness(pipeline: pipeline, recogniser: recogniser, backpressure: backpressure,
                        cache: cache, cacheStorage: cacheStorage, gate: gate, controller: controller,
                        tier: tier, transport: transport, recorder: recorder, governor: governor,
-                       bus: bus, configStore: configStore, config: config)
+                       bus: bus, configStore: configStore, brain: brain, config: config)
     }
 
     // MARK: - Awaiting readers
@@ -1396,5 +1489,294 @@ final class LiveTranslationPipelineTests: XCTestCase {
 
         await pipeline.close()
         XCTAssertEqual(engine.forgetCallCount, 1, "close ends the detector, which forgets its rectangles")
+    }
+
+    // MARK: - Scenario: The cascade is dictionary, then the on-device brain,
+    // then the consent-gated cloud (FR-LCT-008 as amended 2026-09-17)
+    //
+    // These four claims are what the tier insertion is for:
+    //   1. a curated string is never asked of a 4B model,
+    //   2. a string the brain answers never leaves the device — no consent, no
+    //      request, no budget,
+    //   3. a string the brain cannot answer is not dropped: it reaches the
+    //      cloud exactly as it did when tier 1 did not exist,
+    //   4. the whole cycle's unresolved strings are ONE generation.
+
+    /// Gives the session's task tree the window an assertion that something
+    /// did *not* happen needs — the same window the positive assertions get
+    /// from `waitUntil`.
+    private func settleTheCycle() async {
+        try? await Task<Never, Never>.sleep(for: .milliseconds(60))
+    }
+
+    /// The brain's translation of an uncurated string. Nepali target, so the
+    /// string reads like a real answer rather than a marker.
+    private let brainTranslation = "यहाँ भित्र प्रवेश मात्र"
+
+    @MainActor
+    func testScenarioACuratedSceneNeverReachesTheBrain() async throws {
+        let harness = makeHarness()
+        await harness.pipeline.updateLayout(layout)
+        harness.recogniser.defaultStep = .regions([detected(curatedText)])
+
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+        await settleTheCycle()
+
+        let publication = try await latest(harness)
+        let region = try XCTUnwrap(region(curatedText, in: publication))
+        XCTAssertEqual(publication.result(for: region).sourceTier, .dictionary)
+
+        let brainCalls = harness.brain.calls
+        XCTAssertTrue(brainCalls.isEmpty,
+                      "tier 0 answers it; the cascade does not escalate past an answered question")
+    }
+
+    @MainActor
+    func testScenarioABrainAnswerIsNeverSentToTheCloud() async throws {
+        // Consent declined and no provider key: the brain path must not need
+        // either (it leaves nothing to consent to) and must not consult them.
+        let harness = makeHarness(consent: false, configured: false)
+        await harness.pipeline.updateLayout(layout)
+        harness.recogniser.defaultStep = .regions([detected(cloudText)])
+        harness.brain.answers = [cloudText: brainTranslation]
+
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        let asked = cloudText
+        await waitUntil("the brain's answer to be published") {
+            guard let latest = await harness.recorder.latest,
+                  let region = latest.regions.first(where: { $0.text == asked }) else {
+                return false
+            }
+            return latest.result(for: region).sourceTier == .onDeviceBrain
+        }
+
+        let publication = try await latest(harness)
+        let region = try XCTUnwrap(region(cloudText, in: publication))
+        XCTAssertEqual(publication.result(for: region).text, brainTranslation)
+        XCTAssertEqual(publication.result(for: region).sourceTier, .onDeviceBrain,
+                       "a local answer must be attributed to the tier that produced it")
+
+        XCTAssertEqual(harness.transport.requestCount, 0, "the cloud is never asked")
+        XCTAssertEqual(harness.governor.callsToday, 0, "a local answer spends no provider budget")
+        XCTAssertFalse(harness.controller.isPromptPresented,
+                       "nothing leaves the device, so there is nothing to consent to (OD-13)")
+        XCTAssertEqual(harness.gate.inFlightRegistrationCount, 0)
+    }
+
+    @MainActor
+    func testScenarioABrainFailureFallsThroughToTheCloud() async throws {
+        // The fake answers nothing: a brain that hit no failure class the tier
+        // reports distinctly still hands the string back, and the cascade
+        // continues. The tier's own suite covers which reason each failure
+        // maps to.
+        let harness = makeHarness(consent: true,
+                                  transport: Self.respondingTransport())
+        await harness.pipeline.updateLayout(layout)
+        harness.recogniser.defaultStep = .regions([detected(cloudText)])
+
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        // The claim is about what a consumer can see, so the wait is on the
+        // publication rather than on the request count: a request that has
+        // been made but not answered is not yet an answer.
+        let asked = cloudText
+        await waitUntil("the cloud answer to be published") {
+            guard let latest = await harness.recorder.latest,
+                  let region = latest.regions.first(where: { $0.text == asked }) else {
+                return false
+            }
+            return latest.result(for: region).sourceTier == .cloud
+        }
+
+        let publication = try await latest(harness)
+        let region = try XCTUnwrap(region(cloudText, in: publication))
+        XCTAssertEqual(publication.result(for: region).sourceTier, .cloud)
+        XCTAssertEqual(requests(carrying: cloudText, in: harness), 1,
+                       "an unanswered string is not dropped — it is asked of the next tier")
+        let brainCalls = harness.brain.calls
+        XCTAssertEqual(brainCalls, [[cloudText]], "the brain was asked first, once")
+    }
+
+    @MainActor
+    func testScenarioAnUnavailableBrainIsReportedAndSkipsToTheCloud() async throws {
+        let harness = makeHarness(consent: true,
+                                  transport: Self.respondingTransport())
+        await harness.pipeline.updateLayout(layout)
+        harness.recogniser.defaultStep = .regions([detected(cloudText)])
+        harness.brain.unavailable = true
+
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        let asked = cloudText
+        await waitUntil("the cloud answer to be published") {
+            guard let latest = await harness.recorder.latest,
+                  let region = latest.regions.first(where: { $0.text == asked }) else {
+                return false
+            }
+            return latest.result(for: region).sourceTier == .cloud
+        }
+
+        // The device has no brain: the tier says so in its own vocabulary and
+        // the cycle continues. Never a silent stub, never a stalled cycle.
+        let unavailable = harness.bus.events(named: "brain_translation_unavailable")
+        XCTAssertEqual(unavailable.count, 1, "one reason per sighting, not one per frame")
+        XCTAssertEqual(unavailable.first?.metadata["reason"], "model_not_installed")
+        XCTAssertEqual(unavailable.first?.outcome, "degraded")
+
+        let publication = try await latest(harness)
+        let region = try XCTUnwrap(region(cloudText, in: publication))
+        XCTAssertEqual(publication.result(for: region).sourceTier, .cloud)
+    }
+
+    @MainActor
+    func testScenarioAGrantedPromptDoesNotReAskTheBrain() async throws {
+        // The prompt cycle releases the attempt so the next tick can carry it;
+        // "the next tick" is not a reason to pay for the same generation again.
+        // One sighting, one ask — including the sighting an elder answered in
+        // the middle of.
+        let harness = makeHarness(consent: false, transport: Self.respondingTransport())
+        await harness.pipeline.updateLayout(layout)
+        harness.recogniser.defaultStep = .regions([detected(cloudText)])
+
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        await waitUntil("the prompt to be presented") { harness.controller.isPromptPresented }
+        if case .failure(let error) = harness.controller.grant() {
+            return XCTFail("a grant must be recorded: \(error)")
+        }
+        await harness.pipeline.ingest(frame)
+
+        let asked = cloudText
+        await waitUntil("the cloud answer to be published") {
+            guard let latest = await harness.recorder.latest,
+                  let region = latest.regions.first(where: { $0.text == asked }) else {
+                return false
+            }
+            return latest.result(for: region).sourceTier == .cloud
+        }
+
+        let publication = try await latest(harness)
+        let region = try XCTUnwrap(region(cloudText, in: publication))
+        XCTAssertEqual(publication.result(for: region).sourceTier, .cloud,
+                       "a released attempt is still owed to the gate after the answer")
+        XCTAssertEqual(harness.brain.calls, [[cloudText]],
+                       "the sighting paid for one generation, not one per tick")
+    }
+
+    @MainActor
+    func testScenarioOneCycleIsOneBatchAndOneSightingIsOneAsk() async throws {
+        let harness = makeHarness(consent: true,
+                                  transport: Self.respondingTransport())
+        await harness.pipeline.updateLayout(layout)
+        harness.recogniser.defaultStep = .regions([
+            detected(cloudText, box: box(0.1, 0.2, 0.4, 0.3)),
+            detected(secondCloudText, box: box(0.5, 0.2, 0.8, 0.3))
+        ])
+
+        let frame = try makeFrame()
+        // Four ticks: both regions become visible on the second, and the third
+        // and fourth are the ones that would re-ask a brain that let them.
+        for _ in 0..<4 { await harness.pipeline.ingest(frame) }
+
+        await waitUntil("the brain to be asked") {
+            let calls = harness.brain.calls
+            return !calls.isEmpty
+        }
+        await settleTheCycle()
+
+        let brainCalls = harness.brain.calls
+        XCTAssertEqual(brainCalls.count, 1,
+                       "the cycle's unresolved strings are ONE generation, and a sighting asks once")
+        XCTAssertEqual(Set(brainCalls[0]), [cloudText, secondCloudText],
+                       "both of the cycle's unresolved strings travel in the same batch")
+    }
+
+    @MainActor
+    func testScenarioOnlyTheStringsTheBrainCouldNotAnswerReachTheGate() async throws {
+        let harness = makeHarness(consent: true,
+                                  transport: Self.respondingTransport())
+        await harness.pipeline.updateLayout(layout)
+        harness.recogniser.defaultStep = .regions([
+            detected(cloudText, box: box(0.1, 0.2, 0.4, 0.3)),
+            detected(secondCloudText, box: box(0.5, 0.2, 0.8, 0.3))
+        ])
+        // The brain answers exactly one of the two.
+        harness.brain.answers = [cloudText: brainTranslation]
+
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        let asked = secondCloudText
+        await waitUntil("the cloud answer to be published") {
+            guard let latest = await harness.recorder.latest,
+                  let region = latest.regions.first(where: { $0.text == asked }) else {
+                return false
+            }
+            return latest.result(for: region).sourceTier == .cloud
+        }
+
+        XCTAssertEqual(requests(carrying: cloudText, in: harness), 0,
+                       "a string the brain answered does not also go to the cloud")
+        XCTAssertEqual(requests(carrying: secondCloudText, in: harness), 1,
+                       "a string the brain could not answer is not lost on the way")
+
+        let publication = try await latest(harness)
+        let answered = try XCTUnwrap(region(cloudText, in: publication))
+        let remainder = try XCTUnwrap(region(secondCloudText, in: publication))
+        XCTAssertEqual(publication.result(for: answered).sourceTier, .onDeviceBrain)
+        XCTAssertEqual(publication.result(for: remainder).sourceTier, .cloud)
+    }
+
+    @MainActor
+    func testScenarioClosingTheSessionReleasesTheBrain() async throws {
+        let harness = makeHarness()
+        await harness.pipeline.close()
+
+        let releaseCount = harness.brain.releaseCount
+        XCTAssertEqual(releaseCount, 1,
+                       "a closed session leaves no model parked in memory")
+    }
+
+    @MainActor
+    func testTheProductionCompositionBuildsTheShippedTierAndStillReachesTheCloud() async throws {
+        // The one test that lets the pipeline build its own tier (no brain
+        // handed in). On a device or simulator with no brain installed that
+        // tier reports itself unavailable and the cascade behaves exactly as
+        // it did before tier 1 existed — which is the property the production
+        // wiring has to have.
+        let harness = makeHarness(consent: true,
+                                  transport: Self.respondingTransport(),
+                                  handsInABrain: false)
+        await harness.pipeline.updateLayout(layout)
+        harness.recogniser.defaultStep = .regions([detected(cloudText)])
+
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        let asked = cloudText
+        await waitUntil("the cloud answer to be published") {
+            guard let latest = await harness.recorder.latest,
+                  let region = latest.regions.first(where: { $0.text == asked }) else {
+                return false
+            }
+            return latest.result(for: region).sourceTier == .cloud
+        }
+
+        let publication = try await latest(harness)
+        let region = try XCTUnwrap(region(cloudText, in: publication))
+        XCTAssertEqual(publication.result(for: region).sourceTier, .cloud)
     }
 }

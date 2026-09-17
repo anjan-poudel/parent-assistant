@@ -121,6 +121,71 @@ struct LiveTranslateConfig: Equatable {
     /// persisted state — `LiveTranslateSettings` owns the persisted value.
     var alwaysShowOriginalDefault: Bool = false
 
+    // MARK: Tier 1 — the on-device brain
+
+    /// The 4B Nepali brain the on-device translation tier runs, newest first:
+    /// the first entry that is installed and complete is the one that runs.
+    ///
+    /// A pinned list rather than "whatever the elder picked for the assistant
+    /// brain": the tier's contract is that it is the app's own installed
+    /// Nepali brain, and a preference the household can switch at any moment
+    /// would make the tier's availability change under a running session for
+    /// reasons unrelated to translation.
+    ///
+    /// Why two entries and not one. `intentQwen4BSlotCanon` is the app's
+    /// current brain (`AppCoordinator.defaultBrainModelID`) — the artifact a
+    /// device that has used the assistant at all will have. `intentQwen4BS43`
+    /// is the seed-43 fine-tune the owner named when this tier was specified;
+    /// it is a hidden (superseded, not removed) catalog entry, so a device
+    /// that cached it keeps it and a device that never did is not left without
+    /// a brain. A single pinned id would leave the tier unavailable on every
+    /// device holding the other one — the exact "can't translate" the tier
+    /// exists to remove — so the list is the honest shape of "a brain is
+    /// installed, either of these will do". Order matters only when a device
+    /// holds both.
+    ///
+    /// A follow-up may want this to follow the elder's brain selection
+    /// (`AppCoordinator.resolvedBrainModelID`); that is a product decision,
+    /// not a lookup to hide in here.
+    var brainTranslationModelIDs: [ModelID] = [ModelCatalog.intentQwen4BSlotCanon,
+                                              ModelCatalog.intentQwen4BS43]
+
+    /// Deadline for one brain translation attempt. Latency here is seconds,
+    /// not milliseconds — a 4B model generating a batch of short
+    /// translations on a phone — and the existing pending state covers the
+    /// wait, so the bound is generous. It is still a bound: a generation that
+    /// outlives it is stopped and the strings fall through to the cloud
+    /// rather than holding the cycle open (failure, never a hang).
+    ///
+    /// Nominal, not frozen: the device spike to come may move it.
+    var brainTranslationTimeoutSeconds: TimeInterval = 25
+
+    /// Strings per brain request. Everything unresolved in one cycle goes to
+    /// the brain in ONE generation (the tier's whole point is one call, not
+    /// one per region), so this is the point at which a scene is too big for
+    /// a single request — the surplus strings are left unresolved for the
+    /// cloud tier, never dropped.
+    ///
+    /// It exists because the shared context is 1,024 tokens (`n_ctx`):
+    /// prompt and output share it, so an unbounded batch is a truncated
+    /// answer. 8 strings of a scene's short sign text leaves room for both.
+    var brainTranslationMaxStrings: Int = 8
+
+    /// Characters per brain request — the second bound on the same batch, for
+    /// a scene of two long lines rather than eight short ones. Same rule: the
+    /// surplus is left to the cloud, never dropped.
+    var brainTranslationMaxCharacters: Int = 800
+
+    /// How long the tier's resident handle may sit unused before it is
+    /// released. The translation tier is not in the residency ledger (see
+    /// `LocalBrainTranslationTier`'s header for why it cannot be), so this is
+    /// its own answer to the same problem that ledger exists for: a camera
+    /// session that goes quiet gives the 4B's memory back instead of parking
+    /// it until the app dies. A batch arriving after a longer gap pays one
+    /// model load inside its own timeout — which is what the generous
+    /// `brainTranslationTimeoutSeconds` is sized for.
+    var brainTranslationIdleUnloadSeconds: TimeInterval = 30
+
     // MARK: Tier 2
 
     /// Base timeout for one tier-2 request. **Derived, never stored (CL-8):**

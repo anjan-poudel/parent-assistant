@@ -1,8 +1,9 @@
+import CoreGraphics
 import XCTest
 @testable import ElderlyAssistant
 
 /// T-002 — truthful tier attribution and honest degradation are structural
-/// (FR-LCT-008, FR-LCT-018, NFR-LCT-010, D2).
+/// (FR-LCT-008 as amended 2026-09-17, FR-LCT-018, NFR-LCT-010).
 final class TranslationResultTests: XCTestCase {
 
     private let source = "फार्मेसी"
@@ -62,6 +63,9 @@ final class TranslationResultTests: XCTestCase {
         let outcomes: [TranslationOutcome] = [
             .pending(originalText: source),
             .resolved(originalText: source, translation: "Pharmacy", tier: .dictionary),
+            // The on-device brain is a tier that translated, so it names
+            // itself through exactly the same accessors as the other two.
+            .resolved(originalText: source, translation: "Pharmacy", tier: .onDeviceBrain),
             .resolved(originalText: source, translation: "Pharmacy", tier: .cloud),
             .degraded(originalText: source, reason: .noNetwork)
         ]
@@ -93,21 +97,62 @@ final class TranslationResultTests: XCTestCase {
         }
     }
 
-    // MARK: Scenario: the deferred on-device tier has no representation
+    // MARK: Scenario: the on-device tier exists, and only as a nameable result
 
-    func testTheTierTypeHasExactlyTwoCasesAndNoOrdinalReservation() {
-        XCTAssertEqual(TranslationTier.allCases.count, 2)
-        XCTAssertEqual(Set(TranslationTier.allCases), [.dictionary, .cloud])
-        XCTAssertEqual(Set(TranslationTier.allCases.map(\.rawValue)), ["dictionary", "cloud"])
+    /// The amended vocabulary (FR-LCT-008, 2026-09-17): three tiers, one per
+    /// source that can actually produce a translation. The ordinal rule is
+    /// untouched — a tier is named, never numbered — and every case must be
+    /// producible, because a case no code path can produce is the "stubbed
+    /// deferred capability" the amendment still forbids.
+    func testTheTierTypeHasExactlyThreeCasesOnePerProducingSource() {
+        XCTAssertEqual(TranslationTier.allCases.count, 3)
+        XCTAssertEqual(Set(TranslationTier.allCases), [.dictionary, .onDeviceBrain, .cloud])
+        XCTAssertEqual(Set(TranslationTier.allCases.map(\.rawValue)),
+                       ["dictionary", "onDeviceBrain", "cloud"])
 
         for raw in TranslationTier.allCases.map(\.rawValue) {
             XCTAssertFalse(raw.contains("tier"), "ordinals are prose, never a case: \(raw)")
             XCTAssertNil(Int(raw), "no ordinal tier number is reserved as a case: \(raw)")
-            XCTAssertFalse(raw.lowercased().contains("on_device"))
-            XCTAssertFalse(raw.lowercased().contains("nmt"))
+            XCTAssertFalse(raw.lowercased().contains("nmt"),
+                           "the tier is named for the app's brain, not for an NMT pipeline: \(raw)")
         }
-        // A `dictionary`-only resolution path cannot produce a tier-1 claim
-        // because there is no such value to produce (D2, "absent not stubbed").
+        // Tier attribution is only worth anything if each case can be
+        // produced by a real path: the dictionary by `ApplianceLabelLocalizer`
+        // + the cache, the brain by `LocalBrainTranslationTier`, the cloud by
+        // `CloudTranslationTier`. A case with no producer would be the
+        // "stubbed deferred capability" this requirement still forbids, so the
+        // brain tier's own suite drives all three end to end.
+    }
+
+    /// The renderer contract the owner fixed together with the tier's name: a
+    /// brain translation is NOT curated, so it may never take the in-place
+    /// form that replaces a sign's own text with an unvetted model output
+    /// (FR-LCT-015, D1). Pinned here rather than left to the placement suite
+    /// because it is a statement about the TIER — "the guard happens to
+    /// exclude it today" is exactly what a later refactor removes.
+    func testAnOnDeviceBrainTranslationIsNeverInPlaceEligible() {
+        let policy = LiveTranslateOverlaySurface.policy(config: .default,
+                                                        alwaysShowOriginal: false)
+        let regionRect = CGRect(x: 0, y: 0, width: 400, height: 200)
+
+        for tier in TranslationTier.allCases where tier != .dictionary {
+            XCTAssertNotEqual(
+                LiveOverlayPlacement.inPlaceEligibility(source: "Light",
+                                                        translation: "बत्ती",
+                                                        regionRect: regionRect,
+                                                        policy: policy,
+                                                        tier: tier),
+                .eligible,
+                "only the curated tier may replace a sign's text in place (\(tier))")
+        }
+        // …while the curated dictionary, the one tier that may, still may:
+        // the guard above is a tier rule, not an unusually small rect.
+        XCTAssertEqual(LiveOverlayPlacement.inPlaceEligibility(source: "Light",
+                                                              translation: "बत्ती",
+                                                              regionRect: regionRect,
+                                                              policy: policy,
+                                                              tier: .dictionary),
+                       .eligible)
     }
 
     // MARK: Scenario: state transitions are monotone

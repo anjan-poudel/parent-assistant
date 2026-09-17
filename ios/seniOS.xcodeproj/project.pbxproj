@@ -532,6 +532,7 @@
 		D863E2BCBAC6BB0420905E45 /* DependencyProtocols.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2AD7ABE631C1C62F6AF745E /* DependencyProtocols.swift */; };
 		D89B09EADAED534ED9BBAB51 /* VoiceEnrollmentRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6C6DC7636D26D44A73A7D71 /* VoiceEnrollmentRecorder.swift */; };
 		D8FA717DE7FFBBB66310949A /* IntentSchemaV2Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85ED77D882328D44E3F08B23 /* IntentSchemaV2Tests.swift */; };
+		D96A80671E2C681B82C8E287 /* LocalBrainTranslationTierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C8F9A00BEFE4F261E83F167 /* LocalBrainTranslationTierTests.swift */; };
 		D9789FDF083F285BB94383A0 /* CommandRouterPreAckTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4CFAEA934431A46E8FC9D1E /* CommandRouterPreAckTests.swift */; };
 		D9BD936BF795D8F4891934B2 /* NewsReaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42F00905A16D9B2FA337352A /* NewsReaderTests.swift */; };
 		DA7F15025B07E93EBBA807CE /* TimerAlarmScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3A016233A0C060D8C8F6559 /* TimerAlarmScreen.swift */; };
@@ -607,6 +608,7 @@
 		F109D17C3F64BB10822330AD /* StartupDegradation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58AC0437D038872C952C0E62 /* StartupDegradation.swift */; };
 		F1AFDFFE05963D24C411DA68 /* VoiceSessionStateMachine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6FA9BB313CEDA9FA33F3668 /* VoiceSessionStateMachine.swift */; };
 		F218B431712F7F8B7353BDF3 /* CloudBrainProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5843059095D1AB8946D839EB /* CloudBrainProvider.swift */; };
+		F254F20C065306044785A10A /* LocalBrainTranslationTier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4095DF23DAB974A83CE81263 /* LocalBrainTranslationTier.swift */; };
 		F2627B0A31C8A7C59B79A8B8 /* LiveTranslatePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF87DFB06C6F8F59BDA028E4 /* LiveTranslatePlugin.swift */; };
 		F29C7D1E8FD2BBCFDB157D74 /* MedicationVisualAidPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22577ED90A48390A73B44C47 /* MedicationVisualAidPresentationTests.swift */; };
 		F2F6F6AA6F169544AB0F43F8 /* SearchPhraseCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = D49DA0EAA80FE9867B155E2A /* SearchPhraseCapture.swift */; };
@@ -750,6 +752,7 @@
 		1BA70380B9611FE297DA6C91 /* NotificationReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationReader.swift; sourceTree = "<group>"; };
 		1C2928C7DCA281112CD80D23 /* AppLauncherPluginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLauncherPluginTests.swift; sourceTree = "<group>"; };
 		1C66F1336A7C9BE3F3D4AAC7 /* SpeakerEmbeddingMathTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerEmbeddingMathTests.swift; sourceTree = "<group>"; };
+		1C8F9A00BEFE4F261E83F167 /* LocalBrainTranslationTierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalBrainTranslationTierTests.swift; sourceTree = "<group>"; };
 		1C9080DC0F9997AFA7050A4E /* ExternalEventLinkStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExternalEventLinkStore.swift; sourceTree = "<group>"; };
 		1D48C33AF32E7C9599EF8140 /* WhisperPostTurnPolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperPostTurnPolicyTests.swift; sourceTree = "<group>"; };
 		1DF4872182C2AB35F523BB49 /* FamilyContactStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamilyContactStore.swift; sourceTree = "<group>"; };
@@ -828,6 +831,7 @@
 		3FFA14A84826D9687B94394A /* GoogleCalendarGatewayTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GoogleCalendarGatewayTests.swift; sourceTree = "<group>"; };
 		4016748B0946C8701967D58E /* CalendarRecurrenceRule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarRecurrenceRule.swift; sourceTree = "<group>"; };
 		40456F465A26C9E1679A8997 /* HomeSubviews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeSubviews.swift; sourceTree = "<group>"; };
+		4095DF23DAB974A83CE81263 /* LocalBrainTranslationTier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalBrainTranslationTier.swift; sourceTree = "<group>"; };
 		40CEC0F6B2E9FE0B1EF96F9B /* EventsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventsView.swift; sourceTree = "<group>"; };
 		40FA3780DF1A872699A610BC /* HomeDateLineComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeDateLineComposer.swift; sourceTree = "<group>"; };
 		4110ED5F9481C973A164A54B /* NavigationGeocoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NavigationGeocoder.swift; sourceTree = "<group>"; };
@@ -1482,6 +1486,7 @@
 				C84660FAB1F4B2C85D5A5E8F /* LiveTranslateSnapshot.swift */,
 				F76796766605ED152AAF8E57 /* LiveTranslateSpeech.swift */,
 				F9FF760520B585CD2ADD40D1 /* LiveTranslationPipeline.swift */,
+				4095DF23DAB974A83CE81263 /* LocalBrainTranslationTier.swift */,
 				0212B978B7089D84A5BC9D7D /* SceneTextSanitiser.swift */,
 				A0ECBF6048BBE4DC00FE0854 /* TextRegionStabilizer.swift */,
 				ADC36BE478622FC428838552 /* TranslationResult.swift */,
@@ -2027,6 +2032,7 @@
 				79CD8E352C1F92787067EE7A /* LiveTranslateSpeechTests.swift */,
 				EF51E75EEEB19879204E9EF6 /* LiveTranslateTestCipherKeyStore.swift */,
 				AE5A7A7BF2077907CF177EDF /* LiveTranslationPipelineTests.swift */,
+				1C8F9A00BEFE4F261E83F167 /* LocalBrainTranslationTierTests.swift */,
 				6EAE28D43D4E1F0C1B6FE13A /* OCRFixturePageTests.swift */,
 				AEC123B9E266E9C6B1C45131 /* OverlayRenderProbe.swift */,
 				505606392973499BB54842A6 /* ResultVoidAssertions.swift */,
@@ -2900,6 +2906,7 @@
 				F593F346299D6CCCC2485B1D /* LiveTranslationPipeline.swift in Sources */,
 				27AB8E1CA3BBFC1C0F9E7009 /* LlamaCommandInterpreter.swift in Sources */,
 				9BCED999CC8F507A4920156A /* LocalBrainChain.swift in Sources */,
+				F254F20C065306044785A10A /* LocalBrainTranslationTier.swift in Sources */,
 				8165EB1DBC42D7A7A03CEC3F /* LocalGoogleEventMappingStore.swift in Sources */,
 				DB6F8B72DA582CF22A29C2B2 /* LocalIntentInterpreter.swift in Sources */,
 				B4AD88D385DD6ACCFA61E763 /* LocalToolLogStore.swift in Sources */,
@@ -3205,6 +3212,7 @@
 				8AA076C728743BC9F6BD8070 /* LiveTranslationPipelineTests.swift in Sources */,
 				3F9A3AB41810B96D00D61D73 /* LlamaCommandInterpreterTests.swift in Sources */,
 				7C420642E0B121247B8853EB /* LocalBrainChainTests.swift in Sources */,
+				D96A80671E2C681B82C8E287 /* LocalBrainTranslationTierTests.swift in Sources */,
 				733E83057A36BFFB551D809C /* LocalGoogleEventMappingStoreTests.swift in Sources */,
 				CDBD31C584A2D4E8F753A6D0 /* LocalIntentInterpreterTests.swift in Sources */,
 				E7B87B15F917C56B33CA3AC8 /* LocalToolLogStoreTests.swift in Sources */,

@@ -32,6 +32,8 @@ final class LiveTranslateEventsTests: XCTestCase {
         events.textChange(regionCount: 2)
         events.translationBatchRequested(stringCount: 5, batchIndex: 0, batchCount: 1)
         events.translationBatchResolved(resolvedCount: 4, unresolvedCount: 1, durationMs: 812)
+        events.brainTranslationBatch(resolvedCount: 3, unresolvedCount: 1, durationMs: 4200)
+        events.brainTranslationUnavailable(.modelNotInstalled)
         events.translationDegraded(reason: .noNetwork, regionCount: 1)
         events.translationDedupeHit(keyCount: 2)
         events.textQuarantined(count: 1)
@@ -134,6 +136,9 @@ final class LiveTranslateEventsTests: XCTestCase {
     func testEveryEmittedMetadataValueIsCountTokenOrVersion() {
         let allowedTokens = Set(TranslationUnavailableReason.allCases.map(\.rawValue))
             .union(Set(TranslationTier.allCases.map(\.rawValue)))
+            // The on-device translation tier's own closed reason vocabulary:
+            // the tokens its `brain_translation_unavailable` event may carry.
+            .union(Set(LiveTranslateBrainUnavailableReason.allCases.map(\.rawValue)))
             .union([
                 "no_capture_device", "configuration_failed", "resource_in_use",
                 "backgrounded", "system_interruption", "thermal",
