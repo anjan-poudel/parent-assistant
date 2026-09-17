@@ -53,6 +53,26 @@ final class GoogleCalendarGatewayTests: XCTestCase {
         ])
     }
 
+    func testInboundWithSyncTokenNeverCombinesSingleEvents() async {
+        // [SYNCTOKEN-FIX] Google rejects `syncToken` + `singleEvents`
+        // with 400 — the query must be mode-exclusive. The first call
+        // (no token) carries singleEvents; a stored-token call must not.
+        transport.enqueue(json: ["items": [], "nextSyncToken": "tok-1"])
+        let gateway = makeGateway()
+        _ = await gateway.listIncoming(syncToken: nil)
+        transport.enqueue(json: ["items": [], "nextSyncToken": "tok-2"])
+        _ = await gateway.listIncoming(syncToken: "tok-1")
+
+        let firstURL = transport.requests[0].url
+        let secondURL = transport.requests[1].url
+        XCTAssertTrue(firstURL?.query?.contains("singleEvents=true") == true)
+        XCTAssertTrue(firstURL?.query?.contains("timeMin=") == true)
+        XCTAssertTrue(secondURL?.query?.contains("syncToken=tok-1") == true)
+        XCTAssertFalse(secondURL?.query?.contains("singleEvents") == true,
+                       "a sync-token page must never combine with singleEvents")
+        XCTAssertFalse(secondURL?.query?.contains("timeMin") == true)
+    }
+
     func testInboundDecodeFailureNamesTheSchemaField() async {
         // A 2xx whose `items` is not an array — the decode must fail
         // AND name the structure of the mismatch so a Release console
