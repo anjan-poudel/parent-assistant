@@ -570,7 +570,7 @@ final class CalendarSyncService: NSObject {
             operations.append(.remove(eventIdentifier: record.eventIdentifier))
         }
         for record in records where !record.isCanceled
-            && record.notes?.contains(Self.mirrorTag) == true
+            && Self.notesCarryMirrorTag(record.notes)
             && MirrorLinkToken.parse(record.notes) == nil {
             // Legacy one-way leftovers (fragment, no token) — the
             // two-way rebuild inherits them and removes them.
@@ -900,7 +900,33 @@ final class CalendarSyncService: NSObject {
                               sahayakIdentifier: sahayakIdentifier)
     }
 
+    /// The one-way mirror: replace, never append.
+    ///
+    /// The wipe below must remove EVERY mirror-tagged event the store can
+    /// see — the DEFAULT calendar's one-way mirrors above all, since that
+    /// is where this path writes — BEFORE the desired set is re-added.
+    /// Any tagged event that survives a wipe is one the rebuild then
+    /// duplicates, and this pass runs at every launch and on every
+    /// schedule change, so a partial wipe is not a cosmetic bug: it is a
+    /// pile of routine mirrors in the family's calendar that grows once
+    /// per launch.
+    ///
+    /// "Every" is the gateway's contract, not an assumption made here:
+    /// all calendars, the first-line tag rule (bare tag AND the token
+    /// variant — `notesCarryMirrorTag`), and one removal per EVENT rather
+    /// than per occurrence. That last part is load-bearing: the mirrors
+    /// are recurring daily series, and a span-`.thisEvent` sweep over the
+    /// occurrences a predicate fetch expands cancels single occurrences
+    /// while leaving each series standing — which is exactly how the
+    /// duplicates accumulated. See `EventKitCalendarGateway`.
+    ///
+    /// Mode gating lives one level up in `syncNow` (two-way owns the
+    /// mirror whenever it is live, and this path must not run at all
+    /// then); the guard here states the same invariant at the writer, so
+    /// a future caller cannot reach the one-way writer while two-way is
+    /// on and end up with two writers into the store.
     private func rebuildLegacyMirror(entries: [RoutineEntry]) {
+        guard !twoWayEnabled else { return }
         let removed = gateway.removeEvents(matchingNotesFragment: Self.mirrorTag)
         // That wipe is not routine-specific — it matches the notes
         // fragment in EVERY calendar, so it takes the Sahayak medication
@@ -1040,6 +1066,34 @@ final class CalendarSyncService: NSObject {
     /// Internal, not private, exactly so the scanner's mapping rules
     /// and `MirrorLinkToken` can consult it.
     static let mirrorTag = "com.elderlyassistant.mirrored-routine"
+
+    /// Whether a native event's notes mark it as one of OURS.
+    ///
+    /// The tag is the notes' FIRST LINE in both mirror forms, which is
+    /// the rule `ExternalCalendarService`'s import exclusion documents
+    /// (see `MirrorLinkToken`): the legacy one-way mirror writes the tag
+    /// bare, a two-way mirror writes the tag and then the link token's
+    /// `entry=`/`slot=` lines under it. So the rule is "the first
+    /// non-empty line starts with the tag" — which catches both forms:
+    ///
+    ///     com.elderlyassistant.mirrored-routine
+    ///     com.elderlyassistant.mirrored-routine
+    ///     entry=07A6C012-…-…
+    ///     slot=0
+    ///
+    /// …and nothing else. A bare substring match is NOT the same rule: a
+    /// family event whose notes merely mention the string in prose is not
+    /// ours, and the one-way rebuild — which DELETES what it matches —
+    /// must never sweep it away. Pure and static so the rebuild's wipe
+    /// and the two-way planners' orphan sweep are pinned against one
+    /// definition rather than two that can drift.
+    static func notesCarryMirrorTag(_ notes: String?,
+                                    tag: String = mirrorTag) -> Bool {
+        guard let notes else { return false }
+        let firstLine = notes.components(separatedBy: .newlines)
+            .first { !$0.trimmingCharacters(in: .whitespaces).isEmpty } ?? ""
+        return firstLine.trimmingCharacters(in: .whitespaces).hasPrefix(tag)
+    }
 
     private func emit(_ type: String, outcome: String, metadata: [String: String] = [:]) {
         observabilityBus.emit(ObservabilityEvent(

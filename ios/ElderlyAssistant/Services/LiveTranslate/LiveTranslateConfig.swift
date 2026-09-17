@@ -356,7 +356,7 @@ struct LiveTranslateConfig: Equatable {
     /// 0.5 s is deliberately above the nominal pass interval (0.25 s), so one
     /// dropped pass at full cadence still cannot clear a box, while a camera
     /// that has genuinely moved on clears it in well under a second.
-    var overlayDepartureGraceSeconds: TimeInterval = 0.5
+    var overlayDepartureGraceSeconds: TimeInterval = 1.2
 
     /// How many passes a region's normalized string stays available as an
     /// identity signal once its box has left every geometry threshold.
@@ -450,7 +450,7 @@ struct LiveTranslateConfig: Equatable {
     /// container that is roughly 16 pt across and 34 pt down, comfortably
     /// above the detector's jitter and well below a move an elder would
     /// follow with their eyes.
-    var overlayGeometryStickiness: Double = 0.04
+    var overlayGeometryStickiness: Double = 0.06
 
     // MARK: Overlay (D1, OD2)
 

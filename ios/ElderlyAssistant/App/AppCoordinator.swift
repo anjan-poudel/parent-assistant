@@ -2541,6 +2541,15 @@ final class AppCoordinator: ObservableObject {
         // time, not now.
         cameraCapture = makeCameraCaptureFlow()
 
+        // [MED-OCR] (2026-09-18) The medication-label scan and the purpose
+        // lookup — the two Settings-side seams of the camera/lookup feature.
+        // Built here for the same reason as the camera flow above: a handful
+        // of allocations and no I/O (Vision's request object is inert until
+        // it runs, and the presenter resolves its host at presentation
+        // time), so the buttons work the first time they are tapped.
+        medicationLabelScanner = makeMedicationLabelScanner()
+        medicationPurposeLookup = makeMedicationPurposeLookup()
+
         // All stored properties are initialised — push the restored
         // language into services that build user-facing strings.
         syncServiceLocales()
@@ -8192,24 +8201,54 @@ self.noteTalkContractChanged()
     /// did; blank is normalized to nil rather than stored as an empty
     /// string, the same rule `normalizedOptionalText` applies everywhere
     /// else in this file.
+    /// `times` ([MED-OCR], 2026-09-18) is one or more dose times: the editor
+    /// grew time rows for the label scan (a `1-0-1` is two doses, and a form
+    /// that could only hold one of them would silently drop half of what the
+    /// label said). Empty is rejected rather than defaulted — a medication
+    /// with no dose time is not a schedule, and inventing one for it is the
+    /// kind of quiet claim this app does not make.
+    ///
+    /// `strength` ([MED-OCR]) is the printed dose strength ("500 mg") and is
+    /// stored in the entry's existing `doseDescription` — the dose line the
+    /// fired-dose screen and the morning briefing already render. Blank is
+    /// nil, like every other optional text here.
+    ///
+    /// `photo` ([MED-OCR]) is the picture the scan flow just took. It is
+    /// written to the medication `VisualAidStore` under the NEW entry's id,
+    /// before the entry payload is persisted, and becomes the entry's first
+    /// visual aid — the family's "which box is this?" picture, attached by
+    /// the act of scanning. A failed write (no bitmap, unusable sandbox)
+    /// leaves the entry without the photo, exactly as the visual-aid editor
+    /// treats a failed save: a nicety, never a failed medication.
     @discardableResult
-    func addMedication(name: String, time: DateComponents,
-                       purpose: String? = nil) -> String? {
+    func addMedication(name: String, times: [DateComponents],
+                       purpose: String? = nil,
+                       strength: String? = nil,
+                       photo: UIImage? = nil) -> String? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "settings.meds.nameRequired" }
+        guard !times.isEmpty else { return "settings.meds.timeRequired" }
         let duplicate = medicationScheduler.medicationEntries().contains { entry in
-            entry.medicationName == trimmed && entry.scheduleTimes.contains(time)
+            entry.medicationName == trimmed
+                && entry.scheduleTimes.contains { times.contains($0) }
         }
         guard !duplicate else { return "settings.meds.duplicateError" }
         let trimmedPurpose = purpose?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedStrength = strength?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let entryId = UUID()
+        var visualAids: [VisualAid] = []
+        if let photo, let aid = medicationVisualAidStore.save(photo, for: entryId) {
+            visualAids.append(aid)
+        }
 
         var entries = medicationScheduler.medicationEntries()
         let entry = MedicationEntry(
-            id: UUID(),
+            id: entryId,
             userProfileId: UUID(),
             medicationName: trimmed,
-            doseDescription: "",
-            scheduleTimes: [time],
+            doseDescription: trimmedStrength ?? "",
+            scheduleTimes: times,
             frequency: .daily,
             ackWindowMinutes: 5,
             maxRefireCount: 5,
@@ -8217,7 +8256,8 @@ self.noteTalkContractChanged()
             doubleDoseWindowHours: 4,
             photoVerificationEnabled: false,
             confirmationDescription: nil,
-            purpose: (trimmedPurpose?.isEmpty ?? true) ? nil : trimmedPurpose
+            purpose: (trimmedPurpose?.isEmpty ?? true) ? nil : trimmedPurpose,
+            visualAids: visualAids
         )
         entries.append(entry)
         medicationScheduler.loadSchedule(entries: entries)
@@ -8902,6 +8942,159 @@ self.noteTalkContractChanged()
     /// reads the entry at fire time, so the photo is live either way).
     func setMedicationVisualAids(_ entryId: UUID, aids: [VisualAid]) {
         medicationScheduler.setVisualAids(aids, entryId: entryId)
+    }
+
+    // MARK: - Medication label scan ([MED-OCR], 2026-09-18)
+
+    /// The label-scan seam: the same system camera the voice launcher
+    /// presents, plus the on-device OCR pass over the shot label. A stored,
+    /// assignable property so a test can put a scripted scanner in its place;
+    /// production is built once in `init` (see `makeMedicationLabelScanner`).
+    var medicationLabelScanner: MedicationLabelScanner?
+
+    /// Runs one scan for the Settings medication editor, handing the result
+    /// back on the main queue. The scanner speaks its own outcomes — the
+    /// read line, the "could not read it" line and the camera guidance — so
+    /// this method adds no claim of its own.
+    func scanMedicationLabel(completion: @escaping (MedicationLabelScanResult) -> Void) {
+        guard let medicationLabelScanner else {
+            // No scanner installed: the same honest answer the camera path
+            // gives when its presenter is missing — nothing can be captured
+            // here — rather than a button that does nothing.
+            speak(text: L10n.str("apps.camera.unavailable", locale: activeLocale))
+            completion(.unavailable(.cannotPresent))
+            return
+        }
+        medicationLabelScanner.start(completion: completion)
+    }
+
+    /// Builds the production scanner: the system picker behind
+    /// `CameraCapturePresenting`, the on-device recognizer, and this
+    /// coordinator's speech + observability channels.
+    private func makeMedicationLabelScanner() -> MedicationLabelScanner {
+        MedicationLabelScanner(
+            presenter: PhotoCameraPresenter(),
+            recognizer: VisionMedicationLabelRecognizer(),
+            locale: { [weak self] in
+                self?.activeLocale ?? Locale(identifier: "ne-NP")
+            },
+            channels: MedicationLabelScanner.Channels(
+                speak: { [weak self] text in
+                    self?.speak(text: text)
+                },
+                emit: { [weak self] eventType, outcome in
+                    self?.emitMedicationScan(eventType: eventType, outcome: outcome)
+                }
+            )
+        )
+    }
+
+    /// The scan's ledger row. Metadata-free: the outcome names the PATH
+    /// (scanned / noText / ocrFailed / cancelled / a camera reason), never
+    /// the medicine and never a word of what was read (constitution C9).
+    private func emitMedicationScan(eventType: String, outcome: String) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "medication_label_scan",
+            eventType: eventType,
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: nil,
+            metadata: [:]
+        ))
+    }
+
+    // MARK: - Medication purpose lookup ([MED-PURPOSE-LOOKUP], 2026-09-18)
+
+    /// The web-lookup seam. Production is a `SearchTool` round-trip over
+    /// `URLSession`; nil would mean no lookup stack is installed and the
+    /// honest answer is the "web search is not set up" line.
+    var medicationPurposeLookup: MedicationPurposeLookingUp?
+
+    /// Asks the web what `name` is FOR and hands the outcome back on the
+    /// main queue.
+    ///
+    /// The FOUND text is the caller's to put in the purpose field — showing
+    /// it is the answer, and speaking a snippet into a settings screen the
+    /// family is reading would be noise. Every OTHER outcome is spoken here,
+    /// because "nothing happened" is exactly the state the family must not
+    /// be left in: an unconfigured tool, an empty result set and a failed
+    /// round-trip each get their own honest sentence.
+    func lookupMedicationPurpose(name: String,
+                                 completion: @escaping (MedicationPurposeLookupOutcome) -> Void) {
+        guard let medicationPurposeLookup else {
+            speak(key: "meds.lookup.notConfigured")
+            emitMedicationLookup(.notConfigured)
+            completion(.notConfigured)
+            return
+        }
+        Task { @MainActor [weak self] in
+            let outcome = await medicationPurposeLookup.lookupPurpose(forMedicine: name)
+            guard let self else { return }
+            switch outcome {
+            case .found:
+                // The filled field is the answer; nothing to say.
+                break
+            case .notConfigured:
+                self.speak(key: "meds.lookup.notConfigured")
+            case .capReached:
+                // The SAME line the voice search speaks when the shared
+                // daily budget is spent — it is the same budget.
+                self.speak(key: "search.capReached")
+            case .noResults:
+                self.speak(key: "meds.lookup.noResults")
+            case .unavailable:
+                self.speak(key: "meds.lookup.failed")
+            }
+            self.emitMedicationLookup(outcome)
+            completion(outcome)
+        }
+    }
+
+    /// The lookup's ledger row: the outcome only — never the medicine name
+    /// and never a word of the summary (C9).
+    private func emitMedicationLookup(_ outcome: MedicationPurposeLookupOutcome) {
+        let name: String
+        switch outcome {
+        case .found: name = "found"
+        case .notConfigured: name = "notConfigured"
+        case .capReached: name = "capReached"
+        case .noResults: name = "noResults"
+        case .unavailable: name = "unavailable"
+        }
+        observabilityBus.emit(ObservabilityEvent(
+            component: "medication_purpose_lookup",
+            eventType: "medication_purpose_lookup",
+            durationMs: nil,
+            outcome: name,
+            errorCode: nil,
+            metadata: [:]
+        ))
+    }
+
+    /// Builds the production lookup: the credential PAIR gate and the locale
+    /// resolved at call time, over `URLSession` — the same transport, the
+    /// same credentials and the same quota the voice search uses, because it
+    /// is the same search.
+    private func makeMedicationPurposeLookup() -> MedicationPurposeLookupService {
+        MedicationPurposeLookupService(
+            credentials: { [weak self] in
+                guard let self else { return nil }
+                let store = self.searchConfigStore
+                // Exactly `fireWebSearchIfDue`'s gate: search is family
+                // opt-in, and both halves of the credential pair must exist —
+                // a key without an engine is unconfigured, not
+                // half-configured.
+                guard store.isConfigured,
+                      let apiKey = store.apiKey,
+                      let engineID = store.searchEngineID else { return nil }
+                return MedicationPurposeLookupService.Credentials(
+                    apiKey: apiKey, searchEngineID: engineID)
+            },
+            transport: URLSession.shared,
+            locale: { [weak self] in
+                self?.activeLocale ?? Locale(identifier: "ne-NP")
+            }
+        )
     }
 
     /// The presentation is dismissed (Close button, or the cover's own

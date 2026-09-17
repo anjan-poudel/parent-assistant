@@ -29,7 +29,7 @@ final class LiveTranslateConfigTests: XCTestCase {
         // nominal pass interval, so one dropped frame at full cadence is still
         // not a departure, and well under the 1.4 s two misses cost at the
         // reduced one.
-        XCTAssertEqual(config.overlayDepartureGraceSeconds, 0.5)
+        XCTAssertEqual(config.overlayDepartureGraceSeconds, 1.2)
 
         // Decluttering (OD5), both re-tuned by the 2026-09-17 UX rework: a
         // wider merge (clustered same-string boxes become one overlay) and a
