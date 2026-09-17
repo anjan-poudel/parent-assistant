@@ -140,12 +140,17 @@ struct LiveTranslateConfig: Equatable {
     /// a later approved copy change bumps this and every stale grant is
     /// invalidated rather than silently inherited.
     ///
+    /// The OD3 copy review completed 2026-09-17 with the wording unchanged,
+    /// so the stamp no longer says `draft.`. The bump retires any grant made
+    /// under the old stamp rather than letting it be silently inherited; none
+    /// existed in the field, the feature being unmerged at the time.
+    ///
     /// Deliberately not a literal date run (`2026-09-16`): the shipped
     /// `LogSanitiser` scrubs digit runs of eight or more with common
     /// separators (the phone-shape guard), which would redact the value out
     /// of the consent events the evidence depends on. `16sep2026` carries
     /// the same meaning and survives the bus intact.
-    var disclosureVersion: String = "livetranslate.disclosure.draft.16sep2026.r1"
+    var disclosureVersion: String = "livetranslate.disclosure.16sep2026.r1"
 
     static let `default` = LiveTranslateConfig()
 }

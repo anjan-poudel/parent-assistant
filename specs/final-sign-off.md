@@ -2,8 +2,10 @@
 
 **Task:** final-sign-off (T2 human gate) — decision pack
 **Date:** 2026-09-17
-**Branch under review:** worktree-live-camera-translation at c0f1d8c (pushed to origin; master merged in at b032fb0). Not yet integrated into master.
-**What this document is:** the pack the owner reads in order to decide. It is the reviewer's recommendation. It is not the sign-off — the binding approval is the owner's, given through the separate human approval step.
+**Branch under review:** worktree-live-camera-translation (pushed to origin; master merged in at b032fb0; tip at the owner's sign-off was 8aae456). Not yet integrated into master.
+**What this document is:** the pack the owner read in order to decide, and now the record of the decision. The reviewer's recommendation is unchanged; the sign-off itself was the owner's, given through the separate human approval step.
+
+**Amended at sign-off (2026-09-17).** The owner gave the T2 sign-off on 2026-09-17 and accepted the consent/disclosure copy as it stands (Open Decision 3 / OA-3). Two consequences are recorded in place below: the copy review is complete (Gate 2), and the disclosure version stamp has been bumped to drop the word "draft" — it now reads livetranslate.disclosure.16sep2026.r1, wording unchanged. No consent grant could exist under the old stamp: the feature is not on master and no build of it has ever been distributed, so the bump retires nothing in the field. The release log-safety gate was re-run after the stamp edit and passed (Gate 3). Everything else in this pack stands as it was when the recommendation was made.
 
 **How this review was done:** the design, security and evidence documents were read; the recorded test result bundles were re-read with the standard bundle tool (no suite is cited here without a non-zero test count — a suite that runs zero tests still reports success); the two cheap log-safety script gates were re-run in the worktree, both exit 0; no build or test target was run; no artifact was modified.
 
@@ -15,10 +17,11 @@
 
 **What is verified.** All three release gates this final gate exists to check, reported in full in Release gates verified below: the recorded constitution exception (Open Decision 13) is present and text-only; the camera purpose string is updated and discloses both required facts; the release log-safety gate and its fixture harness both pass and cover the new OCR/translation paths, with every rule proven load-bearing. On top of that: the recorded test gates are green (205 tests in the TG10 gate bundle across 14 suites; 307 in the T033 gate bundle across 18 suites; 13 security-evidence tests; 174 tests across 11 suites in two scoped runs made after the master merge), and every cited suite was confirmed to have run a non-zero count. The STRIDE security design review and the security test both returned SECURITY-GO; all ten mandatory amendments are discharged with named tests.
 
-**What is NOT verified — the three things to weigh before deciding.**
+**What is NOT verified — the things to weigh before deciding.**
 1. **No device validation was performed.** All sixteen device checks (DV-1 to DV-16) are NOT RUN and every measurement in the record is a simulator measurement. The feature has not been run on a phone. Camera behaviour in real light, battery use and heat over sustained use, real airplane mode, the device speaker, and the real encrypted container are unmeasured. The three value decisions that depend on those measurements (OD1, OD2, OD5) are unmeasured — not "probably fine". Nothing in this pack is device evidence.
-2. **The consent/disclosure copy review is still owed by the owner** (Open Decision 3). The purpose string is updated, but the copy review is not done; two catalogue strings remain marked DRAFT, and the disclosure version stamp itself still carries the word "draft". Their exact identity, wording and status are in Gate 2 below.
-3. **No real cloud call was ever made in testing.** Every network assertion was made against a recorded request with a stub; live provider behaviour is unverified.
+2. **No real cloud call was ever made in testing.** Every network assertion was made against a recorded request with a stub; live provider behaviour is unverified.
+
+The third item this section carried when the recommendation was made — the consent/disclosure copy review owed by the owner under Open Decision 3 — was discharged at sign-off on 2026-09-17: see Gate 2 below.
 
 Recommendation: see the Decision section.
 
@@ -48,26 +51,28 @@ Camera purpose string, current, from ios/ElderlyAssistant/Info.plist:
 
 - **(a) Does it disclose that the camera reads printed text for live translation?** Yes: "The camera is also used to read printed text aloud in your language with live translation."
 - **(b) Does it disclose that only text — never the photo — is sent, and only when the on-device dictionary cannot translate?** Yes: "For live translation, only the text seen by the camera is sent — and only when the phone's own dictionary cannot translate it. Photos of that text are never sent."
-- Wording nuance for the owner's review: the translation sentence says the text "is sent" without repeating "to the assistant's cloud service"; the cloud destination is named in the preceding sentence (about appliance photos). That is a wording judgement for the copy review, not a missing fact.
+- Wording nuance the owner considered at the copy review and accepted: the translation sentence says the text "is sent" without repeating "to the assistant's cloud service"; the cloud destination is named in the preceding sentence (about appliance photos). That is a wording judgement, not a missing fact.
 
 Two planning comments in the repository still describe this string as not yet updated (a comment in the workflow definition and a parenthetical in the feature constitution's Standards section). Both predate the update; the shipped string is the one quoted above, and the copy test asserts the disclosure is present in the real file.
 
 The consent prompt shown at first cloud need exists in the string catalogue, Nepali first. Its central disclosure line, English: "When a word isn't in the phone's own dictionary, the text on this screen — only the text, never the picture — is sent to the assistant's cloud service to be translated. Nothing is sent until you agree, and you can stop it any time." Prompt title: "Use the internet to translate?"; accept: "Yes, use the internet"; decline: "No, keep it on this phone"; stop control: "Stop using the internet for translation".
 
-The disclosure version stamp recorded on a consent grant currently literally reads livetranslate.disclosure.draft.16sep2026.r1 — with "draft" in it. The recorded rule (owner action OA-3): if the copy changes when it is reviewed, this stamp must be bumped so previously granted consents do not carry over to the new wording.
+The disclosure version stamp recorded on a consent grant read livetranslate.disclosure.draft.16sep2026.r1 — with "draft" in it — while the review was open. At the owner's review on 2026-09-17 it became livetranslate.disclosure.16sep2026.r1. The recorded rule (owner action OA-3): if the copy changes when it is reviewed, this stamp must be bumped so previously granted consents do not carry over to the new wording. The wording did not change, so no wording-driven carry-over arises; the bump was applied so that the stamp no longer reads "draft", and it is the mechanism that would have retired a stale grant had one existed. None did: the feature is absent from master (verified — master holds no file under Services/LiveTranslate/) and no build of it has been distributed, so there was no field consent to invalidate.
 
-**Consent/disclosure copy review (Open Decision 3): NOT DONE — owed by the owner.** The two DRAFT catalogue keys, exactly as they stand:
+**Consent/disclosure copy review (Open Decision 3): COMPLETE — owner review, 2026-09-17; copy accepted as written.** The two catalogue keys that were held DRAFT, exactly as they stand and as accepted:
 
 | Catalogue key | English | Nepali | Status |
 |---|---|---|---|
-| livetranslate.snapshot.capture | "Hold this picture" | "यो दृश्य रोक्नुहोस्" | DRAFT — catalogue comment: "T-033 freeze-frame control. DRAFT: awaiting the owner's OD3 copy review at final sign-off." |
-| livetranslate.snapshot.live | "Go live again" | "फेरि चलाउनुहोस्" | DRAFT — catalogue comment: "T-033 freeze-frame control, the way back. DRAFT: awaiting the owner's OD3 copy review at final sign-off." |
+| livetranslate.snapshot.capture | "Hold this picture" | "यो दृश्य रोक्नुहोस्" | ACCEPTED at sign-off 2026-09-17. Catalogue comment still reads "DRAFT: awaiting the owner's OD3 copy review at final sign-off" — see the staleness note below. |
+| livetranslate.snapshot.live | "Go live again" | "फेरि चलाउनुहोस्" | ACCEPTED at sign-off 2026-09-17. Catalogue comment still reads "DRAFT: awaiting the owner's OD3 copy review at final sign-off" — see the staleness note below. |
+
+**One residual left by that acceptance, recorded rather than tidied.** The DRAFT wording lives in the two catalogue comments in ios/ElderlyAssistant/Resources/Localizable.xcstrings (and in a comment in the copy test that pins those keys). Those comments now describe a review that is complete. They are developer-facing comments, not user-visible strings — the shipped English and Nepali values are the ones in the table above and are unchanged. They were left untouched deliberately: the comments are the pin that made the copy debt visible, and editing a pinned artifact in the same change that records the sign-off would blur the two. Clearing them is a follow-up, not a condition of this sign-off.
 
 These are the freeze-frame control's two labels (one control, two states). They are pinned by the copy test so that a third unreviewed string cannot be added silently. All 26 feature strings have both English and Nepali values and pass the copy tests, which assert properties (present, localised, truthful) rather than final wording.
 
 ### Gate 3 — release log-safety gate: PASSES, and covers the new OCR/translation paths
 
-Re-run in this worktree for this review; both commands exited 0.
+Re-run in this worktree for this review; both commands exited 0. The release gate was run once more after the sign-off stamp edit (the only source change made at sign-off) and passed again, exit 0, with the same 24 fixtures over 12 rules.
 
 - The release gate script (ios/tools/check-release-log-safety.sh): passes. It runs the rule engine over the whole source tree — including the feature's new roots — and then runs the gate's own fixture suite. Reported output: no transcript content or raw error object can be printed in a non-Debug configuration, and the live-camera-translation sources carry no console write or content-bearing event field.
 - The fixture harness (ios/tools/check-release-log-safety-fixtures.py) with its falsification flag: passes. 36 cases over 12 rules; every rule proven load-bearing (disabling a rule makes its positive fixture pass — i.e. the rule was catching something real). The build-path run is 24 fixtures over 12 rules; every rule has a positive and a negative fixture, and a missing fixture fails the gate rather than skipping it.
@@ -122,24 +127,24 @@ The security test review re-derived the evidence and returned SECURITY-GO: all t
 4. The master unit baseline remains red (about 21 pre-existing failures, unrelated to this feature). The scoped suites are the mitigation; no full-suite green is claimed.
 5. One load-sensitive determinism test was observed flaky during the snapshot task; it is attributed in the notes, not eliminated.
 6. The release log-safety gate cannot see through indirection; that limit is stated in the design, and the typed emitters plus the source-hygiene suite are its complement, not a replacement.
-7. Two copy keys remain DRAFT, and the consent and disclosure copy review is owed at final sign-off (owner), together with Open Decision 3.
+7. Two copy keys were held DRAFT pending the consent and disclosure copy review at final sign-off (owner), together with Open Decision 3. That review was completed at sign-off on 2026-09-17 with the copy accepted as written; the stamp was bumped and the catalogue comments that still say DRAFT are noted as stale in Gate 2.
 8. Residual SR-1 (the provider's block reason emitted from one pre-existing shared site — pinned to that site, never on a feature event) and residuals T-2 (the consent record's on-device integrity rests on platform file protection, not an authentication tag) and SD-5 (with the cloud voice engine active, one screen can have two cloud paths but only the translation indicator; input to the joint Open Decision 12 / 13 review) stand as ruled in the security design review.
 
 ## Open items
 
-Owner actions (all open; owner: Anjan Poudel):
+Owner actions (OA-3 closed at sign-off; the rest open; owner: Anjan Poudel):
 
 | # | Action | Why it is the owner's | State |
 |---|---|---|---|
 | OA-1 | OD1 — fix or confirm the OCR cadence and thermal values | needs device checks DV-2 / DV-10 / DV-15 | Open — unmeasured |
 | OA-2 | OD2 — confirm the always-show-original default and the in-place rule | needs the DV-3 device demo | Open — unmeasured |
-| OA-3 | OD3 — review the consent/disclosure copy and the purpose-string wording; if the copy changes, bump the disclosure version stamp | a copy and disclosure judgement, with a reader in front of the prompt (DV-6) | Open — owner review |
+| OA-3 | OD3 — review the consent/disclosure copy and the purpose-string wording; if the copy changes, bump the disclosure version stamp | a copy and disclosure judgement, with a reader in front of the prompt (DV-6) | CLOSED 2026-09-17 — owner accepted the copy as written; stamp bumped to livetranslate.disclosure.16sep2026.r1 |
 | OA-4 | OD5 — confirm the declutter thresholds | needs DV-13 / DV-16 on real dense pages | Open — unmeasured |
 | OA-5 | Run the device validation itself (DV-1…DV-16), then the constitution's pre-release device console check on a Release build before submission | only the owner has the hardware | Open |
 
 Draft and known-limitation items carried forward:
 
-- The two DRAFT copy keys (Gate 2) — the copy debt is pinned so it cannot grow silently.
+- The two catalogue comments that still say DRAFT (Gate 2) — the copy debt they pinned is discharged, but the comments are the stale half of the pin and were left for a follow-up rather than edited in the change that records the sign-off.
 - The log-safety gate's two stated limits: indirection, and falsification being a manual recorded run (a rule could regress to firing only in company between runs; the build path still catches a rule that stops firing entirely).
 - The aborted result bundle TG10-ocr.xcresult holds zero tests and must never be cited as evidence; the real OCR evidence is inside TG10-gate.xcresult.
 - Evidence retention: one earlier gate bundle can no longer be read by the result-bundle tool, and two groups retained no bundle, so three group counts rest on the notes rather than on recorded bundles.
@@ -155,7 +160,7 @@ Residual security risks: SR-1, T-2 and SD-5 (detail in Security posture). SR-1's
 
 In plain terms there are four real levers, and no others. There is no CI pipeline and no deployment machinery in this repository — integration and rollback are manual; and there is no remote kill switch, because the encrypted remote-configuration channel is not implemented (a recorded descope).
 
-1. Before integration — do nothing. As of this review the feature exists only on the branch worktree-live-camera-translation (pushed to origin, tip c0f1d8c); master does not contain it. Not merging it is a complete rollback.
+1. Before integration — do nothing. The feature exists only on the branch worktree-live-camera-translation (pushed to origin); master does not contain it (verified: no file under Services/LiveTranslate/ on master). Not merging it is a complete rollback.
 2. After integration — revert the change. Integration is expected via a pull request; after a merge, roll back by reverting that merge commit (the git revert command with -m 1 against the merge commit). The change is additive — new directories plus small additive edits — so the revert restores the previous behaviour cleanly. Then verify the way every change is verified here: build the app, run the scoped tests, re-run the two log-safety script gates. The constitution amendment (Open Decision 13) sits in its own commits, so it can be retained deliberately for a future re-landing while the code is reverted.
 3. After shipping — in-product levers, best first:
    - The user (or family) revokes translation consent: the cloud text send stops immediately and the feature continues in offline mode. This is the product-level off switch this feature has; it is reachable from the translation screen and from Settings.
@@ -174,7 +179,7 @@ In plain terms there are four real levers, and no others. There is no CI pipelin
 | No image egress on any path, including the retry | PASS — structurally impossible; every recorded request decoded: one text part, no media; positive control proves the check works |
 | Log safety gated at build time and covering the new OCR/translation paths | PASS — wired ahead of every test scope; both gates re-run green today; 12/12 rules proven load-bearing |
 | Camera purpose string updated and disclosing both required facts | PASS — quoted in Gate 2 |
-| Consent/disclosure copy reviewed | NOT DONE — owner review owed (Open Decision 3); the two DRAFT keys are listed in Gate 2 |
+| Consent/disclosure copy reviewed | PASS — owner review completed 2026-09-17 (Open Decision 3 / OA-3); copy accepted as written; stamp bumped to livetranslate.disclosure.16sep2026.r1; stale catalogue DRAFT comments noted in Gate 2 |
 | Device validation | NOT PERFORMED — DV-1…DV-16 NOT RUN; simulator-only evidence; OD1 / OD2 / OD5 unmeasured |
 | Requirements lock intact | PASS — 23 FR / 13 NFR; 36/36 hashes recompute; the FR-LCT-003 narrowing is owner-signed and recorded |
 | No regression to shared behaviour (NFR-LCT-012) | PASS within the evidence — appliance-helper suites green; shared governor and overlay mapper untouched against the merge base |
@@ -183,12 +188,13 @@ In plain terms there are four real levers, and no others. There is no CI pipelin
 
 decision: GO
 
-**GO — the change is recommended for the owner's sign-off.** Every gate criterion this review can verify is met, and each was re-checked rather than taken on trust: the exception amendment is recorded (Gate 1); the purpose string is updated and discloses both required facts (Gate 2); the log-safety gate passes and covers the new paths, with every rule proven load-bearing (Gate 3); all ten security amendments are discharged with named, passing tests; and the recorded test gates are green with every cited suite confirmed non-zero.
+**GO — recommended by this review and signed by the owner.** Every gate criterion this review can verify is met, and each was re-checked rather than taken on trust: the exception amendment is recorded (Gate 1); the purpose string is updated and discloses both required facts (Gate 2); the log-safety gate passes and covers the new paths, with every rule proven load-bearing (Gate 3); all ten security amendments are discharged with named, passing tests; and the recorded test gates are green with every cited suite confirmed non-zero.
 
-This recommendation is not the sign-off, and it is not a statement that the feature is ready to ship. Three things remain, and they are the owner's:
+This recommendation was not itself the sign-off. **The owner gave the T2 sign-off on 2026-09-17** through the human approval step (HIL item b6d85d84-1847-4849-9688-39d89091686f, resolved 2026-09-17T02:37:01Z), accepting the consent/disclosure copy as written.
 
-1. The consent/disclosure copy review (Open Decision 3) — the two DRAFT keys and the current consent prompt copy are set out in Gate 2 so the review can be done; if the wording changes, the disclosure version stamp must be bumped.
-2. The device validation run (DV-1…DV-16), then the constitution's pre-release device console check, before any store submission. The feature has not been tested on a phone, and nothing in this pack is device evidence.
-3. The OD1 / OD2 / OD5 value decisions, once (2) produces measurements.
+Two things remain, and they are the owner's. Neither was a condition of the sign-off; both are conditions of shipping:
 
-If the owner prefers to hold the change until the copy review and the device run are complete, nothing here resists that: the engineering work is complete and additive, and the Open items section is the complete list of what remains.
+1. The device validation run (DV-1…DV-16), then the constitution's pre-release device console check, before any store submission. The feature has not been tested on a phone, and nothing in this pack is device evidence. DV-1…DV-16 stand recorded as the pre-submission owner action.
+2. The OD1 / OD2 / OD5 value decisions, once item 1 produces measurements.
+
+The third item this section carried when the recommendation was made — the consent/disclosure copy review — closed at sign-off: see Gate 2. If the owner prefers to hold the change until the device run is complete, nothing here resists that: the engineering work is complete and additive, and the Open items section is the list of what remains.

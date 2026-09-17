@@ -2,7 +2,7 @@
   "id": "b6d85d84-1847-4849-9688-39d89091686f",
   "task_id": "final-sign-off",
   "workflow_id": "live-camera-translation",
-  "status": "PENDING",
+  "status": "RESOLVED",
   "reason": "T2 human sign-off - live camera translation (EN->NE v1). The final-sign-off report (specs/final-sign-off.md) recommends GO: the recorded constitution exception for the text-only cloud tier (Open Decision 13) is present and text-only; the camera purpose string is updated and discloses both required facts; the release log-safety gate and its fixtures pass (12/12 rules load-bearing) and cover the new OCR/translation paths. The sign-off itself is the owner's. Three things remain and are not the reviewer's to grant.",
   "context": {
     "task_description": "Final reviewer-authored sign-off pack: change summary, requirements traceability, security posture, open items, rollback plan, compliance checklist.",
@@ -35,5 +35,7 @@
     "rollback": "Before integration: do not merge - the feature exists only on the branch. After integration: revert the merge commit (git revert -m 1); the change is additive. After shipping: user revokes translation consent (stops cloud text send, keeps offline mode); or unregister the plugin (one registration in AppCoordinator.swift) which makes the feature unreachable via an explicit tested 'unavailable' path; or lower the shared Gemini per-day budget (floor 10, shared with voice); or remove the API key (blunt, stops all Gemini use). No remote kill switch exists (the encrypted remote-configuration channel is a recorded descope).",
     "note": "Item created by the task session because the task was dispatched directly (not via the ai-sdd run command), which is the path that normally creates it. Left PENDING for the human. The earlier HIL item 75d8d101-44d5-4794-af7c-7f57eefb4cc3 (requirements sign-off) was already resolved by the owner on 2026-09-16 and must not be re-resolved."
   },
-  "created_at": "2026-09-17T02:20:09.000Z"
+  "created_at": "2026-09-17T02:20:09.000Z",
+  "notes": "Owner-approved 2026-09-17 T2 final sign-off. Consent/disclosure copy accepted as-is (wording unchanged; stamp bump applied). Device validation DV-1..16 recorded as pre-submission owner action OA-5.",
+  "resolved_at": "2026-09-17T02:37:01.814Z"
 }
