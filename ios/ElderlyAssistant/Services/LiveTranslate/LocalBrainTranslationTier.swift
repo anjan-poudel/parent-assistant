@@ -210,6 +210,20 @@ enum BrainGenerationFailure: Error, Equatable {
     /// answer.
     case promptOverflow
     case timedOut
+    /// The caller stopped waiting for this attempt, so the decode was stopped
+    /// with it.
+    ///
+    /// Its own case rather than a second spelling of `timedOut` (added
+    /// 2026-09-17, the device report): the two point at different halves of
+    /// the attempt. `timedOut` means the tier's own bound was reached *during
+    /// the decode* — the model and the batch are what is too slow. `cancelled`
+    /// means the caller's own stage deadline expired first, which is only
+    /// possible when everything before the decode (the handle load, or a
+    /// previous attempt's decode still holding the runtime) ate the budget —
+    /// a fact about the tier's *queue*, not about its model. Collapsing them
+    /// is what made the device's console unreadable: every overrun reported
+    /// `inference_failed`, the one token that describes neither.
+    case cancelled
     case generationFailed
 }
 
@@ -291,7 +305,8 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
               let modelURL = modelStore.path(for: modelID) else {
             // No store, no catalogue entry, or no installed artifact: the tier
             // is skipped and says so. The strings fall through untouched.
-            events.brainTranslationUnavailable(modelStore == nil ? .runtimeMissing : .modelNotInstalled)
+            events.brainTranslationUnavailable(modelStore == nil ? .runtimeMissing : .modelNotInstalled,
+                                               stage: .availability)
             return .none
         }
 
@@ -344,12 +359,14 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
             return LocalBrainTranslationOutcome(translations: translations,
                                                 durationMs: durationMs)
         } catch let failure as BrainGenerationFailure {
-            events.brainTranslationUnavailable(Self.reason(for: failure))
+            events.brainTranslationUnavailable(Self.reason(for: failure),
+                                               stage: Self.stage(for: failure))
             return .none
         } catch {
             // A llama.cpp error this tier does not classify is still a failure
-            // it reports, with the token that says "the generation failed".
-            events.brainTranslationUnavailable(.inferenceFailed)
+            // it reports, with the token that says "the generation failed" —
+            // and, now, the stage that says it came out of the decode.
+            events.brainTranslationUnavailable(.inferenceFailed, stage: .decode)
             return .none
         }
         #else
@@ -357,7 +374,7 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
         // Built without the llama.cpp runtime: no model can be run, whatever is
         // on disk. Recorded once per sighting by the caller's claim, not once
         // per frame.
-        events.brainTranslationUnavailable(.runtimeMissing)
+        events.brainTranslationUnavailable(.runtimeMissing, stage: .availability)
         return .none
         #endif
     }
@@ -637,7 +654,24 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
         switch failure {
         case .loadFailed: return .modelLoadFailed
         case .promptOverflow, .generationFailed: return .inferenceFailed
-        case .timedOut: return .inferenceTimeout
+        case .timedOut, .cancelled: return .inferenceTimeout
+        }
+    }
+
+    /// Where the attempt stopped, for the `failureStage` metadata key.
+    ///
+    /// The second half of the same report `reason(for:)` serves, and the one
+    /// that makes a device capture actionable: the reason tokens are four
+    /// wide by design (what the caller must do), while the stage is seven
+    /// wide (what the implementation did). Every case is named by the code
+    /// path that throws it, so the two cannot drift.
+    private static func stage(for failure: BrainGenerationFailure) -> BrainFailureStage {
+        switch failure {
+        case .loadFailed: return .load
+        case .promptOverflow: return .promptBudget
+        case .timedOut: return .deadline
+        case .cancelled: return .cancelled
+        case .generationFailed: return .decode
         }
     }
 
@@ -687,15 +721,14 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
                   modelURL: URL,
                   timeout: TimeInterval) async throws -> String {
         #if canImport(LLM)
-        let llm = try loadHandle(modelURL: modelURL)
         defer {
             lastUse = Date()
             scheduleIdleRelease()
         }
-        return try await Self.run(llm,
-                                  prompt: prompt,
-                                  jsonSchema: jsonSchema,
-                                  timeout: timeout)
+        return try await run(modelURL: modelURL,
+                             prompt: prompt,
+                             jsonSchema: jsonSchema,
+                             timeout: timeout)
         #else
         _ = (prompt, jsonSchema, modelURL, timeout)
         throw BrainGenerationFailure.loadFailed
@@ -782,42 +815,101 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
         return created
     }
 
-    /// One generation, raced against its deadline.
+    /// One attempt, raced against its deadline — **the handle load included**.
     ///
     /// The budget guard runs first and fails fast: prompt and output share the
     /// 1,024-token context, so a prompt that leaves less than the output
     /// headroom does not produce a shorter answer, it produces a truncated
     /// one — and under temp 0 with a fixed seed that truncation is
-    /// deterministic, not transient. A timeout is the one failure worth
-    /// interrupting rather than reporting: `stop()` breaks the decode loop so
-    /// the handle is usable again immediately.
-    private static func run(_ llm: LLM,
-                            prompt: String,
-                            jsonSchema: String,
-                            timeout: TimeInterval) async throws -> String {
-        let promptTokens = await llm.encode(prompt).count
-        guard promptTokens <= LocalIntentInterpreter.contextTokenBudget
-                - LocalIntentInterpreter.outputHeadroomTokens else {
-            throw BrainGenerationFailure.promptOverflow
-        }
+    /// deterministic, not transient.
+    ///
+    /// **The deadline used to start after the load** (2026-09-17, the device
+    /// report). `brainTranslationTimeoutSeconds` bounded the decode and
+    /// nothing else, while `loadHandle` — a synchronous, uninterruptible
+    /// `llama_model_load_from_file` over a 2.5 GB GGUF — ran before the clock
+    /// began. With `brainTranslationIdleUnloadSeconds` at 5 s almost every
+    /// batch pays that load, so the bound the device actually hit was the
+    /// pipeline's stage deadline a few seconds later, not this one; the batch
+    /// was then abandoned mid-decode with nobody waiting for it. The config's
+    /// own contract says the opposite ("a batch arriving after a longer gap
+    /// pays one model load inside its own timeout — which is what the
+    /// generous `brainTranslationTimeoutSeconds` is sized for"), and this is
+    /// the code that makes that sentence true: an overrunning load now fails
+    /// at the tier, at this deadline, with the decode never started.
+    ///
+    /// **Every exit that did not get an answer stops the decode.** The
+    /// interruption used to live in the deadline task alone, so it ran only
+    /// when the sleep won the race. A caller's cancellation makes `Task.sleep`
+    /// throw instead, so `stop()` was never reached and the decode ran on: it
+    /// held the `LLMCore` actor for its full length, every later batch queued
+    /// behind it and blew its own deadline in turn, and each of those was
+    /// reported as `inference_failed` — the device's repeated-failure tail,
+    /// one cause and N events.
+    ///
+    /// The stop has to be issued from the group body's `defer`, and that is
+    /// measured, not assumed: on the deadline the body unwinds 0.20 s in (the
+    /// moment the sleep throws), and on the caller's cancellation it unwinds
+    /// at the cancellation itself, while the `catch` *outside* the group does
+    /// not run until 2.00 s — the scope exit first drains the children, and
+    /// the decode child is a synchronous, non-cancellable loop inside the
+    /// runtime that `group.cancelAll()` cannot stop. A stop issued after the
+    /// group would therefore be a stop issued after the decode it was meant to
+    /// bound. `defer` cannot await, so the call hops to this (idle) actor in a
+    /// detached task; if the decode happened to finish on its own first, the
+    /// hop can land after the next batch has begun its generation — `LLMCore`
+    /// scopes an interruption to whichever generation is current when it is
+    /// issued — which costs that batch an early stop it reports as
+    /// unavailable and hands to the next tier. Never a wrong answer.
+    private func run(modelURL: URL,
+                     prompt: String,
+                     jsonSchema: String,
+                     timeout: TimeInterval) async throws -> String {
+        do {
+            return try await withThrowingTaskGroup(of: String.self) { group in
+                group.addTask { [self] in
+                    let llm = try await loadHandle(modelURL: modelURL)
+                    // A deadline that fired while the (synchronous, and so
+                    // uninterruptible) load was running must not be followed
+                    // by a decode nobody is waiting for: the bytes would be
+                    // spent on an answer the caller has already given up on.
+                    try Task.checkCancellation()
 
-        return try await withThrowingTaskGroup(of: String.self) { group in
-            group.addTask {
-                try await llm.core.generateWithConstraints(from: prompt, jsonSchema: jsonSchema)
+                    let promptTokens = await llm.encode(prompt).count
+                    guard promptTokens <= LocalIntentInterpreter.contextTokenBudget
+                            - LocalIntentInterpreter.outputHeadroomTokens else {
+                        throw BrainGenerationFailure.promptOverflow
+                    }
+                    return try await llm.core.generateWithConstraints(from: prompt,
+                                                                     jsonSchema: jsonSchema)
+                }
+                group.addTask {
+                    try await Task.sleep(for: .seconds(timeout))
+                    throw BrainGenerationFailure.timedOut
+                }
+                // The one point every exit passes through — the decode
+                // returned, the deadline threw, the caller cancelled — and the
+                // last one that is reached before the group drains, which is
+                // the whole reason the stop lives here and not after the group.
+                defer {
+                    group.cancelAll()
+                    Task { await self.stopDecode() }
+                }
+                guard let output = try await group.next() else {
+                    throw BrainGenerationFailure.generationFailed
+                }
+                return output
             }
-            group.addTask {
-                try await Task.sleep(for: .seconds(timeout))
-                llm.stop()
-                throw BrainGenerationFailure.timedOut
-            }
-            // First result wins; on the deadline the sleep throws, the group
-            // cancels, and the interrupted generation ends inside the runtime.
-            let first = try await group.next() ?? {
-                throw BrainGenerationFailure.generationFailed
-            }()
-            group.cancelAll()
-            return first
+        } catch is CancellationError {
+            // The caller stopped waiting. See
+            // `BrainGenerationFailure.cancelled` for why this is not `timedOut`.
+            throw BrainGenerationFailure.cancelled
         }
+    }
+
+    /// Stops the decode in flight on the resident handle, if there is one.
+    /// Safe with nothing in flight, and with no handle at all.
+    private func stopDecode() {
+        (handle as? LLM)?.stop()
     }
 
     #endif

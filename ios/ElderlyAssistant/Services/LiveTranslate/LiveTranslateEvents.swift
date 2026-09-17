@@ -67,6 +67,55 @@ enum LiveTranslateBrainUnavailableReason: String, Equatable, CaseIterable {
     case inferenceTimeout = "inference_timeout"
 }
 
+/// Closed vocabulary for the `failureStage` metadata key: **where** an
+/// on-device brain attempt stopped.
+///
+/// Added 2026-09-17 for the device report this file was amended over. The
+/// `reason` token answers "could not answer" — but the shipped pair
+/// (`inference_failed`, `inference_timeout`) collapses four different device
+/// facts into two tokens: a handle that never loaded, a prompt the guard
+/// refused, a decode that threw, and a decode that the deadline (or the
+/// caller) stopped. The owner's console showed the tier failing every cycle
+/// with no way to tell a slow 4B from a refused prompt from a stopped decode,
+/// so the reason token alone was not enough to act on. The stage is the
+/// missing half and it is what a capture now carries.
+///
+/// A closed set, like every other token in this file, and for the same
+/// reason: the value travels in event metadata, so it can be no free-form
+/// string (`LiveTranslateSourceHygieneTests.testNoEmitterAcceptsFreeText`
+/// pins that no emitter takes a `String`).
+enum BrainFailureStage: String, Equatable, CaseIterable {
+    /// The tier never reached a load: no installed model, or no llama.cpp
+    /// runtime in this build. The strings were never at risk and nothing was
+    /// spent — this stage says "the device cannot", where every other stage
+    /// says "the device tried".
+    case availability
+    /// The handle could not be constructed from the installed file — a corrupt
+    /// or mismatched artifact, or a context the device could not create.
+    case load
+    /// The composed prompt would have left less than the output headroom
+    /// inside the shared 1,024-token context, so the guard refused it before
+    /// the first token rather than discovering the wall as a truncated answer.
+    case promptBudget = "prompt_budget"
+    /// The constrained decode threw — a llama.cpp error raised out of
+    /// `generateWithConstraints` that the tier does not classify further
+    /// (context creation, grammar construction, a failed `llama_decode`).
+    case decode
+    /// The decode outlived `brainTranslationTimeoutSeconds` and the tier
+    /// stopped it. A device fact about the model and the batch, not about the
+    /// caller.
+    case deadline
+    /// The caller stopped waiting, so the tier stopped the decode with it.
+    /// Distinguished from `deadline` on purpose: the tier's own bound was
+    /// never reached, which points at everything *before* the decode — the
+    /// handle load, or a previous attempt's decode still holding the runtime.
+    case cancelled
+    /// The pipeline's own stage deadline expired
+    /// (`brainTranslationStageDeadlineSeconds`): the tier never returned at
+    /// all, so this one is recorded by the caller and not by the tier.
+    case stageDeadline = "stage_deadline"
+}
+
 /// Closed vocabulary for the `mode` metadata key: what asked for speech.
 enum LiveTranslateSpeechMode: String, Equatable, CaseIterable {
     /// The tap-to-hear affordance in the overlay.
@@ -154,7 +203,12 @@ enum LiveTranslateEventCatalogue {
         //    the cloud tier is still there to answer.
         "brain_translation_batch": Entry(outcomes: ["success", "partial", "degraded"],
                                          metadataKeys: ["resolvedCount", "unresolvedCount", "durationMs"]),
-        "brain_translation_unavailable": Entry(outcomes: ["degraded"], metadataKeys: ["reason"]),
+        // `failureStage` joined the schema 2026-09-17 with the tier's device
+        // report (see `BrainFailureStage`): the reason token says the attempt
+        // could not answer, the stage says where it stopped. Both are closed
+        // vocabularies, so neither can carry content.
+        "brain_translation_unavailable": Entry(outcomes: ["degraded"],
+                                               metadataKeys: ["reason", "failureStage"]),
         "translation_batch_resolved": Entry(outcomes: ["success", "partial"],
                                            metadataKeys: ["resolvedCount", "unresolvedCount", "durationMs"]),
         "translation_degraded": Entry(outcomes: ["degraded"], metadataKeys: ["reason", "regionCount"]),
@@ -218,6 +272,10 @@ struct LiveTranslateEvents {
         case origin
         case mode
         case reason
+        /// Where an on-device brain attempt stopped (`BrainFailureStage`).
+        /// Added 2026-09-17: the reason token alone could not tell a slow
+        /// decode from a refused prompt from a stopped one.
+        case failureStage
         case disclosureVersion
     }
 
@@ -391,10 +449,18 @@ struct LiveTranslateEvents {
     }
 
     /// The tier could not be used. Content-free by construction: the reason is
-    /// a closed token and there is nothing else to carry.
-    func brainTranslationUnavailable(_ reason: LiveTranslateBrainUnavailableReason) {
+    /// a closed token, the stage is another, and there is nothing else to
+    /// carry.
+    ///
+    /// `stage` is required rather than defaulted: a call site that could omit
+    /// it is a call site that would leave a capture unable to say where the
+    /// attempt stopped, which is the whole reason the key exists. The cheap
+    /// tokens (`availability` for a missing model, `load` for a refused
+    /// handle) are the ones the tier's early exits pass.
+    func brainTranslationUnavailable(_ reason: LiveTranslateBrainUnavailableReason,
+                                     stage: BrainFailureStage) {
         emit("brain_translation_unavailable", outcome: "degraded",
-             metadata: [.reason: reason.rawValue])
+             metadata: [.reason: reason.rawValue, .failureStage: stage.rawValue])
     }
 
     // MARK: Sanitisation (C07)
