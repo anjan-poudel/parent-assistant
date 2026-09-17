@@ -385,6 +385,18 @@ protocol GoogleAccountSessionProtocol: AnyObject {
     /// only after `isSignedIn`.
     var hasRequiredScopes: Bool { get }
 
+    /// [SCOPE-LEDGER] (2026-09-17) The scopes the share path needs, in
+    /// Google's URL spelling — the baseline the ledger compares the live
+    /// token against. Exposed on the protocol so the service can build
+    /// the per-scope card rows without knowing the list.
+    var requiredScopes: [String] { get }
+
+    /// [SCOPE-LEDGER] (2026-09-17) Asks Google for SPECIFIC scopes —
+    /// the ledger's Grant button, after `refreshScopeStatus` found a
+    /// gap. Presents the consent sheet; true when the grant landed (the
+    /// fresh token is cached the same way sign-in caches it).
+    func grantScopes(_ scopes: [String]) async -> Bool
+
     /// Presents Google's sign-in flow, then asks for the share scopes.
     ///
     /// Returns the OUTCOME rather than a Bool: "cancelled", "failed",
@@ -494,6 +506,14 @@ protocol GoogleCalendarGatewayProtocol: AnyObject {
     /// `.notFound`, which the caller also reads as "the goal state is
     /// reached". Both spellings drain the same tombstone.
     func deleteEvent(id: String) async -> Bool
+
+    /// [SCOPE-LEDGER] (2026-09-17) The scopes the LIVE token actually
+    /// carries, asked of Google's tokeninfo endpoint — ground truth,
+    /// immune to the SDK's cached `grantedScopes` list (the source of
+    /// two 2026-09-17 misdiagnoses). Nil when there is no token or
+    /// Google could not answer; the empty array when the token carries
+    /// no scopes at all.
+    func fetchTokenScopes() async -> [String]?
 
     /// People v1: makes sure `email` exists as one of the elder's Google
     /// contacts, creating it when absent (design §4.2 — keeps invites out

@@ -299,6 +299,38 @@ final class GoogleCalendarGateway: GoogleCalendarGatewayProtocol {
     /// that is exactly "someone invited the elder and nobody has answered
     /// yet". Everything else on the primary calendar is either the
     /// elder's own event or an invitation they already dealt with.
+    /// [SCOPE-LEDGER] (2026-09-17) The live token's REAL scopes, asked
+    /// of Google's tokeninfo endpoint — ground truth the SDK's cached
+    /// `grantedScopes` list can drift from (the source of two 2026-09-17
+    /// misdiagnoses). The token rides in the query string (tokeninfo's
+    /// documented shape); nothing about it is ever logged — this method
+    /// emits only the OUTCOME of the check.
+    func fetchTokenScopes() async -> [String]? {
+        let event = "calendar_share_token_scope_check"
+        guard let token = await session.accessToken() else { return nil }
+        var components = URLComponents(string: "https://oauth2.googleapis.com/tokeninfo")
+        components?.queryItems = [URLQueryItem(name: "access_token", value: token)]
+        guard let url = components?.url else { return nil }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        guard let (data, response) = try? await transport.send(request),
+              let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode) else {
+            self.emit(event, outcome: "failure",
+                      metadata: ["reason": "transport"])
+            return nil
+        }
+        struct TokenInfoResponse: Decodable { let scope: String? }
+        guard let info = try? JSONDecoder().decode(TokenInfoResponse.self, from: data),
+              let scopeList = info.scope, !scopeList.isEmpty else {
+            self.emit(event, outcome: "failure",
+                      metadata: ["reason": "malformed_response"])
+            return nil
+        }
+        self.emit(event, outcome: "success")
+        return scopeList.split(separator: " ").map(String.init)
+    }
+
     func listIncoming(syncToken: String?) async -> GoogleIncomingPage? {
         let event = "calendar_share_inbound"
         guard let token = await authorizedToken(event: event, kind: nil) else { return nil }

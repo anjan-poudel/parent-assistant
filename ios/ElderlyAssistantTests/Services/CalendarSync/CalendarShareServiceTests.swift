@@ -977,6 +977,71 @@ final class CalendarShareServiceTests: XCTestCase {
                        "a signed-out / unconsented device still says WHY it shared nothing")
     }
 
+    // MARK: - Scope ledger (2026-09-17)
+
+    func testRefreshScopeStatusPublishesTheTokeninfoTruth() async {
+        let rig = makeService()
+        // The live token carries calendar but NOT contacts — the exact
+        // 2026-09-17 device state that 403'd the People call while the
+        // SDK's list still claimed the grant.
+        rig.gateway.tokenScopesResult = ["https://www.googleapis.com/auth/calendar"]
+
+        await rig.service.refreshScopeStatus()
+        await drainMain()
+
+        XCTAssertEqual(rig.service.status.scopeStatus, [
+            "https://www.googleapis.com/auth/calendar": true,
+            "https://www.googleapis.com/auth/contacts": false,
+        ])
+        let check = rig.bus.emittedEvents.filter {
+            $0.eventType == "calendar_share_scope_check"
+        }
+        XCTAssertEqual(check.count, 1)
+        XCTAssertEqual(check.first?.metadata["calendar"], "granted")
+        XCTAssertEqual(check.first?.metadata["contacts"], "missing")
+    }
+
+    func testGrantMissingScopesRequestsExactlyTheGapAndRechecks() async {
+        let rig = makeService()
+        rig.gateway.tokenScopesResult = ["https://www.googleapis.com/auth/calendar"]
+        await rig.service.refreshScopeStatus()
+        await drainMain()
+        // The grant lands: the next tokeninfo read answers with both.
+        rig.gateway.tokenScopesResult = [
+            "https://www.googleapis.com/auth/calendar",
+            "https://www.googleapis.com/auth/contacts",
+        ]
+
+        let granted = await rig.service.grantMissingScopes()
+        await drainMain()
+
+        XCTAssertTrue(granted)
+        XCTAssertEqual(rig.session.grantScopesRequests.count, 1)
+        XCTAssertEqual(rig.session.grantScopesRequests.first,
+                       ["https://www.googleapis.com/auth/contacts"],
+                       "only the missing scope is asked for — never a full re-consent")
+        // Three tokeninfo reads: the initial check, the direct post-grant
+        // re-check, and the republish re-check the service runs last.
+        // The published ledger truth itself is pinned in
+        // testRefreshScopeStatusPublishesTheTokeninfoTruth.
+        XCTAssertEqual(rig.gateway.tokenScopeCheckCalls, 3)
+    }
+
+    func testGrantMissingScopesWithNoGapAsksGoogleNothing() async {
+        let rig = makeService()
+        rig.gateway.tokenScopesResult = [
+            "https://www.googleapis.com/auth/calendar",
+            "https://www.googleapis.com/auth/contacts",
+        ]
+        await rig.service.refreshScopeStatus()
+        await drainMain()
+
+        let granted = await rig.service.grantMissingScopes()
+
+        XCTAssertTrue(granted)
+        XCTAssertTrue(rig.session.grantScopesRequests.isEmpty)
+    }
+
     // MARK: - Sign out
 
     func testSignOutClearsTheLedgerAndSaysSo() async {
@@ -1546,6 +1611,21 @@ private final class FakeShareSession: GoogleAccountSessionProtocol {
     private(set) var restoreCalls = 0
     private(set) var accessTokenCalls = 0
 
+    /// [SCOPE-LEDGER] The baseline the ledger compares against; tests can
+    /// narrow it to drive a partial-grant household.
+    var requiredScopes: [String] = [
+        "https://www.googleapis.com/auth/calendar",
+        "https://www.googleapis.com/auth/contacts",
+    ]
+    /// What `grantScopes` reports and records.
+    var grantScopesResult = true
+    private(set) var grantScopesRequests: [[String]] = []
+
+    func grantScopes(_ scopes: [String]) async -> Bool {
+        grantScopesRequests.append(scopes)
+        return grantScopesResult
+    }
+
     /// Signs the fake in (or not) exactly the way the real session does:
     /// `.connected` leaves a scoped session, `.connectedWithoutScopes`
     /// leaves a signed-in one WITHOUT the grant, and the other two leave
@@ -1618,6 +1698,16 @@ private final class FakeShareGateway: GoogleCalendarGatewayProtocol {
     /// service in an already-paused state.
     var lastErrorClass: GoogleShareError?
     var errorClassAfterFailure: GoogleShareError? = .transport("test")
+
+    /// [SCOPE-LEDGER] The tokeninfo answer — URL-form scopes the live
+    /// token carries. nil = the check could not run.
+    var tokenScopesResult: [String]? = nil
+    private(set) var tokenScopeCheckCalls = 0
+
+    func fetchTokenScopes() async -> [String]? {
+        tokenScopeCheckCalls += 1
+        return tokenScopesResult
+    }
 
     private(set) var ensureFamilyCalendarCalls = 0
     private(set) var createdDrafts: [CalendarTwinDraft] = []

@@ -72,6 +72,13 @@ struct CalendarShareStatus: Equatable {
     /// The most recent failure class, for the honest status line.
     var lastError: GoogleShareError?
 
+    /// [SCOPE-LEDGER] (2026-09-17) What Google's tokeninfo says the live
+    /// token actually carries, per required scope (URL-form keys). nil =
+    /// never checked (or the check could not run). This is the ground
+    /// truth the card's scope rows render — the SDK's own grantedScopes
+    /// list has drifted twice on real devices.
+    var scopeStatus: [String: Bool]?
+
     /// Whether sharing is actually acting: connected, SCOPED and
     /// consented. Pending work with this false is exactly the state the
     /// card has to surface ("3 events waiting to share" + why they are
@@ -326,8 +333,78 @@ final class CalendarShareService: ObservableObject {
     func restoreSession() async -> Bool {
         let outcome = await session.restorePreviousSession()
         refreshStatus()
-        if outcome.isConnected { await flushPending() }
+        if outcome.isConnected {
+            await refreshScopeStatus()
+            await flushPending()
+        }
         return outcome.isConnected
+    }
+
+    // MARK: - Scope ledger (2026-09-17)
+
+    /// Asks Google's tokeninfo what the live token REALLY carries and
+    /// publishes the per-scope truth on `status.scopeStatus` — the
+    /// ground truth the card renders. Names only ever leave this method
+    /// (scope URL forms), never the token.
+    func refreshScopeStatus() async {
+        guard let granted = await gateway.fetchTokenScopes() else {
+            onMain { [weak self] in
+                guard let self else { return }
+                var next = self.status
+                next.scopeStatus = nil
+                self.status = next
+            }
+            return
+        }
+        let normalized = Set(granted.map { Self.normalizeScopeName($0) })
+        let required = session.requiredScopes
+        onMain { [weak self] in
+            guard let self else { return }
+            var ledger: [String: Bool] = [:]
+            for scope in required {
+                ledger[scope] = normalized.contains(Self.normalizeScopeName(scope))
+            }
+            var next = self.status
+            next.scopeStatus = ledger
+            self.status = next
+            var metadata: [String: String] = [:]
+            for (scope, grantedFlag) in ledger {
+                metadata[Self.normalizeScopeName(scope)] = grantedFlag ? "granted" : "missing"
+            }
+            self.emit("calendar_share_scope_check", outcome: "success",
+                      metadata: metadata)
+        }
+    }
+
+    /// The card's Grant button: asks Google for exactly the scopes the
+    /// last check found missing, then re-checks the truth and drains the
+    /// queue when the grant completes the set. The answer comes from the
+    /// DIRECT re-check (tokeninfo), not the published status — the
+    /// publish is a main-queue hop that lands after this returns, and a
+    /// caller must never read a stale ledger for its decision.
+    @discardableResult
+    func grantMissingScopes() async -> Bool {
+        let missing = status.scopeStatus?
+            .filter { !$0.value }.map(\.key) ?? []
+        guard !missing.isEmpty else { return true }
+        guard await session.grantScopes(missing) else { return false }
+        let grantedNow = await gateway.fetchTokenScopes() ?? []
+        let normalized = Set(grantedNow.map { Self.normalizeScopeName($0) })
+        let allGranted = session.requiredScopes.allSatisfy {
+            normalized.contains(Self.normalizeScopeName($0))
+        }
+        await refreshScopeStatus()
+        if status.isActive { await flushPending() }
+        return allGranted
+    }
+
+    /// The URL-form / short-form scope-name reconciliation the ledger
+    /// shares with the session's own comparison: tokeninfo answers in
+    /// URL form, the catalog request uses the same, and the SDK's short
+    /// forms must never read as "missing" because the spelling differs.
+    private static func normalizeScopeName(_ scope: String) -> String {
+        let prefix = "https://www.googleapis.com/auth/"
+        return scope.hasPrefix(prefix) ? String(scope.dropFirst(prefix.count)) : scope
     }
 
     /// Drops the session and PAUSES sharing. The local calendar, the

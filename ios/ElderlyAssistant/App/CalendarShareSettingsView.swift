@@ -79,8 +79,12 @@ struct CalendarShareSettingsView: View {
         // foreground flush) may have moved it since the hub was drawn —
         // including the SCOPE state, which a re-connect elsewhere in the
         // app (or a revocation at Google) can change while this card is
-        // off screen.
-        .onAppear { service.refreshStatus() }
+        // off screen. The scope ledger re-checks the LIVE token each
+        // time the card appears.
+        .onAppear {
+            service.refreshStatus()
+            run { await service.refreshScopeStatus() }
+        }
         .alert(L10n.str("calendarShare.stopSharing.confirm", locale: locale),
                isPresented: $confirmingStop) {
             Button(L10n.str("common.cancel", locale: locale), role: .cancel) { }
@@ -231,6 +235,7 @@ struct CalendarShareSettingsView: View {
                 .font(.system(size: DesignTokens.minCaptionPointSize))
                 .foregroundStyle(DesignTokens.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
+            scopeLedgerRows
             primaryAction("calendarShare.syncNow") {
                 run {
                     await service.flushPending()
@@ -243,6 +248,46 @@ struct CalendarShareSettingsView: View {
             }
             signOutAction
             workingRow
+        }
+    }
+
+    /// [SCOPE-LEDGER] (2026-09-17) The per-scope truth, asked of Google's
+    /// tokeninfo — the rows that end the console guessing. Each required
+    /// scope shows granted or missing; one missing scope gets one Grant
+    /// button that presents the consent sheet for exactly that scope and
+    /// re-checks afterwards. Before the first check has run, the rows
+    /// read "checking" — the card refreshes the check on appear.
+    @ViewBuilder
+    private var scopeLedgerRows: some View {
+        let ledger = service.status.scopeStatus
+        let displayScopes: [(String, String)] = [
+            ("https://www.googleapis.com/auth/calendar", "calendarShare.scope.calendar"),
+            ("https://www.googleapis.com/auth/contacts", "calendarShare.scope.contacts"),
+        ]
+        ForEach(displayScopes, id: \.0) { scope, labelKey in
+            HStack(spacing: 10) {
+                Image(systemName: ledger.map { $0[scope] == true } == true
+                      ? "checkmark.circle.fill" : "circle.dashed")
+                    .foregroundStyle(ledger.map { $0[scope] == true } == true
+                                     ? DesignTokens.stateSpeaking : DesignTokens.textSecondary)
+                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                Text(L10n.str(labelKey, locale: locale))
+                    .font(.system(size: DesignTokens.minBodyPointSize))
+                    .foregroundStyle(DesignTokens.textPrimary)
+                Spacer()
+                if ledger?[scope] == false {
+                    Button {
+                        run { _ = await service.grantMissingScopes() }
+                    } label: {
+                        Text(L10n.str("calendarShare.scope.grant", locale: locale))
+                            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                            .foregroundStyle(DesignTokens.accent)
+                            .frame(minHeight: DesignTokens.minTapTargetSize)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 4)
         }
     }
 

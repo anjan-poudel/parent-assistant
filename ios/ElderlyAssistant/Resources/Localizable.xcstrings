@@ -11404,6 +11404,57 @@
         }
       }
     },
+    "calendarShare.scope.calendar": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Calendar access"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "क्यालेन्डर पहुँच"
+          }
+        }
+      }
+    },
+    "calendarShare.scope.contacts": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Contacts access"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सम्पर्क पहुँच"
+          }
+        }
+      }
+    },
+    "calendarShare.scope.grant": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Grant"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अनुमति दिनुहोस्"
+          }
+        }
+      }
+    },
     "events.share.noEmails": {
       "extractionState": "manual",
       "localizations": {
