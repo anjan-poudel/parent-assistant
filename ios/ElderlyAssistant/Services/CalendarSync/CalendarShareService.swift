@@ -414,7 +414,18 @@ final class CalendarShareService: ObservableObject {
     func eventCreated(localEventId: String, title: String, startDate: Date,
                       durationMinutes: Int, location: String? = nil) {
         onMain { [weak self] in
-            guard let self, self.canShare else { return }
+            guard let self else { return }
+            // [CALENDAR-POLICY] (2026-09-17) The first gate must never be
+            // silent either: two 2026-09-17 device runs created events
+            // with zero share activity in the console — not signed in /
+            // no consent / no scopes is a real reason, and the console
+            // has to say it instead of saying nothing.
+            guard self.canShare else {
+                self.emit("calendar_share_skipped_not_active",
+                          outcome: "info",
+                          metadata: ["kind": EventNotifyKind.calendarEvent.rawValue])
+                return
+            }
             let key = CalendarShareKey.oneOff(kind: .calendarEvent,
                                              eventIdentifier: localEventId)
             guard let draft = CalendarShareMapper.calendarEventDraft(
@@ -426,6 +437,16 @@ final class CalendarShareService: ObservableObject {
                 // candidate has no email. Nothing is queued, and no twin is
                 // left behind, so a LATER edit that makes someone eligible
                 // starts from a clean slate.
+                //
+                // [CALENDAR-POLICY] (2026-09-17) But never SILENTLY: the
+                // 2026-09-17 field reports read as "no invitation was
+                // sent" with zero observability — sharing was on and
+                // connected, and the policy had simply invited nobody.
+                // The event records the skip with its kind so the console
+                // can finally say WHY no invite left the device.
+                self.emit("calendar_share_skipped_no_invitees",
+                          outcome: "info",
+                          metadata: ["kind": EventNotifyKind.calendarEvent.rawValue])
                 return
             }
             // Marked as OURS before the request goes out, and marked as

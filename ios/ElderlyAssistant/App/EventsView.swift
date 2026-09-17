@@ -211,6 +211,7 @@ struct EventFormView: View {
                 photoCard
                 addressCard
                 notesCard
+                shareHintCard
                 saveButton
             }
         }
@@ -361,6 +362,23 @@ struct EventFormView: View {
             .fixedSize(horizontal: false, vertical: true)
             .background(DesignTokens.card)
             .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+    }
+
+    /// [CALENDAR-POLICY] (2026-09-17) The never-silent caption: sharing
+    /// is connected and consented, but every family contact lacks an
+    /// email — so THIS event will not invite anyone until an email is
+    /// added. Invisible otherwise; nothing is pended or promised when it
+    /// shows, the save is still local-first.
+    @ViewBuilder
+    private var shareHintCard: some View {
+        if coordinator.calendarShareService.status.isActive,
+           coordinator.familyContacts.allSatisfy({ ($0.email ?? "").isEmpty }) {
+            Text(LocalizedStringKey("events.share.noEmails"))
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundStyle(DesignTokens.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 4)
+        }
     }
 
     private var saveButton: some View {
