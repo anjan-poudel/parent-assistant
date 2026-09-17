@@ -185,6 +185,28 @@ final class SnapshotModeTests: XCTestCase {
         return buffer
     }
 
+    /// Presents frames until the live picture has published a placement — the
+    /// state the elder taps in: a picture with text on it, before any freeze.
+    ///
+    /// Not a fixed number of deliveries. The live path needs two observations
+    /// of a region before it is on screen (its appear hysteresis), and a frame
+    /// handed over while the pipeline is mid-cycle is refused by its own
+    /// in-flight guard, so how many frames it takes is not a fact a test can
+    /// assume: "the live picture is up" is a condition to wait for, and the
+    /// frames keep coming until it holds.
+    @MainActor
+    private func deliverUntilTheLivePictureIsUp(_ harness: Harness,
+                                                width: Int = 1920,
+                                                height: Int = 1080,
+                                                file: StaticString = #filePath,
+                                                line: UInt = #line) async {
+        await waitUntil("the live picture to publish a placement", file: file, line: line) {
+            if !(harness.model.publication?.placements.isEmpty ?? true) { return true }
+            try? self.deliverFrame(harness, width: width, height: height)
+            return false
+        }
+    }
+
     /// Hands frames over while a picture is held. There is no pass to wait for
     /// by definition — that is the claim under test — so this waits out a
     /// window in which a pass would have run instead.
@@ -1177,11 +1199,10 @@ final class SnapshotModeTests: XCTestCase {
         reportLayout(harness)
         harness.parts.engine.regions = [detected(curatedText)]
         await harness.model.start()
-        try await deliverPass(harness)
-        try await deliverPass(harness)
+        await deliverUntilTheLivePictureIsUp(harness)
 
-        let livePublication = try XCTUnwrap(harness.model.publication)
-        let livePlacement = try XCTUnwrap(livePublication.placements.first)
+        let livePlacement = try XCTUnwrap(harness.model.publication?.placements.first,
+                                          "the live picture shows a placement to tap")
         harness.model.tapRegion(livePlacement.region.id)
         XCTAssertEqual(harness.parts.speech.spokenTexts, [curatedTranslation],
                        "the live tap speaks the placement's line")
@@ -1522,14 +1543,9 @@ final class SnapshotModeTests: XCTestCase {
         reportLayout(harness)
         harness.parts.engine.regions = [detected("बत्ती बन्द छ", box: (0.10, 0.20, 0.70, 0.30))]
         await harness.model.start()
-        // Two passes: the live path's appear hysteresis is what makes a region
-        // visible on screen, so one frame is not yet "the picture the elder is
-        // looking at".
-        try await deliverPass(harness, width: 640, height: 480)
-        try await deliverPass(harness, width: 640, height: 480)
-        await waitUntil("the live picture to publish the recognized text") {
-            !(harness.model.publication?.regions.isEmpty ?? true)
-        }
+        // The live picture has to be showing the recognized text before the
+        // tap: that is the picture the elder is looking at when it is held.
+        await deliverUntilTheLivePictureIsUp(harness, width: 640, height: 480)
 
         // The still pass fails — the detector's own failure mode, recorded as
         // `ocr_pass_failed` and never surfaced (T-007).
