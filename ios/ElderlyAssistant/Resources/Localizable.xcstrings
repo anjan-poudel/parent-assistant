@@ -17268,6 +17268,23 @@
         }
       }
     },
+    "calendarShare.error.insufficientScopes": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Calendar access was refused even though consent was given. Sign out, then connect the account again — if this keeps happening, check the console."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सहमति दिइए पनि क्यालेन्डर पहुँच अस्वीकार गरियो। साइन आउट गरेर खाता फेरि जोड्नुहोस् — यस्तै भइरह्यो भने कन्सोल जाँच्नुहोस्।"
+          }
+        }
+      }
+    },
     "calendarShare.error.rateLimited": {
       "extractionState": "manual",
       "localizations": {

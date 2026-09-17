@@ -37,13 +37,20 @@ final class GoogleAccountSessionTests: XCTestCase {
     private func makeSession(clientID: String? = "test-client-id",
                              presenter: (() -> UIViewController?)? = nil,
                              flow: FakeAuthFlow,
-                             bus: MockObservabilityBus) -> GoogleAccountSession {
+                             bus: MockObservabilityBus,
+                             now: @escaping () -> Date = Date.init) -> GoogleAccountSession {
         GoogleAccountSession(clientID: clientID,
                              presenter: presenter ?? self.presenter(),
                              flow: flow,
                              observabilityBus: bus,
+                             now: now,
                              defaults: .standard)
     }
+
+    /// A fixed instant for the token-cache tests, so expiry is a literal
+    /// in the assertions rather than "whatever `Date()` said when the
+    /// suite ran" — the same reason the gateway's tests fix their clock.
+    private let grantInstant = Date(timeIntervalSince1970: 1_800_000_000)
 
     private func sessionEvents(_ bus: MockObservabilityBus,
                                _ type: String) -> [ObservabilityEvent] {
@@ -388,6 +395,190 @@ final class GoogleAccountSessionTests: XCTestCase {
         XCTAssertEqual(events.first?.errorCode, "not_configured")
     }
 
+    // MARK: - The grant-time token (2026-09-17)
+
+    /// The regression this section exists for. After the consent sheet,
+    /// the token that matters is the one THAT call minted — the SDK's own
+    /// refresh keeps handing back the sign-in's token for up to an hour,
+    /// which is how every Calendar call went out with an identity-scoped
+    /// token while the console showed a household that had granted
+    /// everything.
+    func testTheConsentSheetsTokenIsTheOneKeptNotTheSignInOne() async {
+        let flow = FakeAuthFlow()
+        flow.signInResult = .success(["email", "profile"])
+        flow.addScopesResult = .success(GoogleAccountSession.requiredScopes + ["email"])
+        let session = makeSession(flow: flow, bus: MockObservabilityBus())
+
+        let outcome = await session.signIn()
+
+        XCTAssertEqual(outcome, .connected)
+        XCTAssertEqual(session.grantedToken?.value, "consent-token",
+                       "the token minted WITH the grant wins over the one before it")
+    }
+
+    /// No consent sheet was needed (the account already held the scopes),
+    /// so the sign-in's token is the freshest one there is.
+    func testASignInThatAlreadyHoldsTheScopesKeepsItsOwnToken() async {
+        let flow = FakeAuthFlow()
+        flow.signInResult = .success(GoogleAccountSession.requiredScopes)
+        let session = makeSession(flow: flow, bus: MockObservabilityBus())
+
+        let outcome = await session.signIn()
+
+        XCTAssertEqual(outcome, .connected)
+        XCTAssertEqual(flow.addScopesCalls, 0)
+        XCTAssertEqual(session.grantedToken?.value, "sign-in-token")
+    }
+
+    /// The elder is signed in and declined the grant: nothing about the
+    /// consent sheet produced a token, and the sign-in's is still what
+    /// the account is spending — so it is what the session keeps.
+    func testADeclinedConsentSheetStillKeepsTheSignInToken() async {
+        let flow = FakeAuthFlow()
+        flow.signInResult = .success(["email"])
+        flow.addScopesResult = .failure(GoogleSignInCode.canceled.error)
+        let session = makeSession(flow: flow, bus: MockObservabilityBus())
+
+        let outcome = await session.signIn()
+
+        XCTAssertEqual(outcome, .connectedWithoutScopes)
+        XCTAssertEqual(session.grantedToken?.value, "sign-in-token")
+    }
+
+    /// The launch restore hands over a token too, so the first flush after
+    /// a launch spends the one the restore just refreshed instead of
+    /// asking the SDK again.
+    func testTheRestoredTokenIsKept() async {
+        let flow = FakeAuthFlow()
+        flow.hasPreviousSignInResult = true
+        flow.restoreResult = .success(GoogleAccountSession.requiredScopes)
+        let session = makeSession(flow: flow, bus: MockObservabilityBus())
+
+        let outcome = await session.restorePreviousSession()
+
+        XCTAssertEqual(outcome, .connected)
+        XCTAssertEqual(session.grantedToken?.value, "restore-token")
+    }
+
+    /// A flow that ends with NO session keeps nothing: a token without a
+    /// session behind it is a credential this app has no right to hold.
+    func testACancelledSignInKeepsNoToken() async {
+        let flow = FakeAuthFlow()
+        flow.signInResult = .failure(GoogleSignInCode.canceled.error)
+        let session = makeSession(flow: flow, bus: MockObservabilityBus())
+
+        let outcome = await session.signIn()
+
+        XCTAssertEqual(outcome, .cancelled)
+        XCTAssertNil(session.grantedToken)
+    }
+
+    /// The expiry the SDK reports is carried through, and it is the
+    /// boundary the token is actually trusted to: fresh up to it, gone
+    /// from it. Strictly `<` at the instant itself — the alternative to a
+    /// wrong "expired" is one silent refresh, the alternative to a wrong
+    /// "still good" is a request Google answers 401/403.
+    func testTheKeptTokenExpiresWhenTheSDKSaysItDoes() async {
+        let flow = FakeAuthFlow()
+        flow.signInResult = .success(GoogleAccountSession.requiredScopes)
+        flow.tokenExpiresAt = grantInstant.addingTimeInterval(3600)
+        let session = makeSession(flow: flow, bus: MockObservabilityBus(), now: { self.grantInstant })
+
+        _ = await session.signIn()
+
+        let kept = session.grantedToken
+        XCTAssertEqual(kept?.expiresAt, grantInstant.addingTimeInterval(3600))
+        XCTAssertEqual(kept?.isFresh(at: grantInstant), true)
+        XCTAssertEqual(kept?.isFresh(at: grantInstant.addingTimeInterval(3599)), true)
+        XCTAssertEqual(kept?.isFresh(at: grantInstant.addingTimeInterval(3600)), false,
+                       "the instant it expires is already too late")
+        XCTAssertEqual(kept?.isFresh(at: grantInstant.addingTimeInterval(3601)), false)
+    }
+
+    /// An SDK that reports no expiry still gets a token into the cache —
+    /// but only for a short, guessed window, because an expiry this app
+    /// has to guess is not one it can promise anything about.
+    func testATokenWithNoReportedExpiryIsTrustedOnlyBriefly() async {
+        let flow = FakeAuthFlow()
+        flow.signInResult = .success(GoogleAccountSession.requiredScopes)
+        flow.tokenExpiresAt = nil
+        let session = makeSession(flow: flow, bus: MockObservabilityBus(), now: { self.grantInstant })
+
+        _ = await session.signIn()
+
+        let kept = session.grantedToken
+        XCTAssertEqual(kept?.expiresAt,
+                       grantInstant.addingTimeInterval(GoogleAccountSession.unreportedTokenLifetime))
+        XCTAssertEqual(kept?.isFresh(at: grantInstant), true)
+        XCTAssertEqual(kept?.isFresh(at: grantInstant.addingTimeInterval(
+            GoogleAccountSession.unreportedTokenLifetime)), false)
+    }
+
+    /// Signing out is the end of the session, and of everything that
+    /// belonged to it.
+    func testSignOutDropsTheKeptToken() async {
+        let flow = FakeAuthFlow()
+        flow.signInResult = .success(GoogleAccountSession.requiredScopes)
+        let session = makeSession(flow: flow, bus: MockObservabilityBus())
+        _ = await session.signIn()
+        XCTAssertNotNil(session.grantedToken)
+
+        session.signOut()
+
+        XCTAssertNil(session.grantedToken,
+                     "a token for an account the elder just dropped is a second, invisible session")
+    }
+
+    /// A restore that failed leaves the app where a never-connected device
+    /// sits, and a credential the restore could not re-establish is not one
+    /// to keep spending.
+    func testAFailedRestoreDropsTheKeptToken() async {
+        let flow = FakeAuthFlow()
+        flow.signInResult = .success(GoogleAccountSession.requiredScopes)
+        flow.hasPreviousSignInResult = true
+        flow.restoreResult = .failure(GoogleSignInCode.hasNoAuthInKeychain.error)
+        let session = makeSession(flow: flow, bus: MockObservabilityBus())
+        _ = await session.signIn()
+
+        let outcome = await session.restorePreviousSession()
+
+        XCTAssertEqual(outcome, .unavailable)
+        XCTAssertNil(session.grantedToken)
+    }
+
+    /// Nothing stored to restore is the same conclusion one step earlier.
+    func testARestoreWithNothingStoredDropsTheKeptToken() async {
+        let flow = FakeAuthFlow()
+        flow.signInResult = .success(GoogleAccountSession.requiredScopes)
+        flow.hasPreviousSignInResult = false
+        let session = makeSession(flow: flow, bus: MockObservabilityBus())
+        _ = await session.signIn()
+
+        let outcome = await session.restorePreviousSession()
+
+        XCTAssertEqual(outcome, .unavailable)
+        XCTAssertNil(session.grantedToken)
+    }
+
+    /// Reading a token with no session in memory: nil, and the kept token
+    /// goes with the session that is not there. No `GIDSignIn` user exists
+    /// in a test process — which is exactly the state being asserted, and
+    /// the reason the cache's own rule is asserted through `grantedToken`
+    /// rather than through a live SDK.
+    func testNoSessionInMemoryDropsTheKeptTokenAndAnswersNil() async {
+        let flow = FakeAuthFlow()
+        flow.signInResult = .success(GoogleAccountSession.requiredScopes)
+        let session = makeSession(flow: flow, bus: MockObservabilityBus())
+        _ = await session.signIn()
+        XCTAssertNotNil(session.grantedToken)
+
+        let token = await session.accessToken()
+
+        XCTAssertNil(token)
+        XCTAssertNil(session.grantedToken,
+                     "a token must not outlive the session it was minted for")
+    }
+
     // MARK: - Scope reading
 
     /// The pure half of `hasRequiredScopes`: which granted lists count as
@@ -448,6 +639,19 @@ private final class FakeAuthFlow: GoogleAuthFlow {
     var hasPreviousSignInResult = false
     var restoreResult: Result<[String], Error> = .success([])
 
+    /// The TOKEN each flow reports beside its scopes — the other half of
+    /// `GoogleAuthResult` (2026-09-17).
+    ///
+    /// Three distinct strings rather than one shared value, because which
+    /// one the session ends up holding IS the assertion: the bug was a
+    /// session that could only ever spend the sign-in's token.
+    var signInToken = "sign-in-token"
+    var addScopesToken = "consent-token"
+    var restoreToken = "restore-token"
+    /// The expiry every reported token carries. Nil by default, which is
+    /// the SDK reporting none — a state the session has to handle.
+    var tokenExpiresAt: Date?
+
     private(set) var signInCalls = 0
     private(set) var addScopesCalls = 0
     private(set) var hasPreviousSignInCalls = 0
@@ -456,9 +660,12 @@ private final class FakeAuthFlow: GoogleAuthFlow {
     /// consent request carries the calendar grant.
     private(set) var requestedScopes: [[String]] = []
 
-    func signIn(presenting controller: UIViewController) async throws -> [String] {
+    func signIn(presenting controller: UIViewController) async throws -> GoogleAuthResult {
         signInCalls += 1
-        return try signInResult.get()
+        let scopes = try signInResult.get()
+        return GoogleAuthResult(grantedScopes: scopes,
+                                accessToken: signInToken,
+                                expiresAt: tokenExpiresAt)
     }
 
     func hasPreviousSignIn() -> Bool {
@@ -466,16 +673,22 @@ private final class FakeAuthFlow: GoogleAuthFlow {
         return hasPreviousSignInResult
     }
 
-    func restorePreviousSignIn() async throws -> [String] {
+    func restorePreviousSignIn() async throws -> GoogleAuthResult {
         restoreCalls += 1
-        return try restoreResult.get()
+        let scopes = try restoreResult.get()
+        return GoogleAuthResult(grantedScopes: scopes,
+                                accessToken: restoreToken,
+                                expiresAt: tokenExpiresAt)
     }
 
     func addScopes(_ scopes: [String],
-                   presenting controller: UIViewController) async throws -> [String] {
+                   presenting controller: UIViewController) async throws -> GoogleAuthResult {
         addScopesCalls += 1
         requestedScopes.append(scopes)
-        return try addScopesResult.get()
+        let granted = try addScopesResult.get()
+        return GoogleAuthResult(grantedScopes: granted,
+                                accessToken: addScopesToken,
+                                expiresAt: tokenExpiresAt)
     }
 }
 

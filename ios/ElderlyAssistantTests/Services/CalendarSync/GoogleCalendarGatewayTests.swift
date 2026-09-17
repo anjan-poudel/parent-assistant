@@ -220,6 +220,42 @@ final class GoogleCalendarGatewayTests: XCTestCase {
                        "unauthorized")
     }
 
+    /// 403 is NOT the same fault as 401 (2026-09-17), and the whole point
+    /// of splitting them is that the log and the card must never merge
+    /// them again: 401 is a token Google will not accept at all, 403 is a
+    /// valid token that is not allowed to do this — which, right after a
+    /// consent sheet, means the token in hand was minted for the wrong
+    /// scopes. Same pause for the queue, different diagnosis for the
+    /// family.
+    func testA403IsRecordedAsInsufficientScopesNotUnauthorized() async {
+        transport.enqueue(json: ["items": [["id": familyCalendarID,
+                                            "summary": "Sahayak Family"]]])
+        transport.enqueue(json: ["error": ["code": 403]], status: 403)
+        let gateway = makeGateway()
+
+        let id = await gateway.createEvent(makeDraft())
+
+        XCTAssertNil(id)
+        XCTAssertEqual(gateway.lastErrorClass, .insufficientScopes)
+        XCTAssertNotEqual(gateway.lastErrorClass, .unauthorized,
+                          "the two refusals are different faults and must not read as one")
+        XCTAssertEqual(gateway.lastErrorClass?.isRetryable, false)
+        XCTAssertEqual(gateway.lastErrorClass?.isAuthorizationFailure, true,
+                       "both refusals stop the pass — the queue does the same thing about either")
+        XCTAssertEqual(bus.events(named: "calendar_share_create_failed").last?.errorCode,
+                       "insufficient_scopes")
+    }
+
+    /// A 401 stops the pass as well, and the classification above is the
+    /// only difference between the two — asserted together so a future
+    /// edit cannot quietly drop one of them out of the pause.
+    func testBothRefusalsStopThePassAndNeitherIsRetryable() {
+        XCTAssertTrue(GoogleShareError.unauthorized.isAuthorizationFailure)
+        XCTAssertTrue(GoogleShareError.insufficientScopes.isAuthorizationFailure)
+        XCTAssertFalse(GoogleShareError.unauthorized.isRetryable)
+        XCTAssertFalse(GoogleShareError.insufficientScopes.isRetryable)
+    }
+
     func testA404OnCreateIsReportedAsNotFound() async {
         transport.enqueue(json: ["items": [["id": familyCalendarID,
                                             "summary": "Sahayak Family"]]])
@@ -463,7 +499,9 @@ final class GoogleCalendarGatewayTests: XCTestCase {
         let ensured = await gateway.ensureContact(email: "kin@example.com", name: nil, phone: nil)
 
         XCTAssertFalse(ensured)
-        XCTAssertEqual(gateway.lastErrorClass, .unauthorized)
+        // People v1 answering 403 is the account-scope case exactly: the
+        // token works, and it was not minted with `contacts`.
+        XCTAssertEqual(gateway.lastErrorClass, .insufficientScopes)
         XCTAssertTrue(bus.contains("calendar_share_contact_failed"))
     }
 

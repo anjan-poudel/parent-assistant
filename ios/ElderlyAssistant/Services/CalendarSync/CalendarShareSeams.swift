@@ -66,9 +66,23 @@ enum GoogleShareError: Error, Equatable {
     /// No OAuth client id is configured. The honest "not configured"
     /// state (design §0) — never a crash, never a silent no-op.
     case notConfigured
-    /// 401/403 — the token was revoked or the scope was never granted.
-    /// The service pauses and surfaces this rather than retrying.
+    /// 401 — Google does not accept this token at all: it was revoked, it
+    /// expired, or the session behind it is gone. The service pauses and
+    /// surfaces this rather than retrying.
     case unauthorized
+    /// 403 — the token IS valid and Google knows who is calling, but the
+    /// account holds no grant for what was asked (2026-09-17).
+    ///
+    /// Its own case rather than a second spelling of `unauthorized`
+    /// because the two are different stories that were being told as one,
+    /// and merging them is exactly how the bug that split them stayed
+    /// invisible in a device log: a 403 after a consent sheet means the
+    /// token IN HAND was minted for the wrong scopes — the stale-token
+    /// bug `GoogleAccountSession` now prevents — while a 401 means there
+    /// is no usable session at all. The recovery is the same (the family
+    /// reconnects) and so is the pause; the diagnosis is not, and the
+    /// card says which one it is.
+    case insufficientScopes
     /// 429 / quota. Retryable with backoff.
     case rateLimited
     /// 5xx. Retryable with backoff.
@@ -87,15 +101,41 @@ enum GoogleShareError: Error, Equatable {
     /// the same no-PII rule as the rest of this type.
     case transport(String)
 
-    /// Whether a retry could plausibly succeed. `unauthorized` and
-    /// `notConfigured` are NOT retryable: retrying a revoked token is a
-    /// busy-loop, and the user has to act. `notFound` is not retryable
-    /// either — what was there is gone; only a RE-CREATE helps.
+    /// Whether a retry could plausibly succeed. `unauthorized`,
+    /// `insufficientScopes` and `notConfigured` are NOT retryable:
+    /// retrying a revoked token or a withheld grant is a busy-loop, and
+    /// the user has to act. `notFound` is not retryable either — what was
+    /// there is gone; only a RE-CREATE helps.
     var isRetryable: Bool {
         switch self {
         case .rateLimited, .server, .transport: return true
-        case .notSignedIn, .notConfigured, .unauthorized, .notFound,
-             .malformedResponse:
+        case .notSignedIn, .notConfigured, .unauthorized, .insufficientScopes,
+             .notFound, .malformedResponse:
+            return false
+        }
+    }
+
+    /// Whether this failure means "the session exists but Google will not
+    /// accept it for this call" — the class the flush stops a whole pass
+    /// on.
+    ///
+    /// 401 and 403 are two causes of ONE state: nothing queued can
+    /// succeed until the family reconnects, so working through the queue
+    /// is a busy-loop and an attempt counter is a delay on a dead end.
+    /// The two are kept apart in the LOG and on the CARD (401: the
+    /// session is gone; 403: the token in hand is scoped wrongly), never
+    /// in what the queue does about them.
+    ///
+    /// `notSignedIn` is deliberately NOT here. It is the SDK holding no
+    /// account rather than Google refusing one, the service treats it as
+    /// an ordinary failed attempt today, and quietly widening the pause
+    /// to cover it would be a behaviour change smuggled in beside a
+    /// classification fix.
+    var isAuthorizationFailure: Bool {
+        switch self {
+        case .unauthorized, .insufficientScopes: return true
+        case .notSignedIn, .notConfigured, .rateLimited, .server, .notFound,
+             .malformedResponse, .transport:
             return false
         }
     }
@@ -122,6 +162,7 @@ extension GoogleShareError {
         case .notSignedIn: return "calendarShare.error.notSignedIn"
         case .notConfigured: return "calendarShare.error.notConfigured"
         case .unauthorized: return "calendarShare.error.unauthorized"
+        case .insufficientScopes: return "calendarShare.error.insufficientScopes"
         case .rateLimited: return "calendarShare.error.rateLimited"
         case .server: return "calendarShare.error.server"
         case .notFound: return "calendarShare.error.notFound"
@@ -134,19 +175,22 @@ extension GoogleShareError {
     /// Settings card — and the one action that helps: connect the account
     /// again.
     ///
-    /// `unauthorized` is the case this exists for: 401/403 means the
-    /// token was revoked or the Calendar/contacts grant was never given,
-    /// and the ONLY recovery is the OAuth flow. A card that explains the
-    /// failure without offering that tap leaves the household with a
-    /// dead end. `notSignedIn` is the same dead end with a different
-    /// cause, so it gets the same tap.
+    /// `unauthorized` is the case this exists for: a 401 means the token
+    /// was revoked, and the ONLY recovery is the OAuth flow. A card that
+    /// explains the failure without offering that tap leaves the
+    /// household with a dead end. `notSignedIn` is the same dead end with
+    /// a different cause, so it gets the same tap. `insufficientScopes`
+    /// is the same shape again — 403 rather than 401, the consent
+    /// refused rather than the token withdrawn — and its line names the
+    /// extra step the fix needs (sign out first, so the SDK cannot hand
+    /// back the token it minted without the grant).
     ///
     /// Everything else is either ours to retry (rate limited, 5xx,
     /// transport), already satisfied (`notFound`), or a state no tap on
     /// this card can change (`notConfigured`, `malformedResponse`).
     var isActionableFromSettings: Bool {
         switch self {
-        case .unauthorized, .notSignedIn: return true
+        case .unauthorized, .insufficientScopes, .notSignedIn: return true
         case .notConfigured, .rateLimited, .server, .notFound,
              .malformedResponse, .transport:
             return false
@@ -154,10 +198,38 @@ extension GoogleShareError {
     }
 }
 
+// MARK: - Auth flow result
+
+/// What one Google flow hands back: the scopes the account holds
+/// afterwards, and the access token minted to carry them (2026-09-17).
+///
+/// The token is here because the scopes ALONE were the whole bug. A grant
+/// is only usable through a token minted for it, and the SDK keeps
+/// handing back the token it minted BEFORE the elder consented — it still
+/// looks fresh for up to an hour — so a session that reduced a flow to
+/// its scope list had nothing better to spend and every Calendar call
+/// went out with an identity-scoped token. That is the 401/403 the device
+/// console showed, and one value taken straight off the user the flow
+/// returned is what lets the session keep the good token instead.
+///
+/// `expiresAt` is the SDK's own estimate (`GIDToken.expirationDate`),
+/// which is nullable in the header, so nil is a state callers must handle
+/// rather than a value they may assume.
+struct GoogleAuthResult: Equatable {
+    /// The scopes the account holds when the flow ends.
+    let grantedScopes: [String]
+    /// The access token the flow produced, exactly as the SDK spelled it.
+    let accessToken: String
+    /// When that token stops being usable, as the SDK estimates it. Nil
+    /// when Google/the SDK reported no expiry.
+    let expiresAt: Date?
+}
+
 // MARK: - Auth flow
 
-/// The GoogleSignIn SDK's session entry points, reduced to the ONE fact
-/// this app acts on: the scopes the account holds afterwards.
+/// The GoogleSignIn SDK's session entry points, reduced to the two facts
+/// this app acts on: the scopes the account holds afterwards, and the
+/// token that carries them.
 ///
 /// A protocol rather than calls straight into `GIDSignIn.sharedInstance`
 /// because the branch that matters most cannot be reached any other way.
@@ -182,9 +254,10 @@ extension GoogleShareError {
 /// exists.
 protocol GoogleAuthFlow: AnyObject {
     /// Presents Google's sign-in sheet. Returns the scopes the account
-    /// holds afterwards. Throws whatever the SDK threw — the session
-    /// maps the code, and never the description (constitution C9).
-    func signIn(presenting controller: UIViewController) async throws -> [String]
+    /// holds afterwards, WITH the token that carries them. Throws
+    /// whatever the SDK threw — the session maps the code, and never the
+    /// description (constitution C9).
+    func signIn(presenting controller: UIViewController) async throws -> GoogleAuthResult
 
     /// Whether the SDK holds an account from a PREVIOUS launch, in its
     /// own Keychain cache. Reads no network and presents nothing, which
@@ -201,26 +274,33 @@ protocol GoogleAuthFlow: AnyObject {
     /// point the SDK documents for app start (its own header says not to
     /// call `signIn` from launch and to restore instead).
     ///
-    /// Returns the scopes the account holds afterwards, reduced the same
-    /// way `signIn` reduces its result, so the session's scope policy
-    /// applies unchanged to a restored account. Throws whatever the SDK
-    /// threw — including `kGIDSignInErrorCodeHasNoAuthInKeychain` when
-    /// the elder has signed out or revoked the grant since, which the
-    /// session reports as a failed restore.
+    /// Returns the same value `signIn` returns — scopes plus the token
+    /// that carries them — so the session's scope policy applies unchanged
+    /// to a restored account and its cache starts this process with the
+    /// token the restore just refreshed. Throws whatever the SDK threw —
+    /// including `kGIDSignInErrorCodeHasNoAuthInKeychain` when the elder
+    /// has signed out or revoked the grant since, which the session
+    /// reports as a failed restore.
     ///
     /// Refresh is the SDK's business here: it restores from its cache and
     /// silently refreshes an expired token, so a launch restore costs one
     /// network call at most and no user interaction ever.
-    func restorePreviousSignIn() async throws -> [String]
+    func restorePreviousSignIn() async throws -> GoogleAuthResult
 
     /// Presents Google's scope-consent sheet on the current user for
-    /// `scopes`, returning the scopes held afterwards.
+    /// `scopes`, returning the scopes held afterwards and the token
+    /// minted for them.
+    ///
+    /// This result's token is the whole point of the 2026-09-17 fix: it
+    /// is the ONLY place the post-grant token can be obtained, because
+    /// the SDK's own refresh hands back the pre-grant one for as long as
+    /// that one looks fresh.
     ///
     /// The scopes are passed IN rather than read from a constant here so
     /// the session stays the one place that decides what this feature
     /// needs.
     func addScopes(_ scopes: [String],
-                   presenting controller: UIViewController) async throws -> [String]
+                   presenting controller: UIViewController) async throws -> GoogleAuthResult
 }
 
 // MARK: - Flow outcome
@@ -350,6 +430,13 @@ protocol GoogleAccountSessionProtocol: AnyObject {
     /// A currently-valid access token, refreshing silently when needed.
     /// nil means "no session" or "refresh failed" — the caller pauses
     /// rather than guessing which.
+    ///
+    /// The token handed over is the one minted for the CURRENT grant
+    /// whenever the session holds it (2026-09-17), because the SDK's
+    /// refresh returns the pre-grant token for as long as that one looks
+    /// fresh — the reason every Calendar call went out unscoped after a
+    /// consent sheet. A silent refresh is the fallback, used when no
+    /// grant-time token is held or the one held has expired.
     func accessToken() async -> String?
 }
 
