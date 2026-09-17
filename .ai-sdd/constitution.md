@@ -13,5 +13,6 @@
 | implement | `specs/implement-notes.md` | `implementation` | COMPLETED | 2026-09-16 |
 | review-implementation | `specs/review-implementation.md` | `review_report` | COMPLETED | 2026-09-16 |
 | security-test | `specs/security-test.md` | `review_report` | COMPLETED | 2026-09-17 |
+| final-sign-off | `specs/final-sign-off.md` | `review_report` | COMPLETED | 2026-09-17 |
 
 <!-- end:workflow-artifacts -->
