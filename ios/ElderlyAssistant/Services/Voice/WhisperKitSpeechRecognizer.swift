@@ -615,6 +615,14 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
         loadedDescriptor = descriptor
         lifecycle.commit(reservation)
         lifecycle.didLoad(.speechToText, owner: self)
+        // [MODEL-WARDEN] Step 3 — the load this slot just paid for is what
+        // the warden prices its eviction at. 77 s cold on a device, 135 s
+        // after an ANE recompile; the ledger's prior is the first of those
+        // and this measurement is what replaces it once the device has
+        // spoken. Fire-and-forget on purpose — see `noteLoadCost`.
+        lifecycle.noteLoadCost(loadMs: Double(loadMs),
+                               slot: .speechToText,
+                               modelID: preferredModelID)
         emit("model_loaded", errorCode: nil)
         // [TURN-TIMING] Model ready — the load ms rides as a point entry
         // when this load happened inside a live turn.

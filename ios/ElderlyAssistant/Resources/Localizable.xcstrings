@@ -9858,6 +9858,91 @@
         }
       }
     },
+    "model.unavailable.deviceTooSmall": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This phone does not have enough memory to run it."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो फोनमा यसलाई चलाउन पुग्ने मेमोरी छैन।"
+          }
+        }
+      }
+    },
+    "model.unavailable.marker": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "not for this phone"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो फोनका लागि होइन"
+          }
+        }
+      }
+    },
+    "model.unavailable.overBrainCeiling": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This phone's voice setup is not sized for this model. Pick the recommended one."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो फोनको आवाज सेटअप यो मोडेलका लागि बनाइएको छैन। सिफारिस गरिएको मोडेल छान्नुहोस्।"
+          }
+        }
+      }
+    },
+    "model.unavailable.overClassBudget": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This phone cannot hold this model at all."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो फोनले यो मोडेल राख्नै सक्दैन।"
+          }
+        }
+      }
+    },
+    "model.unavailable.requiresEvictingWarmSTT": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This phone cannot run this model and keep voice recognition ready at the same time. Choosing it would make every reply start with a long wait."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो फोनले यो मोडेल चलाउँदा आवाज पहिचान तयार अवस्थामा राख्न सक्दैन। यसलाई छानेमा हरेक जवाफ सुरु गर्नु अघि लामो प्रतीक्षा गर्नुपर्ने हुन्छ।"
+          }
+        }
+      }
+    },
     "model.verifying": {
       "extractionState": "manual",
       "localizations": {
