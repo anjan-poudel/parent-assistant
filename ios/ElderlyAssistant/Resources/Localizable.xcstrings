@@ -18867,7 +18867,1826 @@
         }
       }
     },
-    "·": {}
+    "·": {},
+    "voice.readiness.loading.starting": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voice stack loading…"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आवाज लोड हुँदैछ…"
+          }
+        }
+      }
+    },
+    "voice.readiness.failed.pipelineStart": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Voice activation isn't available right now."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आवाज अहिले उपलब्ध छैन।"
+          }
+        }
+      }
+    },
+    "voice.readiness.failed.retry": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Try again"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फेरि प्रयास गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "home.setupOptionalCount": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld optional setup items"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld वैकल्पिक सेटअप काम"
+          }
+        }
+      }
+    },
+    "home.setupTalkNow": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Talk now, or finish setup"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिले बोल्नुहोस्, वा सेटअप पूरा गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "homeTimer.multiple": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld more"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld अरू"
+          }
+        }
+      }
+    },
+    "homeTimer.remaining": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remaining"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बाँकी"
+          }
+        }
+      }
+    },
+    "homeTimer.stop": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stop timer"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "टाइमर बन्द गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "timers.cancelFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sorry — I couldn't cancel the timer."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "माफ गर्नुहोस् — टाइमर रद्द गर्न सकिनँ।"
+          }
+        }
+      }
+    },
+    "timers.cancelled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Timer cancelled."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "टाइमर बन्द भयो।"
+          }
+        }
+      }
+    },
+    "timers.none": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You don't have any timers running."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कुनै टाइमर चलिरहेको छैन।"
+          }
+        }
+      }
+    },
+    "settings.encoder.pipelineTrace": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Pipeline trace"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पाइपलाइन ट्रेस"
+          }
+        }
+      }
+    },
+    "settings.encoder.pipelineTrace.count": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%d/%d stages ran"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%d/%d चरण चले"
+          }
+        }
+      }
+    },
+    "settings.encoder.pipelineTrace.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No turn traced yet"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिलेसम्म कुनै पालोको ट्रेस भएको छैन"
+          }
+        }
+      }
+    },
+    "family.contact.email": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Email address"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "इमेल ठेगाना"
+          }
+        }
+      }
+    },
+    "family.contact.emailRequired": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "An emergency contact needs an email address, so the family's calendar can send them the invitation."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आपतकालीन सम्पर्कको इमेल ठेगाना चाहिन्छ — परिवारको क्यालेन्डरबाट निम्ता पठाउन यो चाहिन्छ।"
+          }
+        }
+      }
+    },
+    "family.contact.emailInvalid": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This does not look like an email address. Check for a missing @ or dot."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो इमेल ठेगाना जस्तो देखिँदैन। @ वा डट छुटेको छ कि हेर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "family.contact.emailHintEmergency": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Emergency contacts are invited to every shared reminder, so an email address is required here."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आपतकालीन सम्पर्कलाई हरेक साझा सम्झनामा निम्ता जान्छ, त्यसैले यहाँ इमेल ठेगाना अनिवार्य छ।"
+          }
+        }
+      }
+    },
+    "settings.calendarSharing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Calendar sharing"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "क्यालेन्डर साझा"
+          }
+        }
+      }
+    },
+    "caregiverNotify.shareHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Family members can also be invited to see these events on their own calendar. These switches choose who is invited — but an emergency contact is always invited. Set up in Calendar sharing."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "परिवारका सदस्यहरूलाई यी कार्यक्रम आफ्नै क्यालेन्डरमा देख्न पनि निम्ता दिन सकिन्छ। कसलाई निम्ता जान्छ यी स्विचले तय गर्छन् — तर आपतकालीन सम्पर्कलाई सधैँ निम्ता जान्छ। यो क्यालेन्डर साझा भन्ने ठाउँमा मिलाइन्छ।"
+          }
+        }
+      }
+    },
+    "calendarShare.notConfigured": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Calendar sharing needs a Google sign-in that has not been set up for this app yet. Nothing is being shared. Ask the family member who set up this phone to finish the setup."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "क्यालेन्डर साझा गर्न गुगल साइन-इन चाहिन्छ, जुन यो एपका लागि अझै मिलाइएको छैन। अहिले केही पनि साझा भइरहेको छैन। यो फोन मिलाउनुभएको परिवारको सदस्यलाई सेटअप पूरा गर्न भन्नुहोस्।"
+          }
+        }
+      }
+    },
+    "calendarShare.signedOut": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Google Calendar is not connected yet, so nothing is being shared. Connect the family's Google account to put your reminders on their calendar."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुगल क्यालेन्डर अझै जोडिएको छैन, त्यसैले केही पनि साझा भइरहेको छैन। तपाईंका सम्झनाहरू परिवारको क्यालेन्डरमा राख्न गुगल खाता जोड्नुहोस्।"
+          }
+        }
+      }
+    },
+    "calendarShare.connect": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connect Google Calendar"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुगल क्यालेन्डर जोड्नुहोस्"
+          }
+        }
+      }
+    },
+    "calendarShare.createAccount": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Create a Google account"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुगल खाता बनाउनुहोस्"
+          }
+        }
+      }
+    },
+    "calendarShare.working": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Talking to Google…"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुगलसँग कुरा गर्दैछु…"
+          }
+        }
+      }
+    },
+    "calendarShare.syncNow": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Share now"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिले साझा गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "calendarShare.stopSharing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stop sharing"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "साझा गर्न रोक्नुहोस्"
+          }
+        }
+      }
+    },
+    "calendarShare.stopSharing.confirm": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stop sharing your calendar with the family? Reminders and alarms on this phone keep working either way."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "परिवारसँग क्यालेन्डर साझा गर्न रोक्ने हो? यो फोनका सम्झना र अलार्महरू जसरी पनि चलिरहन्छन्।"
+          }
+        }
+      }
+    },
+    "calendarShare.status.pending": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Waiting to share: %d"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "साझा गर्न बाँकी: %d"
+          }
+        }
+      }
+    },
+    "calendarShare.status.synced": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Everything is shared — last updated %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सबै साझा भयो — पछिल्लो अद्यावधिक %@"
+          }
+        }
+      }
+    },
+    "calendarShare.status.waiting": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing has been shared yet. A reminder is shared as soon as it is created."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिलेसम्म केही पनि साझा भएको छैन। सम्झना बन्नेबित्तिकै साझा हुन्छ।"
+          }
+        }
+      }
+    },
+    "calendarShare.consent.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Before sharing starts"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "साझा सुरु गर्नुअघि"
+          }
+        }
+      }
+    },
+    "calendarShare.consent.body": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Event titles, including medicine names, will be sent to your Google Calendar and shared with invited family contacts. They will see what is coming up on your calendar."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कार्यक्रमका पूरा नाम — औषधिका नामसमेत — तपाईंको गुगल क्यालेन्डरमा पठाइन्छन् र निम्ता दिइएका परिवारका सदस्यहरूले देख्न सक्छन्। उनीहरूले तपाईंको क्यालेन्डरमा के आउँदैछ देख्नेछन्।"
+          }
+        }
+      }
+    },
+    "calendarShare.consent.whoCanSee": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Emergency contacts are always invited. Other family members are invited for the kinds of reminders you switch on in Notify caregivers."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आपतकालीन सम्पर्कहरूलाई सधैं निम्ता जान्छ। अरू परिवारलाई परिवारलाई खबर गर्नेमा खोल्नुभएका सम्झनाका प्रकारअनुसार निम्ता जान्छ।"
+          }
+        }
+      }
+    },
+    "calendarShare.consent.revoke": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You can stop sharing at any time, and this screen will always tell you what is happening."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईं जहिले पनि साझा गर्न रोक्न सक्नुहुन्छ, र यही स्क्रिनले सधैं के भइरहेको छ भनेर देखाउँछ।"
+          }
+        }
+      }
+    },
+    "calendarShare.consent.accept": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I understand"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मैले बुझें"
+          }
+        }
+      }
+    },
+    "calendarShare.error.notSignedIn": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Google is not connected, so nothing is being shared."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुगल जोडिएको छैन, त्यसैले केही पनि साझा भइरहेको छैन।"
+          }
+        }
+      }
+    },
+    "calendarShare.error.notConfigured": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Calendar sharing is not set up for this app, so nothing can be shared."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो एपमा क्यालेन्डर साझा मिलाइएको छैन, त्यसैले केही पनि साझा गर्न सकिँदैन।"
+          }
+        }
+      }
+    },
+    "calendarShare.error.unauthorized": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Google has stopped allowing access. Connect the account again to keep sharing."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुगलले पहुँच दिन छोडेको छ। साझा जारी राख्न खाता फेरि जोड्नुहोस्।"
+          }
+        }
+      }
+    },
+    "calendarShare.error.insufficientScopes": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Calendar access was refused even though consent was given. Sign out, then connect the account again — if this keeps happening, check the console."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सहमति दिइए पनि क्यालेन्डर पहुँच अस्वीकार गरियो। साइन आउट गरेर खाता फेरि जोड्नुहोस् — यस्तै भइरह्यो भने कन्सोल जाँच्नुहोस्।"
+          }
+        }
+      }
+    },
+    "calendarShare.error.rateLimited": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Google is busy right now. Sharing will try again by itself."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुगल अहिले व्यस्त छ। साझा गर्ने काम आफैं फेरि प्रयास गर्नेछ।"
+          }
+        }
+      }
+    },
+    "calendarShare.error.server": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Google had a problem. Sharing will try again by itself."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुगलमा समस्या आयो। साझा गर्ने काम आफैं फेरि प्रयास गर्नेछ।"
+          }
+        }
+      }
+    },
+    "calendarShare.error.malformedResponse": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Google sent back something unexpected, so that share did not go through."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुगलबाट अनपेक्षित जवाफ आयो, त्यसैले त्यो साझा हुन सकेन।"
+          }
+        }
+      }
+    },
+    "calendarShare.error.notFound": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "A calendar item this phone was updating is no longer on Google. It will be put back the next time it changes."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो फोनले अद्यावधिक गरिरहेको एउटा क्यालेन्डर घटना गुगलमा अब छैन। अर्को पटक परिवर्तन हुँदा यो फेरि राखिनेछ।"
+          }
+        }
+      }
+    },
+    "calendarShare.error.transport": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Could not reach Google. Sharing will try again when the phone has internet."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुगलसम्म पुग्न सकिएन। फोनमा इन्टरनेट हुँदा साझा गर्ने काम फेरि प्रयास गर्नेछ।"
+          }
+        }
+      }
+    },
+    "calendarShare.error.generic": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Reminders, alarms and medicine times on this phone keep working either way."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो फोनका सम्झना, अलार्म र औषधिका बेला जसरी पनि चलिरहन्छन्।"
+          }
+        }
+      }
+    },
+    "calendarShare.signOut": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign out of Google"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुगलबाट साइन आउट गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "meds.firePrompt": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Time to take your medicine"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंको औषधि खाने समय भयो"
+          }
+        }
+      }
+    },
+    "visualAid.add": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add photo"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोटो थप्नुहोस्"
+          }
+        }
+      }
+    },
+    "visualAid.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Photo"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोटो"
+          }
+        }
+      }
+    },
+    "visualAid.pageIndicator": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Photo %d of %d"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोटो %d / %d"
+          }
+        }
+      }
+    },
+    "visualAid.remove": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove photo"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोटो हटाउनुहोस्"
+          }
+        }
+      }
+    },
+    "visualAid.captionPlaceholder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Caption (optional)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "विवरण (वैकल्पिक)"
+          }
+        }
+      }
+    },
+    "visualAid.addHint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "You can add up to 3 photos"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईं बढीमा ३ फोटो थप्न सक्नुहुन्छ"
+          }
+        }
+      }
+    },
+    "cloudCascade.holdCue": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "One moment — this is taking a little longer…"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "एक छिन — अलि बढी समय लाग्दैछ…"
+          }
+        }
+      }
+    },
+    "settings.cloudCascade.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Cloud cascade"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "क्लाउड क्यास्केड"
+          }
+        }
+      }
+    },
+    "settings.cloudCascade.toggleLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Send unsure local answers to the cloud"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अनिश्चित स्थानीय जवाफ क्लाउडमा पठाउने"
+          }
+        }
+      }
+    },
+    "settings.cloudCascade.toggleNote": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "On, an answer the large local brain gives below the confidence shown below goes to the configured cloud provider — after the spoken hold cue; off, the local answer stands. Inert while no cloud provider is configured."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "खुला हुँदा, तल देखाइएको विश्वासभन्दा कम भएको स्थानीय जवाफ क्लाउडमा जान्छ — पहिले 'एक छिन' भनिन्छ; बन्द हुँदा स्थानीय जवाफ नै रहन्छ। क्लाउड मिलाइएको नभए यसले केही गर्दैन।"
+          }
+        }
+      }
+    },
+    "settings.cloudCascade.thresholdLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Escalate below"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यसभन्दा कम भए पठाउने"
+          }
+        }
+      }
+    },
+    "settings.cloudCascade.thresholdNote": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The large local brain must be at least this confident to answer on its own."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "स्थानीय दिमागले आफैं जवाफ दिन यति विश्वास चाहिन्छ।"
+          }
+        }
+      }
+    },
+    "history.channel.cloud": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Online brain"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अनलाइन दिमाग"
+          }
+        }
+      }
+    },
+    "history.cloudEscalation": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sent to the online brain"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अनलाइन दिमागमा पठाइयो"
+          }
+        }
+      }
+    },
+    "settings.cloudCascade.increase": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Raise the threshold"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "थ्रेसहोल्ड बढाउने"
+          }
+        }
+      }
+    },
+    "settings.cloudCascade.decrease": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Lower the threshold"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "थ्रेसहोल्ड घटाउने"
+          }
+        }
+      }
+    },
+    "apps.camera.savePermissionDenied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I can't save photos yet. Please allow adding to your photos in Settings. I haven't taken a photo."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "म अझै फोटो सुरक्षित गर्न सक्दिनँ। कृपया सेटिङमा फोटोमा थप्ने अनुमति दिनुहोस्। मैले फोटो खिचेको छैन।"
+          }
+        }
+      }
+    },
+    "apps.announce.openingSettings": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I can't open that screen. Opening Settings."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "त्यो स्क्रिन खोल्न सक्दिनँ। सेटिङ खोल्दैछु।"
+          }
+        }
+      }
+    },
+    "launcher.confirmOpenSettings": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I can't open that exact screen. Should I open Settings instead?"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "त्यो ठ्याक्कै स्क्रिन खोल्न सक्दिनँ। सट्टामा सेटिङ खोल्ने हो?"
+          }
+        }
+      }
+    },
+    "events.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Events"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कार्यक्रमहरू"
+          }
+        }
+      }
+    },
+    "events.empty": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No events yet. Tap + above to add one."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिलेसम्म कुनै कार्यक्रम छैन। माथिको + थिचेर थप्नुहोस्।"
+          }
+        }
+      }
+    },
+    "events.add": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add an event"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कार्यक्रम थप्नुहोस्"
+          }
+        }
+      }
+    },
+    "events.edit": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Edit event"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कार्यक्रम सम्पादन गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "events.save": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save event"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कार्यक्रम बचत गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "events.saveChanges": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Save changes"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "परिवर्तन बचत गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "events.form.addTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New event"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नयाँ कार्यक्रम"
+          }
+        }
+      }
+    },
+    "events.form.editTitle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Edit event"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कार्यक्रम सम्पादन"
+          }
+        }
+      }
+    },
+    "events.field.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "What is it?"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "के हो?"
+          }
+        }
+      }
+    },
+    "events.field.duration": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "How long"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कति लामो"
+          }
+        }
+      }
+    },
+    "events.field.recurrence": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Does it repeat?"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "दोहोरिन्छ?"
+          }
+        }
+      }
+    },
+    "events.field.photo": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Photo"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोटो"
+          }
+        }
+      }
+    },
+    "events.field.address": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Where"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कहाँ"
+          }
+        }
+      }
+    },
+    "events.field.addressPlaceholder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Address or place name"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ठेगाना वा ठाउँको नाम"
+          }
+        }
+      }
+    },
+    "events.field.notes": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Notes (optional)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "टिप्पणी (चाहिएमा)"
+          }
+        }
+      }
+    },
+    "events.photo.add": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add photo"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोटो थप्नुहोस्"
+          }
+        }
+      }
+    },
+    "events.photo.change": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Change photo"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोटो फेर्नुहोस्"
+          }
+        }
+      }
+    },
+    "events.photo.remove": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove photo"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोटो हटाउनुहोस्"
+          }
+        }
+      }
+    },
+    "events.photo.note": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The photo shows in this app only."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोटो यही एपमा मात्र देखिन्छ।"
+          }
+        }
+      }
+    },
+    "events.address.note": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "With an address, this event gets a Go button that gives directions."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ठेगाना भए यो कार्यक्रममा बाटो देखाउने जाऊ बटन आउँछ।"
+          }
+        }
+      }
+    },
+    "events.recurrence.none": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Does not repeat"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "दोहोरिँदैन"
+          }
+        }
+      }
+    },
+    "events.recurrence.daily": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Every day"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "हरेक दिन"
+          }
+        }
+      }
+    },
+    "events.recurrence.weekly": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Every week"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "हरेक हप्ता"
+          }
+        }
+      }
+    },
+    "events.duration.minutes": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld min"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld मिनेट"
+          }
+        }
+      }
+    },
+    "events.duration.hours": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld hr"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%lld घण्टा"
+          }
+        }
+      }
+    },
+    "events.repeats.daily": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Every day at %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "हरेक दिन %@ बजे"
+          }
+        }
+      }
+    },
+    "events.repeats.weekly": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Every %@ at %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "हरेक %@ %@ बजे"
+          }
+        }
+      }
+    },
+    "events.detail.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Event"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कार्यक्रम"
+          }
+        }
+      }
+    },
+    "events.detail.gone": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This event is no longer in the calendar."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो कार्यक्रम अब पात्रोमा छैन।"
+          }
+        }
+      }
+    },
+    "events.navigate": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Go there"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "त्यहाँ जानुहोस्"
+          }
+        }
+      }
+    },
+    "events.delete": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete event"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कार्यक्रम मेट्नुहोस्"
+          }
+        }
+      }
+    },
+    "events.deleteConfirm": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Delete this event? Its photo will be removed too."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो कार्यक्रम मेट्ने हो? यसको फोटो पनि हटाइनेछ।"
+          }
+        }
+      }
+    },
+    "events.notification.open": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "खोल्नुहोस्"
+          }
+        }
+      }
+    },
+    "calendarShare.banner.signedIn": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Signed in to Google"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुगलमा साइन इन गरिएको छ"
+          }
+        }
+      }
+    },
+    "calendarShare.step.account": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Step 1 of 2 — Connect the Google account"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "चरण १/२ — गुगल खाता जोड्नुहोस्"
+          }
+        }
+      }
+    },
+    "calendarShare.step.consent": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Step 2 of 2 — Agree to share your reminders"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "चरण २/२ — आफ्ना सम्झनाहरू साझा गर्न सहमत हुनुहोस्"
+          }
+        }
+      }
+    },
+    "calendarShare.scopesMissing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your Google account is connected, but Sahayak has not been given permission to use your Google Calendar yet. Nothing is being shared."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंको गुगल खाता जोडिएको छ, तर सहायकलाई तपाईंको गुगल क्यालेन्डर प्रयोग गर्ने अनुमति अझै दिइएको छैन। केही पनि साझा भइरहेको छैन।"
+          }
+        }
+      }
+    },
+    "calendarShare.scopesMissing.howTo": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Tap below, then allow Calendar and Contacts when Google asks. You can stop sharing at any time."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तल थिच्नुहोस्, अनि गुगलले सोध्दा क्यालेन्डर र सम्पर्कहरूको अनुमति दिनुहोस्। तपाईं जुनसुकै बेला साझा गर्न रोक्न सक्नुहुन्छ।"
+          }
+        }
+      }
+    },
+    "calendarShare.scopesMissing.reconnect": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Allow Google Calendar access"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गुगल क्यालेन्डरको पहुँच दिनुहोस्"
+          }
+        }
+      }
+    },
+    "calendarShare.error.reconnect": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connect the account again"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "खाता फेरि जोड्नुहोस्"
+          }
+        }
+      }
+    }
   },
   "version": "1.0"
 }

@@ -167,9 +167,12 @@ its own, nothing light can help and the encoder is not sacrificed for zero bytes
   which is a behavior change this work is explicitly not allowed to make.
 - **`LocalBrainChain` needs no slot.** It is a router over interpreters that do their
   own loading; it never holds a model of its own.
-- **`LocalIntentInterpreter` holds a second llama handle** that is not yet registered
-  with the manager. It is only constructed on fallback paths today, so its absence
-  cannot cross the budget in practice — but it is a real gap, not a closed one.
+- **`LocalIntentInterpreter` holds a second llama handle** on its own slot
+  (`.intentBrain`, registered since the 2026-09-17 [TRUNCATION-FIX]). Before that
+  registration it was invisible to every budget — the "दशैँ कहिले हो" escalation
+  admitted the 4B picker brain on top of the resident 1B and the pair got jetsam'd.
+  The slot closes the gap: the gate can refuse, evictions can reach it, and the
+  cascade unloads it before a heavier stand-in takes the turn.
 - **Two engines, one slot.** `.speechToText` can be backed by either the ANC
   (WhisperKit) or whisper.cpp engine. Whichever registers last owns the slot, and
   residency updates from the other are ignored, so a stale engine's release cannot

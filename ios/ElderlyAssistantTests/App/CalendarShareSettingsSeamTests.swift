@@ -123,7 +123,7 @@ final class CalendarShareSettingsSeamTests: XCTestCase {
     /// line is how a specific problem becomes a generic shrug.
     func testEveryFailureClassHasItsOwnMessageKey() {
         let errors: [GoogleShareError] = [
-            .notSignedIn, .notConfigured, .unauthorized, .rateLimited,
+            .notSignedIn, .notConfigured, .unauthorized, .insufficientScopes, .rateLimited,
             .server(500), .notFound, .malformedResponse, .transport("timedOut"),
         ]
         let keys = errors.map(\.settingsMessageKey)
@@ -142,7 +142,7 @@ final class CalendarShareSettingsSeamTests: XCTestCase {
     /// a Nepali household.
     func testEveryFailureMessageResolvesInBothLanguages() {
         let errors: [GoogleShareError] = [
-            .notSignedIn, .notConfigured, .unauthorized, .rateLimited,
+            .notSignedIn, .notConfigured, .unauthorized, .insufficientScopes, .rateLimited,
             .server(500), .notFound, .malformedResponse, .transport("timedOut"),
         ]
         for error in errors {
@@ -164,6 +164,8 @@ final class CalendarShareSettingsSeamTests: XCTestCase {
                       "a revoked token or a withheld grant — the OAuth flow IS the fix")
         XCTAssertTrue(GoogleShareError.notSignedIn.isActionableFromSettings,
                       "same dead end, different cause: there is no session to write with")
+        XCTAssertTrue(GoogleShareError.insufficientScopes.isActionableFromSettings,
+                      "a 403 is refused consent, not a dead token — re-connecting is still the fix")
         XCTAssertFalse(GoogleShareError.rateLimited.isActionableFromSettings,
                       "ours to retry — a re-connect would be a tap that changes nothing")
         XCTAssertFalse(GoogleShareError.server(503).isActionableFromSettings)
@@ -173,6 +175,27 @@ final class CalendarShareSettingsSeamTests: XCTestCase {
         XCTAssertFalse(GoogleShareError.notConfigured.isActionableFromSettings,
                       "no client id in the bundle: no amount of tapping builds one in")
         XCTAssertFalse(GoogleShareError.malformedResponse.isActionableFromSettings)
+    }
+
+    /// The 403 line is ACTIONABLE prose, not a shrug (2026-09-17). A 403
+    /// after a consent sheet means the token in hand was minted for the
+    /// wrong scopes, and the fix has one step the 401 line does not name:
+    /// signing out first, so the SDK cannot hand the same token back. A
+    /// line that only says "connect again" sends the family round the
+    /// same loop — which is why the remedy is asserted, in both
+    /// languages, rather than just the fact that some string resolves.
+    func testTheInsufficientScopesLineNamesItsOwnRecovery() {
+        let key = GoogleShareError.insufficientScopes.settingsMessageKey
+        let english = L10n.str(key, locale: Locale(identifier: "en")).lowercased()
+        let nepali = L10n.str(key, locale: Locale(identifier: "ne"))
+
+        XCTAssertTrue(english.contains("sign out"),
+                      "the 403 line has to name the sign-out step, or the re-connect taps straight back into the same refusal")
+        XCTAssertTrue(english.contains("console"),
+                      "and where to look when it persists — the console is the only place the two refusals can be told apart")
+        XCTAssertNotEqual(nepali, L10n.str(GoogleShareError.unauthorized.settingsMessageKey,
+                                           locale: Locale(identifier: "ne")),
+                          "its own sentence, not the 401's")
     }
 
     // MARK: - New card copy, both languages
@@ -264,6 +287,11 @@ private final class FakeCancellingSession: GoogleAccountSessionProtocol {
     }
 
     func createAccount() async -> GoogleSessionOutcome { .cancelled }
+    /// The launch restore is not what this file drives — it is covered
+    /// where the outcome matrix lives (`GoogleAccountSessionTests`) and
+    /// where the status is republished (`CalendarShareServiceTests`).
+    /// Here it answers the honest "nothing restored".
+    func restorePreviousSession() async -> GoogleSessionOutcome { .unavailable }
     func signOut() {}
     func accessToken() async -> String? { nil }
 }

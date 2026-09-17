@@ -240,9 +240,11 @@ final class CalendarShareService: ObservableObject {
         } else {
             next.connection = .signedOut
         }
-        // A revoked token is reported by the gateway as `.unauthorized`;
-        // the connection is still nominally signed in, so the card says
-        // "connected" and the error line says what is wrong with it.
+        // A refusal is reported by the gateway as `.unauthorized` (401:
+        // the session is gone) or `.insufficientScopes` (403: the token
+        // in hand was minted for the wrong scopes); the connection is
+        // still nominally signed in, so the card says "connected" and the
+        // error line says what is wrong with it.
         if status != next {
             status = next
         }
@@ -294,6 +296,35 @@ final class CalendarShareService: ObservableObject {
     @discardableResult
     func createAccount() async -> Bool {
         let outcome = await session.createAccount()
+        refreshStatus()
+        if outcome.isConnected { await flushPending() }
+        return outcome.isConnected
+    }
+
+    /// Brings back the Google account a previous launch connected, then
+    /// republishes the status so the Settings card shows the restored
+    /// "signed in as" state (2026-09-17).
+    ///
+    /// The republish is the point of doing this HERE rather than at the
+    /// call site: `status` is published state the card observes, and the
+    /// restore completes asynchronously — after launch has already
+    /// rendered. A card that read the session directly would be right by
+    /// accident; a card driven by `status` is only right if something
+    /// recomputes it when the restore lands, which is this line.
+    ///
+    /// A restore that brings nothing back changes nothing here: the
+    /// status recomputes to the same `signedOut` (or `notConfigured`)
+    /// it already showed, and the queue stays exactly as it was. That is
+    /// the honest degradation — a failed restore must not look like a
+    /// connection, and it must not look like a fresh problem either.
+    ///
+    /// Flushing on success is what makes the restore worth doing at
+    /// launch rather than only on the next foreground: anything the
+    /// family queued before the process restarted drains now, instead of
+    /// waiting behind a sign-in the elder has no reason to perform again.
+    @discardableResult
+    func restoreSession() async -> Bool {
+        let outcome = await session.restorePreviousSession()
         refreshStatus()
         if outcome.isConnected { await flushPending() }
         return outcome.isConnected
@@ -691,6 +722,11 @@ final class CalendarShareService: ObservableObject {
         /// limit or a dead network stays an ordinary retry.
         var pausedKeys: Set<String> = []
         var pausedForAuth = false
+        /// WHICH refusal stopped the pass, for the event below. Kept as
+        /// the class rather than a Bool because 401 and 403 are no longer
+        /// one thing (2026-09-17) and a log line that called a 403
+        /// "unauthorized" is exactly the merge this split removes.
+        var pausedClass: GoogleShareError = .unauthorized
 
         for operation in due {
             // Stop at the first failure: whatever caused it (rate limit,
@@ -719,11 +755,18 @@ final class CalendarShareService: ObservableObject {
                 // failed, rather than before the pass: the class is not
                 // sticky (any later success clears it), so a pre-pass read
                 // can only ever be another operation's leftovers — and
-                // since nothing would clear it, a stale `.unauthorized`
-                // would skip every later pass including the one right
-                // after the family reconnects.
-                if gateway.lastErrorClass == .unauthorized {
+                // since nothing would clear it, a stale refusal would
+                // skip every later pass including the one right after the
+                // family reconnects.
+                //
+                // BOTH refusal classes pause (401 and 403): they are two
+                // causes of one state — nothing queued can land until the
+                // family reconnects — and the class itself is kept so the
+                // event below names the one that actually happened
+                // instead of labelling every pause "unauthorized".
+                if let refusal = gateway.lastErrorClass, refusal.isAuthorizationFailure {
                     pausedForAuth = true
+                    pausedClass = refusal
                     pausedKeys.insert(operation.key)
                 } else {
                     failedKeys.insert(operation.key)
@@ -786,7 +829,7 @@ final class CalendarShareService: ObservableObject {
                                  "remaining": "\(next.count)"])
             if pausedForAuth {
                 self.emit("calendar_share_flush_paused", outcome: "failure",
-                          metadata: ["reason": self.errorClassLabel(.unauthorized)])
+                          metadata: ["reason": self.errorClassLabel(pausedClass)])
             }
             self.refreshStatus()
         }
@@ -1031,6 +1074,7 @@ final class CalendarShareService: ObservableObject {
         case .notSignedIn: return "not_signed_in"
         case .notConfigured: return "not_configured"
         case .unauthorized: return "unauthorized"
+        case .insufficientScopes: return "insufficient_scopes"
         case .rateLimited: return "rate_limited"
         case .notFound: return "not_found"
         case .server: return "server"

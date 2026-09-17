@@ -4184,7 +4184,11 @@ self.noteTalkContractChanged()
             voiceSession.transition(to: .stopped)
             cancelVoiceWatchdog()
         case .idle:
-            voiceSession.transition(to: speakingCount > 0 ? .speaking : .idle)
+            // [LAUNCH-TRANSITION-FIX] `.error → .speaking` has no direct
+            // edge (pipeline error at boot, then `.idle` while push
+            // speech plays); the machine bridges through `.idle`, where
+            // both edges are legal.
+            voiceSession.transitionViaIdle(to: speakingCount > 0 ? .speaking : .idle)
             cancelVoiceWatchdog()
             cancelVoiceStartWatchdog()
             // [VAD-RT] A deferred KWS build that dodged a live capture
@@ -4224,7 +4228,11 @@ self.noteTalkContractChanged()
             // (2026-09-06 field report).
             lastTranscript = nil
             livePartialTranscript = nil
-            voiceSession.transition(to: .listening)
+            // [LAUNCH-TRANSITION-FIX] A capture event can land while the
+            // session is still `.stopped`/`.error` (recycle + immediate
+            // capture); `→ .listening` has no direct edge from either —
+            // bridge through `.idle`, where both edges are legal.
+            voiceSession.transitionViaIdle(to: .listening)
             armVoiceWatchdog()
         case .processing:
             voiceSession.transition(to: .transcribing)
@@ -8023,7 +8031,53 @@ self.noteTalkContractChanged()
             evictable: false
         ) {}
 
+        // [TRUNCATION-FIX] Bridge the ledger's decisions to the
+        // observability bus — `onEvent` used to be assigned only in
+        // tests, so a field capture of the "दशैँ कहिले हो" kill showed
+        // no trace of which model was evicted or admitted.
+        lifecycle.onEvent = { [weak self] event in
+            self?.relayModelLifecycleEvent(event)
+        }
+
         lifecycle.startIdleTimer()
+    }
+
+    /// Observability bridge for `ModelLifecycleEvent` — component
+    /// "model_lifecycle", one event type per decision, metadata carries
+    /// the slot/reason/bytes.
+    private func relayModelLifecycleEvent(_ event: ModelLifecycleEvent) {
+        let type: String
+        let metadata: [String: String]
+        switch event {
+        case .admitted(let slot, let liveBytes, let evicted):
+            type = "admitted"
+            metadata = ["slot": slot.rawValue,
+                        "liveBytes": String(liveBytes),
+                        "evicted": evicted.map(\.rawValue).joined(separator: ",")]
+        case .denied(let slot, let reason):
+            type = "denied"
+            metadata = ["slot": slot.rawValue, "reason": reason.rawValue]
+        case .evicted(let slot, let reason):
+            type = "evicted"
+            metadata = ["slot": slot.rawValue, "reason": reason.rawValue]
+        case .soloOverBudget(let slot, let liveBytes, let budgetBytes):
+            type = "solo_over_budget"
+            metadata = ["slot": slot.rawValue,
+                        "liveBytes": String(liveBytes),
+                        "budgetBytes": String(budgetBytes)]
+        case .memoryPressure(let budgetBytes, let evicted):
+            type = "memory_pressure"
+            metadata = ["budgetBytes": String(budgetBytes),
+                        "evicted": evicted.map(\.rawValue).joined(separator: ",")]
+        }
+        observabilityBus.emit(ObservabilityEvent(
+            component: "model_lifecycle",
+            eventType: type,
+            durationMs: nil,
+            outcome: "info",
+            errorCode: nil,
+            metadata: metadata
+        ))
     }
 
     /// Declares the encoder's ledger row the first time the encoder is
@@ -8601,6 +8655,17 @@ self.noteTalkContractChanged()
     /// enqueue is the only thing that can produce work, so an unchanged
     /// schedule costs a few local reads and zero requests — which is
     /// what makes it safe to run on every activation.
+    ///
+    /// [GOOGLE-RESTORE] (2026-09-17) The SDK's stored session is restored
+    /// FIRST, and the pass is SEQUENCED behind it rather than raced with
+    /// it. Every gate in the pass reads `session.isSignedIn`, which is
+    /// nil in a cold process until a restore has run — so a pass that
+    /// went first would judge a connected household signed out,
+    /// reconcile nothing and drain nothing, and the family's already
+    /// queued events would wait for the next activation (the
+    /// silent-skip this change exists to remove). The restore is
+    /// idempotent, so the cost of this on every activation is one
+    /// in-memory check.
     func syncCalendarShare() {
         let share = calendarShareService
         share.locale = activeLocale
@@ -8613,6 +8678,24 @@ self.noteTalkContractChanged()
             // reminder that fires and alerts a caregiver.
             Task { await self?.externalCalendar.rescan() }
         }
+        Task { [weak self] in
+            // Nothing may present from here: a restore takes no
+            // presenter and shows no sheet, which is what makes it safe
+            // at launch — before the window the sign-in flow needs
+            // exists.
+            await share.restoreSession()
+            await MainActor.run { self?.runCalendarSharePass() }
+        }
+    }
+
+    /// The reconcile/flush half of `syncCalendarShare()`, run once the
+    /// session restore has landed.
+    ///
+    /// Main-confined: it reads the coordinator's published schedules and
+    /// the free-form event index, both of which are only ever mutated on
+    /// the main queue.
+    private func runCalendarSharePass() {
+        let share = calendarShareService
         share.reconcileMedication(medicationScheduler.medicationEntries())
         share.reconcileRoutines(routineScheduler.entries())
         // Swept BEFORE the flush, so a twin whose local event the elder

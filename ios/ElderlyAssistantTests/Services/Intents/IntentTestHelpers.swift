@@ -66,6 +66,9 @@ final class StubCommandInterpreter: CommandInterpreter {
     var available: Bool
     private(set) var callCount = 0
     private(set) var lastTranscript: String?
+    /// [TRUNCATION-FIX] The cascade must drop the preferred brain's
+    /// resident model before the stand-in takes the turn.
+    private(set) var unloadCount = 0
 
     init(available: Bool = true, result: InterpretedCommand? = nil) {
         self.available = available
@@ -80,6 +83,10 @@ final class StubCommandInterpreter: CommandInterpreter {
         callCount += 1
         lastTranscript = transcript
         DispatchQueue.main.async { completion(self.nextResult) }
+    }
+
+    func unload() {
+        unloadCount += 1
     }
 }
 
