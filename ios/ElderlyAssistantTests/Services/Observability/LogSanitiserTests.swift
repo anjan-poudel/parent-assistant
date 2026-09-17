@@ -38,6 +38,13 @@ final class LogSanitiserTests: XCTestCase {
                      "unknown metadata keys are still dropped outright")
     }
 
+    func testChunksCountSurvivesTheSanitiser() {
+        // [DEAD-TAP-RECOVERY] The capture chunk count is the console's
+        // discriminator between a silent capture and a dead tap.
+        let clean = sanitiser.sanitise(event(metadata: ["chunks": "0"]))
+        XCTAssertEqual(clean.metadata["chunks"], "0")
+    }
+
     func testDecodeDetailSurvivesTheSanitiser() {
         // [DECODE-DIAGNOSTIC] The Google schema field a decode failed on
         // must reach the console — it is the entire diagnostic value.
