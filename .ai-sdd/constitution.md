@@ -12,5 +12,6 @@
 | plan-tasks | `specs/plan-tasks/plan.md` | `task_breakdown_l3` | COMPLETED | 2026-09-16 |
 | implement | `specs/implement-notes.md` | `implementation` | COMPLETED | 2026-09-16 |
 | review-implementation | `specs/review-implementation.md` | `review_report` | COMPLETED | 2026-09-16 |
+| security-test | `specs/security-test.md` | `review_report` | COMPLETED | 2026-09-17 |
 
 <!-- end:workflow-artifacts -->

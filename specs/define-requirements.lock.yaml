@@ -11,6 +11,13 @@
 # Status: snapshot presented for the owner HIL sign-off gate on
 # define-requirements. Re-lock after any sign-off change; the hashes below are
 # the drift-detection baseline.
+#
+# Re-lock 2026-09-16T23:42:56Z (security-test gate). One owner-signed amendment:
+# FR-LCT-003 is narrowed to English source text only, with Nepali/Devanagari
+# source recorded as an explicit v1 non-goal and the reason given as a measured
+# platform fact (specs/hi-in-probe-notes.md) rather than an assumption. All 36
+# hashes were re-derived; FR-LCT-003 is the only one that changed, so the other
+# 35 requirement files are unchanged by this re-lock.
 
 version: "1"
 task: define-requirements
@@ -48,8 +55,14 @@ requirements:
     area: "Text Detection"
     priority: MUST
     file: specs/define-requirements/FR/FR-LCT-003-on-device-ocr-language-detection.md
-    sha256: e99d8d669453623a420246f529144c7d3ef0e178d73a6f94b73d20057e00dabe
+    sha256: b1b3206a74b21d9df8bf8fd96fceca3bf4e77ef67afe33484a86f16973388877
     acceptance_scenarios: 3
+    amended: "2026-09-16T23:42:56Z"
+    amendment: >-
+      Owner-signed at the security-test gate: v1 accepts English source text only
+      (Nepali/Devanagari source is an explicit v1 non-goal). Third acceptance scenario
+      narrowed to a Latin-script non-English sample, which the English control proves
+      is testable. Reason is measured, not assumed — see specs/hi-in-probe-notes.md.
   - id: FR-LCT-004
     title: "Region tracking between OCR passes"
     kind: FR
@@ -385,6 +398,7 @@ out_of_scope:
   - "The on-device NMT tier (tier 1) - v1.1 candidate, blocked until addendum §13.5's non-goal is revisited"
   - "Family/caregiver configuration surface for this feature"
   - "Changes to the existing feed translation path"
+  - "Devanagari source text (Nepali source -> any target, and Nepali/Devanagari OCR). Explicit v1 non-goal, owner-signed at the security-test gate. The pipeline stays language-agnostic by design (FR-LCT-003), but v1 makes no recognition claim for Devanagari. Reason is measured, not assumed: on iOS 26.5 Vision resolves to revision 3 with 30 supported languages and no Devanagari-capable code, a rendered Nepali frame yields zero observations under both the platform default and an explicit hi-IN request, and the API reports no error for an unsupported language. Record: specs/hi-in-probe-notes.md."
 
 divergences:
   - id: D1
