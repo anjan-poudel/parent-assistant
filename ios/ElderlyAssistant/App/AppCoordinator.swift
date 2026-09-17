@@ -8114,14 +8114,25 @@ self.noteTalkContractChanged()
     /// Adds or validates a medication schedule entry from the Settings
     /// editor. Returns a catalog key on validation failure, nil on success.
     /// Success persists via `loadSchedule` and re-arms alarms (spec §4.4.3).
+    ///
+    /// `purpose` ([MED-PURPOSE], 2026-09-17) is what the medicine is for —
+    /// a `MedicationPurpose` chip id or the family's own words, exactly as
+    /// `MedicationPurposeDraft.storedValue` resolved it. Defaulted nil so
+    /// every pre-purpose caller (the voice `set_reminder` path, every test
+    /// fixture) keeps compiling and keeps creating the entry it always
+    /// did; blank is normalized to nil rather than stored as an empty
+    /// string, the same rule `normalizedOptionalText` applies everywhere
+    /// else in this file.
     @discardableResult
-    func addMedication(name: String, time: DateComponents) -> String? {
+    func addMedication(name: String, time: DateComponents,
+                       purpose: String? = nil) -> String? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "settings.meds.nameRequired" }
         let duplicate = medicationScheduler.medicationEntries().contains { entry in
             entry.medicationName == trimmed && entry.scheduleTimes.contains(time)
         }
         guard !duplicate else { return "settings.meds.duplicateError" }
+        let trimmedPurpose = purpose?.trimmingCharacters(in: .whitespacesAndNewlines)
 
         var entries = medicationScheduler.medicationEntries()
         let entry = MedicationEntry(
@@ -8136,7 +8147,8 @@ self.noteTalkContractChanged()
             escalationWindowMinutes: 60,
             doubleDoseWindowHours: 4,
             photoVerificationEnabled: false,
-            confirmationDescription: nil
+            confirmationDescription: nil,
+            purpose: (trimmedPurpose?.isEmpty ?? true) ? nil : trimmedPurpose
         )
         entries.append(entry)
         medicationScheduler.loadSchedule(entries: entries)
@@ -8850,6 +8862,63 @@ self.noteTalkContractChanged()
     /// elder is being shown must be the one that fired.
     private func presentMedicationVisualAids(for entry: MedicationEntry) {
         firedMedicationVisualAids = MedicationVisualAidsPresentation(entry: entry)
+    }
+
+    // MARK: - The voice photo query ([MED-PHOTO], 2026-09-17)
+
+    /// The live medication schedule as the voice photo query sees it — the
+    /// `VoiceCommandCoordinating` seam the router reads ONCE per turn: the
+    /// keyword rule builds its vocabulary from these entries (name +
+    /// purpose keys per `MedicationVoiceVocabulary`), and the matched key
+    /// is resolved back against the same list. Nothing is cached: a
+    /// medicine added or deleted a moment ago is already in (or gone from)
+    /// the answer.
+    var medicationVoiceEntries: [MedicationEntry] { medicationScheduler.medicationEntries() }
+
+    /// The elder asked what a medicine looks like ("रक्तचापको औषधि कस्तो
+    /// छ?"). Presents the same full-screen photo surface a fired dose uses
+    /// — in its IDENTIFY mode, so nothing about a dose appears: no "time to
+    /// take your medicine", no "I took it". Nothing is due; a dose prompt
+    /// with an active acknowledge button at a moment when no dose was
+    /// scheduled is exactly how a dose gets recorded that was never taken
+    /// (the double-dose detector would then block the real one).
+    ///
+    /// Returns the line to speak: the photo's caption ("रक्तचापको औषधि —
+    /// अम्लोडिपिन", the same line the fired dose's screen shows), the
+    /// honest "no photo yet" line when the entry carries none, and nil when
+    /// the entry is gone (nothing to show, nothing to claim).
+    func showMedicationPhoto(entryId: UUID) -> String? {
+        guard let entry = medicationEntry(for: entryId) else {
+            emitMedicationPhotoQuery(outcome: "entryGone", entryId: nil)
+            return nil
+        }
+        let presentation = MedicationVisualAidsPresentation(entry: entry, mode: .identify)
+        guard !entry.visualAids.isEmpty else {
+            // The honest line, never a blank screen with a promise: the
+            // family can add the photo, and this says where.
+            emitMedicationPhotoQuery(outcome: "noPhoto", entryId: entry.id)
+            return L10n.str("meds.photoMissing", locale: activeLocale)
+        }
+        firedMedicationVisualAids = presentation
+        emitMedicationPhotoQuery(outcome: "presented", entryId: entry.id)
+        return presentation.caption(locale: activeLocale)
+    }
+
+    /// Observability for the voice photo query — the outcome and, when an
+    /// entry resolved, its HASH. Never the medicine's name, its purpose or
+    /// the transcript: the medication privacy rule every other event in
+    /// this file follows (`setVisualAids` logs an `entry_id_hash` for the
+    /// same reason). The hash is what lets a "she asked and got the honest
+    /// no-photo line three times this week" observation be made at all.
+    private func emitMedicationPhotoQuery(outcome: String, entryId: UUID?) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "medication_photo",
+            eventType: "medication_photo_query",
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: nil,
+            metadata: entryId.map { ["entry_id_hash": IdHashing.shortHash(of: $0)] } ?? [:]
+        ))
     }
 
     /// Today's medication reminders as localized "name — time" lines for

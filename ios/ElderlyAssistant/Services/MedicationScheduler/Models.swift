@@ -36,6 +36,18 @@ struct MedicationEntry: Codable, Identifiable {
     let doubleDoseWindowHours: Int         // dementia FR-D03, default: 4
     let photoVerificationEnabled: Bool     // dementia FR-D04a
     let confirmationDescription: String?   // dementia FR-D01, caregiver-configured
+    /// What the medicine is FOR (medication-purpose task, 2026-09-17):
+    /// a `MedicationPurpose` chip id ("bloodPressure") or the caregiver's
+    /// own words. Optional because every entry that existed before this
+    /// field existed has no purpose, and a schedule must never be lost to
+    /// a missing key — see `init(from:)` for the migration.
+    ///
+    /// Read at three surfaces, all through `MedicationPurpose`: the
+    /// settings row's caption, the photo caption ("रक्तचापको औषधि —
+    /// अम्लोडिपिन"), and the voice photo query's vocabulary
+    /// (`MedicationVoiceVocabulary` — the elder can ask for a medicine by
+    /// what it is for, not only by its name).
+    let purpose: String?
     /// Photos shown with this dose (medication-visual-aids task,
     /// 2026-09-16) — the picture of the actual box, so the elder can match
     /// what is in their hand to what the reminder is asking for.
@@ -61,6 +73,7 @@ struct MedicationEntry: Codable, Identifiable {
         doubleDoseWindowHours: Int,
         photoVerificationEnabled: Bool,
         confirmationDescription: String?,
+        purpose: String? = nil,
         visualAids: [VisualAid] = []
     ) {
         self.id = id
@@ -75,6 +88,7 @@ struct MedicationEntry: Codable, Identifiable {
         self.doubleDoseWindowHours = doubleDoseWindowHours
         self.photoVerificationEnabled = photoVerificationEnabled
         self.confirmationDescription = confirmationDescription
+        self.purpose = purpose
         self.visualAids = visualAids
     }
 
@@ -84,16 +98,19 @@ struct MedicationEntry: Codable, Identifiable {
         case id, userProfileId, medicationName, doseDescription, scheduleTimes,
              frequency, ackWindowMinutes, maxRefireCount, escalationWindowMinutes,
              doubleDoseWindowHours, photoVerificationEnabled, confirmationDescription,
-             visualAids
+             purpose, visualAids
     }
 
     /// Migration-safe decode: `visualAids` was added after the first
     /// installs shipped, so a payload persisted before it MUST decode as an
     /// empty list rather than throwing `keyNotFound` and losing the
     /// household's whole medication schedule (the failure mode is identical
-    /// to the routine store's — see `RoutineEntry.init(from:)`). Every other
-    /// key stays required: a payload missing one of those is genuinely
-    /// corrupt and must fail loudly rather than default a dose.
+    /// to the routine store's — see `RoutineEntry.init(from:)`). `purpose`
+    /// rides the same rule for the same reason — a pre-purpose payload has
+    /// no such key and MUST decode as "no purpose" (medication-purpose
+    /// task, 2026-09-17). Every other key stays required: a payload missing
+    /// one of those is genuinely corrupt and must fail loudly rather than
+    /// default a dose.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -109,6 +126,7 @@ struct MedicationEntry: Codable, Identifiable {
         photoVerificationEnabled = try container.decode(Bool.self, forKey: .photoVerificationEnabled)
         confirmationDescription = try container.decodeIfPresent(String.self,
                                                                forKey: .confirmationDescription)
+        purpose = try container.decodeIfPresent(String.self, forKey: .purpose)
         visualAids = try container.decodeIfPresent([VisualAid].self, forKey: .visualAids) ?? []
     }
 
@@ -121,7 +139,7 @@ struct MedicationEntry: Codable, Identifiable {
     /// touch the visual aids they attached.
     ///
     /// A method on the model rather than a memberwise rebuild at the
-    /// call site: the entry has thirteen fields and the compiler cannot
+    /// call site: the entry has fourteen fields and the compiler cannot
     /// notice a dropped one when the initializer has defaults.
     func withScheduleTimes(_ times: [DateComponents]) -> MedicationEntry {
         MedicationEntry(
@@ -137,6 +155,7 @@ struct MedicationEntry: Codable, Identifiable {
             doubleDoseWindowHours: doubleDoseWindowHours,
             photoVerificationEnabled: photoVerificationEnabled,
             confirmationDescription: confirmationDescription,
+            purpose: purpose,
             visualAids: visualAids
         )
     }
