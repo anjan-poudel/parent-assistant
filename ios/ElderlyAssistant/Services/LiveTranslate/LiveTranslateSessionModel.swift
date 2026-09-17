@@ -173,6 +173,13 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// and the aspect the placement maths uses were fixed by T-006.
     @Published private(set) var previewLayer: AVCaptureVideoPreviewLayer?
 
+    /// The pixel size of the frame the camera is delivering, or `.zero` before
+    /// the first one. The view needs it to draw the picture's window: the
+    /// aspect-fit rect a gesture's coordinates are converted through, and the
+    /// layer transform that draws the window (`LiveCameraPresentation`).
+    /// Published on change only — see `delivered(_:)`.
+    @Published private(set) var framePixelSize: CGSize = .zero
+
     // MARK: Dependencies
 
     let locale: Locale
@@ -625,11 +632,25 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// The view's geometry, from its `GeometryReader`. Reports are cheap and
     /// frequent (every layout pass), so an unchanged layout is dropped here
     /// rather than before the pipeline.
-    func updateLayout(containerSize: CGSize, safeArea: CGRect, occupiedRects: [CGRect]) {
+    ///
+    /// `crop` is the window the elder's fingers have moved to — the zoom's and
+    /// the pan's virtual crop (owner follow-up, 2026-09-18) — and it comes from
+    /// the same place the container does: the view, which observes the camera's
+    /// zoom surface and reports the window whenever it moves. It is an input of
+    /// the layout rather than of the publication because it is a fact about
+    /// what is on screen, like the container size, and it must be able to
+    /// change without a recognition pass or a new region. `.whole` is the
+    /// identity and the honest default for a caller that has no window to
+    /// report.
+    func updateLayout(containerSize: CGSize,
+                      safeArea: CGRect,
+                      occupiedRects: [CGRect],
+                      crop: LiveCameraCrop = .whole) {
         guard !isClosed else { return }
         let layout = LiveTranslateLayout(containerSize: containerSize,
                                          safeArea: safeArea,
-                                         occupiedRects: occupiedRects)
+                                         occupiedRects: occupiedRects,
+                                         crop: crop)
         guard layout != pendingLayout else { return }
         pendingLayout = layout
         guard let pipeline else { return }
@@ -929,6 +950,18 @@ final class LiveTranslateSessionModel: ObservableObject {
     private func delivered(_ frame: CameraFrame) async {
         guard !isClosed, frozen == nil else { return }
         latestFrame = frame
+        // The picture's own size, published for the view's geometry and not
+        // for anything else (owner follow-up, 2026-09-18): the container tells
+        // the view *where* the picture is on screen, and this tells it the
+        // aspect the aspect-fit is of, so the window the elder's fingers move
+        // can be drawn and read through one map (`LiveCameraPresentation`) by
+        // the preview layer, the gestures and the recognition pass alike.
+        //
+        // Guarded on change, because `@Published` announces every assignment:
+        // this runs on every delivered frame, and a frame size that only
+        // changes when the format does must not invalidate the view at the
+        // frame rate.
+        if framePixelSize != frame.pixelSize { framePixelSize = frame.pixelSize }
         await pipeline?.ingest(frame)
     }
 

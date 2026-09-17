@@ -204,6 +204,19 @@ struct LiveTranslateLayout: Equatable {
     /// under a control the elder needs.
     var occupiedRects: [CGRect]
 
+    /// The window of the frame the elder is looking through: the zoom's and the
+    /// pan's virtual crop (owner follow-up, 2026-09-18). It is the layout's
+    /// business rather than the publication's because it is a fact about the
+    /// *container* — what part of the picture is on screen — exactly like the
+    /// container size, and it changes when the elder's fingers move rather than
+    /// when a pass produces text. `LiveOverlayPlacement.place` maps every
+    /// region's box through it, so the callouts land on the pixels the preview
+    /// layer is drawing (the two go through `LiveCameraPresentation`).
+    ///
+    /// `.whole` for a session that has neither zoomed nor panned, which is the
+    /// layout every caller before the window existed pushed in.
+    var crop: LiveCameraCrop = .whole
+
     static let unknown = LiveTranslateLayout(containerSize: .zero,
                                              safeArea: .zero,
                                              occupiedRects: [])
@@ -1120,6 +1133,7 @@ actor LiveTranslationPipeline {
                                           framePixelSize: framePixelSize,
                                           safeArea: layout.safeArea,
                                           occupiedRects: layout.occupiedRects,
+                                          crop: layout.crop,
                                           policy: policy,
                                           stateCopy: surface.stateCopy(for:))
     }

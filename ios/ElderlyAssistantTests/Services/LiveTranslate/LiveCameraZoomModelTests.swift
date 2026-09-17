@@ -145,8 +145,8 @@ final class LiveCameraZoomModelTests: XCTestCase {
         // Two samples of one pinch: the second is not compounded on the first
         // (the recogniser's scale is already cumulative), so the same movement
         // travels the same distance however often it is sampled.
-        XCTAssertEqual(model.pinched(by: 1.2, from: 1).factor, 1.2)
-        XCTAssertEqual(model.pinched(by: 1.8, from: 1).factor, 1.8)
+        XCTAssertEqual(model.pinched(by: 1.2, from: model).factor, 1.2)
+        XCTAssertEqual(model.pinched(by: 1.8, from: model).factor, 1.8)
     }
 
     func testAPinchReleaseSnapsOntoALensSwitchItStoppedNear() {
@@ -495,6 +495,451 @@ final class LiveCameraZoomModelTests: XCTestCase {
         XCTAssertFalse(surface.isFocusLocked, "and being told the same thing twice changes nothing")
     }
 
+    // MARK: - The window, the pan and the anchored pinch (owner report, 2026-09-18)
+
+    /// A model for the arithmetic below, on a device with no lens switch and a
+    /// long range: the numbers asserted here are the window's own, not a
+    /// switch-over factor's.
+    private func zoomModel(at factor: Double,
+                           config: LiveTranslateConfig = .default,
+                           pan: CGPoint = .zero) -> LiveCameraZoomModel {
+        LiveCameraZoomModel(config: config, factor: factor, pan: pan,
+                            deviceRange: 1...8, deviceSwitchOverFactors: [])
+    }
+
+    /// Core Animation's own rule, written out so this suite can check the
+    /// presentation's transform *as the elder's screen applies it*: a layer's
+    /// affine transform is applied about its anchor point, so a point of the
+    /// layer's bounds lands at `T(p) + (I - L)(anchor)` in the superlayer. The
+    /// presentation's `layerTransform(anchor:)` carries exactly this
+    /// correction; if it ever stopped, the picture would sit offset from the
+    /// callouts by `(1 - scale) × half the container`.
+    private func drawnPoint(_ point: CGPoint, by transform: CGAffineTransform,
+                            anchor: CGPoint) -> CGPoint {
+        let applied = point.applying(transform)
+        return CGPoint(x: applied.x + (1 - transform.a) * anchor.x,
+                       y: applied.y + (1 - transform.d) * anchor.y)
+    }
+
+    /// A container and a picture rect to map through: a 390 × 844 phone with a
+    /// 4:3 frame in it, letterboxed by the app's own aspect-fit arithmetic.
+    private func pictureRect(_ size: CGSize = CGSize(width: 390, height: 844)) -> CGRect {
+        ApplianceOverlayMapper.displayedImageRect(containerSize: size,
+                                                  imageSize: CGSize(width: 1280, height: 720))
+    }
+
+    func testTheWindowIsTheWholeFrameAtTheRampsStartAndTheConfiguredFractionAtItsEnd() {
+        XCTAssertEqual(zoomModel(at: 1).cropFraction, 1,
+                       "at the ramp's start there is nothing to pan to, so nothing is cropped")
+        XCTAssertTrue(zoomModel(at: 1).crop.isWhole)
+        XCTAssertTrue(zoomModel(at: 1).showsWholeFrame)
+        XCTAssertEqual(zoomModel(at: 1).panLimit, 0, "and no room to move")
+
+        XCTAssertEqual(zoomModel(at: 2.5).cropFraction, 0.85, accuracy: 1e-12,
+                       "halfway up a 1×–4× ramp is halfway from the whole frame to the configured 0.7")
+        XCTAssertEqual(zoomModel(at: 4).cropFraction, 0.7, accuracy: 1e-12)
+        XCTAssertEqual(zoomModel(at: 8).cropFraction, 0.7, accuracy: 1e-12,
+                       "past the ramp's end the window stays at the configured fraction")
+        XCTAssertFalse(zoomModel(at: 8).showsWholeFrame)
+    }
+
+    func testTheWindowRampIsLinearInTheReadoutAndADegenerateRampIsNoWindow() {
+        var config = LiveTranslateConfig.default
+        config.panStartZoom = 2
+        config.panFullZoom = 4
+        config.panWindowFraction = 0.5
+        let ramp = zoomModel(at: 1, config: config)
+
+        XCTAssertEqual(ramp.windowFraction(for: 1), 1, "below the ramp's start the window is the frame")
+        XCTAssertEqual(ramp.windowFraction(for: 2), 1)
+        XCTAssertEqual(ramp.windowFraction(for: 3), 0.75, accuracy: 1e-12, "linear between the ends")
+        XCTAssertEqual(ramp.windowFraction(for: 4), 0.5, accuracy: 1e-12)
+        XCTAssertEqual(ramp.windowFraction(for: 8), 0.5, accuracy: 1e-12)
+
+        // The ends the wrong way round (or the same) describe no ramp: the
+        // elder gets the whole frame rather than a window they cannot see out
+        // of.
+        config.panStartZoom = 4
+        config.panFullZoom = 1
+        XCTAssertEqual(zoomModel(at: 8, config: config).cropFraction, 1)
+        config.panStartZoom = 2
+        config.panFullZoom = 2
+        XCTAssertEqual(zoomModel(at: 8, config: config).cropFraction, 1)
+    }
+
+    func testAWindowFractionThatCannotDescribeAWindowIsReadAsTheWholeFrame() {
+        for fraction in [0, -0.5, 1.5, Double.nan] {
+            var config = LiveTranslateConfig.default
+            config.panWindowFraction = fraction
+            let model = zoomModel(at: 8, config: config)
+            XCTAssertEqual(model.cropFraction, 1, "\(fraction) is not a window")
+            XCTAssertTrue(model.crop.isWhole)
+            XCTAssertEqual(model.panLimit, 0)
+        }
+    }
+
+    func testPanningTurnedOffLeavesTheWholeFrameAtEveryZoom() {
+        var config = LiveTranslateConfig.default
+        config.panEnabled = false
+        let model = zoomModel(at: 8, config: config, pan: CGPoint(x: 0.5, y: 0.5))
+
+        XCTAssertEqual(model.cropFraction, 1, "no window means nothing to move")
+        XCTAssertTrue(model.showsWholeFrame)
+        XCTAssertEqual(model.pan, .zero, "and a pan that somehow arrived is not held")
+        XCTAssertEqual(model.withPan(CGPoint(x: 0.3, y: 0.3)).pan, .zero)
+    }
+
+    func testThePanIsClampedSoTheWindowNeverLeavesTheFrame() {
+        let atFullRamp = zoomModel(at: 4)
+        XCTAssertEqual(atFullRamp.panLimit, 0.15, accuracy: 1e-12,
+                       "a 0.7 window has 0.15 of frame to move either way")
+
+        let right = atFullRamp.withPan(CGPoint(x: 0.9, y: 0))
+        XCTAssertEqual(right.pan.x, 0.15, accuracy: 1e-12)
+        XCTAssertEqual(right.crop.box.xMax, 1, accuracy: 1e-12,
+                       "the window's edge stops at the frame's, so nothing beyond it is ever shown")
+        XCTAssertGreaterThanOrEqual(right.crop.box.xMin, 0)
+
+        let left = atFullRamp.withPan(CGPoint(x: -0.9, y: 0))
+        XCTAssertEqual(left.pan.x, -0.15, accuracy: 1e-12)
+        XCTAssertEqual(left.crop.box.xMin, 0, accuracy: 1e-12)
+        XCTAssertLessThanOrEqual(left.crop.box.xMax, 1)
+
+        // A gesture that reports a number that is not a number (a cancelled
+        // recogniser, a degenerate translation) recentres rather than
+        // propagating a NaN into the crop, the placement and the layer.
+        XCTAssertEqual(atFullRamp.withPan(CGPoint(x: CGFloat.nan, y: CGFloat.infinity)).pan, .zero)
+    }
+
+    func testThePanRoomOpensWithTheZoomAndClosesAroundTheWholeFrame() {
+        XCTAssertEqual(zoomModel(at: 1).panLimit, 0, accuracy: 1e-12)
+        XCTAssertEqual(zoomModel(at: 2.5).panLimit, 0.075, accuracy: 1e-12)
+        XCTAssertEqual(zoomModel(at: 4).panLimit, 0.15, accuracy: 1e-12)
+        XCTAssertEqual(zoomModel(at: 8).panLimit, 0.15, accuracy: 1e-12)
+    }
+
+    func testZoomingBackOutPullsTheWindowHomeRatherThanLeavingItAtTheFramesEdge() {
+        // The elder pans to the frame's right edge at 4× and then zooms out:
+        // the window that factor allows is the whole frame, and the only place
+        // a whole-frame window can be is the centre.
+        let panned = zoomModel(at: 4).withPan(CGPoint(x: 0.15, y: 0.15))
+        let widened = panned.withFactor(1)
+
+        XCTAssertEqual(widened.pan, .zero)
+        XCTAssertTrue(widened.crop.isWhole)
+        XCTAssertEqual(widened.crop.box, NormalizedBox(xMin: 0, yMin: 0, xMax: 1, yMax: 1))
+    }
+
+    func testAPinchHoldsTheFramePointUnderTheFingers() {
+        // The anchoring, as arithmetic: the elder's fingers are holding a
+        // *place in the picture*, and the place has to stay under them.
+        let base = zoomModel(at: 2)
+        XCTAssertEqual(base.cropFraction, 0.9, accuracy: 1e-12)
+        let focus = CGPoint(x: 0.2, y: 0.8)          // low and to the left of the window
+        let held = base.crop.framePoint(ofCropPoint: focus)
+
+        let zoomed = base.pinched(by: 1.25, from: base, at: focus)
+
+        XCTAssertEqual(zoomed.factor, 2.5, accuracy: 1e-12)
+        XCTAssertEqual(zoomed.cropFraction, 0.85, accuracy: 1e-12)
+        XCTAssertEqual(zoomed.crop.cropPoint(ofFramePoint: held).x, focus.x, accuracy: 1e-12,
+                       "the frame point under the finger is still under the finger")
+        XCTAssertEqual(zoomed.crop.cropPoint(ofFramePoint: held).y, focus.y, accuracy: 1e-12)
+        XCTAssertGreaterThan(abs(zoomed.pan.x), 0,
+                             "and holding a place that is not the centre is what moves the window")
+    }
+
+    func testAPinchAtTheCentreOfThePictureNeedsNoPanAndOneAtTheEdgeMovesTheWindowTheOtherWay() {
+        let base = zoomModel(at: 2)
+
+        let centred = base.pinched(by: 2, from: base, at: CGPoint(x: 0.5, y: 0.5))
+        XCTAssertEqual(centred.pan, .zero,
+                       "zooming about the middle of the window is the buttons' own behaviour")
+
+        // A finger on the window's left edge: the window has to slide left to
+        // keep that edge's content still, and the tap that focuses where the
+        // elder is looking follows it.
+        let left = base.pinched(by: 2, from: base, at: CGPoint(x: 0, y: 0.5))
+        XCTAssertEqual(left.pan.x, -0.1, accuracy: 1e-12)
+        let right = base.pinched(by: 2, from: base, at: CGPoint(x: 1, y: 0.5))
+        XCTAssertEqual(right.pan.x, 0.1, accuracy: 1e-12)
+        XCTAssertEqual(left.pan.y, 0, accuracy: 1e-12, "a finger on the horizontal centre moves no window vertically")
+    }
+
+    func testAPinchThatAsksForMoreRoomThanTheFrameHasIsClampedToTheFrame() {
+        // Zooming *in* from an edge-panned window wants more room than the
+        // frame has: the picture stops following the fingers at the frame's
+        // edge, because the alternative is showing frame the camera never
+        // captured.
+        let panned = zoomModel(at: 4).withPan(CGPoint(x: 0.15, y: 0))
+        let released = panned.pinched(by: 0.6, from: panned, at: CGPoint(x: 0.99, y: 0.5))
+
+        XCTAssertEqual(released.cropFraction, 0.86, accuracy: 1e-12)
+        XCTAssertEqual(released.pan.x, released.panLimit, accuracy: 1e-12,
+                       "the window stops at the frame's edge rather than past it")
+        XCTAssertEqual(released.crop.box.xMax, 1, accuracy: 1e-12)
+        XCTAssertTrue(released.crop.intersects(NormalizedBox(xMin: 0.99, yMin: 0, xMax: 1, yMax: 1)),
+                      "and the content the elder was pinching is still on screen")
+    }
+
+    func testPinchSensitivityRaisesTheRecognisersScaleToTheConfiguredPower() {
+        var config = LiveTranslateConfig.default
+        config.pinchSensitivity = 2
+        let gentle = zoomModel(at: 1, config: config)
+
+        XCTAssertEqual(gentle.pinched(by: 1.5, from: gentle).factor, 2.25, accuracy: 1e-12,
+                       "1.5² — the key changes how much picture the same fingers buy, not what a scale means")
+
+        for sensitivity in [0, -1, Double.nan] {
+            config.pinchSensitivity = sensitivity
+            let model = zoomModel(at: 1, config: config)
+            XCTAssertEqual(model.pinched(by: 1.5, from: model).factor, 1.5, accuracy: 1e-12,
+                           "\(sensitivity) is not a power: the scale itself is used")
+        }
+
+        // A pinch that reports a scale that is not a positive number cannot
+        // move anything: a cancelled recogniser must not widen the picture.
+        XCTAssertEqual(gentle.pinched(by: 0, from: gentle).factor, 1)
+        XCTAssertEqual(gentle.pinched(by: .nan, from: gentle).factor, 1)
+    }
+
+    // MARK: - One map for the picture and the callouts
+
+    func testThePresentationMapsAFramePointToTheContainerAndBack() {
+        let picture = pictureRect()
+        let presentation = zoomModel(at: 4).withPan(CGPoint(x: 0.15, y: -0.15))
+            .presentation(in: picture)
+
+        for point in [CGPoint(x: 0, y: 0), CGPoint(x: 0.5, y: 0.5), CGPoint(x: 1, y: 1),
+                      CGPoint(x: 0.31, y: 0.72)] {
+            let container = presentation.containerPoint(ofFramePoint: point)
+            let back = presentation.framePoint(ofContainerPoint: container)
+            XCTAssertEqual(back.x, point.x, accuracy: 1e-12)
+            XCTAssertEqual(back.y, point.y, accuracy: 1e-12)
+        }
+
+        // What the window shows fills the picture rect and nothing else: the
+        // window's own corners are the letterbox's corners, and a frame point
+        // the window has moved away from has no place on screen.
+        let topLeft = presentation.containerPoint(ofFramePoint:
+            CGPoint(x: presentation.crop.box.xMin, y: presentation.crop.box.yMin))
+        XCTAssertEqual(topLeft.x, picture.minX, accuracy: 1e-9)
+        XCTAssertEqual(topLeft.y, picture.minY, accuracy: 1e-9)
+        XCTAssertFalse(picture.contains(presentation.containerPoint(ofFramePoint: .zero)),
+                       "the corner the window moved away from is off the picture, not drawn at its edge")
+    }
+
+    func testTheLayerTransformDrawsEveryFramePointWhereThePlacementPutsIt() {
+        let picture = pictureRect()
+        let anchor = CGPoint(x: picture.midX, y: picture.midY)
+        let crops = [LiveCameraCrop.whole,
+                     zoomModel(at: 2).crop,
+                     zoomModel(at: 4).withPan(CGPoint(x: 0.15, y: 0.15)).crop,
+                     zoomModel(at: 4).withPan(CGPoint(x: -0.15, y: 0)).crop]
+
+        for crop in crops {
+            let presentation = LiveCameraPresentation(crop: crop, pictureRect: picture)
+            let transform = presentation.layerTransform(anchor: anchor)
+            for point in [CGPoint(x: 0, y: 0), CGPoint(x: 0.25, y: 0.75), CGPoint(x: 0.5, y: 0.5),
+                          CGPoint(x: 1, y: 1)] {
+                // The layer's own drawing of the frame point is the *unzoomed*
+                // container point — `captureDevicePointConverted`'s space — and
+                // what the elder sees is that point through the transform.
+                let live = presentation.unzoomedContainerPoint(ofFramePoint: point)
+                let drawn = drawnPoint(live, by: transform, anchor: anchor)
+                let placed = presentation.containerPoint(ofFramePoint: point)
+                XCTAssertEqual(drawn.x, placed.x, accuracy: 1e-9,
+                               "the layer and the placement must agree about \(point) at \(crop)")
+                XCTAssertEqual(drawn.y, placed.y, accuracy: 1e-9)
+            }
+        }
+    }
+
+    func testABubbleGluedToARegionStaysGluedWhileThePictureIsZoomedAndPanned() {
+        // The owner's requirement, as arithmetic: a callout is drawn from its
+        // *frame* box, and the picture is drawn from the same crop. If the two
+        // maps are one map, a callout over a sign is over the sign at every
+        // window.
+        let picture = pictureRect()
+        let anchor = CGPoint(x: picture.midX, y: picture.midY)
+        let region = NormalizedBox(xMin: 0.42, yMin: 0.31, xMax: 0.58, yMax: 0.44)
+        let crops = [LiveCameraCrop.whole,
+                     zoomModel(at: 1.6).crop,
+                     zoomModel(at: 3).crop,
+                     zoomModel(at: 4).withPan(CGPoint(x: 0.15, y: -0.15)).crop]
+
+        for crop in crops {
+            XCTAssertTrue(crop.intersects(region),
+                          "the region is on screen at \(crop), so the glue is a fact about what is drawn")
+            let presentation = LiveCameraPresentation(crop: crop, pictureRect: picture)
+            let transform = presentation.layerTransform(anchor: anchor)
+            let placement = LiveOverlayPlacement.screenRect(for: region,
+                                                            containerSize: CGSize(width: 390, height: 844),
+                                                            framePixelSize: CGSize(width: 1280, height: 720),
+                                                            crop: crop)
+            let origin = drawnPoint(presentation.unzoomedContainerPoint(
+                ofFramePoint: CGPoint(x: region.xMin, y: region.yMin)), by: transform, anchor: anchor)
+            let corner = drawnPoint(presentation.unzoomedContainerPoint(
+                ofFramePoint: CGPoint(x: region.xMax, y: region.yMax)), by: transform, anchor: anchor)
+
+            XCTAssertEqual(origin.x, placement.minX, accuracy: 1e-9)
+            XCTAssertEqual(origin.y, placement.minY, accuracy: 1e-9)
+            XCTAssertEqual(corner.x, placement.maxX, accuracy: 1e-9)
+            XCTAssertEqual(corner.y, placement.maxY, accuracy: 1e-9)
+        }
+    }
+
+    func testADragMovesThePictureWithTheFingerOneForOne() {
+        // The pan is a display-space offset, so a drag moves the *content*
+        // under the finger by the finger's own distance — whatever the zoom,
+        // because the crop cancels: the visible window is drawn in the picture
+        // rect at every factor.
+        let picture = pictureRect()
+        let base = zoomModel(at: 4)
+        let presentation = base.presentation(in: picture)
+
+        let translation = CGPoint(x: 30, y: -40)
+        let offset = presentation.panOffset(ofContainerTranslation: translation)
+        XCTAssertEqual(offset.x, -translation.x / picture.width * base.cropFraction, accuracy: 1e-12)
+        XCTAssertEqual(offset.y, -translation.y / picture.height * base.cropFraction, accuracy: 1e-12)
+        XCTAssertLessThan(offset.x, 0,
+                          "the window moves the other way, which is what makes the picture follow the finger")
+        XCTAssertLessThan(abs(offset.x), abs(translation.x) / picture.width,
+                          "and a narrow window moves less than the finger, because every frame fraction "
+                          + "is drawn bigger than it was")
+
+        // The elder's own proof: the frame point they grabbed is where their
+        // finger went, and it is still on screen (the drag stayed in bounds).
+        let grabbed = CGPoint(x: 0.5, y: 0.5)   // the window's centre
+        let before = presentation.containerPoint(ofFramePoint: grabbed)
+        let after = base.withPan(CGPoint(x: base.pan.x + offset.x, y: base.pan.y + offset.y))
+            .presentation(in: picture).containerPoint(ofFramePoint: grabbed)
+        XCTAssertEqual(after.x - before.x, translation.x, accuracy: 1e-9)
+        XCTAssertEqual(after.y - before.y, translation.y, accuracy: 1e-9)
+    }
+
+    func testATapIsTakenBackThroughTheWindowBeforeTheLayerConvertsIt() {
+        // The layer knows the aspect fit and the device's zoom; it knows
+        // nothing about the window. So a tap on the glass is mapped back to the
+        // frame, and then to the point the *unzoomed* picture would draw it at,
+        // which is the only container point the layer's conversion is defined
+        // for.
+        let picture = pictureRect()
+        let base = zoomModel(at: 1)
+        let zoomed = zoomModel(at: 4).withPan(CGPoint(x: 0.15, y: 0))
+        let glass = CGPoint(x: picture.midX, y: picture.midY)
+
+        let unzoomed = base.presentation(in: picture)
+        let panned = zoomed.presentation(in: picture)
+
+        XCTAssertEqual(panned.framePoint(ofContainerPoint: glass).x, 0.65, accuracy: 1e-12,
+                       "the middle of the glass is the middle of the *window*, which is past the frame's "
+                       + "own middle once the window has moved right")
+        XCTAssertEqual(panned.unzoomedPoint(ofContainerPoint: glass).x,
+                       unzoomed.containerPoint(ofFramePoint: panned.framePoint(ofContainerPoint: glass)).x,
+                       accuracy: 1e-9,
+                       "and what the layer is handed is where the *unzoomed* picture draws it")
+        XCTAssertNotEqual(panned.unzoomedPoint(ofContainerPoint: glass).x, glass.x,
+                          "which is not the point on the glass: the layer would focus the wrong place otherwise")
+    }
+
+    // MARK: - The surface's pan path
+
+    func testADragIsMeasuredFromWhereItStartedAndSurvivesTheFingerLifting() {
+        let recorder = ZoomSurfaceRecorder()
+        let surface = recorder.makeSurface()
+        surface.zoom(.closer)                                   // 1× → 1.5×
+        surface.zoom(.closer)                                   // 1.5× → 2×
+        let start = surface.model.pan
+
+        surface.pan(to: CGPoint(x: -0.02, y: 0.01))
+        surface.pan(to: CGPoint(x: -0.04, y: 0.02))
+        XCTAssertEqual(surface.model.pan.x, start.x - 0.04, accuracy: 1e-12,
+                       "the recogniser's translation is cumulative, so the surface adds it to one base")
+        XCTAssertEqual(surface.model.pan.y, start.y + 0.02, accuracy: 1e-12)
+
+        surface.panEnded()
+        XCTAssertEqual(surface.model.pan.x, start.x - 0.04, accuracy: 1e-12,
+                       "a gesture that moved the picture does not move it back")
+
+        // A new touch is a new translation: the recogniser reports 0.01 from
+        // *this* touch's start, and the surface adds it to the window the last
+        // drag left behind — so the readout reads the finger's own movement,
+        // not a jump back to where the first drag began.
+        surface.pan(to: CGPoint(x: 0.01, y: 0))
+        XCTAssertEqual(surface.model.pan.x, start.x - 0.04 + 0.01, accuracy: 1e-12,
+                       "the next drag starts from where the last one left the window")
+    }
+
+    func testAThawSendsTheWindowHomeAndTheConfigCanSayNotTo() {
+        let recorder = ZoomSurfaceRecorder()
+        let surface = recorder.makeSurface()
+        surface.zoom(.closer)
+        surface.zoom(.closer)
+        surface.pan(to: CGPoint(x: -0.05, y: 0))
+        XCTAssertNotEqual(surface.model.pan, .zero)
+
+        surface.sessionReleased()                               // the camera came back
+        XCTAssertEqual(surface.model.pan, .zero, "the elder comes back to the middle of the frame")
+
+        // The household that would rather come back to the same label. The
+        // recorder outlives the surface: the surface's closures answer for the
+        // device, and a recorder that died first would take the device with it.
+        var config = LiveTranslateConfig.default
+        config.panResetsOnExit = false
+        let keptRecorder = ZoomSurfaceRecorder()
+        let kept = keptRecorder.makeSurface(config: config)
+        kept.zoom(.closer)
+        kept.zoom(.closer)
+        kept.pan(to: CGPoint(x: -0.05, y: 0))
+        let panned = kept.model.pan
+        kept.sessionReleased()
+        XCTAssertEqual(kept.model.pan.x, panned.x, accuracy: 1e-12)
+        XCTAssertEqual(kept.model.pan.y, panned.y, accuracy: 1e-12)
+    }
+
+    func testEveryWindowTheSurfaceSettlesOnIsTheWindowTheSessionIsTold() {
+        let recorder = ZoomSurfaceRecorder()
+        let surface = recorder.makeSurface()
+
+        surface.zoom(.closer)
+        surface.pinch(to: 2)
+        surface.pan(to: CGPoint(x: -0.02, y: 0))
+        surface.pinchEnded()
+
+        XCTAssertEqual(recorder.crops.first, .whole,
+                       "the session is told the window the surface opens at")
+        XCTAssertEqual(recorder.crops.last, surface.model.crop,
+                       "and every settled window after that: the last one it was told is the one the readout shows")
+        let distinct = recorder.crops.filter { $0 != recorder.crops.first }.count
+        XCTAssertGreaterThanOrEqual(distinct, 3,
+                                    "a press, a pinch and a drag are three different windows")
+    }
+
+    /// The crop the session is told is the crop the section above says — and it
+    /// is told once per *change*, not once per frame: an unchanged window is
+    /// dropped by `settle`, which is what keeps a per-frame consumer from being
+    /// woken by a gesture that has stopped.
+    func testTheSurfaceDoesNotRepublishAWindowThatDidNotChange() {
+        var config = LiveTranslateConfig.default
+        config.maxVideoZoom = 2
+        let recorder = ZoomSurfaceRecorder()
+        let surface = recorder.makeSurface(config: config)
+
+        let opened = recorder.crops.count                     // the window the surface opens at
+        surface.zoom(.closer)                                   // 1× → 1.5×: a new window
+        XCTAssertEqual(recorder.crops.count, opened + 1)
+        surface.pan(to: .zero)                                  // a drag that moved nothing
+        surface.panEnded()
+        XCTAssertEqual(recorder.crops.count, opened + 1, "a gesture that moved nothing publishes nothing")
+
+        surface.zoom(.closer)                                   // 1.5× → 2×: a new window
+        XCTAssertEqual(recorder.crops.count, opened + 2)
+        surface.zoom(.closer)                                   // at the ceiling: no move, no window
+        XCTAssertEqual(recorder.crops.count, opened + 2,
+                       "a press at the end of the range does not republish the window it is already at")
+    }
+
     // MARK: - The capture layer's device mapping
 
     func testTheLensSetsAreDiscoveredWithTheSwitchingDevicesFirst() {
@@ -607,9 +1052,46 @@ final class LiveCameraZoomModelTests: XCTestCase {
         XCTAssertTrue(view.contains("UITapGestureRecognizer"))
         XCTAssertTrue(view.contains("recognizer.location(in: view)"),
                       "the touch is read in the preview view's own space, which is the space the conversion takes")
-        XCTAssertTrue(view.contains("zoom.pinch(to: Double($0))"),
-                      "the pinch's cumulative scale goes to the surface as one gesture")
+        XCTAssertTrue(view.contains("zoom.pinch(to: Double($0), at: $1)"),
+                      "the pinch's cumulative scale goes to the surface as one gesture, with the window "
+                      + "position the fingers landed on — the zoom's anchor")
         XCTAssertTrue(view.contains("zoom.focus(atDevicePoint: $0)"))
+        XCTAssertTrue(view.contains("presentation.framePoint(ofContainerPoint:"),
+                      "the tap is taken back through the window before the layer converts it")
+        XCTAssertTrue(view.contains("unzoomedContainerPoint"),
+                      "and the layer is handed the point the *unzoomed* picture draws it at, which is the "
+                      + "only space its conversion is defined in")
+        XCTAssertTrue(view.contains("presentation.layerTransform(anchor:"),
+                      "the layer is drawn through the same map the placement is drawn through")
+        XCTAssertTrue(view.contains("setAffineTransform("),
+                      "an affine transform moves the layer's drawing without re-laying it out")
+        XCTAssertFalse(view.contains("previewLayer.frame = bounds"),
+                       "and it must not resize the layer while a transform is set: `frame` is derived "
+                       + "from the transform, so assigning it would shrink the drawing area to compensate")
+    }
+
+    /// Gesture ownership (owner follow-up, 2026-09-18): the three touches that
+    /// can land on the picture, and which of them owns what. A drag that ran
+    /// during a pinch would move the window the zoom was already moving, and a
+    /// drag that ran while the whole frame was visible would move a window that
+    /// does not exist — so the recogniser is one finger, and it is switched off
+    /// until there is something to move.
+    func testOneFingerDragsTwoPinchAndTheDragExistsOnlyWhileThereIsAWindow() {
+        let view = viewSource()
+
+        XCTAssertTrue(view.contains("UIPanGestureRecognizer"),
+                      "the drag is a recogniser of its own, so its finger count is its own")
+        XCTAssertTrue(view.contains("recognizer.minimumNumberOfTouches = 1"))
+        XCTAssertTrue(view.contains("recognizer.maximumNumberOfTouches = 1"),
+                      "two fingers are the pinch's: a drag that also ran would fight it for the same gesture")
+        XCTAssertTrue(view.contains("panRecognizer?.isEnabled = !presentation.crop.isWhole"),
+                      "the drag exists exactly while a window does — the whole frame has nothing to move")
+        XCTAssertTrue(view.contains("presentation.panOffset(ofContainerTranslation: recognizer.translation(in: view))"),
+                      "the drag's own translation is converted to the window offset it asks for")
+        XCTAssertTrue(view.contains("zoom.pan(to: $0)") && view.contains("zoom.panEnded()"),
+                      "and the surface keeps what the finger left, rather than springing back")
+        XCTAssertTrue(view.contains("case .began, .changed:"),
+                      "all three recognisers drive their surface on began and changed alike")
     }
 
     /// The pixel half, in the `OverlayRenderProbe` / plugin-exit precedent: a
@@ -703,6 +1185,10 @@ private final class ZoomSurfaceRecorder {
     private(set) var appliedFactors: [Double] = []
     private(set) var focusPoints: [CGPoint] = []
     private(set) var lockRequests: [Bool] = []
+    /// Every window the surface settled on and told the session about, in
+    /// order. The session crops its frames to the last of these, so what the
+    /// elder sees and what Vision reads are one picture.
+    private(set) var crops: [LiveCameraCrop] = []
 
     func makeSurface(config: LiveTranslateConfig = .default) -> LiveCameraZoomSurface {
         LiveCameraZoomSurface(
@@ -713,6 +1199,7 @@ private final class ZoomSurfaceRecorder {
                 return deviceAnswer(factor)
             },
             applyFocus: { [unowned self] point in focusPoints.append(point) },
-            applyFocusLock: { [unowned self] locked in lockRequests.append(locked) })
+            applyFocusLock: { [unowned self] locked in lockRequests.append(locked) },
+            applyCrop: { [unowned self] crop in crops.append(crop) })
     }
 }

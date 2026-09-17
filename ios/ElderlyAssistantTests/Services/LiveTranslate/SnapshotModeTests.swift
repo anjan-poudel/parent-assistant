@@ -898,8 +898,9 @@ final class SnapshotModeTests: XCTestCase {
         XCTAssertEqual(occurrences(of: "VNImageRequestHandler(", in: detector), 1)
         // The still entry is the shared pass implementation, handed the frame.
         let stillEntry = try XCTUnwrap(block(startingWith: "func recognizeStillFrame(", in: detectorFile))
-        XCTAssertTrue(stillEntry.contains("perform(frame)"),
-                      "the still entry runs the same pass as the live path")
+        XCTAssertTrue(stillEntry.contains("perform(frame, crop: .whole) { .ocr }"),
+                      "the still entry runs the same pass as the live path — an OCR pass over the "
+                      + "frame's own whole buffer, since a held picture was never cropped")
 
         // A control: the scan sees the request and the handler where they live.
         XCTAssertNotNil(FeatureSourceScan.firstMatch(of: "VNRecognizeTextRequest", in: detector))
@@ -1295,7 +1296,7 @@ final class SnapshotModeTests: XCTestCase {
         XCTAssertEqual(occurrences(of: "@State ", in: view), 0,
                        "no view state that could fall out of step with the model")
         XCTAssertEqual(occurrences(of: "@State(", in: view), 0)
-        let frozenBranch = try XCTUnwrap(block(startingWith: "private var preview:", in: "ElderlyAssistant/App/LiveTranslate/LiveTranslateView.swift"))
+        let frozenBranch = try XCTUnwrap(block(startingWith: "private func preview(in proxy: GeometryProxy)", in: "ElderlyAssistant/App/LiveTranslate/LiveTranslateView.swift"))
         XCTAssertTrue(frozenBranch.contains("model.frozenFrameImage"),
                       "the preview branch draws the held picture from the model")
         XCTAssertEqual(occurrences(of: "model.frozen", in: view), 1,

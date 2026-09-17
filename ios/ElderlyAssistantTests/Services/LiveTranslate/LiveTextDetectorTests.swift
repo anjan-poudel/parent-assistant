@@ -83,6 +83,31 @@ final class LiveTextDetectorTests: XCTestCase {
         NormalizedBox(xMin: x, yMin: 0.1, xMax: x + 0.2, yMax: 0.2)
     }
 
+    /// The same painted frame, carrying the window the display is showing
+    /// (owner follow-up, 2026-09-18). The session stamps this on every frame it
+    /// delivers, so this is what a pass actually receives once the elder has
+    /// zoomed or panned.
+    private func frame(luma: UInt8, crop: LiveCameraCrop,
+                       width: Int = 64, height: Int = 48) throws -> CameraFrame {
+        let base = try frame(luma: luma, width: width, height: height)
+        return CameraFrame(pixelBuffer: base.pixelBuffer,
+                           pixelSize: base.pixelSize,
+                           timestamp: base.timestamp,
+                           zoomFactor: base.zoomFactor,
+                           crop: crop)
+    }
+
+    /// A window exactly half of the frame on each axis, centred (or moved by
+    /// `pan`): half of a 64 × 48 frame is 32 × 24 pixels whatever the rounding
+    /// rule, so the assertions below are about *which* pixels Vision was given
+    /// and not about a rounding convention.
+    private func window(pan: CGPoint = .zero) -> LiveCameraCrop {
+        var config = LiveTranslateConfig.default
+        config.panWindowFraction = 0.5
+        return LiveCameraZoomModel(config: config, factor: 4, pan: pan,
+                                   deviceRange: 1...8, deviceSwitchOverFactors: []).crop
+    }
+
     // MARK: Scenario: the OCR pass is the only source of recognized text
 
     func testAnOCRPassProducesTextAndNoTrackedGeometry() async throws {
@@ -426,6 +451,102 @@ final class LiveTextDetectorTests: XCTestCase {
 
     // MARK: Recognition is on device (NFR-LCT-001)
 
+    // MARK: Scenario: the elder's window (owner follow-up, 2026-09-18)
+
+    func testAnOCRPassReadsTheWindowAndReportsItsBoxesInTheFramesOwnCoordinates() async throws {
+        // What the elder can see is what recognition reads — a whole-buffer pass
+        // would OCR text they cannot see and miss the label they zoomed in for —
+        // and what comes back is in the *frame's* coordinates, because that is
+        // the space every consumer of a box speaks (the stabiliser, the
+        // placement, the overlay).
+        let crop = window()
+        XCTAssertEqual(crop.box, NormalizedBox(xMin: 0.25, yMin: 0.25, xMax: 0.75, yMax: 0.75))
+        engine.regions = [region("Exit", x: 0.25, y: 0.4)]
+        let detector = makeDetector()
+        XCTAssertTrue(detector.begin().isSuccess)
+
+        let result = await detector.recognize(try frame(luma: 30, crop: crop))
+
+        guard case .success(let pass) = result else { return XCTFail("expected a pass: \(result)") }
+        XCTAssertEqual(engine.recognizedBufferSizes.last, CGSize(width: 32, height: 24),
+                       "Vision is handed the window at the sensor's own resolution — half of a "
+                       + "64 × 48 frame — not the whole buffer and not an enlarged screen image")
+        let box = try XCTUnwrap(pass.regions.first?.normalizedBox)
+        XCTAssertEqual(box.xMin, 0.375, accuracy: 1e-12)
+        XCTAssertEqual(box.yMin, 0.45, accuracy: 1e-12)
+        XCTAssertEqual(box.xMax, 0.475, accuracy: 1e-12)
+        XCTAssertEqual(box.yMax, 0.5, accuracy: 1e-12)
+        XCTAssertNotEqual(box.xMin, 0.25,
+                          "the window's own coordinates would have put the box at the frame's left edge")
+    }
+
+    func testATrackingPassFollowsTheWindowTooAndReportsFrameCoordinates() async throws {
+        let crop = window()
+        engine.regions = [region("Exit")]
+        engine.trackedBoxes = ["Exit": box(0.25)]
+        let detector = makeDetector()
+        _ = detector.begin()
+
+        _ = await detector.recognize(try frame(luma: 0, crop: crop))
+        clock.advance(by: detector.config.ocrSampleInterval / 2)
+        let result = await detector.recognize(try frame(luma: 90, crop: crop))
+
+        guard case .success(let pass) = result else { return XCTFail("expected a pass: \(result)") }
+        XCTAssertEqual(engine.trackCallCount, 1, "the window is the picture a tracker follows in")
+        let tracked = try XCTUnwrap(pass.trackedBoxes["Exit"])
+        XCTAssertEqual(tracked.xMin, 0.375, accuracy: 1e-12,
+                       "a tracked box is in the frame's coordinates, like a recognized one")
+        XCTAssertEqual(tracked.yMin, 0.3, accuracy: 1e-12)
+    }
+
+    func testAMovedWindowDropsWhatWasRememberedBeforeThePassKindIsChosen() async throws {
+        // The engine remembers the last OCR pass's rectangles *in the buffer
+        // that pass saw*. A tracker following one of them in a differently
+        // cropped buffer would put a region's geometry — and the text drawn
+        // over that geometry — on a different label, so the rectangles go
+        // before the frame's pass kind is even chosen.
+        let first = window()
+        let moved = window(pan: CGPoint(x: 0.25, y: 0))
+        engine.regions = [region("Exit")]
+        engine.trackedBoxes = ["Exit": box(0.25)]
+        let detector = makeDetector()
+        _ = detector.begin()
+
+        _ = await detector.recognize(try frame(luma: 0, crop: first))
+        XCTAssertEqual(engine.forgetCallCount, 1,
+                       "the first pass runs on the session's window, not the whole frame: nothing "
+                       + "remembered before it is about this picture")
+
+        clock.advance(by: detector.config.ocrSampleInterval / 2)
+        let result = await detector.recognize(try frame(luma: 90, crop: moved))
+
+        XCTAssertEqual(engine.trackCallCount, 0,
+                       "a changed scene would normally be tracked; a moved window cannot be, "
+                       + "because the remembered rectangle belongs to the old picture")
+        XCTAssertEqual(engine.forgetCallCount, 2, "and it is dropped before the pass kind is chosen")
+        guard case .success(let pass) = result else { return XCTFail("expected a pass: \(result)") }
+        XCTAssertEqual(pass.regions.map(\.text), ["Exit"], "the frame gets the OCR pass that re-anchors")
+    }
+
+    func testASessionThatNeverMovedItsWindowStillPaysNoForgetForIt() async throws {
+        // The whole-frame window is the feature's pre-window behaviour, and it
+        // must stay free of the window's bookkeeping: no engine forget, no
+        // dropped anchors, for every session that never zooms.
+        engine.regions = [region("Exit")]
+        engine.trackedBoxes = ["Exit": box(0.25)]
+        let detector = makeDetector()
+        _ = detector.begin()
+
+        _ = await detector.recognize(try frame(luma: 0))
+        clock.advance(by: detector.config.ocrSampleInterval / 2)
+        let result = await detector.recognize(try frame(luma: 90))
+
+        XCTAssertEqual(engine.forgetCallCount, 0)
+        guard case .success(let pass) = result else { return XCTFail("expected a pass: \(result)") }
+        XCTAssertEqual(pass.trackedBoxes["Exit"], box(0.25),
+                       "the box comes back exactly as Vision reported it: no crop, no conversion")
+    }
+
     func testTheDetectorReachesNoNetworkAndDownloadsNoModel() {
         let file = FeatureSourceScan.iosDirectory()
             .appendingPathComponent(FeatureSourceScan.liveTranslateSources)
@@ -653,6 +774,10 @@ final class ScriptedRecognitionEngine: LiveTextRecognitionEngine {
     private(set) var trackCallCount = 0
     private(set) var forgetCallCount = 0
     private(set) var maxConcurrentRecognitions = 0
+    /// The pixel size of every buffer Vision was handed, in order: what the
+    /// pass actually read, which is how "recognition follows the window" is
+    /// measured without a camera.
+    private(set) var recognizedBufferSizes: [CGSize] = []
 
     /// Holds a pass open so a test can inspect the in-flight state.
     var hold: DispatchSemaphore?
@@ -666,6 +791,8 @@ final class ScriptedRecognitionEngine: LiveTextRecognitionEngine {
         recognizeCallCount += 1
         active += 1
         maxConcurrentRecognitions = max(maxConcurrentRecognitions, active)
+        recognizedBufferSizes.append(CGSize(width: CVPixelBufferGetWidth(pixelBuffer),
+                                            height: CVPixelBufferGetHeight(pixelBuffer)))
         lock.unlock()
         defer {
             lock.lock(); active -= 1; lock.unlock()

@@ -459,6 +459,14 @@ struct LiveTranslateSnapshotPath {
     /// it safe to call again when the display preference changes, and what
     /// keeps a held frame's rects measured against the frozen geometry rather
     /// than the live one.
+    ///
+    /// The layout's window is dropped here, deliberately. A held picture is the
+    /// frame's own buffer drawn whole (`LiveTranslateSnapshot` builds the image
+    /// from it, and a freeze is "the picture in front of me"), so its regions
+    /// are whole-frame boxes and its rects are measured through `.whole`. The
+    /// zoom and the pan are live gestures: what the elder was pointing at when
+    /// they tapped is held still, and moving the camera's window afterwards
+    /// must not slide the callouts off their labels.
     func placed(regions: [TextRegionStabilizer.StableTextRegion],
                 outcomes: [TextRegionStabilizer.RegionIdentity: TranslationResult],
                 policy: LiveOverlayPlacement.Policy,
@@ -471,6 +479,7 @@ struct LiveTranslateSnapshotPath {
                                                     framePixelSize: framePixelSize,
                                                     safeArea: layout.safeArea,
                                                     occupiedRects: layout.occupiedRects,
+                                                    crop: .whole,
                                                     policy: policy,
                                                     stateCopy: surface.stateCopy(for:))
         // The session's own counter, from the live cycle: a frozen frame's
