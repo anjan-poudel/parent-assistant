@@ -720,14 +720,14 @@ final class LiveTranslateOverlayViewTests: XCTestCase {
     func testADriftBeyondTheThresholdIsAdoptedOnTheFrameItCrosses() {
         let memory = LiveOverlayGeometryMemory()
         let before = drawn(memory, surface(box: box(0.2, 0.30, 0.8, 0.38))).first
-        let moved = surface(box: box(0.2, 0.30, 0.8, 0.44))
+        let moved = surface(box: box(0.2, 0.30, 0.8, 0.45))
         let after = drawn(memory, moved).first
 
         guard let before, let after, let placed = moved.presentations.first else {
             return XCTFail("both frames must place the region")
         }
         XCTAssertNotEqual(after.frameRect, before.frameRect,
-                          "6 % of the container is a move the elder can see, and it lands")
+                          "7 % of the container is a move the elder can see, and it lands")
         XCTAssertEqual(after.frameRect, placed.frameRect,
                        "the frame that notices the move draws it: the memory is never one frame behind")
         XCTAssertEqual(memory.count, 1, "the same identity, at a new rect")
@@ -748,9 +748,9 @@ final class LiveTranslateOverlayViewTests: XCTestCase {
         XCTAssertEqual(rects[0], rects[1], "1.5 % is below the threshold: held")
         XCTAssertEqual(rects[0], rects[2], "and again: the drift is measured against the drawn rect, "
                        + "not against the last measurement")
-        XCTAssertNotEqual(rects[0], rects[3], "by the third step the accumulated drift is past the "
+        XCTAssertEqual(rects[0], rects[4], "four steps still hold below the 6 % threshold")
+        XCTAssertNotEqual(rects[0], rects[5], "by the fifth step the accumulated drift is past the "
                           + "threshold, so the box lands where the sign is")
-        XCTAssertEqual(rects[3], rects[5], "and then holds again at its new rect")
         XCTAssertEqual(Set(rects).count, 2,
                        "six frames, two drawn rects: the box moves less often than the detector does")
     }

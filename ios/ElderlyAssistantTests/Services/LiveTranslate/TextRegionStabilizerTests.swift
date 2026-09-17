@@ -387,12 +387,14 @@ final class TextRegionStabilizerTests: XCTestCase {
     /// grace bounds the departure in the unit the elder sees, so the box
     /// clears on the first pass after it — one cycle plus the grace.
     func testAPublishedRegionClearsWithinOneCycleOfItsDepartureEvenAtTheReducedCadence() {
-        var stabilizer = TextRegionStabilizer(config: LiveTranslateConfig())
+        let config = LiveTranslateConfig()
+        var stabilizer = TextRegionStabilizer(config: config)
         let identity = publishedRegion(&stabilizer, box: box(0.3, 0.3))
 
-        // 0.7 s later — one reduced-cadence interval, and still one miss short
-        // of `regionMissPasses`, so the pass-count rule alone keeps it drawn.
-        let departed = stabilizer.consume(regions: [], at: at(0.95))
+        // One pass after the grace window closes — the grace, not the
+        // pass-count rule, is what bounds a departure at the reduced cadence.
+        let departed = stabilizer.consume(regions: [],
+                                          at: at(0.25 + config.overlayDepartureGraceSeconds + 0.01))
         XCTAssertEqual(departed, [.disappeared(id: identity)],
                        "one cycle plus the departure grace must clear the overlay: the region "
                        + "left the publication, so nothing may still be drawn for it")
@@ -403,10 +405,11 @@ final class TextRegionStabilizerTests: XCTestCase {
     /// must not spend: one dropped frame at the nominal cadence is 0.25 s, well
     /// inside the grace, and leaves the box exactly where it was.
     func testASingleMissedPassInsideTheGraceKeepsTheBoxOnScreen() {
-        var stabilizer = TextRegionStabilizer(config: LiveTranslateConfig())
+        let config = LiveTranslateConfig()
+        var stabilizer = TextRegionStabilizer(config: config)
         let identity = publishedRegion(&stabilizer, box: box(0.3, 0.3))
 
-        XCTAssertEqual(stabilizer.consume(regions: [], at: at(0.5)), [],
+        XCTAssertEqual(stabilizer.consume(regions: [], at: at(0.25 + config.overlayDepartureGraceSeconds / 2)), [],
                        "one missed pass is not a departure")
         XCTAssertEqual(stabilizer.visible.map(\.id), [identity])
     }
@@ -414,10 +417,11 @@ final class TextRegionStabilizerTests: XCTestCase {
     /// The boundary, stated: the grace is the *oldest* a last sighting may be,
     /// so a sighting exactly one grace behind the current pass has left.
     func testTheGraceIsInclusiveAtItsBoundary() {
-        var stabilizer = TextRegionStabilizer(config: LiveTranslateConfig())
+        let config = LiveTranslateConfig()
+        var stabilizer = TextRegionStabilizer(config: config)
         let identity = publishedRegion(&stabilizer, box: box(0.3, 0.3))
 
-        XCTAssertEqual(stabilizer.consume(regions: [], at: at(0.25 + 0.5)),
+        XCTAssertEqual(stabilizer.consume(regions: [], at: at(0.25 + config.overlayDepartureGraceSeconds)),
                        [.disappeared(id: identity)])
     }
 
@@ -460,18 +464,23 @@ final class TextRegionStabilizerTests: XCTestCase {
     /// un-publishes, it does not release — but re-enters the emitted set only
     /// after `regionAppearPasses` fresh consecutive sightings.
     func testARegionClearedByTheGraceRepaysTheAppearHysteresisBeforeItIsDrawnAgain() {
-        var stabilizer = TextRegionStabilizer(config: LiveTranslateConfig())
+        let config = LiveTranslateConfig()
+        var stabilizer = TextRegionStabilizer(config: config)
         let sign = box(0.3, 0.3)
         let identity = publishedRegion(&stabilizer, box: sign)
-        XCTAssertEqual(stabilizer.consume(regions: [], at: at(0.95)), [.disappeared(id: identity)])
+        let departedAt = 0.25 + config.overlayDepartureGraceSeconds + 0.01
+        XCTAssertEqual(stabilizer.consume(regions: [], at: at(departedAt)),
+                       [.disappeared(id: identity)])
 
         // First sighting after the departure: not yet painted.
-        XCTAssertEqual(stabilizer.consume(regions: [observation("Timer", sign)], at: at(1.2)), [])
+        XCTAssertEqual(stabilizer.consume(regions: [observation("Timer", sign)],
+                                          at: at(departedAt + 0.25)), [])
         XCTAssertTrue(stabilizer.visible.isEmpty,
                       "a region that left the publication pays the appear hysteresis again")
 
         // Second consecutive sighting: back, on the identity it kept.
-        let returned = stabilizer.consume(regions: [observation("Timer", sign)], at: at(1.45))
+        let returned = stabilizer.consume(regions: [observation("Timer", sign)],
+                                          at: at(departedAt + 0.5))
         XCTAssertEqual(returned, [.appeared(id: identity)],
                        "the grace clears the overlay without releasing the identity")
     }
