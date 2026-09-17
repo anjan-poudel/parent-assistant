@@ -76,6 +76,10 @@ struct LogSanitiser {
         // `GoogleCalendarGateway.decodeDetail(from:)`, whose only inputs
         // are the error kind and the coding path.
         "decode_detail",
+        // [DEAD-TAP-RECOVERY] (2026-09-17) The count of audio chunks a
+        // capture received — count-shaped, the discriminator between a
+        // silent capture and a dead tap.
+        "chunks",
         // [TURN-TIMING] The serialized per-turn stage list
         // (`[{stage, ms}, …]`) — stage names and integer durations only,
         // never transcript or reply text (see VoiceTurnLatencyTracer).
