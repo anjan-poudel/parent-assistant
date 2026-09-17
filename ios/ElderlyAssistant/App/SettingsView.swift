@@ -2889,6 +2889,12 @@ struct MedicationScheduleSettingsView: View {
 
     @State private var name = ""
     @State private var time = Date()
+    /// What the medicine is for ([MED-PURPOSE], 2026-09-17) — the ten
+    /// chips plus the family's own words, held as the value type that
+    /// owns the chips-prefill/free-text-overrides rule (see
+    /// `MedicationPurposeDraft`). The view only moves values in and reads
+    /// `storedValue` out at Save.
+    @State private var purpose = MedicationPurposeDraft()
     @State private var errorKey: String?
     /// The medication whose photos are being managed (medication-visual-
     /// aids task, 2026-09-16) — held as the full entry so the sheet renders
@@ -2913,13 +2919,17 @@ struct MedicationScheduleSettingsView: View {
                     }
                 }
                 addForm
-                // Native-calendar mirror/two-way/import cards moved to
-                // the Calendar settings leaf (calendar-settings task,
-                // 2026-09-07). The appointment calendar auto-add toggle
-                // moved here from the Meds leaf (menu-audit task,
-                // 2026-09-17) — settings live under Settings.
-                calendarAutoAddCard
-                festivalReminderCard
+                // This leaf edits the household's MEDICINES — nothing else
+                // (calendar-split task, 2026-09-17). The native-calendar
+                // mirror/two-way/import cards left for the Calendar settings
+                // leaf on 2026-09-07, and the two calendar settings that
+                // stayed behind — the appointment → iPhone Calendar write
+                // gate and the festival advance-reminder days — followed
+                // them there. Neither was a medication setting: one is the
+                // EventKit write gate the Calendar leaf's mirror cards
+                // belong to, the other a Bikram Sambat notification rule
+                // that every other BS-calendar control already shares a
+                // screen with.
             }
         }
         // A medicine's photos, edited by the family (medication-visual-aids
@@ -2953,6 +2963,18 @@ struct MedicationScheduleSettingsView: View {
                 Text(timesText(entry.scheduleTimes))
                     .font(.system(size: DesignTokens.minCaptionPointSize))
                     .foregroundStyle(DesignTokens.textSecondary)
+                // What the medicine is FOR ([MED-PURPOSE], 2026-09-17) —
+                // the same label the photo caption and the voice rule use
+                // (`MedicationPurpose.label(forStored:locale:)`), so the
+                // family sees one name for a purpose everywhere. Absent
+                // (or blank) draws no line at all: a household that files
+                // no purposes sees exactly the row it saw before.
+                if let purpose = MedicationPurpose.label(forStored: entry.purpose,
+                                                         locale: coordinator.activeLocale) {
+                    Text(purpose)
+                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .foregroundStyle(DesignTokens.textSecondary)
+                }
             }
             Spacer()
             // Photos live behind this row, the same place routines put
@@ -3012,6 +3034,8 @@ struct MedicationScheduleSettingsView: View {
             .background(DesignTokens.background)
             .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
 
+            purposeStep
+
             if let errorKey {
                 Text(LocalizedStringKey(errorKey))
                     .font(.system(size: DesignTokens.minCaptionPointSize))
@@ -3021,8 +3045,15 @@ struct MedicationScheduleSettingsView: View {
 
             Button {
                 let components = Calendar.current.dateComponents([.hour, .minute], from: time)
-                errorKey = coordinator.addMedication(name: name, time: components)
-                if errorKey == nil { name = "" }
+                errorKey = coordinator.addMedication(name: name,
+                                                     time: components,
+                                                     purpose: purpose.storedValue)
+                // Cleared only on success, like the name: a rejected save
+                // must not throw away what the family chose.
+                if errorKey == nil {
+                    name = ""
+                    purpose = MedicationPurposeDraft()
+                }
             } label: {
                 Text("settings.meds.save")
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
@@ -3041,61 +3072,93 @@ struct MedicationScheduleSettingsView: View {
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
     }
 
-    /// Advance-reminder days for important festivals (BS calendar,
-    /// 2026-09-06) — default 2, family-configurable. Changing it
-    /// reschedules festival notifications immediately.
-    /// Calendar auto-add for doctor's appointments (medical task,
-    /// 2026-09-07, moved here from the Meds leaf by the menu-audit task,
-    /// 2026-09-17) — mirrors `appointmentsToCalendar` on the
-    /// coordinator, which persists it and re-syncs the store gate.
-    private var calendarAutoAddCard: some View {
-        Toggle(isOn: Binding(
-            get: { coordinator.appointmentsToCalendar },
-            set: { coordinator.appointmentsToCalendar = $0 }
-        )) {
-            Label("medical.calendarToggle", systemImage: "calendar.badge.plus")
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                .foregroundStyle(DesignTokens.textPrimary)
-        }
-        .tint(DesignTokens.accent)
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-    }
+    // The two calendar cards that used to close this leaf — the
+    // appointment → iPhone Calendar write gate and the festival
+    // advance-reminder days — live on `CalendarSettingsView` now
+    // (calendar-split task, 2026-09-17). Their bodies were carried over
+    // verbatim; `SettingsTabMappingTests` pins that they are the Calendar
+    // leaf's, and that this one renders no calendar key.
 
-    private var festivalReminderCard: some View {
+    // MARK: - Purpose step ([MED-PURPOSE], 2026-09-17)
+
+    /// "What is it for?": ten one-tap chips over a field that is ALWAYS
+    /// editable. A chip fills the field with its own label (in the active
+    /// language) and the field stays the family's to change — the typed
+    /// words win, which is the whole reason the pair exists rather than a
+    /// closed enum (`MedicationPurposeDraft` owns that rule; this view only
+    /// wires taps and typing into it).
+    ///
+    /// Chips are laid out two per row rather than in a flow: the labels are
+    /// Devanagari at the elder-facing body size, so a row that reflowed
+    /// would shuffle the chips' positions between the two languages and
+    /// between a phone's width and a tablet's. Fixed pairs keep the tenth
+    /// chip where the family last found it.
+    private var purposeStep: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("festival.reminderTitle", systemImage: "bell.badge")
+            Text("meds.purpose.label")
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
                 .foregroundStyle(DesignTokens.textPrimary)
-            HStack {
-                Text("festival.reminderDays")
-                    .font(.system(size: DesignTokens.minBodyPointSize))
-                    .foregroundStyle(DesignTokens.textPrimary)
-                Spacer()
-                Stepper(value: Binding(
-                    get: { coordinator.festivalCalendar.advanceReminderDays },
-                    set: { newValue in
-                        coordinator.festivalCalendar.advanceReminderDays = newValue
-                        coordinator.festivalCalendar.scheduleAll()
+                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(spacing: 8) {
+                ForEach(Self.purposeChipRows, id: \.self) { row in
+                    HStack(spacing: 8) {
+                        ForEach(row) { chip in
+                            purposeChip(chip)
+                        }
                     }
-                ), in: 0...7) {
-                    Text(BikramSambat.devanagariDigits(coordinator.festivalCalendar.advanceReminderDays))
-                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                        .foregroundStyle(DesignTokens.accent)
                 }
             }
-            Text("festival.reminderHint")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+            TextField(LocalizedStringKey("meds.purpose.freeTextPlaceholder"),
+                      text: Binding(
+                        get: { purpose.text },
+                        set: { purpose.editText($0) }
+                      ))
+                .font(.system(size: DesignTokens.minBodyPointSize))
+                .padding(14)
+                .frame(minHeight: 56)
+                .fixedSize(horizontal: false, vertical: true)
+                .background(DesignTokens.background)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
         }
-        .padding(16)
+        .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .background(DesignTokens.background)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
     }
 
+    /// `MedicationPurpose.allCases` in the design's order, two per row.
+    private static let purposeChipRows: [[MedicationPurpose]] = {
+        var rows: [[MedicationPurpose]] = []
+        var current: [MedicationPurpose] = []
+        for chip in MedicationPurpose.allCases {
+            current.append(chip)
+            if current.count == 2 {
+                rows.append(current)
+                current = []
+            }
+        }
+        if !current.isEmpty { rows.append(current) }
+        return rows
+    }()
+
+    private func purposeChip(_ chip: MedicationPurpose) -> some View {
+        let isSelected = purpose.chip == chip
+        return Button {
+            purpose.select(chip, locale: coordinator.activeLocale)
+        } label: {
+            Text(chip.label(locale: coordinator.activeLocale))
+                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                .foregroundStyle(isSelected ? .white : DesignTokens.textPrimary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
+                .background(isSelected ? DesignTokens.accent : DesignTokens.background)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+    }
 
     private func timesText(_ times: [DateComponents]) -> String {
         times

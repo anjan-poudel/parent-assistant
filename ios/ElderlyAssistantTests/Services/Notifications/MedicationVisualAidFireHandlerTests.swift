@@ -23,7 +23,7 @@ final class MedicationVisualAidFireHandlerTests: XCTestCase {
 
     /// An entry with `aidCount` photos attached (no files on disk — this
     /// handler reads the MODEL; the store is the coordinator's business).
-    private func makeEntry(aidCount: Int) -> MedicationEntry {
+    private func makeEntry(aidCount: Int, purpose: String? = nil) -> MedicationEntry {
         MedicationEntry(
             id: entryId,
             userProfileId: UUID(),
@@ -37,6 +37,7 @@ final class MedicationVisualAidFireHandlerTests: XCTestCase {
             doubleDoseWindowHours: 4,
             photoVerificationEnabled: false,
             confirmationDescription: nil,
+            purpose: purpose,
             visualAids: (0..<aidCount).map {
                 VisualAid(filename: "dose-\($0).jpg",
                           caption: $0 == 0 ? "the round white tablet" : nil)
@@ -87,6 +88,46 @@ final class MedicationVisualAidFireHandlerTests: XCTestCase {
         XCTAssertEqual(fired?.visualAids.first?.caption, "the round white tablet")
         XCTAssertEqual(fired?.medicationName, "Amlodipine",
                        "the screen needs the name and dose line the entry fired with")
+    }
+
+    /// A dose that fires for a medicine the family filed a purpose for
+    /// shows that purpose in the screen's caption ([MED-PURPOSE],
+    /// 2026-09-17) — and the caption is the SAME composition the voice photo
+    /// query speaks, so the elder is told the same thing about the same
+    /// medicine however the screen appeared.
+    func testFiredDoseCarriesThePurposeIntoTheCaption() async throws {
+        let entry = makeEntry(aidCount: 1, purpose: "bloodPressure")
+        let presented = expectation(description: "presented")
+        var fired: MedicationEntry?
+        let handler = makeHandler(entry: entry) { fired = $0; presented.fulfill() }
+
+        _ = handler.willPresent(doseNotification(entryId: entryId),
+                                categoryIdentifier: "MEDICATION_REMINDER")
+        await fulfillment(of: [presented], timeout: 2)
+
+        let presentation = MedicationVisualAidsPresentation(entry: try XCTUnwrap(fired),
+                                                            mode: .dose)
+        XCTAssertEqual(presentation.caption(locale: Locale(identifier: "ne")),
+                       "रक्तचापको औषधि — Amlodipine",
+                       "the dose screen's title carries the purpose")
+    }
+
+    /// ...and a medicine with no purpose fires exactly the screen it fired
+    /// before this feature: the bare name.
+    func testFiredDoseWithoutAPurposeKeepsTheBareNameCaption() async throws {
+        let entry = makeEntry(aidCount: 1)
+        let presented = expectation(description: "presented")
+        var fired: MedicationEntry?
+        let handler = makeHandler(entry: entry) { fired = $0; presented.fulfill() }
+
+        _ = handler.willPresent(doseNotification(entryId: entryId),
+                                categoryIdentifier: "MEDICATION_REMINDER")
+        await fulfillment(of: [presented], timeout: 2)
+
+        let presentation = MedicationVisualAidsPresentation(entry: try XCTUnwrap(fired),
+                                                            mode: .dose)
+        XCTAssertNil(presentation.purpose)
+        XCTAssertEqual(presentation.caption(locale: Locale(identifier: "ne")), "Amlodipine")
     }
 
     /// The overwhelming case: a dose with no photos must reach the

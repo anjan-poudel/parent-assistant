@@ -172,7 +172,7 @@ final class LiveTranslationPipelineTests: XCTestCase {
             }
 
             guard !unavailable else {
-                events?.brainTranslationUnavailable(.modelNotInstalled)
+                events?.brainTranslationUnavailable(.modelNotInstalled, stage: .availability)
                 return .none
             }
             var translations: [String: String] = [:]
@@ -1805,6 +1805,13 @@ final class LiveTranslationPipelineTests: XCTestCase {
         let timeout = harness.bus.events(named: "brain_translation_unavailable")
         XCTAssertEqual(timeout.first?.metadata["reason"], "inference_timeout",
                        "a stage that never returned is reported with the token that says what happened")
+        // …and with the stage that says WHOSE deadline it was. The tier's own
+        // bound (`deadline`) and the caller's (`stage_deadline`) are different
+        // diagnoses — "the model is too slow" against "the tier never got to
+        // its own bound" — and on the device they were indistinguishable
+        // (2026-09-17: the tier reported the second as `inference_failed`).
+        XCTAssertEqual(timeout.first?.metadata["failureStage"], "stage_deadline",
+                       "the caller's own deadline is the stage this record names")
         XCTAssertEqual(requests(carrying: cloudText, in: harness), 1,
                        "the region is not stranded: what the brain did not answer reaches the gate")
         let attempts = await inFlightAttempts(harness)

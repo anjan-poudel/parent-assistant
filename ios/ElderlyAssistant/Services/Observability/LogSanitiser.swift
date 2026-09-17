@@ -76,6 +76,10 @@ struct LogSanitiser {
         // `GoogleCalendarGateway.decodeDetail(from:)`, whose only inputs
         // are the error kind and the coding path.
         "decode_detail",
+        // [DEAD-TAP-RECOVERY] (2026-09-17) The count of audio chunks a
+        // capture received — count-shaped, the discriminator between a
+        // silent capture and a dead tap.
+        "chunks",
         // [TURN-TIMING] The serialized per-turn stage list
         // (`[{stage, ms}, …]`) — stage names and integer durations only,
         // never transcript or reply text (see VoiceTurnLatencyTracer).
@@ -140,6 +144,13 @@ struct LogSanitiser {
         "origin",
         "mode",
         "reason",
+        // [LLAMADEBUG] (2026-09-17) Where an on-device brain attempt stopped
+        // — `BrainFailureStage`, a closed token set (availability / load /
+        // prompt_budget / decode / deadline / cancelled / stage_deadline).
+        // The device report behind it: every live-translate cycle logged
+        // `brain_translation_unavailable` and the `reason` token could not
+        // say which of four different failures it was.
+        "failureStage",
         "disclosureVersion",
         // [LIVE-CAMERA-TRANSLATION] AM-2 decision, recorded rather than
         // widened silently: `cap`. The shipped `GeminiCostGovernor` emits

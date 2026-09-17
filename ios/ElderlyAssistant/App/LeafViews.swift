@@ -155,6 +155,8 @@ struct MedicalView: View {
             MedicationDoseFireScreen(
                 medicationName: dose.medicationName,
                 doseDescription: dose.doseDescription,
+                purpose: dose.purpose,
+                mode: dose.mode,
                 aids: dose.aids,
                 entryId: dose.entryId,
                 store: coordinator.medicationVisualAidStore,
