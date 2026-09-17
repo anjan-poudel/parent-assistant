@@ -356,6 +356,35 @@ protocol VoiceCommandCoordinating: AnyObject {
     /// — the router adds no speech and no card of its own, exactly like
     /// the briefing stage. On-demand: no once-per-wake-window budget.
     func fireNewsReader()
+
+    /// [MED-PHOTO] (2026-09-17) The live medication schedule as the voice
+    /// photo query sees it: the entries the `.medicationPhoto` keyword rule
+    /// builds its vocabulary from (through
+    /// `MedicationVoiceVocabulary.voiceKeys(for:)`) AND the entries a
+    /// matched key resolves back to. One read serves both halves, which is
+    /// what keeps the two derivations from drifting.
+    ///
+    /// Never a fixed table: a medicine the elder actually has is the only
+    /// one that can be asked about, and one deleted between the read and
+    /// the resolution simply stops resolving. Inert default ([]): with no
+    /// entries the medication group is empty, an empty group can never
+    /// satisfy a variant, and the rule can never fire — every conformer
+    /// that does not opt in behaves exactly as it did before this member.
+    /// Requirement-with-extension-default pattern like the surfaces above
+    /// (the router holds the coordinator as a protocol reference, so an
+    /// extension-only member would bind statically and `AppCoordinator`'s
+    /// implementation could never be reached).
+    var medicationVoiceEntries: [MedicationEntry] { get }
+
+    /// [MED-PHOTO] (2026-09-17) The elder asked what a medicine looks
+    /// like: presents `entryId`'s photo full screen and RETURNS the line
+    /// to speak — the photo's caption, or the honest "no photo yet" line
+    /// when the entry carries none. nil means "nothing to say" (the entry
+    /// is gone). The caller only speaks what it is handed, exactly like
+    /// the launch seam above; the coordinator owns the presentation, the
+    /// caption and the honest fallback. Same
+    /// requirement-with-extension-default pattern as the members above.
+    func showMedicationPhoto(entryId: UUID) -> String?
 }
 
 /// [INTENT-TOOLS] (2026-09-07) Tool-capability default. The default keeps
@@ -438,6 +467,13 @@ extension VoiceCommandCoordinating {
     // fires a news digest, so the deterministic ladder stage falls
     // through to the interpreter/keyword remainder exactly as before.
     func fireNewsReader() {}
+    // [MED-PHOTO] (2026-09-17) Inert defaults — a conformer that does not
+    // opt in has no medications to ask about (`[]` leaves the rule's
+    // group empty, so the rule can never fire) and presents nothing. Only
+    // a coordinator that explicitly implements the members
+    // (AppCoordinator, and the scripted mock under test) shows a photo.
+    var medicationVoiceEntries: [MedicationEntry] { [] }
+    func showMedicationPhoto(entryId: UUID) -> String? { nil }
 }
 
 /// Turns a raw transcript into a coordinator call and a spoken reply.
@@ -1053,7 +1089,17 @@ final class CommandRouter {
         // confirmation question and the launch). Every relaxed claim is
         // observable: `intent_keyword_match` (domain, matched keys —
         // fixed rule vocabulary, never user text).
-        if let relaxed = KeywordIntentRule.match(transcript: preText) {
+        // [MED-PHOTO] (2026-09-17) The medication vocabulary the table's
+        // last rule matches against — read from the coordinator's live
+        // schedule (never a fixed table), and read ONCE here so the rule's
+        // group and this stage's resolution below work from the same
+        // snapshot.
+        let medicationVoiceEntries = coordinator?.medicationVoiceEntries ?? []
+        let medicationNames = medicationVoiceEntries.flatMap {
+            MedicationVoiceVocabulary.voiceKeys(for: $0)
+        }
+        if let relaxed = KeywordIntentRule.match(transcript: preText,
+                                                 medicationNames: medicationNames) {
             switch relaxed.domain {
             case .news:
                 emitIntentKeywordMatch(relaxed)
@@ -1128,6 +1174,55 @@ final class CommandRouter {
                 emit(eventType: "festival_date_answered", outcome: "success")
                 speak(text: L10n.fmt("festival.fallsOn", locale: locale,
                                      spokenName, formatter.string(from: gregorian)))
+                return .unrecognised(transcript: raw)
+            case .medicationPhoto:
+                // [MED-PHOTO] (2026-09-17) "रक्तचापको औषधि कस्तो छ?" — the
+                // elder asks what one of their OWN medicines looks like.
+                // The rule resolved the utterance to a vocabulary key out
+                // of the live schedule; this stage turns that key back into
+                // the entry (or entries) carrying it and hands the one to
+                // show to the coordinator's seam. No model, no band, no
+                // calibration — a photo question the household can answer
+                // with a photo is answered with the photo.
+                //
+                // Every spoken line stays the coordinator's or the
+                // catalog's: the names line for the multi-match case is
+                // the one exception, composed here from the entries the
+                // vocabulary already resolved (the same shape the festival
+                // stage's line has), and carded like the launch seam's
+                // replies so it survives the full-screen cover.
+                guard let key = relaxed.medicationName,
+                      let coordinator else { break }
+                emitIntentKeywordMatch(relaxed)
+                let matches = medicationVoiceEntries.filter {
+                    MedicationVoiceVocabulary.voiceKeys(for: $0).contains(key)
+                }
+                guard let firstMatch = matches.first else {
+                    // The key resolved against this same read and names
+                    // nothing any more (an entry deleted in the pause
+                    // between): the honest "no photo yet" line, carded —
+                    // never a silent dead end.
+                    speakWithVisibleOutcome(key: "meds.photoMissing")
+                    return .unrecognised(transcript: raw)
+                }
+                if matches.count > 1 {
+                    // Several medicines answer to the same word: name them
+                    // first, then show the first one that actually has a
+                    // photo. Never a guess at which one was meant.
+                    let names = matches.map(\.medicationName).joined(separator: ", ")
+                    let line = L10n.fmt("meds.photoMultiple",
+                                        locale: coordinator.activeLocale, names)
+                    coordinator.noteGenericReply(line)
+                    speak(text: line)
+                }
+                let target = matches.first { !$0.visualAids.isEmpty } ?? firstMatch
+                if let line = coordinator.showMedicationPhoto(entryId: target.id) {
+                    // Carded exactly like the launch seam's line: the
+                    // honest no-photo line has no other surface once the
+                    // turn ends.
+                    coordinator.noteGenericReply(line)
+                    speak(text: line)
+                }
                 return .unrecognised(transcript: raw)
             }
         }

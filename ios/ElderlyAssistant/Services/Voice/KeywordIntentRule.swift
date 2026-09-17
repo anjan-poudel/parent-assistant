@@ -46,6 +46,15 @@ import Foundation
 /// the Photos app. The router hands a match to the coordinator's
 /// launch seam, which is the SAME seam the plugin calls — the keyword
 /// layer composes no plugin command of its own.
+///
+/// [MED-PHOTO] (2026-09-17) The medication photo query ("रक्तचापको औषधि
+/// कस्तो छ?" / "what does my blood pressure medicine look like?") is the
+/// one rule whose keyword group is NOT in the static table: it is built at
+/// match time from the live medication schedule (names + purposes), so a
+/// medicine the household does not have can never be asked about. It is
+/// evaluated last of all — after the festival rule and every launcher
+/// rule — and the router resolves the key it matched back through the same
+/// live schedule.
 enum KeywordIntentRule {
 
     /// Safe domains the relaxed rules may claim.
@@ -63,12 +72,29 @@ enum KeywordIntentRule {
         /// calibration. The matched rule carries the catalog id in
         /// `Match.festivalID`.
         case festivalDate
+        /// [MED-PHOTO] (2026-09-17) "What does my blood pressure medicine
+        /// look like?" — a photo IDENTIFICATION question about a medicine
+        /// the household actually has. The rule's vocabulary is built at
+        /// match time from the live medication schedule (names + the
+        /// purposes they were filed under), so it can only ever claim a
+        /// medication the elder can actually be shown. The matched rule
+        /// carries the vocabulary key that resolved the entry in
+        /// `Match.medicationName`.
+        case medicationPhoto
     }
 
     /// A fired rule: which domain resolved, and the FIRST matching
     /// alternative of each required group — the honest "matched keys"
     /// payload for the `intent_keyword_match` observability event
     /// (fixed rule vocabulary only, never user text).
+    ///
+    /// That "fixed vocabulary only" rule is why `.medicationPhoto`'s
+    /// medication key rides `medicationName` and NOT `matchedKeys`: the
+    /// vocabulary is the live schedule, so a matched key can be a
+    /// medication name or a purpose word — health data about the
+    /// household, and the exact thing every medication event in this app
+    /// refuses to log. The event keeps the rule's own query lexeme, which
+    /// is fixed vocabulary and safe.
     struct Match: Equatable {
         let domain: Domain
         let matchedKeys: [String]
@@ -81,13 +107,22 @@ enum KeywordIntentRule {
         /// `.festivalDate` match resolved to ("dashain", "tihar", …).
         /// nil for every other domain.
         let festivalID: String?
+        /// [MED-PHOTO] (2026-09-17) The medication vocabulary key a
+        /// `.medicationPhoto` match resolved to — an entry's NAME or one of
+        /// its purpose words, in the canonical form the live schedule's
+        /// `MedicationVoiceVocabulary` produced. The router resolves that
+        /// key back to the entry (or entries) it names; the rule itself
+        /// never holds a table of medicines. nil for every other domain.
+        let medicationName: String?
 
         init(domain: Domain, matchedKeys: [String],
-             appID: String? = nil, festivalID: String? = nil) {
+             appID: String? = nil, festivalID: String? = nil,
+             medicationName: String? = nil) {
             self.domain = domain
             self.matchedKeys = matchedKeys
             self.appID = appID
             self.festivalID = festivalID
+            self.medicationName = medicationName
         }
     }
 
@@ -97,7 +132,18 @@ enum KeywordIntentRule {
     /// ALL co-occur in the transcript, or nil when no relaxed rule
     /// fires. Canonicalization mirrors the router's phrase stages
     /// (lowercase + interior-whitespace collapse).
-    static func match(transcript raw: String) -> Match? {
+    ///
+    /// `medicationNames` is the DYNAMIC half of the table
+    /// ([MED-PHOTO], 2026-09-17): the live medication vocabulary — each
+    /// entry's name plus the words its purpose covers, as produced by
+    /// `MedicationVoiceVocabulary.voiceKeys(for:)`. It is passed IN, never
+    /// held: a fixed drug table would let the app claim a medicine the
+    /// household does not have. The default `[]` is what every pre-existing
+    /// caller and the other rules' tests get — with no entries the
+    /// medication group is empty, an empty group can never satisfy a
+    /// variant, and the medication rule simply never fires.
+    static func match(transcript raw: String,
+                      medicationNames: [String] = []) -> Match? {
         let text = canonical(raw)
         guard !text.isEmpty else { return nil }
         for rule in rules {
@@ -123,7 +169,76 @@ enum KeywordIntentRule {
                 }
             }
         }
-        return nil
+        // [MED-PHOTO] The one rule whose groups cannot live in the static
+        // table above: its medication group is built from the live schedule
+        // at match time. Evaluated LAST, after every static rule, which is
+        // exactly where the approved design puts it.
+        return matchMedicationPhotoQuery(text: text, medicationNames: medicationNames)
+    }
+
+    /// [MED-PHOTO] (2026-09-17) The medication photo query: a query lexeme
+    /// ("कस्तो देखिन्छ", "what does … look like") AND a medication
+    /// vocabulary key co-occurring anywhere in the utterance.
+    ///
+    /// Both groups are REQUIRED, and that conjunction is the whole safety
+    /// story: naming a medicine alone ("रक्तचापको औषधि") is not a question,
+    /// and asking "how does it look" with no medicine in the sentence
+    /// resolves to nothing — never to a guess at which medicine was meant.
+    private static func matchMedicationPhotoQuery(text: String,
+                                                  medicationNames: [String]) -> Match? {
+        let vocabulary = medicationVocabularyGroup(medicationNames)
+        // No medications (or none of them produced a usable key): the group
+        // is empty and an empty group can never satisfy a variant — the
+        // rule goes quiet rather than guessing a medicine.
+        guard !vocabulary.isEmpty else { return nil }
+        guard let queryKey = firstMatchingKey(in: medicationQueryWords, text: text),
+              let medicationKey = firstMatchingKey(in: vocabulary, text: text) else {
+            return nil
+        }
+        // `matchedKeys` carries the QUERY lexeme only — the medication key
+        // is schedule data (a name or the family's words) and the
+        // `intent_keyword_match` event is fixed-vocabulary-only, so the key
+        // travels the dedicated `medicationName` field instead.
+        return Match(domain: .medicationPhoto,
+                     matchedKeys: [queryKey],
+                     medicationName: medicationKey)
+    }
+
+    /// [MED-PHOTO] The medication group, built from the live vocabulary
+    /// passed in. Canonicalized and deduplicated on the way in — the
+    /// coordinator's keys and this group's keys must be the same strings,
+    /// because the router resolves the matched key back against the
+    /// schedule it came from.
+    private static func medicationVocabularyGroup(_ names: [String]) -> Group {
+        var seen = Set<String>()
+        var group: Group = []
+        for raw in names {
+            let key = canonical(raw)
+            guard !key.isEmpty, seen.insert(key).inserted else { continue }
+            group.append(alternative(forVocabularyKey: key))
+        }
+        return group
+    }
+
+    /// A vocabulary key's match mode, by the same rules the rest of this
+    /// table follows: WHOLE-TOKEN for a single Latin word (containment
+    /// would turn "pressure" into "pressured" and "pain" into "paint"), and
+    /// PHRASE containment for Devanagari — where postpositions fuse onto
+    /// the stem ("रक्तचापको औषधि" ⊃ "रक्तचाप", the grapheme rule of
+    /// 2026-09-07) — and for any multi-word key ("blood pressure" can never
+    /// token-equal one token).
+    private static func alternative(forVocabularyKey key: String) -> Alternative {
+        if key.contains(" ") || containsDevanagari(key) {
+            return .phrase(key)
+        }
+        return .token(key)
+    }
+
+    /// Devanagari block (U+0900–U+097F) — enough to answer "does this key
+    /// fuse postpositions onto its stem?", which is the only question the
+    /// match-mode split asks.
+    private static func containsDevanagari(_ text: String) -> Bool {
+        text.unicodeScalars.contains { (0x0900...0x097F).contains($0.value) }
     }
 
     // MARK: - Rule table
@@ -248,6 +363,10 @@ enum KeywordIntentRule {
         Rule(domain: .festivalDate, variants: [
             [whenQuestionWords, festivalNamesGroup]
         ])
+        // [MED-PHOTO] (2026-09-17) The medication photo query is NOT here:
+        // its second group is the live medication schedule, so it is built
+        // and evaluated in `match(transcript:medicationNames:)` after this
+        // whole table — i.e. ordered last, after the festival rule too.
     ]
 
     /// Festival name keys resolved back to catalog ids — the name
@@ -404,6 +523,25 @@ enum KeywordIntentRule {
                 .filter { !$0.isEmpty }
                 .map { Alternative.phrase(canonical($0)) }
         }
+    /// [MED-PHOTO] (2026-09-17) The "what does it look like?" family — the
+    /// identification question the photo query answers. Phrase-matched
+    /// throughout: every form here is longer than one token, and
+    /// "कस्तो छ" must not fire on a bare "कस्तो" (which belongs to the
+    /// topic table's questions) any more than "looks like" may fire on
+    /// "look".
+    ///
+    /// "what does" is the English half of "what does it look like" and is
+    /// deliberately no weaker than that: the medication group is the other
+    /// required half, so "what does my blood pressure medicine do?" is
+    /// still a question about a medicine the household HAS — the worst case
+    /// is showing a photo the elder did not ask for, never claiming a
+    /// medicine that does not exist.
+    private static let medicationQueryWords: Group = [
+        .phrase("कस्तो देखिन्छ"), .phrase("कस्तो छ"),
+        .phrase("कुन हो"), .phrase("kun ho"),
+        .phrase("looks like"), .phrase("what does")
+    ]
+
     /// The YouTube APP word — deliberately separate from
     /// `youtubeKeywords` above: that group is substring-matched for the
     /// postposition-fused "युट्युबमा" of a PLAY request, while a launch

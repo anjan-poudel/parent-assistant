@@ -24,6 +24,14 @@ struct MedicationDoseFireScreen: View {
     /// description the family configured, and the photos.
     let medicationName: String
     let doseDescription: String
+    /// What the medicine is for ([MED-PURPOSE], 2026-09-17) — folded into
+    /// the screen's title with `medicationName` ("रक्तचापको औषधि —
+    /// अम्लोडिपिन") when the family filed one, absent otherwise.
+    let purpose: String?
+    /// Why this screen is up. `.dose` is a fired reminder (prompt + "I took
+    /// it"); `.identify` is the elder's own voice question about what a
+    /// medicine looks like, where neither belongs.
+    let mode: MedicationVisualAidsPresentation.Mode
     let aids: [VisualAid]
     let entryId: UUID
     /// The MEDICATION photo store (`AppCoordinator.medicationVisualAidStore`)
@@ -42,10 +50,20 @@ struct MedicationDoseFireScreen: View {
         doseDescription.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// The screen's title: the purpose line and the name ("रक्तचापको औषधि —
+    /// अम्लोडिपिन") when the family filed a purpose, the bare name
+    /// otherwise — so a household that uses no purposes sees exactly the
+    /// screen it saw before this feature.
+    private var title: String {
+        MedicationVisualAidsPresentation.caption(medicationName: medicationName,
+                                                 purpose: purpose,
+                                                 locale: locale)
+    }
+
     var body: some View {
         ReminderVisualAidScreen(
             entryId: entryId,
-            title: medicationName,
+            title: title,
             aids: aids,
             store: store,
             locale: locale,
@@ -55,7 +73,19 @@ struct MedicationDoseFireScreen: View {
         }
     }
 
+    /// The dose-only half of the screen. The identify mode shows the photo
+    /// and its title and nothing else: a "time to take your medicine" with
+    /// an active "I took it" at a moment when nothing is due invites a dose
+    /// that was never scheduled, and the double-dose detector would then
+    /// block the real one.
+    @ViewBuilder
     private var footer: some View {
+        if mode == .dose {
+            doseFooter
+        }
+    }
+
+    private var doseFooter: some View {
         VStack(spacing: 14) {
             Text("meds.firePrompt")
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
@@ -94,29 +124,76 @@ struct MedicationDoseFireScreen: View {
 /// `fullScreenCover(item:)`, keyed by the medication entry (the same entry
 /// fires again tomorrow).
 struct MedicationVisualAidsPresentation: Identifiable, Equatable {
+    /// Why the photo is on screen — the one thing the screen's ACTION row
+    /// depends on, so it rides the presentation rather than a second
+    /// published flag that could disagree with the photo being shown.
+    enum Mode: String, Equatable {
+        /// A scheduled dose fired: the screen carries the dose prompt and
+        /// the elder's "I took it".
+        case dose
+        /// The elder ASKED what the medicine looks like ([MED-PHOTO],
+        /// 2026-09-17). Nothing is due, so the screen is the photo and its
+        /// caption only.
+        case identify
+    }
+
     let entryId: UUID
     let medicationName: String
     let doseDescription: String
+    /// The purpose the family filed this medicine under — a chip id or
+    /// their own words, shown and spoken through `caption(locale:)`. nil
+    /// (or blank) leaves the caption as the bare name.
+    var purpose: String?
+    let mode: Mode
     let aids: [VisualAid]
-    var id: UUID { entryId }
+
+    /// `fullScreenCover(item:)` keys on this. The identity is the ENTRY
+    /// *and the reason the screen is up*: a re-fire of the same dose
+    /// presents again (same id, the documented behaviour), while a voice
+    /// "what does it look like?" for a medicine whose DOSE screen is
+    /// already up is a different presentation — one carries the
+    /// acknowledge action, the other must not, and a cover that swallowed
+    /// the swap would leave the wrong one on screen.
+    var id: String { "\(entryId.uuidString)-\(mode.rawValue)" }
 
     init(entryId: UUID, medicationName: String, doseDescription: String,
-         aids: [VisualAid]) {
+         purpose: String? = nil, aids: [VisualAid], mode: Mode = .dose) {
         self.entryId = entryId
         self.medicationName = medicationName
         self.doseDescription = doseDescription
+        self.purpose = purpose
         self.aids = aids
+        self.mode = mode
     }
 
-    /// Snapshots a live entry's name, dose line and photos. Callers take
-    /// the snapshot when they DECIDE to present, never when they draw: an
-    /// entry edited while the screen is up must not silently swap the dose
-    /// the elder is looking at.
-    init(entry: MedicationEntry) {
+    /// Snapshots a live entry's purpose, name, dose line and photos.
+    /// Callers take the snapshot when they DECIDE to present, never when
+    /// they draw: an entry edited while the screen is up must not silently
+    /// swap the dose the elder is looking at.
+    init(entry: MedicationEntry, mode: Mode = .dose) {
         self.init(entryId: entry.id,
                   medicationName: entry.medicationName,
                   doseDescription: entry.doseDescription,
-                  aids: entry.visualAids)
+                  purpose: entry.purpose,
+                  aids: entry.visualAids,
+                  mode: mode)
+    }
+
+    /// The line the photo carries: the purpose and the name
+    /// ("रक्तचापको औषधि — अम्लोडिपिन") when the family filed a purpose,
+    /// the bare name otherwise. ONE composition for both surfaces — the
+    /// dose that fires and the voice query — so the elder is told the same
+    /// thing about the same medicine however the screen appeared.
+    static func caption(medicationName: String, purpose: String?,
+                        locale: Locale) -> String {
+        guard let label = MedicationPurpose.label(forStored: purpose, locale: locale) else {
+            return medicationName
+        }
+        return "\(L10n.fmt("meds.purposeCaption", locale: locale, label)) — \(medicationName)"
+    }
+
+    func caption(locale: Locale) -> String {
+        Self.caption(medicationName: medicationName, purpose: purpose, locale: locale)
     }
 }
 
@@ -147,6 +224,8 @@ struct MedicationVisualAidOverlay: View {
                 MedicationDoseFireScreen(
                     medicationName: fired.medicationName,
                     doseDescription: fired.doseDescription,
+                    purpose: fired.purpose,
+                    mode: fired.mode,
                     aids: fired.aids,
                     entryId: fired.entryId,
                     store: store,

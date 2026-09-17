@@ -302,4 +302,155 @@ final class KeywordIntentRuleTests: XCTestCase {
                          "\(utterance) must never be claimed by a relaxed rule")
         }
     }
+
+    // MARK: - The medication photo query ([MED-PHOTO] 2026-09-17)
+
+    /// The vocabulary the router hands the rule: an entry's name plus the
+    /// words its purpose covers, exactly as `MedicationVoiceVocabulary`
+    /// produces them for the live schedule. Passed IN — the rule holds no
+    /// medicine of its own — so these tests are the whole of its drug
+    /// knowledge.
+    private let bloodPressureEntry = ["amlodipine", "रक्तचाप", "blood pressure", "pressure"]
+    private let nepaliNamedEntry = ["डाइलोक्सिन"]
+
+    /// A medicine the elder actually has, asked about by NAME: the query
+    /// lexeme and the name co-occur, in either language and in noisy
+    /// surrounding text.
+    func testMedicationPhotoFiresOnAMedicationNameDataDriven() {
+        let utterances = [
+            "amlodipine कस्तो छ?",
+            "हेर, amlodipine कस्तो छ त",
+            "what does amlodipine look like",
+            "amlodipine looks like what?",
+            "kun ho amlodipine",
+            "मेरो डाइलोक्सिन कस्तो देखिन्छ?"
+        ]
+        for utterance in utterances {
+            let names = utterance.contains("डाइलोक्सिन") ? nepaliNamedEntry : bloodPressureEntry
+            XCTAssertEqual(KeywordIntentRule.match(transcript: utterance,
+                                                   medicationNames: names)?.domain,
+                           .medicationPhoto,
+                           "\(utterance) must resolve to the photo query")
+        }
+    }
+
+    /// ...and by what it is FOR: a purpose word is a key like any other, so
+    /// "रक्तचापको औषधि" (the blood-pressure medicine) asks about the entry
+    /// filed under blood pressure without ever naming it.
+    func testMedicationPhotoFiresOnAPurposeWordDataDriven() {
+        for utterance in [
+            "रक्तचापको औषधि कस्तो छ?",
+            "blood pressure medicine looks like what?",
+            "pressure kun ho",
+            "मलाई रक्तचापको औषधि कस्तो देखिन्छ थाहा छैन"
+        ] {
+            XCTAssertEqual(KeywordIntentRule.match(transcript: utterance,
+                                                   medicationNames: bloodPressureEntry)?.domain,
+                           .medicationPhoto,
+                           "\(utterance) names the medicine by its purpose — a purpose key is a key")
+        }
+    }
+
+    /// The matched rule carries the query lexeme in `matchedKeys` and the
+    /// medication key in `medicationName` — that is the string the router
+    /// resolves back to the entry (or entries) carrying it, so its identity
+    /// with the vocabulary is load-bearing. The medication key deliberately
+    /// stays OUT of `matchedKeys`: that field feeds the
+    /// `intent_keyword_match` event, which carries fixed rule vocabulary
+    /// only, and a medication name is the household's health data.
+    func testMedicationPhotoMatchCarriesTheQueryKeyAndTheMedicationKey() {
+        let match = KeywordIntentRule.match(transcript: "रक्तचापको औषधि कस्तो छ?",
+                                            medicationNames: bloodPressureEntry)
+
+        XCTAssertEqual(match, KeywordIntentRule.Match(domain: .medicationPhoto,
+                                                      matchedKeys: ["कस्तो छ"],
+                                                      medicationName: "रक्तचाप"))
+        XCTAssertEqual(match?.matchedKeys, ["कस्तो छ"],
+                       "no schedule-derived key may ride the fixed-vocabulary event field")
+    }
+
+    /// Devanagari postpositions fuse onto the stem ("रक्तचापको" ⊃
+    /// "रक्तचाप") — the phrase mode of the 2026-09-07 grapheme rule, which
+    /// is why a chip need only ship the bare stem.
+    func testDevanagariPurposeKeysMatchWithFusedPostpositions() {
+        XCTAssertEqual(KeywordIntentRule.match(transcript: "रक्तचापको औषधि कस्तो छ",
+                                               medicationNames: bloodPressureEntry)?
+                        .medicationName,
+                       "रक्तचाप")
+        XCTAssertEqual(KeywordIntentRule.match(transcript: "सास फेर्नको औषधि कुन हो",
+                                               medicationNames: ["सास फेर्न", "सास"])?
+                        .medicationName,
+                       "सास फेर्न")
+    }
+
+    /// Whole-token discipline for the single Latin words: the same rule
+    /// that keeps "news" out of "newspaper" keeps "pain" out of "paint" and
+    /// "sleep" out of "sleepy" — a wrong photo is worse than no photo.
+    func testSingleLatinPurposeWordsMatchWholeTokensOnly() {
+        XCTAssertNil(KeywordIntentRule.match(transcript: "the paint looks like this",
+                                             medicationNames: ["pain"]))
+        XCTAssertNil(KeywordIntentRule.match(transcript: "i am sleepy, kun ho?",
+                                             medicationNames: ["sleep"]))
+        XCTAssertEqual(KeywordIntentRule.match(transcript: "pain kun ho",
+                                               medicationNames: ["pain"])?.domain,
+                       .medicationPhoto)
+    }
+
+    /// Multi-word keys match as phrases, because a two-word key can never
+    /// equal one whitespace token.
+    func testMultiWordVocabularyKeysMatchAsPhrases() {
+        XCTAssertEqual(KeywordIntentRule.match(transcript: "my blood pressure tablet कस्तो छ",
+                                               medicationNames: ["blood pressure"])?.domain,
+                       .medicationPhoto)
+        XCTAssertNil(KeywordIntentRule.match(transcript: "my blood test result कस्तो छ",
+                                             medicationNames: ["blood pressure"]),
+                     "the phrase is the key, not its first word")
+    }
+
+    /// BOTH halves are required. A question with no medication in it never
+    /// fires — the rule must not guess which medicine was meant.
+    func testMedicationPhotoNeverFiresWithoutAMedicationWord() {
+        for utterance in ["कस्तो छ?", "यो औषधि कस्तो छ?",
+                          "what does it look like", "kun ho", "कुन हो"] {
+            XCTAssertNil(KeywordIntentRule.match(transcript: utterance,
+                                                 medicationNames: bloodPressureEntry),
+                         "\(utterance) asks about no medicine in particular — never a guess")
+        }
+    }
+
+    /// ...and naming a medicine is not a question. Without a query lexeme
+    /// the utterance resolves to nothing, exactly as it did before this
+    /// rule existed.
+    func testMedicationPhotoNeverFiresOnAMedicationWithoutAQuery() {
+        for utterance in ["amlodipine", "रक्तचापको औषधि",
+                          "मैले amlodipine खाएँ", "रक्तचापको औषधि खानु पर्छ",
+                          "amlodipine is in the blue box"] {
+            XCTAssertNil(KeywordIntentRule.match(transcript: utterance,
+                                                 medicationNames: bloodPressureEntry),
+                         "\(utterance) mentions a medicine but asks nothing — no photo")
+        }
+    }
+
+    /// The empty vocabulary is what every pre-existing caller gets: with no
+    /// medications the rule goes quiet for every utterance shape, including
+    /// the ones that would otherwise fire.
+    func testEmptyVocabularyNeverFiresTheRule() {
+        for utterance in ["कस्तो छ?", "amlodipine कस्तो छ", "blood pressure kun ho",
+                          "what does amlodipine look like"] {
+            XCTAssertNil(KeywordIntentRule.match(transcript: utterance),
+                         "no medications → no vocabulary → the rule can never match: \(utterance)")
+        }
+    }
+
+    /// Ordering: the medication rule is evaluated LAST, after the whole
+    /// static table. An utterance that also satisfies an earlier rule
+    /// resolves to that earlier rule, mirroring the ladder.
+    func testMedicationPhotoRunsLast() {
+        XCTAssertEqual(KeywordIntentRule.match(transcript: "समाचार सुनाऊ, amlodipine कस्तो छ",
+                                               medicationNames: bloodPressureEntry)?.domain,
+                       .news)
+        XCTAssertEqual(KeywordIntentRule.match(transcript: "युट्युबमा गीत चलाऊ, amlodipine कस्तो छ",
+                                               medicationNames: bloodPressureEntry)?.domain,
+                       .youtube)
+    }
 }
