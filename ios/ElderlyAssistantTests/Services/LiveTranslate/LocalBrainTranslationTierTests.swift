@@ -15,9 +15,9 @@ final class LocalBrainTranslationTierTests: XCTestCase {
     private let config = LiveTranslateConfig.default
 
     /// A string no dictionary knows and only the brain can answer.
-    private let brainText = "फार्मेसी"
-    private let secondBrainText = "खुला छ"
-    private let thirdBrainText = "प्रवेश निषेध"
+    private let brainText = "Pharmacy"
+    private let secondBrainText = "Open"
+    private let thirdBrainText = "No entry"
 
     // MARK: - Doubles
 
@@ -225,16 +225,16 @@ final class LocalBrainTranslationTierTests: XCTestCase {
 
     func testEveryUnresolvedStringOfACycleGoesIntoOneGeneration() async throws {
         try await withTier { tier, generator, bus in
-            generator.output = answer(["Pharmacy", "Open", "No entry"])
+            generator.output = answer(["फार्मेसी", "खुला छ", "प्रवेश निषेध"])
             let sources = [brainText, secondBrainText, thirdBrainText]
 
             let outcome = await tier.translate(sources)
 
             XCTAssertEqual(generator.prompts.count, 1,
                            "N unresolved strings are ONE generation, not N")
-            XCTAssertEqual(outcome.translations, [brainText: "Pharmacy",
-                                                  secondBrainText: "Open",
-                                                  thirdBrainText: "No entry"])
+            XCTAssertEqual(outcome.translations, [brainText: "फार्मेसी",
+                                                  secondBrainText: "खुला छ",
+                                                  thirdBrainText: "प्रवेश निषेध"])
             let event = bus.events(named: "brain_translation_batch").first
             XCTAssertEqual(event?.metadata["resolvedCount"], "3")
             XCTAssertEqual(event?.metadata["unresolvedCount"], "0")
@@ -244,7 +244,7 @@ final class LocalBrainTranslationTierTests: XCTestCase {
 
     func testThePromptCarriesTheSourcesInOrderAndKeepsTheSchemaOutOfIt() async throws {
         try await withTier { tier, generator, _ in
-            generator.output = answer(["Pharmacy", "Open"])
+            generator.output = answer(["फार्मेसी", "खुला छ"])
             _ = await tier.translate([brainText, secondBrainText])
 
             let prompt = try XCTUnwrap(generator.prompts.first)
@@ -263,7 +263,7 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         var config = LiveTranslateConfig.default
         config.brainTranslationTimeoutSeconds = 7
         try await withTier(config: config) { tier, generator, _ in
-            generator.output = answer(["Pharmacy"])
+            generator.output = answer(["फार्मेसी"])
             _ = await tier.translate([brainText])
             XCTAssertEqual(generator.timeouts, [7],
                            "the deadline is the config's, not a literal at the call site")
@@ -276,7 +276,7 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         var config = LiveTranslateConfig.default
         config.brainTranslationMaxStrings = 2
         try await withTier(config: config) { tier, generator, bus in
-            generator.output = answer(["Pharmacy", "Open"])
+            generator.output = answer(["फार्मेसी", "खुला छ"])
             let sources = [brainText, secondBrainText, thirdBrainText]
 
             let outcome = await tier.translate(sources)
@@ -298,7 +298,7 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         config.brainTranslationMaxCharacters = 10
         try await withTier(config: config) { tier, generator, _ in
             let long = String(repeating: "क", count: 8)
-            generator.output = answer(["Pharmacy", "Open"])
+            generator.output = answer(["फार्मेसी", "खुला छ"])
 
             let outcome = await tier.translate([long, long])
 
@@ -333,10 +333,10 @@ final class LocalBrainTranslationTierTests: XCTestCase {
 
     func testAnAnswerThatStopsEarlyLeavesTheTailUnresolved() async throws {
         try await withTier { tier, generator, _ in
-            generator.output = answer(["Pharmacy"])
+            generator.output = answer(["फार्मेसी"])
             let outcome = await tier.translate([brainText, secondBrainText])
 
-            XCTAssertEqual(outcome.translations, [brainText: "Pharmacy"])
+            XCTAssertEqual(outcome.translations, [brainText: "फार्मेसी"])
             XCTAssertNil(outcome.translations[secondBrainText],
                          "a short answer must not shift translations onto the wrong sign")
         }
@@ -368,9 +368,9 @@ final class LocalBrainTranslationTierTests: XCTestCase {
 
     func testTranslationsAreTrimmedAndAttributedToTheBrainAlone() async throws {
         try await withTier { tier, generator, _ in
-            generator.output = answer(["  Pharmacy  "])
+            generator.output = answer(["  फार्मेसी  "])
             let outcome = await tier.translate([brainText])
-            XCTAssertEqual(outcome.translations[brainText], "Pharmacy")
+            XCTAssertEqual(outcome.translations[brainText], "फार्मेसी")
         }
     }
 
@@ -418,7 +418,7 @@ final class LocalBrainTranslationTierTests: XCTestCase {
 
     func testNoEventCarriesAStringFromTheBatch() async throws {
         try await withTier { tier, generator, bus in
-            generator.output = answer(["Pharmacy"])
+            generator.output = answer(["फार्मेसी"])
             _ = await tier.translate([brainText, secondBrainText])
 
             for event in bus.events {
@@ -434,7 +434,7 @@ final class LocalBrainTranslationTierTests: XCTestCase {
 
     func testTheBatchEventCarriesTheDurationTheTierMeasured() async throws {
         try await withTier { tier, generator, bus in
-            generator.output = answer(["Pharmacy"])
+            generator.output = answer(["फार्मेसी"])
             let outcome = await tier.translate([brainText])
 
             let event = try XCTUnwrap(bus.events(named: "brain_translation_batch").first)
