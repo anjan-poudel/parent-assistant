@@ -16,7 +16,9 @@ import WhisperKit
 // while the user speaks — off the turn path. NON-GATING: the transcribe
 // never waits on it; when it is still running at `finish()`, `loadKit`
 // joins the in-flight load instead of constructing a second instance
-// (a duplicate would double the ~1.5 GB footprint).
+// (a duplicate would double the resident cost — the shipping v6 q8 medium
+// is ~1.00 GB live, and `ModelLifecycleInventory.footprint(for: .speechToText)`
+// is the only copy of that number).
 //
 /// The pure first-use prewarm decision.
 enum WhisperFirstUsePrewarmPolicy {
@@ -209,7 +211,7 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
     ///    behavior for this engine.
     ///
     /// A real change releases a resident kit so the next turn reloads from
-    /// the new artifact instead of holding the old one's ~1.5 GB until the
+    /// the new artifact instead of holding the old one's live footprint
     /// post-turn policy releases it.
     func setPreferredModel(_ id: ModelID?) {
         guard let id,
@@ -404,7 +406,7 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
         }
     }
 
-    /// Drops the loaded model so its RAM (~1.5 GB for medium-class
+    /// Drops the loaded model so its RAM (~1.00 GB for the shipping
     /// CoreML) is available to the LLM interpreter — same contract as
     /// `WhisperSpeechRecognizer.releaseModel()`, called from
     /// `AppCoordinator.recordTranscript`. The next utterance reloads on
@@ -425,7 +427,13 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
     /// engine) behaves exactly as it does for any other load failure —
     /// the lifecycle layer adds no new failure taxonomy to the pipeline.
     private struct LifecycleDenied: Error {
-        let reason: LoadDenialReason
+        /// [MODEL-WARDEN] Step 1 — the reservation vocabulary, not the
+        /// admission one. The gate below is two-phase now, so the refusal
+        /// it produces is a `ReservationDenial`; carrying the superset and
+        /// mapping it down would be a second, lossier answer to a question
+        /// nobody asks (`loadDenialReason(for:)` exists for the callers
+        /// that still speak the old taxonomy).
+        let reason: ReservationDenial
     }
 
     // MARK: - Inference (guarded)
@@ -513,7 +521,7 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
     /// Loads (or reuses) the WhisperKit instance for a descriptor.
     /// [LAT-EVIDENCE] Concurrent loaders JOIN one in-flight load: the
     /// non-gating first-use prewarm and the first transcribe may race to
-    /// the load — a second construction would double the ~1.5 GB
+    /// the load — a second construction would double the resident
     /// footprint. A failed load clears the pending slot so a later
     /// attempt starts fresh (a stale failure can never poison every
     /// future load).
@@ -562,22 +570,50 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
         // `runInference`) and behind the in-flight dedupe, so gating here
         // means no path can build an ANE instance the manager did not
         // approve of — including the post-turn re-warm, which previously
-        // re-loaded 2 GB on a raw probe reading with no idea that the
-        // brain had grown in the meantime.
+        // re-loaded ~1.0 GB of non-pageable ANE weights on a raw probe
+        // reading with no idea that the brain had grown in the meantime.
         registerWithLifecycle()
-        if case .denied(let reason) = lifecycle.prepareLoad(
-            of: .speechToText, modelID: preferredModelID) {
+        // [MODEL-WARDEN] Step 1 — the reservation is held ACROSS the load,
+        // which is the whole point: this is the ANE construction (~1.0 GB
+        // live, none of it pageable, 77 s cold on device) and the bytes
+        // were unaccounted for between an admission decision and `didLoad`.
+        // Holding it here also puts the load on the serial queue, so a 4B
+        // brain page-in cannot be admitted on top of it.
+        //
+        // The deadline and cancellation contracts are untouched: the
+        // reservation adds no await, no timeout and no cancellation path
+        // of its own. If the task awaiting this load stops waiting, the
+        // throw below abandons the reservation as `.cancelled` (or
+        // `.loadFailed`) and the reaper covers the rest; `WhisperKit(config)`
+        // sees exactly the cancellation it saw before.
+        let reservation: ModelReservation
+        switch lifecycle.reserve(ModelLoadRequest(slot: .speechToText,
+                                                  modelID: preferredModelID,
+                                                  owner: self,
+                                                  purpose: .voiceTurn)) {
+        case .success(let granted):
+            reservation = granted
+        case .failure(let reason):
             // Honest, content-free refusal: the pipeline's existing
             // failure handling takes it from here (whisper.cpp or the
             // cloud engine may still serve the turn).
-            emit("model_load_denied", errorCode: reason.rawValue)
+            emit("model_load_denied", errorCode: reason.token)
             throw RecognitionError.recognitionFailed(LifecycleDenied(reason: reason))
         }
         let loadStart = CFAbsoluteTimeGetCurrent()
-        let created = try await WhisperKit(config)
+        let created: WhisperKit
+        do {
+            created = try await WhisperKit(config)
+        } catch {
+            lifecycle.abandon(reservation,
+                              reason: error is CancellationError
+                                  ? .cancelled : .loadFailed)
+            throw error
+        }
         let loadMs = Int((CFAbsoluteTimeGetCurrent() - loadStart) * 1000)
         kitInstance = created
         loadedDescriptor = descriptor
+        lifecycle.commit(reservation)
         lifecycle.didLoad(.speechToText, owner: self)
         emit("model_loaded", errorCode: nil)
         // [TURN-TIMING] Model ready — the load ms rides as a point entry

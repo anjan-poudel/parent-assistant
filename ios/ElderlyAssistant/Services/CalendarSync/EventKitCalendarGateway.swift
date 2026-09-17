@@ -172,9 +172,25 @@ protocol EventKitCalendarGateway: AnyObject {
     /// removal failed (both fine — the caller's goal is reached).
     func removeEvent(identifier: String) -> Bool
 
-    /// Removes every event whose notes contain `fragment` (all
-    /// calendars) and returns the count removed — the legacy rebuild's
-    /// wipe-by-tag. One commit for the whole batch.
+    /// Removes EVERY event whose notes carry `fragment` as their first
+    /// line — all calendars, so the legacy one-way rebuild's default-
+    /// calendar mirrors go as surely as the two-way Sahayak ones — and
+    /// returns the count removed. One commit for the whole batch.
+    ///
+    /// The ownership test is `CalendarSyncService.notesCarryMirrorTag`,
+    /// not a substring search: the tag is the notes' FIRST LINE in both
+    /// mirror forms, and a family event that merely mentions the string
+    /// in prose is not ours to delete.
+    ///
+    /// ONE REMOVAL PER EVENT, never per occurrence. The mirrors are
+    /// recurring daily series and a date-predicate fetch expands a
+    /// series into one entry per occurrence, all sharing the series'
+    /// identifier; removing those one at a time with `span: .thisEvent`
+    /// cancels occurrences and leaves the series itself standing, so the
+    /// next rebuild stacks a second series on top of the first — the
+    /// duplicate pile. Implementations collapse occurrences by
+    /// identifier and remove the event itself, recurring series
+    /// included.
     func removeEvents(matchingNotesFragment fragment: String) -> Int
 
     /// Whether an event with this identifier is still in the store — the
@@ -372,7 +388,15 @@ final class EKCalendarGateway: EventKitCalendarGateway {
     func removeEvent(identifier: String) -> Bool {
         guard let event = store.event(withIdentifier: identifier) else { return false }
         do {
-            try store.remove(event, span: .thisEvent, commit: true)
+            // `.futureEvents`, for the same reason the tag wipe uses it:
+            // the app's mirrored routines (and a family's own weekly or
+            // daily entry) are recurring SERIES, and `.thisEvent` on a
+            // series cancels a single occurrence — the event the caller
+            // asked to delete keeps appearing, and for a mirror the next
+            // rebuild adds a second series on top of it. For a
+            // non-recurring event the span is ignored, so a one-off is
+            // still removed whole.
+            try store.remove(event, span: .futureEvents, commit: true)
             return true
         } catch {
             return false
@@ -385,20 +409,38 @@ final class EKCalendarGateway: EventKitCalendarGateway {
         let start = Calendar.current.date(byAdding: .year, value: -1, to: Date()) ?? Date()
         let end = Calendar.current.date(byAdding: .year, value: 1, to: Date()) ?? Date()
         let predicate = store.predicateForEvents(withStart: start, end: end, calendars: nil)
+        // `calendars: nil` is every calendar on purpose: the one-way
+        // mirror writes into the DEFAULT calendar and the two-way one
+        // into Sahayak, and the wipe must not leave either behind.
         let ours = store.events(matching: predicate).filter {
-            $0.notes?.contains(fragment) == true
+            CalendarSyncService.notesCarryMirrorTag($0.notes, tag: fragment)
         }
         var removed = 0
+        // Occurrences of one recurring event share the series'
+        // identifier (EventKit documents this), so this collapses the
+        // fetch's per-occurrence expansion back to one entry per EVENT —
+        // and it also drops the stale occurrence objects of a series
+        // already removed a moment ago, which is precisely the set that
+        // used to throw and get swallowed.
+        var seen = Set<String>()
         for event in ours {
+            guard seen.insert(event.eventIdentifier).inserted else { continue }
             do {
-                try store.remove(event, span: .thisEvent, commit: false)
+                // `.futureEvents`, NEVER `.thisEvent`: this event is a
+                // recurring daily series, and `.thisEvent` cancels one
+                // occurrence and leaves the series (and every later
+                // occurrence) in the family's calendar, where the next
+                // rebuild adds another one on top of it. `.futureEvents`
+                // removes the event itself — for a non-recurring event
+                // the span is ignored, so both shapes are removed whole.
+                try store.remove(event, span: .futureEvents, commit: false)
                 removed += 1
             } catch {
                 // Best-effort removal — a single stuck event must not
                 // abort the rebuild.
             }
         }
-        if !ours.isEmpty { try? store.commit() }
+        if removed > 0 { try? store.commit() }
         return removed
     }
 

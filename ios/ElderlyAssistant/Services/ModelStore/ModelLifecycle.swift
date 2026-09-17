@@ -47,14 +47,33 @@ enum ModelLifecycleRole: String, Codable {
     case brain
     case encoder
     case corrector
+    /// The Piper voice cache (`SherpaTTSEngine.engines`) — one sherpa VITS
+    /// session per voice directory, cached for the process lifetime.
+    /// [MODEL-WARDEN] Step 0: light in bytes (21–24 MB a voice) and
+    /// invisible to the ledger until now.
+    case tts
+    /// The always-on sherpa keyword spotter (`SherpaKWSWakeWordEngine
+    /// .spotter`), built once per launch.
+    /// [MODEL-WARDEN] Step 0: registered for ledger honesty, never evicted.
+    case wakeWord
+    /// Silero VAD (`ggml-silero-v5.1.2.bin`, ~0.9 MB) — the lightest
+    /// resident in the zoo and the one nobody has ever had a reason to
+    /// count.
+    case vad
 
     /// The roles that can put a 6 GB device over its jetsam ceiling.
     /// At most one of these may be resident unless the budget says the
     /// pair fits (see `ModelLifecycleBudget`).
+    ///
+    /// `.tts`, `.wakeWord` and `.vad` are deliberately NOT heavy: a Piper
+    /// voice costs ~24 MB, the spotter ~5 MB and the VAD ~0.9 MB, and
+    /// marking them heavy would put them ahead of a 3.4 GB brain in the
+    /// eviction order — the exact mistake `lruEvictionOrderLocked`
+    /// documents against.
     var isHeavy: Bool {
         switch self {
         case .stt, .brain: return true
-        case .encoder, .corrector: return false
+        case .encoder, .corrector, .tts, .wakeWord, .vad: return false
         }
     }
 }
@@ -154,6 +173,31 @@ enum ModelSlot: String, CaseIterable, Codable {
     /// does not need to be. It is inventoried so the ledger's total is
     /// honest and so nobody re-derives this surprise later.
     case sttCorrector
+    /// [MODEL-WARDEN] Step 0 — the Piper voice cache, as ONE aggregate row
+    /// over `SherpaTTSEngine.engines`. It is a slot per *cache*, not per
+    /// voice, because that is the granularity the release path has: the
+    /// engine can flush the whole dictionary and nothing finer, and a
+    /// half-flushed cache would be a residency state no owner could
+    /// describe.
+    ///
+    /// Invisible to the ledger until now (`TTSEngine` had no unload at all,
+    /// `engines` was never emptied). Registered `evictable` because Step 0
+    /// adds the one release path that was missing —
+    /// `SherpaTTSEngine.unloadCachedVoices()` — so an eviction here is a
+    /// real unload and not a lie in the ledger.
+    case ttsVoices
+    /// [MODEL-WARDEN] Step 0 — the always-on KWS spotter. Registered for
+    /// ledger honesty only; `evictable: false`, because releasing it needs
+    /// an audio-graph restart (the pipeline's mic tap is built around the
+    /// spotter's frame length and the engine has no reload path). At ~5 MB
+    /// int8 it is not worth a restart, and a slot the ledger counts is
+    /// worth more than a slot it could evict.
+    case wakeWord
+    /// [MODEL-WARDEN] Step 0 — Silero VAD. Registered for the same reason
+    /// as `.wakeWord`, and non-evictable for the same kind of reason: the
+    /// Ort session is built once by the audio graph and there is no unload
+    /// API to call. At 0.9 MB it is the cheapest row in the ledger.
+    case vad
 }
 
 /// Static inventory lookup. Numbers here are *derived*, with the derivation
@@ -240,6 +284,49 @@ enum ModelLifecycleInventory {
     // `static let`. Not a model, not evictable, ~0.1% of the 6 GB budget.
     static let correctorLexiconBytes: UInt64 = 2_627_973
 
+    // MARK: The three residents that were invisible [MODEL-WARDEN] Step 0
+    //
+    // Each row below is a resident the ledger did not know about until this
+    // commit, and each is registered at the site that actually builds it.
+    // The byte figures are the *catalog* sizes where a catalog entry exists
+    // (so a size bump moves the ledger with it, the same rule the STT and
+    // brain rows follow), plus the runtime cost the runtime pays on top.
+    //
+    // The three together are ~102 MB (83.8 + 17.6 + 0.9) — 3.2 % of the 6 GB
+    // class budget, so none of them changes an admission decision. That is
+    // the point: they are registered so the ledger's TOTAL is a number a
+    // field capture can be reconciled against, not so they can be evicted.
+    // (`specs/model-warden-field-notes.md` carries the measured vs declared
+    // artefact numbers behind each figure.)
+
+    /// Voice directories `SherpaTTSEngine` can hold open at once: the two
+    /// Nepali voices and the English one the catalog ships. Derived from
+    /// the catalog rather than written down, so removing a voice from the
+    /// product moves the ledger with it.
+    static var ttsVoiceIDs: [ModelID] {
+        [ModelCatalog.piperNepali,
+         ModelCatalog.piperNepaliChitwan,
+         ModelCatalog.piperEnglishUS]
+    }
+
+    /// On-disk size of one voice directory when the catalog does not know
+    /// the id — the low end of the observed 21–24 MB band, so an unknown
+    /// voice under-counts rather than inflating the budget.
+    static let ttsVoiceFallbackBytes: UInt64 = 21_000_000
+
+    /// Per-voice runtime cost on top of the weights: the sherpa VITS
+    /// session's own allocations plus espeak-ng's phonemisation data,
+    /// which is loaded per engine and not part of the `.onnx` body.
+    static let ttsVoiceOverheadBytes: UInt64 = 6_000_000
+
+    /// Fallback for the KWS spotter when the catalog entry is missing.
+    /// `sherpa-kws-zipformer-gigaspeech-3.3m` is ~5 MB int8 across its
+    /// encoder/decoder/joiner files.
+    static let wakeWordFallbackBytes: UInt64 = 5_000_000
+
+    /// `ggml-silero-v5.1.2.bin`, straight from the catalog entry.
+    static let vadFallbackBytes: UInt64 = 900_000
+
     /// The footprint for a slot backed by `modelID`. `modelID` is the
     /// catalog entry currently in the slot; `nil` falls back to the
     /// lightest artifact the slot can hold, which is the conservative
@@ -270,7 +357,59 @@ enum ModelLifecycleInventory {
                 runtimeOverheadBytes: 0,
                 residency: .processWide,
                 releaseContract: .processLifetime)
+        case .ttsVoices:
+            return ttsFootprint(modelID: modelID)
+        case .wakeWord:
+            return ModelFootprint(
+                role: .wakeWord,
+                weightsBytes: artifactBytes(modelID,
+                                            fallback: wakeWordFallbackBytes),
+                kvCacheBytes: 0,
+                runtimeOverheadBytes: 0,
+                // The spotter's weights live in onnxruntime's own
+                // allocation, so the kernel cannot take them back for us.
+                residency: .residentWeights,
+                // `stop()` clears `active` and `reset()`s the stream; it
+                // does not free the spotter. Registration is honesty, not
+                // a promise of eviction.
+                releaseContract: .processLifetime)
+        case .vad:
+            return ModelFootprint(
+                role: .vad,
+                weightsBytes: artifactBytes(modelID, fallback: vadFallbackBytes),
+                kvCacheBytes: 0,
+                runtimeOverheadBytes: 0,
+                residency: .residentWeights,
+                releaseContract: .processLifetime)
         }
+    }
+
+    /// The Piper cache, as ONE row: every voice the catalog ships, whether
+    /// or not it is loaded. The ledger has no way to see inside
+    /// `SherpaTTSEngine.engines` and the release path (flush) takes all of
+    /// it, so the honest row is the worst case — all voices resident.
+    /// Over-counting by ~50 MB in the direction that never admits too much
+    /// is the safe half of the two.
+    ///
+    /// A caller that knows better (a future per-voice cache with a real
+    /// count) passes the loaded ids; today only the aggregate is knowable.
+    private static func ttsFootprint(modelID: ModelID?) -> ModelFootprint {
+        var weights: UInt64 = 0
+        var overhead: UInt64 = 0
+        let ids = modelID.map { [$0] } ?? ttsVoiceIDs
+        for id in ids {
+            weights += artifactBytes(id, fallback: ttsVoiceFallbackBytes)
+            overhead += ttsVoiceOverheadBytes
+        }
+        return ModelFootprint(
+            role: .tts,
+            weightsBytes: weights,
+            kvCacheBytes: 0,
+            runtimeOverheadBytes: overhead,
+            residency: .residentWeights,
+            // Dropping the `SherpaOnnxOfflineTtsWrapper` releases the
+            // session; `unloadCachedVoices()` is what drops it.
+            releaseContract: .synchronousDrop)
     }
 
     /// WhisperKit ids are the ANE/CoreML artifacts; every other whisper id

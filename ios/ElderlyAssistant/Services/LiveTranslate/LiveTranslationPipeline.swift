@@ -296,6 +296,15 @@ actor LiveTranslationPipeline {
     private let events: LiveTranslateEvents
     private let publishToSink: PublicationSink
 
+    /// The session's one clock, injected (the consent gate's `now:` seam,
+    /// same convention). The pipeline is not time-driven — it is a frame tick,
+    /// and AM-6 puts every *ordering* decision on a counter — but a departure
+    /// has to be bounded in the unit the elder experiences it in, which is
+    /// seconds, so exactly one rule reads this: the stabiliser's departure
+    /// grace. Production passes `Date.init`; a test that asserts the grace
+    /// passes its own clock and never waits on the wall.
+    private let now: () -> Date
+
     // MARK: State (actor-isolated)
 
     private var stabilizer: TextRegionStabilizer
@@ -390,6 +399,7 @@ actor LiveTranslationPipeline {
          config: LiveTranslateConfig = .default,
          observabilityBus: ObservabilityBus,
          brain: LocalBrainTranslating? = nil,
+         now: @escaping () -> Date = Date.init,
          publish: @escaping PublicationSink) {
         self.locale = locale
         self.targetLanguage = targetLanguage
@@ -413,6 +423,7 @@ actor LiveTranslationPipeline {
                                                         events: events,
                                                         targetLanguage: targetLanguage)
         self.publishToSink = publish
+        self.now = now
         self.stabilizer = TextRegionStabilizer(config: config)
     }
 
@@ -463,7 +474,9 @@ actor LiveTranslationPipeline {
             // degraded on its account.
             return
         case .success(let result):
-            let changes = stabilizer.consume(regions: result.regions, tracked: result.trackedBoxes)
+            let changes = stabilizer.consume(regions: result.regions,
+                                             tracked: result.trackedBoxes,
+                                             at: now())
             record(changes)
             noteSceneActivity(changed: !changes.isEmpty)
             reconcile()

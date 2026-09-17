@@ -795,7 +795,10 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
                 return
             }
             #if canImport(LLM)
-            switch self.loadLLMHandle() {
+            // [MODEL-WARDEN] The warm seam is not a turn: nothing is
+            // waiting, so it reserves as `.warm` and Step 2 may preempt it
+            // without touching a household's answer.
+            switch self.loadLLMHandle(purpose: .warm) {
             case .success:
                 completion(.ready)
             case .failure(let error):
@@ -835,7 +838,13 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
     /// seam and the first inference — whichever runs first wins the load
     /// and the other reuses the cached handle. Emits the honest failure
     /// event on each failure shape (the caller maps the reason).
-    private func loadLLMHandle() -> Result<LLM, LLMLoadFailure> {
+    ///
+    /// `purpose` is what the reservation is recorded as: `.warm` from the
+    /// warm seam (nothing is waiting), `.voiceTurn` from the first
+    /// inference (the household is). Step 1 only records the difference;
+    /// Step 2's priority ladder is what acts on it.
+    private func loadLLMHandle(purpose: ReservationPurpose = .voiceTurn)
+    -> Result<LLM, LLMLoadFailure> {
         if let existing = llmInstance as? LLM {
             return .success(existing)
         }
@@ -853,7 +862,8 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
         // This is the load the whole mechanism exists for: a 4B brain at
         // ~3.4 GB live is over the 6 GB class budget on its own, and
         // before this gate it could be constructed on top of a resident
-        // 2 GB ANE STT — the exact pairing that killed the devices.
+        // ~1.0 GB of non-pageable ANE STT weights — the exact pairing that
+        // killed the devices.
         lifecycle.register(
             slot: .brain,
             modelID: preferredBaseId,
@@ -861,10 +871,41 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
         ) { [weak self] in
             self?.unloadModel()
         }
-        if case .denied(let reason) =
-            lifecycle.prepareLoad(of: .brain, modelID: preferredBaseId) {
-            emit("model_load_denied:" + reason.rawValue, outcome: "failure")
+        //
+        // [MODEL-WARDEN] Step 1 — the gate is a two-phase reservation, not
+        // an admission. `prepareLoad` returned a decision and the ledger
+        // only counted `.brain` at `didLoad`, i.e. after this method had
+        // already built the handle; between the two the bytes were
+        // unaccounted for, which is how a second load on another slot was
+        // admitted against the same budget. The reservation holds the
+        // incoming `liveBytes` in the transient term for exactly that
+        // interval, and is retired by `commit` (handle built) or
+        // `abandon` (any failure below — the defer).
+        //
+        // The refusal contract is unchanged and still fail-fast: a load
+        // that cannot be reserved returns synchronously, before `LLM(...)`
+        // allocates anything, with the reason token the dashboard already
+        // reads. The token vocabulary is wider than the old
+        // `LoadDenialReason` — `budget_exhausted`, `load_in_flight` and
+        // `already_reserved` name why the bytes were not available — but
+        // every one of them still maps to the same caller-visible
+        // `.insufficientHeadroom`.
+        let reservation: ModelReservation
+        switch lifecycle.reserve(ModelLoadRequest(slot: .brain,
+                                                  modelID: preferredBaseId,
+                                                  owner: self,
+                                                  purpose: purpose)) {
+        case .success(let granted):
+            reservation = granted
+        case .failure(let denial):
+            emit("model_load_denied:" + denial.token, outcome: "failure")
             return .failure(.insufficientHeadroom)
+        }
+        var committed = false
+        defer {
+            if !committed {
+                lifecycle.abandon(reservation, reason: .loadFailed)
+            }
         }
         // 1024-token context (default 2048): our prompts are ~150
         // tokens + 128 output, and the smaller n_batch halves
@@ -911,6 +952,8 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
             return .failure(.modelLoadFailed)
         }
         llmInstance = created
+        lifecycle.commit(reservation)
+        committed = true
         lifecycle.didLoad(.brain, owner: self)
         emit("model_loaded", outcome: "success")
         return .success(created)

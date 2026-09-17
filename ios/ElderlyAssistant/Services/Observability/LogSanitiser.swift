@@ -186,7 +186,54 @@ struct LogSanitiser {
         // emits.
         "provider",
         "threshold",
-        "confidence"
+        "confidence",
+        // [MODEL-WARDEN] Step 0 (2026-09-18) — the memory ledger's own
+        // vocabulary. The `model_lifecycle` component has been emitting
+        // `slot` / `liveBytes` / `evicted` / `budgetBytes` since the ledger
+        // shipped and every one of them was being DROPPED here, so the
+        // family-visible memory story arrived as an event with no bytes in
+        // it. These additions close that and cover the reservation layer
+        // (`reserved` / `reservation_denied` / `reservation_committed` /
+        // `reservation_abandoned` / `footprint_sample`).
+        //
+        // VALUES ARE BYTE COUNTS, MILLISECONDS, CLOSED TOKENS OR SLOT NAMES
+        // BY CONSTRUCTION — `slot` / `evicted` are `ModelSlot` raw values,
+        // `purpose` is a `ReservationPurpose` raw value, `reason` is a
+        // closed denial/abandon token, `liveBytes` / `budgetBytes` /
+        // `freed_bytes` / `phys_footprint` / `ceiling_bytes` /
+        // `working_set_bytes` / `projected_peak_bytes` are integers,
+        // `load_ms` and `heldSeconds` are durations, `priority` and
+        // `isLargeLoad` are a closed token and a boolean. No key here may
+        // ever carry a transcript, a prompt, a file path or a model URL —
+        // the ledger deals in positions and bytes only, and a test pins
+        // that claim against the bridge.
+        "slot",
+        "liveBytes",
+        "budgetBytes",
+        "evicted",
+        "purpose",
+        "isLargeLoad",
+        "heldSeconds",
+        // `T(t)` — the reserved-but-not-yet-loaded byte count. Named after
+        // the ledger's own `liveBytes` rather than the proposal's `T` so a
+        // capture reads as one vocabulary.
+        "transientLiveBytes",
+        // The cost-model keys §5.5 of the proposal names. `phys_footprint`
+        // is the kernel's own number for us (`task_info(TASK_VM_INFO)`),
+        // `ceiling_bytes` the app's jetsam limit, `working_set_bytes` the
+        // non-model estimate W(t), `projected_peak_bytes` the M+T+W
+        // projection, `freed_bytes` what an eviction actually returned, and
+        // `load_ms` how long a load took — the quantity the thrash guard
+        // and the Step 3 load-rate limit are built on. `priority` is
+        // reserved for Step 2's ladder so its first field capture does not
+        // require a sanitiser change to be readable.
+        "phys_footprint",
+        "ceiling_bytes",
+        "working_set_bytes",
+        "projected_peak_bytes",
+        "freed_bytes",
+        "load_ms",
+        "priority"
     ]
 
     /// Metadata keys whose value must satisfy the *code* bound rather than a

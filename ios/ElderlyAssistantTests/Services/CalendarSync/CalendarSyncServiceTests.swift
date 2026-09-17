@@ -95,10 +95,20 @@ final class CalendarSyncServiceTests: XCTestCase {
             return true
         }
 
+        /// The wipe, modelled on the real contract (see
+        /// `EventKitCalendarGateway`): "ours" is the tag as the notes'
+        /// FIRST LINE — both mirror forms, and nothing that merely
+        /// mentions the string — and one event is one removal. A
+        /// substring match would sweep a family event that happens to
+        /// name the tag in prose, which is the failure this fake exists
+        /// to catch rather than to hide.
         func removeEvents(matchingNotesFragment fragment: String) -> Int {
             fragmentRemovalRequests.append(fragment)
-            let mirrors = records.filter { $0.notes?.contains(fragment) == true }
-            records.removeAll { $0.notes?.contains(fragment) == true }
+            func isOurs(_ record: CalendarEventRecord) -> Bool {
+                CalendarSyncService.notesCarryMirrorTag(record.notes, tag: fragment)
+            }
+            let mirrors = records.filter(isOurs)
+            records.removeAll(where: isOurs)
             lastFragmentRemovalCount = mirrors.count
             return mirrors.count
         }
@@ -995,6 +1005,150 @@ final class CalendarSyncServiceTests: XCTestCase {
                        "the user's event survives; the fresh legacy mirror joins it")
         XCTAssertEqual(gateway.created.map { $0.draft.title },
                        [mirrorTitle(for: entry(name: "new", hours: [10]))])
+    }
+
+    // MARK: - One-way rebuild: the duplicate-mirror fix (2026-09-18)
+
+    /// The tag rule the wipe's ownership test is built on: the tag is
+    /// the notes' FIRST LINE, so both mirror forms are ours — and
+    /// nothing that merely mentions the string is.
+    func testMirrorTagRuleMatchesBothMirrorFormsAndNothingElse() {
+        let entryId = UUID()
+        XCTAssertTrue(CalendarSyncService.notesCarryMirrorTag(CalendarSyncService.mirrorTag),
+                      "the bare tag line the one-way mirror writes")
+        XCTAssertTrue(CalendarSyncService.notesCarryMirrorTag(
+            MirrorLinkToken.notes(entryId: entryId, slot: 0)),
+            "the token variant — tag first, entry=/slot= under it")
+        XCTAssertTrue(CalendarSyncService.notesCarryMirrorTag(
+            MirrorLinkToken.notes(entryId: entryId, slot: 1, kind: .medication)))
+        XCTAssertTrue(CalendarSyncService.notesCarryMirrorTag(
+            "\n   \(CalendarSyncService.mirrorTag)\nentry=\(entryId.uuidString)"),
+            "a hand-edit that left blank space above the tag is still ours")
+
+        XCTAssertFalse(CalendarSyncService.notesCarryMirrorTag(nil))
+        XCTAssertFalse(CalendarSyncService.notesCarryMirrorTag(""))
+        XCTAssertFalse(CalendarSyncService.notesCarryMirrorTag(
+            "Ask Anjan about \(CalendarSyncService.mirrorTag) sometime"),
+            "prose that mentions the tag is the family's event — the old "
+            + "substring match would have deleted it")
+        XCTAssertFalse(CalendarSyncService.notesCarryMirrorTag(
+            "Reminder\n\(CalendarSyncService.mirrorTag)"),
+            "the tag must be the FIRST line, not one buried under someone else's")
+    }
+
+    /// Every mirror-tagged shape in the DEFAULT calendar goes before the
+    /// desired set is re-added — the bare tag the one-way mirror writes
+    /// and the token variant a mode switch leaves behind.
+    func testOneWayRebuildSweepsBothMirrorFormsFromTheDefaultCalendar() async {
+        let (service, gateway, _) = makeService()
+        service.isEnabled = true
+        gateway.records = [
+            CalendarEventRecord(eventIdentifier: "bare-1",
+                                calendarIdentifier: "default-calendar",
+                                title: "Walk (व्यायाम)",
+                                notes: CalendarSyncService.mirrorTag,
+                                startDate: time(9), isAllDay: false,
+                                isCanceled: false, recurrence: .daily),
+            CalendarEventRecord(eventIdentifier: "token-1",
+                                calendarIdentifier: "default-calendar",
+                                title: "Pills (औषधि)",
+                                notes: MirrorLinkToken.notes(entryId: UUID(), slot: 0),
+                                startDate: time(9), isAllDay: false,
+                                isCanceled: false, recurrence: .daily)
+        ]
+
+        await service.enableAndSync(entries: [entry(name: "new", hours: [10])])
+
+        XCTAssertEqual(gateway.lastFragmentRemovalCount, 2,
+                       "both mirror forms are ours — a wipe that knows only one "
+                       + "of them leaves the other to pile up")
+        XCTAssertEqual(gateway.records.count, 1, "…and exactly the desired set is re-added")
+        XCTAssertEqual(gateway.records.first?.notes, CalendarSyncService.mirrorTag,
+                       "the survivor is the freshly mirrored entry, not a leftover")
+        XCTAssertEqual(gateway.created.last?.calendarIdentifier, nil,
+                       "the one-way mirror lives in the DEFAULT calendar")
+    }
+
+    /// The wipe matches by OWNERSHIP, never by resemblance: an untagged
+    /// event, and an event whose notes merely mention the tag, survive a
+    /// rebuild untouched.
+    func testOneWayRebuildNeverTouchesEventsThatAreNotOurs() async {
+        let (service, gateway, _) = makeService()
+        service.isEnabled = true
+        gateway.records = [
+            CalendarEventRecord(eventIdentifier: "family-1",
+                                calendarIdentifier: "default-calendar",
+                                title: "Doctor", notes: nil,
+                                startDate: time(12), isAllDay: false,
+                                isCanceled: false, recurrence: nil),
+            CalendarEventRecord(eventIdentifier: "family-2",
+                                calendarIdentifier: "default-calendar",
+                                title: "Family note",
+                                notes: "Don't delete — ask Anjan about "
+                                    + CalendarSyncService.mirrorTag,
+                                startDate: time(13), isAllDay: false,
+                                isCanceled: false, recurrence: nil)
+        ]
+
+        await service.enableAndSync(entries: [entry(name: "Walk", hours: [11])])
+
+        XCTAssertEqual(gateway.lastFragmentRemovalCount, 0,
+                       "neither event carries the tag as its first line")
+        XCTAssertTrue(gateway.records.contains { $0.eventIdentifier == "family-1" })
+        XCTAssertTrue(gateway.records.contains { $0.eventIdentifier == "family-2" },
+                      "a mention in prose is not ownership")
+    }
+
+    /// The field bug, pinned: the rebuild runs on every launch and after
+    /// every schedule change, and each pass must REPLACE the mirror set.
+    /// If a pass appends instead, the family's calendar grows a fresh
+    /// set of routine mirrors per launch.
+    func testConsecutiveOneWaySyncsCannotAccumulateDuplicates() async {
+        let (service, gateway, _) = makeService()
+        service.isEnabled = true
+        let walk = entry(name: "Walk", hours: [11, 16])
+
+        await service.enableAndSync(entries: [walk])
+        XCTAssertEqual(gateway.records.count, 2, "one mirror per slot")
+
+        // The app relaunches, then the schedule re-syncs — the same
+        // unchanged entries either side, which is the common case.
+        service.syncNow(entries: [walk])
+        XCTAssertEqual(gateway.records.count, 2,
+                       "a second sync replaces the set instead of stacking a new one on it")
+        service.syncNow(entries: [walk])
+        XCTAssertEqual(gateway.records.count, 2)
+        XCTAssertEqual(gateway.records.filter {
+            CalendarSyncService.notesCarryMirrorTag($0.notes)
+        }.count, 2, "exactly the desired set is live, however many passes ran")
+        XCTAssertEqual(gateway.created.count, 6,
+                       "each pass re-adds the set — the STORE holds one copy, which is "
+                       + "what the family sees")
+    }
+
+    /// Mode gating: while two-way owns the mirror, the one-way rebuild —
+    /// wipe and writes alike — must not run at all. Two writers into one
+    /// store is how a mirror becomes a duplicate.
+    func testOneWayRebuildDoesNotRunWhileTwoWayOwnsTheMirror() async {
+        let (service, gateway, _) = makeService()
+        service.isEnabled = true
+        let walk = entry(name: "Walk", hours: [11])
+
+        await service.enableAndSync(entries: [walk])        // legacy pass
+        await service.enableTwoWayAndSync(entries: [walk])  // two-way takes over
+        XCTAssertTrue(service.twoWayEnabled)
+        let wipeRequests = gateway.fragmentRemovalRequests.count
+        let creates = gateway.created.count
+
+        service.syncNow(entries: [walk])
+
+        XCTAssertEqual(gateway.fragmentRemovalRequests.count, wipeRequests,
+                       "the one-way wipe must not run while two-way is live")
+        XCTAssertEqual(gateway.created.count, creates,
+                       "…and neither does its writer — equal shapes converge")
+        XCTAssertFalse(gateway.created.dropFirst(creates).contains {
+            $0.calendarIdentifier == nil
+        }, "no write lands in the DEFAULT calendar under two-way mode")
     }
 
     // MARK: - Two-way service flows (2026-09-07)

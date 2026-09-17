@@ -180,6 +180,101 @@ its own, nothing light can help and the encoder is not sacrificed for zero bytes
 - **Eviction order is heavy-first, not pure LRU** — see above. This is what makes
   "light models survive every heavy eviction" true rather than aspirational.
 
+## The cost model (what a load actually costs — evidence in the tree)
+
+The load-cost asymmetry is the design's central tension: the model whose bytes we most
+want back under pressure (the ANE STT, ~1.0 GB of non-pageable weights) is the one
+whose reload costs 77 s. Idle-eviction thresholds are therefore a *prior* derived from
+this table rather than a taste (Step 3's `ModelCostModel`); Steps 0/1 record the
+numbers the prior will read.
+
+| Transition | Measured/derived cost | Evidence |
+|---|---|---|
+| ANE STT cold load (WhisperKit medium), incl. CoreML specialization | **~77 s** on device; **135 s** on a reload after `MILCompilerForANE error: failed to compile ANE model` | `WhisperPostTurnPolicy` header (device evidence 2026-09-16, "क्यामेरा खोल" turn: 72 s inter-turn gap → 77 s cold load) |
+| ANE STT warm utterance | ~1.3 s per utterance (iPhone 14 Pro Max) | `ModelCatalog.whisperKitNepaliMedium` comment |
+| ANE STT hold window today | 180 s TTL, then release **and a required background re-warm** | `WhisperPostTurnPolicy.ttlSeconds`, `WhisperResidencyCycle` |
+| llama 4B (2.5 GB, mmap) re-load | "a full file page-in"; per-batch reloads called "the CPU burn the watchdog kills for" | `LiveTranslateConfig.brainTranslationIdleUnloadSeconds` comment (30 s → 5 s retune) |
+| llama free | deferred to the LLM actor (`llama_model_free`), not instant | `ModelReleaseContract.actorDeferredFree` |
+| whisper.cpp context | per attempt, freed on settle; **watchdog-killed contexts are never freed** (bounded at 2 × 500 MB) | `ModelReleaseContract.perAttemptContext`, `whisperCPPWedgedReserveBytes` |
+| Piper voice (21–24 MB int8) | cheap in bytes; session creation **segfaults off-main on the x86_64 simulator** (crash 204647) | `Speaker.swift:537-556` |
+| CoreML encoder (118 MB int8) | fast to load, **non-pageable** once resident (ANE/GPU allocation) | `ModelLifecycleInventory.intentEncoderBodyBytes` |
+
+The measured artefact sizes behind these rows, and the residents Step 0 added to the
+ledger, are in `specs/model-warden-field-notes.md`.
+
+## Step 1 — the reservation (`T(t)`)
+
+`prepareLoad` answered "may this slot become resident". It could not answer the
+question the OOM kills actually came through: **an admitted load was not a
+reservation**. It decided and returned; the caller then loaded (seconds for an ANE
+specialization, tens of seconds for a 2.5 GB page-in), and the ledger only counted the
+slot at `didLoad` — *after* the bytes were in memory. Two callers on different slots
+were therefore both admitted against the same budget, and both allocated.
+
+```
+peak_footprint(t) = M(t) + T(t) + W(t)
+                    │      │      └ the app's own working set (not ours to reclaim)
+                    │      └ bytes RESERVED and not yet in memory — the missing term
+                    └ resident `liveBytes` (what the ledger always had)
+```
+
+| Piece | Where |
+|---|---|
+| `ModelLoadRequest` — slot, model, owner (weak), purpose, `replacesSlotContents` | `Services/ModelStore/ModelLoadReservation.swift` |
+| `ModelReservation` — the permit: bytes, deadline, `evicted`, `soloOverBudget` | same |
+| `ReservationDenial` — `overBudgetAlone` / `budgetExhausted(by:)` / `insufficientHeadroom` / `loadInFlight(holder:)` / `alreadyReserved(slot:holder:)`, each with a content-free `token` for the bus | same |
+| `reserve` / `commit` / `abandon` / `reapExpiredReservations` / `cancelPendingReservations` | `ModelLifecycleManager` |
+| `ModelWardenConfig` — `maxConcurrentLargeLoads = 1`, `largeLoadThresholdBytes = 256 MB`, `maxConcurrentSmallLoads = 2`, `reservationTTLSeconds = 30`, `loadWatchdogSeconds = 120` | same |
+
+Rules, in the order they are applied:
+
+1. **GC.** Expired reservations (TTL 30 s, watchdog 120 s) and dead owners' reservations
+   are reaped before any decision — an abandoned load must not keep a position closed.
+2. **One position, one load.** A second reservation on a slot already reserved is
+   refused (`alreadyReserved`), whatever its purpose: two reservations on one position
+   both assume the position can hold their model.
+3. **The serial queue.** Large loads (≥ 256 MB) are capped at one in flight, small ones
+   at two. A load that cannot be reserved **fails fast** — no waiting state, no queue to
+   starve in — because the alternative is a turn holding open behind a 2.5 GB page-in
+   with no error and no answer.
+4. **Budget with the transient term.** `resident + reserved + incoming ≤ budget`;
+   victims are chosen heavy-first, then light only if light bytes can close the gap. A
+   load that is over budget *alone* is admitted if it replaces a position (the user's
+   own pick must not become unloadable) and refused if it is a peer.
+5. **Headroom re-probe.** After eviction, the incoming model's `hardBytes` are compared
+   with `os_proc_available_memory()` — the one refusal eviction cannot fix.
+6. **The permit is retired by exactly one of** `commit` (the bytes landed) or `abandon`
+   (the load failed, was cancelled, was superseded, was reaped). Callers hold it in a
+   `defer`, so `T` cannot outlive the attempt that created it.
+
+`prepareLoad` remains, expressed as `reserve` + `commit`, for callers that allocate
+synchronously at the decision point and have nothing to wait for. Every migrated load
+site reserves **before** constructing and commits **after**: the ANE STT load
+(`WhisperKitSpeechRecognizer.createKit`), the whisper.cpp per-attempt load, the voice
+pipeline's brain (`LlamaCommandInterpreter.loadLLMHandle`), and the live-translate
+generator. Their existing deadline and cancellation contracts are untouched — the
+reservation adds no await, no timeout and no cancellation path of its own; a load whose
+task stops waiting abandons its permit as `.cancelled` and the next caller is judged on
+a free ledger.
+
+**Escalation.** `.critical` memory pressure cancels every pending reservation before
+evicting anything (a permit to create a spike is the first thing to withdraw); a
+background transition (`AppCoordinator.handleScenePhase(.background)`) withdraws them
+without evicting a resident, because residency is the eviction policy's business and a
+backgrounded app should not pay an ANE re-specialization for a signal that has not
+arrived.
+
+**The footprint sample.** Every reading above is arithmetic. `MemoryProbe.physFootprintBytes`
+(`task_info(TASK_VM_INFO)`) is the kernel's own number, and it is emitted as
+`footprintSample(physFootprintBytes:ceilingBytes:residentLiveBytes:transientLiveBytes:)`
+— the four together, because neither half is actionable alone — at the three moments the
+ledger changes shape: a residency transition (`didLoad`, which both spellings of the
+admission go through), an eviction, and a pressure level. Note the sample is taken at
+`didLoad` and not at `commit`: residency is recorded by `didLoad`, so a sample at commit
+would report the ledger before the incoming bytes were in it. A probe that cannot read
+the number reports 0 and the sample is skipped — 0 is the honest "not measured" value,
+and it must never be read as "the app holds nothing".
+
 ## Tests
 
 `ModelLifecycleManagerTests` drives a scripted `MemoryProbing` and an injected clock,
@@ -189,5 +284,14 @@ formula (including ceiling recovery from resident bytes), the inventory rows and
 residencies, the no-two-heavy invariant in both directions, heavy-before-light
 eviction order, LRU ordering vs admission order, idle eviction at/under the threshold,
 pins blocking every eviction path, reload after eviction, the solo escape hatch, both
-denial reasons, owner-scoped updates, dead-owner pruning, and the process-wide
-corrector's exemption from pruning.
+denial reasons, owner-scoped updates, dead-owner pruning, the process-wide corrector's
+exemption from pruning, and — Step 1 — the reservation lifecycle (reserve→commit,
+reserve→abandon, TTL and watchdog reaping, ownerless reservations surviving GC), the
+serial queue (a second large load is refused while one is in flight, small loads are
+not), the transient term as the quantity that refuses the second load, fail-fast on
+insufficient headroom, `.critical` cancellation, and the background withdrawal that
+leaves residents alone. Step 0's measurement is covered on both sides: the sample event
+carries the kernel's number at the residency transition, and a probe that cannot read it
+is silent rather than zero-footprinted. `ModelStoreTests` covers the one reading the
+ledger cannot derive — that `MemoryProbe.physFootprintBytes` returns a real measurement
+rather than its failure value.

@@ -35,7 +35,7 @@ import Foundation
 //  - whisper.cpp (SwiftWhisper) is NEVER warmed: its design loads a FRESH
 //    context per attempt and drops it after each transcript
 //    (WhisperSpeechRecognizer.runInference), so a warmed context could
-//    never be reused — it would only hold ~1.5 GB of RAM hostage during
+//    never be reused — it would only hold the model's live footprint
 //    idle while the LLM needs it. The planner pins this as
 //    `.skip("per_attempt_contexts")`.
 //  - Gemini (STT or LLM) is NEVER warmed: every Gemini API call is

@@ -96,7 +96,7 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
     //    it fires even when the attempt's own thread is the one wedged.
     //  * After two consecutive watchdog kills the engine has proven it
     //    wedges on this device/model; further attempts fail fast with
-    //    `.timedOut` instead of stacking another wedged (up to ~1.5 GB)
+    //    `.timedOut` instead of stacking another wedged (up to ~600 MB)
     //    context per utterance. A successful attempt, `releaseModel()`, or
     //    a model change resets the streak.
     //
@@ -255,7 +255,7 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
 
     /// Frees the loaded Whisper context so LLaMA can have the RAM.
     /// The router calls this once the transcript is in hand: large-v3
-    /// (~1.5 GB resident) plus the LLaMA interpreter (~1.4 GB with its
+    /// (~1.00 GB resident) plus the LLaMA interpreter (~1.4 GB with its
     /// 2048-token compute buffer) together exceed the app's memory
     /// ceiling on 6 GB devices and crash llama.cpp's `output_reserve`.
     ///
@@ -753,9 +753,23 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         ) { [weak self] in
             self?.releaseModel()
         }
-        if case .denied(let reason) =
-            lifecycle.prepareLoad(of: .speechToText, modelID: modelId) {
-            emit("model_load_denied", errorCode: reason.rawValue)
+        //     [MODEL-WARDEN] Step 1 — the gate is a two-phase reservation.
+        //     This load is synchronous (`Whisper(fromFileURL:)` below is a
+        //     blocking C call on this attempt's own queue), so the
+        //     transient interval is short — but it is not zero, and the
+        //     ledger must still see the bytes while they are being
+        //     committed. Fail-fast refusal is unchanged: the attempt is
+        //     settled with the same content-free failure and the pipeline
+        //     falls back exactly as it did.
+        let reservation: ModelReservation
+        switch lifecycle.reserve(ModelLoadRequest(slot: .speechToText,
+                                                  modelID: modelId,
+                                                  owner: self,
+                                                  purpose: .voiceTurn)) {
+        case .success(let granted):
+            reservation = granted
+        case .failure(let denial):
+            emit("model_load_denied", errorCode: denial.token)
             settleAttempt(attemptID, with: .failure(.recognitionFailed(
                 NSError(domain: "WhisperSTT", code: -4,
                         userInfo: [NSLocalizedDescriptionKey:
@@ -765,6 +779,7 @@ final class WhisperSpeechRecognizer: SpeechRecognizerProtocol {
         }
         let loadStart = CFAbsoluteTimeGetCurrent()
         let whisper = Whisper(fromFileURL: modelURL, withParams: params)
+        lifecycle.commit(reservation)
         lifecycle.didLoad(.speechToText, owner: self)
         let loadMs = Int((CFAbsoluteTimeGetCurrent() - loadStart) * 1000)
         // [TURN-TIMING] Model ready — the load ms rides as a point entry

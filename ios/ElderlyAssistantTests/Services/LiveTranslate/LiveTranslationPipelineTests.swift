@@ -188,6 +188,32 @@ final class LiveTranslationPipelineTests: XCTestCase {
         }
     }
 
+    /// A scripted clock.
+    ///
+    /// The departure grace (`overlayDepartureGraceSeconds`) is the one rule in
+    /// this feature that reads a time, so the scenario that asserts it moves
+    /// this rather than sleeping: the pipeline is handed `{ clock.now }`, and
+    /// every pass states its own instant. Nothing here depends on how long a
+    /// test takes to run, and no test waits on the wall.
+    final class ScriptedClock: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stored: Date
+
+        init(start: Date = Date(timeIntervalSinceReferenceDate: 0)) {
+            stored = start
+        }
+
+        var now: Date {
+            lock.lock(); defer { lock.unlock() }
+            return stored
+        }
+
+        func advance(by seconds: TimeInterval) {
+            lock.lock(); defer { lock.unlock() }
+            stored = stored.addingTimeInterval(seconds)
+        }
+    }
+
     /// The consumer side of the pipeline: a publication arrives whole or not
     /// at all, and only a counter crosses the boundary.
     actor PublicationRecorder {
@@ -238,6 +264,8 @@ final class LiveTranslationPipelineTests: XCTestCase {
                              recogniser: ScriptedFrameRecogniser = ScriptedFrameRecogniser(),
                              brain: RecordingBrain? = nil,
                              handsInABrain: Bool = true,
+                             cacheChannel: EncryptedLocalStorage? = nil,
+                             now: @escaping () -> Date = Date.init,
                              config: LiveTranslateConfig = .default) -> Harness {
         let bus = LiveTranslateSanitisingBus()
         // The brain is behind its own seam, so these tests never build a
@@ -249,7 +277,12 @@ final class LiveTranslationPipelineTests: XCTestCase {
         // The one test of the production wiring hands in nothing at all, so
         // the pipeline builds the shipped tier over the process's own store.
         let handedInBrain: LocalBrainTranslating? = handsInABrain ? brain : nil
-        let cacheStorage = LabelTranslationCacheTestStorage()
+        // The cache's channel is injectable so a scenario can put the real
+        // T-032 cipher under the live path; the default in-memory double keeps
+        // the ordinary scenarios free of crypto and keeps the fault-injection
+        // scenarios able to reach `failsReads` through the harness.
+        let cacheDouble = LabelTranslationCacheTestStorage()
+        let cacheStorage: EncryptedLocalStorage = cacheChannel ?? cacheDouble
         let storage = LabelTranslationCacheTestStorage()
         let configStore = GeminiConfigStore(storage: storage)
         if configured { configStore.save("fake-key") }
@@ -289,11 +322,12 @@ final class LiveTranslationPipelineTests: XCTestCase {
                                                config: config,
                                                observabilityBus: bus,
                                                brain: handedInBrain,
+                                               now: now,
                                                publish: { publication in
                                                    await recorder.record(publication)
                                                })
         return Harness(pipeline: pipeline, recogniser: recogniser, backpressure: backpressure,
-                       cache: cache, cacheStorage: cacheStorage, gate: gate, controller: controller,
+                       cache: cache, cacheStorage: cacheDouble, gate: gate, controller: controller,
                        tier: tier, transport: transport, recorder: recorder, governor: governor,
                        bus: bus, configStore: configStore, brain: brain, config: config)
     }
@@ -769,6 +803,264 @@ final class LiveTranslationPipelineTests: XCTestCase {
         let movedRegion = try XCTUnwrap(region(cloudText, in: afterMove))
         XCTAssertEqual(movedRegion.box.yMin, 0.05, accuracy: 1e-9,
                        "geometry-only drift still adopts the new box")
+    }
+
+    // MARK: - Scenario: A camera that leaves clears the overlay, and a camera
+    // that comes back costs nothing
+    //
+    // Two owner-device defects, one scripted session. The translation used to
+    // hang over text the camera had left — the departure was bounded in
+    // *passes*, and two passes at the reduced still-scene cadence is 1.4 s of
+    // stale overlay — and the string the cloud had already been paid for used
+    // to be asked again when the camera came back to it, because the answer
+    // was held for the regions on screen rather than for the text.
+
+    @MainActor
+    func testScenarioACameraThatLeavesClearsTheOverlayAndAComebackIsAnsweredFromTheCache() async throws {
+        let clock = ScriptedClock()
+        let harness = makeHarness(transport: Self.respondingTransport(), now: { clock.now })
+        await harness.pipeline.updateLayout(layout)
+        let frame = try makeFrame()
+
+        // 1. The sign resolves once, at the nominal cadence.
+        harness.recogniser.defaultStep = .regions([detected(cloudText)])
+        await harness.pipeline.ingest(frame)
+        clock.advance(by: 0.25)
+        await harness.pipeline.ingest(frame)
+        await waitUntil("the string to resolve") { harness.transport.requestCount == 1 }
+        await waitUntil("the resolution to be published") {
+            guard let latest = await harness.recorder.latest,
+                  let region = latest.regions.first(where: { $0.text == self.cloudText }) else { return false }
+            if case .resolved = latest.result(for: region).outcome { return true }
+            return false
+        }
+        let resolved = try await latest(harness)
+        let resolvedRegion = try XCTUnwrap(region(cloudText, in: resolved))
+        XCTAssertEqual(requests(carrying: cloudText, in: harness), 1)
+        XCTAssertEqual(harness.brain.calls.count, 1,
+                       "the cloud string is asked of the on-device tier first")
+
+        // 2. The camera leaves the sign. The scene is now still, so the tap is
+        //    at the reduced cadence (0.7 s) — one pass of it is one miss, and
+        //    the wall-clock grace (recalibrated 2026-09-18) is what bounds the
+        //    departure, not the pass count.
+        harness.recogniser.defaultStep = .regions([])
+        clock.advance(by: LiveTranslateConfig().overlayDepartureGraceSeconds + 0.1)
+        await harness.pipeline.ingest(frame)
+
+        let departed = try await latest(harness)
+        XCTAssertNil(region(cloudText, in: departed),
+                     "a region that left the publication must clear its overlay within one "
+                     + "cycle plus the departure grace — nothing may still be drawn for it")
+        XCTAssertTrue(departed.regions.isEmpty)
+        assertEveryRegionIsRendered(departed)
+
+        // 3. The camera comes back to the same sign. It resolves again — and
+        //    the resolution costs nothing: the persisted cache answers it.
+        harness.recogniser.defaultStep = .regions([detected(cloudText)])
+        clock.advance(by: 0.7)
+        await harness.pipeline.ingest(frame)
+        clock.advance(by: 0.25)
+        await harness.pipeline.ingest(frame)
+        await waitUntil("the returned string to be answered") {
+            guard let latest = await harness.recorder.latest,
+                  let region = latest.regions.first(where: { $0.text == self.cloudText }) else { return false }
+            if case .resolved = latest.result(for: region).outcome { return true }
+            return false
+        }
+
+        XCTAssertEqual(requests(carrying: cloudText, in: harness), 1,
+                       "the same text is one question for the session: the second resolution is a "
+                       + "cache hit, not a second request the family pays for")
+        XCTAssertEqual(harness.transport.requestCount, 1)
+        XCTAssertEqual(harness.brain.calls.count, 1,
+                       "a cache hit is answered before the brain is asked again, so the return "
+                       + "costs no generation either")
+        let persistedHits = harness.bus.events(named: "cache_hit")
+            .filter { $0.metadata["origin"] == "persisted" }
+        XCTAssertGreaterThanOrEqual(persistedHits.count, 1,
+                                    "the second resolution is recorded as what it is: a persisted hit")
+
+        let returned = try await latest(harness)
+        let returnedRegion = try XCTUnwrap(region(cloudText, in: returned))
+        XCTAssertEqual(returnedRegion.id, resolvedRegion.id,
+                       "the string kept its identity across the departure, so the overlay returns "
+                       + "to the region it left")
+        guard case .resolved(_, let translation, let tier) = returned.result(for: returnedRegion).outcome else {
+            return XCTFail("a cached string resolves; the elder sees the same translation again")
+        }
+        XCTAssertEqual(translation, "ने:" + cloudText, "the same text resolves to the same translation")
+        XCTAssertEqual(tier, .cloud, "a persisted entry is cloud-produced and says so (no request claimed)")
+        let awaited = await inFlightAttempts(harness)
+        XCTAssertEqual(awaited, 0)
+    }
+
+    /// The cache write, end to end through the live path and the shipped
+    /// T-032 cipher: what the cloud resolved is on the encrypted channel in
+    /// the shape the next session reads, and what the dictionary answered is
+    /// not on the channel at all.
+    ///
+    /// The point of driving the *real* decorator here rather than the
+    /// in-memory double is that "the cache is written" is not the claim the
+    /// feature makes — "the next session's lookup is a hit, without a second
+    /// request" is, and that path runs through the cipher.
+    @MainActor
+    func testScenarioACloudResolutionIsWrittenThroughTheCipherSeamAndServesTheNextSession() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("LiveTranslationPipelineTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let keyStore = LiveTranslateTestCipherKeyStore()
+        // The shipped composition (AppCoordinator): the cipher wrapping the
+        // encrypted file channel, with the key held elsewhere.
+        let cipher = LiveTranslateCipherStorage(wrapping: EncryptedFileStorage(rootDirectory: root),
+                                                keyStore: keyStore)
+
+        let harness = makeHarness(transport: Self.respondingTransport(), cacheChannel: cipher)
+        await harness.pipeline.updateLayout(layout)
+        let frame = try makeFrame()
+
+        // One curated string and one the device cannot answer, in one scene:
+        // the whole point is to see which of the two reaches the channel.
+        harness.recogniser.defaultStep = .regions([detected(curatedText, box: box(0.1, 0.1, 0.4, 0.2)),
+                                                   detected(cloudText, box: box(0.2, 0.4, 0.6, 0.5))])
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+        await waitUntil("both strings to terminate") {
+            guard let latest = await harness.recorder.latest,
+                  latest.regions.count == 2 else { return false }
+            return latest.regions.allSatisfy { region in
+                if case .pending = latest.result(for: region).outcome { return false }
+                return true
+            }
+        }
+        XCTAssertEqual(harness.transport.requestCount, 1, "the curated string never reaches the cloud")
+
+        // The bytes on the channel are the cipher's envelope, not the payload.
+        let sealed = try XCTUnwrap(cipher.readRawData(key: LabelTranslationCache.storageKey),
+                                   "a cloud resolution must be persisted, or the camera coming back "
+                                   + "to the same text pays for it again")
+        XCTAssertEqual(Array(sealed.prefix(LiveTranslateCipherStorage.Envelope.magic.count)),
+                       LiveTranslateCipherStorage.Envelope.magic,
+                       "the live path writes the cache through the cipher, never in the clear (T-032)")
+        let raw = String(decoding: sealed, as: UTF8.self)
+        XCTAssertFalse(raw.contains(cloudText), "no recognized text on the channel in the clear")
+        XCTAssertFalse(raw.contains("ने:" + cloudText), "no translation on the channel in the clear")
+
+        // Decoded through the cipher: exactly one entry, and it is the cloud
+        // string's key. The curated string is served by lookup and is never
+        // written (FR-LCT-019).
+        guard case .success(let payload) = cipher.read(key: LabelTranslationCache.storageKey,
+                                                       type: LabelTranslationCache.Persisted.self) else {
+            return XCTFail("the channel must hold one decodable payload")
+        }
+        XCTAssertEqual(payload.schemaVersion, LabelTranslationCache.Persisted.currentSchemaVersion)
+        XCTAssertEqual(payload.entries.map(\.key),
+                       [LabelTranslationCache.normalizationKey(text: cloudText, targetLanguage: .nepali)],
+                       "only the cloud-resolved string is persisted")
+
+        // The next session: a fresh cache over the same channel, no pipeline
+        // and no transport at all. This is the lookup that must not cost a
+        // request.
+        let nextSession = LabelTranslationCache(storage: cipher,
+                                                 observabilityBus: LiveTranslateSanitisingBus())
+        guard case .success(.some(let hit)) = nextSession.lookup(text: cloudText) else {
+            return XCTFail("the next session must answer a cloud-resolved string from the cache")
+        }
+        XCTAssertEqual(hit.translation, "ने:" + cloudText)
+        XCTAssertEqual(hit.origin, .persisted)
+        XCTAssertEqual(hit.tier, .cloud)
+    }
+
+    /// The consent half of the caching rule: a cache hit is not egress, so it
+    /// must not re-open the question the elder has already answered. The
+    /// prompt is presented once — at the first cloud need — and never again
+    /// for a string the device can already answer.
+    @MainActor
+    func testScenarioACacheHitNeverRePromptsForConsent() async throws {
+        let clock = ScriptedClock()
+        let harness = makeHarness(consent: false, transport: Self.respondingTransport(),
+                                  now: { clock.now })
+        await harness.pipeline.updateLayout(layout)
+        let frame = try makeFrame()
+
+        // First cloud need: the prompt, the grant, the resolution.
+        harness.recogniser.defaultStep = .regions([detected(cloudText)])
+        await harness.pipeline.ingest(frame)
+        clock.advance(by: 0.25)
+        await harness.pipeline.ingest(frame)
+        await waitUntil("the prompt to be presented") { harness.controller.isPromptPresented }
+        XCTAssertEqual(harness.bus.events(named: "consent_prompt_shown").count, 1)
+        if case .failure(let error) = harness.controller.grant() {
+            return XCTFail("a grant must be recorded: \(error)")
+        }
+        await harness.pipeline.ingest(frame)
+        await waitUntil("the granted attempt to land") { harness.transport.requestCount == 1 }
+        await waitUntil("the resolution to be published") {
+            guard let latest = await harness.recorder.latest,
+                  let region = latest.regions.first(where: { $0.text == self.cloudText }) else { return false }
+            if case .resolved = latest.result(for: region).outcome { return true }
+            return false
+        }
+
+        // The camera leaves the sign and comes back to it.
+        harness.recogniser.defaultStep = .regions([])
+        clock.advance(by: 0.7)
+        await harness.pipeline.ingest(frame)
+        harness.recogniser.defaultStep = .regions([detected(cloudText)])
+        clock.advance(by: 0.7)
+        await harness.pipeline.ingest(frame)
+        clock.advance(by: 0.25)
+        await harness.pipeline.ingest(frame)
+        await waitUntil("the returned string to be answered from the cache") {
+            guard let latest = await harness.recorder.latest,
+                  let region = latest.regions.first(where: { $0.text == self.cloudText }) else { return false }
+            if case .resolved = latest.result(for: region).outcome { return true }
+            return false
+        }
+
+        XCTAssertEqual(harness.transport.requestCount, 1, "a cache hit is not a send")
+        XCTAssertFalse(harness.controller.isPromptPresented,
+                       "nothing leaves the device for a cached string, so there is nothing to consent to")
+        XCTAssertEqual(harness.bus.events(named: "consent_prompt_shown").count, 1,
+                       "the prompt is presented once, at the first cloud need; a cache hit does not "
+                       + "re-ask the elder for a translation the device already holds")
+    }
+
+    /// The complement of the Fix-1 half, so the grace is not over-broad: a
+    /// scene that is *seen* every pass — including through a tracking pass,
+    /// which is what following a moving box looks like — never loses its
+    /// overlay, however long the session runs.
+    @MainActor
+    func testScenarioARegionThatIsSeenOnEveryPassIsNeverClearedByTheGrace() async throws {
+        let clock = ScriptedClock()
+        let harness = makeHarness(transport: Self.respondingTransport(), now: { clock.now })
+        await harness.pipeline.updateLayout(layout)
+        let frame = try makeFrame()
+
+        // The drift-following case from the owner's own complaint: a pan that
+        // keeps the same string on screen, boxes moving with it.
+        harness.recogniser.defaultStep = .regions([detected(cloudText, box: box(0.2, 0.4, 0.6, 0.5))])
+        await harness.pipeline.ingest(frame)
+        clock.advance(by: 0.25)
+        await harness.pipeline.ingest(frame)
+        await waitUntil("the string to resolve") { harness.transport.requestCount == 1 }
+
+        for step in 1...6 {
+            let y = 0.40 + Double(step) * 0.05
+            harness.recogniser.defaultStep = .regions([detected(cloudText, box: box(0.2, y, 0.6, y + 0.1))])
+            clock.advance(by: 0.7)
+            await harness.pipeline.ingest(frame)
+        }
+
+        let publication = try await latest(harness)
+        let region = try XCTUnwrap(region(cloudText, in: publication),
+                                   "a region that is seen on every pass is never a departure")
+        guard case .resolved = publication.result(for: region).outcome else {
+            return XCTFail("and it never flashes back to pending")
+        }
+        XCTAssertEqual(region.box.yMin, 0.40 + 6 * 0.05, accuracy: 1e-9,
+                       "the overlay keeps following the box: the grace does not freeze geometry")
+        XCTAssertEqual(harness.transport.requestCount, 1, "and the pan asks nothing new")
     }
 
     /// The complement of the test above, so the fix is not over-broad: a
