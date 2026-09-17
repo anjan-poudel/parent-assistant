@@ -10,7 +10,7 @@
 ## 1. User decisions
 
 1. **Layout:** top tabs — pill-style, ≥44pt targets, swipeable — replacing the single long scroll.
-2. **Hidden set:** long-press the Settings title reveals Gemini/cloud AI, voice engine stack, web search, intent log, tool log, hidden AI models. (AI + dev tools scope; content config stays visible.)
+2. **Hidden set:** long-press the Settings title reveals Gemini/cloud AI, voice engine stack, web search, intent log, tool log, hidden AI models. (AI + dev tools scope; content config stays visible.) Amended 2026-09-17: the YouTube key row joined the set — see §3 amendment.
 3. **Tab title:** the content tab is named **Tools** (not "Apps").
 4. **Defaults rule:** the default model is always the best (latest) and, where the catalog has one, the ANE-accelerated build.
 5. **Brain default:** gate-passing Qwen 4B = `intentQwen4BSlotCanon`.
@@ -38,14 +38,26 @@
 |---|---|
 | **Voice** | Wake word, Talk & listen, TTS voices |
 | **Family** | Family & friends, caregiver notifications, calling apps |
-| **Reminders** | Medications, alarms & timers, calendar, calendar sharing |
-| **Tools** | Quick apps, YouTube, news feeds, manuals, saved places |
+| **Reminders** | Medications, daily routines, alarms & timers, events, calendar, calendar sharing |
+| **Tools** | Quick apps, news feeds, manuals, saved places (YouTube moved out 2026-09-17 — see amendment) |
 | **System** | Appearance, language, privacy |
 
 - Pill tab bar under the Settings title; `DesignTokens.minTapTargetSize` (≥44pt), swipe + tap, selected-tab accent per house tokens. All rows keep their existing leaf screens and `navigationDestination`s.
 - **Long-press the Settings title** (e.g., 0.8s, with an a11y alternative — a small ellipsis affordance that appears after first use) → modal sheet: Gemini/cloud AI, voice engine stack, web search, intent log, tool log, hidden AI models. The existing `showHiddenAIModels` toggle state moves into this sheet.
 - Existing 22-case `SettingsSection` enum collapses to the 5 tabs (the hidden sheet reuses the removed cases). Voice-first: every tab and row remains reachable by accessibility labels; no row loses its L10n key (en+ne for new tab titles + sheet title + long-press hint).
 - Tests: tab mapping table test (every section exactly once), hidden-sheet contents test, long-press gesture present test (view-level where feasible; mapping logic pinned as a pure table).
+
+### Amendment (2026-09-17, menu-deepening pass)
+
+The first pass left one classification inconsistent: three rows are the *same screen* — an
+optional cloud-provider credential (a `SecureField` for an API key, a quota note, a privacy
+note) that the household is never asked to handle — and two of them (`Web search`, `Gemini
+AI`) were in the hidden sheet while `YouTube` sat on the Tools tab. YouTube moved into the
+hidden sheet, next to its peers. Nothing else in the tab table changed; the visible-row
+count is 19 and the hidden sheet carries six rows plus the model screen. The manual's
+Settings tour (`docs/user-manual.md` §4k, and the bundled `ManualText/userManual.json`) was
+brought level with the table in the same pass — it was still missing the Daily routine and
+Events rows — and both are now pinned by `SettingsTabMappingTests`.
 
 ## 4. PR 3 — STT fallback auto-restore (root cause of 2026-09-16 device bug)
 

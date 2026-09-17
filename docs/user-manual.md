@@ -282,8 +282,9 @@ calmly: *"Okay, I'll remind you again later."*
   appointment texts can never be added automatically; the screen says this in a one-time
   note and points to the paste button and the voice alternative ("add a doctor
   appointment").
-- **Calendar seam:** the **"Add appointments to the iPhone Calendar"** toggle (default ON)
-  is the switch that will write appointments into the iPhone Calendar app. **Honest status
+- **Calendar seam:** the **"Add appointments to the iPhone Calendar"** toggle (default ON,
+  and it lives in Settings → **Medication schedule** — settings stay under Settings) is the
+  switch that will write appointments into the iPhone Calendar app. **Honest status
   today:** the writing backend is not yet wired into this build — the toggle and the intent
   are real, but appointments currently live in the app only. Family can mirror the daily
   *routine* to the Calendar app already (see 4c).
@@ -535,9 +536,10 @@ off (the spoken confirmation names the time).
 2. **On-device (offline)** — speech recognition (Whisper models) and the local brain model
    run entirely on the phone. Works fully offline **once its models are downloaded**.
    Downloading is done on the hidden **AI models** screen — **long-press the word
-   "Settings" at the top of the Settings screen for 1.5 seconds** to open it (deliberately
-   hidden from one-tap reach: it's a family tool). There you pick the speech-recognition
-   model, the assistant brain model, and watch/delete downloads with sizes shown.
+   "Settings" at the top of the Settings screen for about a second (0.8 s)** to open it
+   (deliberately hidden from one-tap reach: it's a family tool). There you pick the
+   speech-recognition model, the assistant brain model, and watch/delete downloads with
+   sizes shown.
 3. **Cloud fallback** (on-device stack only, **off by default**): *"Ask Gemini when I
    can't answer"* — an opt-in that escalates only the questions the local brain couldn't
    answer, and only when a Gemini key exists.
@@ -555,12 +557,13 @@ on any model, so emergencies work even while the brain is downloading.
   if *no brain exists at all*, Sahayak says *"my brain isn't set up — please ask a family
   member…"* rather than pretending it misunderstood you.
 
-**Web search & YouTube keys** (family-facing): Settings → **Web search** holds the Google
-Custom Search credentials (both fields required; up to 50 searches/day; queries go to
-Google — said plainly on the screen). Settings → **YouTube** holds the optional YouTube
-Data API key that upgrades "play X on youtube" from opening a search to auto-playing the
-top result (free quota ≈ 100 searches/day; your words are sent to YouTube to find the
-video — said plainly on the screen).
+**Web search & YouTube keys** (family-facing): both live in the hidden technical sheet
+(long-press the word "Settings" at the top). **Web search** holds the Google Custom Search
+credentials (both fields required; up to 50 searches/day; queries go to Google — said
+plainly on the screen). **YouTube** holds the optional YouTube Data API key that upgrades
+"play X on youtube" from opening a search to auto-playing the top result (free quota ≈ 100
+searches/day; your words are sent to YouTube to find the video — said plainly on the
+screen).
 
 **What it will never do:** send voice to Gemini unless the family configured a key (and,
 on the on-device engine, not even then — only the opt-in cloud-fallback questions);
@@ -607,34 +610,46 @@ working in a reduced, honest mode if you say no.
   plainly. Choose the **On-device** engine (with its models downloaded) if you want the
   strictly-offline guarantee.
 
-### 4k. Full Settings tour — every section, one line each
+### 4k. Full Settings tour — every row, by tab
 
-Open Settings with the gear at the top-left of Home. In order:
+Open Settings with the gear at the top-left of Home. The screen has five tabs under the word
+"Settings" — **Voice, Family, Reminders, Tools, System** — plus the **hidden technical
+sheet**: long-press the word "Settings" at the top for about a second (0.8 s) to open it, and
+after the first open a small "…" button appears next to the title and opens the same sheet.
+Tap a tab's name, or swipe the page sideways, to move between tabs.
 
-| # | Section | What it does |
+| Tab | Row | What it does |
 |---|---|---|
-| 1 | **Appearance** | Pick a warm background theme — Cream (default), Sage, Sky, Lavender, Dusk. Changes every screen instantly; text and cards keep their contrast. |
-| 2 | **Language & region** | English or नेपाली — the app's whole interface and Sahayak's spoken replies follow it. (Region: Nepal, ne-NP.) |
-| 3 | **Calling** | The default calling app for call buttons: FaceTime / Phone / Messenger / WhatsApp (Messenger needs a per-person username). |
-| 4 | **Places and maps** | Saved places (home + important places, with a default-home radio), which map app voice navigation opens (Auto / Google Maps / Apple Maps / inside this app), add/edit/delete places. |
-| 5 | **Gemini AI** | Paste the Gemini API key; daily call limit with a live usage bar (10–1000, default 200); AI model picker (Flash-Lite default, Flash, Pro, custom). Status dot: Connected / Setup needed. |
-| 6 | **Voice Engine** | Gemini (cloud) vs On-device (offline) — instant switch, no restart; plus the "Ask Gemini when I can't answer" fallback toggle under On-device. |
-| 7 | **Voice activation** | The wake-word switch (listen for "ये कान्छी"), an honest status card (Active / Off / Setup needed / Restart to activate) with a checklist of what's missing, and the battery note. |
-| 8 | **Voices** | Pick the voice for Sahayak's replies: Google voice (Nepali) + its 17 other speakers, Chitwan voice; Listen to audition each without switching; confirm before applying; English voice shown as status; a test button speaks a sample greeting. |
-| 9 | **Voice personalization** | *Reduce background noise* (experimental, off by default, on-device), *Help with my accent* (on by default, on-device), and the *Voice fingerprint* (enroll with 3 short recordings, stays on-device, removable). |
-| 10 | **Web search** | Google API key + search-engine ID for the on-device engine's web search; 50/day quota and the privacy note stated on the screen. |
-| 11 | **YouTube** | Optional YouTube Data API key (upgrades voice "play X" to auto-play); quota and privacy notes on the screen. |
-| 12 | **Feeds** | Feed sources (add-by-URL with "default" tags), topic chips, and the News sources editor. |
-| 13 | **Quick apps** | Pick up to 8 favourite apps for the Home quick-access row; installed apps are detected honestly (apps that aren't on the phone are labelled). |
-| 14 | **Family and friends** | The curated contact list (up to 12) with the 5-step add/edit wizard: search → relationship (+ emergency flag) → photo → Messenger username → nickname + home address. |
-| 15 | **Medication schedule** | Medicine names and times (duplicates refused), plus festival advance-reminder days (0–7, default 2). |
-| 16 | **Manuals** | The five bundled camera-free manuals (iPhone, Phone, Messages, Messenger, YouTube) in English + Nepali with zoomable annotated steps. |
-| 17 | **Calendar** | The three bridge switches: Show in Calendar app (mirror out), Mirror routine changes both ways (Sahayak calendar, off by default), Import from Calendar & Reminders (with notify-minutes-before stepper 0–30). |
-| 18 | **Alarms & timers** | Every voice-set alarm (toggle/delete) and live countdown timer (cancel), a hand-set alarm form, and the honesty note about the Clock app. |
-| 19 | **Privacy** | The privacy statement and the app version number. |
-| 20 | **Assistant activity** | The intent log — confirmed/corrected commands; clear or export. |
-| 21 | **Tool requests** | The last 200 weather/search/YouTube requests with outcomes; export. (Encrypted on-device.) |
-| — | **AI models** *(hidden)* | Long-press the word "Settings" at the top for 1.5 s: speech-recognition model picker, assistant brain model picker, and the downloads list with sizes, cancel and delete. |
+| **Voice** | **Voice activation** | The wake-word switch (listen for "ये कान्छी"), an honest status card (Active / Off / Setup needed / Restart to activate) with a checklist of what's missing, and the battery note. |
+| | **Voice personalization** | *Reduce background noise* (experimental, off by default, on-device), *Help with my accent* (on by default, on-device), and the *Voice fingerprint* (enroll with 3 short recordings, stays on-device, removable). |
+| | **Voices** | Pick the voice for Sahayak's replies: Google voice (Nepali) + its 17 other speakers, Chitwan voice; Listen to audition each without switching; confirm before applying; English voice shown as status; a test button speaks a sample greeting. |
+| **Family** | **Family and friends** | The curated contact list (up to 12) with the 5-step add/edit wizard: search → relationship (+ emergency flag) → photo → Messenger username → nickname + home address. |
+| | **Notify caregivers** | Which events tell the family: medication taken or missed, routines, and calendar events. Every switch is opt-in and off by default. |
+| | **Calling** | The default calling app for call buttons: FaceTime / Phone / Messenger / WhatsApp (Messenger needs a per-person username). |
+| **Reminders** | **Medication schedule** | Medicine names and times (duplicates refused), plus festival advance-reminder days (0–7, default 2). |
+| | **Daily routine** | The household's routines with their own on/off switches and photos; each routine is the thing Sahayak walks through out loud at its time. |
+| | **Alarms & timers** | Every voice-set alarm (toggle/delete) and live countdown timer (cancel), a hand-set alarm form, and the honesty note about the Clock app. |
+| | **Events** | The family's own appointments: what it is, when, how long, whether it repeats (every day / every week / not at all), notes, a photo and a place. Each one lands in the phone's Calendar app too, and with a place it gets a "Go there" button that starts directions. Photos stay in this app. |
+| | **Calendar** | The three bridge switches: Show in Calendar app (mirror out), Mirror routine changes both ways (Sahayak calendar, off by default), Import from Calendar & Reminders (with notify-minutes-before stepper 0–30). |
+| | **Calendar sharing** | Puts the same reminders on a family member's own Google Calendar; the card states honestly whether sharing is on, and stopping it asks once for confirmation. |
+| **Tools** | **Quick apps** | Pick up to 8 favourite apps for the Home quick-access row; installed apps are detected honestly (apps that aren't on the phone are labelled). |
+| | **Feeds** | Feed sources (add-by-URL with "default" tags), topic chips, and the News sources editor. |
+| | **Manuals** | The five bundled camera-free manuals (iPhone, Phone, Messages, Messenger, YouTube) in English + Nepali with zoomable annotated steps. |
+| | **Places and maps** | Saved places (home + important places, with a default-home radio), which map app voice navigation opens (Auto / Google Maps / Apple Maps / inside this app), add/edit/delete places. |
+| **System** | **Appearance** | Pick a warm background theme — Cream (default), Sage, Sky, Lavender, Dusk. Changes every screen instantly; text and cards keep their contrast. |
+| | **Language & region** | English or नेपाली — the app's whole interface and Sahayak's spoken replies follow it. (Region: Nepal, ne-NP.) |
+| | **Privacy** | The privacy statement and the app version number. |
+| **Hidden sheet** | **Gemini AI** | Paste the Gemini API key; daily call limit with a live usage bar (10–1000, default 200); AI model picker (Flash-Lite default, Flash, Pro, custom). Status dot: Connected / Setup needed. |
+| | **Voice Engine** | Gemini (cloud) vs On-device (offline) — instant switch, no restart; plus the "Ask Gemini when I can't answer" fallback toggle under On-device. |
+| | **Web search** | Google API key + search-engine ID for the on-device engine's web search; 50/day quota and the privacy note stated on the screen. |
+| | **YouTube** | Optional YouTube Data API key (upgrades voice "play X" to auto-play); quota and privacy notes on the screen. |
+| | **Assistant activity** | The intent log — confirmed/corrected commands; clear or export. |
+| | **Tool requests** | The last 200 weather/search/YouTube requests with outcomes; export. (Encrypted on-device.) |
+| | **AI models** | Speech-recognition model picker, assistant brain model picker, and the downloads list with sizes, cancel and delete. |
+
+The three credential screens — **Gemini AI**, **Web search** and **YouTube** — are the same
+kind of row (an optional provider key the household is never asked to handle), so they sit
+together in the hidden sheet rather than on a household tab.
 
 ---
 

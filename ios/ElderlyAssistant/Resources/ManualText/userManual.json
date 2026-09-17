@@ -142,8 +142,8 @@
       "Doctor's appointments: a list of upcoming appointments (doctor/clinic, place, date, time, note), newest first, stored encrypted, up to 50.",
       "By touch: Medical → the add form; or copy an appointment SMS in Messages and tap “Paste appointment message” — Sahayak shows you exactly what it understood and asks you to confirm before saving anything. The clipboard is read only on that tap, never in the background.",
       "Honesty — SMS: the iPhone does not let apps read text messages, so appointment texts can never be added automatically; the screen says this in a one-time note and points to the paste button.",
-      "Honesty — the calendar toggle: “Add appointments to the iPhone Calendar” (default on) is the switch that will write appointments into the iPhone Calendar app. The writing backend is not yet wired into this build — appointments currently live in the app only.",
-      "Settings → Medication schedule: where the family types each medicine's name and time(s); duplicate name-and-time pairs are refused. Below it, Festival reminders: how many days early (0–7, default 2) important festivals notify.",
+      "Honesty — the calendar toggle: “Add appointments to the iPhone Calendar” (default on, and it lives in Settings → Medication schedule) is the switch that will write appointments into the iPhone Calendar app. The writing backend is not yet wired into this build — appointments currently live in the app only.",
+      "Settings → Medication schedule: where the family types each medicine's name and time(s); duplicate name-and-time pairs are refused, and the calendar toggle above sits here too. Below it, Festival reminders: how many days early (0–7, default 2) important festivals notify.",
       "What it will never do: mark a dose as taken without your yes; accept नखाए as खाए; double-count a dose inside the safety window; claim an SMS was read automatically; claim an appointment was written to the iPhone Calendar when it wasn't."
     ],
     "paragraphsNe": [
@@ -153,7 +153,7 @@
       "डाक्टरको भेटघाट: आउँदा भेटघाटहरूको सूची (डाक्टर/क्लिनिक, ठाउँ, मिति, समय, टिप्पणी), नयाँ पहिला, सुरक्षित बचत, बढीमा ५०।",
       "हातले: औषधि स्क्रिन → थप्ने फारम; वा म्यासेज एपमा भेटघाटको SMS कपी गरेर 'भेटघाटको सन्देश टाँस्नुहोस्' थिच्नुहोस् — सहायकले के बुझ्यो देखाउँछ र बचत गर्नुअघि तपाईंसँग पुष्टि सोध्छ। क्लिपबोर्ड त्यही थिचाइमा मात्र पढिन्छ, कहिल्यै पछाडिबाट होइन।",
       "इमानदारी — SMS: आइफोनले एपलाई टेक्स्ट सन्देश पढ्न दिँदैन, त्यसैले भेटघाटका सन्देश आफैं थपिन सक्दैनन्; स्क्रिनले यो एक पटकको टिप्पणीमा भन्छ र टाँस्ने बटनतिर देखाउँछ।",
-      "इमानदारी — क्यालेन्डरको स्विच: 'भेटघाट आईफोन क्यालेन्डरमा थप्नुहोस्' (सुरुमा खुला) भनेको भेटघाट आईफोनको क्यालेन्डर एपमा लेख्ने स्विच हो। अहिलेसम्म लेख्ने भाग यो संस्करणमा जोडिएको छैन — भेटघाट हाल एपभित्र मात्र रहन्छ। दैनिक दिनचर्या भने परिवारले क्यालेन्डर एपमा पहिल्यै देख्न सक्छन् (पात्रो खण्ड हेर्नुहोस्)।",
+      "इमानदारी — क्यालेन्डरको स्विच: 'भेटघाट आईफोन क्यालेन्डरमा थप्नुहोस्' (सुरुमा खुला, र यो स्विच सेटिङ → औषधि तालिकामा छ) भनेको भेटघाट आईफोनको क्यालेन्डर एपमा लेख्ने स्विच हो। अहिलेसम्म लेख्ने भाग यो संस्करणमा जोडिएको छैन — भेटघाट हाल एपभित्र मात्र रहन्छ। दैनिक दिनचर्या भने परिवारले क्यालेन्डर एपमा पहिल्यै देख्न सक्छन् (पात्रो खण्ड हेर्नुहोस्)।",
       "सेटिङ → औषधि तालिका: परिवारले हरेक औषधिको नाम र समय(हरू) लेख्ने ठाउँ; एउटै नाम र समय दोहोरिएमा अस्वीकार हुन्छ। तल, चाडपर्वको सम्झना: महत्त्वपूर्ण चाडपर्व कति दिन अगाडि सम्झाउने (०–७, सुरुमा २)।",
       "कहिल्यै के गर्दैन: तपाईंको 'हो' बिना खुराक लेख्दैन; नखाएलाई खाए मान्दैन; सुरक्षा समयभित्र खुराक दोहोर्‍याएर गन्दैन; SMS आफैं पढियो भन्दैन; आईफोन क्यालेन्डरमा भेटघाट लेखियो भनेर नलेखिएको बेला दाबी गर्दैन।"
     ],
@@ -397,12 +397,13 @@
       "• Calling — the default calling app for call buttons: FaceTime / Phone / Messenger / WhatsApp (Messenger needs a per-person username).",
       "Reminders tab:",
       "• Medication schedule — medicine names and times (duplicates refused), plus festival advance-reminder days (0–7, default 2).",
+      "• Daily routine — the household's routines with their own on/off switches and photos; each routine is also the thing Sahayak walks through out loud at its time.",
       "• Alarms & timers — every voice-set alarm (toggle/delete) and live countdown timer (cancel), a hand-set alarm form, and the honesty note about the Clock app.",
+      "• Events — the family's own appointments: add one with what it is, when, how long, whether it repeats (every day / every week / not at all), notes, a photo and a place. Each one also lands in the phone's Calendar app; with a place, the event gets a “Go there” button that starts directions. Photos stay in this app.",
       "• Calendar — the three bridge switches: Show in Calendar app (mirror out), Mirror routine changes both ways (Sahayak calendar, off by default), Import from Calendar & Reminders (with notify-minutes-before stepper 0–30).",
       "• Calendar sharing — puts the same reminders on a family member's own Google Calendar; the card states honestly whether sharing is on, and stopping it asks once for confirmation.",
       "Tools tab:",
       "• Quick apps — pick up to 8 favourite apps for the Home quick-access row; installed apps are detected honestly (apps that aren't on the phone are labelled).",
-      "• YouTube — optional YouTube Data API key (upgrades voice “play X” to auto-play); quota and privacy notes on the screen.",
       "• Feeds — feed sources (add-by-URL with “default” tags), topic chips, and the News sources editor.",
       "• Manuals — the five bundled camera-free manuals (iPhone, Phone, Messages, Messenger, YouTube) in English + Nepali with zoomable annotated steps.",
       "• Places and maps — saved places (home + important places, with a default-home radio), which map app voice navigation opens (Auto / Google Maps / Apple Maps / inside this app), add/edit/delete places.",
@@ -410,7 +411,7 @@
       "• Appearance — pick a warm background theme: Cream (default), Sage, Sky, Lavender, Dusk. Changes every screen instantly; text and cards keep their contrast.",
       "• Language & region — English or नेपाली; the whole interface and Sahayak's spoken replies follow it.",
       "• Privacy — the privacy statement and the app version number.",
-      "Technical settings (hidden) — press and hold the word “Settings” at the top for about a second: Gemini AI (API key, daily call limit, model picker), Voice Engine (Gemini cloud or on-device), Web search, Assistant activity (the intent log), Tool requests (the last 200 requests), and AI models (the speech-recognition and assistant-brain model pickers, and the downloads list with sizes, cancel and delete). After you open it once, a small “…” button appears next to the title and opens the same sheet."
+      "Technical settings (hidden) — press and hold the word “Settings” at the top for about a second: Gemini AI (API key, daily call limit, model picker), Voice Engine (Gemini cloud or on-device), Web search (its API key), YouTube (the optional YouTube Data API key — with one, voice “play X” plays the top video itself; without one it opens YouTube search), Assistant activity (the intent log), Tool requests (the last 200 requests), and AI models (the speech-recognition and assistant-brain model pickers, and the downloads list with sizes, cancel and delete). After you open it once, a small “…” button appears next to the title and opens the same sheet."
     ],
     "paragraphsNe": [
       "होमको माथि बायाँको गियरबाट सेटिङ खोल्नुहोस्। स्क्रिनमा 'सेटिङ' शब्दमुनि पाँचवटा ट्याब (बटन) छन्: आवाज, परिवार, सम्झनाहरू, उपकरणहरू, प्रणाली। ट्याबको नाम थिच्नुहोस् वा पाना देब्रे-दायाँ स्वाइप गर्नुहोस्।",
@@ -424,12 +425,13 @@
       "• कलिङ — कल-बटनहरूको पूर्वनिर्धारित एप: फेसटाइम / फोन / मेसेन्जर / ह्वाट्सएप (मेसेन्जरलाई प्रति-व्यक्ति नाम चाहिन्छ)।",
       "सम्झनाहरू ट्याब:",
       "• औषधि तालिका — औषधिका नाम र समय (दोहोरो अस्वीकार), साथै चाडपर्व कति दिन अगाडि सम्झाउने (०–७, सुरुमा २)।",
+      "• दिनचर्या — घरका दिनचर्याहरू, हरेकको आफ्नै अन/अफ स्विच र फोटोसहित; समय भएपछि Sahayak ले त्यही दिनचर्या बोलेर देखाउँछ।",
       "• अलार्म र टाइमर — हरेक आवाजबाट राखिएको अलार्म (स्विच/मेट्ने) र चलिरहेको टाइमर (रद्द), हातले अलार्म राख्ने फारम, र Clock एपबारेको इमानदारीको टिप्पणी।",
+      "• कार्यक्रमहरू — परिवारका आफ्नै भेटघाट: के हो, कहिले, कति लामो, दोहोरिन्छ कि (हरेक दिन / हरेक हप्ता / दोहोरिँदैन), टिप्पणी, फोटो र ठाउँ लेखेर थप्नुहोस्। हरेक कार्यक्रम फोनको पात्रो एपमा पनि देखिन्छ; ठाउँ लेखेको भए 'त्यहाँ जानुहोस्' बटनले बाटो खोल्छ। फोटो यही एपमा रहन्छ।",
       "• पात्रो — तीनवटा पुल-स्विच: क्यालेन्डर एपमा देखाउनुहोस् (बाहिर मिरर), दिनचर्याका परिवर्तन दुवैतिर मिरर गर्नुहोस् (Sahayak क्यालेन्डर, सुरुमा बन्द), पात्रो र सम्झना एपबाट ल्याउनुहोस् (०–३० कति मिनेट अघि सूचना दिनेसहित)।",
       "• क्यालेन्डर साझा — परिवारको आफ्नै गुगल क्यालेन्डरमा यिनै सम्झनाहरू राख्छ; कार्डले साझा चालु छ कि छैन इमानदारीपूर्वक देखाउँछ, र बन्द गर्नु एक पटक पुष्टि गरेर मात्र हुन्छ।",
       "उपकरणहरू ट्याब:",
       "• द्रुत एपहरू — होमको द्रुत-पङ्क्तिका लागि बढीमा ८ मनपर्ने एप; स्थापित एपहरू इमानदारीपूर्वक चिनिन्छन् (नभएका छुट्टै चिन्ह लाग्छ)।",
-      "• युट्युब — वैकल्पिक YouTube Data API कुञ्जी (आवाजको 'चलाऊ' लाई आफैं चलाउने बनाउँछ); कोटा र गोपनीयताको कुरा स्क्रिनमै छन्।",
       "• फिड — फिडका स्रोत (लिङ्कबाट थप्ने, 'सुरुको' चिन्हसहित), विषय-चिप्स, र समाचार स्रोतहरूको सम्पादक।",
       "• म्यानुअलहरू — साथमा आएका पाँच पुस्तिका (आइफोन, फोन, म्यासेज, मेसेन्जर, युट्युब) अंग्रेजी + नेपाली, ठूलो बनाउन मिल्ने चिन्हित चरणसहित।",
       "• ठाउँ र नक्सा — बचत गरिएका ठाउँ (घर + महत्त्वपूर्ण ठाउँ, पूर्वनिर्धारित-घरको चिन्हसहित), आवाजको बाटो कुन नक्सा एपमा खोल्ने (स्वतः / गुगल नक्सा / एप्पल नक्सा / यही एपभित्र), ठाउँ थप्ने/सम्पादन/मेट्ने।",
@@ -437,7 +439,7 @@
       "• रूप — तातो पृष्ठभूमिका विषयवस्तु: क्रिम (पूर्वनिर्धारित), सेज, स्काई, ल्याभेन्डर, डस्क। हरेक स्क्रिन तुरुन्तै बदलिन्छ; पाठ र कार्डको भिन्नता जोगिन्छ।",
       "• भाषा र क्षेत्र — अंग्रेजी वा नेपाली; पूरै स्क्रिन र सहायकका बोली यसैलाई पछ्याउँछन्।",
       "• गोपनीयता — गोपनीयताको विवरण र एपको संस्करण नम्बर।",
-      "प्राविधिक सेटिङ (लुकेको) — माथिको 'सेटिङ' शब्द करिब एक सेकेन्ड थिचिराख्नुहोस्: जेमिनी AI (कुञ्जी, दैनिक कल-सीमा, मोडेल रोज्ने), आवाज इन्जिन (जेमिनी क्लाउड वा यन्त्रमै), वेब खोज, सहायकको गतिविधि (आदेश-लग), उपकरण अनुरोधहरू (पछिल्ला २०० अनुरोध), र AI मोडेल (बोली चिन्ने र सहायक दिमागको मोडेल रोज्ने, र साइज, रद्द र मेटाइसहितको डाउनलोड-सूची)। एक पटक खोलेपछि शीर्षकको छेउमा सानो '…' बटन देखिन्छ, जसले त्यही सूची खोल्छ।"
+      "प्राविधिक सेटिङ (लुकेको) — माथिको 'सेटिङ' शब्द करिब एक सेकेन्ड थिचिराख्नुहोस्: जेमिनी AI (कुञ्जी, दैनिक कल-सीमा, मोडेल रोज्ने), आवाज इन्जिन (जेमिनी क्लाउड वा यन्त्रमै), वेब खोज (त्यसको API कुञ्जी), युट्युब (वैकल्पिक YouTube Data API कुञ्जी — भए आवाजको 'चलाऊ' ले आफैं उत्कृष्ट भिडियो चलाउँछ, नभए युट्युबको खोज खुल्छ), सहायकको गतिविधि (आदेश-लग), उपकरण अनुरोधहरू (पछिल्ला २०० अनुरोध), र AI मोडेल (बोली चिन्ने र सहायक दिमागको मोडेल रोज्ने, र साइज, रद्द र मेटाइसहितको डाउनलोड-सूची)। एक पटक खोलेपछि शीर्षकको छेउमा सानो '…' बटन देखिन्छ, जसले त्यही सूची खोल्छ।"
     ],
     "images": []
   },
