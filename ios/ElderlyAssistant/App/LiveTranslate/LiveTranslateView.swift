@@ -47,14 +47,33 @@ import UIKit
 //     in the strip is the way back to live ("Go live again"). The view keeps
 //     no freeze state: it reads `model.frozenFrameImage`, `model.surface` and
 //     `model.snapshotSurface`, exactly as it reads the live ones.
+//
+//  7. **The elder can zoom, and tap where the camera should look (owner report,
+//     2026-09-17).** A pinch on the picture and two large buttons either side
+//     of the factor the elder is at; the number between them is what the system
+//     camera would print for the same lens. Tapping the picture focuses there
+//     — the layer converts the tap through the aspect fit, so what is touched
+//     is what is focused — and the lock beside the buttons holds focus where it
+//     is. The gesture and the buttons carry no *words*: the readout is a
+//     numeral ("1.5×") and the controls are system symbols, because the
+//     feature's copy is a pinned catalog inventory (`LiveTranslateCopyTests`)
+//     and a sentence per reachable zoom factor is not a sentence to translate.
+//     All of it is observation: the view calls the session's zoom surface and
+//     renders what the **device** reported back.
 
 struct LiveTranslateView: View {
 
     @StateObject private var model: LiveTranslateSessionModel
+    /// The zoom and focus surface (owner report, 2026-09-17). Observed rather
+    /// than owned: the session owns it — it is the object that talks to the
+    /// running device — and the view is one of its readers. Read on the main
+    /// thread, like every other surface here.
+    @ObservedObject private var zoom: LiveCameraZoomSurface
     @Environment(\.dismiss) private var dismiss
 
     init(dependencies: LiveTranslateSessionDependencies) {
         _model = StateObject(wrappedValue: LiveTranslateSessionModel(dependencies: dependencies))
+        _zoom = ObservedObject(wrappedValue: dependencies.camera.zoomSurface)
     }
 
     var body: some View {
@@ -115,7 +134,16 @@ struct LiveTranslateView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityHidden(true)
         } else if let layer = model.previewLayer {
-            LiveTranslatePreviewHost(layer: layer)
+            // The gestures live on the picture, and only on the picture: the
+            // overlay above handles a tap that lands on one of its boxes, and
+            // a tap that lands on the picture is the elder pointing the camera
+            // at something (see `LiveTranslatePreviewHost`). Decorative to
+            // VoiceOver — the overlay is what describes the frame — and the
+            // zoom controls are real controls with their own identifiers.
+            LiveTranslatePreviewHost(layer: layer,
+                                     onPinch: { zoom.pinch(to: Double($0)) },
+                                     onPinchEnded: { zoom.pinchEnded() },
+                                     onFocusTap: { zoom.focus(atDevicePoint: $0) })
                 .accessibilityHidden(true)
         } else {
             Color.black
@@ -146,12 +174,118 @@ struct LiveTranslateView: View {
                 resultsCard(in: proxy)
             }
             Spacer()
+            // The live controls, out of the way of a thumb holding the phone
+            // over a package: the bottom of the screen, on the band directly
+            // above the overlay's own control strip. Not drawn while a frame is
+            // held — the picture is still there, and a still picture is not
+            // something to zoom into.
+            //
+            // The lift is the overlay's own strip's height, asked of the
+            // overlay's own arithmetic: T-021 pinned the always-show-original
+            // toggle to the bottom leading edge, so a zoom control drawn at the
+            // same edge would share its corner and its touch.
+            if !model.isFrozen {
+                zoomControls
+                    .padding(.bottom, Self.overlayStripHeight(containerSize: proxy.size))
+            }
         }
         .padding(DesignTokens.interElementSpacing)
         .padding(.top, proxy.safeAreaInsets.top)
+        .padding(.bottom, proxy.safeAreaInsets.bottom)
         .padding(.leading, proxy.safeAreaInsets.leading)
         .padding(.trailing, proxy.safeAreaInsets.trailing)
     }
+
+    // MARK: - Zoom and focus (owner report, 2026-09-17)
+
+    /// The live controls: one press either side of the factor the elder is at,
+    /// the factor itself between them, and the focus lock at the trailing edge.
+    ///
+    /// Sized from the token table (a control is never below the app's minimum
+    /// tap target, and the +/− pair is drawn larger still — 52 pt — because a
+    /// thumb aiming at a phone held over a package is not precise), and placed
+    /// where the overlay is told to keep clear (`zoomChromeRects`).
+    private var zoomControls: some View {
+        HStack(spacing: DesignTokens.interElementSpacing) {
+            zoomStepControl(.wider)
+            zoomReadout
+            zoomStepControl(.closer)
+            Spacer(minLength: DesignTokens.interElementSpacing)
+            focusLockControl
+        }
+    }
+
+    /// A press of **−** (`direction: .wider`: a shorter lens, a wider view) or
+    /// **+** (`.closer`). Drawn disabled at the end of the range rather than
+    /// hidden, so the control the elder has learned stays where it is.
+    private func zoomStepControl(_ direction: ZoomStepDirection) -> some View {
+        let isCloser = direction == .closer
+        return Button {
+            zoom.zoom(direction)
+        } label: {
+            Image(systemName: isCloser ? Self.zoomInSymbolName : Self.zoomOutSymbolName)
+                .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .foregroundColor(DesignTokens.textPrimary)
+                .frame(width: Self.zoomControlDiameter, height: Self.zoomControlDiameter)
+                .background(DesignTokens.card)
+                .clipShape(Circle())
+        }
+        .disabled(isCloser ? !zoom.model.canZoomCloser : !zoom.model.canZoomWider)
+        .accessibilityIdentifier(isCloser ? Self.zoomInIdentifier : Self.zoomOutIdentifier)
+    }
+
+    /// The factor, as the elder reads it — "1×", "1.5×", "2.5×".
+    ///
+    /// A numeral and a multiplication sign, in the device's display space, so
+    /// the number matches what the system camera would show for the same lens.
+    /// No words, deliberately (see the file's header): the catalog inventory is
+    /// pinned, and arithmetic on session state is not copy.
+    private var zoomReadout: some View {
+        Text(zoom.model.label)
+            .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .semibold))
+            .monospacedDigit()
+            .foregroundColor(DesignTokens.textPrimary)
+            .padding(.horizontal, DesignTokens.interElementSpacing)
+            .frame(minWidth: Self.zoomControlDiameter, minHeight: Self.zoomControlDiameter)
+            .background(DesignTokens.card)
+            .clipShape(Capsule())
+            .accessibilityIdentifier(Self.zoomFactorIdentifier)
+    }
+
+    /// Holds focus at its current lens position, or lets it search again. The
+    /// glyph is the state as well as the control (a closed padlock in the
+    /// accent colour is focus held), which is how the system camera's own lock
+    /// reads.
+    private var focusLockControl: some View {
+        Button {
+            zoom.toggleFocusLock()
+        } label: {
+            Image(systemName: zoom.isFocusLocked ? Self.focusLockedSymbolName
+                                                 : Self.focusUnlockedSymbolName)
+                .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .foregroundColor(zoom.isFocusLocked ? DesignTokens.accent : DesignTokens.textPrimary)
+                .frame(width: Self.zoomControlDiameter, height: Self.zoomControlDiameter)
+                .background(DesignTokens.card)
+                .clipShape(Circle())
+        }
+        .accessibilityIdentifier(Self.focusLockIdentifier)
+    }
+
+    /// A control's drawn size: the app's minimum tap target plus its spacing —
+    /// the one relationship the reserved strip is computed from, so a control
+    /// can never outgrow its reservation.
+    static let zoomControlDiameter = DesignTokens.minTapTargetSize + DesignTokens.interElementSpacing
+
+    /// SF Symbol names, not copy: system identifiers, like the close control's.
+    static let zoomInSymbolName = "plus.magnifyingglass"
+    static let zoomOutSymbolName = "minus.magnifyingglass"
+    static let focusLockedSymbolName = "lock.fill"
+    static let focusUnlockedSymbolName = "lock.open"
+
+    static let zoomInIdentifier = "livetranslate.zoom.in"
+    static let zoomOutIdentifier = "livetranslate.zoom.out"
+    static let zoomFactorIdentifier = "livetranslate.zoom.factor"
+    static let focusLockIdentifier = "livetranslate.focus.lock"
 
     /// The frozen frame's reading surface (owner UX rework, 2026-09-17): the
     /// snapshot's *results card*, over the held picture.
@@ -259,9 +393,15 @@ struct LiveTranslateView: View {
         let width = max(0, proxy.size.width - insets.leading - insets.trailing)
         let height = max(0, proxy.size.height - insets.top - insets.bottom)
         let safeArea = CGRect(x: insets.leading, y: insets.top, width: width, height: height)
+        // The obstacles a callout must not land under: the fixed strips, plus
+        // the zoom controls' own strip at the bottom. Composed here rather than
+        // inside `occupiedRects`, which names the two strips that are always
+        // reserved whatever the session is doing — the zoom strip is composed
+        // in because its height depends on the safe area this function has.
         model.updateLayout(containerSize: proxy.size,
                            safeArea: safeArea,
-                           occupiedRects: Self.occupiedRects(containerSize: proxy.size))
+                           occupiedRects: Self.occupiedRects(containerSize: proxy.size,
+                                                            bottomInset: insets.bottom))
     }
 
     /// The strips the overlay must not draw under: the overlay's own reserved
@@ -277,6 +417,46 @@ struct LiveTranslateView: View {
     static func occupiedRects(containerSize: CGSize) -> [CGRect] {
         LiveTranslateOverlaySurface.chromeRects(containerSize: containerSize)
             + topChromeRects(containerSize: containerSize)
+    }
+
+    /// `occupiedRects` plus the bottom strip the zoom controls stand in. A
+    /// separate function so the two always-reserved strips stay one arithmetic
+    /// (`occupiedRects`, which the overlay's own tests pin) and the conditional
+    /// strip is a decision made at the call site.
+    static func occupiedRects(containerSize: CGSize, bottomInset: CGFloat) -> [CGRect] {
+        occupiedRects(containerSize: containerSize)
+            + zoomChromeRects(containerSize: containerSize, bottomInset: bottomInset)
+    }
+
+    /// The zoom controls' strip: a control and its spacing around it, in the
+    /// band directly **above the overlay's own strip** — never in it, because
+    /// that strip's bottom-leading corner is T-021's always-show-original
+    /// toggle.
+    ///
+    /// The safe area's own bottom inset is part of the band: the chrome is laid
+    /// out inside the safe area (the VStack's own padding), so the band the
+    /// controls land in moves up with it. The height of the strip below is the
+    /// overlay's own arithmetic, taken from `LiveTranslateOverlaySurface`
+    /// rather than copied.
+    ///
+    /// Reserved even while a frame is held and the controls are not drawn: the
+    /// session measures a layout once per size, and a reservation that appeared
+    /// and disappeared with the freeze state would be a strip the placement was
+    /// told about at a different moment than the one it drew in.
+    static func zoomChromeRects(containerSize: CGSize, bottomInset: CGFloat = 0) -> [CGRect] {
+        let height = zoomControlDiameter + 2 * DesignTokens.interElementSpacing
+        let y = containerSize.height - max(0, bottomInset)
+            - overlayStripHeight(containerSize: containerSize) - height
+        guard containerSize.width > 0, containerSize.height > height, y >= 0 else { return [] }
+        return [CGRect(x: 0, y: y, width: containerSize.width, height: height)]
+    }
+
+    /// The height of the overlay's own reserved strip, which the zoom controls
+    /// stand on. Asked of `LiveTranslateOverlaySurface.chromeRects` — the
+    /// function that owns that arithmetic — so the two bands cannot drift
+    /// apart and start sharing a corner.
+    static func overlayStripHeight(containerSize: CGSize) -> CGFloat {
+        LiveTranslateOverlaySurface.chromeRects(containerSize: containerSize).first?.height ?? 0
     }
 
     /// This view's own strip: the close control on the leading edge and the
@@ -415,21 +595,105 @@ struct LiveTranslateResultsCardView: View {
 /// over the capture session and sets the video gravity), so the aspect the
 /// placement maps through — `resizeAspect` over the frame's pixel size — is the
 /// aspect the elder sees. The host never configures capture: it lays a layer
-/// out and nothing else.
+/// out, and it is also the only place the elder's two gestures can be read off
+/// the picture.
+///
+/// **Why the gestures are UIKit's here.** A pinch belongs to the picture and a
+/// tap means "look *there*", and "there" is a point in the *device's*
+/// coordinates: the layer's own `captureDevicePointConverted(fromLayerPoint:)`
+/// is the conversion that accounts for the aspect fit and the frame size, so
+/// the conversion happens here, on the layer, and not in arithmetic the view
+/// would have to re-derive. Attaching the recognisers to this view (rather
+/// than a SwiftUI gesture on the whole container) is also what keeps them off
+/// the chrome: a tap that lands on the overlay's boxes, on a button or on the
+/// results card is handled above this view and never reaches it.
 struct LiveTranslatePreviewHost: UIViewRepresentable {
 
     let layer: AVCaptureVideoPreviewLayer
+    /// A pinch in flight: the recogniser's cumulative scale, 1 at the moment
+    /// the fingers landed.
+    let onPinch: (CGFloat) -> Void
+    /// The pinch's end (lifted, cancelled or failed).
+    let onPinchEnded: () -> Void
+    /// A tap on the picture, converted to the device's own point of interest
+    /// (normalized, top-left origin) by the layer that knows the aspect fit.
+    let onFocusTap: (CGPoint) -> Void
 
     func makeUIView(context: Context) -> PreviewView {
         let view = PreviewView()
         view.backgroundColor = .black
         view.layer.addSublayer(layer)
         view.previewLayer = layer
+        view.isMultipleTouchEnabled = true
+        view.addGestureRecognizer(context.coordinator.makePinchRecognizer())
+        view.addGestureRecognizer(context.coordinator.makeTapRecognizer())
         return view
     }
 
     func updateUIView(_ view: PreviewView, context: Context) {
+        // The closures are the body's (they capture the surface this render was
+        // built from), so each pass refreshes them; the recognisers themselves
+        // are made once, in `makeUIView`.
+        context.coordinator.onPinch = onPinch
+        context.coordinator.onPinchEnded = onPinchEnded
+        context.coordinator.onFocusTap = onFocusTap
         view.layoutPreviewLayer()
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onPinch: onPinch, onPinchEnded: onPinchEnded, onFocusTap: onFocusTap)
+    }
+
+    /// The gesture target: it reads the touch in the preview view's own
+    /// coordinates and converts it on the layer, so nothing here holds session
+    /// state — the closures it calls are the surface's.
+    final class Coordinator: NSObject {
+
+        var onPinch: (CGFloat) -> Void
+        var onPinchEnded: () -> Void
+        var onFocusTap: (CGPoint) -> Void
+
+        init(onPinch: @escaping (CGFloat) -> Void,
+             onPinchEnded: @escaping () -> Void,
+             onFocusTap: @escaping (CGPoint) -> Void) {
+            self.onPinch = onPinch
+            self.onPinchEnded = onPinchEnded
+            self.onFocusTap = onFocusTap
+        }
+
+        func makePinchRecognizer() -> UIPinchGestureRecognizer {
+            let recognizer = UIPinchGestureRecognizer(target: self, action: #selector(handlePinch))
+            return recognizer
+        }
+
+        func makeTapRecognizer() -> UITapGestureRecognizer {
+            let recognizer = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+            // One finger, one tap: a two-finger touch belongs to the pinch, and
+            // focusing in the middle of a zoom would fight it. Nothing else is
+            // configured — a single-tap recogniser and a pinch do not contend,
+            // because they are woken by different numbers of touches.
+            recognizer.numberOfTouchesRequired = 1
+            recognizer.numberOfTapsRequired = 1
+            return recognizer
+        }
+
+        @objc func handlePinch(_ recognizer: UIPinchGestureRecognizer) {
+            switch recognizer.state {
+            case .began, .changed:
+                onPinch(recognizer.scale)
+            case .ended, .cancelled, .failed:
+                onPinchEnded()
+            default:
+                break
+            }
+        }
+
+        @objc func handleTap(_ recognizer: UITapGestureRecognizer) {
+            guard let view = recognizer.view as? PreviewView,
+                  let layer = view.previewLayer else { return }
+            let layerPoint = recognizer.location(in: view)
+            onFocusTap(layer.captureDevicePointConverted(fromLayerPoint: layerPoint))
+        }
     }
 
     /// The container whose own layout pass drives the layer's frame — a
