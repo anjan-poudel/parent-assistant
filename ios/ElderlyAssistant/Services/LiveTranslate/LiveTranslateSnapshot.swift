@@ -144,10 +144,11 @@ enum LiveTranslateFrozenRaster {
 /// large type with the original underneath each line and a target an
 /// elder-sized thumb can hit to hear it.
 ///
-/// Pure and `Equatable`, like every other surface in the feature, and derived
-/// from the overlay's own presentations — so the card and the overlay cannot
-/// disagree about what a region says, and the row count is the placement count
-/// by construction rather than by convention.
+/// Pure and `Equatable`, like every other surface in the feature, and built
+/// from the publication — one row per **recognized string**, not per measured
+/// box — so the card and the overlay cannot disagree about what a region says
+/// (both read the placement's own measured lines) and a recognized string
+/// cannot disappear from the only surface a held frame has.
 struct LiveTranslateResultsCardSurface: Equatable {
 
     /// One row: a translation, the text it came from, and whether there is
@@ -171,6 +172,49 @@ struct LiveTranslateResultsCardSurface: Equatable {
         let speaksTranslation: Bool
         /// The region this row came from: what a tap hands back.
         let regionID: TextRegionStabilizer.RegionIdentity
+
+        /// One recognized string's row.
+        ///
+        /// `lines` are the strings the region's own box was measured around,
+        /// when it has a box: the row then carries exactly what the overlay
+        /// draws and announces. A region with no box has no lines and the same
+        /// two strings are derived by the rule the placement measures a
+        /// callout's supporting line with — the original beside a translation,
+        /// the honest state sentence when there is none — so "this region could
+        /// not be measured" changes where a string is *drawn*, never whether it
+        /// can be *read*.
+        init(regionID: TextRegionStabilizer.RegionIdentity,
+             result: TranslationResult,
+             id: String,
+             lines: [LiveOverlayTextLine] = [],
+             stateCopy: (TranslationResult) -> String?) {
+            let primary = lines.first?.text ?? result.text
+            self.id = id
+            self.regionID = regionID
+            self.translation = primary
+
+            if lines.count > 1 {
+                // A callout draws its own second line; the card repeats it
+                // rather than re-deriving it.
+                self.source = lines[1].text
+            } else if result.sourceTier != nil {
+                // A translation exists and was drawn alone — in place, over the
+                // text it replaces — so the original is the supporting line the
+                // box did not draw. A string identical to the label is not
+                // repeated.
+                let original = result.originalText
+                self.source = original.isEmpty || original == primary ? nil : original
+            } else {
+                self.source = stateCopy(result)
+            }
+
+            self.speaksTranslation = result.sourceTier != nil
+            switch result.outcome {
+            case .resolved: self.symbolName = nil
+            case .pending: self.symbolName = RegionPresentation.pendingSymbolName
+            case .degraded: self.symbolName = RegionPresentation.degradedSymbolName
+            }
+        }
     }
 
     let rows: [Row]
@@ -178,16 +222,68 @@ struct LiveTranslateResultsCardSurface: Equatable {
     /// the overlay's empty state: one sentence for one situation.
     let emptyHint: String
 
-    init(overlay: LiveTranslateOverlaySurface) {
-        self.rows = overlay.presentations.map { presentation in
-            Row(id: presentation.id,
-                translation: presentation.accessibilityLabel,
-                source: presentation.accessibilityValue,
-                symbolName: presentation.symbolName,
-                speaksTranslation: presentation.speaksTranslation,
-                regionID: presentation.regionID)
+    /// The card before anything has been read: no strings, and the same calm
+    /// sentence a frame with no text on it says.
+    init(emptyHint: String) {
+        self.rows = []
+        self.emptyHint = emptyHint
+    }
+
+    /// A publication as a list to read.
+    ///
+    /// **One row per recognized string.** The regions the overlay drew come
+    /// first, in the placement's own reading order, and then every string the
+    /// overlay had no box for. A held frame's card is the picture's *text*, not
+    /// its geometry: a region the placement could not measure — no container
+    /// yet, a frame shape with no room, a box the detector could not place — is
+    /// a region with no box, and never a recognized string that vanishes from
+    /// the only surface the elder has (owner's requirement, 2026-09-17: a
+    /// frozen picture with text on it is never an empty card).
+    ///
+    /// The rows of the placed regions are the rows the overlay's own
+    /// presentations carry — same identity, same two strings, same glyph, same
+    /// tap — because both are built from the lines the placement measured.
+    /// `stateCopy` is the overlay's own copy source and `emptyHint` its own
+    /// hint: one situation, one sentence (T-005).
+    init(publication: LiveTranslatePublication,
+         stateCopy: (TranslationResult) -> String?,
+         emptyHint: String) {
+        var rows: [Row] = []
+        var ordinals: [String: Int] = [:]
+        var placed: Set<TextRegionStabilizer.RegionIdentity> = []
+
+        // What the overlay drew, in the order it stacked it.
+        for placement in publication.placements {
+            placed.insert(placement.region.id)
+            rows.append(Row(regionID: placement.region.id,
+                            result: placement.result,
+                            id: Self.identity(for: placement.region.text, ordinals: &ordinals),
+                            lines: placement.lines,
+                            stateCopy: stateCopy))
         }
-        self.emptyHint = overlay.emptyHint
+
+        // ... and what it had no box for.
+        for region in publication.regions where !placed.contains(region.id) {
+            rows.append(Row(regionID: region.id,
+                            result: publication.result(for: region),
+                            id: Self.identity(for: region.text, ordinals: &ordinals),
+                            stateCopy: stateCopy))
+        }
+
+        self.rows = rows
+        self.emptyHint = emptyHint
+    }
+
+    /// The identity a row is keyed by: the overlay's own rule, over the same
+    /// strings and in the same order — the normalized text, with an ordinal
+    /// only when a second region carries it — so a row and its box are one
+    /// view identity and a list cannot swap two regions that say the same
+    /// thing.
+    private static func identity(for text: String, ordinals: inout [String: Int]) -> String {
+        let key = LiveTranslateTextNormalization.normalized(text)
+        let ordinal = ordinals[key, default: 0]
+        ordinals[key] = ordinal + 1
+        return ordinal == 0 ? key : "\(key)#\(ordinal)"
     }
 
     /// Whether the card has read anything. A frozen frame with no text shows
@@ -227,9 +323,19 @@ struct LiveTranslateSnapshotPath {
     /// `outcomesAfterCloudAnswers` — so the elder gets the frozen picture
     /// immediately and the translations arrive onto it, exactly as they do
     /// live.
+    ///
+    /// `holdingRegions` is the text the live picture was showing at the tap,
+    /// and it is what a *failed* still pass leaves on the held frame: a failed
+    /// pass is recorded by the detector itself (`ocr_pass_failed`) and never
+    /// surfaced — and, exactly as on the live path (T-007, where a failed pass
+    /// keeps the regions already on screen), it does not blank the picture the
+    /// elder is holding. A pass that succeeds is the frozen frame's own truth,
+    /// including when that truth is "no text on this frame".
     func freeze(_ frame: CameraFrame,
                 layout: LiveTranslateLayout,
-                policy: LiveOverlayPlacement.Policy) async -> Result<LiveTranslateSnapshot, LiveTranslateError> {
+                policy: LiveOverlayPlacement.Policy,
+                holdingRegions: [TextRegionStabilizer.StableTextRegion] = [])
+        async -> Result<LiveTranslateSnapshot, LiveTranslateError> {
         guard let image = LiveTranslateFrozenRaster.image(from: frame.pixelBuffer) else {
             // The frame cannot be shown, so it is not frozen: refusing is the
             // honest answer, and the live picture stays where it is.
@@ -241,17 +347,40 @@ struct LiveTranslateSnapshotPath {
         case .success(let pass):
             detected = pass.regions
         case .failure:
-            // A failed still pass is recorded by the detector itself
-            // (`ocr_pass_failed`) and never surfaced, exactly as on the live
-            // path (T-007): the elder gets the frozen picture with no text on
-            // it, which is what is true.
-            detected = []
+            // The regions the live picture was showing, held onto the frozen
+            // frame: the elder tapped a picture with text on it, and a still
+            // pass that failed is not a statement that the text went away.
+            // Without this the freeze publishes nothing at all — and the held
+            // frame's reading surface is the card, so "nothing" is a blank
+            // card, which is the one thing a picture with text on it must
+            // never be (owner's report, 2026-09-17: "now nothing").
+            return await heldFrame(frame,
+                                   image: image,
+                                   regions: holdingRegions,
+                                   layout: layout,
+                                   policy: policy)
         }
 
-        let regions = Self.regions(from: detected)
-        let outcomes = resolveFromTheDevice(regions)
+        return await heldFrame(frame,
+                               image: image,
+                               regions: Self.regions(from: detected),
+                               layout: layout,
+                               policy: policy)
+    }
+
+    /// One held frame, from the strings it is holding: the device layers, the
+    /// placement measured against the frozen frame's own geometry, and the
+    /// publication to render. The one place a frozen frame is built — whether
+    /// the strings came from the still pass or from the picture the elder was
+    /// looking at when they tapped — so a freeze has one shape, not two.
+    private func heldFrame(_ frame: CameraFrame,
+                           image: CGImage,
+                           regions: [TextRegionStabilizer.StableTextRegion],
+                           layout: LiveTranslateLayout,
+                           policy: LiveOverlayPlacement.Policy)
+        async -> Result<LiveTranslateSnapshot, LiveTranslateError> {
         let publication = await placed(regions: regions,
-                                       outcomes: outcomes,
+                                       outcomes: resolveFromTheDevice(regions),
                                        policy: policy,
                                        layout: layout,
                                        framePixelSize: frame.pixelSize)
