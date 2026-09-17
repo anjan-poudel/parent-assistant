@@ -802,12 +802,17 @@ actor LiveTranslationPipeline {
         generation.cancel()
 
         guard let outcome else {
-            // The clock won. The tier is not being waited on any more, so it
-            // cannot report this itself — it has not come back to report
-            // anything — and a stage that falls through to the cloud without a
-            // record is exactly the silent degradation this feature must not
-            // have. The reason is the timeout token, which is what happened.
-            events.brainTranslationUnavailable(.inferenceTimeout)
+            // The clock won. The tier is not being waited on any more — it has
+            // not come back to report anything — and a stage that falls
+            // through to the cloud without a record is exactly the silent
+            // degradation this feature must not have. The reason is the
+            // timeout token, which is what happened; the stage says *whose*
+            // timeout it was (`stage_deadline`, the caller's, as against the
+            // tier's own `deadline`), which is the difference between "the
+            // model is too slow" and "the tier never got to its own bound"
+            // (2026-09-17: the two were indistinguishable on the device and
+            // the tier reported the second as `inference_failed`).
+            events.brainTranslationUnavailable(.inferenceTimeout, stage: .stageDeadline)
             return items
         }
 

@@ -41,6 +41,9 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         var output = ""
         /// A failure to throw instead of answering (timeout, load failure, …).
         var failure: BrainGenerationFailure?
+        /// An error the tier did not classify — the shape a llama.cpp
+        /// `LLMError` (or any other runtime throw) arrives in.
+        var runtimeError: Error?
         /// Whether a handle is already open on the model. Drives the one case
         /// where the memory gate must not refuse: the bytes are spent already.
         var holdingHandle = false
@@ -56,6 +59,7 @@ final class LocalBrainTranslationTierTests: XCTestCase {
             prompts.append(prompt)
             timeouts.append(timeout)
             if let failure { throw failure }
+            if let runtimeError { throw runtimeError }
             return output
         }
 
@@ -279,6 +283,8 @@ final class LocalBrainTranslationTierTests: XCTestCase {
             let event = bus.events(named: "brain_translation_unavailable").first
             XCTAssertEqual(event?.outcome, "degraded")
             XCTAssertEqual(event?.metadata["reason"], "model_not_installed")
+            XCTAssertEqual(event?.metadata["failureStage"], "availability",
+                           "no attempt was made: the model is not on the device")
         }
     }
 
@@ -293,8 +299,9 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         let outcome = await tier.translate([brainText])
 
         XCTAssertEqual(outcome, .none)
-        XCTAssertEqual(bus.events(named: "brain_translation_unavailable").first?.metadata["reason"],
-                       "runtime_missing")
+        let event = bus.events(named: "brain_translation_unavailable").first
+        XCTAssertEqual(event?.metadata["reason"], "runtime_missing")
+        XCTAssertEqual(event?.metadata["failureStage"], "availability")
     }
 
     func testAnEmptyBatchIsNotAnAttempt() async throws {
@@ -564,14 +571,22 @@ final class LocalBrainTranslationTierTests: XCTestCase {
 
     // MARK: A failure is a reason, never a hang and never a stub
 
+    /// The reason token says the attempt was abandoned; the stage token says
+    /// where in the attempt it stopped. Both ride on every unavailability
+    /// event: a reader who sees `inference_timeout` alone cannot tell a load
+    /// that never finished from a decode that ran past the deadline, and that
+    /// ambiguity is exactly what the 2026-09-17 device console could not
+    /// resolve.
     func testATimedOutGenerationIsReportedAndAnswersNothing() async throws {
         try await withTier { tier, generator, bus in
             generator.failure = .timedOut
             let outcome = await tier.translate([brainText])
 
             XCTAssertEqual(outcome, .none)
-            XCTAssertEqual(bus.events(named: "brain_translation_unavailable").first?.metadata["reason"],
-                           "inference_timeout")
+            let event = bus.events(named: "brain_translation_unavailable").first
+            XCTAssertEqual(event?.metadata["reason"], "inference_timeout")
+            XCTAssertEqual(event?.metadata["failureStage"], "deadline",
+                           "the deadline fired on the generation itself, not on the load")
             XCTAssertTrue(bus.events(named: "brain_translation_batch").isEmpty,
                           "a generation that never produced an answer did not resolve a batch")
         }
@@ -581,8 +596,9 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         try await withTier { tier, generator, bus in
             generator.failure = .loadFailed
             _ = await tier.translate([brainText])
-            XCTAssertEqual(bus.events(named: "brain_translation_unavailable").first?.metadata["reason"],
-                           "model_load_failed")
+            let event = bus.events(named: "brain_translation_unavailable").first
+            XCTAssertEqual(event?.metadata["reason"], "model_load_failed")
+            XCTAssertEqual(event?.metadata["failureStage"], "load")
         }
     }
 
@@ -590,8 +606,45 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         try await withTier { tier, generator, bus in
             generator.failure = .promptOverflow
             _ = await tier.translate([brainText])
-            XCTAssertEqual(bus.events(named: "brain_translation_unavailable").first?.metadata["reason"],
-                           "inference_failed")
+            let event = bus.events(named: "brain_translation_unavailable").first
+            XCTAssertEqual(event?.metadata["reason"], "inference_failed")
+            XCTAssertEqual(event?.metadata["failureStage"], "prompt_budget",
+                           "the prompt did not fit the window the tier enforces")
+        }
+    }
+
+    /// The caller stopped waiting — the pipeline's stage deadline, or the
+    /// capture session ending. The tier stops the decode with it, and says so:
+    /// `cancelled` is a stage of its own precisely so that a stopped decode is
+    /// never read as a broken one. On the device this was the tail of the
+    /// 2026-09-17 session, where every abandoned batch was reported as
+    /// `inference_failed` and looked like a model fault.
+    func testACancelledAttemptIsReportedAsAStoppedAttempt() async throws {
+        try await withTier { tier, generator, bus in
+            generator.failure = .cancelled
+            let outcome = await tier.translate([brainText])
+
+            XCTAssertEqual(outcome, .none)
+            let event = bus.events(named: "brain_translation_unavailable").first
+            XCTAssertEqual(event?.metadata["reason"], "inference_timeout",
+                           "a stopped attempt is the same reason token as a deadline hit")
+            XCTAssertEqual(event?.metadata["failureStage"], "cancelled",
+                           "…but a different stage: nobody's generation failed here")
+        }
+    }
+
+    /// A throw the tier has no classification for — a llama.cpp `LLMError`, a
+    /// failed allocation, a grammar the template refused. It lands on the
+    /// decode stage, which is the honest reading: the attempt reached the
+    /// decode and the decode is what threw.
+    func testAnUnclassifiedThrowIsReportedAsADecodeFailure() async throws {
+        struct RuntimeThrow: Error {}
+        try await withTier { tier, generator, bus in
+            generator.runtimeError = RuntimeThrow()
+            _ = await tier.translate([brainText])
+            let event = bus.events(named: "brain_translation_unavailable").first
+            XCTAssertEqual(event?.metadata["reason"], "inference_failed")
+            XCTAssertEqual(event?.metadata["failureStage"], "decode")
         }
     }
 

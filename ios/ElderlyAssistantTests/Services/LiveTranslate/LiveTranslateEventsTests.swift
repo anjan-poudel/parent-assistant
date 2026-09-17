@@ -33,7 +33,7 @@ final class LiveTranslateEventsTests: XCTestCase {
         events.translationBatchRequested(stringCount: 5, batchIndex: 0, batchCount: 1)
         events.translationBatchResolved(resolvedCount: 4, unresolvedCount: 1, durationMs: 812)
         events.brainTranslationBatch(resolvedCount: 3, unresolvedCount: 1, durationMs: 4200)
-        events.brainTranslationUnavailable(.modelNotInstalled)
+        events.brainTranslationUnavailable(.modelNotInstalled, stage: .availability)
         events.translationDegraded(reason: .noNetwork, regionCount: 1)
         events.translationDedupeHit(keyCount: 2)
         events.textQuarantined(count: 1)
@@ -139,6 +139,9 @@ final class LiveTranslateEventsTests: XCTestCase {
             // The on-device translation tier's own closed reason vocabulary:
             // the tokens its `brain_translation_unavailable` event may carry.
             .union(Set(LiveTranslateBrainUnavailableReason.allCases.map(\.rawValue)))
+            // …and the stage that says where the attempt stopped — the second
+            // closed token on the same event (2026-09-17).
+            .union(Set(BrainFailureStage.allCases.map(\.rawValue)))
             .union([
                 "no_capture_device", "configuration_failed", "resource_in_use",
                 "backgrounded", "system_interruption", "thermal",

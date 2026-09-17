@@ -140,6 +140,13 @@ struct LogSanitiser {
         "origin",
         "mode",
         "reason",
+        // [LLAMADEBUG] (2026-09-17) Where an on-device brain attempt stopped
+        // — `BrainFailureStage`, a closed token set (availability / load /
+        // prompt_budget / decode / deadline / cancelled / stage_deadline).
+        // The device report behind it: every live-translate cycle logged
+        // `brain_translation_unavailable` and the `reason` token could not
+        // say which of four different failures it was.
+        "failureStage",
         "disclosureVersion",
         // [LIVE-CAMERA-TRANSLATION] AM-2 decision, recorded rather than
         // widened silently: `cap`. The shipped `GeminiCostGovernor` emits
