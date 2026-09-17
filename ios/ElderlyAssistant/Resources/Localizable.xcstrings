@@ -11404,6 +11404,23 @@
         }
       }
     },
+    "events.share.noEmails": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Calendar sharing is on, but no family contact has an email yet — add one to invite them to this event."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "क्यालेन्डर साझा खुला छ, तर कुनै परिवारको सम्पर्कमा इमेल छैन — यो कार्यक्रममा निम्तो पठाउन इमेल थप्नुहोस्।"
+          }
+        }
+      }
+    },
     "festival.dateUnknown": {
       "extractionState": "manual",
       "localizations": {

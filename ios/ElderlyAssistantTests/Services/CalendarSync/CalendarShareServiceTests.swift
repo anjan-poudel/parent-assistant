@@ -949,6 +949,32 @@ final class CalendarShareServiceTests: XCTestCase {
         await drainMain()
         XCTAssertEqual(second.store.pendingCount, 0)
         XCTAssertTrue(second.gateway.callLog.isEmpty)
+
+        // [CALENDAR-POLICY] (2026-09-17) The skip is recorded, never
+        // silent: the 2026-09-17 device runs created events with zero
+        // share observability, which is what made "no invitation" so
+        // hard to diagnose.
+        let skipped = rig.bus.emittedEvents.filter {
+            $0.eventType == "calendar_share_skipped_no_invitees"
+        }
+        XCTAssertEqual(skipped.count, 1)
+        XCTAssertEqual(skipped.first?.metadata["kind"],
+                       EventNotifyKind.calendarEvent.rawValue)
+    }
+
+    func testEventCreatedWhenSharingIsNotActiveEmitsSkippedNotActive() async {
+        let rig = makeService(signedIn: false)
+
+        rig.service.eventCreated(localEventId: "evt-1", title: "Doctor",
+                                 startDate: fakeNow, durationMinutes: 45)
+        await drainMain()
+
+        XCTAssertEqual(rig.store.pendingCount, 0)
+        let skipped = rig.bus.emittedEvents.filter {
+            $0.eventType == "calendar_share_skipped_not_active"
+        }
+        XCTAssertEqual(skipped.count, 1,
+                       "a signed-out / unconsented device still says WHY it shared nothing")
     }
 
     // MARK: - Sign out

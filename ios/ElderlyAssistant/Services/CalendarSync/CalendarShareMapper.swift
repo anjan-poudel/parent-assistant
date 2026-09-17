@@ -171,7 +171,14 @@ enum CalendarShareMapper {
         for contact in contacts where contact.isEmergencyContact {
             if let email = contact.email { append(email) }
         }
-        if othersEnabled {
+        // [CALENDAR-POLICY] (2026-09-17) Calendar events are shared with
+        // EVERY contact that has an email, toggle-independent — the
+        // elder's original requirement ("make all calendar events
+        // sharable with caregivers and emergency contacts"). The toggle
+        // keeps its fire-time meaning (SMS/WhatsApp at fire); medication
+        // and routine kinds keep toggle gating because their daily
+        // recurrence would invite every contact to every dose forever.
+        if othersEnabled || kind == .calendarEvent {
             for contact in contacts where !contact.isEmergencyContact {
                 if let email = contact.email { append(email) }
             }
