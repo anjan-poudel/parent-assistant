@@ -5,10 +5,11 @@ import XCTest
 /// hysteresis, the change-only event gate, determinism, and the one
 /// normalization shared with the cache key.
 ///
-/// The stabiliser is pure and time-free by construction, so every check here
-/// is a scripted pass sequence: no clock, no async, no OCR — the same input
-/// always produces the same output, which is exactly what the determinism
-/// scenario asserts.
+/// The stabiliser reads no clock of its own — the one time it needs (the
+/// departure grace) is a parameter — so every check here is a scripted pass
+/// sequence: no async, no OCR, and for the timing section a clock the test
+/// states rather than waits on. The same input always produces the same
+/// output, which is exactly what the determinism scenario asserts.
 final class TextRegionStabilizerTests: XCTestCase {
 
     // MARK: - Fixtures
@@ -350,6 +351,150 @@ final class TextRegionStabilizerTests: XCTestCase {
         XCTAssertTrue(stabilizer.visible.isEmpty)
         XCTAssertEqual(stabilizer.consume(regions: []), [],
                        "a region is removed exactly once, not once per empty pass")
+    }
+
+    // MARK: - Departure grace (owner device verdict, 2026-09-17)
+
+    /// A fixed base so every timing assertion states its own clock; no test in
+    /// this section reads the wall or waits for anything.
+    private let clockStart = Date(timeIntervalSinceReferenceDate: 0)
+
+    private func at(_ seconds: TimeInterval) -> Date {
+        clockStart.addingTimeInterval(seconds)
+    }
+
+    /// Publishes one region under the **shipped** hysteresis and returns its
+    /// identity. Sightings land at the nominal cadence (0.25 s), which is the
+    /// cadence a scene still being recognized runs at.
+    private func publishedRegion(_ stabilizer: inout TextRegionStabilizer,
+                                 text: String = "Timer",
+                                 box sign: NormalizedBox) -> TextRegionStabilizer.RegionIdentity {
+        _ = stabilizer.consume(regions: [observation(text, sign)], at: at(0))
+        let appeared = stabilizer.consume(regions: [observation(text, sign)], at: at(0.25))
+        guard case .appeared(let identity) = appeared.first else {
+            XCTFail("expected an appeared event, got \(appeared)")
+            return TextRegionStabilizer.RegionIdentity(rawValue: -1)
+        }
+        return identity
+    }
+
+    /// The owner's complaint, as a test: "the translation sticks around even
+    /// when the camera moved away."
+    ///
+    /// The expensive case is the one where the camera has *left* — the scene
+    /// is now still, so the tap is at the reduced cadence (0.7 s), and two
+    /// missed passes are 1.4 s of overlay hanging over text that is gone. The
+    /// grace bounds the departure in the unit the elder sees, so the box
+    /// clears on the first pass after it — one cycle plus the grace.
+    func testAPublishedRegionClearsWithinOneCycleOfItsDepartureEvenAtTheReducedCadence() {
+        var stabilizer = TextRegionStabilizer(config: LiveTranslateConfig())
+        let identity = publishedRegion(&stabilizer, box: box(0.3, 0.3))
+
+        // 0.7 s later — one reduced-cadence interval, and still one miss short
+        // of `regionMissPasses`, so the pass-count rule alone keeps it drawn.
+        let departed = stabilizer.consume(regions: [], at: at(0.95))
+        XCTAssertEqual(departed, [.disappeared(id: identity)],
+                       "one cycle plus the departure grace must clear the overlay: the region "
+                       + "left the publication, so nothing may still be drawn for it")
+        XCTAssertTrue(stabilizer.visible.isEmpty)
+    }
+
+    /// The anti-jitter the pass-count hysteresis exists for, which the grace
+    /// must not spend: one dropped frame at the nominal cadence is 0.25 s, well
+    /// inside the grace, and leaves the box exactly where it was.
+    func testASingleMissedPassInsideTheGraceKeepsTheBoxOnScreen() {
+        var stabilizer = TextRegionStabilizer(config: LiveTranslateConfig())
+        let identity = publishedRegion(&stabilizer, box: box(0.3, 0.3))
+
+        XCTAssertEqual(stabilizer.consume(regions: [], at: at(0.5)), [],
+                       "one missed pass is not a departure")
+        XCTAssertEqual(stabilizer.visible.map(\.id), [identity])
+    }
+
+    /// The boundary, stated: the grace is the *oldest* a last sighting may be,
+    /// so a sighting exactly one grace behind the current pass has left.
+    func testTheGraceIsInclusiveAtItsBoundary() {
+        var stabilizer = TextRegionStabilizer(config: LiveTranslateConfig())
+        let identity = publishedRegion(&stabilizer, box: box(0.3, 0.3))
+
+        XCTAssertEqual(stabilizer.consume(regions: [], at: at(0.25 + 0.5)),
+                       [.disappeared(id: identity)])
+    }
+
+    /// The clock is the *last sighting*, not the last miss: a region seen again
+    /// after a missed pass starts its departure window over, so a scene that
+    /// flickers a region in and out never accumulates its way to a departure.
+    func testTheGraceIsMeasuredFromTheLastSightingNotFromTheFirstMiss() {
+        var stabilizer = TextRegionStabilizer(config: LiveTranslateConfig())
+        let sign = box(0.3, 0.3)
+        let identity = publishedRegion(&stabilizer, box: sign)
+
+        XCTAssertEqual(stabilizer.consume(regions: [], at: at(0.5)), [])
+        // Seen again — the window restarts here, not at the first miss.
+        XCTAssertEqual(stabilizer.consume(regions: [observation("Timer", sign)], at: at(0.75)), [])
+        XCTAssertEqual(stabilizer.consume(regions: [], at: at(1.0)), [],
+                       "0.25 s after the last sighting is inside the grace, however long the "
+                       + "region has been tracked")
+        XCTAssertEqual(stabilizer.visible.map(\.id), [identity])
+    }
+
+    /// A region the detector is still *following* is still on screen, so a
+    /// tracking pass refreshes the departure clock. Without that, a region the
+    /// OCR skipped while the overlay followed its box would be cleared out from
+    /// under a camera that never left it.
+    func testATrackedPassRefreshesTheDepartureClock() {
+        var stabilizer = TextRegionStabilizer(config: LiveTranslateConfig())
+        let identity = publishedRegion(&stabilizer, box: box(0.3, 0.3))
+
+        XCTAssertEqual(stabilizer.consume(regions: [],
+                                          tracked: ["Timer": box(0.32, 0.3)],
+                                          at: at(0.95)), [],
+                       "a followed region is seen, not missed")
+        XCTAssertEqual(stabilizer.consume(regions: [], at: at(1.3)), [],
+                       "0.35 s after the tracked pass is inside the grace")
+        XCTAssertEqual(stabilizer.visible.map(\.id), [identity])
+    }
+
+    /// Appearance hysteresis is untouched by the grace. A region that was
+    /// cleared and is then seen again keeps its identity — the grace
+    /// un-publishes, it does not release — but re-enters the emitted set only
+    /// after `regionAppearPasses` fresh consecutive sightings.
+    func testARegionClearedByTheGraceRepaysTheAppearHysteresisBeforeItIsDrawnAgain() {
+        var stabilizer = TextRegionStabilizer(config: LiveTranslateConfig())
+        let sign = box(0.3, 0.3)
+        let identity = publishedRegion(&stabilizer, box: sign)
+        XCTAssertEqual(stabilizer.consume(regions: [], at: at(0.95)), [.disappeared(id: identity)])
+
+        // First sighting after the departure: not yet painted.
+        XCTAssertEqual(stabilizer.consume(regions: [observation("Timer", sign)], at: at(1.2)), [])
+        XCTAssertTrue(stabilizer.visible.isEmpty,
+                      "a region that left the publication pays the appear hysteresis again")
+
+        // Second consecutive sighting: back, on the identity it kept.
+        let returned = stabilizer.consume(regions: [observation("Timer", sign)], at: at(1.45))
+        XCTAssertEqual(returned, [.appeared(id: identity)],
+                       "the grace clears the overlay without releasing the identity")
+    }
+
+    /// Drift-following while visible is untouched: a region that is seen every
+    /// pass never comes near the grace, so its box keeps tracking the sign at
+    /// the reduced cadence — the sticky-geometry behaviour, not a regression.
+    func testARegionThatIsSeenOnEveryPassFollowsItsBoxAtAnyCadence() {
+        var stabilizer = TextRegionStabilizer(config: LiveTranslateConfig())
+        let sign = box(0.3, 0.3)
+        let identity = publishedRegion(&stabilizer, box: sign)
+
+        // The scene holds still: one pass every 0.7 s, box drifting with the
+        // camera, each within the match thresholds.
+        for (step, y) in [0.32, 0.34, 0.36, 0.38].enumerated() {
+            let moved = box(0.3, y)
+            XCTAssertEqual(stabilizer.consume(regions: [observation("Timer", moved)],
+                                              at: at(0.95 + Double(step) * 0.7)), [],
+                           "a seen region emits nothing and is never treated as departed")
+            XCTAssertEqual(stabilizer.visible.map(\.box), [moved],
+                           "the overlay keeps following the box")
+        }
+        XCTAssertEqual(stabilizer.visible.map(\.id), [identity])
     }
 
     // MARK: - Change-only gate
