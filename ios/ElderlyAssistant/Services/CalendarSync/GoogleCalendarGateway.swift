@@ -482,6 +482,26 @@ final class GoogleCalendarGateway: GoogleCalendarGatewayProtocol {
     /// 404 is the only one today. Such a status clears `lastErrorClass`
     /// like any other success and emits nothing here; the caller reports
     /// its own event, because only the caller knows the goal was reached.
+    ///
+    /// THE STATUS IS CLASSIFIED BEFORE THE BODY IS EVER LOOKED AT
+    /// (2026-09-17), and that ordering is the rule this method exists to
+    /// keep. A non-2xx response is a refusal whatever it says, and every
+    /// caller below only ever decodes a body that got PAST this gate — so
+    /// a 401/403 from Google is `unauthorized`/`insufficientScopes` even
+    /// when the error document it carries would decode into the success
+    /// shape. The inbound listing is the case that makes it matter: an
+    /// error body decodes as a page with no items, so a body-first path
+    /// would report a refused listing as a SUCCESSFUL empty one — the
+    /// elder's unanswered invitations silently dropped — and a body that
+    /// failed to decode would be reported as `malformedResponse`, hiding
+    /// a scope refusal behind "Google sent back something unexpected".
+    /// Both are the same mistake: reading a refusal as a response.
+    ///
+    /// A new call therefore adds nothing here; it builds its request,
+    /// passes the statuses it means to treat as success, and only decodes
+    /// what comes back. The decode-failure bookkeeping (`recordMalformed`)
+    /// belongs at the call site for exactly that reason: it is reachable
+    /// only for a 2xx.
     private func roundTrip(_ request: URLRequest,
                            event: String,
                            kind: EventNotifyKind?,

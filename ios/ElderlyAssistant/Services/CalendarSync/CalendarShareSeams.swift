@@ -373,7 +373,7 @@ protocol GoogleAccountSessionProtocol: AnyObject {
     var accountEmail: String? { get }
 
     /// Whether the connected account holds EVERY scope the share path
-    /// needs (`calendar.events` + `contacts`).
+    /// needs (`calendar` + `contacts`).
     ///
     /// Separate from `isSignedIn` because the two are genuinely
     /// different states on a device: an account can be signed in and
