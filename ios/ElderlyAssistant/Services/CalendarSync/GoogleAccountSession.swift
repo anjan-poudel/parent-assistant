@@ -66,18 +66,41 @@ final class GoogleAccountSession: GoogleAccountSessionProtocol {
     /// The OAuth scopes this feature cannot work without, in the URL
     /// spelling Google's own consent screen shows.
     ///
-    /// `calendar.events` is the narrowest grant that can create, rewrite
-    /// and delete the family's twins — deliberately NOT the full
-    /// `calendar` scope, which would also hand over every calendar the
-    /// account can see. `contacts` is what `People v1` needs to put the
-    /// caregiver in the elder's own address book before inviting them
-    /// (design §4.2 — an invite from an unknown address lands in spam).
+    /// `calendar` — the ACCOUNT-WIDE grant, NOT `calendar.events`
+    /// (2026-09-17). The narrow grant is enough for every EVENT call this
+    /// layer makes: `events.list` on the elder's primary calendar, the
+    /// twins' insert/update/delete inside a calendar the app already
+    /// knows the id of, and the accept patch. It is not enough for the
+    /// family calendar's own lifecycle, and that lifecycle comes FIRST:
+    /// `ensureFamilyCalendar` has to list the account's calendars and
+    /// create one, and Google answers 403 to both of those with
+    /// `calendar.events` in hand — a device console showed exactly that
+    /// split, inbound `events.list` succeeding while
+    /// `calendarList.list`/`calendars.insert` were refused.
+    ///
+    /// A share path that cannot find or create its own calendar has
+    /// nowhere to write a twin, so the first thing every write does would
+    /// fail no matter how well the scopes covered events. The wide grant
+    /// is therefore the honest requirement rather than an over-ask — and
+    /// it is why the consent screen must list Calendar as well: `addScopes`
+    /// cannot hand back a grant the console does not offer.
+    ///
+    /// `contacts` is what `People v1` needs to put the caregiver in the
+    /// elder's own address book before inviting them (design §4.2 — an
+    /// invite from an unknown address lands in spam).
     ///
     /// `profile`/`email` are not listed: the SDK asks for identity as
     /// part of its own sign-in flow, and asking twice would show the
     /// elder a consent screen listing a permission they already gave.
+    ///
+    /// This list is both what the consent sheet asks for and what
+    /// `hasRequiredScopes` reads back, so an account still holding only
+    /// the old `calendar.events` grant reports as
+    /// `connectedWithoutScopes` — which is the truth: it is signed in and
+    /// cannot reach the family calendar. Signing out and connecting again
+    /// is what replaces the grant.
     static let requiredScopes = [
-        "https://www.googleapis.com/auth/calendar.events",
+        "https://www.googleapis.com/auth/calendar",
         "https://www.googleapis.com/auth/contacts",
     ]
 
@@ -268,6 +291,15 @@ final class GoogleAccountSession: GoogleAccountSessionProtocol {
     /// both spellings over the SDK's lifetime. An exact match against
     /// either form would silently read a granted scope as missing — which
     /// is the failure mode this whole change exists to remove.
+    ///
+    /// Normalizing the prefix is ALL it does: the comparison itself stays
+    /// exact, so `calendar` and `calendar.events` remain two different
+    /// grants (2026-09-17). Google's hierarchy is real and one-directional
+    /// — the wide grant covers everything the narrow one does, not the
+    /// other way round — and a list holding only `calendar.events` cannot
+    /// list or create a calendar, which is the 403 this feature hit on a
+    /// device. Nothing here may be written to read the narrow grant as
+    /// satisfying the wide one.
     static func grantsRequiredScopes(_ granted: [String]) -> Bool {
         let normalized = Set(granted.map(normalizeScope))
         return requiredScopes.allSatisfy { normalized.contains(normalizeScope($0)) }
@@ -331,7 +363,7 @@ final class GoogleAccountSession: GoogleAccountSessionProtocol {
     /// instead of leaving the household signed out for the whole process.
     ///
     /// The scope grant is READ, never requested: a restored account that
-    /// is missing `calendar.events`/`contacts` is reported honestly as
+    /// is missing `calendar`/`contacts` is reported honestly as
     /// `connectedWithoutScopes` and no sheet is shown. Asking at launch
     /// would put Google's consent screen in front of an elder who
     /// opened the app to check the time.
@@ -648,8 +680,8 @@ final class GoogleAccountSession: GoogleAccountSessionProtocol {
     /// async `signIn(withPresenting:)`, and it asks for identity alone),
     /// so the only supported path to a Calendar grant is `addScopes` on
     /// the user it returns. Asking at sign-in time was the bug this
-    /// method exists to fix: the token came back without
-    /// `calendar.events`, and every Calendar call answered 401.
+    /// method exists to fix: the token came back without the
+    /// calendar/contacts grant, and every Calendar call answered 401.
     @MainActor private static func runFlow(clientID: String,
                                            presenter: (() -> UIViewController?)?,
                                            flow: GoogleAuthFlow) async -> FlowReport {

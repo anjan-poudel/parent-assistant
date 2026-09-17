@@ -236,7 +236,7 @@ final class CalendarShareServiceTests: XCTestCase {
         XCTAssertEqual(unscoped.service.status.connection,
                        .connectedWithoutScopes(email: "maa@example.com"))
         XCTAssertFalse(unscoped.service.status.isActive,
-                       "consent or not, a token without calendar.events cannot share")
+                       "consent or not, a token without the calendar grant cannot share")
 
         // The full matrix in one place, so a future flag cannot silently
         // collapse two of these into one.

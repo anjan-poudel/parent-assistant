@@ -10,7 +10,7 @@
 GoogleSignIn-iOS needs an OAuth client from a Google Cloud project:
 - Create iOS OAuth client ID; the app's `GIDClientID` comes from an Info.plist key (house choice: `GoogleSignIn` plist key or code constant — implementation picks the documented one).
 - Configure `CFBundleURLTypes` reverse-client-id URL scheme in `project.yml`.
-- OAuth consent screen: scopes `openid`, `email`, `https://www.googleapis.com/auth/calendar.events`, `https://www.googleapis.com/auth/contacts`.
+- OAuth consent screen: scopes `openid`, `email`, `https://www.googleapis.com/auth/calendar`, `https://www.googleapis.com/auth/contacts`. The account-wide `calendar` grant since 2026-09-17, not `calendar.events`: the narrow grant is refused 403 by `calendarList.list` and `calendars.insert`, the two calls that find or create the family calendar every twin is written into (a device console showed `events.list` succeeding while those two failed). The consent screen must OFFER the calendar scope — `addScopes` can only hand back a grant the console lists. See `GoogleAccountSession.requiredScopes`.
 - **Graceful degradation is required:** a missing client ID must leave the Settings card in the honest "not configured" state, never crash (constitution: no silent stubs).
 
 ## 1. Piece A — contact email (model + editor)

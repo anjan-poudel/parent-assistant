@@ -5,8 +5,8 @@ import UIKit
 /// `GoogleAccountSession`: the interactive flow's OUTCOME MATRIX.
 ///
 /// The bug this file exists for (2026-09-17): `signIn(withPresenting:)`
-/// was called with no scopes, so the token came back without
-/// `calendar.events`/`contacts` and every Calendar call answered 401. The
+/// was called with no scopes, so the token came back without the
+/// calendar/contacts grant and every Calendar call answered 401. The
 /// fix asks for them with `addScopes` — and the state it introduces, an
 /// elder who is SIGNED IN and has DECLINED the calendar grant, is the one
 /// this suite is built around. It cannot be reached in the simulator
@@ -103,7 +103,7 @@ final class GoogleAccountSessionTests: XCTestCase {
     /// it has no calendar access.
     func testGrantedScopesMatchEitherSpelling() async {
         let flow = FakeAuthFlow()
-        flow.signInResult = .success(["calendar.events", "contacts"])
+        flow.signInResult = .success(["calendar", "contacts"])
         let bus = MockObservabilityBus()
 
         let outcome = await makeSession(flow: flow, bus: bus).signIn()
@@ -588,10 +588,10 @@ final class GoogleAccountSessionTests: XCTestCase {
 
         XCTAssertTrue(GoogleAccountSession.grantsRequiredScopes(required))
         XCTAssertTrue(GoogleAccountSession.grantsRequiredScopes(required + ["email"]))
-        XCTAssertTrue(GoogleAccountSession.grantsRequiredScopes(["calendar.events", "contacts"]),
+        XCTAssertTrue(GoogleAccountSession.grantsRequiredScopes(["calendar", "contacts"]),
                       "the SDK's short spelling counts as granted")
         XCTAssertTrue(GoogleAccountSession.grantsRequiredScopes(
-            ["https://www.googleapis.com/auth/calendar.events",
+            ["https://www.googleapis.com/auth/calendar",
              "contacts",
              "https://www.googleapis.com/auth/userinfo.email"]),
                       "a mixed list counts as granted")
@@ -599,17 +599,59 @@ final class GoogleAccountSessionTests: XCTestCase {
                        "an absent list reads as empty, never as 'assume granted'")
         XCTAssertFalse(GoogleAccountSession.grantsRequiredScopes(["email", "profile"]),
                        "identity alone is not calendar access — the 401 this whole change is about")
-        XCTAssertFalse(GoogleAccountSession.grantsRequiredScopes(["calendar.events"]),
+        XCTAssertFalse(GoogleAccountSession.grantsRequiredScopes(["calendar"]),
                        "one of the two is not both: contacts is what keeps the invite out of spam")
     }
 
-    /// The two scopes are exactly the narrow pair the design asked for —
-    /// `calendar.events`, never the account-wide `calendar` scope that
-    /// would expose every calendar the elder can see.
-    func testRequiredScopesAreTheNarrowCalendarGrantAndContacts() {
+    /// The normalization, over the FULL-calendar URL form Google's consent
+    /// screen displays (2026-09-17): `https://www.googleapis.com/auth/calendar`
+    /// granted, and the session must read it as the grant it asked for.
+    /// This is the spelling the account comes back holding after the elder
+    /// taps through the consent sheet this feature shows.
+    func testTheFullCalendarURLFormReadsAsGranted() {
+        XCTAssertTrue(GoogleAccountSession.grantsRequiredScopes(
+            ["https://www.googleapis.com/auth/calendar",
+             "https://www.googleapis.com/auth/contacts"]),
+                      "the URL spelling Google's consent screen shows")
+        XCTAssertTrue(GoogleAccountSession.grantsRequiredScopes(
+            ["https://www.googleapis.com/auth/calendar",
+             "https://www.googleapis.com/auth/contacts",
+             "https://www.googleapis.com/auth/userinfo.email"]),
+                      "identity scopes riding along change nothing")
+    }
+
+    /// The grant that caused the device 403 stays a MISS. `calendar.events`
+    /// covers every EVENT call and not the family calendar's own lifecycle:
+    /// with it as the only calendar grant, Google answered
+    /// `calendarList.list`/`calendars.insert` — the two calls
+    /// `ensureFamilyCalendar` makes — with 403, so nothing could be shared
+    /// at all. Normalizing the URL prefix must never be read as a
+    /// hierarchy: the account is signed in, cannot share, and the card has
+    /// to be able to say so.
+    func testTheNarrowCalendarEventsGrantDoesNotSatisfyTheWideOne() {
+        XCTAssertFalse(GoogleAccountSession.grantsRequiredScopes(["calendar.events", "contacts"]),
+                       "the old narrow grant is exactly the state that 403'd on a device")
+        XCTAssertFalse(GoogleAccountSession.grantsRequiredScopes(
+            ["https://www.googleapis.com/auth/calendar.events",
+             "https://www.googleapis.com/auth/contacts"]),
+                       "…in either spelling")
+        XCTAssertTrue(GoogleAccountSession.grantsRequiredScopes(["calendar", "contacts"]),
+                      "while the wide grant is what the family calendar's lifecycle needs")
+    }
+
+    /// The pair the consent sheet asks for, pinned (2026-09-17). The
+    /// account-wide `calendar` grant replaced `calendar.events` because
+    /// finding or creating the family calendar needs it — a future edit
+    /// that narrows this list back would break sharing on a device while
+    /// every test above stayed green, since the narrow grant still covers
+    /// the event calls this app makes.
+    func testRequiredScopesAreTheAccountWideCalendarGrantAndContacts() {
         XCTAssertEqual(GoogleAccountSession.requiredScopes,
-                       ["https://www.googleapis.com/auth/calendar.events",
+                       ["https://www.googleapis.com/auth/calendar",
                         "https://www.googleapis.com/auth/contacts"])
+        XCTAssertFalse(GoogleAccountSession.requiredScopes.contains(
+            "https://www.googleapis.com/auth/calendar.events"),
+                       "the narrow event grant is the 403 this pair replaced")
     }
 
     /// Signed out, the SDK has no user and the answer is false — read
