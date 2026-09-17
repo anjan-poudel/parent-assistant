@@ -19,11 +19,17 @@ final class ModelLifecycleManagerTests: XCTestCase {
     private final class ScriptedProbe: MemoryProbing {
         var physicalMemoryBytes: UInt64
         var availableProcessMemoryBytes: UInt64
+        /// Defaults to 0 — the protocol's "not measured" value — so every
+        /// test written before Step 0 keeps the behaviour it was written
+        /// against, and the sample tests below opt in explicitly.
+        var physFootprintBytes: UInt64
 
         init(physicalMemoryBytes: UInt64 = 6_000_000_000,
-             availableProcessMemoryBytes: UInt64 = 3_400_000_000) {
+             availableProcessMemoryBytes: UInt64 = 3_400_000_000,
+             physFootprintBytes: UInt64 = 0) {
             self.physicalMemoryBytes = physicalMemoryBytes
             self.availableProcessMemoryBytes = availableProcessMemoryBytes
+            self.physFootprintBytes = physFootprintBytes
         }
     }
 
@@ -599,5 +605,386 @@ final class ModelLifecycleManagerTests: XCTestCase {
                                         * ModelLifecycleManager.memoryPressureBudgetFraction))
         XCTAssertTrue(events.contains { if case .memoryPressure = $0 { return true }
                                         ; return false })
+    }
+
+    // MARK: - 11. [MODEL-WARDEN] Step 1 — the reservation
+    //
+    // Step 0 made the ledger honest; Step 1 makes an *admitted* load a
+    // reservation. The hole these cases pin is the interval between the
+    // decision and `didLoad`, where the incoming bytes used to be counted
+    // by nobody: `peak_footprint = M + T + W`, and `T` did not exist.
+    //
+    // The scripted probe and the injected clock make every case here
+    // deterministic — no case sleeps, and none depends on the host's RAM.
+
+    private func request(_ slot: ModelSlot,
+                         modelID: ModelID?,
+                         owner: AnyObject?,
+                         purpose: ReservationPurpose = .voiceTurn,
+                         replaces: Bool = true) -> ModelLoadRequest {
+        ModelLoadRequest(slot: slot, modelID: modelID, owner: owner,
+                         purpose: purpose, replacesSlotContents: replaces)
+    }
+
+    private func reserveOrFail(_ manager: ModelLifecycleManager,
+                               _ request: ModelLoadRequest,
+                               file: StaticString = #filePath,
+                               line: UInt = #line) -> ModelReservation? {
+        switch manager.reserve(request) {
+        case .success(let reservation):
+            return reservation
+        case .failure(let denial):
+            XCTFail("expected the reservation to be granted, got \(denial)",
+                    file: file, line: line)
+            return nil
+        }
+    }
+
+    func testReserveCountsTheIncomingBytesAndCommitRetiresThem() {
+        var events: [ModelLifecycleEvent] = []
+        manager.onEvent = { events.append($0) }
+        let owner = FakeOwner()
+        register(.brain, modelID: brain4B, owner: owner)
+        let live = ModelLifecycleInventory.footprint(for: .brain,
+                                                     modelID: brain4B).liveBytes
+
+        guard let reservation = reserveOrFail(
+            manager, request(.brain, modelID: brain4B, owner: owner)) else { return }
+
+        // `T(t)` is non-zero for exactly the interval the load occupies —
+        // the interval a second admitted load used to be budgeted against
+        // as if it were free.
+        XCTAssertEqual(reservation.liveBytes, live)
+        XCTAssertTrue(reservation.isLargeLoad)
+        XCTAssertEqual(manager.snapshot().transientLiveBytes, live)
+        XCTAssertEqual(manager.inFlightReservations().map(\.slot), [.brain])
+        XCTAssertTrue(events.contains(.reserved(slot: .brain,
+                                                liveBytes: live,
+                                                purpose: .voiceTurn,
+                                                isLargeLoad: true)))
+
+        manager.commit(reservation)
+
+        XCTAssertEqual(manager.snapshot().transientLiveBytes, 0)
+        XCTAssertTrue(manager.inFlightReservations().isEmpty)
+        XCTAssertTrue(events.contains(.reservationCommitted(slot: .brain,
+                                                            heldSeconds: 0)),
+                      "commit must report how long the permit was held")
+    }
+
+    func testReserveThenAbandonReleasesTheBytesAndSaysWhy() {
+        var events: [ModelLifecycleEvent] = []
+        manager.onEvent = { events.append($0) }
+        let owner = FakeOwner()
+        register(.brain, modelID: brain17B, owner: owner)
+
+        guard let reservation = reserveOrFail(
+            manager, request(.brain, modelID: brain17B, owner: owner)) else { return }
+        manager.abandon(reservation, reason: .loadFailed)
+
+        XCTAssertEqual(manager.snapshot().transientLiveBytes, 0)
+        XCTAssertTrue(events.contains(.reservationAbandoned(slot: .brain,
+                                                            reason: .loadFailed)))
+        // The permit is not sticky: the next ask is judged on its own
+        // merits rather than on the corpse of the last one.
+        XCTAssertNotNil(reserveOrFail(
+            manager, request(.brain, modelID: brain17B, owner: owner)))
+    }
+
+    func testReservationTTLReapsALoadThatNeverCommitted() {
+        var events: [ModelLifecycleEvent] = []
+        manager.onEvent = { events.append($0) }
+        let owner = FakeOwner()
+        register(.brain, modelID: brain17B, owner: owner)
+        guard let reservation = reserveOrFail(
+            manager, request(.brain, modelID: brain17B, owner: owner)) else { return }
+
+        // One second short of the TTL the load is still in flight and
+        // still holding its bytes.
+        now = now.addingTimeInterval(ModelWardenConfig.default.reservationTTLSeconds - 1)
+        XCTAssertTrue(manager.reapExpiredReservations().isEmpty)
+        XCTAssertEqual(manager.snapshot().transientLiveBytes, reservation.liveBytes)
+
+        now = now.addingTimeInterval(2)
+        let reaped = manager.reapExpiredReservations()
+
+        XCTAssertEqual(reaped.map(\.id), [reservation.id])
+        XCTAssertEqual(manager.snapshot().transientLiveBytes, 0)
+        XCTAssertTrue(events.contains(.reservationAbandoned(slot: .brain,
+                                                            reason: .ttlExpired)))
+    }
+
+    func testReservationPastTheWatchdogIsReapedUnderItsOwnReason() {
+        var events: [ModelLifecycleEvent] = []
+        manager.onEvent = { events.append($0) }
+        let owner = FakeOwner()
+        register(.brain, modelID: brain17B, owner: owner)
+        _ = reserveOrFail(manager, request(.brain, modelID: brain17B, owner: owner))
+
+        now = now.addingTimeInterval(ModelWardenConfig.default.loadWatchdogSeconds)
+
+        XCTAssertEqual(manager.reapExpiredReservations().count, 1)
+        XCTAssertTrue(events.contains(.reservationAbandoned(
+            slot: .brain, reason: .watchdogExpired)),
+            "the watchdog is evidence, the TTL is housekeeping — the "
+            + "reasons must not be conflated")
+    }
+
+    func testSecondReservationOnTheSameSlotIsRejected() {
+        var events: [ModelLifecycleEvent] = []
+        manager.onEvent = { events.append($0) }
+        let owner = FakeOwner()
+        register(.brain, modelID: brain17B, owner: owner)
+        _ = reserveOrFail(manager, request(.brain, modelID: brain17B, owner: owner))
+
+        let second = manager.reserve(request(.brain,
+                                             modelID: brain17B,
+                                             owner: owner))
+
+        guard case .failure(let denial) = second else {
+            return XCTFail("a second reservation on one pipeline position "
+                           + "would double-book the position's bytes")
+        }
+        XCTAssertEqual(denial, .alreadyReserved(slot: .brain, holder: .voiceTurn))
+        XCTAssertEqual(denial.token, "already_reserved")
+        XCTAssertFalse(denial.token.contains("("),
+                       "the bus token must be content-free")
+    }
+
+    func testTwoLargeLoadsAreNeverInFlightTogether() {
+        let sttOwner = FakeOwner()
+        register(.speechToText, modelID: sttQ8, owner: sttOwner)
+        let ttsOwner = FakeOwner()
+        register(.ttsVoices, modelID: nil, owner: ttsOwner)
+        let brainOwner = FakeOwner()
+        register(.brain, modelID: brain4B, owner: brainOwner)
+
+        // 1. The ANE load takes the serial slot…
+        guard let stt = reserveOrFail(
+            manager, request(.speechToText, modelID: sttQ8, owner: sttOwner)),
+              // 2. …and a SMALL load is not serialized behind it (the cap
+              //    is on the spike, and a voice cache is not a spike).
+              let tts = reserveOrFail(
+                manager, request(.ttsVoices, modelID: nil, owner: ttsOwner))
+        else { return }
+        // 3. A second LARGE load is refused, and the refusal names the
+        //    load it is waiting behind.
+        guard case .failure(let denial) = manager.reserve(
+            request(.brain, modelID: brain4B, owner: brainOwner)) else {
+            return XCTFail("two large page-ins at once is the spike the "
+                           + "watchdog kills for")
+        }
+        XCTAssertEqual(denial, .loadInFlight(holder: .speechToText))
+        XCTAssertEqual(denial.token, "load_in_flight")
+        // 4. Fail-fast, not queue: the refusal was synchronous, and once
+        //    the first load hands its permit back the queue is free again.
+        manager.abandon(tts, reason: .loadFailed)
+        manager.abandon(stt, reason: .cancelled)
+        XCTAssertNotNil(reserveOrFail(
+            manager, request(.brain, modelID: brain4B, owner: brainOwner)))
+    }
+
+    func testTheTransientTermIsWhatRefusesTheSecondLoad() {
+        // The pinned budget is one byte short of the two loads together, so
+        // the ONLY thing that can refuse the second ask is the first one's
+        // uncommitted reservation — nothing is resident, and the second ask
+        // fits on its own.
+        let sttLive = ModelLifecycleInventory.footprint(for: .speechToText,
+                                                        modelID: sttQ8).liveBytes
+        let ttsLive = ModelLifecycleInventory.footprint(for: .ttsVoices,
+                                                        modelID: nil).liveBytes
+        let tight = makeManager(budget: sttLive + ttsLive - 1)
+        let sttOwner = FakeOwner()
+        tight.register(slot: .speechToText, modelID: sttQ8, owner: sttOwner) {}
+        let ttsOwner = FakeOwner()
+        tight.register(slot: .ttsVoices, modelID: nil, owner: ttsOwner) {}
+
+        guard let stt = reserveOrFail(
+            tight, request(.speechToText, modelID: sttQ8, owner: sttOwner))
+        else { return }
+        XCTAssertEqual(tight.snapshot().residentLiveBytes, 0)
+
+        guard case .failure(let denial) = tight.reserve(
+            request(.ttsVoices, modelID: nil, owner: ttsOwner)) else {
+            return XCTFail("the in-flight load's bytes were not counted")
+        }
+        guard case .budgetExhausted = denial else {
+            return XCTFail("expected a budget refusal, got \(denial)")
+        }
+        // …and the refusal is provisional, not sticky.
+        tight.abandon(stt, reason: .loadFailed)
+        XCTAssertNotNil(reserveOrFail(
+            tight, request(.ttsVoices, modelID: nil, owner: ttsOwner)))
+    }
+
+    func testFailFastRefusalOnInsufficientHeadroom() {
+        let owner = FakeOwner()
+        register(.brain, modelID: brain4B, owner: owner)
+        // 200 MB left; the brain's non-pageable bytes alone exceed that, so
+        // no amount of eviction helps and the honest answer is "not now".
+        probe.availableProcessMemoryBytes = 200_000_000
+
+        guard case .failure(let denial) = manager.reserve(
+            request(.brain, modelID: brain4B, owner: owner)) else {
+            return XCTFail("a model whose hard bytes exceed the headroom "
+                           + "must be refused, not attempted")
+        }
+        guard case .insufficientHeadroom = denial else {
+            return XCTFail("expected the headroom refusal, got \(denial)")
+        }
+        XCTAssertEqual(denial.token, "insufficient_headroom")
+        XCTAssertEqual(manager.snapshot().transientLiveBytes, 0,
+                       "a refused load reserves nothing")
+    }
+
+    func testCriticalPressureCancelsEveryPendingReservation() {
+        var events: [ModelLifecycleEvent] = []
+        manager.onEvent = { events.append($0) }
+        let owner = FakeOwner()
+        register(.brain, modelID: brain17B, owner: owner)
+        _ = reserveOrFail(manager, request(.brain, modelID: brain17B, owner: owner))
+
+        manager.handleMemoryPressure(level: .critical)
+
+        XCTAssertEqual(manager.snapshot().transientLiveBytes, 0)
+        XCTAssertTrue(events.contains(.reservationAbandoned(
+            slot: .brain, reason: .memoryPressure)),
+            "a permission to create a spike must not survive the kernel "
+            + "saying it is out of memory")
+    }
+
+    func testBackgroundingWithdrawsPendingReservationsButKeepsResidents() {
+        let brainOwner = FakeOwner()
+        XCTAssertTrue(load(.brain, modelID: brain17B, owner: brainOwner).isAllowed)
+        let ttsOwner = FakeOwner()
+        register(.ttsVoices, modelID: nil, owner: ttsOwner)
+        _ = reserveOrFail(manager, request(.ttsVoices, modelID: nil, owner: ttsOwner))
+
+        let withdrawn = manager.cancelPendingReservations(reason: .backgrounded)
+
+        XCTAssertEqual(withdrawn.map(\.slot), [.ttsVoices])
+        XCTAssertEqual(manager.snapshot().transientLiveBytes, 0)
+        // Residency is the eviction policy's business, not the scene's:
+        // backgrounding must not cost the ANE specialization.
+        XCTAssertTrue(manager.isResident(.brain))
+        XCTAssertEqual(brainOwner.unloadCount, 0)
+    }
+
+    func testDeadOwnerReservationIsReapedRatherThanKeptAlive() {
+        var owner: FakeOwner? = FakeOwner()
+        register(.brain, modelID: brain17B, owner: owner!)
+        _ = reserveOrFail(manager, request(.brain, modelID: brain17B, owner: owner!))
+
+        owner = nil   // the load site died with the load in flight
+
+        XCTAssertEqual(manager.reapExpiredReservations().count, 1)
+        XCTAssertEqual(manager.snapshot().transientLiveBytes, 0)
+    }
+
+    func testOwnerlessReservationSurvivesGCUntilItsTTL() {
+        // A maintenance load with no owner has no owner to observe dying;
+        // it must be reaped by the clock, never mistaken for an abandoned
+        // one on the next unrelated reserve.
+        let owner = FakeOwner()
+        register(.brain, modelID: brain17B, owner: owner)
+        guard let reservation = reserveOrFail(
+            manager, request(.brain, modelID: brain17B, owner: nil)) else { return }
+
+        // An unrelated load's gate runs the GC. The ownerless reservation
+        // must survive it — it has an owner-shaped hole, not a dead owner.
+        XCTAssertNotNil(reserveOrFail(
+            manager, request(.ttsVoices, modelID: nil, owner: owner)))
+
+        XCTAssertTrue(manager.inFlightReservations().contains {
+            $0.id == reservation.id
+        })
+        XCTAssertGreaterThanOrEqual(manager.snapshot().transientLiveBytes,
+                                    reservation.liveBytes)
+    }
+
+    func testAStoppedLoadDoesNotStrandTheNextCaller() {
+        // The composition the two migrated load sites depend on: the tier
+        // races its load against a deadline (and deliberately does not
+        // cancel the loser), the voice interpreter stops its decode on
+        // cancellation. Both end in the same warden call — `abandon` — and
+        // what that call must guarantee is that the NEXT caller is judged
+        // on a free ledger rather than blocked behind a load nobody is
+        // waiting for.
+        let owner = FakeOwner()
+        register(.brain, modelID: brain17B, owner: owner)
+
+        guard let tier = reserveOrFail(manager, request(.brain,
+                                                        modelID: brain17B,
+                                                        owner: owner,
+                                                        purpose: .liveTranslate))
+        else { return }
+        manager.abandon(tier, reason: .cancelled)   // the deadline won
+
+        guard let turn = reserveOrFail(manager, request(.brain,
+                                                       modelID: brain17B,
+                                                       owner: owner,
+                                                       purpose: .voiceTurn))
+        else { return }
+        XCTAssertEqual(turn.purpose, .voiceTurn)
+        manager.abandon(turn, reason: .cancelled)
+
+        XCTAssertNotNil(reserveOrFail(manager, request(.brain,
+                                                      modelID: brain17B,
+                                                      owner: owner,
+                                                      purpose: .liveTranslate)))
+    }
+
+    func testPrepareLoadStillCommitsItsOwnReservation() {
+        // `prepareLoad` is the synchronous fast path, expressed in terms of
+        // reserve + commit: the decision is identical and nothing is left
+        // in the transient term afterwards.
+        let owner = FakeOwner()
+        register(.brain, modelID: brain17B, owner: owner)
+
+        XCTAssertEqual(manager.prepareLoad(of: .brain, modelID: brain17B),
+                       .allowed(evicted: []))
+        XCTAssertEqual(manager.snapshot().transientLiveBytes, 0)
+        XCTAssertTrue(manager.inFlightReservations().isEmpty)
+    }
+
+    // MARK: - 12. [MODEL-WARDEN] Step 0 — the footprint sample
+
+    func testTheFootprintSampleRidesWithTheLoadItMeasures() {
+        // The ledger's total is arithmetic; `phys_footprint` is the kernel's
+        // own number. They are only comparable if the sample is taken at the
+        // moment the bytes land, which is what this pins.
+        probe.physFootprintBytes = 1_234_000_000
+        probe.availableProcessMemoryBytes = 2_000_000_000
+        var events: [ModelLifecycleEvent] = []
+        manager.onEvent = { events.append($0) }
+
+        XCTAssertTrue(load(.brain, modelID: brain17B, owner: FakeOwner()).isAllowed)
+
+        let live = ModelLifecycleInventory.footprint(for: .brain,
+                                                     modelID: brain17B).liveBytes
+        XCTAssertTrue(events.contains(.footprintSample(
+            physFootprintBytes: 1_234_000_000,
+            // Ceiling and footprint are reported as a pair: the reading that
+            // says how much is spent is meaningless without the one that
+            // says how much there is.
+            ceilingBytes: 3_234_000_000,
+            residentLiveBytes: live,
+            transientLiveBytes: 0)),
+            "a committed load must report the kernel's own footprint")
+        XCTAssertEqual(manager.snapshot().physFootprintBytes, 1_234_000_000)
+    }
+
+    func testAProbeThatCannotReadTheFootprintReportsSilence() {
+        // 0 is the honest "not measured" value, so the sample is skipped
+        // rather than emitted as a real-looking reading of zero bytes.
+        var events: [ModelLifecycleEvent] = []
+        manager.onEvent = { events.append($0) }
+
+        XCTAssertTrue(load(.brain, modelID: brain17B, owner: FakeOwner()).isAllowed)
+
+        XCTAssertFalse(events.contains { if case .footprintSample = $0 { return true }
+                                         return false },
+                       "a failed probe must not fabricate a footprint")
+        XCTAssertEqual(manager.snapshot().physFootprintBytes, 0)
     }
 }

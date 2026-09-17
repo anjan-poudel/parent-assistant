@@ -225,6 +225,15 @@ enum BrainGenerationFailure: Error, Equatable {
     /// `inference_failed`, the one token that describes neither.
     case cancelled
     case generationFailed
+    /// [MODEL-WARDEN] Step 1 — the warden refused the allocation before a
+    /// single byte was spent (`ModelLifecycleManager.reserve`). Distinct
+    /// from `loadFailed`, which means the runtime tried and the artifact
+    /// would not construct: this one means nobody tried, on purpose, and
+    /// the `ReservationDenial` says why (budget, a competing load, the
+    /// app's headroom). The tier answers both the same way — the strings
+    /// fall through to the next tier — but the capture must not confuse
+    /// "the device cannot hold this" with "this artifact is broken".
+    case loadDenied(ReservationDenial)
 }
 
 // MARK: - The tier
@@ -652,7 +661,14 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
 
     private static func reason(for failure: BrainGenerationFailure) -> LiveTranslateBrainUnavailableReason {
         switch failure {
-        case .loadFailed: return .modelLoadFailed
+        // A warden refusal rides with `loadFailed` here, and deliberately:
+        // this token is four wide by design (it says what the CALLER must
+        // do, which for both is "hand these strings to the next tier").
+        // The precise cause — `budget_exhausted` vs `load_in_flight` vs
+        // `insufficient_headroom`, with the slot and purpose — is on the
+        // ledger's own `reservation_denied` event, which is emitted at the
+        // moment of refusal and is the record a capture is read for.
+        case .loadFailed, .loadDenied: return .modelLoadFailed
         case .promptOverflow, .generationFailed: return .inferenceFailed
         case .timedOut, .cancelled: return .inferenceTimeout
         }
@@ -667,7 +683,10 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
     /// path that throws it, so the two cannot drift.
     private static func stage(for failure: BrainGenerationFailure) -> BrainFailureStage {
         switch failure {
-        case .loadFailed: return .load
+        // Same reasoning as `reason(for:)`: `load` is the stage that means
+        // "no handle exists and none was decoded from", which is exactly
+        // what a refusal produces. The ledger names the refusal precisely.
+        case .loadFailed, .loadDenied: return .load
         case .promptOverflow: return .promptBudget
         case .timedOut: return .deadline
         case .cancelled: return .cancelled
@@ -712,8 +731,17 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
     /// the first.
     private var idleRelease: Task<Void, Never>?
 
-    init(config: LiveTranslateConfig = .default) {
+    /// [MODEL-WARDEN] Step 1 — the warden this generator reserves its handle
+    /// against. Before this, the tier's load was the clearest instance of
+    /// finding H1: the 4B appeared in the ledger only at `didLoad`, i.e.
+    /// after a 2.5 GB page-in had already landed, so a voice-turn brain load
+    /// and this one were both admitted against the same budget.
+    private let lifecycle: ModelLifecycleManager
+
+    init(config: LiveTranslateConfig = .default,
+         lifecycle: ModelLifecycleManager = .shared) {
         self.config = config
+        self.lifecycle = lifecycle
     }
 
     func generate(prompt: String,
@@ -794,6 +822,44 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
     private func loadHandle(modelURL: URL) throws -> LLM {
         if let existing = handle as? LLM, handleModelURL == modelURL { return existing }
 
+        // [MODEL-WARDEN] Step 1 — ask the warden BEFORE allocating.
+        //
+        // `replacesSlotContents: false`: this is a PEER load. The tier
+        // deliberately takes no slot (§ the file header — registering
+        // `.brain` from here would clobber the voice interpreter's release
+        // closure and free the wrong handle), so the bytes reserved here
+        // are *additional* to whatever `.brain` already holds. Saying so is
+        // what stops a second 4B from slipping past a budget the first one
+        // already spent.
+        //
+        // The refusal is thrown, not awaited: this generator has no queue to
+        // wait in, and the tier's answer to "cannot load now" is already
+        // the one it gives for a failed load — hand the strings to the next
+        // tier. The load still runs inside the caller's deadline (see
+        // `run`), so a granted reservation that takes too long is bounded
+        // exactly as before.
+        let reservation: ModelReservation
+        switch lifecycle.reserve(ModelLoadRequest(
+            slot: .brain,
+            modelID: Self.modelID(forURL: modelURL),
+            owner: self,
+            purpose: .liveTranslate,
+            replacesSlotContents: false)) {
+        case .success(let granted):
+            reservation = granted
+        case .failure(let denial):
+            throw BrainGenerationFailure.loadDenied(denial)
+        }
+        // Every exit that is not a committed load hands the permit back —
+        // a throw from the construction, and (though this method has no
+        // suspension point today) anything the runtime adds later.
+        var committed = false
+        defer {
+            if !committed {
+                lifecycle.abandon(reservation, reason: .loadFailed)
+            }
+        }
+
         // Passthrough template: generation calls `generateWithConstraints`
         // with the raw prompt, and the template's chat framing is only used by
         // `respond(to:)`, which this generator never calls.
@@ -812,7 +878,28 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
         }
         handle = created
         handleModelURL = modelURL
+        // The bytes are in memory: the transient term retires into the
+        // ledger's resident total. Committed even when the caller's stage
+        // deadline has already expired — the 2.5 GB IS resident, and a
+        // ledger that declined to count it would be exactly the undercount
+        // this migration exists to remove.
+        lifecycle.commit(reservation)
+        committed = true
         return created
+    }
+
+    /// The catalog id behind a resolved model URL.
+    ///
+    /// The reservation's arithmetic is only as good as the artifact it is
+    /// told about, and this actor is handed a URL and nothing else
+    /// (`BrainTextGenerating.generate` carries no id, and widening that
+    /// protocol would ripple into every double — including the scripted one
+    /// the tier's tests drive). Resolution from the catalog by filename is
+    /// the same mapping `ModelStore.path(for:)` inverted, and a URL that
+    /// names no catalog artifact honestly resolves to `nil` (the ledger's
+    /// own conservative fallback) rather than to a guess.
+    private static func modelID(forURL url: URL) -> ModelID? {
+        ModelCatalog.all.first { $0.filename == url.lastPathComponent }?.id
     }
 
     /// One attempt, raced against its deadline — **the handle load included**.

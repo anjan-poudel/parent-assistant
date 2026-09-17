@@ -5363,12 +5363,35 @@ self.noteTalkContractChanged()
 
     // MARK: - Post-turn whisper weights ([LAT-M1])
 
-    /// The catalog whisper footprint the hold/probe arithmetic uses —
-    /// the medium-class model's declared size (the weights the boot warm
-    /// actually loads).
-    private static let whisperFootprintBytes: UInt64 = UInt64(
-        ModelCatalog.entry(for: ModelCatalog.whisperKitNepaliMedium)?.sizeBytes
-            ?? 1_600_000_000)
+    /// The whisper weights' live footprint, read from the LEDGER — the one
+    /// place that knows which artifact the recognizer actually loads.
+    ///
+    /// [MODEL-WARDEN] Step 0, closing H5. This used to be a `static let`
+    /// resolving `ModelCatalog.whisperKitNepaliMedium` — the *superseded
+    /// fp16 v3* entry, 1.6 GB — while the shipping recognizer loads
+    /// `whisperKitMediumV6` (800 MB on disk, 1.00 GB live: weights + KV +
+    /// overhead). Every hold and re-warm decision in this file was therefore
+    /// made against 1.6× the real number, which is why the field log shows
+    /// `post_transcript outcome=released (ram_critical)` on a device that
+    /// had room to keep the weights — the exact reload the invariance
+    /// contract exists to prevent.
+    ///
+    /// The ledger resolved the real model id when the recognizer registered
+    /// the slot, so asking it removes the second, drifting copy of the
+    /// number rather than correcting it to a third value that can drift
+    /// again.
+    private var whisperFootprintBytes: UInt64 {
+        if let registered = ModelLifecycleManager.shared
+            .footprint(of: .speechToText)?.liveBytes, registered > 0 {
+            return registered
+        }
+        // Nothing registered yet — a launch where the recognizer has not
+        // been constructed. Resolve the same way the registration will,
+        // from the inventory and the recognizer's own preferred model id.
+        return ModelLifecycleInventory.footprint(
+            for: .speechToText,
+            modelID: whisperKitSpeechRecognizer.preferredModelID).liveBytes
+    }
 
     /// True while WhisperKit is the STT the on-device selection table
     /// would actually run — the only recognizer whose weights can be
@@ -5400,7 +5423,7 @@ self.noteTalkContractChanged()
                 whisperKitAvailable: whisperKitSpeechRecognizer.isAvailable,
                 isModelLoaded: whisperKitSpeechRecognizer.isModelLoaded),
             availableBytes: MemoryProbe.availableProcessMemoryBytes,
-            whisperFootprintBytes: Self.whisperFootprintBytes)
+            whisperFootprintBytes: whisperFootprintBytes)
         switch action {
         case .hold:
             // The probe allows the weights to stay resident across the
@@ -5446,7 +5469,7 @@ self.noteTalkContractChanged()
               whisperKitIsActiveSTT,
               whisperKitSpeechRecognizer.isAvailable else { return }
         guard MemoryProbe.availableProcessMemoryBytes
-                >= Self.whisperFootprintBytes else {
+                >= whisperFootprintBytes else {
             emitWhisperWeightsEvent(
                 eventType: "rewarm", outcome: "skipped",
                 metadata: ["reason": "ram_critical"])
@@ -8041,6 +8064,22 @@ self.noteTalkContractChanged()
         }
 
         lifecycle.startIdleTimer()
+
+        // [MODEL-WARDEN] Step 0 — the kernel's own pressure signal, alongside
+        // `didReceiveMemoryWarning`. `.warning` routes to the existing
+        // squeeze; `.critical` additionally cancels every pending reservation
+        // and evicts the light residents the squeeze spares.
+        //
+        // The three residents Step 0 brings into the ledger — the TTS voice
+        // cache, the wake-word spotter, the VAD — are NOT registered here:
+        // each registers at the object that actually allocates it
+        // (`PiperVoiceSpeaker`, `SherpaKWSWakeWordEngine`, `SileroONNXVAD`),
+        // the same convention the heavy slots already follow, so a row only
+        // exists while the bytes it describes do. Registering the shipped
+        // `EnergyVAD` here, for instance, would add 0.9 MB of Silero ONNX
+        // bytes the build does not hold — the ledger's total has to stay
+        // checkable against `phys_footprint`.
+        lifecycle.startMemoryPressureMonitor()
     }
 
     /// Observability bridge for `ModelLifecycleEvent` — component
@@ -8070,6 +8109,36 @@ self.noteTalkContractChanged()
             type = "memory_pressure"
             metadata = ["budgetBytes": String(budgetBytes),
                         "evicted": evicted.map(\.rawValue).joined(separator: ",")]
+        // [MODEL-WARDEN] Step 1 — the reservation layer. Every value below is
+        // a slot name, a closed token or a byte count; nothing here can carry
+        // content, and every key is in `LogSanitiser.allowedKeys` (a test
+        // pins that claim, because a silently dropped key is how the memory
+        // story arrived at the field with no bytes in it the first time).
+        case .reserved(let slot, let liveBytes, let purpose, let isLargeLoad):
+            type = "reserved"
+            metadata = ["slot": slot.rawValue,
+                        "liveBytes": String(liveBytes),
+                        "purpose": purpose.rawValue,
+                        "isLargeLoad": String(isLargeLoad)]
+        case .reservationDenied(let slot, let reason, let purpose):
+            type = "reservation_denied"
+            metadata = ["slot": slot.rawValue,
+                        "reason": reason.token,
+                        "purpose": purpose.rawValue]
+        case .reservationCommitted(let slot, let heldSeconds):
+            type = "reservation_committed"
+            metadata = ["slot": slot.rawValue,
+                        "heldSeconds": String(format: "%.2f", heldSeconds)]
+        case .reservationAbandoned(let slot, let reason):
+            type = "reservation_abandoned"
+            metadata = ["slot": slot.rawValue, "reason": reason.rawValue]
+        case .footprintSample(let physFootprintBytes, let ceilingBytes,
+                              let residentLiveBytes, let transientLiveBytes):
+            type = "footprint_sample"
+            metadata = ["phys_footprint": String(physFootprintBytes),
+                        "ceiling_bytes": String(ceilingBytes),
+                        "liveBytes": String(residentLiveBytes),
+                        "transientLiveBytes": String(transientLiveBytes)]
         }
         observabilityBus.emit(ObservabilityEvent(
             component: "model_lifecycle",
@@ -8651,6 +8720,17 @@ self.noteTalkContractChanged()
             // moment the elder's device is reliably online.
             syncCalendarShare()
         case .background:
+            // [MODEL-WARDEN] Step 0/1 — the scene-phase hook. A backgrounded
+            // app is judged against a much smaller jetsam limit and its
+            // in-flight work may never be resumed, so a permission to
+            // allocate must not outlive the foreground: every uncommitted
+            // reservation is withdrawn here (a committed one is resident,
+            // and residency is the eviction policy's business, not the
+            // scene's). The next activation re-issues the load through the
+            // same gate, which is why this is a cancellation and not a
+            // state change.
+            ModelLifecycleManager.shared
+                .cancelPendingReservations(reason: .backgrounded)
             externalCalendar.submitBackgroundRefresh()
         default:
             break
