@@ -14,6 +14,13 @@ import Foundation
 //      second copy of any of those rules in this file would be a defect, so
 //      there is none: the actor calls into them and carries their answers.
 //
+//      The one order it does own is the cascade (FR-LCT-008 as amended
+//      2026-09-17): the curated dictionary and the persisted cache first, the
+//      on-device brain second, the consent-gated cloud last — and only for
+//      what the layer before it did not answer. The brain is asked inside the
+//      same session-scoped task as the cloud attempt, so the cadence never
+//      waits on a generation.
+//
 //   2. **One cycle, one coherent publication.** A cycle's regions, outcomes,
 //      placements and the policy they were measured under are published as a
 //      single value, so a consumer can never observe a new region with an old
@@ -31,9 +38,10 @@ import Foundation
 //      `ingest(_:)` is the frame tick. While the OCR pass runs, the actor
 //      holds the frame source's own backpressure flag (T-006), so the tap
 //      drops samples instead of queueing them — memory stays flat and a slow
-//      Vision pass cannot build a backlog. The cloud resolution is *not* under
-//      that flag: it is a session-scoped task, so the OCR cadence continues
-//      while a request is in flight, and the next tick is the retry.
+//      Vision pass cannot build a backlog. Resolution — the brain's
+//      generation, then the cloud request — is *not* under that flag: it is a
+//      session-scoped task, so the OCR cadence continues while a request or a
+//      generation is in flight, and the next tick is the retry.
 //
 //   4. **Ordering is a monotone counter, never a clock (AM-6).** Each
 //      publication carries `sequence`, incremented in memory under actor
@@ -223,6 +231,11 @@ actor LiveTranslationPipeline {
     private let targetLanguage: AppLanguage
     private let recogniser: LiveTranslateFrameRecognising
     private let cache: LabelTranslationCache
+    /// Tier 1 — the on-device brain, asked before anything leaves the device
+    /// (FR-LCT-008 as amended 2026-09-17). Never nil: a device with no brain
+    /// installed has a tier that says so and hands the strings back, which is
+    /// a different thing from a cascade that has no tier at all.
+    private let brain: LocalBrainTranslating
     private let tier: CloudTranslationTier
     private let cloudNeed: LiveTranslateCloudNeedDeciding
     private weak var backpressure: LiveTranslateBackpressure?
@@ -252,6 +265,16 @@ actor LiveTranslationPipeline {
     /// the attempt reports back, so a key is never requested twice at once
     /// (the tier's own claim step is the second half of that guarantee).
     private var attemptKeys: Set<String> = []
+    /// Normalized keys the on-device brain has already been asked about **in
+    /// this sighting**. The brain is not a lookup: one attempt is a generation
+    /// of seconds, so asking it again on the next tick — which is exactly what
+    /// the tick-per-attempt design does for the cloud, where an attempt is a
+    /// cheap in-memory decision — would queue generations behind each other
+    /// for as long as a region stayed on screen. Pruned with the settled set
+    /// and cleared by a resume, so the claim is per sighting and no stronger:
+    /// the same text seen again is a new question, answered again (the
+    /// sampling is deterministic, so it is answered the same way).
+    private var brainAttemptedKeys: Set<String> = []
     /// The session-scoped task tree: one entry per dispatched attempt, removed
     /// by the attempt itself when it finishes, so this stays bounded by the
     /// number of in-flight requests rather than by the session's length.
@@ -297,6 +320,7 @@ actor LiveTranslationPipeline {
          alwaysShowOriginal: Bool,
          config: LiveTranslateConfig = .default,
          observabilityBus: ObservabilityBus,
+         brain: LocalBrainTranslating? = nil,
          publish: @escaping PublicationSink) {
         self.locale = locale
         self.targetLanguage = targetLanguage
@@ -307,7 +331,17 @@ actor LiveTranslationPipeline {
         self.backpressure = backpressure
         self.alwaysShowOriginal = alwaysShowOriginal
         self.config = config
-        self.events = LiveTranslateEvents(bus: observabilityBus, config: config)
+        let events = LiveTranslateEvents(bus: observabilityBus, config: config)
+        self.events = events
+        // Tier 1 is built here when no brain was handed in, so the production
+        // session model — which knows nothing about models — gets the real
+        // tier without a second construction site to keep in step. Tests hand
+        // in a deterministic fake; the store is the same process-wide layout
+        // the coordinator builds its own store over, and a failure to build it
+        // is reported by the tier as `runtime_missing` rather than swallowed.
+        self.brain = brain ?? LocalBrainTranslationTier(config: config,
+                                                        modelStore: try? ModelStore(observabilityBus: observabilityBus),
+                                                        events: events)
         self.publishToSink = publish
         self.stabilizer = TextRegionStabilizer(config: config)
     }
@@ -363,7 +397,7 @@ actor LiveTranslationPipeline {
             reconcile()
             resolveFromTheDevice()
             await publish()
-            dispatchCloudNeeds()
+            dispatchResolutionNeeds()
         }
     }
 
@@ -382,6 +416,7 @@ actor LiveTranslationPipeline {
 
         cancelResolutionTasks()
         settledOutcomes.removeAll()
+        brainAttemptedKeys.removeAll()
         stabilizer.reset()
         outcomes.removeAll()
 
@@ -405,9 +440,14 @@ actor LiveTranslationPipeline {
         backpressure?.ocrPassInFlight = false
         cancelResolutionTasks()
         recogniser.end()
+        // Closing gives the brain's memory back: a session that is over must
+        // not leave a 4B resident parked behind it (the tier takes no ledger
+        // slot, so this release is its only one).
+        await brain.release()
         stabilizer.reset()
         outcomes.removeAll()
         settledOutcomes.removeAll()
+        brainAttemptedKeys.removeAll()
     }
 
     // MARK: - Pushed state
@@ -489,6 +529,7 @@ actor LiveTranslationPipeline {
             }
         }
         settledOutcomes = settledOutcomes.filter { visibleKeys.contains($0.key) }
+        brainAttemptedKeys = Set(brainAttemptedKeys.filter { visibleKeys.contains($0) })
         outcomes = next
     }
 
@@ -536,29 +577,110 @@ actor LiveTranslationPipeline {
         }
     }
 
-    /// Hands every still-pending string to the cloud tier — through the gate,
-    /// one session-scoped task, never awaited by the tick.
-    private func dispatchCloudNeeds() {
-        var items: [String: CloudTranslationTier.Item] = [:]
+    /// Hands every still-pending string to the on-device brain first and the
+    /// cloud second — one session-scoped task, never awaited by the tick.
+    ///
+    /// The order is the cascade (FR-LCT-008 as amended 2026-09-17): the
+    /// dictionary has already answered what it can (`resolveFromTheDevice`),
+    /// the brain is asked next, and only what it did not answer reaches the
+    /// consent gate and the cloud. The gate therefore sees the *remainder*,
+    /// which is what keeps a scene the device can answer from ever presenting
+    /// the elder with a consent prompt (FR-LCT-011, FR-LCT-020).
+    ///
+    /// Region order, not dictionary order: the batch the brain receives is
+    /// built by walking the visible regions, so the same scene produces the
+    /// same batch and the first-N bound is deterministic.
+    ///
+    /// The two claims are not the same claim. `attemptKeys` is "an attempt is
+    /// owed for this string" and is released when the gate asks for a decision;
+    /// `brainAttemptedKeys` is "a generation has already been paid for this
+    /// string in this sighting" and is not, because the brain is a generation
+    /// rather than a lookup and a tick that re-asked it would turn one answer
+    /// into one generation per frame. The two are therefore applied separately:
+    /// a string the brain has already been asked about is carried straight to
+    /// the gate, so the tick that follows the elder's answer reaches the cloud
+    /// without paying for the same generation twice.
+    private func dispatchResolutionNeeds() {
+        var items: [CloudTranslationTier.Item] = []
+        var claimed: Set<String> = []
         for region in stabilizer.visible {
             guard let existing = outcomes[region.id], case .pending = existing.outcome else { continue }
             let key = LabelTranslationCache.normalizationKey(text: region.text,
                                                              targetLanguage: targetLanguage)
-            guard settledOutcomes[key] == nil, !attemptKeys.contains(key) else { continue }
-            items[key] = CloudTranslationTier.Item(id: key,
+            guard claimed.insert(key).inserted else { continue }
+            guard settledOutcomes[key] == nil,
+                  !attemptKeys.contains(key) else { continue }
+            items.append(CloudTranslationTier.Item(id: key,
                                                    text: region.text,
-                                                   detectedSourceLanguage: region.detectedLanguage)
+                                                   detectedSourceLanguage: region.detectedLanguage))
         }
         guard !items.isEmpty else { return }
 
-        attemptKeys.formUnion(items.keys)
-        let dispatched = Array(items.values)
+        attemptKeys.formUnion(items.map(\.id))
+        let unanswered = items.filter { !brainAttemptedKeys.contains($0.id) }
+        brainAttemptedKeys.formUnion(unanswered.map(\.id))
+        let fresh = Set(unanswered.map(\.id))
+
         let token = UUID()
         resolutionTasks[token] = Task { [weak self] in
             guard let self else { return }
-            await self.resolveThroughTheGate(dispatched)
+            let remainder = await self.resolveThroughTheBrain(unanswered)
+            let stillUnresolved = Set(remainder.map(\.id))
+            // Everything the brain did not answer goes on to the gate, in
+            // region order: the strings it answered are settled and drop out,
+            // and the ones it was not asked about this time — the elder has
+            // just answered the prompt for them — are carried through.
+            let onward = items.filter { !fresh.contains($0.id) || stillUnresolved.contains($0.id) }
+            if !onward.isEmpty {
+                await self.resolveThroughTheGate(onward)
+            }
             await self.forget(task: token)
         }
+    }
+
+    /// Tier 1: the on-device brain, before anything leaves the device.
+    ///
+    /// Returns the items the brain did not answer, in the order it was handed
+    /// them — the caller sends exactly those to the gate, so a string the
+    /// brain answered never reaches the cloud and a string it did not is never
+    /// dropped (FR-LCT-008's cascade). Nothing here is consent-gated: no
+    /// request, no egress, no budget — the brain is the device's own, which is
+    /// why the gate is consulted *after* this stage and not before it.
+    ///
+    /// A brain answer is settled and published immediately, so the region
+    /// stops being pending in the cycle the answer arrives rather than waiting
+    /// for a tier that has not been asked yet. The answer is attributed to
+    /// `.onDeviceBrain`: it is neither curated nor cloud, and saying otherwise
+    /// would either misreport egress or let unvetted model output take the
+    /// in-place form only the curated tier may take (FR-LCT-015).
+    ///
+    /// Nothing to ask is not an attempt: an empty hand-over asks the brain for
+    /// nothing at all, rather than for everything and nothing.
+    private func resolveThroughTheBrain(_ items: [CloudTranslationTier.Item]) async -> [CloudTranslationTier.Item] {
+        guard !items.isEmpty else { return [] }
+        let outcome = await brain.translate(items.map(\.text))
+        // The cancellation contract: a close that lands mid-generation wins.
+        // The keys were released by `cancelResolutionTasks`, so nothing is left
+        // claimed by this attempt.
+        guard !isClosed else { return [] }
+        guard !outcome.translations.isEmpty else { return items }
+
+        var answered: [(CloudTranslationTier.Item, TranslationResult)] = []
+        var remainder: [CloudTranslationTier.Item] = []
+        for item in items {
+            if let translation = outcome.translations[item.text] {
+                answered.append((item, .resolved(originalText: item.text,
+                                                 translation: translation,
+                                                 tier: .onDeviceBrain)))
+            } else {
+                remainder.append(item)
+            }
+        }
+
+        settle(answered)
+        apply(items: answered)
+        await publish()
+        return remainder
     }
 
     /// One attempt, in the order AM-1 and FR-LCT-011 fix: the gate decides

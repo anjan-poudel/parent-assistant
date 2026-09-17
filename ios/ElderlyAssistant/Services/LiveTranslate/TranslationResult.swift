@@ -11,10 +11,22 @@ import Foundation
 //    from it, so the inconsistent states the first-pass flat struct allowed
 //    — a degraded result naming a tier that did not translate — cannot be
 //    constructed at all.
-//  - `TranslationTier` has exactly two cases. There is **no case for the
-//    deferred on-device NMT tier** (D2, FR-LCT-008 scenario 4), and no
-//    ordinal tier number is reserved: ordinals live in prose and in
-//    observability metadata only.
+//  - `TranslationTier` has exactly three cases, and no ordinal tier number
+//    is reserved: ordinals live in prose and in observability metadata only.
+//
+//    The third case — the on-device brain — is the owner's 2026-09-17
+//    directive, which revisits the §13.5 non-goal that had kept the
+//    on-device tier absent (FR-LCT-008, amended the same day): the elder's
+//    complaint was that any string the curated dictionary missed degraded to
+//    "can't translate" whenever the cloud was declined or unreachable. The
+//    tier that closes that gap is the app's OWN installed Nepali brain, so
+//    the result must name it rather than borrowing `.cloud` (a claim that
+//    something left the device, which would poison the security evidence) or
+//    `.dictionary` (a claim of curation, which would also let an unvetted
+//    model translation replace a sign's text in place — FR-LCT-015's
+//    tier-0-only rule). It is tier 1 *in spirit*: on-device, no consent, no
+//    network, no budget. The case is spelled `onDeviceBrain`, never an
+//    ordinal.
 //  - The error taxonomy keeps every failure's log-safe code a constant
 //    token (never a description, an upstream body, a count or a status
 //    embedded in a description) and maps every case onto the closed
@@ -28,12 +40,21 @@ import Foundation
 
 /// Which translation source produced a string.
 ///
-/// Exactly two cases: the curated on-device dictionary (tier 0) and the
-/// consent-gated cloud tier (tier 2). The deferred on-device NMT tier (tier
-/// 1) has **no representation**, which is what FR-LCT-008 scenario 4 and
-/// divergence D2 require — deferred capability is absent, not stubbed.
+/// Three cases, one per tier that can actually produce a translation: the
+/// curated on-device dictionary (tier 0), the on-device brain (tier 1 — the
+/// app's installed Nepali LLM, local and consent-free), and the consent-gated
+/// cloud tier (tier 2). Every case is a statement about what happened, and
+/// none of them is a placeholder: a case that no code path can produce would
+/// be the "stubbed deferred capability" FR-LCT-008's amendment still forbids.
 enum TranslationTier: String, Equatable, Codable, CaseIterable {
     case dictionary     // tier 0 — `ApplianceLabelLocalizer` curated entries
+    /// Tier 1 — the on-device brain (`LocalBrainTranslationTier`). Never
+    /// consent-gated and never sent anywhere: nothing about it is cloud, and
+    /// nothing about it is curated. Renderers treat it exactly like `.cloud`
+    /// (callout, original preserved); only `.dictionary` may replace in place
+    /// (FR-LCT-015), which is why the curated table's provenance may not be
+    /// borrowed by a model's output.
+    case onDeviceBrain
     case cloud          // tier 2 — consent-gated, text-only
 }
 

@@ -37,6 +37,36 @@ enum LiveTranslateCacheOrigin: String, Equatable, CaseIterable {
     case persisted = "persisted"
 }
 
+/// Closed vocabulary for the `reason` metadata key on the on-device tier's
+/// events: why a batch was not answered by the brain.
+///
+/// It covers both halves of "the tier could not answer" — the tier was never
+/// usable (`modelNotInstalled`, `runtimeMissing`, `modelLoadFailed`) and the
+/// attempt failed (`inferenceFailed`, `inferenceTimeout`) — because from the
+/// caller's side they are one outcome: the strings fall through to the next
+/// tier unresolved. The token says which it was.
+///
+/// A closed set of tokens rather than a message, for the same reason every
+/// other reason in this file is: the value travels in event metadata, and a
+/// free-form string is how content or a rendered error reaches a log. `String`
+/// is the raw type, not a parameter type — no emitter takes a `String`
+/// (pinned by `LiveTranslateSourceHygieneTests.testNoEmitterAcceptsFreeText`).
+enum LiveTranslateBrainUnavailableReason: String, Equatable, CaseIterable {
+    /// No translation model is installed on this device.
+    case modelNotInstalled = "model_not_installed"
+    /// The on-device LLM runtime (or the model store that fronts it) is not
+    /// available in this build.
+    case runtimeMissing = "runtime_missing"
+    /// The language model could not be constructed from the installed file.
+    case modelLoadFailed = "model_load_failed"
+    /// The generation returned nothing usable — a runtime failure, an
+    /// unusable completion, or an answer that matched no source string.
+    case inferenceFailed = "inference_failed"
+    /// The generation outlived the configured deadline
+    /// (`brainTranslationTimeoutSeconds`) and was stopped.
+    case inferenceTimeout = "inference_timeout"
+}
+
 /// Closed vocabulary for the `mode` metadata key: what asked for speech.
 enum LiveTranslateSpeechMode: String, Equatable, CaseIterable {
     /// The tap-to-hear affordance in the overlay.
@@ -109,6 +139,22 @@ enum LiveTranslateEventCatalogue {
 
         "translation_batch_requested": Entry(outcomes: ["success"],
                                              metadataKeys: ["stringCount", "batchIndex", "batchCount"]),
+        // The on-device (tier 1) translation tier. Two events, both honest:
+        //  - `brain_translation_batch` says the tier RAN and what it answered
+        //    — every item it was handed either came back translated or did
+        //    not, so the two counts plus the duration are the whole story.
+        //    No key here can carry a string: the counts are integers and the
+        //    duration is a number of milliseconds.
+        //  - `brain_translation_unavailable` says the tier could not answer
+        //    this batch and why, with the closed-vocabulary reason — an
+        //    absent model and a timed-out generation are both "the next tier
+        //    has to answer", and the token keeps them distinguishable. It is
+        //    the same shape as `tracking_unsupported`: a degradation the
+        //    project must be able to see and the elder never sees, because
+        //    the cloud tier is still there to answer.
+        "brain_translation_batch": Entry(outcomes: ["success", "partial", "degraded"],
+                                         metadataKeys: ["resolvedCount", "unresolvedCount", "durationMs"]),
+        "brain_translation_unavailable": Entry(outcomes: ["degraded"], metadataKeys: ["reason"]),
         "translation_batch_resolved": Entry(outcomes: ["success", "partial"],
                                            metadataKeys: ["resolvedCount", "unresolvedCount", "durationMs"]),
         "translation_degraded": Entry(outcomes: ["degraded"], metadataKeys: ["reason", "regionCount"]),
@@ -316,6 +362,39 @@ struct LiveTranslateEvents {
     func translationDedupeHit(keyCount: Int) {
         emit("translation_dedupe_hit", outcome: "deduped",
              metadata: [.keyCount: String(keyCount)])
+    }
+
+    // MARK: Tier 1 — the on-device brain
+
+    /// One brain batch's result. `success` only when every string it was
+    /// handed came back translated, `partial` when some did, `degraded` when
+    /// none did — the same three-way honesty the cloud's batch event uses,
+    /// and never a claim of success for a batch that answered nothing.
+    func brainTranslationBatch(resolvedCount: Int, unresolvedCount: Int, durationMs: Int) {
+        let outcome: String
+        if unresolvedCount == 0 {
+            outcome = "success"
+        } else if resolvedCount > 0 {
+            outcome = "partial"
+        } else {
+            outcome = "degraded"
+        }
+        emit("brain_translation_batch", outcome: outcome,
+             metadata: [.resolvedCount: String(resolvedCount),
+                        .unresolvedCount: String(unresolvedCount),
+                        // The catalogue declares `durationMs` as metadata and
+                        // the shipped event also has a top-level duration
+                        // field; both are written from this one parameter, so
+                        // they cannot disagree.
+                        .durationMs: String(durationMs)],
+             durationMs: durationMs)
+    }
+
+    /// The tier could not be used. Content-free by construction: the reason is
+    /// a closed token and there is nothing else to carry.
+    func brainTranslationUnavailable(_ reason: LiveTranslateBrainUnavailableReason) {
+        emit("brain_translation_unavailable", outcome: "degraded",
+             metadata: [.reason: reason.rawValue])
     }
 
     // MARK: Sanitisation (C07)
