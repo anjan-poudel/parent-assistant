@@ -660,8 +660,8 @@ final class LocalBrainTranslationTierTests: XCTestCase {
 
             XCTAssertTrue(generator.prompts.isEmpty, "no load: no generation")
             XCTAssertEqual(outcome.deferral,
-                           .insufficientHeadroom(requiredBytes: footprint.hardBytes,
-                                                 availableBytes: probe.headroom))
+                           .insufficientHeadroom(requiredBytes: Double(footprint.hardBytes),
+                                                 availableBytes: Double(probe.headroom)))
             XCTAssertEqual(batchEvent(bus)?.outcome, "degraded")
             XCTAssertGreaterThan(probe.headroomReads, 0, "the gate read the headroom to decide")
         }
@@ -680,8 +680,8 @@ final class LocalBrainTranslationTierTests: XCTestCase {
             XCTAssertTrue(generator.prompts.isEmpty,
                           "one model's worth of headroom is not two models' worth")
             XCTAssertEqual(outcome.deferral,
-                           .insufficientHeadroom(requiredBytes: footprint.hardBytes * 2,
-                                                 availableBytes: footprint.hardBytes))
+                           .insufficientHeadroom(requiredBytes: Double(footprint.hardBytes) * 2,
+                                                 availableBytes: Double(footprint.hardBytes)))
         }
     }
 

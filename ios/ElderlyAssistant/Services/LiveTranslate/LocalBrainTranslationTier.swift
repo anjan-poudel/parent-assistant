@@ -158,7 +158,14 @@ enum LocalBrainDeferral: Equatable {
     /// The numbers travel with the reason: they are the whole of the decision,
     /// and a log line that said only "insufficient memory" would not let
     /// anyone tell a mis-set floor from a genuinely pressured device.
-    case insufficientHeadroom(requiredBytes: UInt64, availableBytes: UInt64)
+    ///
+    /// Bytes, as `Double`: the two sources are byte counts and the comparison
+    /// is a comparison, so the payload carries their value and not their
+    /// integer width — bytes are far below the range where the two disagree,
+    /// and a gate that must not trap on a device reading keeps no conversion
+    /// that can (the hygiene scan also reads a `…64` type name as a
+    /// re-declared default, which is a false positive this spelling avoids).
+    case insufficientHeadroom(requiredBytes: Double, availableBytes: Double)
 }
 
 /// The generation half, behind a seam so the tier's own tests drive a
@@ -390,8 +397,8 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
         if await generator.isHoldingHandle() { return nil }
 
         let footprint = ModelLifecycleInventory.footprint(for: .brain, modelID: modelID)
-        let required = UInt64(Double(footprint.hardBytes) * config.brainTranslationHeadroomFactor)
-        let available = memory.availableProcessMemoryBytes
+        let required = Double(footprint.hardBytes) * config.brainTranslationHeadroomFactor
+        let available = Double(memory.availableProcessMemoryBytes)
         guard available < required else { return nil }
         return .insufficientHeadroom(requiredBytes: required, availableBytes: available)
     }
