@@ -126,6 +126,91 @@ final class SettingsTabMappingTests: XCTestCase {
         }
     }
 
+    // MARK: - Which leaf owns which setting (calendar-split, 2026-09-17)
+
+    /// The Medication schedule leaf kept two calendar settings after the
+    /// 2026-09-07 calendar-settings pass and the menu-audit pass that
+    /// followed it: the appointment → iPhone Calendar write gate
+    /// (`medical.calendarToggle`) and the festival advance-reminder days
+    /// (`festival.*`). Both are the Calendar leaf's now, and these four
+    /// assertions are what "the move happened" means — the card table of
+    /// the receiving leaf, its copy in both languages, and a source scan
+    /// proving the sending leaf renders neither.
+
+    func testTheCalendarLeafCarriesItsCardsInDisplayOrder() {
+        // The leaf's own table (the hub's `SettingsSection.rows` convention
+        // applied one screen down). The order groups the cards by what they
+        // do: the BS-calendar pair (display, festival reminders), then the
+        // two EventKit writers (appointments, routine mirror), then the
+        // two-way mode, then the one reader (native import).
+        XCTAssertEqual(CalendarSettingsView.cards,
+                       [.display, .festivalReminders, .appointmentCalendar,
+                        .mirrorOut, .twoWay, .importExternal])
+    }
+
+    func testTheRescuedCardsAreTheCalendarLeafs() {
+        // Named, not just counted: a pass that drops the two rescued cards
+        // from the table fails HERE rather than on the elder's screen,
+        // where the appointment calendar toggle would simply be gone.
+        let cards = Set(CalendarSettingsView.cards)
+        XCTAssertTrue(cards.contains(.appointmentCalendar),
+                      "the appointment → iPhone Calendar write gate is a calendar setting")
+        XCTAssertTrue(cards.contains(.festivalReminders),
+                      "the festival advance-reminder rule is a BS-calendar setting")
+    }
+
+    func testEveryCalendarCardLabelResolvesInBothLanguages() {
+        for card in CalendarSettingsView.Card.allCases {
+            for locale in [english, nepali] {
+                let value = L10n.str(card.labelKey, locale: locale)
+                XCTAssertNotEqual(value, card.labelKey,
+                                  "\(card.labelKey) is unresolved in "
+                                  + "\(locale.identifier) — the card moved "
+                                  + "house, its translation did not follow it")
+            }
+        }
+    }
+
+    func testTheCalendarLeafRendersTheRescuedSettings() throws {
+        // The receiving half of the move, asserted on the CODE rather than
+        // on the table: a label key in `Card.labelKey` that the view never
+        // renders would leave the card blank and still pass the table pin.
+        let calendar = try structSource(named: "CalendarSettingsView",
+                                        in: "ElderlyAssistant/App/CalendarSettingsView.swift")
+        for key in ["medical.calendarToggle", "festival.reminderTitle",
+                    "festival.reminderDays", "festival.reminderHint"] {
+            XCTAssertTrue(calendar.contains("\"\(key)\""),
+                          "the Calendar leaf must render \(key)")
+        }
+    }
+
+    func testTheMedicationScheduleLeafRendersNoCalendarSetting() throws {
+        // The sending half — and the rule this pass exists to leave
+        // behind: the Medication schedule leaf edits MEDICINES. Its own
+        // content is untouched by the move, which is why the scan asserts
+        // the leaf is still the medication editor before it asserts what
+        // is absent from it (a scan that reads nothing proves nothing).
+        let meds = try structSource(named: "MedicationScheduleSettingsView",
+                                    in: "ElderlyAssistant/App/SettingsView.swift")
+        XCTAssertTrue(meds.contains("settings.meds.name"),
+                      "the scan did not reach the medication leaf's own content")
+        XCTAssertTrue(meds.contains("settings.meds.delete"),
+                      "…including the per-medicine row it must keep")
+
+        for card in CalendarSettingsView.Card.allCases {
+            XCTAssertFalse(meds.contains("\"\(card.labelKey)\""),
+                           "\(card.labelKey) is a calendar setting and lives "
+                           + "on the Calendar leaf — the Medication schedule "
+                           + "leaf must not carry it again")
+        }
+        for key in ["festival.reminderTitle", "festival.reminderDays",
+                    "festival.reminderHint"] {
+            XCTAssertFalse(meds.contains("\"\(key)\""),
+                           "\(key) left the Medication schedule leaf "
+                           + "(calendar-split task, 2026-09-17)")
+        }
+    }
+
     // MARK: - Row identity (no row loses its L10n key)
 
     func testEveryRowTitleResolvesInBothLanguages() {
@@ -291,6 +376,32 @@ final class SettingsTabMappingTests: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    /// The source of one top-level `struct`, from its declaration to the
+    /// next top-level declaration. The unit of a scan is the TYPE: a key
+    /// rendered by a neighbouring leaf in the same (very long) file cannot
+    /// pass for this one's.
+    ///
+    /// `FeatureSourceScan.codeText` strips comments and preserves string
+    /// literals, which is exactly the split these scans need — prose that
+    /// NAMES a key is not the leaf rendering it, and a literal is.
+    private func structSource(named name: String,
+                              in relativePath: String) throws -> String {
+        let url = FeatureSourceScan.iosDirectory(file: #filePath)
+            .appendingPathComponent(relativePath)
+        let text = FeatureSourceScan.codeText(of: url)
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+            .map(String.init)
+        let start = try XCTUnwrap(lines.firstIndex { $0.hasPrefix("struct \(name)") },
+                                  "\(relativePath) has no top-level `struct \(name)`")
+        // Top-level declarations start in column 0; nested types and
+        // members do not, so the next one is the end of this type.
+        let end = lines[(start + 1)...].firstIndex { line in
+            ["struct ", "enum ", "extension ", "final class ", "class "]
+                .contains { line.hasPrefix($0) }
+        } ?? lines.count
+        return lines[start..<end].joined(separator: "\n")
+    }
 
     private func duplicates<T: Hashable>(in values: [T]) -> [T] {
         var seen: Set<T> = []
