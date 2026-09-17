@@ -11,12 +11,17 @@ import Foundation
 //    unchanged scene therefore produces an empty change list and zero traffic
 //    (FR-LCT-005, design §2). There is no timer, no clock and no "re-request
 //    just in case" path.
-//  - **Stable identity.** Matching is geometry (IoU at or above
-//    `regionMatchIoU`, or centroid distance within
-//    `regionMatchCentroidDistance`) **combined with** normalized-string
-//    equality — so a sign whose text changes keeps its identifier and its
-//    overlay while the text updates, and a region below every threshold
-//    starts a new identity.
+//  - **Stable identity, keyed by the string first.** A region whose
+//    normalized string equals an observation's, and that was seen within
+//    `regionStringIdentityPasses`, is that observation's region however far
+//    its box has moved: a camera movement is not a new sign, and re-keying
+//    the region would release its identifier — and with it the overlay and
+//    the already-answered question. Geometry is the tiebreaker and the
+//    fallback: it separates two occurrences of one string seen on the same
+//    screen (each keeps the occurrence nearest it), and it is what lets a
+//    sign whose *text* changed keep its identifier, because its box did not
+//    move. A region below every threshold with no string to claim it starts
+//    a new identity.
 //  - **Two-sided hysteresis.** A region is published after
 //    `regionAppearPasses` consecutive observations and removed after
 //    `regionMissPasses` consecutive misses; one missed pass leaves the region
@@ -161,6 +166,15 @@ struct TextRegionStabilizer {
     /// been handed out is never handed out again.
     private var nextIdentityRawValue = 0
 
+    /// The pass counter the string-identity window is measured against.
+    ///
+    /// Monotone and never reset, for the same reason the identity counter is
+    /// not: a pass number that could repeat would make a sighting from before
+    /// a reset look like a recent one. `reset()` empties `regions`, so no
+    /// stale pass number can be read anyway — this is what keeps that true
+    /// even if the two ever drift apart.
+    private var passIndex = 0
+
     /// What the stabiliser carries for one region between passes.
     private struct TrackedRegion: Equatable {
         let id: RegionIdentity
@@ -169,6 +183,11 @@ struct TextRegionStabilizer {
         var box: NormalizedBox
         var detectedLanguage: String?
         var confidence: Double
+        /// The pass number this region was last observed in — recognized or
+        /// tracked. The string-identity window is measured from here, so a
+        /// region that stops being seen eventually stops being claimable by
+        /// its text.
+        var lastSeenPass: Int
         /// Consecutive passes this region was observed in.
         var consecutiveDetections: Int
         /// Consecutive passes it was not observed in.
@@ -201,10 +220,11 @@ struct TextRegionStabilizer {
     /// not depend on telling them apart.
     mutating func consume(regions observations: [LiveTextDetector.DetectedTextRegion],
                           tracked: [String: NormalizedBox] = [:]) -> [RegionChangeEvent] {
+        passIndex += 1
         var seen: Set<RegionIdentity> = []
 
-        // 1. Observations: match by geometry combined with normalized-string
-        //    equality, else start a new identity.
+        // 1. Observations: match by normalized-string identity first, by
+        //    geometry second, else start a new identity.
         for observation in observations {
             let normalized = LiveTranslateTextNormalization.normalized(observation.text)
             // An observation with nothing to translate, or with a box that
@@ -219,6 +239,7 @@ struct TextRegionStabilizer {
                 regions[index].box = observation.normalizedBox
                 regions[index].detectedLanguage = observation.detectedLanguage
                 regions[index].confidence = observation.confidence
+                regions[index].lastSeenPass = passIndex
                 regions[index].consecutiveDetections += 1
                 regions[index].consecutiveMisses = 0
                 seen.insert(regions[index].id)
@@ -230,6 +251,7 @@ struct TextRegionStabilizer {
                     box: observation.normalizedBox,
                     detectedLanguage: observation.detectedLanguage,
                     confidence: observation.confidence,
+                    lastSeenPass: passIndex,
                     consecutiveDetections: 1,
                     consecutiveMisses: 0,
                     isPublished: false)
@@ -246,6 +268,7 @@ struct TextRegionStabilizer {
             guard let index = regions.firstIndex(where: { !seen.contains($0.id) && $0.text == text })
             else { continue }
             regions[index].box = box
+            regions[index].lastSeenPass = passIndex
             regions[index].consecutiveMisses = 0
             seen.insert(regions[index].id)
         }
@@ -287,7 +310,10 @@ struct TextRegionStabilizer {
 
     /// Drops every region — a process/system interruption. Identities are
     /// **not** recycled: the counter keeps climbing, so a late pass cannot
-    /// resurrect an identifier this session already released.
+    /// resurrect an identifier this session already released. The pass
+    /// counter keeps climbing too, and the region list is what makes the
+    /// reset complete: a dropped region is not a candidate for anything, so
+    /// its text cannot claim a region back into existence.
     mutating func reset() {
         regions.removeAll()
         emitted.removeAll()
@@ -296,14 +322,28 @@ struct TextRegionStabilizer {
     // MARK: Matching
 
     /// The best existing region for an observation, or nil when nothing
-    /// geometry-matches it.
+    /// matches it.
     ///
-    /// A same-string match outranks a different-string one — the string
-    /// equality is half of the match rule and the stronger identity signal —
-    /// and among equals the higher IoU wins, then the shorter centroid
-    /// distance, then the lower identity (the scan is in identity order, so
-    /// the first wins a full tie). That ordering is total, which is what
-    /// makes the choice reproducible.
+    /// **The string is the identity; geometry is the tiebreaker and the
+    /// fallback.** A region whose normalized text equals the observation's,
+    /// and that was seen within `regionStringIdentityPasses`, is a candidate
+    /// however far its box has moved — a camera movement is not a new sign,
+    /// and re-keying the region would release its identifier, repaint the
+    /// overlay and re-ask a question the session has already answered. Every
+    /// other region must clear a geometry gate (`regionMatchIoU` or
+    /// `regionMatchCentroidDistance`), which is what lets a sign whose *text*
+    /// changed keep its identifier: its box did not move.
+    ///
+    /// A string match carries no distance limit, so among same-string
+    /// candidates geometry decides — which is what keeps two occurrences of
+    /// one word on one screen apart: each observation takes the occurrence
+    /// nearest it, and `seen` makes the earlier choice unavailable to the
+    /// later one.
+    ///
+    /// Among equals the higher IoU wins, then the shorter centroid distance,
+    /// then the lower identity (the scan is in identity order, so the first
+    /// wins a full tie). That ordering is total, which is what makes the
+    /// choice reproducible.
     private func bestMatchIndex(for observation: LiveTextDetector.DetectedTextRegion,
                                 normalized: String,
                                 seen: Set<RegionIdentity>) -> Int? {
@@ -311,10 +351,12 @@ struct TextRegionStabilizer {
         for (index, region) in regions.enumerated() where !seen.contains(region.id) {
             let iou = Self.intersectionOverUnion(region.box, observation.normalizedBox)
             let distance = Self.centroidDistance(region.box, observation.normalizedBox)
-            guard iou >= config.regionMatchIoU
+            let sameString = region.normalizedText == normalized
+                && passIndex - region.lastSeenPass <= config.regionStringIdentityPasses
+            guard sameString
+                    || iou >= config.regionMatchIoU
                     || distance <= config.regionMatchCentroidDistance else { continue }
-            let candidate = (index: index, iou: iou, distance: distance,
-                             sameString: region.normalizedText == normalized)
+            let candidate = (index: index, iou: iou, distance: distance, sameString: sameString)
             guard let current = best else { best = candidate; continue }
             if Self.isBetter(candidate, than: current) { best = candidate }
         }

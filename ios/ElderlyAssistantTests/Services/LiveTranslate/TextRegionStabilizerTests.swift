@@ -107,6 +107,178 @@ final class TextRegionStabilizerTests: XCTestCase {
         XCTAssertEqual(stabilizer.visible.count, 1)
     }
 
+    // MARK: - String-keyed identity across camera movement
+
+    /// A config whose hysteresis is satisfiable in one pass but whose miss
+    /// bound leaves a region alive across a gap, so the string-identity
+    /// *window* can be observed rather than assumed.
+    private func windowedConfig(missPasses: Int, window: Int) -> LiveTranslateConfig {
+        var config = LiveTranslateConfig()
+        config.regionAppearPasses = 1
+        config.regionMissPasses = missPasses
+        config.regionStringIdentityPasses = window
+        return config
+    }
+
+    /// The owner-reported defect, at the level it is decided: a camera
+    /// movement carries the box past every geometry threshold, and the region
+    /// keeps its identity and simply adopts the new box.
+    ///
+    /// The move is chosen to defeat **both** halves of the geometry gate —
+    /// no overlap at all, and a centroid distance above
+    /// `regionMatchCentroidDistance` — because a match that still qualifies
+    /// geometrically would pass whether or not the string rule exists.
+    func testAPureCameraMoveKeepsTheIdentityAndAdoptsTheNewBox() {
+        var stabilizer = TextRegionStabilizer(config: immediateConfig())
+        let appeared = stabilizer.consume(regions: [observation("Wash", box(0.05, 0.05, width: 0.10, height: 0.05))])
+        guard case .appeared(let identity) = appeared.first else {
+            return XCTFail("expected an appeared event, got \(appeared)")
+        }
+
+        // A 0.40 downward pan: disjoint boxes, centroid distance 0.40 — past
+        // both `regionMatchIoU` and `regionMatchCentroidDistance`.
+        let moved = box(0.05, 0.45, width: 0.10, height: 0.05)
+        XCTAssertEqual(stabilizer.consume(regions: [observation("Wash", moved)]), [],
+                       "a camera movement is not a translation event")
+        XCTAssertEqual(stabilizer.visible.map(\.id), [identity],
+                       "the same string keeps the same identity however far its box moved")
+        XCTAssertEqual(stabilizer.visible.map(\.box), [moved],
+                       "geometry-only drift adopts the new box, never a new identity")
+        XCTAssertEqual(stabilizer.activeRegionCount, 1)
+    }
+
+    /// The same claim as a scripted pan: every frame moves the box, no frame
+    /// is a new region, and the whole movement emits nothing after the
+    /// publish pass. This is the frame sequence the device shake produced.
+    func testAScriptedCameraPanEmitsNothingAndBirthsNoIdentity() {
+        var stabilizer = TextRegionStabilizer(config: LiveTranslateConfig())
+        // Each step is a 0.40 pan: disjoint from the previous box, and past
+        // the centroid gate, so only the string can hold the region together.
+        let pan: [Double] = [0.05, 0.45, 0.85, 0.45, 0.05]
+
+        var published: TextRegionStabilizer.RegionIdentity?
+        for (frame, y) in pan.enumerated() {
+            let events = stabilizer.consume(regions: [observation("Wash", box(0.05, y, width: 0.10, height: 0.05))])
+            switch frame {
+            case 0:
+                XCTAssertEqual(events, [], "the first sighting is not yet a region")
+            case 1:
+                guard case .appeared(let identity) = events.first, events.count == 1 else {
+                    return XCTFail("expected one appeared event on frame 1, got \(events)")
+                }
+                published = identity
+            default:
+                XCTAssertEqual(events, [],
+                               "frame \(frame) of a pure camera movement must re-resolve nothing")
+            }
+        }
+
+        XCTAssertEqual(stabilizer.visible.map(\.id), [published].compactMap { $0 })
+        XCTAssertEqual(stabilizer.visible.map(\.box),
+                       [box(0.05, 0.05, width: 0.10, height: 0.05)],
+                       "the overlay followed the pan to the box it ended on")
+        XCTAssertEqual(stabilizer.activeRegionCount, 1,
+                       "five frames of movement produced one region, not five")
+    }
+
+    /// The window's positive half: a region missed once is still claimable by
+    /// its string, so a movement that straddles a dropped frame does not
+    /// create a second identity for the same sign.
+    func testAStringIdentitySurvivesAMissedPassWithinItsWindow() {
+        var stabilizer = TextRegionStabilizer(config: windowedConfig(missPasses: 2, window: 2))
+        let appeared = stabilizer.consume(regions: [observation("Exit", box(0.05, 0.05, width: 0.10, height: 0.05))])
+        guard case .appeared(let identity) = appeared.first else {
+            return XCTFail("expected an appeared event, got \(appeared)")
+        }
+
+        // One dropped frame: the region survives on hysteresis alone.
+        XCTAssertEqual(stabilizer.consume(regions: []), [])
+
+        // The sign is recognized again far away — geometry alone would call
+        // this a new region.
+        let reappeared = box(0.85, 0.85, width: 0.10, height: 0.05)
+        XCTAssertEqual(stabilizer.consume(regions: [observation("Exit", reappeared)]), [])
+        XCTAssertEqual(stabilizer.visible.map(\.id), [identity])
+        XCTAssertEqual(stabilizer.visible.map(\.box), [reappeared])
+    }
+
+    /// The window's negative half, and the pin on "the identifier of a
+    /// removed region is never resurrected": a region the stabiliser has been
+    /// missing for longer than `regionStringIdentityPasses` is not the same
+    /// region, however identical its text is.
+    func testAStringOutsideItsIdentityWindowIsANewRegion() {
+        var stabilizer = TextRegionStabilizer(config: windowedConfig(missPasses: 4, window: 2))
+        let appeared = stabilizer.consume(regions: [observation("Exit", box(0.05, 0.05, width: 0.10, height: 0.05))])
+        guard case .appeared(let identity) = appeared.first else {
+            return XCTFail("expected an appeared event, got \(appeared)")
+        }
+
+        // Three consecutive misses: alive on the miss bound, outside the
+        // window (pass 4 minus last seen at pass 1 is 3 > window 2).
+        for pass in 2...4 {
+            XCTAssertEqual(stabilizer.consume(regions: []), [], "pass \(pass) is a miss, not a removal")
+        }
+        XCTAssertEqual(stabilizer.visible.map(\.id), [identity],
+                       "the region is still alive — this is the window expiring, not the region")
+
+        let returned = stabilizer.consume(regions: [observation("Exit", box(0.85, 0.85,
+                                                                           width: 0.10, height: 0.05))])
+        guard case .appeared(let born) = returned.last, returned.count == 2 else {
+            return XCTFail("expected the old region to age out and a new one to appear, got \(returned)")
+        }
+        XCTAssertEqual(returned.first, .disappeared(id: identity))
+        XCTAssertNotEqual(born, identity,
+                          "a sighting outside the window is a new region, not a resurrected one")
+    }
+
+    /// Geometry is still the tiebreaker, and still the *fallback*: a
+    /// different string on a moved-but-overlapping box is a text change on
+    /// the same identity, never a new region — the string rule must not
+    /// hijack it.
+    func testADifferentStringOnAMovedBoxIsATextChangeOnTheSameIdentity() {
+        var stabilizer = TextRegionStabilizer(config: immediateConfig())
+        let appeared = stabilizer.consume(regions: [observation("Start", box(0.10, 0.10))])
+        guard case .appeared(let identity) = appeared.first else {
+            return XCTFail("expected an appeared event, got \(appeared)")
+        }
+
+        // Overlapping (IoU ≈ 0.43, above `regionMatchIoU`), different string.
+        XCTAssertEqual(stabilizer.consume(regions: [observation("Stop", box(0.12, 0.12))]),
+                       [.textChanged(id: identity)])
+        XCTAssertEqual(stabilizer.visible.map(\.id), [identity])
+        XCTAssertEqual(stabilizer.visible.map(\.text), ["Stop"])
+    }
+
+    /// Two occurrences of one string on one screen stay two regions through a
+    /// pan: each observation takes the occurrence nearest it, because
+    /// `seen` makes the earlier choice unavailable to the later one. Without
+    /// that, the string rule would collapse both signs onto one identity.
+    func testTwoOccurrencesOfOneStringKeepTheirOwnIdentitiesThroughAPan() {
+        var stabilizer = TextRegionStabilizer(config: immediateConfig())
+        let top = box(0.05, 0.05, width: 0.10, height: 0.05)
+        let bottom = box(0.45, 0.55, width: 0.10, height: 0.05)
+
+        let appeared = stabilizer.consume(regions: [observation("Save", top),
+                                                    observation("Save", bottom)])
+        XCTAssertEqual(appeared.count, 2, "two disjoint occurrences are two regions: \(appeared)")
+        let identities = stabilizer.visible.map(\.id)
+        XCTAssertEqual(identities.count, 2)
+
+        // A 0.40 downward pan: each box is disjoint from its predecessor and
+        // 0.40 away from it — past the centroid gate — while staying nearer
+        // its own occurrence than the other one. Only the string can hold
+        // each region together, and each observation must take its own.
+        let movedTop = box(0.05, 0.45, width: 0.10, height: 0.05)
+        let movedBottom = box(0.45, 0.95, width: 0.10, height: 0.05)
+        XCTAssertEqual(stabilizer.consume(regions: [observation("Save", movedTop),
+                                                    observation("Save", movedBottom)]), [])
+        XCTAssertEqual(stabilizer.visible.map(\.id), identities,
+                       "each occurrence kept its own identity through the pan")
+        XCTAssertEqual(stabilizer.visible.map(\.box), [movedTop, movedBottom])
+        XCTAssertEqual(stabilizer.activeRegionCount, 2,
+                       "a pan moves two regions; it does not create or merge any")
+    }
+
     // MARK: - Matching
 
     func testGeometryAndStringDecideTheMatch() {
