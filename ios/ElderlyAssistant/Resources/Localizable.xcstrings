@@ -8464,6 +8464,23 @@
         }
       }
     },
+    "meds.addTime": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Add another time"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अर्को समय थप्नुहोस्"
+          }
+        }
+      }
+    },
     "meds.challengePrompt": {
       "extractionState": "manual",
       "localizations": {
@@ -8579,6 +8596,74 @@
           "stringUnit": {
             "state": "translated",
             "value": "लिएँ"
+          }
+        }
+      }
+    },
+    "meds.lookup.searching": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Searching…"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "खोज्दै…"
+          }
+        }
+      }
+    },
+    "meds.lookup.notConfigured": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Web search is not set up. A family member can add a search key in Settings."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "वेब खोज सुरु गरिएको छैन। परिवारको कसैले सेटिङमा खोज कुञ्जी थप्न सक्नुहुन्छ।"
+          }
+        }
+      }
+    },
+    "meds.lookup.noResults": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I found nothing about this medicine."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो औषधिको बारेमा केही भेटिएन।"
+          }
+        }
+      }
+    },
+    "meds.lookup.failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The search could not be completed. Please try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "खोज पूरा हुन सकेन। कृपया फेरि प्रयास गर्नुहोस्।"
           }
         }
       }
@@ -8753,6 +8838,23 @@
         }
       }
     },
+    "meds.purpose.lookup": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Find out what it is for"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कुन कामको लागि हो, पत्ता लगाउनुहोस्"
+          }
+        }
+      }
+    },
     "meds.purpose.other": {
       "extractionState": "manual",
       "localizations": {
@@ -8885,6 +8987,108 @@
           "stringUnit": {
             "state": "translated",
             "value": "औषधिको सम्झना"
+          }
+        }
+      }
+    },
+    "meds.scanLabel": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Scan label"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "लेबल स्क्यान गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "meds.scan.removePhoto": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove photo"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोटो हटाउनुहोस्"
+          }
+        }
+      }
+    },
+    "meds.scan.photoAttached": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This photo will be saved with the medicine."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो फोटो औषधिसँगै राखिनेछ।"
+          }
+        }
+      }
+    },
+    "meds.scan.noText": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I could not read the label. The photo is attached — please fill in the name and time."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मैले लेबल पढ्न सकिन। फोटो भने जोडिएको छ — कृपया नाम र समय आफैं भर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "meds.scan.found": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Read from the label: %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "लेबलबाट पढियो: %@"
+          }
+        }
+      }
+    },
+    "meds.removeTime": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Remove this time"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो समय हटाउनुहोस्"
           }
         }
       }
@@ -14142,6 +14346,23 @@
         }
       }
     },
+    "settings.meds.strengthPlaceholder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Strength (e.g. 500 mg)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मात्रा (जस्तै ५०० मिग्रा)"
+          }
+        }
+      }
+    },
     "settings.meds.time": {
       "extractionState": "manual",
       "localizations": {
@@ -14155,6 +14376,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "समय"
+          }
+        }
+      }
+    },
+    "settings.meds.timeRequired": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Please set a time for this medicine."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "कृपया यो औषधिको समय राख्नुहोस्।"
           }
         }
       }

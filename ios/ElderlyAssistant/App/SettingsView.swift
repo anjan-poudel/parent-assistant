@@ -2887,14 +2887,24 @@ private struct PlacesEditorSheet: View {
 struct MedicationScheduleSettingsView: View {
     @EnvironmentObject var coordinator: AppCoordinator
 
-    @State private var name = ""
-    @State private var time = Date()
-    /// What the medicine is for ([MED-PURPOSE], 2026-09-17) — the ten
-    /// chips plus the family's own words, held as the value type that
-    /// owns the chips-prefill/free-text-overrides rule (see
-    /// `MedicationPurposeDraft`). The view only moves values in and reads
-    /// `storedValue` out at Save.
-    @State private var purpose = MedicationPurposeDraft()
+    /// The whole form as a value ([MED-OCR], 2026-09-18): the name, the
+    /// printed strength, the dose-time rows and the purpose step. The view
+    /// only moves state in and reads stored values out at Save — the
+    /// pre-fill rules for a label scan live in `MedicationEditorDraft`,
+    /// where they are tested without a view.
+    ///
+    /// It replaced three `@State` properties (`name`, `time`, `purpose`)
+    /// because the label scan fills several of them at once, and "what a
+    /// scan may overwrite" is exactly the rule a reader has to be able to
+    /// find in one place.
+    @State private var draft = MedicationEditorDraft()
+    /// The photo the last scan took, held until Save. The entry does not
+    /// exist yet — `addMedication` mints its id — so the picture waits here
+    /// and is written as the entry's first visual aid at save time.
+    @State private var scanPhoto: UIImage?
+    /// True while the purpose lookup is in flight: the button becomes the
+    /// "searching" line so a slow round-trip is never a dead button.
+    @State private var isLookingUpPurpose = false
     @State private var errorKey: String?
     /// The medication whose photos are being managed (medication-visual-
     /// aids task, 2026-09-16) — held as the full entry so the sheet renders
@@ -2960,6 +2970,17 @@ struct MedicationScheduleSettingsView: View {
                 Text(entry.medicationName)
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                     .foregroundStyle(DesignTokens.textPrimary)
+                // The printed strength ([MED-OCR], 2026-09-18) — read off
+                // the label by the scan flow and stored in the dose line.
+                // Shown on the row for the same reason the purpose is: a
+                // household with two boxes of the same medicine at different
+                // strengths must be able to tell them apart HERE, before
+                // anyone is asked to take one.
+                if !entry.doseDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(entry.doseDescription)
+                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .foregroundStyle(DesignTokens.textSecondary)
+                }
                 Text(timesText(entry.scheduleTimes))
                     .font(.system(size: DesignTokens.minCaptionPointSize))
                     .foregroundStyle(DesignTokens.textSecondary)
@@ -3012,27 +3033,30 @@ struct MedicationScheduleSettingsView: View {
 
     private var addForm: some View {
         VStack(spacing: 10) {
-            TextField(LocalizedStringKey("settings.meds.name"), text: $name)
+            scanLabelButton
+            if let scanPhoto {
+                scannedPhotoRow(scanPhoto)
+            }
+            TextField(LocalizedStringKey("settings.meds.name"), text: $draft.name)
                 .font(.system(size: DesignTokens.minBodyPointSize))
                 .padding(14)
                 .frame(minHeight: 56)
                 .fixedSize(horizontal: false, vertical: true)
                 .background(DesignTokens.background)
                 .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
-            HStack(spacing: 12) {
-                Text("settings.meds.time")
-                    .font(.system(size: DesignTokens.minBodyPointSize))
-                    .foregroundStyle(DesignTokens.textPrimary)
-                Spacer()
-                DatePicker("", selection: $time, displayedComponents: .hourAndMinute)
-                    .labelsHidden()
-                    .environment(\.locale, coordinator.activeLocale)
-            }
-            .padding(14)
-            .frame(minHeight: 56)
-            .fixedSize(horizontal: false, vertical: true)
-            .background(DesignTokens.background)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+            // The printed strength ([MED-OCR], 2026-09-18) — read off the
+            // label, editable like every other scan-filled field, and stored
+            // in the entry's dose line.
+            TextField(LocalizedStringKey("settings.meds.strengthPlaceholder"),
+                      text: $draft.strength)
+                .font(.system(size: DesignTokens.minBodyPointSize))
+                .padding(14)
+                .frame(minHeight: 56)
+                .fixedSize(horizontal: false, vertical: true)
+                .background(DesignTokens.background)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+
+            timeRows
 
             purposeStep
 
@@ -3044,15 +3068,17 @@ struct MedicationScheduleSettingsView: View {
             }
 
             Button {
-                let components = Calendar.current.dateComponents([.hour, .minute], from: time)
-                errorKey = coordinator.addMedication(name: name,
-                                                     time: components,
-                                                     purpose: purpose.storedValue)
+                errorKey = coordinator.addMedication(name: draft.storedName,
+                                                     times: draft.storedTimes,
+                                                     purpose: draft.storedPurpose,
+                                                     strength: draft.storedStrength,
+                                                     photo: scanPhoto)
                 // Cleared only on success, like the name: a rejected save
-                // must not throw away what the family chose.
+                // must not throw away what the family chose — nor the photo
+                // they took for it.
                 if errorKey == nil {
-                    name = ""
-                    purpose = MedicationPurposeDraft()
+                    draft = MedicationEditorDraft()
+                    scanPhoto = nil
                 }
             } label: {
                 Text("settings.meds.save")
@@ -3070,6 +3096,153 @@ struct MedicationScheduleSettingsView: View {
         .frame(maxWidth: .infinity)
         .background(DesignTokens.card)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    // MARK: - Scan label ([MED-OCR], 2026-09-18)
+
+    /// "Scan label" — the camera, then on-device OCR, then the form.
+    ///
+    /// What the scan may and may not do is the whole feature's contract, and
+    /// it is enforced in `MedicationEditorDraft.applyScan` rather than here:
+    /// blank fields are filled, the label's schedule replaces the form's,
+    /// and NOTHING is saved. The family confirms on Save like every other
+    /// medication — an OCR misread costs a correction, never a dose.
+    private var scanLabelButton: some View {
+        Button {
+            scanLabel()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "text.viewfinder")
+                    .font(.system(size: 24, weight: .semibold))
+                Text("meds.scanLabel")
+                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+            }
+            .foregroundStyle(DesignTokens.accent)
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: DesignTokens.minTapTargetSize + 12)
+            .background(DesignTokens.setupReminder)
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// The photo the scan took, shown while the form is still being filled
+    /// in: the family can see that the picture they just took is going to be
+    /// the medicine's visual aid. It is attached on Save — see `save`.
+    private func scannedPhotoRow(_ image: UIImage) -> some View {
+        HStack(spacing: 12) {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 56, height: 56)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+            Text("meds.scan.photoAttached")
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundStyle(DesignTokens.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            Button {
+                scanPhoto = nil
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 22))
+                    .foregroundStyle(DesignTokens.textSecondary)
+                    .frame(minWidth: DesignTokens.minTapTargetSize,
+                           minHeight: DesignTokens.minTapTargetSize)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text("meds.scan.removePhoto"))
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity)
+        .background(DesignTokens.background)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+    }
+
+    private func scanLabel() {
+        coordinator.scanMedicationLabel { result in
+            switch result {
+            case .scanned(let image, let candidate):
+                // The shutter fired: the photo is kept for Save either way.
+                scanPhoto = image
+                // …and the reading is applied, which is a no-op for a
+                // candidate that found nothing.
+                if let candidate { draft.applyScan(candidate) }
+            case .cancelled, .unavailable:
+                // The scanner has already spoken the honest line (the
+                // cancelled acknowledgement, or the camera guidance); the
+                // form is left exactly as it was.
+                break
+            }
+        }
+    }
+
+    /// One row per dose time ([MED-OCR], 2026-09-18): the editor used to
+    /// hold exactly one time, which could not express a `1-0-1` label — or
+    /// any medicine taken twice a day.
+    private var timeRows: some View {
+        VStack(spacing: 10) {
+            ForEach(draft.times.indices, id: \.self) { index in
+                HStack(spacing: 12) {
+                    Text("settings.meds.time")
+                        .font(.system(size: DesignTokens.minBodyPointSize))
+                        .foregroundStyle(DesignTokens.textPrimary)
+                    Spacer()
+                    DatePicker("", selection: timeBinding(at: index),
+                               displayedComponents: .hourAndMinute)
+                        .labelsHidden()
+                        .environment(\.locale, coordinator.activeLocale)
+                    // The last row cannot be removed: a medication with no
+                    // dose time is not a schedule, and `addMedication`
+                    // rejects one.
+                    if draft.times.count > 1 {
+                        Button {
+                            draft.removeTime(at: index)
+                        } label: {
+                            Image(systemName: "minus.circle.fill")
+                                .font(.system(size: 22))
+                                .foregroundStyle(DesignTokens.stateError)
+                                .frame(minWidth: DesignTokens.minTapTargetSize,
+                                       minHeight: DesignTokens.minTapTargetSize)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(Text("meds.removeTime"))
+                    }
+                }
+                .padding(14)
+                .frame(minHeight: 56)
+                .fixedSize(horizontal: false, vertical: true)
+                .background(DesignTokens.background)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+            }
+            Button {
+                draft.addTime()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                    Text("meds.addTime")
+                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                }
+                .foregroundStyle(DesignTokens.accent)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
+                .background(DesignTokens.background)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func timeBinding(at index: Int) -> Binding<Date> {
+        Binding(
+            get: { draft.times.indices.contains(index) ? draft.times[index] : Date() },
+            set: { newValue in
+                guard draft.times.indices.contains(index) else { return }
+                draft.times[index] = newValue
+            }
+        )
     }
 
     // The two calendar cards that used to close this leaf — the
@@ -3110,8 +3283,8 @@ struct MedicationScheduleSettingsView: View {
             }
             TextField(LocalizedStringKey("meds.purpose.freeTextPlaceholder"),
                       text: Binding(
-                        get: { purpose.text },
-                        set: { purpose.editText($0) }
+                        get: { draft.purpose.text },
+                        set: { draft.purpose.editText($0) }
                       ))
                 .font(.system(size: DesignTokens.minBodyPointSize))
                 .padding(14)
@@ -3119,11 +3292,61 @@ struct MedicationScheduleSettingsView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .background(DesignTokens.background)
                 .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+            purposeLookupButton
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(DesignTokens.background)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+    }
+
+    /// "What is this medicine for?" ([MED-PURPOSE-LOOKUP], 2026-09-18) — the
+    /// web lookup that fills the field above.
+    ///
+    /// Disabled until there is a NAME to ask about: a lookup for a blank
+    /// medicine is a request with nothing in it, and the field it would fill
+    /// is the one the family is still typing in. The result lands in the
+    /// free-text field (never silently as a chip) and the family edits or
+    /// clears it before Save — this is the same advisory rule the label scan
+    /// follows.
+    private var purposeLookupButton: some View {
+        Button {
+            lookupPurpose()
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 18, weight: .semibold))
+                Text(isLookingUpPurpose ? "meds.lookup.searching" : "meds.purpose.lookup")
+                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+            }
+            .foregroundStyle(canLookUpPurpose ? DesignTokens.accent : DesignTokens.textSecondary)
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: DesignTokens.minTapTargetSize)
+            .background(DesignTokens.card)
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+        }
+        .buttonStyle(.plain)
+        .disabled(!canLookUpPurpose)
+    }
+
+    /// A name to ask about, and no lookup already running.
+    private var canLookUpPurpose: Bool {
+        !draft.storedName.isEmpty && !isLookingUpPurpose
+    }
+
+    private func lookupPurpose() {
+        let name = draft.storedName
+        guard !name.isEmpty else { return }
+        isLookingUpPurpose = true
+        coordinator.lookupMedicationPurpose(name: name) { outcome in
+            isLookingUpPurpose = false
+            // Only the FOUND text touches the form; every other outcome was
+            // spoken by the coordinator, and a field the family is reading
+            // is never quietly rewritten to say "nothing found".
+            if case .found(let text) = outcome {
+                draft.applyPurposeLookup(text)
+            }
+        }
     }
 
     /// `MedicationPurpose.allCases` in the design's order, two per row.
@@ -3142,9 +3365,9 @@ struct MedicationScheduleSettingsView: View {
     }()
 
     private func purposeChip(_ chip: MedicationPurpose) -> some View {
-        let isSelected = purpose.chip == chip
+        let isSelected = draft.purpose.chip == chip
         return Button {
-            purpose.select(chip, locale: coordinator.activeLocale)
+            draft.purpose.select(chip, locale: coordinator.activeLocale)
         } label: {
             Text(chip.label(locale: coordinator.activeLocale))
                 .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
