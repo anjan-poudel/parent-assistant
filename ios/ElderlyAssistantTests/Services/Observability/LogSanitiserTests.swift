@@ -38,6 +38,15 @@ final class LogSanitiserTests: XCTestCase {
                      "unknown metadata keys are still dropped outright")
     }
 
+    func testDecodeDetailSurvivesTheSanitiser() {
+        // [DECODE-DIAGNOSTIC] The Google schema field a decode failed on
+        // must reach the console — it is the entire diagnostic value.
+        let clean = sanitiser.sanitise(event(metadata: [
+            "decode_detail": "type_mismatch:items",
+        ]))
+        XCTAssertEqual(clean.metadata["decode_detail"], "type_mismatch:items")
+    }
+
     func testScopeLedgerNamesSurviveTheSanitiser() {
         // [SCOPE-LEDGER] The console must be able to say which Google
         // scope is granted or missing — fixed vocabulary names, no PII.

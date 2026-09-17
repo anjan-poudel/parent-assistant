@@ -353,8 +353,16 @@ final class GoogleCalendarGateway: GoogleCalendarGatewayProtocol {
         }
         guard let (data, _) = await roundTrip(request(url, method: "GET", token: token),
                                               event: event, kind: nil) else { return nil }
-        guard let page = try? JSONDecoder().decode(EventListResponse.self, from: data) else {
-            recordMalformed(event, kind: nil)
+        let page: EventListResponse
+        do {
+            page = try JSONDecoder().decode(EventListResponse.self, from: data)
+        } catch {
+            // [DECODE-DIAGNOSTIC] The structure of the mismatch rides in
+            // the observable event (Release included), so the next
+            // device capture names the exact Google field that broke
+            // the decode.
+            recordMalformed(event, kind: nil,
+                            decodeDetail: Self.decodeDetail(from: error))
             // [INBOUND-DEBUG] (2026-09-17) Debug builds print the first
             // bytes of a 2xx body the decoder rejected, so the real
             // Google response shape can be seen on a device run and the
@@ -654,9 +662,38 @@ final class GoogleCalendarGateway: GoogleCalendarGatewayProtocol {
     /// A 2xx whose body did not contain what was asked of it — the one
     /// failure the round-trip chokepoint cannot see, because the status
     /// was fine and the body was not.
-    private func recordMalformed(_ event: String, kind: EventNotifyKind?) {
+    ///
+    /// [DECODE-DIAGNOSTIC] (2026-09-17) `decodeDetail` names the STRUCTURE
+    /// of the mismatch — a Google schema field name and the DecodingError
+    /// kind — so a Release device console can say exactly which field
+    /// broke the decode (the 2026-09-17 inbound 403/404 saga hid behind
+    /// `malformed_response` for a day because no such detail existed).
+    /// Field names are Google's fixed schema vocabulary, never content.
+    private func recordMalformed(_ event: String, kind: EventNotifyKind?,
+                                 decodeDetail: String? = nil) {
         lastErrorClass = .malformedResponse
-        emit("\(event)_failed", outcome: "failure", error: .malformedResponse, kind: kind)
+        var metadata: [String: String] = [:]
+        if let decodeDetail { metadata["decode_detail"] = decodeDetail }
+        emit("\(event)_failed", outcome: "failure", error: .malformedResponse,
+             kind: kind, metadata: metadata)
+    }
+
+    /// Reduces a JSON decode failure to a bounded, content-free label:
+    /// the DecodingError kind plus the Google schema path it names.
+    private static func decodeDetail(from error: Error) -> String {
+        guard let decoding = error as? DecodingError else { return "unknown" }
+        switch decoding {
+        case .keyNotFound(let key, _):
+            return "key_not_found:\(key.stringValue)"
+        case .typeMismatch(_, let context):
+            return "type_mismatch:\(context.codingPath.map(\.stringValue).joined(separator: "."))"
+        case .valueNotFound(_, let context):
+            return "value_not_found:\(context.codingPath.map(\.stringValue).joined(separator: "."))"
+        case .dataCorrupted:
+            return "data_corrupted"
+        @unknown default:
+            return "unknown"
+        }
     }
 
     // MARK: - Observability
