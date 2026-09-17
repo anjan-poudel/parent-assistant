@@ -1,0 +1,594 @@
+import CoreMedia
+import CoreText
+import CoreVideo
+import UIKit
+import Vision
+import XCTest
+@testable import ElderlyAssistant
+
+/// T-007 — the detector's contract: two non-interchangeable request kinds, the
+/// OCR cadence, the drop-a-failed-pass rule, the tracking degradation and the
+/// language it refuses to invent (FR-LCT-003/004, NFR-LCT-001/002/005).
+///
+/// Two layers deliberately. The **policy** is exercised against a scripted
+/// recognition engine, so the pass-kind decisions and the failure paths are
+/// exact and camera-free. The **shipped engine** is exercised for real on a
+/// rendered frame, so "on device" is evidenced by Vision rather than asserted.
+final class LiveTextDetectorTests: XCTestCase {
+
+    private var bus: LiveTranslateSanitisingBus!
+    private var engine: ScriptedRecognitionEngine!
+    private var clock: Clock!
+
+    /// The injectable time source: the cadence is advanced, never slept.
+    final class Clock {
+        var now: TimeInterval = 1_000
+        func advance(by seconds: TimeInterval) { now += seconds }
+    }
+
+    override func setUp() {
+        super.setUp()
+        bus = LiveTranslateSanitisingBus()
+        engine = ScriptedRecognitionEngine()
+        clock = Clock()
+    }
+
+    private func makeDetector(config: LiveTranslateConfig = .default) -> LiveTextDetector {
+        LiveTextDetector(config: config,
+                         observabilityBus: bus,
+                         engine: engine,
+                         now: { [clock] in clock?.now ?? 0 })
+    }
+
+    private func frame() throws -> CameraFrame {
+        try XCTUnwrap(CameraFrame(sampleBuffer: SampleBufferFactory.make(
+            width: 64, height: 48, pts: CMTime(value: 1, timescale: 1))))
+    }
+
+    private func region(_ text: String, x: Double = 0.2, y: Double = 0.2) -> LiveTextDetector.DetectedTextRegion {
+        LiveTextDetector.DetectedTextRegion(
+            text: text,
+            normalizedBox: NormalizedBox(xMin: x, yMin: y, xMax: x + 0.2, yMax: y + 0.1),
+            detectedLanguage: nil,
+            confidence: 0.9)
+    }
+
+    private func box(_ x: Double) -> NormalizedBox {
+        NormalizedBox(xMin: x, yMin: 0.1, xMax: x + 0.2, yMax: 0.2)
+    }
+
+    // MARK: Scenario: the OCR pass is the only source of recognized text
+
+    func testAnOCRPassProducesTextAndNoTrackedGeometry() async throws {
+        engine.regions = [region("Exit"), region("Push")]
+        let detector = makeDetector()
+        XCTAssertTrue(detector.begin().isSuccess)
+
+        let result = await detector.recognize(try frame())
+
+        guard case .success(let pass) = result else { return XCTFail("expected a pass: \(result)") }
+        XCTAssertEqual(pass.regions.map(\.text), ["Exit", "Push"])
+        XCTAssertTrue(pass.trackedBoxes.isEmpty,
+                      "an OCR pass anchors geometry; it does not report tracked boxes")
+        XCTAssertEqual(bus.events(named: "ocr_pass").first?.metadata["regionCount"], "2")
+        XCTAssertEqual(bus.events(named: "ocr_pass").first?.outcome, "success")
+    }
+
+    func testATrackingPassProducesGeometryOnlyAndCannotChangeText() async throws {
+        engine.regions = [region("Exit"), region("Push")]
+        engine.trackedBoxes = ["Exit": box(0.25), "Push": box(0.55)]
+        let detector = makeDetector()
+        XCTAssertTrue(detector.begin().isSuccess)
+
+        _ = await detector.recognize(try frame())
+        clock.advance(by: detector.config.ocrSampleInterval / 2)
+        let result = await detector.recognize(try frame())
+
+        guard case .success(let pass) = result else { return XCTFail("expected a pass: \(result)") }
+        XCTAssertEqual(engine.trackCallCount, 1, "the second pass is the tracking kind")
+        XCTAssertTrue(pass.regions.isEmpty,
+                      "a tracking pass has no string in its output: text changes only on an OCR pass")
+        XCTAssertEqual(pass.trackedBoxes, ["Exit": box(0.25), "Push": box(0.55)])
+    }
+
+    // MARK: Scenario: tracking carries position between OCR passes
+
+    func testATrackingLossOmitsTheKeyRatherThanMovingOrDroppingTheRegion() async throws {
+        engine.regions = [region("Exit"), region("Push")]
+        // The tracker held "Exit" and lost "Push" on this frame.
+        engine.trackedBoxes = ["Exit": box(0.25)]
+        let detector = makeDetector()
+        _ = detector.begin()
+
+        _ = await detector.recognize(try frame())
+        clock.advance(by: detector.config.ocrSampleInterval / 2)
+        let result = await detector.recognize(try frame())
+
+        guard case .success(let pass) = result else { return XCTFail("expected a pass: \(result)") }
+        XCTAssertEqual(Array(pass.trackedBoxes.keys), ["Exit"],
+                       "a lost key is absent, so the stabiliser keeps the last OCR-confirmed geometry")
+        XCTAssertEqual(pass.trackedBoxes["Exit"], box(0.25))
+    }
+
+    func testTrackingIsNotEvenAttemptedWhenAnOCRPassRecognizedNothing() async throws {
+        engine.regions = []
+        let detector = makeDetector()
+        _ = detector.begin()
+
+        _ = await detector.recognize(try frame())
+        clock.advance(by: detector.config.ocrSampleInterval / 2)
+        _ = await detector.recognize(try frame())
+
+        XCTAssertEqual(engine.trackCallCount, 0,
+                       "with nothing remembered there is no rectangle to follow: OCR runs instead")
+        XCTAssertEqual(engine.recognizeCallCount, 2)
+    }
+
+    // MARK: Scenario: an unreadable frame is not an error
+
+    func testAnEmptyPassSucceedsWithNoRegionsAndReportsTheEmptyOutcome() async throws {
+        engine.regions = []
+        let detector = makeDetector()
+        _ = detector.begin()
+
+        let result = await detector.recognize(try frame())
+
+        XCTAssertEqual(result, .success(LiveTextDetector.Pass(regions: [], trackedBoxes: [:])))
+        let events = bus.events(named: "ocr_pass")
+        XCTAssertEqual(events.count, 1)
+        XCTAssertEqual(events.first?.outcome, "empty", "zero regions is the empty-state hint")
+        XCTAssertEqual(events.first?.metadata["regionCount"], "0")
+        XCTAssertTrue(bus.events(named: "ocr_pass_failed").isEmpty)
+    }
+
+    // MARK: Scenario: a failed pass is dropped, never surfaced
+
+    func testAFailedPassIsReportedAsAFailureRecordedOnceAndNotLatched() async throws {
+        engine.errorToThrow = StubFailure(message: "vision refused")
+        let detector = makeDetector()
+        _ = detector.begin()
+
+        let failed = await detector.recognize(try frame())
+
+        XCTAssertEqual(failed.failureError, .ocrPassFailed(.requestFailed))
+        XCTAssertEqual(bus.events(named: "ocr_pass_failed").count, 1)
+        XCTAssertFalse(detector.isPassInFlight, "a failed pass must not wedge the in-flight flag")
+        XCTAssertTrue(bus.events(named: "ocr_pass").isEmpty)
+
+        // The next pass simply tries again — and succeeds.
+        engine.errorToThrow = nil
+        engine.regions = [region("Exit")]
+        let retried = await detector.recognize(try frame())
+
+        guard case .success(let pass) = retried else { return XCTFail("expected a pass: \(retried)") }
+        XCTAssertEqual(pass.regions.map(\.text), ["Exit"])
+    }
+
+    func testNoRecognizedTextReachesTheEvents() async throws {
+        engine.regions = [region("Emergency Exit"), region("आपतकालीन निकास")]
+        engine.trackedBoxes = ["Emergency Exit": box(0.3)]
+        let detector = makeDetector()
+        _ = detector.begin()
+
+        _ = await detector.recognize(try frame())
+        clock.advance(by: detector.config.ocrSampleInterval / 2)
+        _ = await detector.recognize(try frame())
+
+        for event in bus.events {
+            XCTAssertEqual(event.component, LiveTranslateEventCatalogue.component)
+            let entry = try XCTUnwrap(LiveTranslateEventCatalogue.entries[event.eventType])
+            XCTAssertTrue(entry.outcomes.contains(event.outcome))
+            XCTAssertTrue(entry.metadataKeys.isSuperset(of: Set(event.metadata.keys)))
+            for value in event.metadata.values {
+                XCTAssertFalse(value.contains(" "), "metadata carries counts and tokens, never text")
+            }
+            XCTAssertNil(event.metadata["text"])
+        }
+    }
+
+    // MARK: Scenario: unsupported tracking degrades to OCR-only
+
+    func testUnsupportedTrackingIsAnnouncedOnceAndTheDetectorKeepsWorkingWithOCR() async throws {
+        engine.supportsTracking = false
+        engine.regions = [region("Exit")]
+        let detector = makeDetector()
+
+        XCTAssertTrue(detector.begin().isSuccess, "tracking is a SHOULD: the feature stays usable")
+        XCTAssertEqual(bus.events(named: "tracking_unsupported").count, 1)
+
+        let result = await detector.recognize(try frame())
+
+        guard case .success(let pass) = result else { return XCTFail("expected a pass: \(result)") }
+        XCTAssertEqual(pass.regions.map(\.text), ["Exit"])
+        XCTAssertEqual(engine.trackCallCount, 0)
+        XCTAssertEqual(bus.events(named: "tracking_unsupported").count, 1,
+                       "the degradation is announced once, not once per pass")
+    }
+
+    func testTurningTrackingOffInConfigIsNotADegradationAndIsNotReported() async throws {
+        engine.supportsTracking = true
+        engine.regions = [region("Exit")]
+        var config = LiveTranslateConfig.default
+        config.trackingEnabled = false
+        let detector = makeDetector(config: config)
+
+        _ = detector.begin()
+        _ = await detector.recognize(try frame())
+        clock.advance(by: config.ocrSampleInterval / 2)
+        _ = await detector.recognize(try frame())
+
+        XCTAssertEqual(engine.trackCallCount, 0, "a configured off is not a pass kind")
+        XCTAssertTrue(bus.events(named: "tracking_unsupported").isEmpty,
+                      "tracking switched off by configuration is the feature working as configured")
+    }
+
+    func testATrackingRequestTheDeviceRefusesDegradesTheDetectorAtThatMoment() async throws {
+        engine.regions = [region("Exit")]
+        engine.trackingError = StubFailure(message: "no tracker")
+        let detector = makeDetector()
+        _ = detector.begin()
+
+        _ = await detector.recognize(try frame())
+        clock.advance(by: detector.config.ocrSampleInterval / 2)
+        let tracking = await detector.recognize(try frame())
+
+        XCTAssertEqual(tracking, .failure(.trackingUnsupported),
+                       "the refused request is reported to the caller, which drops it like any failed pass")
+        XCTAssertEqual(bus.events(named: "tracking_unsupported").count, 1)
+
+        // Degraded: the next frame runs OCR, and the refusal is not re-reported.
+        clock.advance(by: detector.config.ocrSampleInterval / 2)
+        let next = await detector.recognize(try frame())
+        guard case .success(let pass) = next else { return XCTFail("expected a pass: \(next)") }
+        XCTAssertEqual(pass.regions.map(\.text), ["Exit"])
+        XCTAssertEqual(engine.trackCallCount, 1, "tracking is not attempted again after the refusal")
+        XCTAssertEqual(bus.events(named: "tracking_unsupported").count, 1)
+    }
+
+    // MARK: The cadence (NFR-LCT-002)
+
+    func testThePassKindFollowsTheConfiguredCadence() async throws {
+        engine.regions = [region("Exit")]
+        let detector = makeDetector()
+        _ = detector.begin()
+        _ = await detector.recognize(try frame())
+
+        let base = LiveTranslateConfig.default.ocrSampleInterval
+        XCTAssertEqual(detector.passKind(at: clock.now + base / 2), .tracking)
+        XCTAssertEqual(detector.passKind(at: clock.now + base), .ocr,
+                       "at the cadence an OCR pass is due")
+
+        // The cadence is the config's value, not a literal: doubling it makes
+        // the same moment fall inside the interval again.
+        var slower = LiveTranslateConfig.default
+        slower.ocrSampleInterval = base * 2
+        let relaxed = makeDetector(config: slower)
+        _ = relaxed.begin()
+        _ = await relaxed.recognize(try frame())
+        XCTAssertEqual(relaxed.passKind(at: clock.now + base + base / 2), .tracking)
+    }
+
+    func testTrackingIsNeverTheFirstPassOfASession() async throws {
+        engine.regions = [region("Exit")]
+        let detector = makeDetector()
+        _ = detector.begin()
+
+        XCTAssertEqual(detector.passKind(at: clock.now), .ocr,
+                       "there is nothing remembered to track before the first OCR pass")
+    }
+
+    // MARK: Lifecycle
+
+    func testRecognizingBeforeBeginIsReportedRatherThanRun() async throws {
+        let detector = makeDetector()
+
+        let result = await detector.recognize(try frame())
+
+        XCTAssertEqual(result.failureError, .ocrUnavailable(.requestCreationFailed))
+        XCTAssertEqual(engine.recognizeCallCount, 0, "no pass is run without a session")
+    }
+
+    func testEndForgetsWhatWasRememberedAndTheDetectorIsUsableAgainAfterBegin() async throws {
+        engine.regions = [region("Exit")]
+        let detector = makeDetector()
+        _ = detector.begin()
+        _ = await detector.recognize(try frame())
+
+        detector.end()
+        detector.end()
+
+        XCTAssertEqual(engine.forgetCallCount, 1, "end() is idempotent")
+        let afterEnd = await detector.recognize(try frame())
+        XCTAssertEqual(afterEnd.failureError, .ocrUnavailable(.requestCreationFailed))
+
+        _ = detector.begin()
+        let result = await detector.recognize(try frame())
+        guard case .success = result else { return XCTFail("expected a pass after re-begin: \(result)") }
+        XCTAssertEqual(detector.passKind(at: clock.now + LiveTranslateConfig.default.ocrSampleInterval / 2),
+                       .tracking,
+                       "the re-begun session remembers the OCR pass it just made")
+    }
+
+    func testIsPassInFlightIsTrueForTheWholePassAndFalseAfterwards() async throws {
+        let hold = DispatchSemaphore(value: 0)
+        let entered = expectation(description: "the pass reached the engine")
+        engine.hold = hold
+        engine.onEnter = { entered.fulfill() }
+        engine.regions = [region("Exit")]
+        let detector = makeDetector()
+        _ = detector.begin()
+        XCTAssertFalse(detector.isPassInFlight)
+
+        let sample = try frame()
+        let pass = Task { await detector.recognize(sample) }
+        await fulfillment(of: [entered], timeout: 5)
+
+        XCTAssertTrue(detector.isPassInFlight,
+                      "the camera's tap reads this to drop samples while Vision is busy")
+        hold.signal()
+        _ = await pass.value
+        XCTAssertFalse(detector.isPassInFlight)
+    }
+
+    func testTwoConcurrentCallersAreSerialisedRatherThanRacingTheRequestHandler() async throws {
+        let hold = DispatchSemaphore(value: 0)
+        let entered = expectation(description: "the first pass reached the engine")
+        engine.hold = hold
+        engine.onEnter = { entered.fulfill() }
+        engine.regions = [region("Exit")]
+        let detector = makeDetector()
+        _ = detector.begin()
+
+        let sample = try frame()
+        let first = Task { await detector.recognize(sample) }
+        await fulfillment(of: [entered], timeout: 5)
+        let second = Task { await detector.recognize(sample) }
+        hold.signal()
+
+        _ = await first.value
+        _ = await second.value
+
+        XCTAssertEqual(engine.maxConcurrentRecognitions, 1,
+                       "one pass at a time: Vision's request handler is never shared")
+        XCTAssertEqual(engine.recognizeCallCount + engine.trackCallCount, 2,
+                       "the second caller was served (as the pass its cadence calls for), not dropped")
+    }
+
+    // MARK: Recognition is on device (NFR-LCT-001)
+
+    func testTheDetectorReachesNoNetworkAndDownloadsNoModel() {
+        let file = FeatureSourceScan.iosDirectory()
+            .appendingPathComponent(FeatureSourceScan.liveTranslateSources)
+            .appendingPathComponent("LiveTextDetector.swift")
+        let code = FeatureSourceScan.codeText(of: file)
+        XCTAssertFalse(code.isEmpty, "the detector source must be scanned, not skipped")
+
+        let networkAndDownload = [
+            "URLSession", "URLRequest", "dataTask", "URLComponents", "NWConnection",
+            "http://", "https://", "GeminiClient", "VNCoreMLModel", "MLModel",
+            "url(forResource"
+        ]
+        for token in networkAndDownload {
+            let pattern = NSRegularExpression.escapedPattern(for: token)
+            XCTAssertNil(FeatureSourceScan.firstMatch(of: pattern, in: code),
+                         "\(token) does not belong in on-device recognition (FR-LCT-003)")
+        }
+        XCTAssertTrue(code.contains("import Vision"), "recognition is Vision's, and it is local")
+    }
+}
+
+// MARK: - The shipped engine, on a rendered frame
+
+/// The same detector, driven by `VisionTextRecognitionEngine` — the shipped
+/// path — over frames rendered in memory. This is where "on device" stops
+/// being a claim.
+final class VisionTextRecognitionEngineTests: XCTestCase {
+
+    private var bus: LiveTranslateSanitisingBus!
+
+    override func setUp() {
+        super.setUp()
+        bus = LiveTranslateSanitisingBus()
+    }
+
+    private func makeDetector() -> LiveTextDetector {
+        LiveTextDetector(config: .default, observabilityBus: bus)
+    }
+
+    private func recognize(_ text: String, pointSize: CGFloat = 72) throws -> LiveTextDetector.Pass? {
+        let frame = try XCTUnwrap(CameraFrame(sampleBuffer: SampleBufferFactory.make(
+            width: 1200, height: 400, pts: CMTime(value: 1, timescale: 1))))
+        try render(lines: [text], pointSize: pointSize, into: frame.pixelBuffer)
+        let detector = makeDetector()
+        XCTAssertTrue(detector.begin().isSuccess)
+        guard case .success(let pass) = awaitResult(detector, frame) else { return nil }
+        return pass
+    }
+
+    /// `recognize` is asynchronous; this bridges it for the synchronous
+    /// helpers above without a second event-loop library.
+    private func awaitResult(_ detector: LiveTextDetector, _ frame: CameraFrame) -> Result<LiveTextDetector.Pass, LiveTranslateError> {
+        var outcome: Result<LiveTextDetector.Pass, LiveTranslateError>?
+        let done = DispatchSemaphore(value: 0)
+        Task {
+            outcome = await detector.recognize(frame)
+            done.signal()
+        }
+        done.wait()
+        return outcome ?? .failure(.ocrPassFailed(.requestFailed))
+    }
+
+    func testEnglishTextIsRecognizedOnDeviceWithAValidBoxInReadingOrientation() throws {
+        let pass = try XCTUnwrap(recognize("Emergency Exit"))
+
+        let region = try XCTUnwrap(pass.regions.first { $0.text.localizedCaseInsensitiveContains("emergency") },
+                                   "Vision read nothing from the rendered frame: \(pass.regions.map(\.text))")
+        XCTAssertTrue(region.normalizedBox.isValid)
+        XCTAssertGreaterThanOrEqual(region.normalizedBox.xMin, 0)
+        XCTAssertLessThanOrEqual(region.normalizedBox.xMax, 1)
+        XCTAssertGreaterThanOrEqual(region.normalizedBox.yMin, 0)
+        XCTAssertLessThanOrEqual(region.normalizedBox.yMax, 1)
+        // The line is rendered near the top of the frame. Vision reports boxes
+        // with a bottom-left origin, so this is only true if the detector
+        // mirrored `y` into the feature's top-left representation.
+        XCTAssertLessThan(region.normalizedBox.center.y, 0.5,
+                          "the box must be in the feature's top-left orientation")
+        XCTAssertGreaterThan(region.confidence, 0)
+        XCTAssertNil(region.detectedLanguage,
+                     "the classic Vision API reports no per-observation language: omit it, never guess")
+        XCTAssertEqual(bus.events(named: "ocr_pass").first?.outcome, "success")
+    }
+
+    func testTheTrackingPassFollowsARememberedRectangleAndNeverReturnsText() throws {
+        let frame = try XCTUnwrap(CameraFrame(sampleBuffer: SampleBufferFactory.make(
+            width: 1200, height: 400, pts: CMTime(value: 1, timescale: 1))))
+        try render(lines: ["Emergency Exit"], pointSize: 72, into: frame.pixelBuffer)
+        let engine = VisionTextRecognitionEngine()
+
+        let regions = try engine.recognizeText(in: frame.pixelBuffer)
+        let text = try XCTUnwrap(regions.first?.text)
+        let tracked = try engine.followRememberedRectangles(in: frame.pixelBuffer)
+
+        XCTAssertNotNil(tracked[text], "the same frame must still hold the rectangle it just found")
+        XCTAssertEqual(tracked.count, 1)
+        for value in tracked.values {
+            XCTAssertTrue(value.isValid, "the tracking pass reports geometry, and geometry is valid or absent")
+        }
+    }
+
+    func testForgettingTheRectanglesEndsTracking() throws {
+        let frame = try XCTUnwrap(CameraFrame(sampleBuffer: SampleBufferFactory.make(
+            width: 1200, height: 400, pts: CMTime(value: 1, timescale: 1))))
+        try render(lines: ["Emergency Exit"], pointSize: 72, into: frame.pixelBuffer)
+        let engine = VisionTextRecognitionEngine()
+
+        _ = try engine.recognizeText(in: frame.pixelBuffer)
+        engine.forgetRememberedRectangles()
+
+        XCTAssertEqual(try engine.followRememberedRectangles(in: frame.pixelBuffer), [:])
+    }
+
+    /// The platform gap, made visible in code rather than only in prose: this
+    /// runtime's Vision has no Devanagari (or Devanagari-adjacent) recognition
+    /// language, so the Nepali half of T-007's first scenario cannot be
+    /// satisfied by Vision here. The day Apple ships one, this test fails and
+    /// points at the integration test that must then assert real recognition.
+    func testTheRuntimeHasNoDevanagariRecognitionLanguage() throws {
+        let languages = try VNRecognizeTextRequest.supportedRecognitionLanguages(
+            for: .accurate, revision: 3)
+
+        let devanagari = languages.filter {
+            let code = $0.lowercased()
+            return code.hasPrefix("ne") || code.hasPrefix("hi") || code.hasPrefix("sa") || code.hasPrefix("mr")
+        }
+        XCTAssertEqual(devanagari, [],
+                       "Vision now lists Devanagari (\(devanagari)): T-007's Nepali recognition scenario can be "
+                       + "asserted for real — extend the integration test and close the TG-02 open item")
+    }
+
+    func testADevanagariFrameIsNotAnErrorAndNeverInventsTextOrLanguage() throws {
+        let frame = try XCTUnwrap(CameraFrame(sampleBuffer: SampleBufferFactory.make(
+            width: 1200, height: 400, pts: CMTime(value: 1, timescale: 1))))
+        try render(lines: ["आपतकालीन निकास"], pointSize: 72, into: frame.pixelBuffer)
+        let detector = makeDetector()
+        XCTAssertTrue(detector.begin().isSuccess)
+
+        let result = awaitResult(detector, frame)
+
+        // Whatever Vision makes of the glyphs here, the contract this test
+        // pins is: a Devanagari frame is not a failure, no language is
+        // invented, and the empty outcome is reported honestly when nothing is
+        // recognized.
+        guard case .success(let pass) = result else {
+            return XCTFail("a Devanagari frame must not be a failed pass: \(result)")
+        }
+        for region in pass.regions {
+            XCTAssertNil(region.detectedLanguage, "no language may be invented for a recognized string")
+        }
+        let event = try XCTUnwrap(bus.events(named: "ocr_pass").first)
+        XCTAssertEqual(event.outcome, pass.regions.isEmpty ? "empty" : "success",
+                       "the outcome must match what the pass actually produced")
+    }
+
+    // MARK: Helpers
+
+    /// Renders a line of text into `pixelBuffer` in black on white, near the
+    /// top of the frame. CoreText, so the frame is a real image Vision reads.
+    private func render(lines: [String], pointSize: CGFloat, into pixelBuffer: CVPixelBuffer) throws {
+        CVPixelBufferLockBaseAddress(pixelBuffer, [])
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, []) }
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        guard let base = CVPixelBufferGetBaseAddress(pixelBuffer),
+              let context = CGContext(data: base, width: width, height: height,
+                                      bitsPerComponent: 8, bytesPerRow: CVPixelBufferGetBytesPerRow(pixelBuffer),
+                                      space: CGColorSpaceCreateDeviceRGB(),
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
+                                          | CGBitmapInfo.byteOrder32Little.rawValue) else {
+            throw StubFailure(message: "could not build a bitmap context over the frame")
+        }
+        context.setFillColor(UIColor.white.cgColor)
+        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+        context.setFillColor(UIColor.black.cgColor)
+        let font = UIFont.systemFont(ofSize: pointSize)
+        var y = CGFloat(height) - pointSize - 40
+        for line in lines {
+            let attributed = NSAttributedString(string: line, attributes: [.font: font])
+            let ctLine = CTLineCreateWithAttributedString(attributed)
+            context.textPosition = CGPoint(x: 40, y: y)
+            CTLineDraw(ctLine, context)
+            y -= pointSize + 40
+        }
+    }
+}
+
+// MARK: - The scripted engine
+
+/// The recognition seam, scripted: what Vision returns, what it throws, and
+/// what it was asked for. Real `CVPixelBuffer`s still arrive, so the detector's
+/// frame handling is the code under test.
+final class ScriptedRecognitionEngine: LiveTextRecognitionEngine {
+
+    var supportsTracking = true
+    var regions: [LiveTextDetector.DetectedTextRegion] = []
+    var trackedBoxes: [String: NormalizedBox] = [:]
+    var errorToThrow: Error?
+    var trackingError: Error?
+
+    private(set) var recognizeCallCount = 0
+    private(set) var trackCallCount = 0
+    private(set) var forgetCallCount = 0
+    private(set) var maxConcurrentRecognitions = 0
+
+    /// Holds a pass open so a test can inspect the in-flight state.
+    var hold: DispatchSemaphore?
+    var onEnter: (() -> Void)?
+
+    private let lock = NSLock()
+    private var active = 0
+
+    func recognizeText(in pixelBuffer: CVPixelBuffer) throws -> [LiveTextDetector.DetectedTextRegion] {
+        lock.lock()
+        recognizeCallCount += 1
+        active += 1
+        maxConcurrentRecognitions = max(maxConcurrentRecognitions, active)
+        lock.unlock()
+        defer {
+            lock.lock(); active -= 1; lock.unlock()
+        }
+        onEnter?()
+        hold?.wait()
+        if let errorToThrow { throw errorToThrow }
+        return regions
+    }
+
+    func followRememberedRectangles(in pixelBuffer: CVPixelBuffer) throws -> [String: NormalizedBox] {
+        lock.lock(); trackCallCount += 1; lock.unlock()
+        if let trackingError { throw trackingError }
+        return trackedBoxes
+    }
+
+    func forgetRememberedRectangles() {
+        lock.lock(); forgetCallCount += 1; lock.unlock()
+    }
+}

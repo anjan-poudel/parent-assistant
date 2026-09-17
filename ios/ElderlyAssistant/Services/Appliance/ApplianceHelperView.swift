@@ -25,6 +25,13 @@ import UIKit
 struct ApplianceHelperView: View {
 
     @ObservedObject var session: ApplianceHelperSession
+    /// The app's one shared translation store (T-013). The label seam reads
+    /// the same dictionary and the same persisted layer the live translation
+    /// path reads, so a translation resolved on either surface is reused by
+    /// the other with no network call. `nil` — the default, and what every
+    /// shipped call site compiles to unchanged — is exactly the shipped
+    /// localizer-only behaviour.
+    var labelCache: LabelTranslationCache? = nil
     @Environment(\.dismiss) private var dismiss
     @Environment(\.locale) private var locale
     @State private var showCamera = false
@@ -357,12 +364,19 @@ struct ApplianceHelperView: View {
     /// The cropped close-up (button circled, pinch-zoomable) plus the
     /// button's label — augmented into the active locale when the
     /// localizer knows the printed English text.
+    ///
+    /// Resolution goes through `ApplianceLabelResolver` (T-013), which calls
+    /// this same localizer first and returns its result whenever it produced
+    /// a translation; the shared store is consulted only for a label the
+    /// localizer passes through, and only for an entry the live path already
+    /// persisted. No label this view translates today renders differently.
     @ViewBuilder
     private func controlSection(_ control: GroundedControl,
                                 stepNumber: Int,
                                 image: UIImage) -> some View {
-        let display = ApplianceLabelLocalizer.display(for: control.label,
-                                                      locale: locale)
+        let display = ApplianceLabelResolver
+            .resolve(label: control.label, locale: locale, cache: labelCache)
+            .display
         VStack(alignment: .leading, spacing: 10) {
             if let pixelSize = ApplianceCropGeometry.imagePixelSize(image),
                let crop = ApplianceCropGeometry.crop(for: control.normalizedBox,

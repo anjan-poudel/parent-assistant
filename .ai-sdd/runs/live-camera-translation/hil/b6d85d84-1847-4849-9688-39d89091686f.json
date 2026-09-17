@@ -1,0 +1,41 @@
+{
+  "id": "b6d85d84-1847-4849-9688-39d89091686f",
+  "task_id": "final-sign-off",
+  "workflow_id": "live-camera-translation",
+  "status": "RESOLVED",
+  "reason": "T2 human sign-off - live camera translation (EN->NE v1). The final-sign-off report (specs/final-sign-off.md) recommends GO: the recorded constitution exception for the text-only cloud tier (Open Decision 13) is present and text-only; the camera purpose string is updated and discloses both required facts; the release log-safety gate and its fixtures pass (12/12 rules load-bearing) and cover the new OCR/translation paths. The sign-off itself is the owner's. Three things remain and are not the reviewer's to grant.",
+  "context": {
+    "task_description": "Final reviewer-authored sign-off pack: change summary, requirements traceability, security posture, open items, rollback plan, compliance checklist.",
+    "risk_tier": "T2",
+    "agent": "reviewer",
+    "decision": "GO",
+    "artifacts": [
+      "specs/final-sign-off.md",
+      "specs/security-test.md",
+      "specs/review-implementation.md",
+      "specs/implement-notes.md"
+    ],
+    "branch": "worktree-live-camera-translation",
+    "branch_tip": "c0f1d8c",
+    "not_yet_on_master": true,
+    "owner_actions_open": [
+      "OA-3 / Open Decision 3 - review the consent/disclosure copy and the purpose-string wording; two strings remain marked DRAFT (livetranslate.snapshot.capture, livetranslate.snapshot.live); if wording changes, bump the disclosure version stamp (currently livetranslate.disclosure.draft.16sep2026.r1).",
+      "OA-5 - run the device validation DV-1..DV-16 on real hardware, then the constitution's pre-release device console check on a Release build, before any store submission. No App Store / TestFlight build exists yet.",
+      "OA-1 / OA-2 / OA-4 - the value decisions OD1 (OCR cadence + thermal), OD2 (always-show-original default), OD5 (declutter thresholds), which depend on those device measurements."
+    ],
+    "what_is_not_verified": [
+      "No device validation was performed: DV-1..DV-16 NOT RUN; all evidence is simulator-only; OD1/OD2/OD5 unmeasured.",
+      "No real cloud provider call was ever made in testing - all egress evidence is at the client boundary with stubs and decoders.",
+      "Post-merge re-runs were scoped, not full-suite (174 tests across 11 suites).",
+      "The master unit-test baseline remains red (~21 pre-existing, unrelated failures).",
+      "One load-sensitive pipeline determinism test was observed flaky once under heavy machine load; attributed, not eliminated.",
+      "The release log-safety gate is a source-level check and cannot see through indirection.",
+      "Residual security risks SR-1, T-2, SD-5 stand as ruled in the security design review."
+    ],
+    "rollback": "Before integration: do not merge - the feature exists only on the branch. After integration: revert the merge commit (git revert -m 1); the change is additive. After shipping: user revokes translation consent (stops cloud text send, keeps offline mode); or unregister the plugin (one registration in AppCoordinator.swift) which makes the feature unreachable via an explicit tested 'unavailable' path; or lower the shared Gemini per-day budget (floor 10, shared with voice); or remove the API key (blunt, stops all Gemini use). No remote kill switch exists (the encrypted remote-configuration channel is a recorded descope).",
+    "note": "Item created by the task session because the task was dispatched directly (not via the ai-sdd run command), which is the path that normally creates it. Left PENDING for the human. The earlier HIL item 75d8d101-44d5-4794-af7c-7f57eefb4cc3 (requirements sign-off) was already resolved by the owner on 2026-09-16 and must not be re-resolved."
+  },
+  "created_at": "2026-09-17T02:20:09.000Z",
+  "notes": "Owner-approved 2026-09-17 T2 final sign-off. Consent/disclosure copy accepted as-is (wording unchanged; stamp bump applied). Device validation DV-1..16 recorded as pre-submission owner action OA-5.",
+  "resolved_at": "2026-09-17T02:37:01.814Z"
+}
