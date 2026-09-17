@@ -259,7 +259,13 @@ final class CameraCaptureFlow {
     /// shown right now are three different problems with three different
     /// things to do about them. Collapsing them would send someone to
     /// Settings over a phone that has no camera at all.
-    private static func unavailableKey(for reason: CameraAvailability) -> String {
+    ///
+    /// Internal rather than private since [MED-OCR] (2026-09-18): the
+    /// medication-label scanner presents the same camera and must answer the
+    /// same three reasons with the same three lines — one table, so the two
+    /// camera surfaces can never drift into telling a household with no
+    /// camera to check its Settings.
+    static func unavailableKey(for reason: CameraAvailability) -> String {
         switch reason {
         case .permissionDenied: return "apps.camera.permissionDenied"
         case .cannotPresent: return "apps.camera.cannotPresent"
@@ -269,7 +275,8 @@ final class CameraCaptureFlow {
 
     /// The observability outcome name for the same reason (metadata-free,
     /// C9 — the reason is a device/permission fact, never user content).
-    private static func outcomeName(for reason: CameraAvailability) -> String {
+    /// Internal for the same reason as `unavailableKey` above.
+    static func outcomeName(for reason: CameraAvailability) -> String {
         switch reason {
         case .permissionDenied: return "permissionDenied"
         case .cannotPresent: return "cannotPresent"
