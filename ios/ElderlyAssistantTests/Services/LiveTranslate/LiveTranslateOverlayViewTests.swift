@@ -736,21 +736,23 @@ final class LiveTranslateOverlayViewTests: XCTestCase {
     /// A creep too slow to cross the threshold in one pass still lands, because
     /// the comparison is against the rect **on screen**: the difference
     /// accumulates until it is one the elder could see. Six frames of the
-    /// detector's 1.5 %-per-pass creep draw two rects, not six.
+    /// detector's 2.1 %-per-pass creep draw two rects, not six. (The step is
+    /// sized to clear the threshold with margin on both sides, so the crossing
+    /// step is not decided by floating-point luck under any surface conversion.)
     func testASteadyCreepAccumulatesUntilItIsOneTheElderCanSee() {
         let memory = LiveOverlayGeometryMemory()
         var rects: [CGRect] = []
         for step in 0..<6 {
-            let dy = 0.015 * Double(step)
+            let dy = 0.021 * Double(step)
             rects.append(drawn(memory, surface(box: box(0.2, 0.30 + dy, 0.8, 0.38 + dy))).first!.frameRect)
         }
 
-        XCTAssertEqual(rects[0], rects[1], "1.5 % is below the threshold: held")
+        XCTAssertEqual(rects[0], rects[1], "2.1 % is below the threshold: held")
         XCTAssertEqual(rects[0], rects[2], "and again: the drift is measured against the drawn rect, "
                        + "not against the last measurement")
-        XCTAssertEqual(rects[0], rects[4], "four steps still hold below the 6 % threshold")
-        XCTAssertNotEqual(rects[0], rects[5], "by the fifth step the accumulated drift is past the "
+        XCTAssertNotEqual(rects[0], rects[3], "by the third step the accumulated drift is past the "
                           + "threshold, so the box lands where the sign is")
+        XCTAssertEqual(rects[3], rects[5], "and then holds again at its new rect")
         XCTAssertEqual(Set(rects).count, 2,
                        "six frames, two drawn rects: the box moves less often than the detector does")
     }
