@@ -439,10 +439,13 @@ final class LocalIntentInterpreter: CommandInterpreter, InterpreterFailureReport
 
 // MARK: - Constrained decoding payload
 
-/// The `Generatable` conformance `LLM.respond(to:as:)` decodes into —
-/// macro-free (the protocol needs only Codable + a static schema). The
-/// raw JSON still goes through `LlamaCommandInterpreter.parse(json:)`
-/// for the shared validation/clamping path.
+/// The schema carrier the generation call passes to the grammar
+/// converter ([TRUNCATION-FIX]: as a PARAMETER, never appended to the
+/// prompt — the former `respond(to:as:)` schema-wrapper was the
+/// truncation root cause). The `Generatable` conformance is vestigial
+/// (only `jsonSchema` is read); the raw JSON goes through
+/// `LlamaCommandInterpreter.parse(json:)` for the shared
+/// validation/clamping path.
 struct StructuredIntent: Generatable {
     let action: String
     let entryId: String?
