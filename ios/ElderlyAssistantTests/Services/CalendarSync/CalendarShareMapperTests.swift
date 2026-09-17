@@ -167,9 +167,13 @@ final class CalendarShareMapperTests: XCTestCase {
             CalendarShareMapper.inviteeEmails(contacts: [son], kind: .routineReminder,
                                               notifySettings: toggles).isEmpty,
             "one kind's toggle does not open another kind")
-        XCTAssertTrue(
+        // [CALENDAR-POLICY] (2026-09-17) Calendar events are shared with
+        // every contact that has an email, toggle-independent — the
+        // toggle keeps its fire-time meaning only.
+        XCTAssertEqual(
             CalendarShareMapper.inviteeEmails(contacts: [son], kind: .calendarEvent,
-                                              notifySettings: toggles).isEmpty)
+                                              notifySettings: toggles),
+            ["son@example.com"])
     }
 
     func testContactWithNoAddressIsSkippedAndBlankCountsAsAbsent() {
@@ -348,11 +352,25 @@ final class CalendarShareMapperTests: XCTestCase {
         XCTAssertNil(CalendarShareMapper.calendarEventDraft(
             title: "Doctor", startDate: start, durationMinutes: 45,
             contacts: [], notifySettings: settings(), timeZone: utc))
+        // [CALENDAR-POLICY] (2026-09-17) An ordinary contact WITH an
+        // email is now eligible with every toggle off; only the
+        // email-less stay ineligible.
         XCTAssertNil(CalendarShareMapper.calendarEventDraft(
             title: "Doctor", startDate: start, durationMinutes: 45,
-            contacts: [contact(email: "son@example.com")],
+            contacts: [contact(name: "no email", email: nil)],
             notifySettings: settings(), timeZone: utc),
-            "an ordinary contact with the calendar toggle OFF is not eligible")
+            "a contact with no email cannot be invited")
+    }
+
+    func testCalendarEventInvitesOrdinaryContactsRegardlessOfToggle() {
+        let start = utcDate(2026, 9, 16, 14, 0)
+        let twin = CalendarShareMapper.calendarEventDraft(
+            title: "Doctor", startDate: start, durationMinutes: 45,
+            contacts: [contact(email: "son@example.com")],
+            notifySettings: settings(), timeZone: utc)
+
+        XCTAssertEqual(twin?.attendeeEmails, ["son@example.com"],
+                       "calendar events are shared with every contact that has an email")
     }
 
     func testCalendarEventTwinIsAOneOffCarryingTheGivenDuration() {
