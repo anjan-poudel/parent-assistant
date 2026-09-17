@@ -577,6 +577,281 @@ final class LiveTranslationPipelineTests: XCTestCase {
         XCTAssertEqual(awaited3, 0)
     }
 
+    // MARK: - Scenario: A camera movement is not a new question
+    //
+    // The owner-reported defect, end to end on the published stream: the
+    // camera moves, the sign's box leaves every geometry threshold, and the
+    // question the session already answered must not be asked again — nor may
+    // "translating…" ever appear over a string that has a translation.
+
+    @MainActor
+    func testScenarioAPureCameraMoveReResolvesNothingAndFlashesNoPendingState() async throws {
+        let harness = makeHarness(transport: Self.respondingTransport())
+        await harness.pipeline.updateLayout(layout)
+        let frame = try makeFrame()
+
+        // The sign resolves once, at the box it was first seen in.
+        harness.recogniser.defaultStep = .regions([detected(cloudText, box: box(0.2, 0.05, 0.6, 0.15))])
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+        await waitUntil("the string to resolve") { harness.transport.requestCount == 1 }
+        await waitUntil("the resolution to be published") {
+            guard let latest = await harness.recorder.latest,
+                  let region = latest.regions.first(where: { $0.text == self.cloudText }) else { return false }
+            if case .resolved = latest.result(for: region).outcome { return true }
+            return false
+        }
+
+        let requestsWhenResolved = harness.transport.requestCount
+        let resolvedAt = await publicationCount(harness)
+        let settled = try await latest(harness)
+        let settledRegion = try XCTUnwrap(region(cloudText, in: settled))
+
+        // The camera pans: same string, boxes 0.40 apart — disjoint, and past
+        // `regionMatchCentroidDistance`, so geometry alone calls every frame a
+        // brand-new sign.
+        let pan: [Double] = [0.45, 0.85, 0.45, 0.05]
+        harness.recogniser.steps = pan.map { y in
+            .regions([detected(cloudText, box: box(0.2, y, 0.6, y + 0.1))])
+        }
+        for _ in pan { await harness.pipeline.ingest(frame) }
+        try? await Task<Never, Never>.sleep(for: .milliseconds(60))
+
+        // Nothing was asked, and nothing leaked between the frames that could
+        // have been asked about: one question, still.
+        XCTAssertEqual(harness.transport.requestCount, requestsWhenResolved,
+                       "a camera movement is not a new question (no re-resolution)")
+        XCTAssertEqual(requests(carrying: cloudText, in: harness), 1,
+                       "the string was asked about exactly once, before the movement began")
+        let awaitedInFlight = await inFlightKeys(harness)
+        XCTAssertTrue(awaitedInFlight.isEmpty)
+
+        // The identity is stable and the terminal outcome is what every
+        // publication after the movement carries: at no point does the
+        // consumer see the region pending over a string that is answered.
+        let stream = await publications(harness)
+        XCTAssertGreaterThan(stream.count, resolvedAt, "the movement is published: the box really moved")
+        for publication in stream.dropFirst(resolvedAt) {
+            guard let moved = region(cloudText, in: publication) else {
+                return XCTFail("the region must stay visible for the whole pan")
+            }
+            XCTAssertEqual(moved.id, settledRegion.id,
+                           "the same string keeps one identity across the movement")
+            guard case .resolved = publication.result(for: moved).outcome else {
+                return XCTFail("an answered string must never be republished pending "
+                               + "(it would flash as translating): \(publication.result(for: moved))")
+            }
+            assertEveryRegionIsRendered(publication)
+        }
+
+        let afterMove = try await latest(harness)
+        let movedRegion = try XCTUnwrap(region(cloudText, in: afterMove))
+        XCTAssertEqual(movedRegion.box.yMin, 0.05, accuracy: 1e-9,
+                       "geometry-only drift still adopts the new box")
+    }
+
+    /// The complement of the test above, so the fix is not over-broad: a
+    /// string that genuinely *changes* on the same region is a new question,
+    /// and it is asked.
+    @MainActor
+    func testScenarioAChangedStringOnTheSameRegionIsANewQuestion() async throws {
+        let harness = makeHarness(transport: Self.respondingTransport())
+        await harness.pipeline.updateLayout(layout)
+        let frame = try makeFrame()
+
+        harness.recogniser.defaultStep = .regions([detected(cloudText)])
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+        await waitUntil("the first string to resolve") { harness.transport.requestCount == 1 }
+        let beforeChange = try await latest(harness)
+        let firstRegion = try XCTUnwrap(region(cloudText, in: beforeChange))
+        XCTAssertEqual(requests(carrying: cloudText, in: harness), 1)
+
+        // The same box now reads a different string: same region, new text.
+        harness.recogniser.defaultStep = .regions([detected(secondCloudText)])
+        await harness.pipeline.ingest(frame)
+        await waitUntil("the new string to be asked") {
+            self.requests(carrying: self.secondCloudText, in: harness) == 1
+        }
+        await waitUntil("the new string to resolve") {
+            guard let latest = await harness.recorder.latest,
+                  let region = latest.regions.first(where: { $0.text == self.secondCloudText })
+            else { return false }
+            if case .resolved = latest.result(for: region).outcome { return true }
+            return false
+        }
+
+        let afterChange = try await latest(harness)
+        let changed = try XCTUnwrap(region(secondCloudText, in: afterChange))
+        XCTAssertEqual(changed.id, firstRegion.id,
+                       "a text change is a change on ONE identity (the box did not move)")
+        guard case .resolved(_, let translation, _) = afterChange.result(for: changed).outcome else {
+            return XCTFail("a changed string is a question, and it gets an answer")
+        }
+        XCTAssertEqual(translation, "ने:" + secondCloudText)
+        XCTAssertEqual(requests(carrying: secondCloudText, in: harness), 1,
+                       "a changed string is a question the session has not asked")
+        XCTAssertEqual(requests(carrying: cloudText, in: harness), 1,
+                       "and the previous string's one answer is not disturbed by it")
+    }
+
+    // MARK: - Scenario: A reborn region inherits the answer its string already has
+
+    /// Two occurrences of one string, one answer. When the stabiliser releases
+    /// one occurrence's identity and the same sign is picked up again, the
+    /// new region inherits the settled outcome **in the cycle that publishes
+    /// it** — no pending flash, and no second question.
+    ///
+    /// The second occurrence is what makes this observable rather than
+    /// theoretical: the string stays on screen throughout, which is exactly
+    /// the condition under which the settled answer is still held.
+    @MainActor
+    func testScenarioARebornRegionInheritsTheSettledOutcomeInTheSameCycle() async throws {
+        let harness = makeHarness(transport: Self.respondingTransport())
+        await harness.pipeline.updateLayout(layout)
+        let frame = try makeFrame()
+
+        let first = box(0.05, 0.05, 0.35, 0.15)
+        let second = box(0.55, 0.70, 0.85, 0.80)
+
+        // Both occurrences are on screen and share one question.
+        harness.recogniser.defaultStep = .regions([detected(cloudText, box: first),
+                                                   detected(cloudText, box: second)])
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+        await waitUntil("the shared string to resolve") { harness.transport.requestCount == 1 }
+        await waitUntil("both occurrences to be resolved") {
+            guard let latest = await harness.recorder.latest, latest.regions.count == 2 else { return false }
+            return latest.regions.allSatisfy {
+                if case .resolved = latest.result(for: $0).outcome { return true }
+                return false
+            }
+        }
+        XCTAssertEqual(requests(carrying: cloudText, in: harness), 1,
+                       "one string, one question — two occurrences do not double the cost")
+        let before = try await latest(harness)
+        let identitiesWhenWhole = Set(before.regions.map(\.id))
+        XCTAssertEqual(identitiesWhenWhole.count, 2)
+
+        // The first sign is out of frame long enough for its identity to be
+        // released, while the second keeps the string on screen — which is
+        // what leaves the settled answer held rather than pruned.
+        harness.recogniser.steps = [.regions([detected(cloudText, box: second)]),
+                                    .regions([detected(cloudText, box: second)])]
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+        let afterRelease = try await latest(harness)
+        XCTAssertEqual(afterRelease.regions.count, 1, "the first occurrence aged out")
+        let awaitedBeforeReturn = await activeRegions(harness)
+        XCTAssertEqual(awaitedBeforeReturn, 1)
+        let publicationsBeforeReturn = await publicationCount(harness)
+
+        // It comes back, far from where it was: the string is shown again by a
+        // region that did not exist a moment ago, and the question was already
+        // answered.
+        harness.recogniser.steps = [.regions([detected(cloudText, box: first),
+                                              detected(cloudText, box: second)]),
+                                    .regions([detected(cloudText, box: first),
+                                              detected(cloudText, box: second)])]
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+        try? await Task<Never, Never>.sleep(for: .milliseconds(60))
+
+        // The premise, asserted rather than assumed: a region really was born
+        // (otherwise this says nothing about the born-new-region path).
+        let awaitedAfterReturn = await activeRegions(harness)
+        XCTAssertEqual(awaitedAfterReturn, 2, "the returned sign is a new region")
+        let rebornAt = await publicationCount(harness)
+        XCTAssertGreaterThan(rebornAt, publicationsBeforeReturn)
+
+        // From the moment the new region is published it is already terminal:
+        // no pending flash, and no second request.
+        let stream = await publications(harness)
+        for publication in stream.dropFirst(publicationsBeforeReturn) {
+            for region in publication.regions {
+                guard case .pending = publication.result(for: region).outcome else { continue }
+                return XCTFail("a region born for an answered string was published pending "
+                               + "(it would flash as translating): \(region.id)")
+            }
+            assertEveryRegionIsRendered(publication)
+        }
+        let reborn = try XCTUnwrap(stream.last)
+        XCTAssertEqual(reborn.regions.count, 2)
+        XCTAssertEqual(Set(reborn.regions.map(\.id)).count, 2, "two occurrences, two identities")
+        XCTAssertEqual(requests(carrying: cloudText, in: harness), 1,
+                       "the born-new-region path inherits the answer instead of asking again")
+    }
+
+    // MARK: - Scenario: The publish epsilon stops the shake, not the update
+
+    @MainActor
+    func testScenarioASubEpsilonWobbleIsNotPublishedAndAVisibleMoveIs() async throws {
+        // A curated string, so nothing asynchronous can publish between the
+        // ticks and make the deltas below a claim about the wrong cycle.
+        let harness = makeHarness()
+        await harness.pipeline.updateLayout(layout)
+        let frame = try makeFrame()
+
+        harness.recogniser.defaultStep = .regions([detected(curatedText, box: box(0.2, 0.4, 0.6, 0.5))])
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        let epsilon = harness.config.publishBoxEpsilon
+        XCTAssertEqual(epsilon, 0.02, "2% of the container dimension, as documented")
+        XCTAssertEqual(harness.transport.requestCount, 0)
+        let settledCount = await publicationCount(harness)
+        let settledSequence = await publishedSequence(harness)
+        XCTAssertEqual(settledCount, settledSequence)
+        let settledSnapshot = try await latest(harness)
+        let settledRegion = try XCTUnwrap(region(curatedText, in: settledSnapshot))
+
+        // Recognition jitter: the same string, the same identity, boxes that
+        // move by well under the epsilon from the published baseline.
+        harness.recogniser.steps = [
+            .regions([detected(curatedText, box: box(0.2 + epsilon / 2, 0.4, 0.6 + epsilon / 2, 0.5))]),
+            .regions([detected(curatedText, box: box(0.2, 0.4 + epsilon / 2, 0.6, 0.5 + epsilon / 2))]),
+            .regions([detected(curatedText, box: box(0.2 + epsilon / 4, 0.4, 0.6, 0.5 + epsilon / 4))]),
+        ]
+        for _ in harness.recogniser.steps { await harness.pipeline.ingest(frame) }
+
+        let afterWobble = await publicationCount(harness)
+        XCTAssertEqual(afterWobble, settledCount,
+                       "a wobble nobody can see must not re-render the overlay")
+        let sequenceAfterWobble = await publishedSequence(harness)
+        XCTAssertEqual(sequenceAfterWobble, settledSequence,
+                       "a suppressed cycle does not advance the ordering counter either")
+        let wobbledSnapshot = try await latest(harness)
+        let latestRegion = try XCTUnwrap(region(curatedText, in: wobbledSnapshot))
+        XCTAssertEqual(latestRegion.id, settledRegion.id)
+        XCTAssertEqual(harness.transport.requestCount, 0)
+
+        // A movement the elder could see publishes, in full, at the new box —
+        // and still asks nothing: the translation gate is keyed by text.
+        harness.recogniser.steps = [
+            .regions([detected(curatedText, box: box(0.2 + epsilon * 2, 0.4, 0.6 + epsilon * 2, 0.5))])
+        ]
+        await harness.pipeline.ingest(frame)
+
+        let afterMove = await publicationCount(harness)
+        XCTAssertEqual(afterMove, settledCount + 1,
+                       "a position update above the epsilon is published")
+        let movedSnapshot = try await latest(harness)
+        let movedRegion = try XCTUnwrap(region(curatedText, in: movedSnapshot))
+        XCTAssertEqual(movedRegion.id, settledRegion.id)
+        XCTAssertEqual(movedRegion.box.xMin, 0.2 + epsilon * 2, accuracy: 1e-9)
+        XCTAssertEqual(harness.transport.requestCount, 0,
+                       "a position update never re-triggers translation work")
+        let sequenceAfterMove = await publishedSequence(harness)
+        XCTAssertEqual(sequenceAfterMove, settledSequence + 1)
+
+        // The counter the pipeline reports and the stream the consumer saw are
+        // the same run of consecutive integers: a suppression is invisible
+        // from both sides or it is a bug.
+        let sequences = await harness.recorder.sequences
+        XCTAssertEqual(sequences, Array(1...sequences.count))
+        XCTAssertEqual(sequenceAfterMove, sequences.count)
+    }
+
     // MARK: - Scenario: Resume after an interruption recovers honestly
 
     @MainActor

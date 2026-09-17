@@ -58,6 +58,23 @@ struct LiveTranslateConfig: Equatable {
     /// removed (overlay flicker bound).
     var regionMissPasses: Int = 2
 
+    /// How many passes a region's normalized string stays available as an
+    /// identity signal once its box has left every geometry threshold.
+    ///
+    /// Identity is keyed by the string first (T-009 amended at the first
+    /// device demo): a camera movement that carries a sign's box away from
+    /// the box the region was last seen at is not a new sign, and re-keying
+    /// it would release the identifier, repaint the overlay and re-ask a
+    /// question that has already been answered. The window bounds how long
+    /// that claim holds — a sighting long after the last one is a new
+    /// observation of the same text, not the same region.
+    ///
+    /// The shipped value matches `regionMissPasses`: at the shipped
+    /// hysteresis a tracked region is alive for exactly one missed pass, so
+    /// the string rule covers every region the stabiliser is still willing to
+    /// vouch for and no further.
+    var regionStringIdentityPasses: Int = 2
+
     // MARK: Decluttering (OD5)
 
     /// Normalised centroid distance below which two nearby regions are
@@ -77,6 +94,28 @@ struct LiveTranslateConfig: Equatable {
     /// snapshot card is the reading surface, so a dense scene shows few large
     /// stable boxes rather than many small ones (owner UX rework, 2026-09-17).
     var declutterMaxRegions: Int = 6
+
+    // MARK: Publication (T-026)
+
+    /// The largest per-coordinate movement of a region's box that is treated
+    /// as recognition jitter rather than as a position update — expressed, as
+    /// box coordinates are, as a fraction of the container dimension.
+    ///
+    /// A cycle whose published state would differ from the last published one
+    /// in nothing but boxes that moved by at most this much publishes
+    /// **nothing**: the consumer keeps the value it has, the overlay keeps the
+    /// rects it drew, and a wobble nobody can see stops costing a render. The
+    /// next cycle is compared against the same baseline, so a steady drift
+    /// still publishes the moment it crosses the threshold.
+    ///
+    /// This is a *rendering* gate and nothing else. It cannot re-ask or
+    /// un-answer a question: the translation gate is keyed by recognized text
+    /// and runs in the stabiliser, which has already consumed the pass. Any
+    /// change to text, to an outcome, to the policy, to the container or to
+    /// the frame publishes normally, epsilon or not.
+    ///
+    /// 0.02 is 2% of the container dimension.
+    var publishBoxEpsilon: Double = 0.02
 
     // MARK: Overlay (D1, OD2)
 

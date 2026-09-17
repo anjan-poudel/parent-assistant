@@ -21,6 +21,12 @@ import Foundation
 //      property of the shape (`LiveTranslatePublication`), not a convention
 //      about call order.
 //
+//      A cycle whose state differs from the last published one by nothing but
+//      sub-epsilon box movement publishes **nothing at all** (`publishBoxEpsilon`):
+//      recognition jitter is not news, and republishing it re-renders the
+//      overlay for a wobble the elder cannot see. The gate is on *rendering*
+//      only — the translation gate is keyed by text and has already run.
+//
 //   3. **Per-cycle work is bounded, and nothing queues behind anything.**
 //      `ingest(_:)` is the frame tick. While the OCR pass runs, the actor
 //      holds the frame source's own backpressure flag (T-006), so the tap
@@ -38,8 +44,13 @@ import Foundation
 //   5. **One terminal outcome per region per cycle (AM-8, CL-1).** An outcome
 //      is terminal while the region's text is unchanged: a resolved region
 //      never returns to pending, and a settled string is not re-sent on every
-//      tick. The one re-attempt the design asks for is a *resume*, which
-//      restarts the stabiliser from empty and clears the settled set.
+//      tick. The answer is held **per string**, so a region the stabiliser
+//      rebirthed for a string the session has already answered inherits that
+//      answer in the same cycle it is published — a camera movement cannot
+//      flash "translating…" over a translation that is already on screen, and
+//      it cannot leave a region pending with nothing left to dispatch it.
+//      The one re-attempt the design asks for is a *resume*, which restarts
+//      the stabiliser from empty and clears the settled set.
 //
 //   6. **A component failure degrades one region, not the session.** Every
 //      path in this file ends in a rendered state: resolved, degraded with the
@@ -224,11 +235,19 @@ actor LiveTranslationPipeline {
     /// The current outcome per visible region. Never holds an entry for a
     /// region that is no longer visible.
     private var outcomes: [TextRegionStabilizer.RegionIdentity: TranslationResult] = [:]
-    /// Normalized keys whose question has been answered terminally (resolved
-    /// or degraded) for their current text. Keyed by text, so a text change is
-    /// automatically a new question — which is why nothing here has to
-    /// invalidate on edit.
-    private var settledKeys: Set<String> = []
+    /// The **answer** for every normalized key whose question has been
+    /// answered terminally (resolved or degraded), not merely the fact that it
+    /// was. Keyed by text, so a text change is automatically a new question —
+    /// which is why nothing here has to invalidate on edit.
+    ///
+    /// Holding the answer rather than a flag is what makes a region born for
+    /// an already-answered string inherit that answer **in the cycle that
+    /// publishes it**: a camera movement is not a new question, and the elder
+    /// must never see "translating…" flash over a translation the session
+    /// already has. The alternative — a set plus a lookup somewhere else —
+    /// left the new region pending with nothing left to dispatch it, because
+    /// the key was already settled.
+    private var settledOutcomes: [String: TranslationResult] = [:]
     /// Normalized keys currently dispatched to the cloud tier. Cleared when
     /// the attempt reports back, so a key is never requested twice at once
     /// (the tier's own claim step is the second half of that guarantee).
@@ -240,6 +259,13 @@ actor LiveTranslationPipeline {
 
     /// The publication counter (AM-6).
     private var publicationSequence = 0
+    /// The last publication actually delivered, and the geometry it was
+    /// measured under. The jitter gate (T-026) compares against these; a
+    /// suppressed cycle leaves them alone, so the next cycle is measured
+    /// against the same baseline the consumer is still looking at.
+    private var lastPublished: LiveTranslatePublication?
+    private var lastPublishedLayout: LiveTranslateLayout?
+    private var lastPublishedFramePixelSize: CGSize = .zero
     private var layout: LiveTranslateLayout = .unknown
     /// The last frame's pixel size — the letterbox the placement maps through.
     /// Held only as a size: no frame, no buffer and no image is retained beyond
@@ -355,7 +381,7 @@ actor LiveTranslationPipeline {
         isPaused = false
 
         cancelResolutionTasks()
-        settledKeys.removeAll()
+        settledOutcomes.removeAll()
         stabilizer.reset()
         outcomes.removeAll()
 
@@ -381,7 +407,7 @@ actor LiveTranslationPipeline {
         recogniser.end()
         stabilizer.reset()
         outcomes.removeAll()
-        settledKeys.removeAll()
+        settledOutcomes.removeAll()
     }
 
     // MARK: - Pushed state
@@ -427,32 +453,66 @@ actor LiveTranslationPipeline {
 
     /// The visible set is the only set: a region's outcome survives a cycle
     /// while its text is unchanged (AM-8/CL-1 — a resolved region never
-    /// returns to pending), and everything else starts pending.
+    /// returns to pending), and everything else — a region the stabiliser
+    /// just republished under a new identity, or one whose identity it kept —
+    /// inherits the answer its *string* already has, in this same cycle, so
+    /// nothing that has been answered is ever published as pending.
     ///
-    /// The settled set is intersected with the visible one for the same
-    /// reason, and it is a correctness rule rather than tidiness. "Settled"
-    /// means *an answer is attached to a region on screen*; an answer that
-    /// arrived for a string nothing is showing — a resume released the
-    /// regions and the attempt landed afterwards — settles nothing, and
-    /// keeping it settled would leave the region pending for good when the
-    /// same text came back: no outcome to render from the last cycle, and no
-    /// dispatch because the key was "answered". Dropping it makes the string
-    /// askable again, and the cache answers it first, so nothing is re-charged
-    /// and nothing is left unrendered.
+    /// Inheritance is keyed by the normalized string, which is the same key
+    /// the cache, the tier and the settled set use. It is what makes a camera
+    /// movement free: the region may be a different identity, but the
+    /// question was about the text, and the text has an answer.
+    ///
+    /// The settled map is pruned to the visible one for the same reason, and
+    /// it is a correctness rule rather than tidiness. "Settled" means *an
+    /// answer is attached to a region on screen*; an answer that arrived for a
+    /// string nothing is showing — a resume released the regions and the
+    /// attempt landed afterwards — settles nothing, and keeping it settled
+    /// would leave the region pending for good when the same text came back:
+    /// no outcome to render from the last cycle, and no dispatch because the
+    /// key was "answered". Dropping it makes the string askable again, and the
+    /// cache answers it first, so nothing is re-charged and nothing is left
+    /// unrendered.
     private func reconcile() {
         var next: [TextRegionStabilizer.RegionIdentity: TranslationResult] = [:]
         var visibleKeys: Set<String> = []
         for region in stabilizer.visible {
-            visibleKeys.insert(LabelTranslationCache.normalizationKey(text: region.text,
-                                                                     targetLanguage: targetLanguage))
-            if let existing = outcomes[region.id], existing.originalText == region.text {
+            let key = LabelTranslationCache.normalizationKey(text: region.text,
+                                                             targetLanguage: targetLanguage)
+            visibleKeys.insert(key)
+            if let existing = outcomes[region.id], existing.isFinal, existing.originalText == region.text {
                 next[region.id] = existing
+            } else if let settled = settledOutcomes[key] {
+                next[region.id] = Self.restating(settled, for: region.text)
             } else {
                 next[region.id] = .pending(region.text)
             }
         }
-        settledKeys.formIntersection(visibleKeys)
+        settledOutcomes = settledOutcomes.filter { visibleKeys.contains($0.key) }
         outcomes = next
+    }
+
+    /// The stored answer, restated for the text a region is showing now.
+    ///
+    /// The translation is a property of the *string*; the original text is a
+    /// property of the *region*. The two can differ in spelling while
+    /// normalizing identically ("Light" recognized again as "LIGHT"), and a
+    /// result carrying the previous spelling would put the wrong original on
+    /// screen beside the translation — so the answer is carried over and the
+    /// text is the region's own.
+    ///
+    /// A stored entry is terminal by construction, so the pending branch is
+    /// unreachable; it is here because "every case is answered" is the shape
+    /// this function promises and a future caller may not be so lucky.
+    private static func restating(_ result: TranslationResult, for text: String) -> TranslationResult {
+        switch result.outcome {
+        case .pending:
+            return .pending(text)
+        case .resolved(_, let translation, let tier):
+            return .resolved(originalText: text, translation: translation, tier: tier)
+        case .degraded(_, let reason):
+            return .degraded(originalText: text, reason: reason)
+        }
     }
 
     /// The on-device layers — the curated dictionary and the persisted cache —
@@ -484,7 +544,7 @@ actor LiveTranslationPipeline {
             guard let existing = outcomes[region.id], case .pending = existing.outcome else { continue }
             let key = LabelTranslationCache.normalizationKey(text: region.text,
                                                              targetLanguage: targetLanguage)
-            guard !settledKeys.contains(key), !attemptKeys.contains(key) else { continue }
+            guard settledOutcomes[key] == nil, !attemptKeys.contains(key) else { continue }
             items[key] = CloudTranslationTier.Item(id: key,
                                                    text: region.text,
                                                    detectedSourceLanguage: region.detectedLanguage)
@@ -519,9 +579,12 @@ actor LiveTranslationPipeline {
         case .unavailable(let error):
             // Declined, revoked, unreadable or unrecorded-and-unaskable: fail
             // closed and say so with the honest reason. No request, no retry.
-            settle(keys: items.map(\.id))
-            apply(items: items.map { ($0, TranslationResult.degraded(originalText: $0.text,
-                                                                    reason: error.unavailableReason)) })
+            let answered = items.map { item in
+                (item, TranslationResult.degraded(originalText: item.text,
+                                                  reason: error.unavailableReason))
+            }
+            settle(answered)
+            apply(items: answered)
             await publish()
 
         case .answered(let batch):
@@ -580,13 +643,14 @@ actor LiveTranslationPipeline {
         var degradedReasons: [TranslationUnavailableReason: Int] = [:]
 
         for item in items {
-            switch batch.result(for: item).outcome {
+            let result = batch.result(for: item)
+            switch result.outcome {
             case .pending:
                 unresolved.append(item.id)
             case .resolved:
-                settledKeys.insert(item.id)
+                settledOutcomes[item.id] = result
             case .degraded(_, let reason):
-                settledKeys.insert(item.id)
+                settledOutcomes[item.id] = result
                 degradedReasons[reason, default: 0] += regionCount(forKey: item.id)
             }
         }
@@ -632,9 +696,12 @@ actor LiveTranslationPipeline {
         attemptKeys.subtract(keys)
     }
 
-    private func settle(keys: [String]) {
-        attemptKeys.subtract(keys)
-        settledKeys.formUnion(keys)
+    /// Records a terminal answer against the strings it answers, so a region
+    /// that later claims one of those strings inherits it instead of asking
+    /// again.
+    private func settle(_ answered: [(CloudTranslationTier.Item, TranslationResult)]) {
+        attemptKeys.subtract(answered.map(\.0.id))
+        for (item, result) in answered { settledOutcomes[item.id] = result }
     }
 
     private func cancelResolutionTasks() {
@@ -657,18 +724,84 @@ actor LiveTranslationPipeline {
     /// delivered, so a gap cannot appear in the stream a consumer sees.
     private func publish() async {
         guard !isClosed else { return }
-        publicationSequence += 1
 
         let policy = LiveTranslateOverlaySurface.policy(config: config,
                                                         alwaysShowOriginal: alwaysShowOriginal)
         let regions = stabilizer.visible
+
+        // The jitter gate (T-026). Decided before the counter moves, so a
+        // suppressed cycle is invisible in every sense: no sequence step, no
+        // value, nothing for a consumer to re-render.
+        guard !isJitterOnly(regions: regions, policy: policy) else { return }
+
+        publicationSequence += 1
         let publication = LiveTranslatePublication(
             sequence: publicationSequence,
             regions: regions,
             outcomes: outcomes,
             placements: place(regions: regions, policy: policy),
             policy: policy)
+        lastPublished = publication
+        lastPublishedLayout = layout
+        lastPublishedFramePixelSize = framePixelSize
         await publishToSink(publication)
+    }
+
+    /// Whether this cycle's state differs from the last published one by
+    /// nothing but box jitter — the publish epsilon, and nothing else.
+    ///
+    /// The answer is `true` only when **every** other input to the publication
+    /// is identical: the same regions in the same order with the same ids,
+    /// texts, languages and confidences; the same outcomes; the same policy;
+    /// and the same container, safe area, occupied rects and frame the
+    /// placements were measured from. Given all of that, the only thing a
+    /// consumer could notice is where the boxes are.
+    ///
+    /// Two halves, both load-bearing:
+    ///
+    ///  - every box moved by at most `publishBoxEpsilon` on every coordinate —
+    ///    a wobble nobody can see;
+    ///  - at least one box actually moved. A cycle that is *identical* to the
+    ///    last one is not jitter, and republishing it is the pipeline's
+    ///    pre-existing behaviour; this gate exists to stop the shake, not to
+    ///    re-decide what an unchanged cycle means.
+    ///
+    /// The comparison is against the last **delivered** publication, so a
+    /// suppressed cycle does not move the baseline: a slow drift accumulates
+    /// against the rects the overlay is actually drawing and publishes as soon
+    /// as the difference is one the elder could see.
+    ///
+    /// Nothing here can re-ask a question. The translation gate is keyed by
+    /// text and lives in the stabiliser, which has already consumed this
+    /// pass — its events, its outcomes and the dispatch that follows are
+    /// untouched by a suppression.
+    private func isJitterOnly(regions: [TextRegionStabilizer.StableTextRegion],
+                              policy: LiveOverlayPlacement.Policy) -> Bool {
+        guard let lastPublished,
+              lastPublishedLayout == layout,
+              lastPublishedFramePixelSize == framePixelSize,
+              lastPublished.policy == policy,
+              lastPublished.outcomes == outcomes,
+              lastPublished.regions.count == regions.count
+        else { return false }
+
+        var moved = false
+        for (previous, next) in zip(lastPublished.regions, regions) {
+            guard previous.id == next.id,
+                  previous.text == next.text,
+                  previous.normalizedText == next.normalizedText,
+                  previous.detectedLanguage == next.detectedLanguage,
+                  previous.confidence == next.confidence
+            else { return false }
+
+            let deltas = [abs(previous.box.xMin - next.box.xMin),
+                          abs(previous.box.yMin - next.box.yMin),
+                          abs(previous.box.xMax - next.box.xMax),
+                          abs(previous.box.yMax - next.box.yMax)]
+            guard deltas.allSatisfy({ $0 <= config.publishBoxEpsilon }) else { return false }
+            if deltas.contains(where: { $0 > 0 }) { moved = true }
+        }
+        return moved
     }
 
     /// T-020's placement, called with T-021's policy and T-021's copy. The
