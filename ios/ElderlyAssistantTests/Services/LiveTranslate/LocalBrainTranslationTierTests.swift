@@ -444,4 +444,28 @@ final class LocalBrainTranslationTierTests: XCTestCase {
             XCTAssertGreaterThanOrEqual(outcome.durationMs, 0)
         }
     }
+
+    /// The feature translates English → Nepali. The shipped prompt must ask
+    /// for the Nepali direction — a flipped prompt (Nepali → English) is the
+    /// bug that made non-dictionary text never translate (2026-09-17).
+    func testThePromptAsksForTheNepaliDirection() {
+        let prompt = LocalBrainTranslationTier.prompt(for: ["Start"])
+        XCTAssertTrue(prompt.contains("into Nepali"),
+                      "the prompt must target Nepali, got: \(prompt)")
+        XCTAssertFalse(prompt.contains("into English"),
+                       "the prompt must not target English, got: \(prompt)")
+    }
+
+    /// A Latin-script answer for a Nepali target is a wrong-language or echo
+    /// artifact — it must be unresolved so the cloud tier carries the string.
+    func testALatinScriptAnswerIsUnresolved() {
+        let sources = ["Start"]
+        let parsed = LocalBrainTranslationTier.parse(
+            answer(["Start"]) /* raw JSON */, sources: sources, config: config)
+        XCTAssertNil(parsed[sources[0]],
+                     "a non-Devanagari answer must not be attributed to the source")
+        let parsedOK = LocalBrainTranslationTier.parse(
+            answer(["सुरु गर्ने"]), sources: sources, config: config)
+        XCTAssertEqual(parsedOK[sources[0]], "सुरु गर्ने")
+    }
 }

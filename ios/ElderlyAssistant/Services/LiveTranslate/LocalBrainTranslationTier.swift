@@ -269,8 +269,8 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
     /// generations inside the shared 1,024-token context.
     static func prompt(for texts: [String]) -> String {
         var lines = [
-            "You translate Nepali sign text into English.",
-            "Answer with JSON only, exactly one English translation per source, in the same order.",
+            "You translate English text into Nepali.",
+            "Answer with JSON only, exactly one Nepali translation per source, in the same order.",
             "Use \"\" for a source you cannot translate. Keep each translation short.",
             "",
             "Source texts:"
@@ -319,6 +319,10 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
             let text = value.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { continue }
             guard text != source.trimmingCharacters(in: .whitespacesAndNewlines) else { continue }
+            // The tier targets Nepali (v1): a translation with no Devanagari
+            // is a wrong-language or echo artifact, never a usable answer —
+            // unresolved, so the cloud tier carries it.
+            guard Self.containsDevanagari(text) else { continue }
             guard text.count <= TranslationResponseParser.maxLength(forSource: source,
                                                                    config: config) else { continue }
             translations[source] = text
@@ -326,7 +330,14 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
         return translations
     }
 
+    /// Devanagari block U+0900–U+097F — the same range the label localizer
+    /// gates on, so the tier and the renderer agree about what Nepali is.
+    static func containsDevanagari(_ text: String) -> Bool {
+        text.unicodeScalars.contains { (0x0900...0x097F).contains($0.value) }
+    }
+
     private static func reason(for failure: BrainGenerationFailure) -> LiveTranslateBrainUnavailableReason {
+
         switch failure {
         case .loadFailed: return .modelLoadFailed
         case .promptOverflow, .generationFailed: return .inferenceFailed
