@@ -2,23 +2,40 @@ import CoreGraphics
 import Foundation
 
 // C11 — `LiveOverlayPlacement` (T-020: FR-LCT-015, FR-LCT-016, NFR-LCT-002,
-// NFR-LCT-012, D1, OD5).
+// NFR-LCT-012, D1, OD5). Reworked 2026-09-17 for the owner's live-device
+// feedback: "the bubbles are everywhere and shaky and get stacked and
+// clustered depending on text", "the white background of the bubbles covers
+// everything".
 //
 // What this file exists to make true:
 //
-//  - **One predicate, four conditions.** The in-place form is chosen only
-//    when *all four* D1 conditions hold: the outcome is resolved from the
-//    curated dictionary (a cloud translation is never drawn in place, however
-//    well it fits), the normalized source is within the word bound, the
-//    translation fits its region rect at the minimum point size, and the
-//    always-show-original preference is off. `inPlaceEligibility` is the one
-//    implementation; `inlineEligible` and `place` both delegate to it, so a
-//    fifth condition cannot be introduced at one call site and not another.
+//  - **Replace-in-place is the default render.** Every region that has a
+//    translation — dictionary *or* cloud — is drawn inside its own text box,
+//    wrapped to that box, so the translation stands where the text stood
+//    instead of a bubble floating over the picture. The old word bound (a
+//    proxy for "short dictionary label") is gone: the fit is now decided by
+//    measuring the translation against the box it would be drawn in, which is
+//    what actually matters.
+//  - **A callout is the rare fallback**, not the common case. It exists for
+//    the two honest exceptions: text that cannot be drawn legibly in place at
+//    the in-place floor, and the always-show-original preference, which by
+//    definition wants the original kept visible *beside* the translation.
+//  - **One predicate, three conditions.** `inPlaceOutcome` is the one
+//    implementation, and `place` goes through it — a fourth condition cannot
+//    be introduced at one call site and not the other.
 //  - **The measurement is the render.** Every size decision goes through the
 //    caller's `Measure` closure — the feature's one measurer
-//    (`LiveOverlayTextMetrics`) — and the emitted `lines` carry the exact
-//    strings, point sizes and weights that were measured, so the view has no
-//    size to choose and nothing to re-derive (risk R2, removed structurally).
+//    (`LiveOverlayTextMetrics`) — at the width the box will draw at, and the
+//    emitted `lines` carry the exact strings, point sizes and weights that
+//    were measured, so the view has no size to choose and nothing to
+//    re-derive (risk R2, removed structurally).
+//  - **Two boxes never stack.** The in-place box is *geometry first*: it is
+//    the region's own rect grown by at most `inPlaceMaxGrowth`, and only into
+//    space no other region's rect occupies — and where two regions are close,
+//    each takes at most **half** the gap between them, so two boxes that both
+//    grow meet at the midpoint and can touch but never overlap. That is the
+//    "stacked and clustered" complaint answered with a property rather than a
+//    tuning pass.
 //  - **A callout never covers its own region's printed text.** That hard
 //    constraint outranks the preferences (fewest other regions covered, then
 //    nearest). A conflict is never resolved by covering the text it is about.
@@ -28,9 +45,10 @@ import Foundation
 //    placement is flagged `isClampedFallback`, which is what T-030's manual
 //    device validation targets (OD5).
 //  - **Pure, deterministic, total, bounded.** No clock, no I/O, no camera, no
-//    storage, no await. The same inputs produce the same placements — the
-//    output is ordered canonically (top to bottom, then left to right, then
-//    identity) and the work per region is a fixed number of rect operations.
+//    storage, no await. The same inputs produce the same placements whatever
+//    order the regions arrive in — the output is ordered canonically (top to
+//    bottom, then left to right, then identity) and the work per region is a
+//    fixed number of rect operations and text measurements.
 //  - **The letterboxing math is the shipped one.** Region rects are mapped
 //    through `ApplianceOverlayMapper.displayedImageRect` unchanged, so the
 //    live overlay and the shipped appliance overlay agree on where a
@@ -55,26 +73,32 @@ enum LiveOverlayPlacement {
 
     // MARK: - The text seam
 
-    /// How the placement measures text. The real implementation is the
-    /// feature's one measurer, and it is also the one the view renders with;
-    /// a test can substitute a counting closure to prove the cost is bounded
-    /// without changing what is measured.
-    typealias Measure = (String, CGFloat, LiveOverlayTextWeight) -> CGSize
+    /// How the placement measures text: the string, the point size, the
+    /// weight, and the width the text may wrap to. The real implementation is
+    /// the feature's one measurer, and it is also the one the view renders
+    /// with; a test can substitute a counting closure to prove the cost is
+    /// bounded without changing what is measured.
+    typealias Measure = (String, CGFloat, LiveOverlayTextWeight, CGFloat) -> CGSize
 
     // MARK: - Inputs
 
     /// The parameters one placement pass runs under.
     ///
-    /// The first three are the design's (`maxSourceWordCount`, `minPointSize`,
-    /// `alwaysShowOriginal`); the rest are the callout's text layout, supplied
-    /// by the app layer from `DesignTokens` so the view can lay the very same
-    /// lines out inside the very same pill without a second constant anywhere.
-    /// Deliberately no defaults: a policy is always built from the one config
-    /// and the one token table, never from a literal spelled here.
+    /// Everything here is supplied by the app layer: the config's values and
+    /// the token table's, so neither this file nor a test spells a nominal
+    /// value by hand. Deliberately no defaults: a policy is always built from
+    /// the one config and the one token table.
     struct Policy: Equatable {
-        /// Source strings of at most this many words are eligible for the
-        /// in-place form (`inPlaceMaxSourceWordCount`).
-        let maxSourceWordCount: Int
+        /// The point size floor for in-place text (`inPlaceMinPointSize`),
+        /// already reconciled with `minPointSize` by the app layer. In-place
+        /// text may go below the app's body floor because it stands where
+        /// type of roughly that size already stood; the callout and card
+        /// floors do not.
+        let inPlaceMinPointSize: CGFloat
+        /// The ceiling on how far the in-place box may grow past the region's
+        /// own text box, as a factor (`inPlaceMaxGrowth`). A ceiling, not an
+        /// entitlement: the growth is taken only from free space.
+        let inPlaceMaxGrowth: Double
         /// The rendered point size floor for the primary line
         /// (`overlayMinPointSize`, floored by the app's body minimum).
         let minPointSize: CGFloat
@@ -98,8 +122,9 @@ enum LiveOverlayPlacement {
     /// Where one region's presentation is drawn. Exactly the design's shape:
     /// the view and the spoken ordering consume this, and nothing else.
     enum Form: Equatable {
-        /// The translation replaces the region's text, on a background sized
-        /// to the region.
+        /// The translation replaces the region's text, on an opaque box that
+        /// covers the region's own text box and no more free space than it
+        /// needed.
         case inPlace(regionID: TextRegionStabilizer.RegionIdentity, rect: CGRect)
         /// A pill beside the region, with a leader line to `anchor` — the
         /// closest point on the region's rect to the pill, so the line always
@@ -138,91 +163,195 @@ enum LiveOverlayPlacement {
 
     // MARK: - The in-place predicate (D1)
 
-    /// The four conditions, named for their *violation*: `ineligible(_:)`
-    /// reads as the reason the region got a callout, in the design's order.
+    /// The conditions, named for their *violation*: `ineligible(_:)` reads as
+    /// the reason the region got a callout instead of standing in place.
     enum InPlaceCondition: String, Equatable, CaseIterable {
-        /// The outcome is not resolved, or its tier is the cloud: a cloud
-        /// translation is never drawn in place, even when it would fit.
-        case sourceTierIsNotDictionary
-        /// The normalized source has more than `maxSourceWordCount` words.
-        case sourceExceedsWordBound
-        /// The translation does not fit the region rect at `minPointSize`.
+        /// Nothing has translated the region yet (pending), or nothing could
+        /// (degraded). Drawing the recognized text where it already stands
+        /// would cover the original with itself and claim the region was
+        /// fine, which is exactly what FR-LCT-018 forbids.
+        case noTranslationToDraw
+        /// The translation does not fit the region's box even at the in-place
+        /// floor: the honest answer is a callout beside the text rather than
+        /// type too small to read (D1).
         case translationDoesNotFitRegion
         /// The always-show-original preference is on: originals stay visible
         /// beside translations, so nothing is drawn in place.
         case alwaysShowOriginalIsOn
     }
 
-    enum InPlaceEligibility: Equatable {
-        case eligible
+    /// The predicate's answer: the box and the line to draw, or the reason the
+    /// region gets a callout. Carrying the box in the value is what makes "the
+    /// box the fit was decided on is the box that is drawn" a property rather
+    /// than a coincidence of two call sites.
+    enum InPlaceOutcome: Equatable {
+        case fits(box: CGRect, line: LiveOverlayTextLine)
         case ineligible(InPlaceCondition)
+
+        /// The violation, when there is one — the design's boolean form,
+        /// rendered as a value rather than a second implementation.
+        var condition: InPlaceCondition? {
+            guard case .ineligible(let condition) = self else { return nil }
+            return condition
+        }
+
+        /// The box to draw, when the translation fits in it.
+        var box: CGRect? {
+            guard case .fits(let box, _) = self else { return nil }
+            return box
+        }
     }
 
     /// **The** in-place decision (D1). Total: it answers for every outcome,
-    /// including an unresolved one (`tier` nil), so "is this resolved?" cannot
-    /// be forgotten by a caller that only holds a result.
+    /// including an unresolved one, so "is this resolved?" cannot be forgotten
+    /// by a caller that only holds a result.
     ///
-    /// Conditions are tested in the design's order and the first violation is
+    /// Conditions are tested in a fixed order and the first violation is
     /// returned — the reason a region became a callout is then a fact a test
     /// (or a debugger) can read, not an inference.
     ///
-    /// There is deliberately no "growth budget" condition: the fit at the
-    /// minimum point size *is* the bound (D1).
-    static func inPlaceEligibility(source: String,
-                                   translation: String,
-                                   regionRect: CGRect,
-                                   policy: Policy,
-                                   tier: TranslationTier?,
-                                   measure: Measure = LiveOverlayTextMetrics.measure) -> InPlaceEligibility {
-        guard tier == .dictionary else { return .ineligible(.sourceTierIsNotDictionary) }
-
-        guard wordCount(source) <= policy.maxSourceWordCount else {
-            return .ineligible(.sourceExceedsWordBound)
+    /// `obstacles` are the rects the box may not grow into: the app's own
+    /// chrome, and every *other* region's rect. Passing rects rather than
+    /// already-grown boxes is what keeps the decision order-independent — each
+    /// region's growth budget is a function of its neighbours' printed text,
+    /// not of the order they were visited in.
+    static func inPlaceOutcome(regionRect: CGRect,
+                               result: TranslationResult,
+                               obstacles: [CGRect] = [],
+                               bounds: CGRect,
+                               policy: Policy,
+                               measure: Measure = LiveOverlayTextMetrics.measure) -> InPlaceOutcome {
+        guard result.sourceTier != nil, !result.text.isEmpty else {
+            return .ineligible(.noTranslationToDraw)
         }
-
-        let measured = measure(translation, policy.minPointSize, .primary)
-        guard measured.width <= regionRect.width, measured.height <= regionRect.height else {
-            return .ineligible(.translationDoesNotFitRegion)
-        }
-
         guard !policy.alwaysShowOriginal else { return .ineligible(.alwaysShowOriginalIsOn) }
 
-        return .eligible
+        let box = inPlaceMaxBox(regionRect: regionRect,
+                                obstacles: obstacles,
+                                bounds: bounds,
+                                growth: policy.inPlaceMaxGrowth)
+        for pointSize in inPlacePointSizes(policy: policy) {
+            let measured = measure(result.text, pointSize, .primary, box.width)
+            guard measured.width <= box.width, measured.height <= box.height else { continue }
+            return .fits(box: box,
+                         line: LiveOverlayTextLine(text: result.text,
+                                                   pointSize: pointSize,
+                                                   weight: .primary))
+        }
+
+        return .ineligible(.translationDoesNotFitRegion)
     }
 
-    /// The design's boolean form. Delegates — it is a rendering of the same
-    /// decision, never a second implementation of it.
-    static func inlineEligible(source: String,
-                               translation: String,
-                               regionRect: CGRect,
-                               policy: Policy,
-                               tier: TranslationTier?,
-                               measure: Measure = LiveOverlayTextMetrics.measure) -> Bool {
-        inPlaceEligibility(source: source, translation: translation, regionRect: regionRect,
-                           policy: policy, tier: tier, measure: measure) == .eligible
+    /// The point sizes the in-place form is tried at, **largest first**: the
+    /// app's body floor, then the configured in-place floor. Two candidates at
+    /// most, both from the config — a fixed scan, never a search, so the cost
+    /// per region stays a constant a test can pin.
+    ///
+    /// The order is the point: a translation that reads comfortably at the
+    /// body floor is drawn at the body floor, and only a region too small for
+    /// that gets the smaller in-place size. A region too small for both gets a
+    /// callout, which is the honest failure rather than unreadable type.
+    static func inPlacePointSizes(policy: Policy) -> [CGFloat] {
+        let floor = min(policy.inPlaceMinPointSize, policy.minPointSize)
+        return floor < policy.minPointSize ? [policy.minPointSize, floor] : [policy.minPointSize]
     }
 
-    /// The word count the source bound is measured against: the feature's one
-    /// normalization (trim, collapse, case-fold), split on spaces. An empty
-    /// source counts as no words — the stabiliser never publishes an empty
-    /// string, and a caller that passes one gets the honest arithmetic rather
-    /// than a special case.
-    static func wordCount(_ source: String) -> Int {
-        LiveTranslateTextNormalization.normalized(source)
-            .split(separator: " ", omittingEmptySubsequences: true)
-            .count
+    /// The largest box the in-place form may occupy.
+    ///
+    /// Three rules, in this order:
+    ///
+    ///  1. **The region's own rect is the floor.** The box always contains it,
+    ///     so the printed text it replaces is fully covered (the box is drawn
+    ///     opaque). Growth is only ever outward from here.
+    ///  2. **Another rect is a shared gap, and the two halves are each other's
+    ///     bound.** Every other rect bounds the growth *on one axis* to at most
+    ///     half the distance between the two rects across it. Two rects that
+    ///     both grow therefore meet at the midpoint of the axis that separates
+    ///     them: they can touch, never overlap — and because the separation is
+    ///     complete on that one axis, the boxes cannot stack even where they
+    ///     are diagonal neighbours.
+    ///  3. **`growth` is a ceiling, not an entitlement.** `1.4` means at most
+    ///     a fifth of the region's own size clear on each axis, so a translation
+    ///     on a big sign cannot become a wall of text.
+    ///
+    /// The container's own edge is the only bound that may be taken in full:
+    /// free space between the region and the safe area is nobody else's.
+    ///
+    /// **Which axis is bounded.** A rect directly above or below this one
+    /// (overlapping it horizontally) is separated vertically, so it bounds the
+    /// *vertical* growth only — a column of labels would otherwise never be
+    /// able to widen. The rule is the mirror of that for a rect beside it. A
+    /// rect that is *diagonal* — separated on both axes — could collide on
+    /// either, so it bounds the axis it is further away on: that is the axis
+    /// with room to give, the two rects take half of it each, and the pair is
+    /// separated there whatever the other axis does.
+    static func inPlaceMaxBox(regionRect: CGRect,
+                              obstacles: [CGRect],
+                              bounds: CGRect,
+                              growth: Double) -> CGRect {
+        guard regionRect.width > 0, regionRect.height > 0 else { return regionRect }
+
+        var left = max(0, regionRect.minX - bounds.minX)
+        var right = max(0, bounds.maxX - regionRect.maxX)
+        var top = max(0, regionRect.minY - bounds.minY)
+        var bottom = max(0, bounds.maxY - regionRect.maxY)
+
+        func limitHorizontally(_ other: CGRect) {
+            if other.maxX <= regionRect.minX {
+                left = min(left, (regionRect.minX - other.maxX) / 2)
+            } else if other.minX >= regionRect.maxX {
+                right = min(right, (other.minX - regionRect.maxX) / 2)
+            }
+        }
+        func limitVertically(_ other: CGRect) {
+            if other.maxY <= regionRect.minY {
+                top = min(top, (regionRect.minY - other.maxY) / 2)
+            } else if other.minY >= regionRect.maxY {
+                bottom = min(bottom, (other.minY - regionRect.maxY) / 2)
+            }
+        }
+
+        for other in obstacles where other.width > 0 && other.height > 0 {
+            let dx = max(0, max(regionRect.minX - other.maxX, other.minX - regionRect.maxX))
+            let dy = max(0, max(regionRect.minY - other.maxY, other.minY - regionRect.maxY))
+            switch (dx, dy) {
+            case (0, 0):
+                // Overlapping printed text: the region's own rect cannot be
+                // given up, so there is no gap here to share.
+                continue
+            case (_, 0):
+                limitHorizontally(other)
+            case (0, _):
+                limitVertically(other)
+            default:
+                if dx >= dy { limitHorizontally(other) } else { limitVertically(other) }
+            }
+        }
+
+        let factor = growth > 1 ? growth : 1
+        let extraX = regionRect.width * CGFloat(factor - 1) / 2
+        let extraY = regionRect.height * CGFloat(factor - 1) / 2
+        let growLeft = min(extraX, left)
+        let growRight = min(extraX, right)
+        let growTop = min(extraY, top)
+        let growBottom = min(extraY, bottom)
+
+        return CGRect(x: regionRect.minX - growLeft,
+                      y: regionRect.minY - growTop,
+                      width: regionRect.width + growLeft + growRight,
+                      height: regionRect.height + growTop + growBottom)
     }
 
     // MARK: - Placement
 
-    /// Places every region: in place when all four conditions hold, an
-    /// anchored callout otherwise, in reading order.
+    /// Places every region: in place when the translation fits the region's own
+    /// box, an anchored callout otherwise, in reading order.
     ///
-    ///  - `safeArea` is the container-space rect the pill must stay inside
+    ///  - `safeArea` is the container-space rect the placement must stay inside
     ///    (the preview's safe area). An empty rect means "the whole container",
     ///    which is what a caller with no safe-area information has.
-    ///  - `occupiedRects` are the already-placed controls the callout should
-    ///    avoid, like any other region.
+    ///  - `occupiedRects` are the already-placed controls: the pills avoid
+    ///    them, and the in-place boxes do not grow into them.
     ///  - `stateCopy` supplies the honest line for an outcome that has no
     ///    translation (the catalog's pending/unavailable wording, in the active
     ///    language, T-021). It is a closure so this file stays copy-free — and
@@ -262,47 +391,96 @@ enum LiveOverlayPlacement {
             if rect.width > 0, rect.height > 0 { rects[region.id] = rect }
         }
 
+        /// Every *other* region's printed rect, in identity order: the obstacles
+        /// one region's box shares its gaps with. Identity order rather than
+        /// dictionary order so the arithmetic is identical however the input
+        /// array was ordered.
+        func otherRects(_ id: TextRegionStabilizer.RegionIdentity) -> [CGRect] {
+            rects.filter { $0.key != id }.sorted { $0.key < $1.key }.map(\.value)
+        }
+
+        // The in-place box is pure geometry (the region, its neighbours, the
+        // safe area, the growth ceiling), so it is computed before any outcome
+        // is looked at: the box a region gets does not depend on whether it
+        // was visited first, or on what the meanwhile-placed callouts did. Two
+        // of these boxes never overlap — see `inPlaceMaxBox`.
+        var boxes: [TextRegionStabilizer.RegionIdentity: CGRect] = [:]
+        for (id, rect) in rects {
+            boxes[id] = inPlaceMaxBox(regionRect: rect,
+                                      obstacles: occupiedRects + otherRects(id),
+                                      bounds: bounds,
+                                      growth: policy.inPlaceMaxGrowth)
+        }
+
+        /// Every other region's box, in identity order: what a *callout* must
+        /// stay clear of. A box is used rather than the printed rect because
+        /// the drawn boxes are what the elder sees — a pill that avoided a rect
+        /// but covered the box drawn over it would be covering text.
+        func otherBoxes(_ id: TextRegionStabilizer.RegionIdentity) -> [CGRect] {
+            boxes.filter { $0.key != id }.sorted { $0.key < $1.key }.map(\.value)
+        }
+
         var placed: [PlacedOverlay] = []
         placed.reserveCapacity(regions.count)
+        // The pills already placed in this pass. A pill avoids the region
+        // boxes *and* the pills before it, so two callouts cannot stack either.
+        var pills: [CGRect] = []
 
-        for region in regions {
+        for region in placementOrder(regions) {
             guard let regionRect = rects[region.id] else { continue }
             let result = results[region.id] ?? .pending(region.text)
             let lines = calloutLines(for: result, policy: policy, stateCopy: stateCopy)
 
-            if inlineEligible(source: region.text, translation: result.text,
-                              regionRect: regionRect, policy: policy,
-                              tier: result.sourceTier, measure: measure) {
-                placed.append(PlacedOverlay(
-                    region: region,
-                    result: result,
-                    form: .inPlace(regionID: region.id, rect: regionRect),
-                    // The one line the in-place form draws, at the size the fit
-                    // condition measured it at.
-                    lines: [lines.primary]))
-                continue
-            }
+            // The same obstacle set the box above was computed from, so the
+            // box this decision returns is the box that is drawn.
+            let outcome = inPlaceOutcome(regionRect: regionRect,
+                                         result: result,
+                                         obstacles: occupiedRects + otherRects(region.id),
+                                         bounds: bounds,
+                                         policy: policy,
+                                         measure: measure)
 
-            let obstacles = occupiedRects + rects
-                .filter { $0.key != region.id }
-                .sorted { $0.key < $1.key }
-                .map(\.value)
-            let callout = calloutPlacement(regionRect: regionRect,
-                                           lines: lines.all,
-                                           bounds: bounds,
-                                           obstacles: obstacles,
-                                           policy: policy,
-                                           measure: measure)
-            placed.append(PlacedOverlay(
-                region: region,
-                result: result,
-                form: .callout(regionID: region.id, anchor: callout.anchor,
-                               pillRect: callout.rect),
-                lines: lines.all,
-                isClampedFallback: callout.isClampedFallback))
+            switch outcome {
+            case .fits(let box, let line):
+                placed.append(PlacedOverlay(region: region,
+                                            result: result,
+                                            form: .inPlace(regionID: region.id, rect: box),
+                                            // The one line the in-place form
+                                            // draws, at the size the fit
+                                            // condition measured it at.
+                                            lines: [line]))
+            case .ineligible:
+                let callout = calloutPlacement(
+                    regionRect: regionRect,
+                    lines: lines.all,
+                    bounds: bounds,
+                    obstacles: occupiedRects + otherBoxes(region.id) + pills,
+                    policy: policy,
+                    measure: measure)
+                pills.append(callout.rect)
+                placed.append(PlacedOverlay(region: region,
+                                            result: result,
+                                            form: .callout(regionID: region.id,
+                                                           anchor: callout.anchor,
+                                                           pillRect: callout.rect),
+                                            lines: lines.all,
+                                            isClampedFallback: callout.isClampedFallback))
+            }
         }
 
         return readingOrder(placed)
+    }
+
+    /// The order regions are *visited* in, which is the order the pills can
+    /// see each other in: the same canonical reading order the output uses, so
+    /// the same scene produces the same pills whatever order the detector
+    /// reported its regions in.
+    static func placementOrder(_ regions: [TextRegionStabilizer.StableTextRegion])
+        -> [TextRegionStabilizer.StableTextRegion] {
+        regions.sorted(by: { (lhs: TextRegionStabilizer.StableTextRegion,
+                              rhs: TextRegionStabilizer.StableTextRegion) -> Bool in
+            precedes((point: lhs.box.center, id: lhs.id), (point: rhs.box.center, id: rhs.id))
+        })
     }
 
     /// Top to bottom, then left to right, then by identity — the feature's one
@@ -310,13 +488,21 @@ enum LiveOverlayPlacement {
     /// me" walks). Geometric on purpose: the order is a property of where the
     /// text is, not of when it was seen.
     static func readingOrder(_ placed: [PlacedOverlay]) -> [PlacedOverlay] {
-        placed.sorted { lhs, rhs in
-            let left = lhs.region.box.center
-            let right = rhs.region.box.center
-            if left.y != right.y { return left.y < right.y }
-            if left.x != right.x { return left.x < right.x }
-            return lhs.region.id < rhs.region.id
-        }
+        placed.sorted(by: { (lhs: PlacedOverlay, rhs: PlacedOverlay) -> Bool in
+            precedes((point: lhs.region.box.center, id: lhs.region.id),
+                     (point: rhs.region.box.center, id: rhs.region.id))
+        })
+    }
+
+    /// The one comparison behind both orders.
+    private static func precedes(_ left: (point: (x: Double, y: Double),
+                                          id: TextRegionStabilizer.RegionIdentity),
+                                 _ right: (point: (x: Double, y: Double),
+                                           id: TextRegionStabilizer.RegionIdentity))
+        -> Bool {
+        if left.point.y != right.point.y { return left.point.y < right.point.y }
+        if left.point.x != right.point.x { return left.point.x < right.point.x }
+        return left.id < right.id
     }
 
     // MARK: - Screen mapping (NFR-LCT-012)
@@ -383,14 +569,15 @@ enum LiveOverlayPlacement {
 
     /// The size of the pill that holds `lines`: the measured text block plus
     /// the policy's padding. Measured with the same closure the view renders
-    /// with, at the sizes and weights the lines themselves carry.
+    /// with, at the sizes and weights the lines themselves carry. Unwrapped:
+    /// a pill is sized to its lines as written, which is what makes it compact.
     static func pillSize(for lines: [LiveOverlayTextLine],
                          policy: Policy,
                          measure: Measure = LiveOverlayTextMetrics.measure) -> CGSize {
         var width: CGFloat = 0
         var height: CGFloat = 0
         for (index, line) in lines.enumerated() {
-            let measured = measure(line.text, line.pointSize, line.weight)
+            let measured = measure(line.text, line.pointSize, line.weight, .greatestFiniteMagnitude)
             width = max(width, measured.width)
             if index > 0 { height += policy.lineSpacing }
             height += measured.height

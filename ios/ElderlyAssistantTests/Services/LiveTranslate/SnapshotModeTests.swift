@@ -583,16 +583,19 @@ final class SnapshotModeTests: XCTestCase {
     /// control strip): both are the obstacles the view reports, and this
     /// asserts the frozen frame's placements respect them.
     ///
-    /// The region is a cloud-translated sentence, because a cloud translation
-    /// is never drawn in place (T-020's first ineligibility condition) — so
-    /// this frame gets a callout by construction rather than by hoping the fit
-    /// test happens to fail.
+    /// The region is a *tiny* sign carrying a long cloud-translated sentence.
+    /// Replace-in-place is the default render now (owner UX rework,
+    /// 2026-09-17), so a callout is no longer "what a cloud translation gets" —
+    /// it is the fallback for a translation that cannot be read in the region's
+    /// own box. A sign a few points wide cannot hold "Members only beyond this
+    /// point" at any size the floor allows, so this frame gets its callout by
+    /// construction rather than by hoping a fit happens to fail.
     @MainActor
     func testNoCalloutLandsUnderTheCaptureButtonOrTheOverlayChrome() async throws {
         let transport = Self.respondingTransport()
         let harness = makeHarness(consent: true, configured: true, transport: transport)
         reportLayout(harness)
-        harness.parts.engine.regions = [detected(cloudText, box: (0.30, 0.45, 0.70, 0.55))]
+        harness.parts.engine.regions = [detected(cloudText, box: (0.30, 0.45, 0.34, 0.47))]
         await harness.model.start()
         try await deliverPass(harness)
         try await deliverPass(harness)
@@ -609,7 +612,7 @@ final class SnapshotModeTests: XCTestCase {
             callouts.append((pillRect, placement.isClampedFallback))
         }
         XCTAssertFalse(callouts.isEmpty,
-                       "a cloud-translated sentence is never drawn in place, so it has a callout")
+                       "a sentence this long cannot be read in a box this small, so it has a callout")
 
         let top = try XCTUnwrap(LiveTranslateView.topChromeRects(containerSize: containerSize).first)
         XCTAssertTrue(reserved.contains(top), "the capture control's strip is an obstacle")

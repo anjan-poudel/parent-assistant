@@ -182,6 +182,15 @@ final class LiveOverlayPlacementGeometryTests: XCTestCase {
                 safeArea: CGRect(origin: .zero, size: portraitContainer),
                 policy: policy(), stateCopy: { _ in nil })
             let inPlaceRect = try XCTUnwrap(inPlaceRect(in: placements))
+            let own = LiveOverlayPlacement.screenRect(for: region.box,
+                                                       containerSize: portraitContainer,
+                                                       framePixelSize: portraitContainer)
+            // The drawn box is the box the fit was measured against, and it
+            // covers the printed text it replaces: opaque over its own source
+            // and nothing else (owner UX rework, 2026-09-17).
+            XCTAssertTrue(inPlaceRect.insetBy(dx: -1e-9, dy: -1e-9).contains(own),
+                          "the in-place box must cover the printed text it replaces")
+            XCTAssertGreaterThan(inPlaceRect.width, own.width)
             let surface = LiveTranslateOverlaySurface(placements: placements, policy: policy(),
                                                       locale: Locale(identifier: "ne-NP"))
 
@@ -192,13 +201,15 @@ final class LiveOverlayPlacementGeometryTests: XCTestCase {
         }
     }
 
+    /// A callout is the fallback, so the fixture is a sign too small to hold
+    /// its own translation: the pill then has to keep its text inside itself.
     @MainActor
     func testACalloutKeepsItsTextHorizontallyInsideItsPill() throws {
         let region = TextRegionStabilizer.StableTextRegion(
             id: TextRegionStabilizer.RegionIdentity(rawValue: 0),
             text: "Opening hours",
             normalizedText: "opening hours",
-            box: NormalizedBox(xMin: 0.2, yMin: 0.5, xMax: 0.8, yMax: 0.56),
+            box: NormalizedBox(xMin: 0.2, yMin: 0.5, xMax: 0.26, yMax: 0.52),
             detectedLanguage: "en",
             confidence: 0.9)
         let result = TranslationResult.resolved(originalText: region.text,

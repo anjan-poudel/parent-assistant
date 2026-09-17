@@ -62,16 +62,44 @@ struct LiveTranslateConfig: Equatable {
 
     /// Normalised centroid distance below which two nearby regions are
     /// merged into one overlay.
-    var declutterMergeCentroidDistance: Double = 0.06
+    ///
+    /// Raised from the OD5 spike value (owner UX rework, 2026-09-17: "the
+    /// bubbles are everywhere and shaky and get stacked and clustered
+    /// depending on text"). A sign read in two pieces — or one sentence the
+    /// detector split — is *one* thing to the elder, and at the old distance
+    /// the two halves rendered as two boxes fighting for the same pixels.
+    /// Merging is the cheapest way to buy quiet: the union box covers the
+    /// same printed text with one overlay instead of two.
+    var declutterMergeCentroidDistance: Double = 0.12
 
-    /// Maximum number of overlays rendered at once in a dense scene.
-    var declutterMaxRegions: Int = 8
+    /// Maximum number of overlays rendered at once in a dense scene. Kept
+    /// small deliberately: the overlay is now the *glance* surface, and the
+    /// snapshot card is the reading surface, so a dense scene shows few large
+    /// stable boxes rather than many small ones (owner UX rework, 2026-09-17).
+    var declutterMaxRegions: Int = 6
 
     // MARK: Overlay (D1, OD2)
 
-    /// Source strings of at most this many words are eligible for the
-    /// in-place form (tier 0 only, D1).
-    var inPlaceMaxSourceWordCount: Int = 3
+    /// The point size floor for the **in-place** form — the box that covers a
+    /// region's printed text and draws the translation in its place.
+    ///
+    /// In-place text is allowed below `overlayMinPointSize` because it stands
+    /// where text of roughly that size already stood: a sign's own type is not
+    /// the app's body size, and refusing to match it would push every small
+    /// sign into a callout. The floor is still a floor — below it the region
+    /// gets a callout rather than type the elder cannot read, and the
+    /// **callout and card** floors stay at `overlayMinPointSize`
+    /// (owner UX rework, 2026-09-17: replace-in-place is the default render
+    /// for every region).
+    var inPlaceMinPointSize: CGFloat = 16
+
+    /// How far the in-place box may grow past the region's own text box, as a
+    /// factor: 1.4 ⇒ at most 20 % of the region's own size clear on each axis.
+    ///
+    /// A ceiling, not an entitlement: the growth is taken only from free space
+    /// (see `LiveOverlayPlacement.inPlaceBox`), so a box surrounded by other
+    /// text keeps the region's own size and wraps its translation into it.
+    var inPlaceMaxGrowth: Double = 1.4
 
     /// Minimum rendered point size for overlay text: the accessibility floor
     /// for the elder-facing surface.
