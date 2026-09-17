@@ -163,12 +163,14 @@ final class ElderlyAssistantUITests: XCTestCase {
         title.press(forDuration: 1.2)
 
         // ...and the hidden sheet carries the technical rows that left the
-        // tabs, with the model screen behind its own row.
+        // tabs, with the model screen behind its own row. YouTube rides
+        // here since the menu-deepening pass (2026-09-17): a provider-key
+        // screen, not a household Tools row.
         let models = app.buttons.matching(NSPredicate(
             format: "label CONTAINS %@", "AI मोडेल")).firstMatch
         XCTAssertTrue(models.waitForExistence(timeout: 10),
                       "Long-pressing the Settings title should reveal the technical sheet")
-        for row in ["जेमिनी AI", "आवाज इन्जिन"] {
+        for row in ["जेमिनी AI", "आवाज इन्जिन", "युट्युब"] {
             XCTAssertTrue(app.buttons.matching(NSPredicate(
                 format: "label CONTAINS %@", row)).firstMatch.exists,
                 "The technical sheet should carry \"\(row)\"")
@@ -211,12 +213,12 @@ final class ElderlyAssistantUITests: XCTestCase {
                            ("पात्रो", "पात्रो"),
                            ("क्यालेन्डर साझा", "क्यालेन्डर साझा")]),
             ("उपकरणहरू", [("द्रुत एपहरू", "द्रुत एपहरू"),
-                           ("युट्युब", "युट्युब"),
                            ("फिड", "फिड"),
                            ("म्यानुअलहरू", "म्यानुअलहरू"),
                            ("ठाउँ र नक्सा", "ठाउँ र नक्सा")]),
             ("प्रणाली", [("रूप", "रूप"),
                          ("भाषा र क्षेत्र", "भाषा र क्षेत्र"),
+                         ("लाइभ अनुवाद", "लाइभ अनुवाद"),
                          ("गोपनीयता", "गोपनीयता")]),
         ]
         for (index, (tab, rows)) in tabs.enumerated() {

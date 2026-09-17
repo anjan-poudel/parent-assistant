@@ -178,6 +178,15 @@ struct HomeView: View {
             // is fragile — it silently fails to present on some iOS 16
             // builds, which presented as "hub buttons do nothing".
             .navigationDestination(for: LeafDestination.self) { leafView(for: $0) }
+            // Settings leaves pushed straight from Home (menu-audit task,
+            // 2026-09-17): the quick-access strip's plus tile pushes
+            // `.quickApps` directly. While the Settings hub is itself
+            // pushed, ITS registration of this destination type wins (it
+            // is the deeper, later-registered one), so hub rows keep
+            // routing through SettingsDestinationView exactly as before.
+            .navigationDestination(for: SettingsView.SettingsDestination.self) { destination in
+                SettingsDestinationView(destination: destination)
+            }
             // Voice-driven contact search (2026-09-07): a request means
             // "Phone screen + this search" — push the Call leaf when we
             // aren't already on it. The leaf consumes the request on

@@ -2915,8 +2915,10 @@ struct MedicationScheduleSettingsView: View {
                 addForm
                 // Native-calendar mirror/two-way/import cards moved to
                 // the Calendar settings leaf (calendar-settings task,
-                // 2026-09-07); this leaf now edits medications (and
-                // festival advance reminders) alone.
+                // 2026-09-07). The appointment calendar auto-add toggle
+                // moved here from the Meds leaf (menu-audit task,
+                // 2026-09-17) — settings live under Settings.
+                calendarAutoAddCard
                 festivalReminderCard
             }
         }
@@ -3042,6 +3044,26 @@ struct MedicationScheduleSettingsView: View {
     /// Advance-reminder days for important festivals (BS calendar,
     /// 2026-09-06) — default 2, family-configurable. Changing it
     /// reschedules festival notifications immediately.
+    /// Calendar auto-add for doctor's appointments (medical task,
+    /// 2026-09-07, moved here from the Meds leaf by the menu-audit task,
+    /// 2026-09-17) — mirrors `appointmentsToCalendar` on the
+    /// coordinator, which persists it and re-syncs the store gate.
+    private var calendarAutoAddCard: some View {
+        Toggle(isOn: Binding(
+            get: { coordinator.appointmentsToCalendar },
+            set: { coordinator.appointmentsToCalendar = $0 }
+        )) {
+            Label("medical.calendarToggle", systemImage: "calendar.badge.plus")
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .foregroundStyle(DesignTokens.textPrimary)
+        }
+        .tint(DesignTokens.accent)
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
     private var festivalReminderCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             Label("festival.reminderTitle", systemImage: "bell.badge")

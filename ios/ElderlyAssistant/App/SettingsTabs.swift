@@ -7,10 +7,10 @@ import SwiftUI
 // facing list by the end, with the household's everyday rows (medication,
 // family, voices) a long scroll away from the technical ones. The spec
 // splits it into five tabs (pill bar + swipeable pages) and hands the
-// technical six — Gemini/cloud AI, the voice engine stack, web search, the
-// two review logs and the model screen — to a sheet reached by
-// long-pressing the Settings title (with an ellipsis affordance for
-// accessibility once the household has found it once).
+// technical rows — Gemini/cloud AI, the voice engine stack, web search, the
+// YouTube key, the two review logs and the model screen — to a sheet
+// reached by long-pressing the Settings title (with an ellipsis affordance
+// for accessibility once the household has found it once).
 //
 // Both halves are PURE TABLES (`SettingsSection.rows`,
 // `SettingsDestination.hiddenSheetRows`): the view layer only walks them.
@@ -53,8 +53,15 @@ extension SettingsView {
                 return [.meds, .routines, .alarms, .events, .calendar,
                         .calendarSharing]
             case .tools:
-                // "Quick apps, YouTube, news feeds, manuals, saved places".
-                return [.quickApps, .youtube, .feeds, .manuals, .places]
+                // "Quick apps, news feeds, manuals, saved places" — the
+                // household's shelf of apps and reference screens.
+                // YouTube used to sit second here; it is a cloud-provider
+                // KEY screen (the same screen class as the hidden Web
+                // search and Gemini rows: a SecureField, a quota note and
+                // a privacy note), so it moved in with them (menu-
+                // deepening pass, 2026-09-17). A household tab stays free
+                // of plumbing a family member must not be asked to handle.
+                return [.quickApps, .feeds, .manuals, .places]
             case .system:
                 // "Appearance, language, privacy" + the live-translation
                 // consent row ([LIVE-TRANSLATE T-015], 2026-09-17): the
@@ -68,9 +75,10 @@ extension SettingsView {
         }
     }
 
-    /// Every leaf screen the hub can push. The first 20 are the visible
-    /// rows across the five tabs; the last five are the technical
-    /// settings the hidden sheet carries (spec §2 decision 2).
+    /// Every leaf screen the hub can push. The first 19 are the visible
+    /// rows across the five tabs; the last six are the technical settings
+    /// the hidden sheet carries (spec §2 decision 2; YouTube joined them
+    /// in the menu-deepening pass, 2026-09-17).
     enum SettingsDestination: String, CaseIterable, Identifiable {
         // Voice
         case wakeWord, voicePersonalization, ttsVoices
@@ -79,11 +87,12 @@ extension SettingsView {
         // Reminders
         case meds, routines, alarms, events, calendar, calendarSharing
         // Tools
-        case quickApps, youtube, feeds, manuals, places
+        case quickApps, feeds, manuals, places
         // System
         case appearance, language, liveTranslate, privacy
-        // Hidden sheet (spec §2 decision 2) — moved, not deleted.
-        case geminiAI, voiceEngine, webSearch, intentLog, toolLog
+        // Hidden sheet (spec §2 decision 2) — moved, not deleted. YouTube
+        // rides with them: a provider-key screen, not a household control.
+        case geminiAI, voiceEngine, webSearch, intentLog, toolLog, youtube
 
         var id: String { rawValue }
 
@@ -156,18 +165,22 @@ extension SettingsView {
             }
         }
 
-        /// The tab this row lives on — `nil` for the hidden sheet's five
+        /// The tab this row lives on — `nil` for the hidden sheet's six
         /// (spec §2 decision 2 keeps AI + dev tools off the tabs).
         var tab: SettingsSection? {
             SettingsSection.allCases.first { $0.rows.contains(self) }
         }
 
-        /// The technical settings behind the long-press, in sheet order.
-        /// The model screen ("hidden AI models") is the sixth row and is
-        /// NOT a destination case — it has its own entry in
+        /// The technical settings behind the long-press, in sheet order:
+        /// the three cloud-provider credential screens first — Gemini,
+        /// the YouTube Data API key and the web-search key, all three the
+        /// same screen shape — then the two review logs. The model screen
+        /// ("hidden AI models") is the row AFTER these and is NOT a
+        /// destination case — it has its own entry in
         /// `HiddenSettingsSheet` (it never was a `SettingsSection` case).
         static let hiddenSheetRows: [SettingsDestination] = [
-            .geminiAI, .voiceEngine, .webSearch, .intentLog, .toolLog,
+            .geminiAI, .voiceEngine, .webSearch, .youtube, .intentLog,
+            .toolLog,
         ]
     }
 }
