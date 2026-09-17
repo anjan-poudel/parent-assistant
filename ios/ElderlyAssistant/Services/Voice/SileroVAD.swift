@@ -510,10 +510,31 @@ final class SileroONNXVAD: VoiceActivityDetector {
     private var endOfUtteranceMs = 200
     private var running = false
 
-    init(modelPath: String) throws {
+    init(modelPath: String, lifecycle: ModelLifecycleManager = .shared) throws {
         self.env = try ORTEnv(loggingLevel: .warning)
         self.session = try ORTSession(env: env, modelPath: modelPath,
                                       sessionOptions: nil)
+        // [MODEL-WARDEN] Step 0 — the third invisible resident (proposal
+        // §1.2 / finding H5). ~0.9 MB of ONNX weights + session state that
+        // the ledger's `M(t)` did not contain.
+        //
+        // Registered HERE, at the object that allocates it, and only when
+        // it actually exists: the shipped build wires `EnergyVAD` (no model
+        // — pure energy thresholds), so there is nothing to declare in that
+        // configuration, and declaring Silero's 0.9 MB anyway would make
+        // the ledger's total uncheckable against `phys_footprint`.
+        //
+        // Non-evictable, with the reason written: this sits on the audio
+        // path of every capture, and freeing 0.9 MB would mean tearing down
+        // and rebuilding the ONNX session mid-turn — an audio-graph
+        // interruption for a rounding error's worth of memory.
+        lifecycle.register(
+            slot: .vad,
+            modelID: nil,
+            owner: self,
+            evictable: false
+        ) {}
+        lifecycle.didLoad(.vad, owner: self)
     }
 
     func start(endOfUtteranceMs: Int) {

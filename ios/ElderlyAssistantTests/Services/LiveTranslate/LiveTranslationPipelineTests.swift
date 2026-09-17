@@ -842,9 +842,10 @@ final class LiveTranslationPipelineTests: XCTestCase {
 
         // 2. The camera leaves the sign. The scene is now still, so the tap is
         //    at the reduced cadence (0.7 s) — one pass of it is one miss, and
-        //    before the grace that was not enough to clear the box.
+        //    the wall-clock grace (recalibrated 2026-09-18) is what bounds the
+        //    departure, not the pass count.
         harness.recogniser.defaultStep = .regions([])
-        clock.advance(by: 0.7)
+        clock.advance(by: LiveTranslateConfig().overlayDepartureGraceSeconds + 0.1)
         await harness.pipeline.ingest(frame)
 
         let departed = try await latest(harness)

@@ -455,6 +455,13 @@ protocol TTSEngine {
     /// construction inside `synthesize` would. The default is a no-op so
     /// fakes and the non-sherpa stub build inherit it without change.
     func warm(voiceDirectory: URL) throws
+
+    /// [MODEL-WARDEN] Step 0 — drop every cached engine, returning the
+    /// voices' bytes to the process. The default is a no-op because only an
+    /// engine that CACHES has anything to flush; a caching engine must
+    /// override it, or the ledger's `.ttsVoices` row would be an evictable
+    /// slot whose eviction frees nothing.
+    func unloadCachedVoices()
 }
 
 extension TTSEngine {
@@ -464,6 +471,8 @@ extension TTSEngine {
     }
 
     func warm(voiceDirectory: URL) throws {}
+
+    func unloadCachedVoices() {}
 }
 
 enum TTSEngineError: Error {
@@ -514,6 +523,25 @@ final class SherpaTTSEngine: TTSEngine {
         // re-entrant, and the warm must not race a live synthesize.
         try engineQueue.sync {
             _ = try engine(for: voiceDirectory)
+        }
+    }
+
+    /// [MODEL-WARDEN] Step 0 — the release path this engine never had.
+    ///
+    /// Serialized on `engineQueue` for the same reason every other entry
+    /// point is: dropping a `SherpaOnnxOfflineTtsWrapper` while
+    /// `generate()` is running on it is a use-after-free, and the ledger's
+    /// eviction is asynchronous with respect to synthesis. The wrappers are
+    /// released inside the `sync` block, so a `synthesize` that is already
+    /// in flight finishes first and the free cannot land mid-call.
+    ///
+    /// `onEngineCreated` is deliberately NOT re-armed or reset here: the
+    /// next `engine(for:)` constructs a fresh wrapper and fires the
+    /// `tts_voice_loaded` stage boundary exactly as it did the first time,
+    /// which is the honest timing for a reload.
+    func unloadCachedVoices() {
+        engineQueue.sync {
+            engines.removeAll()
         }
     }
 
@@ -602,6 +630,8 @@ final class SherpaTTSEngine: TTSEngine {
     func warm(voiceDirectory: URL) throws {
         throw TTSEngineError.engineInitFailed(voiceDirectory)
     }
+    /// Nothing is ever cached in this configuration, so the protocol's
+    /// no-op default (`unloadCachedVoices`) is already the truth.
 }
 #endif
 
@@ -642,6 +672,10 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
     /// private instance pointing at the SAME default directory — the
     /// files are the shared state (see `AckAudioCache`).
     private let ackCache: AckAudioCache
+    /// [MODEL-WARDEN] The ledger the voice cache registers its residency
+    /// with. Injected so a test can hand in its own ledger instead of
+    /// writing into the process-wide one.
+    private let lifecycle: ModelLifecycleManager
 
     /// Elderly-friendly pace: 5% slower than the voice's natural rate.
     static let defaultSpeed: Float = 0.95
@@ -660,7 +694,8 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
          turnTracer: VoiceTurnLatencyTracer? = nil,
          timingRecorder: TurnTimingRecorder? = nil,
          traceRecorder: PipelineTraceRecorder? = nil,
-         ackCache: AckAudioCache? = nil) {
+         ackCache: AckAudioCache? = nil,
+         lifecycle: ModelLifecycleManager = .shared) {
         self.fallback = fallback
         self.silenceFallback = silenceFallback
         self.observabilityBus = observabilityBus
@@ -669,6 +704,7 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
         self.timingRecorder = timingRecorder
         self.traceRecorder = traceRecorder
         self.ackCache = ackCache ?? AckAudioCache()
+        self.lifecycle = lifecycle
         let sherpa = SherpaTTSEngine()
         // [TURN-TIMING] Voice engine ready — the load ms rides as a point
         // entry when a fresh engine loads inside a live turn.
@@ -678,6 +714,52 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
         self.engine = engine ?? sherpa
         self.bundle = bundle
         super.init()
+        registerVoiceCacheWithLedger()
+    }
+
+    /// [MODEL-WARDEN] Step 0 — bring the voice cache into the ledger
+    /// (proposal §1.2, finding H5: `SherpaTTSEngine.engines` is "one per
+    /// voice directory, cached for the process lifetime, **no TTL, no
+    /// unload, no release API**"). That is what Step 0 changed:
+    /// `TTSEngine.unloadCachedVoices()` now exists, so the `.ttsVoices` row
+    /// is the one invisible resident that can be both declared AND
+    /// evicted — which is why it is the only one of the three registered
+    /// `evictable: true`.
+    ///
+    /// Registered only when the engine actually caches. A fake or a
+    /// non-caching engine would otherwise put a permanent row in the
+    /// process-wide ledger for bytes nobody holds, and the ledger's total
+    /// is supposed to stay checkable against `phys_footprint`.
+    ///
+    /// Owner decision, recorded rather than defaulted: TTS residency stays
+    /// today's behaviour (boot-warm one voice, keep the cache) and is
+    /// revisited once the field numbers land — see
+    /// `specs/model-warden-field-notes.md`.
+    private func registerVoiceCacheWithLedger() {
+        guard let sherpa = engine as? SherpaTTSEngine else { return }
+        lifecycle.register(
+            slot: .ttsVoices,
+            modelID: nil,
+            owner: self,
+            evictable: true
+        ) { [weak self] in
+            guard let self else { return }
+            self.engine.unloadCachedVoices()
+            // The owner's own release path cannot call `evict(_:reason:)`
+            // (that would recurse); `didUnload` is the "I dropped it
+            // myself" record, exactly as `WhisperKitSpeechRecognizer` uses
+            // it.
+            self.lifecycle.didUnload(.ttsVoices, owner: self)
+        }
+        // Residency follows the cache, not the object: the row counts from
+        // the first engine construction — which is when the 21-24 MB
+        // actually appear — and not before.
+        let previous = sherpa.onEngineCreated
+        sherpa.onEngineCreated = { [weak self] loadMs in
+            previous?(loadMs)
+            guard let self else { return }
+            self.lifecycle.didLoad(.ttsVoices, owner: self)
+        }
     }
 
     /// The fallback that can never make things worse: Nepali gets silence

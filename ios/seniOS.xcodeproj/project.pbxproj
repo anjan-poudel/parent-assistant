@@ -424,6 +424,7 @@
 		AAEAC98045D10769BA087819 /* DialectBiasComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D9604F3CC966A9E549FA807 /* DialectBiasComposer.swift */; };
 		AB02D73C0E0236597058B49E /* LiveTranslateSpeechTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79CD8E352C1F92787067EE7A /* LiveTranslateSpeechTests.swift */; };
 		AB953708B661CF95D065EB19 /* VoicePipelineNoiseFilterSeamTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AE54E6D163F8A4276A95D35 /* VoicePipelineNoiseFilterSeamTests.swift */; };
+		ABA0DBD465A458936B34623E /* ModelLoadReservation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F3135771E688548FB503AEF /* ModelLoadReservation.swift */; };
 		ABCE1D7CB2B0B75A90F1371F /* NepaliTextNormalizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02B49CE098CF265F2E49046B /* NepaliTextNormalizerTests.swift */; };
 		ABEC5425E38DCCB59974CE4E /* WarmStart.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE811FACF80BAA62A9F6C1D9 /* WarmStart.swift */; };
 		ACDE59D994E9EC7497DE6454 /* SpeechSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 469503800F9E5EA3670000F6 /* SpeechSource.swift */; };
@@ -773,6 +774,7 @@
 		1E8F8D8770B2D5FCD7040516 /* NepaliFestival.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NepaliFestival.swift; sourceTree = "<group>"; };
 		1E9561057265F5A51E78A7F0 /* NotificationCategoriesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationCategoriesTests.swift; sourceTree = "<group>"; };
 		1F27EA807992A7107AF0C50C /* ApplianceStepCardPlannerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplianceStepCardPlannerTests.swift; sourceTree = "<group>"; };
+		1F3135771E688548FB503AEF /* ModelLoadReservation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelLoadReservation.swift; sourceTree = "<group>"; };
 		20090654EB2D4E0183CF8609 /* FestivalCalendarServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FestivalCalendarServiceTests.swift; sourceTree = "<group>"; };
 		2023FF7A1E401737585B46A0 /* MedicationPurposeLookupTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicationPurposeLookupTests.swift; sourceTree = "<group>"; };
 		2057E2B4FCB53810D0C44D54 /* PhotoCameraPresenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoCameraPresenter.swift; sourceTree = "<group>"; };
@@ -1828,6 +1830,7 @@
 				A8C1DB7B5C44FC3D35F4890B /* ModelDownloadService.swift */,
 				313369B48446E5D7804B0F6B /* ModelLifecycle.swift */,
 				5B767D371B02413E82A010AB /* ModelLifecycleManager.swift */,
+				1F3135771E688548FB503AEF /* ModelLoadReservation.swift */,
 				3A47D6FF8DEA88425316C99B /* ModelPreferenceMemory.swift */,
 				19DC3DAE6268BC226AAB0509 /* ModelStore.swift */,
 			);
@@ -2972,6 +2975,7 @@
 				F3A283FFFFC675ABC0CEA61D /* ModelDownloadService.swift in Sources */,
 				DDA06859C666CDA36595CEFF /* ModelLifecycle.swift in Sources */,
 				F0469EB207A6F38D02192824 /* ModelLifecycleManager.swift in Sources */,
+				ABA0DBD465A458936B34623E /* ModelLoadReservation.swift in Sources */,
 				BF1B80A77FA9022E5D8D5827 /* ModelPreferenceMemory.swift in Sources */,
 				D652C180781D68507298611B /* ModelStore.swift in Sources */,
 				39BCCB367C5AB4044DB8A9C2 /* Models.swift in Sources */,
