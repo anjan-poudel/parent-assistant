@@ -390,6 +390,7 @@
 		9D0C7077CABE513A354A77FF /* LiveTranslateSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 644CF8F1EBA36091AA24E2B9 /* LiveTranslateSettingsTests.swift */; };
 		9D562603E3D5DF1C3CC30DF6 /* CommandRouterYouTubeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E9E90B47A12C2406E4569D5 /* CommandRouterYouTubeTests.swift */; };
 		9D9B1293775CA119A5152382 /* LiveTextDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA9706D1E82290044EBC4FCB /* LiveTextDetector.swift */; };
+		9E6286BCADDBBC9D4396BC9C /* NepaliOutputGateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81254CF022A8E5C2F4030E25 /* NepaliOutputGateTests.swift */; };
 		9F628E5F4ECB527982816C2C /* XlmrUnigramTokenizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2635340C10BBF8F75E445C53 /* XlmrUnigramTokenizerTests.swift */; };
 		A051EEB36D70BAA041C1F8C4 /* FeedTranslatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07AF2E4C8C1DAD22EBDD5459 /* FeedTranslatorTests.swift */; };
 		A0BD1ADEF641349E2F384C7A /* NepaliTimeParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5CD09CC570C2098510C8EEC /* NepaliTimeParser.swift */; };
@@ -442,6 +443,7 @@
 		B0E7FB06E4B5F6028742BFAB /* HomeWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8BC9CD50AB850816DCB32A0 /* HomeWidget.swift */; };
 		B0FAA9361B4E1A999B112E34 /* SpokenTime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 357BB0A805BFD53734B0F7B4 /* SpokenTime.swift */; };
 		B140FEBAF38D71A4D89FA9E1 /* RoutineStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8D60A7A75105987FF8212D2 /* RoutineStoreTests.swift */; };
+		B1EE098819248C5679DB745D /* NepaliOutputGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1933F6DDF53D9CFEDD9BB82 /* NepaliOutputGate.swift */; };
 		B20B34CF355A53463F2E1563 /* RoutinePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CB785F3E9F2AB2CF381AFDE /* RoutinePlugin.swift */; };
 		B2A83DE8F0152B1305038334 /* EventExtrasStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B61DA98BD99B60ED7AC7F304 /* EventExtrasStore.swift */; };
 		B30237BA609FAC1C23F00237 /* SecurityEvidenceBoundaryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 689ADFEECC70A5D7198C51E8 /* SecurityEvidenceBoundaryTests.swift */; };
@@ -1034,6 +1036,7 @@
 		7F9CB2D914CCA960DB69EEFA /* VoiceBiometricStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceBiometricStore.swift; sourceTree = "<group>"; };
 		7FDECCC2CBBC24A6FD4E6A87 /* FamilyNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FamilyNotifier.swift; sourceTree = "<group>"; };
 		80462B405AD704A16369558F /* VoiceContactSearchRoute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceContactSearchRoute.swift; sourceTree = "<group>"; };
+		81254CF022A8E5C2F4030E25 /* NepaliOutputGateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NepaliOutputGateTests.swift; sourceTree = "<group>"; };
 		81548C7BFEB7AAA0ADD63048 /* IntentEncoderFeature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentEncoderFeature.swift; sourceTree = "<group>"; };
 		81F60EA5BB435D5EAEDE8E4B /* ContactPhotoStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactPhotoStore.swift; sourceTree = "<group>"; };
 		822B86279A9F75D9F94B44FB /* SpeakerEmbedderSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerEmbedderSelectionTests.swift; sourceTree = "<group>"; };
@@ -1112,6 +1115,7 @@
 		A0ECBF6048BBE4DC00FE0854 /* TextRegionStabilizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextRegionStabilizer.swift; sourceTree = "<group>"; };
 		A147808D9ACC09608A51E486 /* HomeWidgetTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeWidgetTestSupport.swift; sourceTree = "<group>"; };
 		A151E4562D9A1677C2176C14 /* YouTubeRoute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YouTubeRoute.swift; sourceTree = "<group>"; };
+		A1933F6DDF53D9CFEDD9BB82 /* NepaliOutputGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NepaliOutputGate.swift; sourceTree = "<group>"; };
 		A1BB67C8B82ED45D27FEF36E /* BrainModelSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrainModelSelectionTests.swift; sourceTree = "<group>"; };
 		A1ED50BD01F258793574F27C /* AppThemeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppThemeTests.swift; sourceTree = "<group>"; };
 		A2AD7ABE631C1C62F6AF745E /* DependencyProtocols.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DependencyProtocols.swift; sourceTree = "<group>"; };
@@ -1514,6 +1518,7 @@
 				F76796766605ED152AAF8E57 /* LiveTranslateSpeech.swift */,
 				F9FF760520B585CD2ADD40D1 /* LiveTranslationPipeline.swift */,
 				4095DF23DAB974A83CE81263 /* LocalBrainTranslationTier.swift */,
+				A1933F6DDF53D9CFEDD9BB82 /* NepaliOutputGate.swift */,
 				0212B978B7089D84A5BC9D7D /* SceneTextSanitiser.swift */,
 				A0ECBF6048BBE4DC00FE0854 /* TextRegionStabilizer.swift */,
 				ADC36BE478622FC428838552 /* TranslationResult.swift */,
@@ -2067,6 +2072,7 @@
 				EF51E75EEEB19879204E9EF6 /* LiveTranslateTestCipherKeyStore.swift */,
 				AE5A7A7BF2077907CF177EDF /* LiveTranslationPipelineTests.swift */,
 				1C8F9A00BEFE4F261E83F167 /* LocalBrainTranslationTierTests.swift */,
+				81254CF022A8E5C2F4030E25 /* NepaliOutputGateTests.swift */,
 				6EAE28D43D4E1F0C1B6FE13A /* OCRFixturePageTests.swift */,
 				AEC123B9E266E9C6B1C45131 /* OverlayRenderProbe.swift */,
 				505606392973499BB54842A6 /* ResultVoidAssertions.swift */,
@@ -2985,6 +2991,7 @@
 				1C1588C7CEA590D5F9407235 /* NavigationGeocoder.swift in Sources */,
 				53D1201886D5F07314AB38D4 /* NepaliCalendarPlugin.swift in Sources */,
 				F80206557C6BEDC0F8335452 /* NepaliFestival.swift in Sources */,
+				B1EE098819248C5679DB745D /* NepaliOutputGate.swift in Sources */,
 				14C17283B19361A8D000E4B6 /* NepaliTextNormalizer.swift in Sources */,
 				A0BD1ADEF641349E2F384C7A /* NepaliTimeParser.swift in Sources */,
 				D6499632537E384D96F11681 /* NewsFeedParser.swift in Sources */,
@@ -3290,6 +3297,7 @@
 				52572BD2516796AB72D9A548 /* MultipartDownloadLoopbackTests.swift in Sources */,
 				887B44AE9F2851432101C97A /* MultipartDownloadTests.swift in Sources */,
 				04E79D4F02F4ED38C7365B9F /* NepaliCalendarPluginTests.swift in Sources */,
+				9E6286BCADDBBC9D4396BC9C /* NepaliOutputGateTests.swift in Sources */,
 				ABCE1D7CB2B0B75A90F1371F /* NepaliTextNormalizerTests.swift in Sources */,
 				78E6DFBEC089A62FCF7ED351 /* NepaliTimeParserExtensionTests.swift in Sources */,
 				3A9C9155AE4C7CE71BDEA962 /* NepaliTimeParserTests.swift in Sources */,

@@ -39,16 +39,23 @@ import LLM
 //      (`LLM.stop()` interrupts the generation).
 //
 //   4. **Only a translation may settle a region (2026-09-17).** An answer that
-//      is empty, over the size bound, the source again in comparison form, or
-//      not written in the target language's script is **unresolved** — it
-//      cannot end a string's journey, and the cloud is asked for it. This is
-//      the tier's half of the owner's report ("it no longer falls back to
-//      gemini; only the simplest words translate"): a tier that settles
-//      whatever it produced, however unusable, is a tier that removes the
-//      cloud from the cascade without anyone deciding to. Because the two
-//      failure modes are opposite — answering nothing, and answering something
-//      that is not an answer — this is a separate rule from (3) rather than a
-//      special case of it.
+//      is empty, over the size bound, the source again in comparison form, not
+//      written in the target language's script, or not *established as the
+//      target language* where two languages share that script (2026-09-18,
+//      `NepaliOutputGate`) is **unresolved** — it cannot end a string's
+//      journey, and the cloud is asked for it. This is the tier's half of the
+//      owner's report ("it no longer falls back to gemini; only the simplest
+//      words translate"): a tier that settles whatever it produced, however
+//      unusable, is a tier that removes the cloud from the cascade without
+//      anyone deciding to. Because the two failure modes are opposite —
+//      answering nothing, and answering something that is not an answer — this
+//      is a separate rule from (3) rather than a special case of it.
+//
+//      The last of those is the evaluation rule, and it is why it is a rule at
+//      all: Devanagari is the script of Hindi and Marathi as well as Nepali, so
+//      "the answer is in Devanagari" is satisfied by a Hindi answer. Both
+//      off-the-shelf Qwen rungs produced exactly that, and every guard above
+//      passed it.
 //
 //   5. **The device pays for the work only when it can (2026-09-17).** A batch
 //      is not attempted when a brain is live for another owner, or when the
@@ -591,11 +598,22 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
     ///     "the answer did not change language" looks like — and it is skipped
     ///     when the source has no letters, so a numerals-only sign is not
     ///     refused for having no Devanagari to translate into.
+    ///  5. **Not written in the target's language** (2026-09-18,
+    ///     `NepaliOutputGate`). The script rule's blind spot: Devanagari is
+    ///     Hindi's script too, so a Hindi answer passes rule 4 by
+    ///     construction, and the evaluation produced one on both off-the-shelf
+    ///     rungs — as it produced instruction echoes that were in Nepali but
+    ///     were not translations at all. The gate scores the answer's Nepali
+    ///     evidence against its Hindi evidence and accepts only what is
+    ///     *established* as Nepali, which is the conservative half of the two
+    ///     directions: a wrong rejection costs a cloud call, a wrong acceptance
+    ///     shows an elder Hindi as their own language.
     ///
-    /// Rules 3 and 4 are deliberately independent: an echo in the source's own
-    /// script fails 3, a non-echo that is still in the wrong language fails 4,
-    /// and an answer that fails neither is the only thing that may settle a
-    /// region on the device.
+    /// Rules 3, 4 and 5 are deliberately independent: an echo in the source's
+    /// own script fails 3, a non-echo that is still in the wrong language fails
+    /// 4, a non-echo in Devanagari that is not Nepali fails 5, and an answer
+    /// that fails none of them is the only thing that may settle a region on
+    /// the device.
     static func accepts(_ text: String,
                         for source: String,
                         targetLanguage: AppLanguage,
@@ -607,6 +625,7 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
         if containsLetters(source), !usesTheTargetScript(text, targetLanguage: targetLanguage) {
             return nil
         }
+        guard NepaliOutputGate.accepts(text, targetLanguage: targetLanguage) else { return nil }
         return text
     }
 

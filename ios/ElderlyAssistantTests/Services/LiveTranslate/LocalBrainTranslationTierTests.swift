@@ -29,9 +29,16 @@ final class LocalBrainTranslationTierTests: XCTestCase {
     private let thirdBrainText = "No entry"
 
     /// What a Nepali-speaking elder must be shown for those signs.
-    private let brainAnswer = "फार्मेसी"
+    ///
+    /// Every answer is a Nepali *sentence* rather than a bare noun, and since
+    /// 2026-09-18 that is load-bearing rather than stylistic: the tier's
+    /// language rule (`NepaliOutputGate`) settles a region only on an answer
+    /// with Nepali evidence, and a lone shared noun like "फार्मेसी" is spelled
+    /// identically in Hindi. The fixtures moved to what the gate can vouch for;
+    /// the cost of that rule is measured in `NepaliOutputGateTests`.
+    private let brainAnswer = "यो औषधि पसल हो"
     private let secondBrainAnswer = "खुला छ"
-    private let thirdBrainAnswer = "प्रवेश निषेध"
+    private let thirdBrainAnswer = "भित्र पस्न मनाही छ"
 
     // MARK: - Doubles
 
@@ -532,6 +539,93 @@ final class LocalBrainTranslationTierTests: XCTestCase {
 
             XCTAssertEqual(outcome.translations, [brainText: "Drug store"])
         }
+    }
+
+    // MARK: The language rule (2026-09-18)
+
+    /// The script rule's blind spot, as a fixture. Devanagari is Hindi's script
+    /// as well as Nepali's, so a Hindi answer passes the script rule by
+    /// construction — the 2026-09-18 evaluation produced exactly this string
+    /// from off-the-shelf rungs, and it settled a region as translated.
+    func testAHindiAnswerIsUnresolvedEvenThoughItIsInTheTargetScript() async throws {
+        let hindi = "जल के निकट विद्युत उपकरण रखो नहीं।"
+        XCTAssertTrue(LocalBrainTranslationTier.usesTheTargetScript(hindi, targetLanguage: .nepali),
+                      "the fixture must be the hard case — it is Devanagari, so the script rule is no help")
+
+        try await withTier { tier, generator, bus in
+            generator.output = answer([hindi])
+            let outcome = await tier.translate([brainText])
+
+            XCTAssertTrue(outcome.translations.isEmpty,
+                          "Hindi must not settle a region as the elder's own language")
+            let event = batchEvent(bus)
+            XCTAssertEqual(event?.metadata["unresolvedCount"], "1",
+                           "the string is unresolved, so the next tier is asked for it")
+            XCTAssertEqual(event?.outcome, "degraded")
+        }
+    }
+
+    /// The other 2026-09-18 shape: the model echoed the instruction back in
+    /// Nepali. It is Devanagari, it is not an echo of the source, and it is not
+    /// a translation — so nothing but the language rule can refuse it.
+    func testAnInstructionEchoInNepaliIsUnresolved() async throws {
+        try await withTier { tier, generator, bus in
+            generator.output = answer(["अंग्रेजी शब्दहरू नेपालीमा अनुवाद गर्नुहोस्। एक लाइनमा…"])
+            let outcome = await tier.translate([brainText])
+
+            XCTAssertTrue(outcome.translations.isEmpty,
+                          "the instruction is not an answer to it")
+            XCTAssertEqual(batchEvent(bus)?.metadata["unresolvedCount"], "1")
+        }
+    }
+
+    /// The rule is at the tier's answer gate and nowhere else: `accepts` is
+    /// what refuses, and the refusals are the two shapes above plus the
+    /// marker-free one below. The pin matters because the gate is the only
+    /// place a region can be settled on the device.
+    func testTheLanguageRuleRefusesHindiAndEchoesAndKeepsNepali() {
+        XCTAssertNil(LocalBrainTranslationTier.accepts("खुला है।",
+                                                      for: brainText,
+                                                      targetLanguage: .nepali,
+                                                      config: config),
+                     "Hindi")
+        XCTAssertNil(LocalBrainTranslationTier.accepts("यो अंग्रेजी वाक्य नेपालीमा अनुवाद गर्नुहोस्।",
+                                                      for: brainText,
+                                                      targetLanguage: .nepali,
+                                                      config: config),
+                     "the instruction echoed back")
+        XCTAssertEqual(brainAnswer,
+                       LocalBrainTranslationTier.accepts(brainAnswer,
+                                                         for: brainText,
+                                                         targetLanguage: .nepali,
+                                                         config: config),
+                       "and a Nepali sentence is still an answer")
+    }
+
+    /// The fixture the pipeline suite drives through its own double, checked
+    /// against the real gate: an answer that suite publishes must be one the
+    /// shipped tier would also accept, or the two suites are pinning different
+    /// features.
+    func testTheAnswerThePipelineSuitePublishesIsOneTheTierWouldAccept() {
+        XCTAssertEqual("यहाँ भित्र प्रवेश मात्र",
+                       LocalBrainTranslationTier.accepts("यहाँ भित्र प्रवेश मात्र",
+                                                         for: "Entry inside only",
+                                                         targetLanguage: .nepali,
+                                                         config: config))
+    }
+
+    /// The stated cost of the rule, at the tier's own gate: a correct
+    /// translation that is a single shared noun is *unresolved*, not wrong.
+    /// The region keeps its original text and the string goes to the next tier
+    /// — which is what "conservative" means here, and the price is a cloud call
+    /// (or, offline, the original text with the offline badge) for signs whose
+    /// translation is one word long.
+    func testAMarkerFreeAnswerIsLeftForTheNextTierRatherThanSettled() {
+        XCTAssertNil(LocalBrainTranslationTier.accepts("फार्मेसी",
+                                                      for: brainText,
+                                                      targetLanguage: .nepali,
+                                                      config: config),
+                     "a lone shared noun is not established as Nepali — it must not settle the sign")
     }
 
     /// A source with no letters has no script to be translated into, so the
