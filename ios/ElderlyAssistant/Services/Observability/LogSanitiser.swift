@@ -63,6 +63,12 @@ struct LogSanitiser {
         "state",
         "duration_ms",
         "error_code",
+        // [SCOPE-LEDGER] (2026-09-17) Google scope NAMES, normalized —
+        // "calendar" / "contacts". Fixed vocabulary, no account data, no
+        // token material; the console must be able to show which scope
+        // is granted or missing (the ledger's whole diagnostic value).
+        "calendar",
+        "contacts",
         // [TURN-TIMING] The serialized per-turn stage list
         // (`[{stage, ms}, …]`) — stage names and integer durations only,
         // never transcript or reply text (see VoiceTurnLatencyTracer).
