@@ -215,6 +215,28 @@ final class SnapshotModeTests: XCTestCase {
         return buffer
     }
 
+    /// Presents frames until the live picture has published a placement — the
+    /// state the elder taps in: a picture with text on it, before any freeze.
+    ///
+    /// Not a fixed number of deliveries. The live path needs two observations
+    /// of a region before it is on screen (its appear hysteresis), and a frame
+    /// handed over while the pipeline is mid-cycle is refused by its own
+    /// in-flight guard, so how many frames it takes is not a fact a test can
+    /// assume: "the live picture is up" is a condition to wait for, and the
+    /// frames keep coming until it holds.
+    @MainActor
+    private func deliverUntilTheLivePictureIsUp(_ harness: Harness,
+                                                width: Int = 1920,
+                                                height: Int = 1080,
+                                                file: StaticString = #filePath,
+                                                line: UInt = #line) async {
+        await waitUntil("the live picture to publish a placement", file: file, line: line) {
+            if !(harness.model.publication?.placements.isEmpty ?? true) { return true }
+            try? self.deliverFrame(harness, width: width, height: height)
+            return false
+        }
+    }
+
     /// Hands frames over while a picture is held. There is no pass to wait for
     /// by definition — that is the claim under test — so this waits out a
     /// window in which a pass would have run instead.
@@ -1207,11 +1229,10 @@ final class SnapshotModeTests: XCTestCase {
         reportLayout(harness)
         harness.parts.engine.regions = [detected(curatedText)]
         await harness.model.start()
-        try await deliverPass(harness)
-        try await deliverPass(harness)
+        await deliverUntilTheLivePictureIsUp(harness)
 
-        let livePublication = try XCTUnwrap(harness.model.publication)
-        let livePlacement = try XCTUnwrap(livePublication.placements.first)
+        let livePlacement = try XCTUnwrap(harness.model.publication?.placements.first,
+                                          "the live picture shows a placement to tap")
         harness.model.tapRegion(livePlacement.region.id)
         XCTAssertEqual(harness.parts.speech.spokenTexts, [curatedTranslation],
                        "the live tap speaks the placement's line")
@@ -1465,6 +1486,163 @@ final class SnapshotModeTests: XCTestCase {
         XCTAssertTrue("यो".unicodeScalars.contains { (0x0900...0x097F).contains($0.value) },
                       "the scalar test finds the Devanagari the regex form cannot")
     }
+    // MARK: - 10. The frozen frame's reading surface (owner UX rework)
+
+    /// The owner's device report, as a test.
+    ///
+    /// After the rework the frozen frame has exactly **one** reading surface —
+    /// the results card — and the overlay is not drawn at all while a picture
+    /// is held. So an empty card *is* the owner's report: "I could at least see
+    /// the OCR if not translated text, [now] nothing". The card must list the
+    /// strings the frozen picture holds, in the words the detector recognized,
+    /// before any translation has answered.
+    ///
+    /// The frame is the capture layer's own: `.vga640x480`, landscape, 32BGRA,
+    /// read through the real detector over the real raster — the shape a device
+    /// hands the freeze, and one no snapshot test used before.
+    @MainActor
+    func testTheFrozenCardsRowsAreTheRecognisedStringsBeforeAnyTranslationAnswers() async throws {
+        // No consent and no curated table: nothing can resolve, so every row is
+        // pending and the only text there is to read is the source text.
+        let harness = makeHarness()
+        reportLayout(harness)
+        harness.parts.engine.regions = [detected("टिकट काउन्टर", box: (0.08, 0.10, 0.62, 0.20)),
+                                        detected("सोमबार बन्द छ", box: (0.08, 0.42, 0.70, 0.52))]
+        await harness.model.start()
+        try await deliverPass(harness, width: 640, height: 480)
+
+        await freeze(harness)
+
+        // The card the view draws: the model's own, not a test-built one.
+        let card = harness.model.resultsCard
+        XCTAssertEqual(card.rows.count, 2, "one row per recognized string")
+        XCTAssertEqual(card.rows.map(\.translation).sorted(),
+                       ["सोमबार बन्द छ", "टिकट काउन्टर"].sorted(),
+                       "an unanswered row reads the recognized text, never a blank line")
+        XCTAssertFalse(card.isEmpty, "the frozen picture is holding two strings to read")
+    }
+
+    /// The card and the overlay are two renderings of one reading, so for a
+    /// frame whose regions all placed, the rows are the overlay's own
+    /// presentations — same view identity, same two strings, same glyph, same
+    /// tap — and neither can claim something the other does not. (The card may
+    /// carry *more* rows than the overlay: the recognized strings it had no box
+    /// for. That direction is the next test's subject.)
+    @MainActor
+    func testTheFrozenCardsRowsAreTheOverlaysOwnRowsWhenEveryRegionWasPlaced() async throws {
+        let harness = makeHarness()
+        reportLayout(harness)
+        harness.parts.engine.regions = [detected("टिकट काउन्टर", box: (0.08, 0.10, 0.62, 0.20)),
+                                        detected("सोमबार बन्द छ", box: (0.08, 0.42, 0.70, 0.52))]
+        await harness.model.start()
+        try await deliverPass(harness, width: 640, height: 480)
+        await freeze(harness)
+
+        let frozen = try XCTUnwrap(harness.model.frozen)
+        XCTAssertEqual(frozen.publication.placements.count, 2,
+                       "the premise: every recognized string has a box on the frozen frame")
+        let card = harness.model.resultsCard
+        let presentations = harness.model.surface.presentations
+        XCTAssertEqual(card.rows.count, presentations.count,
+                       "nothing dropped and nothing invented when every region placed")
+        for (row, presentation) in zip(card.rows, presentations) {
+            XCTAssertEqual(row.id, presentation.id,
+                           "a row and its box are the same view identity")
+            XCTAssertEqual(row.regionID, presentation.regionID)
+            XCTAssertEqual(row.translation, presentation.accessibilityLabel,
+                           "the large line is what a screen reader announces: one claim, not two")
+            XCTAssertEqual(row.source, presentation.accessibilityValue)
+            XCTAssertEqual(row.symbolName, presentation.symbolName)
+            XCTAssertEqual(row.speaksTranslation, presentation.speaksTranslation)
+        }
+    }
+
+    /// A still pass that comes back with nothing must not blank the picture the
+    /// elder is holding.
+    ///
+    /// The live path keeps the regions it has when a pass fails — the pipeline's
+    /// failure branch returns without touching them — and the frozen frame is
+    /// the same scene one frame later, read through the same detector. The
+    /// snapshot path is the only call site that turns a failed pass into "no
+    /// text", and since the rework the card is the only place that text could
+    /// be read. This is the freeze none of this suite's tests took: every other
+    /// one happens after a pass that succeeded.
+    @MainActor
+    func testAFailedStillPassStillLeavesTheFrozenFrameItsText() async throws {
+        let harness = makeHarness()
+        reportLayout(harness)
+        harness.parts.engine.regions = [detected("बत्ती बन्द छ", box: (0.10, 0.20, 0.70, 0.30))]
+        await harness.model.start()
+        // The live picture has to be showing the recognized text before the
+        // tap: that is the picture the elder is looking at when it is held.
+        await deliverUntilTheLivePictureIsUp(harness, width: 640, height: 480)
+
+        // The still pass fails — the detector's own failure mode, recorded as
+        // `ocr_pass_failed` and never surfaced (T-007).
+        harness.parts.engine.errorToThrow = LiveTranslateError.ocrPassFailed(.requestFailed)
+        await freeze(harness)
+
+        let frozen = try XCTUnwrap(harness.model.frozen)
+        XCTAssertEqual(frozen.publication.regions.map(\.text), ["बत्ती बन्द छ"],
+                       "the frozen frame keeps the text that was on the picture at the tap")
+        let card = harness.model.resultsCard
+        XCTAssertEqual(card.rows.map(\.translation), ["बत्ती बन्द छ"],
+                       "and the card lists it: a picture with text is never an empty card")
+    }
+
+    /// The card is the frozen frame's *reading* surface, so it must not depend
+    /// on the geometry having worked out. This freeze is taken with no layout
+    /// reported at all, which is the one state in which the placement's own
+    /// totality guard (`containerSize > 0`) measures no box for **any** region
+    /// and the placed list is empty by construction — and the picture still
+    /// holds a recognized string.
+    @MainActor
+    func testTheFrozenCardListsTheTextEvenWhenNoBoxCouldBeMeasuredForIt() async throws {
+        let harness = makeHarness()
+        // Deliberately no `reportLayout`: this session has no container yet.
+        harness.parts.engine.regions = [detected("खुला छ", box: (0.10, 0.20, 0.70, 0.30))]
+        await harness.model.start()
+        try await deliverPass(harness, width: 640, height: 480)
+        await freeze(harness)
+
+        let frozen = try XCTUnwrap(harness.model.frozen)
+        XCTAssertEqual(frozen.publication.regions.count, 1)
+        XCTAssertTrue(frozen.publication.placements.isEmpty,
+                      "the premise: with no container there is no box to measure")
+
+        let card = harness.model.resultsCard
+        XCTAssertEqual(card.rows.map(\.translation), ["खुला छ"],
+                       "the picture holds a recognized string, so the card reads it")
+    }
+
+    /// The pixels, at the seam nothing has covered yet: the reworked view draws
+    /// the card and *not* the overlay while a picture is held, and the card is
+    /// a scroll view whose rows are the app's own type floors. Rows that exist
+    /// as values but do not draw are invisible to every pure-value test here,
+    /// and a card that draws nothing is the owner's report again.
+    @MainActor
+    func testTheFrozenCardDrawsItsRowsAtTheAppsOwnTypeScale() async throws {
+        let harness = makeHarness(dictionary: [curatedText.lowercased(): curatedTranslation])
+        reportLayout(harness)
+        harness.parts.engine.regions = [detected(curatedText, box: (0.08, 0.10, 0.62, 0.20))]
+        await harness.model.start()
+        try await deliverPass(harness, width: 640, height: 480)
+
+        await freeze(harness)
+
+        let surface = harness.model.resultsCard
+        XCTAssertFalse(surface.isEmpty, "the card under test has rows to draw")
+        let image = try XCTUnwrap(OverlayRenderProbe.render(
+            LiveTranslateResultsCardView(surface: surface, onSpeak: { _ in }),
+            size: containerSize))
+        let ink = try OverlayRenderProbe.ink(in: image)
+        XCTAssertFalse(ink.isEmpty, "the frozen card drew nothing at all")
+        // A card of one row of body type plus its caption is not a full page of
+        // ink: the bound is loose, and it catches the one failure that matters —
+        // a card whose chrome draws and whose rows do not.
+        XCTAssertGreaterThan(ink.count, 400, "only the card's own shape was drawn")
+    }
+
 }
 
 // MARK: - Test doubles

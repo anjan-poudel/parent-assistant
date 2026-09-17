@@ -884,26 +884,37 @@ final class LiveTranslateOverlayViewTests: XCTestCase {
 
     // MARK: - Scenario: the snapshot's results card (owner UX rework)
 
-    /// The card is the snapshot's reading surface, and it is derived from the
-    /// overlay's own presentations — so the row count is the placement count by
-    /// construction, and no row can say something the overlay would not.
+    /// The card is the snapshot's reading surface, and for the regions the
+    /// overlay drew it carries the overlay's own announcement — so no row can
+    /// say something the box beside it would not.
     func testTheResultsCardHasOneRowPerPlacementAndItsRowsCarryTheSameFacts() {
         let resolved = region(0, "खुल्ने समय", box: box(0.2, 0.10, 0.8, 0.16))
         let tiny = region(1, "प्रवेश निषेध", box: box(0.2, 0.40, 0.26, 0.42))
         let degraded = region(2, "बाहिर निस्कनुहोस्", box: box(0.2, 0.70, 0.8, 0.76))
-        let surface = makeSurface(
-            regions: [resolved, tiny, degraded],
-            results: [resolved.id: .resolved(originalText: resolved.text,
-                                             translation: "Opening hours", tier: .cloud),
-                      tiny.id: .resolved(originalText: tiny.text,
-                                         translation: "No entry beyond this point, thank you",
-                                         tier: .cloud),
-                      degraded.id: .degraded(originalText: degraded.text, reason: .noNetwork)])
+        let regions = [resolved, tiny, degraded]
+        let results: [TextRegionStabilizer.RegionIdentity: TranslationResult] = [
+            resolved.id: .resolved(originalText: resolved.text,
+                                   translation: "Opening hours", tier: .cloud),
+            tiny.id: .resolved(originalText: tiny.text,
+                               translation: "No entry beyond this point, thank you",
+                               tier: .cloud),
+            degraded.id: .degraded(originalText: degraded.text, reason: .noNetwork)]
+        let surface = makeSurface(regions: regions, results: results)
 
-        let card = LiveTranslateResultsCardSurface(overlay: surface)
+        // The card the app builds: from the publication, the way the model
+        // builds it. The placements are the surface's own, so both are reading
+        // the same frame.
+        let card = LiveTranslateResultsCardSurface(
+            publication: LiveTranslatePublication(sequence: 1,
+                                                  regions: regions,
+                                                  outcomes: results,
+                                                  placements: surface.placements,
+                                                  policy: surface.policy),
+            stateCopy: surface.stateCopy(for:),
+            emptyHint: surface.emptyHint)
 
         XCTAssertEqual(card.rows.count, surface.placements.count,
-                       "the row count is the placement count: nothing dropped, nothing invented")
+                       "every region the overlay drew is a row: nothing dropped")
         XCTAssertEqual(card.rows.count, surface.presentations.count)
         XCTAssertFalse(card.isEmpty)
         XCTAssertEqual(card.emptyHint, surface.emptyHint,
@@ -931,7 +942,15 @@ final class LiveTranslateOverlayViewTests: XCTestCase {
     }
 
     func testAnEmptyFrameGivesAnEmptyCardWithTheCalmSentence() {
-        let card = LiveTranslateResultsCardSurface(overlay: makeSurface(regions: []))
+        let surface = makeSurface(regions: [])
+        let card = LiveTranslateResultsCardSurface(
+            publication: LiveTranslatePublication(sequence: 1,
+                                                  regions: [],
+                                                  outcomes: [:],
+                                                  placements: [],
+                                                  policy: surface.policy),
+            stateCopy: surface.stateCopy(for:),
+            emptyHint: surface.emptyHint)
 
         XCTAssertTrue(card.rows.isEmpty)
         XCTAssertTrue(card.isEmpty)

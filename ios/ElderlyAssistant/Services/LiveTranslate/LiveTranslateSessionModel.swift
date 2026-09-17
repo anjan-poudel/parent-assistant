@@ -323,6 +323,29 @@ final class LiveTranslateSessionModel: ObservableObject {
         frozen?.publication ?? publication
     }
 
+    /// The frozen picture as a list to read (owner UX rework, 2026-09-17).
+    ///
+    /// The *reading* surface of a held frame, and the only one: no box is drawn
+    /// over a held picture, so this is where the picture's text ends up. It is
+    /// built from `activePublication` — one row per **recognized string**, the
+    /// regions the overlay drew first and then the ones it had no box for — so
+    /// a string the placement could not measure is still read (a frozen picture
+    /// with text on it is never an empty card), and its rows carry the very
+    /// lines the overlay draws and announces. Taps go through `tapRegion`, the
+    /// same call the overlay's boxes make, so reading and hearing on the card
+    /// are the live path's own behaviour.
+    var resultsCard: LiveTranslateResultsCardSurface {
+        let surface = self.surface
+        guard let activePublication else {
+            // Nothing has been read yet: no rows, and the calm sentence a frame
+            // with no text on it says.
+            return LiveTranslateResultsCardSurface(emptyHint: surface.emptyHint)
+        }
+        return LiveTranslateResultsCardSurface(publication: activePublication,
+                                               stateCopy: surface.stateCopy(for:),
+                                               emptyHint: surface.emptyHint)
+    }
+
     /// The frozen picture, or nil while the session is live. The view draws
     /// this in place of the camera preview: a `CGImage` built once, in memory,
     /// from the frame's own pixel buffer.
@@ -657,12 +680,21 @@ final class LiveTranslateSessionModel: ObservableObject {
         guard !isClosed, frozen == nil, phase == .running, let frame = latestFrame else { return }
         let layout = pendingLayout
         let policy = self.policy
+        // The text the live picture is showing at the tap, taken here on the
+        // tap's own stack: it is what the held frame keeps if the still pass
+        // over it fails, exactly as a failed live pass keeps the regions on
+        // screen (T-007). Read from the live publication, not from
+        // `activePublication`: a freeze only starts when nothing is held.
+        let holdingRegions = publication?.regions ?? []
         snapshotTask?.cancel()
         // The frame the elder tapped on travels with the work: the freeze is
         // "this picture", not "whatever the camera delivered while the tap was
         // being handled".
         snapshotTask = Task { [weak self] in
-            await self?.freezeFrame(frame, layout: layout, policy: policy)
+            await self?.freezeFrame(frame,
+                                    layout: layout,
+                                    policy: policy,
+                                    holdingRegions: holdingRegions)
         }
     }
 
@@ -695,10 +727,14 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// frame captured at the tap, then the cloud answers onto the same frame.
     private func freezeFrame(_ frame: CameraFrame,
                              layout: LiveTranslateLayout,
-                             policy: LiveOverlayPlacement.Policy) async {
+                             policy: LiveOverlayPlacement.Policy,
+                             holdingRegions: [TextRegionStabilizer.StableTextRegion]) async {
         guard !isClosed, frozen == nil, let path = snapshotPath else { return }
 
-        let outcome = await path.freeze(frame, layout: layout, policy: policy)
+        let outcome = await path.freeze(frame,
+                                        layout: layout,
+                                        policy: policy,
+                                        holdingRegions: holdingRegions)
         guard !isClosed, frozen == nil, case .success(let snapshot) = outcome else { return }
         frozen = snapshot
 

@@ -160,11 +160,12 @@ struct LiveTranslateView: View {
     /// here to read, and a box floating over a still picture is exactly what
     /// the owner's device feedback rejected. It is bounded to a share of the
     /// container so the held frame stays visible behind it, and it is a pure
-    /// function of the model: the rows are the placements the pipeline
-    /// measured, so tapping a row speaks the very region the placement named.
+    /// function of the model: one row per recognized string the held frame
+    /// carries, whether or not a box could be measured for it, and tapping a
+    /// row speaks the very region that row names.
     private func resultsCard(in proxy: GeometryProxy) -> some View {
         LiveTranslateResultsCardView(
-            surface: LiveTranslateResultsCardSurface(overlay: model.surface),
+            surface: model.resultsCard,
             onSpeak: { model.tapRegion($0) })
             .frame(maxHeight: proxy.size.height * Self.resultsCardHeightFraction)
             .padding(.top, DesignTokens.interElementSpacing)
