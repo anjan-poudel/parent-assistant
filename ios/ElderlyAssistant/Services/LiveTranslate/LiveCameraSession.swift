@@ -47,18 +47,32 @@ struct CameraFrame {
     let pixelBuffer: CVPixelBuffer
     let pixelSize: CGSize
     let timestamp: CMTime
+
+    /// The capture device's zoom factor when this frame was produced
+    /// (`AVCaptureDevice.videoZoomFactor`): 1 is the wide camera's native field
+    /// of view, and anything above it is the **device's own crop of the
+    /// sensor**, not a digital enlargement of a wider frame.
+    ///
+    /// Carried so the recognition pass knows what it is looking at. The buffer
+    /// handed to Vision is the zoomed region at the capture preset's full size,
+    /// so "the elder zoomed in on the small print" and "the picture moved" are
+    /// different facts about a frame, and only the frame carries both. A caller
+    /// that never asked the device for a zoom gets 1, which is the honest
+    /// answer for a frame read straight off a sample buffer.
+    let zoomFactor: Double
 }
 
 extension CameraFrame {
     /// Reads a frame's geometry out of a delivered sample buffer. The buffer
     /// is the one `AVCaptureVideoDataOutput` produced under `videoSettings`,
     /// so it is already downscaled, and it is retained only by this value.
-    init?(sampleBuffer: CMSampleBuffer) {
+    init?(sampleBuffer: CMSampleBuffer, zoomFactor: Double = 1) {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return nil }
         self.pixelBuffer = pixelBuffer
         self.pixelSize = CGSize(width: CVPixelBufferGetWidth(pixelBuffer),
                                 height: CVPixelBufferGetHeight(pixelBuffer))
         self.timestamp = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        self.zoomFactor = zoomFactor
     }
 }
 
@@ -246,6 +260,55 @@ protocol LiveCameraCaptureLayer: AnyObject {
     /// `ProcessInfo.processInfo.thermalState`, read through the seam so the
     /// cadence response is testable without heating a device.
     var thermalState: ProcessInfo.ThermalState { get }
+
+    // MARK: Zoom and focus (owner report, 2026-09-17)
+
+    /// What the configured device can do about zoom: the factors it can
+    /// deliver and the factors at which it hands over to its next lens.
+    /// `.unknown` before a device exists.
+    ///
+    /// Asked again on every interaction rather than remembered: the valid range
+    /// follows the device's *active format*, which the platform may change
+    /// under a running session, and a factor clamped against a stale range is
+    /// either an out-of-range exception or a zoom the elder did not ask for.
+    var zoomCapabilities: CameraZoomCapabilities { get }
+
+    /// The device's zoom factor now — what the frames reaching the sink were
+    /// cropped at.
+    var videoZoomFactor: Double { get }
+
+    /// Sets the zoom factor and answers the factor the device actually took.
+    ///
+    /// The answer is the device's, not the argument's: the platform clamps to
+    /// the active format's own range, and a caller that kept its own number
+    /// would draw a readout the camera never honoured.
+    @discardableResult
+    func setVideoZoomFactor(_ factor: Double) -> Double
+
+    /// Whether the device can be told *where* to focus at all.
+    var supportsFocusPointOfInterest: Bool { get }
+
+    /// Moves the focus point — a device point: normalized, top-left origin —
+    /// and starts a **one-shot** focus operation there. Setting the point alone
+    /// focuses nothing; the implementation sets the focus mode after it.
+    func focus(atDevicePoint point: CGPoint)
+
+    /// Moves the focus point and starts a **continuous** close-range search
+    /// there: the mode that keeps looking as the subject moves, used when the
+    /// device reports the subject area changed under a focus that has stopped
+    /// adjusting. Distinct from `focus(atDevicePoint:)` on purpose — a
+    /// one-shot holds the lens where it landed, which is right for a tap and
+    /// wrong for a subject that has moved.
+    func focusContinuously(atDevicePoint point: CGPoint)
+
+    /// Holds focus at its current lens position, or returns it to the
+    /// continuous search.
+    func setFocusLocked(_ locked: Bool)
+
+    /// Registers the device's own report that the subject area changed
+    /// substantially (the packet was turned over, brought closer, moved into
+    /// shadow). Registration replaces any previous handler.
+    func observeSubjectAreaChanges(_ handler: @escaping () -> Void)
 }
 
 /// The shipped capture layer. One `AVCaptureVideoDataOutput`, no photo output,
@@ -254,17 +317,97 @@ final class AVFoundationCaptureLayer: NSObject, LiveCameraCaptureLayer {
 
     let session = AVCaptureSession()
 
+    /// The feature's operational constants, read here because this is the file
+    /// that imports AVFoundation: the capture preset, the zoom the session
+    /// starts at, and the focus policy.
+    private let config: LiveTranslateConfig
+
     /// The device lookup, injectable so a test can exercise the no-camera path
-    /// without unplugging anything.
+    /// without unplugging anything. The default is this feature's own lens
+    /// preference (see `defaultDevice`), never a bare
+    /// `AVCaptureDevice.default(for: .video)`, which would hand back the
+    /// single wide-angle camera.
     private let deviceProvider: () -> AVCaptureDevice?
 
+    private var device: AVCaptureDevice?
     private var sink: ((CMSampleBuffer) -> Void)?
     private var isConfigured = false
+    private var subjectAreaObserver: NSObjectProtocol?
 
-    init(deviceProvider: @escaping () -> AVCaptureDevice? = { AVCaptureDevice.default(for: .video) }) {
-        self.deviceProvider = deviceProvider
+    init(config: LiveTranslateConfig = .default,
+         deviceProvider: (() -> AVCaptureDevice?)? = nil) {
+        self.config = config
+        self.deviceProvider = deviceProvider ?? Self.defaultDevice
         super.init()
     }
+
+    deinit {
+        if let subjectAreaObserver {
+            NotificationCenter.default.removeObserver(subjectAreaObserver)
+        }
+    }
+
+    // MARK: Device discovery
+
+    /// The device the session captures from: the **virtual** multi-lens device
+    /// first, because that is the only kind that gives the elder what the
+    /// standard camera app has.
+    ///
+    /// A virtual device publishes `virtualDeviceSwitchOverVideoZoomFactors`, so
+    /// raising `videoZoomFactor` past one of those factors is what makes the
+    /// camera hand over from the ultra-wide to the wide to the telephoto — the
+    /// automatic lens switching the owner asked for, performed by the platform
+    /// on the sensor, not by this feature on the picture. It is also the only
+    /// kind that performs the *close-subject* fallback: a telephoto whose
+    /// minimum focus distance is 40 cm cannot see a packet held at 20 cm, and
+    /// the platform answers that by switching to a shorter lens on its own —
+    /// which is precisely the blur the owner reported. A single wide-angle
+    /// camera zooms digitally and never switches.
+    ///
+    /// The order is `CameraLensSet.discoveryOrder` (triple, dual-wide, wide),
+    /// read as a value rather than written as three lookups in a row, and the
+    /// last lookup is the honest fallback for a device that has none of them:
+    /// `AVCaptureDevice.default(for: .video)` is still a working camera.
+    static func defaultDevice() -> AVCaptureDevice? {
+        for lensSet in CameraLensSet.discoveryOrder {
+            if let device = AVCaptureDevice.default(deviceType(for: lensSet),
+                                                    for: .video,
+                                                    position: .back) {
+                return device
+            }
+        }
+        return AVCaptureDevice.default(for: .video)
+    }
+
+    /// The AVFoundation device type a lens set is discovered by.
+    ///
+    /// A total mapping, asserted as a value in the tests: a wrong case would
+    /// otherwise only show up as "the camera is single-lens on a triple-camera
+    /// phone", which is invisible until someone tries to read a packet.
+    static func deviceType(for lensSet: CameraLensSet) -> AVCaptureDevice.DeviceType {
+        switch lensSet {
+        case .triple: return .builtInTripleCamera
+        case .dualWide: return .builtInDualWideCamera
+        case .wideAngle: return .builtInWideAngleCamera
+        }
+    }
+
+    /// The session presets to try, in order, for a configured capture quality.
+    ///
+    /// An ordered list rather than one preset because `canSetSessionPreset(_:)`
+    /// is the platform's answer about *this device's* formats: a preset a
+    /// device cannot deliver is not an error the elder should see — a smaller
+    /// frame is still a working translator — and the list ends at the size
+    /// every back camera has been able to deliver since iOS 4, so it cannot run
+    /// out.
+    static func presets(for quality: LiveTranslateCaptureQuality) -> [AVCaptureSession.Preset] {
+        switch quality {
+        case .high: return [.hd1280x720, .vga640x480]
+        case .standard: return [.vga640x480]
+        }
+    }
+
+    // MARK: Permission
 
     var authorizationStatus: CameraAuthorizationStatus {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
@@ -291,12 +434,15 @@ final class AVFoundationCaptureLayer: NSObject, LiveCameraCaptureLayer {
         }
     }
 
+    // MARK: Configuration
+
     func configureVideoOnly(onSampleBuffer: @escaping (CMSampleBuffer) -> Void,
                             queue: DispatchQueue) throws {
         guard !isConfigured else { return }
         guard let device = deviceProvider() else {
             throw LiveTranslateError.cameraUnavailable(.noCaptureDevice)
         }
+        self.device = device
 
         let input: AVCaptureDeviceInput
         do {
@@ -308,13 +454,7 @@ final class AVFoundationCaptureLayer: NSObject, LiveCameraCaptureLayer {
         }
 
         session.beginConfiguration()
-        if session.canSetSessionPreset(.vga640x480) {
-            // The frame is downscaled by the platform's own preset rather than
-            // by a size this feature invents: the design fixes "downscaled",
-            // and the OCR cadence/quality trade-off is OD1's device spike, not
-            // a number buried here.
-            session.sessionPreset = .vga640x480
-        }
+        applyPreset()
         guard session.canAddInput(input) else {
             session.commitConfiguration()
             throw LiveTranslateError.cameraUnavailable(.configurationFailed)
@@ -336,9 +476,246 @@ final class AVFoundationCaptureLayer: NSObject, LiveCameraCaptureLayer {
         session.addOutput(output)
         session.commitConfiguration()
 
+        // The device's own half of the quality story, after the graph is
+        // committed (the formats the session settled on decide the zoom range)
+        // and before the first frame is produced.
+        applyQuality(to: device)
+
         sink = onSampleBuffer
         isConfigured = true
     }
+
+    /// Asks for the configured quality, falling back down the list.
+    ///
+    /// The frame the elder gets is the platform's own downscale of the sensor,
+    /// not a size this feature invents — the preset is the one lever over that,
+    /// and `cameraQuality` is where it is written down.
+    private func applyPreset() {
+        for preset in Self.presets(for: config.cameraQuality) where session.canSetSessionPreset(preset) {
+            session.sessionPreset = preset
+            return
+        }
+    }
+
+    /// Configures the device itself: the opening zoom, the focus policy, and
+    /// the two platform behaviours that decide how much the *device* does on
+    /// its own (constituent camera switching, and HDR).
+    ///
+    /// One lock, one pass. Every property below throws without
+    /// `lockForConfiguration`, and the focus properties only take effect once
+    /// the focus mode is set *after* them, so a half-applied policy would
+    /// silently do nothing.
+    private func applyQuality(to device: AVCaptureDevice) {
+        do {
+            try device.lockForConfiguration()
+        } catch {
+            // A device that cannot be locked still captures at the platform's
+            // defaults, which is a working translator — never a failure the
+            // elder is shown.
+            return
+        }
+        defer { device.unlockForConfiguration() }
+
+        // The lens switching is the platform's. `.auto` (the default for
+        // devices that support it) lets the virtual device pick the best
+        // constituent for the scene, including the close-subject fallback to a
+        // shorter lens. Set explicitly rather than inherited so the feature
+        // states its choice in code — and never `.locked`, which would pin the
+        // session to one constituent and make the switch-over factors the zoom
+        // model reads meaningless.
+        if device.activePrimaryConstituentDeviceSwitchingBehavior != .unsupported {
+            device.setPrimaryConstituentDeviceSwitchingBehavior(
+                .auto,
+                restrictedSwitchingBehaviorConditions: [])
+        }
+
+        if device.isSubjectAreaChangeMonitoringEnabled != config.subjectAreaChangeMonitoring {
+            device.isSubjectAreaChangeMonitoringEnabled = config.subjectAreaChangeMonitoring
+        }
+
+        // The platform turns HDR on by default for a format that fits it; the
+        // feature states it rather than inheriting it, and can turn it off (see
+        // `automaticVideoHDR` for why that escape hatch exists at all).
+        device.automaticallyAdjustsVideoHDREnabled = config.automaticVideoHDR
+
+        // The opening view, in the same space and by the same rule as every
+        // later one: the config's value is a *readout* number ("1× is the wide
+        // camera's own view") and the device wants its own, so the conversion
+        // goes through the device's capabilities — which also mean the opening
+        // factor is inside the range the model will hold the elder to, rather
+        // than a first position the first gesture has to correct.
+        //
+        // A range that traps on a device reporting an inverted one is closed by
+        // the same helper the model clamps with: one clamping rule, one place.
+        device.videoZoomFactor = Self.zoomCapabilities(of: device).openingFactor(for: config)
+
+        if device.isFocusPointOfInterestSupported {
+            device.focusPointOfInterest = config.focusPointOfInterest
+        }
+        applyRangeRestriction(to: device)
+        if config.smoothAutoFocus, device.isSmoothAutoFocusSupported {
+            device.isSmoothAutoFocusEnabled = true
+        }
+        // The mode last, always: the point, the restriction and the smooth
+        // flag only take effect once a focus mode is set after them.
+        if config.focusLockDefault {
+            applyFocusMode(.locked, to: device)
+        } else {
+            applyFocusMode(.continuousAutoFocus, to: device)
+        }
+    }
+
+    /// The near-range restriction, where the config and the device both allow
+    /// it. Called *before* the focus mode at every site that wants it: the
+    /// restriction has no effect until the mode is set after it.
+    private func applyRangeRestriction(to device: AVCaptureDevice) {
+        guard config.focusNearRangeRestriction,
+              device.isAutoFocusRangeRestrictionSupported else { return }
+        device.autoFocusRangeRestriction = .near
+    }
+
+    /// Sets a focus mode the device actually supports.
+    private func applyFocusMode(_ mode: AVCaptureDevice.FocusMode, to device: AVCaptureDevice) {
+        guard device.isFocusModeSupported(mode) else { return }
+        device.focusMode = mode
+    }
+
+    // MARK: Zoom
+
+    var zoomCapabilities: CameraZoomCapabilities {
+        guard let device else { return .unknown }
+        return Self.zoomCapabilities(of: device)
+    }
+
+    /// What a device reports, whether or not it is the one currently running:
+    /// the same answer the running path gives, so the opening factor in
+    /// `applyQuality` and the bounds a later gesture is held to are read off
+    /// the same device in the same vocabulary.
+    private static func zoomCapabilities(of device: AVCaptureDevice) -> CameraZoomCapabilities {
+        let minimum = device.minAvailableVideoZoomFactor
+        let maximum = Swift.max(minimum, device.maxAvailableVideoZoomFactor)
+        return CameraZoomCapabilities(
+            range: minimum...maximum,
+            switchOverFactors: device.virtualDeviceSwitchOverVideoZoomFactors.map(\.doubleValue),
+            widestLensIsUltraWide: widestLensIsUltraWide(device))
+    }
+
+    var videoZoomFactor: Double { Double(device?.videoZoomFactor ?? 1) }
+
+    @discardableResult
+    func setVideoZoomFactor(_ factor: Double) -> Double {
+        guard let device else { return factor }
+        do {
+            try device.lockForConfiguration()
+        } catch {
+            return factor
+        }
+        defer { device.unlockForConfiguration() }
+
+        // Clamped against the range read *inside* the same lock: assigning
+        // outside `minAvailableVideoZoomFactor...maxAvailableVideoZoomFactor`
+        // raises `NSRangeException` — an Objective-C exception, which is a crash
+        // in Swift, not a catchable error — and the range itself follows the
+        // active format, so a value clamped a moment earlier can be out of range
+        // a moment later.
+        let minimum = device.minAvailableVideoZoomFactor
+        let maximum = Swift.max(minimum, device.maxAvailableVideoZoomFactor)
+        device.videoZoomFactor = CGFloat(LiveCameraZoomModel.clamped(factor, to: minimum...maximum))
+        return Double(device.videoZoomFactor)
+    }
+
+    /// Whether this device's widest lens is its ultra-wide camera — the one
+    /// fact the readout's unit is derived from
+    /// (`CameraZoomCapabilities.displayMultiplier`), read off the device's own
+    /// constituent list.
+    ///
+    /// A virtual device lists its constituents in the order its switch-over
+    /// factors progress, so the first is the widest view it can give: the
+    /// ultra-wide on every phone that has one. The alternative is the platform's
+    /// own answer — `displayVideoZoomFactorMultiplier`, the ratio the system
+    /// readout uses — but that property is iOS 18+ and the guard that reaches it
+    /// would have to spell its version number in this file, which the feature's
+    /// source-hygiene scan reads as a re-declaration of a configured default
+    /// (`overlayMinPointSize = 18`). The scan cannot tell a version number from
+    /// a parameter, and a scan that guessed would be the worse guard. A device
+    /// whose first constituent is not the ultra-wide — the wide angle only, or
+    /// an ordering this does not know — gets 1, which is the honest unit for it.
+    private static func widestLensIsUltraWide(_ device: AVCaptureDevice) -> Bool {
+        device.constituentDevices.first?.deviceType == .builtInUltraWideCamera
+    }
+
+    // MARK: Focus
+
+    var supportsFocusPointOfInterest: Bool { device?.isFocusPointOfInterestSupported ?? false }
+
+    func focus(atDevicePoint point: CGPoint) {
+        guard let device, device.isFocusPointOfInterestSupported else { return }
+        do {
+            try device.lockForConfiguration()
+        } catch {
+            return
+        }
+        defer { device.unlockForConfiguration() }
+
+        // The point, then the restriction, then the mode: setting the point
+        // alone focuses nothing, and the restriction is only read when a focus
+        // mode is set after it.
+        device.focusPointOfInterest = point
+        applyRangeRestriction(to: device)
+        // A one-shot scan where the device offers one — that is the "snap it
+        // into focus where I pointed" the elder asked for by tapping — and
+        // continuous focus where it does not.
+        if device.isFocusModeSupported(.autoFocus) {
+            applyFocusMode(.autoFocus, to: device)
+        } else {
+            applyFocusMode(.continuousAutoFocus, to: device)
+        }
+    }
+
+    func focusContinuously(atDevicePoint point: CGPoint) {
+        guard let device, device.isFocusPointOfInterestSupported else { return }
+        do {
+            try device.lockForConfiguration()
+        } catch {
+            return
+        }
+        defer { device.unlockForConfiguration() }
+        device.focusPointOfInterest = point
+        applyRangeRestriction(to: device)
+        applyFocusMode(.continuousAutoFocus, to: device)
+    }
+
+    func setFocusLocked(_ locked: Bool) {
+        guard let device, device.isFocusModeSupported(locked ? .locked : .continuousAutoFocus) else {
+            return
+        }
+        do {
+            try device.lockForConfiguration()
+        } catch {
+            return
+        }
+        defer { device.unlockForConfiguration() }
+        if !locked {
+            applyRangeRestriction(to: device)
+        }
+        applyFocusMode(locked ? .locked : .continuousAutoFocus, to: device)
+    }
+
+    func observeSubjectAreaChanges(_ handler: @escaping () -> Void) {
+        guard let device else { return }
+        if let subjectAreaObserver {
+            NotificationCenter.default.removeObserver(subjectAreaObserver)
+        }
+        // The device posts on whichever thread detected the change; the handler
+        // is the session's, which hops to its own queue rather than doing work
+        // here.
+        subjectAreaObserver = NotificationCenter.default.addObserver(
+            forName: AVCaptureDevice.subjectAreaDidChangeNotification,
+            object: device,
+            queue: nil) { _ in handler() }
+    }
+
+    // MARK: Running
 
     func startRunning() { session.startRunning() }
     func stopRunning() { session.stopRunning() }
@@ -412,6 +789,18 @@ final class LiveCameraSession {
     /// The pipeline's stale-scene signal (see `ocrSceneStale`).
     private var sceneStale = false
 
+    /// The zoom the device was last applied (see `setZoom`), stamped on every
+    /// delivered frame. Kept here rather than read off the device on the video
+    /// queue: the device is a seam implementation's business, and one lock
+    /// already guards every value the tap reads.
+    private var videoZoomFactor: Double
+    /// The focus point the session last asked for (a device point), and whether
+    /// the elder has focus held. Both are mirrors of the zoom surface's state,
+    /// kept here because the subject-area re-arm runs off the video-adjacent
+    /// path and cannot ask the view.
+    private var focusPoint: CGPoint
+    private var focusIsLocked: Bool
+
     private let stream: AsyncStream<CameraFrame>
     private var continuation: AsyncStream<CameraFrame>.Continuation?
 
@@ -419,14 +808,28 @@ final class LiveCameraSession {
 
     init(config: LiveTranslateConfig = .default,
          observabilityBus: ObservabilityBus,
-         capture: LiveCameraCaptureLayer = AVFoundationCaptureLayer(),
+         capture: LiveCameraCaptureLayer? = nil,
          notificationCenter: NotificationCenter = .default,
          now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
         self.config = config
         self.events = LiveTranslateEvents(bus: observabilityBus, config: config)
+        // The shipped layer is built with *this* session's config (the preset,
+        // the opening zoom and the focus policy are all config values, and the
+        // layer is the file that speaks AVFoundation). A supplied layer is used
+        // as it is: it is the caller's, and in tests it is a stub with no
+        // device behind it at all.
+        let capture = capture ?? AVFoundationCaptureLayer(config: config)
         self.capture = capture
         self.notificationCenter = notificationCenter
         self.now = now
+        // The at-rest factor, in the space every other zoom in this class is in
+        // (`setZoom`): the config's readout value taken into the device's own
+        // space through the layer if it already has a device, and the config's
+        // own bounds when it has none. The first `start()` replaces it with the
+        // device's own answer either way (`CameraFrame.zoomFactor`).
+        self.videoZoomFactor = capture.zoomCapabilities.openingFactor(for: config)
+        self.focusPoint = config.focusPointOfInterest
+        self.focusIsLocked = config.focusLockDefault
 
         var capturedContinuation: AsyncStream<CameraFrame>.Continuation?
         // `bufferingNewest(1)` is the second half of the memory bound: even if a
@@ -523,6 +926,137 @@ final class LiveCameraSession {
         return Swift.max(nominal, config.stableSampleInterval)
     }
 
+    // MARK: Zoom and focus (owner report, 2026-09-17)
+
+    /// The zoom and focus surface the session view renders: the elder's factor,
+    /// the device's bounds and switch-over factors, and the focus-lock state.
+    ///
+    /// Lazily built so its closures can reach this session without capturing it
+    /// strongly — the surface is owned here, and a strong pair would be a
+    /// retain cycle. It is a view surface: read it on the main thread.
+    private(set) lazy var zoomSurface: LiveCameraZoomSurface = LiveCameraZoomSurface(
+        config: config,
+        capabilities: { [weak self] in self?.zoomCapabilities ?? .unknown },
+        applyZoom: { [weak self] factor in self?.setZoom(factor) ?? factor },
+        applyFocus: { [weak self] point in self?.focus(at: point) },
+        applyFocusLock: { [weak self] locked in self?.setFocusLocked(locked) })
+
+    /// What the configured device can do about zoom, straight from the capture
+    /// seam — `.unknown` before the session is configured and after it is torn
+    /// down, because then there is no device to ask and the model works from
+    /// the app's own bounds alone.
+    var zoomCapabilities: CameraZoomCapabilities {
+        switch state {
+        case .running, .interrupted:
+            return capture.zoomCapabilities
+        default:
+            return .unknown
+        }
+    }
+
+    /// The zoom the delivered frames are cropped at. Read by a consumer that
+    /// needs to know what a frame is a picture *of*.
+    var currentVideoZoom: Double {
+        withLock { videoZoomFactor }
+    }
+
+    /// Applies a zoom factor to the running device and answers the factor
+    /// actually in effect.
+    ///
+    /// Clamped twice, deliberately. Once here, against the app's bounds narrowed
+    /// by what the device reports, so that a caller always gets a number it can
+    /// draw even when the session is not running; and once inside the capture
+    /// layer, against the range read under the device's own configuration lock,
+    /// because assigning outside it raises an Objective-C exception — a crash —
+    /// and the range follows the active format.
+    ///
+    /// The zoom crosses into the recognition path through the *device*, not
+    /// through this feature: `videoZoomFactor` crops the sensor before the data
+    /// output sees the frame, so the buffer handed to Vision is the zoomed
+    /// region at the capture preset's full size, with no second, downscaled
+    /// copy of the picture in between.
+    ///
+    /// The frame-change gate's baseline is dropped with every applied change: a
+    /// frame of the same scene at a different zoom is a different picture, and
+    /// keeping the old baseline would have the gate answer "unchanged" for the
+    /// frame that shows the small print the elder just zoomed in on — the one
+    /// frame it must never drop. The cost is at most one extra pass.
+    @discardableResult
+    func setZoom(_ factor: Double) -> Double {
+        // The factor arrives in the *device's* space — the one the model's
+        // bounds, steps and readout are all built in — and the bounds are the
+        // config's own limits converted into it by the same rule the model
+        // uses (`CameraZoomCapabilities.rawBounds(for:)`), never a second copy
+        // of the arithmetic.
+        let capabilities = zoomCapabilities
+        let requested = LiveCameraZoomModel.clamped(factor, to: capabilities.rawBounds(for: config))
+        guard state == .running else { return requested }
+
+        let applied: Double = onCaptureQueue { capture.setVideoZoomFactor(requested) }
+        withLock {
+            videoZoomFactor = applied
+            frameDetector.forget()
+        }
+        return applied
+    }
+
+    /// Moves the focus point — a *device* point: normalized, top-left origin —
+    /// and starts a focus operation there.
+    ///
+    /// The conversion from a tap in the letterboxed preview to this point is the
+    /// preview layer's own (`captureDevicePointConverted(fromLayerPoint:)`),
+    /// and it happens in the view, on the layer that knows the aspect fit. What
+    /// arrives here is already in the device's coordinates.
+    ///
+    /// A tap also releases the focus lock: the one-shot focus the layer applies
+    /// is the release, so there is no second call to make — and the surface is
+    /// told, so the lock's control and the lock's device state cannot be drawn
+    /// disagreeing.
+    func focus(at devicePoint: CGPoint) {
+        guard state == .running, capture.supportsFocusPointOfInterest else { return }
+        withLock {
+            focusPoint = devicePoint
+            focusIsLocked = false
+        }
+        zoomSurface.focusLockChanged(to: false)
+        onCaptureQueue { capture.focus(atDevicePoint: devicePoint) }
+    }
+
+    /// Holds focus at its current lens position, or returns it to the
+    /// continuous close-range search.
+    func setFocusLocked(_ locked: Bool) {
+        withLock { focusIsLocked = locked }
+        // The surface is told even when the session is not running: the elder
+        // pressed the control, and a control that flipped back because the
+        // camera happened to be between states would be the app arguing with
+        // itself.
+        zoomSurface.focusLockChanged(to: locked)
+        guard state == .running else { return }
+        onCaptureQueue { capture.setFocusLocked(locked) }
+    }
+
+    /// The device reports that the subject area changed substantially: the
+    /// elder turned the packet over, brought it closer, or moved it out of the
+    /// light. Bring the focus back to the close range at the point the elder
+    /// last aimed at — unless they have focus held, which is them saying "do
+    /// not move it".
+    ///
+    /// Continuous focus rather than another one-shot scan: a one-shot holds the
+    /// lens position it found, which is right after a tap and wrong after a
+    /// change — the packet that was turned over is at a different distance, and
+    /// the mode that keeps looking is the one that finds it. It is also a
+    /// *different* mode assignment from the tap's, so the re-arm is a real focus
+    /// operation and not a re-assertion of the state the device is already in.
+    private func refocusAfterSubjectAreaChange() {
+        guard state == .running else { return }
+        let target: CGPoint? = withLock {
+            guard !focusIsLocked else { return nil }
+            return focusPoint
+        }
+        guard let target else { return }
+        onCaptureQueue { capture.focusContinuously(atDevicePoint: target) }
+    }
+
     // MARK: Preview
 
     /// The full-bleed preview surface: the capture session's own layer with
@@ -594,11 +1128,18 @@ final class LiveCameraSession {
         }
 
         setState(.starting)
+        let appliedZoom: Double
         do {
-            try onCaptureQueue {
+            appliedZoom = try onCaptureQueue {
                 try capture.configureVideoOnly(onSampleBuffer: { [weak self] sampleBuffer in
                     self?.sampleArrived(sampleBuffer)
                 }, queue: videoOutputQueue)
+                // The opening zoom is the layer's — it applied
+                // `initialVideoZoom` while it held the device's configuration
+                // lock — and reading it back is what keeps the frames' own zoom
+                // stamp honest, including on a device whose own range clamped
+                // the value.
+                return capture.videoZoomFactor
             }
         } catch let error as LiveTranslateError {
             setState(.failed(error))
@@ -611,7 +1152,9 @@ final class LiveCameraSession {
             return .failure(failure)
         }
 
+        withLock { videoZoomFactor = appliedZoom }
         registerLifecycleObservers()
+        registerSubjectAreaObserver()
         onCaptureQueue { capture.startRunning() }
         withLock { startHasRun = true }
         setState(.running)
@@ -720,6 +1263,12 @@ final class LiveCameraSession {
             passInFlight = false
             frameDetector.forget()
             sceneStale = false
+            // Back to the same at-rest reading the init states, by the same
+            // rule: a caller that asks after a teardown gets a factor it can
+            // draw, and a restart re-reads the device anyway.
+            videoZoomFactor = capture.zoomCapabilities.openingFactor(for: config)
+            focusPoint = config.focusPointOfInterest
+            focusIsLocked = config.focusLockDefault
             currentState = .stopped
             let removed = observers
             observers = []
@@ -766,7 +1315,11 @@ final class LiveCameraSession {
     /// reference only for frames actually delivered, so a dropped sample never
     /// moves the baseline away from the frame the overlay is showing.
     private func sampleArrived(_ sampleBuffer: CMSampleBuffer) {
-        guard let frame = CameraFrame(sampleBuffer: sampleBuffer) else { return }
+        // What the device was zoomed to when this sample was produced: the
+        // buffer is the device's own crop of the sensor, and the frame carries
+        // that fact so the pass knows what it is looking at.
+        let zoom = withLock { videoZoomFactor }
+        guard let frame = CameraFrame(sampleBuffer: sampleBuffer, zoomFactor: zoom) else { return }
 
         let accepted: AsyncStream<CameraFrame>.Continuation? = withLock {
             guard currentState == .running else { return nil }
@@ -787,6 +1340,16 @@ final class LiveCameraSession {
     }
 
     // MARK: Lifecycle observers
+
+    /// Registers the device's own report that the subject area changed. A
+    /// no-op when the config turns monitoring off (and the device is then not
+    /// asked to monitor at all, so nothing is posted).
+    private func registerSubjectAreaObserver() {
+        guard config.subjectAreaChangeMonitoring else { return }
+        capture.observeSubjectAreaChanges { [weak self] in
+            self?.refocusAfterSubjectAreaChange()
+        }
+    }
 
     private func registerLifecycleObservers() {
         // Registering twice (two successful starts on one session) would double

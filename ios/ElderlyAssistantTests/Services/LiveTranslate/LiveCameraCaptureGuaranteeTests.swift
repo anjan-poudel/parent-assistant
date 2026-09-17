@@ -122,6 +122,65 @@ final class LiveCameraCaptureGuaranteeTests: XCTestCase {
         }
     }
 
+    /// The zoom and focus seam (owner report, 2026-09-17) is the *same*
+    /// video-only seam: the members added for it are the device's own zoom and
+    /// focus, and none of them is a second capture path, a still or a file.
+    func testTheZoomAndFocusSeamIsStillTheVideoOnlySeam() throws {
+        let declaration = try XCTUnwrap(block(startingWith: "protocol LiveCameraCaptureLayer",
+                                              in: "LiveCameraSession.swift"))
+        for member in ["var zoomCapabilities", "var videoZoomFactor",
+                       "func setVideoZoomFactor(", "var supportsFocusPointOfInterest",
+                       "func focus(atDevicePoint", "func focusContinuously(atDevicePoint",
+                       "func setFocusLocked(", "func observeSubjectAreaChanges("] {
+            XCTAssertTrue(declaration.contains(member),
+                          "the zoom/focus seam is the declared one: \(member) is missing")
+        }
+        for entry in forbidden {
+            XCTAssertFalse(declaration.contains(entry.token),
+                           "the zoom/focus members must not add \(entry.token) "
+                           + "(\(entry.meaning)) to the seam")
+        }
+        // And the layer that implements it still configures one output: the
+        // device's own zoom crops the sensor *before* the data output sees the
+        // frame, which is what makes "zoom in on the small print" cost the
+        // recognition path nothing.
+        let file = FeatureSourceScan.iosDirectory()
+            .appendingPathComponent(FeatureSourceScan.liveTranslateSources)
+            .appendingPathComponent("LiveCameraSession.swift")
+        let code = FeatureSourceScan.codeText(of: file)
+        XCTAssertFalse(code.contains("automaticallyAdjustsVideoZoomFactor = true"),
+                       "the platform's own zoom adjustment must never be switched on: this feature "
+                       + "drives `videoZoomFactor` itself, and the two would fight over it")
+        XCTAssertTrue(code.contains("virtualDeviceSwitchOverVideoZoomFactors"),
+                      "the switch-over factors come from the device, never from a table here")
+        XCTAssertFalse(code.contains("AVCapturePhotoOutput("),
+                       "no second output class may appear beside the zoom path")
+    }
+
+    /// A frame's zoom stamp (owner report, 2026-09-17) is a factor, not bytes:
+    /// the new field must not make a frame any more expressible as a file than
+    /// it was.
+    func testTheFramesZoomStampIsNotAPersistableRepresentation() throws {
+        let declaration = try XCTUnwrap(block(startingWith: "struct CameraFrame",
+                                              in: "LiveCameraSession.swift"))
+        XCTAssertTrue(declaration.contains("zoomFactor"),
+                      "a frame says what it is a picture of")
+        // The stamp is carried in by the sample-buffer initialiser, which lives
+        // in the extension beside the declaration: read from the file rather
+        // than from the struct's block, so the assertion is about the stamp
+        // travelling with a delivered frame and not about where it is written.
+        let file = FeatureSourceScan.iosDirectory()
+            .appendingPathComponent(FeatureSourceScan.liveTranslateSources)
+            .appendingPathComponent("LiveCameraSession.swift")
+        let code = FeatureSourceScan.codeText(of: file)
+        XCTAssertTrue(code.contains("init?(sampleBuffer: CMSampleBuffer, zoomFactor: Double"),
+                      "a frame is built from a delivered sample buffer and takes its zoom stamp with it")
+        for token in ["Data", "URL", "Codable", "Encodable", "write", "save", "UIImage", "CGImage"] {
+            XCTAssertFalse(declaration.contains(token),
+                           "the zoom stamp must not make a frame expressible as bytes or a file (\(token))")
+        }
+    }
+
     // MARK: Behaviour: the frame path writes nothing
 
     func testRunningTheFramePathLeavesTheFileSystemUntouched() async throws {

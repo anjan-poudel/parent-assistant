@@ -76,6 +76,84 @@ final class LiveCameraCaptureStub: LiveCameraCaptureLayer {
         return running
     }
 
+    // MARK: Zoom and focus (owner report, 2026-09-17)
+
+    /// What the stub device reports about zoom. The default is a **single-lens**
+    /// device with a range narrower than the config's ceiling: the case that
+    /// must work with no switch-over factors at all, and one where a test that
+    /// expects the device to narrow the model sees it happen without scripting
+    /// anything.
+    var zoomCapabilitiesValue = CameraZoomCapabilities(range: 1...6,
+                                                      switchOverFactors: [])
+
+    var zoomCapabilities: CameraZoomCapabilities {
+        lock.lock(); defer { lock.unlock() }
+        return zoomCapabilitiesValue
+    }
+
+    /// What the device clamps every zoom request to — the platform's own rule,
+    /// and the reason the session adopts the *applied* answer rather than the
+    /// requested one. Unset means the device takes whatever it is asked for.
+    var appliedZoomClamp: ClosedRange<Double>?
+
+    /// Every factor the session asked the device for, in order.
+    private(set) var setZoomRequests: [Double] = []
+
+    /// The device's current factor. Writable so a test can script the factor a
+    /// device was left at (the session reads it back after a start).
+    var videoZoomFactorValue: Double = 1
+
+    var videoZoomFactor: Double {
+        lock.lock(); defer { lock.unlock() }
+        return videoZoomFactorValue
+    }
+
+    @discardableResult
+    func setVideoZoomFactor(_ factor: Double) -> Double {
+        lock.lock(); defer { lock.unlock() }
+        setZoomRequests.append(factor)
+        let applied = appliedZoomClamp.map {
+            Swift.min($0.upperBound, Swift.max($0.lowerBound, factor))
+        } ?? factor
+        videoZoomFactorValue = applied
+        return applied
+    }
+
+    /// Whether the stub device supports a focus point of interest. Writable, so
+    /// the "device cannot be told where to focus" path is testable.
+    var supportsFocusPointOfInterest = true
+
+    /// Every point the session asked for, split by the *kind* of focus request:
+    /// a tap is one-shot, the subject-area re-arm is continuous, and a session
+    /// that confused the two would still deliver a frame.
+    private(set) var focusRequests: [CGPoint] = []
+    private(set) var continuousFocusRequests: [CGPoint] = []
+    private(set) var focusLockRequests: [Bool] = []
+
+    func focus(atDevicePoint point: CGPoint) {
+        lock.lock(); focusRequests.append(point); lock.unlock()
+    }
+
+    func focusContinuously(atDevicePoint point: CGPoint) {
+        lock.lock(); continuousFocusRequests.append(point); lock.unlock()
+    }
+
+    func setFocusLocked(_ locked: Bool) {
+        lock.lock(); focusLockRequests.append(locked); lock.unlock()
+    }
+
+    private var subjectAreaHandler: (() -> Void)?
+
+    func observeSubjectAreaChanges(_ handler: @escaping () -> Void) {
+        lock.lock(); subjectAreaHandler = handler; lock.unlock()
+    }
+
+    /// Fires the handler the session registered, where the device would post it.
+    func subjectAreaDidChange() {
+        lock.lock(); let handler = subjectAreaHandler; lock.unlock()
+        handler?()
+    }
+
     // MARK: Driving frames
 
     /// Delivers a sample buffer to the sink the session registered — the same
