@@ -312,6 +312,36 @@
     ]
   },
   {
+    "id": "livetranslate",
+    "titleEn": "Translate what you see",
+    "titleNe": "क्यामेराले हेरेर अनुवाद गर्ने",
+    "paragraphsEn": [
+      "Point the camera at English writing — buttons, labels, instructions, or a menu — and Sahayak shows the Nepali meaning right on the screen, live. Nothing is photographed and nothing is saved.",
+      "• How to open: tap the Translate tile on the Home screen (the text-viewfinder icon), or say “translate this” — in English or Nepali (“यो अनुवाद गर्नुहोस्”).",
+      "• How it works: hold the phone so the writing fills the screen. Within a moment the translations appear. Short words are rewritten in place; longer text appears in a bubble beside it, with the original English in small letters underneath so you can double-check.",
+      "• Tap to hear: tap any bubble and Sahayak reads it aloud. Or say “read this to me” and everything visible is read to you, top to bottom.",
+      "• If holding the phone steady is hard, tap “Hold this picture” — the screen freezes and you can read calmly. Tap “Go live again” to return to the live view.",
+      "• Without internet: words the phone already knows still translate instantly. New words show the original text with an offline badge — nothing is lost. Everything you have translated before is remembered.",
+      "• Privacy: the camera never takes or saves photos. Only the words themselves are sent to the translation service, and only when the built-in dictionary does not know them, and only after you allow it once. Photos of the writing are never sent.",
+      "• Your choice: before anything is sent, Sahayak asks your permission. You can say no — then only the words the phone already knows are translated. You can change this anytime in Settings. Your translated words are stored safely, locked and encrypted.",
+      "• In Settings you can choose to always show the original English beside every translation, not just the longer ones.",
+      "• Tips: good light helps. Hold the phone about a hand's length away. If the writing is small, move closer — the text grows as you approach."
+    ],
+    "paragraphsNe": [
+      "क्यामेरा अंग्रेजी लेखाइतिर देखाउनुहोस् — बटन, लेबल, निर्देशन वा मेनु — सहायकले स्क्रिनमै नेपाली अर्थ देखाउँछ, तुरुन्तै। कुनै फोटो खिचिँदैन, कुनै फोटो बचत हुँदैन।",
+      "• कसरी खोल्ने: गृह स्क्रिनमा “अनुवाद” टाइल थिच्नुहोस् (पाठ-भ्यूफाइन्डर चिह्न), वा भन्नुहोस् “यो अनुवाद गर्नुहोस्”।",
+      "• कसरी चल्छ: फोनलाई यसरी समाउनुहोस् कि लेखाइ स्क्रिनभरि देखियोस्। केही बेरमै अनुवाद देखा पर्छ। छोटा शब्द आफ्नै ठाउँमा बदलिन्छन्; लामा वाक्यको अनुवाद छेउमै बबलमा देखिन्छ, र जाँच्नका लागि मुनि सानो अक्षरमा मूल अंग्रेजी पनि रहन्छ।",
+      "• थिचेर सुन्ने: कुनै पनि बबल थिच्नुहोस् — सहायकले ठूलो स्वरमा पढेर सुनाउँछ। वा भन्नुहोस् “यो पढेर सुनाऊ” — स्क्रिनमा देखिएका सबै कुरा माथिदेखि तलसम्म सुन्नुहुन्छ।",
+      "• फोन स्थिर राख्न गाह्रो भए “यो चित्र रोक्नुहोस्” थिच्नुहोस् — स्क्रिन रोकिन्छ र शान्तसँग पढ्न सकिन्छ। फेरि “लाइभमा फर्कनुहोस्” थिचेपछि पहिलेजस्तै हुन्छ।",
+      "• इन्टरनेट नभएको बेला: फोनले चिनेका शब्द तुरुन्तै अनुवाद हुन्छन्। नयाँ शब्दमा “अफलाइन” चिह्नसहित मूल पाठ देखिन्छ — केही हराउँदैन। पहिले अनुवाद भइसकेका कुरा सबै सम्झिएर राखिएका हुन्छन्।",
+      "• गोपनीयता: क्यामेराले कहिल्यै फोटो खिच्दैन, न त बचत गर्छ। शब्दहरू मात्र अनुवाद सेवामा पठाइन्छ — र त्यो पनि फोनको आफ्नै शब्दकोशले चिन्न नसकेको बेला, अनि तपाईंले एक पटक अनुमति दिएपछि मात्र। लेखाइको फोटो कहिल्यै पठाइँदैन।",
+      "• तपाईंको रोजाइ: शब्द पठाउनुअघि सहायकले तपाईंलाई सोध्छ। नाई भन्न सक्नुहुन्छ — त्यसो भए फोनले चिनेका शब्द मात्र अनुवाद हुन्छन्। जुनसुकै बेला सेटिङबाट बदल्न सकिन्छ। तपाईंका अनुवादहरू सुरक्षित रूपमा, ताल्चा लगाएर राखिन्छन्।",
+      "• सेटिङमा गएर हरेक अनुवादको छेउमा मूल अंग्रेजी सधैं देखाउने विकल्प छान्न सक्नुहुन्छ।",
+      "• सुझाव: उज्यालोमा राम्रो हुन्छ। फोन एक हातको दूरीमा समाउनुहोस्। अक्षर सानो भए अलि नजिक लैजानुहोस् — नजिक जाँदा पाठ ठूलो देखिन्छ।"
+    ],
+    "images": []
+  },
+  {
     "id": "alarms",
     "titleEn": "Alarms & timers",
     "titleNe": "अलार्म र टाइमर",
