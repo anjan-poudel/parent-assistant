@@ -680,18 +680,11 @@ final class ModelLifecycleManager {
 
             if !plan.fits {
                 if incoming.liveBytes > budget {
-                    let classModelsBudget = ModelLifecycleBudget.modelsBudgetBytes(
-                        for: currentDeviceClassLocked())
-                    let soloAdmissible = incoming.liveBytes <= classModelsBudget
-                    if request.replacesSlotContents && request.slot.admitsSoloOverBudget
-                        && soloAdmissible {
-                        // Over the SESSION budget but inside the class's
-                        // model budget: nothing we can evict changes the
-                        // class arithmetic, and refusing would make the
-                        // app's own default brain unloadable — admit it and
-                        // announce the fact. A model over the CLASS budget
-                        // (a 4B on a standard phone) is still refused: the
-                        // escape is not a way to fit the unfit.
+                    if request.replacesSlotContents && request.slot.admitsSoloOverBudget {
+                        // Over budget on its own. Nothing we can evict
+                        // changes that, and refusing would make the app's
+                        // own default brain unloadable — admit it and
+                        // announce the fact.
                         soloOverBudget = true
                     } else {
                         // No escape hatch to invoke. Either a PEER load —
