@@ -72,6 +72,29 @@ enum DesignTokens {
     /// that read this token gets the better contrast for free.
     static let stateError = Color(red: 0.753, green: 0.184, blue: 0.165)     // #C02F2A
 
+    // MARK: - Live camera translation highlight
+
+    /// The green the live overlay's boxes are washed with — the owner's own
+    /// description of the look they asked for (2026-09-18): "the bounding box
+    /// can be TRANSPARENT GREEN with DARK COLORED TEXT — text plus the
+    /// transparent green overlay".
+    ///
+    /// A **new** token rather than `stateSpeaking`, which is the only other
+    /// green in this table. The state fills above are a vocabulary the elder
+    /// learns about the *voice* (listening, speaking, failed), and reusing one
+    /// would make a translation box say something about the microphone. It is
+    /// also the wrong green for the job: the state greens are tuned to hold
+    /// white glyphs at ≥4.5:1 on an opaque fill, and this one is tuned to do
+    /// the opposite — stay light enough under a wash that near-black type
+    /// inside it clears the contrast floor, while still reading as green over
+    /// the photograph behind it.
+    ///
+    /// The wash's opacity is not here: it is an operational value with a
+    /// config key (`LiveTranslateConfig.overlayHighlightOpacity`), because a
+    /// device check may want a heavier or lighter wash without touching the
+    /// token table.
+    static let overlayHighlight = Color(red: 0.204, green: 0.659, blue: 0.325) // #34A853
+
     // MARK: - Brand glow
     //
     // The reference artwork layers coral, crimson and burgundy ribbons.

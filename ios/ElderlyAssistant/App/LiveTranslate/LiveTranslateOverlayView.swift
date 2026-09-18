@@ -252,6 +252,23 @@ enum LiveOverlayFormGeometry: Equatable {
         }
     }
 
+    /// Whether every coordinate this geometry draws with is a real number.
+    ///
+    /// The placement's own guards mean it never hands in a rect that is not, but
+    /// a degenerate container can, and a NaN cannot be glided: a blend of one is
+    /// still a NaN, and the renderer drops such a box without saying so.
+    var isFinite: Bool {
+        switch self {
+        case .inPlace(let rect), .scrollablePanel(let rect):
+            return rect.minX.isFinite && rect.minY.isFinite
+                && rect.width.isFinite && rect.height.isFinite
+        case .callout(let anchor, let pillRect):
+            return anchor.x.isFinite && anchor.y.isFinite
+                && pillRect.minX.isFinite && pillRect.minY.isFinite
+                && pillRect.width.isFinite && pillRect.height.isFinite
+        }
+    }
+
     /// How far this geometry differs from `other`, as a fraction of the
     /// container dimension: the largest per-coordinate difference across both
     /// edges of the rect — so a move *and* a resize are the same measure — and,
@@ -275,6 +292,65 @@ enum LiveOverlayFormGeometry: Equatable {
                             abs(anchor.y - otherAnchor.y) / container.height))
         }
         return drift
+    }
+
+    /// This geometry with each coordinate moved `factor` of the remaining
+    /// distance toward `target` — one step of an exponential moving average,
+    /// and the reason a box that has decided to move *travels* instead of
+    /// landing (owner spec, 2026-09-18: "the rendered box glides toward each
+    /// new measured rect with an EMA … slow drift follows continuously instead
+    /// of stepping in threshold jumps").
+    ///
+    /// Per coordinate — origin and size, not per edge — so the two rects are
+    /// blended the way a camera dissolves one framing into another: the box
+    /// keeps its own proportions' momentum and there is no frame in which the
+    /// near edge has arrived while the far one has not. Interpolating edges
+    /// instead would draw a rect whose width is a blend of two widths and whose
+    /// origin is a blend of two origins anyway; the two agree only for a pure
+    /// translation, and the per-coordinate form is the one that is symmetric
+    /// under x/y.
+    ///
+    /// A callout glides its pill *and* its leader target together: the two are
+    /// one geometry, and a pill that arrived while the line still pointed at
+    /// where the text used to be would be the very jitter FR-LCT-016 forbids.
+    ///
+    /// `factor` is clamped: `0` returns this geometry unchanged (the box is
+    /// frozen), `1` returns the target outright (the pre-rework snap). A
+    /// non-finite geometry — a rect the placement never produces, but which a
+    /// degenerate container can hand in — is never glided and never blended: the
+    /// drawable end of the glide is what is drawn (the target in the ordinary
+    /// case, this geometry when the target is the broken one). A change of form
+    /// kind is not a move to glide through either: the two surfaces have nothing
+    /// to interpolate (a pill and a panel), so the target is returned and the
+    /// caller's snap rule and this one agree by construction.
+    func stepped(toward target: LiveOverlayFormGeometry, factor: CGFloat) -> LiveOverlayFormGeometry {
+        guard kind == target.kind else { return target }
+        guard isFinite else { return target.isFinite ? target : self }
+        guard target.isFinite else { return self }
+        let t = min(max(factor, 0), 1)
+        guard t > 0 else { return self }
+        guard t < 1 else { return target }
+
+        func glide(_ from: CGFloat, _ to: CGFloat) -> CGFloat {
+            from + (to - from) * t
+        }
+        func glide(_ from: CGRect, _ to: CGRect) -> CGRect {
+            CGRect(x: glide(from.minX, to.minX), y: glide(from.minY, to.minY),
+                   width: glide(from.width, to.width), height: glide(from.height, to.height))
+        }
+
+        switch (self, target) {
+        case let (.inPlace(from), .inPlace(to)):
+            return .inPlace(rect: glide(from, to))
+        case let (.scrollablePanel(from), .scrollablePanel(to)):
+            return .scrollablePanel(rect: glide(from, to))
+        case let (.callout(fromAnchor, fromPill), .callout(toAnchor, toPill)):
+            return .callout(anchor: CGPoint(x: glide(fromAnchor.x, toAnchor.x),
+                                            y: glide(fromAnchor.y, toAnchor.y)),
+                            pillRect: glide(fromPill, toPill))
+        default:
+            return target
+        }
     }
 
     /// This geometry as the form a region is drawn in.
@@ -310,78 +386,118 @@ enum LiveOverlayFormGeometry: Equatable {
 ///    the boxes *around* it, and those regions jump without moving.
 ///
 /// So the memory is keyed by the view identity (the normalized string, plus an
-/// ordinal where two regions share one) and holds the geometry that was last
-/// drawn for that identity. A newly measured geometry is adopted only when its
-/// `drift` from the drawn one exceeds `overlayGeometryStickiness` of the
-/// container — which is the same rule for a move and for a resize, because
-/// both are measured on the rect's own edges — and the comparison is against
-/// the rects *on screen*, so a slow drift accumulates until it is one the
-/// elder could see and then lands (gliding, through `positionSmoothingSeconds`).
+/// ordinal where two regions share one) and holds, for each identity, **two**
+/// geometries:
+///
+///  - the **target** — the last rect the placement asked for and the memory
+///    agreed to move to. A newly measured rect replaces the target only when
+///    its `drift` from the current target exceeds `overlayGeometryStickiness`
+///    of the container, which is the same rule for a move and for a resize
+///    because both are measured on the rect's own edges. This is the threshold
+///    half of the stabilization and it is unchanged by the EMA rework: jitter
+///    below the threshold does not move the target at all.
+///  - the **rendered** — the rect actually on screen, which every frame takes
+///    one EMA step (`stepped(toward:factor:)`, `overlayBoxLerpFactor`) toward
+///    the target. This is the second half (owner spec, 2026-09-18): "the
+///    rendered box glides toward each new measured rect with an EMA … slow
+///    drift follows continuously instead of stepping in threshold jumps".
+///
+/// Two states rather than one is the whole design. Keeping only "the drawn
+/// rect" and holding it until the next threshold crossing would leave a box
+/// that has been asked to move *stuck* mid-flight — the threshold is a
+/// distance, so a glide that stops part of the way is still a permanent offset
+/// from the text — and keeping only "the last measurement" would put the
+/// threshold inside the EMA, where sub-threshold jitter would still creep.
+/// With both, sub-threshold jitter is absorbed twice: it never becomes a
+/// target, and any target it does become is approached over several frames
+/// rather than landed on.
+///
+/// **Snaps** (no glide at all, whatever the rects say): the first sight of an
+/// identity, a change of form kind, and a degenerate container. The first two
+/// are the owner's own rule — "EMA resets on identity change (new block =
+/// snap, no glide-in from far away)" — and the third is the honest answer of a
+/// caller with no container to measure against: every drift is infinite there,
+/// so nothing is held and the placement's own rects are drawn, unfrozen.
 ///
 /// The one thing this must never do is draw a rect the placement did not ask
-/// for: a held geometry is by construction within the threshold of the
-/// measured one (or it would have been adopted), and a change of form kind is
-/// never held at all. That bound is also why the memory needs no reset of its
-/// own: a container that changed under it — a rotation, a new session — hands
-/// it rects that differ by far more than the threshold, so the first frame in
-/// the new container is drawn from the placement's own geometry, and no frame
-/// is ever drawn from a rect that points at nothing.
+/// for: a rendered rect is always on the segment between the previous rendered
+/// rect and a target the placement produced, both of which are inside the
+/// ceiling the placement proved clear of its neighbours, and a change of form
+/// kind is never glided through at all. That bound is also why the memory
+/// needs no reset of its own: a container that changed under it — a rotation,
+/// a new session — hands it rects that differ by far more than the threshold,
+/// so the target jumps and the glide starts from the old rect toward a rect in
+/// the new container, and no frame is ever drawn from a rect that points at
+/// nothing.
 ///
 /// A reference type, deliberately: the memory is written while the frame is
 /// being built, and a value type would have to be written back through view
 /// state — an extra render pass per pass, for a cache that changes nothing the
-/// elder reads. Nothing else here is stateful: every entry is a `CGRect` or a
-/// point, an identity that is no longer placed is dropped on the frame that
-/// drops it (so a long session cannot grow it, NFR-LCT-005), and no text,
-/// outcome or tier is ever stored.
+/// elder reads. Nothing else here is stateful: every entry is a pair of
+/// `CGRect`s, a point, or an enum tag, an identity that is no longer placed is
+/// dropped on the frame that drops it (so a long session cannot grow it,
+/// NFR-LCT-005), and no text, outcome or tier is ever stored.
 final class LiveOverlayGeometryMemory {
 
-    /// The geometry last drawn for each view identity.
-    private var drawn: [String: LiveOverlayFormGeometry] = [:]
+    /// What the memory knows about one view identity: where it is drawn, and
+    /// where the placement last asked it to be.
+    private struct Entry {
+        var rendered: LiveOverlayFormGeometry
+        var target: LiveOverlayFormGeometry
+    }
+
+    private var entries: [String: Entry] = [:]
 
     /// How many identities the memory is holding. A test reads it to show that
     /// an identity which left the frame is released rather than accumulated.
-    var count: Int { drawn.count }
+    var count: Int { entries.count }
 
     /// The presentations **as they are drawn**: each one at the geometry the
-    /// memory holds for its identity, or at the placement's own geometry when
-    /// the drift past the threshold has been adopted.
+    /// memory has glided to for its identity, or at the placement's own
+    /// geometry where the rule above says snap.
     ///
-    /// This is the view's one call per frame, and it is where adoption happens:
-    /// a geometry that has drifted beyond the threshold replaces the held one
-    /// here, so the very frame that notices the move is the frame that draws
-    /// it — there is no second pass, and no frame is ever drawn from a value
-    /// the memory has already discarded.
+    /// This is the view's one call per frame, and it is where target adoption,
+    /// the glide and the snap all happen — so the very frame that notices a
+    /// move is the frame that starts drawing it, there is no second pass, and
+    /// no frame is ever drawn from a value the memory has already discarded.
+    ///
+    /// `lerp` is `LiveTranslateConfig.overlayBoxLerpFactor`: the share of the
+    /// remaining distance the box covers per frame (`0` freezes it, `1` snaps
+    /// it, `0.3` is the shipped glide).
     func held(_ presentations: [RegionPresentation],
               container: CGSize,
-              stickiness: Double) -> [RegionPresentation] {
-        var next: [String: LiveOverlayFormGeometry] = [:]
+              stickiness: Double,
+              lerp: Double) -> [RegionPresentation] {
+        var next: [String: Entry] = [:]
         next.reserveCapacity(presentations.count)
         let limit = CGFloat(stickiness)
+        let factor = CGFloat(lerp)
 
         let resolved = presentations.map { presentation -> RegionPresentation in
             let measured = LiveOverlayFormGeometry(presentation.form)
-            guard let held = drawn[presentation.id] else {
-                // Nothing held: this identity is drawn where the placement put
-                // it, and that is now what "still" means for it.
-                next[presentation.id] = measured
+            // A container with no dimension to be a fraction of measures every
+            // drift as infinite; nothing is held or glided there, and the
+            // placement's own rect is drawn on this frame whatever the memory
+            // remembers (a frozen frame is worse than a jump).
+            guard container.width > 0, container.height > 0,
+                  let entry = entries[presentation.id],
+                  entry.rendered.kind == measured.kind,
+                  entry.target.kind == measured.kind else {
+                next[presentation.id] = Entry(rendered: measured, target: measured)
                 return presentation
             }
-            // A degenerate container measures every drift as infinite, so
-            // nothing is ever held: a caller with no container to measure
-            // against gets the placement's own rects, never a frozen frame.
-            // A change of form kind is adopted for the same reason, whatever
-            // the rects say.
-            guard held.kind == measured.kind,
-                  held.drift(from: measured, in: container) <= limit else {
-                next[presentation.id] = measured
-                return presentation
-            }
-            next[presentation.id] = held
-            return presentation.withForm(held.form(for: presentation.regionID))
+            // The threshold: a measurement the placement already asked for
+            // (within the stickiness of the target) leaves the target alone,
+            // and the box keeps gliding to where it was already going.
+            let target = measured.drift(from: entry.target, in: container) > limit
+                ? measured
+                : entry.target
+            let rendered = entry.rendered.stepped(toward: target, factor: factor)
+            next[presentation.id] = Entry(rendered: rendered, target: target)
+            return presentation.withForm(rendered.form(for: presentation.regionID))
         }
 
-        drawn = next
+        entries = next
         return resolved
     }
 }
@@ -401,6 +517,21 @@ struct LiveTranslateOverlaySurface: Equatable {
     /// The stroke width of a callout's leader line. A visual constant with no
     /// token of its own; it lives here so it is stated once.
     static let leaderLineWidth: CGFloat = 1.5
+
+    /// The fill every highlight box is drawn with: the token table's green,
+    /// washed at the configured opacity — the one place the two meet, so the
+    /// view (and the callers that render it off-screen) never assembles a
+    /// colour at a call site, and a device check can change how heavy the wash
+    /// is without touching the token table.
+    ///
+    /// The ink drawn *inside* it is `DesignTokens.textPrimary`, the app's
+    /// darkest type colour, for the reason stated at the in-place branch: dark
+    /// on green is what the owner asked to see, and it clears the wash by
+    /// roughly 10:1 where the old pair (white on navy) could only be read by
+    /// covering the sign up.
+    var highlightFill: Color {
+        DesignTokens.overlayHighlight.opacity(policy.highlightOpacity)
+    }
 
     /// How long a box takes to move to a new rect, in seconds. A rendering
     /// constant, not an operational one: it exists to absorb what movement is
@@ -442,6 +573,16 @@ struct LiveTranslateOverlaySurface: Equatable {
     /// deliberately *not* the pill token's — a replacement of the sign's type
     /// is tight and square-cornered where a pill that floats beside the text
     /// is neither.
+    ///
+    /// The green highlight's own three values ride through the same way
+    /// (`overlayHighlightOpacity`, `overlayHighlightPadding`,
+    /// `overlayBoxLerpFactor`), for the same reason: they are the owner's
+    /// tuning knobs for the look they asked for, not accessibility floors. The
+    /// padding is the placement's (it is what the detected region is grown by
+    /// before the wash is drawn over it), the opacity is the view's (it is the
+    /// wash itself), and the lerp factor is the geometry memory's (it is how
+    /// fast a box travels) — one policy value each, so no call site picks one
+    /// of them out of the config behind the others' backs.
     static func policy(config: LiveTranslateConfig,
                        alwaysShowOriginal: Bool,
                        extractionMode: Bool = false) -> LiveOverlayPlacement.Policy {
@@ -456,6 +597,9 @@ struct LiveTranslateOverlaySurface: Equatable {
             inPlaceMaxGrowth: config.inPlaceMaxGrowth,
             inPlacePadding: config.inPlacePadding,
             inPlaceCornerRadius: config.inPlaceCornerRadius,
+            highlightPadding: config.overlayHighlightPadding,
+            highlightOpacity: config.overlayHighlightOpacity,
+            boxLerpFactor: config.overlayBoxLerpFactor,
             panelMaxHeightFraction: config.panelMaxHeightFraction,
             geometryStickiness: config.overlayGeometryStickiness,
             minPointSize: primary,
@@ -754,7 +898,8 @@ struct LiveTranslateOverlayView: View {
         GeometryReader { proxy in
             let presentations = geometry.held(surface.presentations,
                                               container: proxy.size,
-                                              stickiness: surface.policy.geometryStickiness)
+                                              stickiness: surface.policy.geometryStickiness,
+                                              lerp: surface.policy.boxLerpFactor)
             ZStack(alignment: .topLeading) {
                 Color.clear
 
@@ -783,8 +928,12 @@ struct LiveTranslateOverlayView: View {
                         // the geometry of the same view — nothing is rebuilt,
                         // and the text never blinks out between frames
                         // (NFR-LCT-002). The memory has already absorbed every
-                        // move below the stickiness threshold; what is left to
-                        // glide is a move the elder can see.
+                        // move below the stickiness threshold, and it has taken
+                        // its own EMA step toward whatever is left (see
+                        // `LiveOverlayGeometryMemory`); this curve is the
+                        // *within-a-step* smoothing, so the box does not land on
+                        // each new rect in a visible tick before the next one
+                        // arrives.
                         .animation(.easeOut(duration: LiveTranslateOverlaySurface.positionSmoothingSeconds),
                                    value: presentation.frameRect)
                         .accessibilityIdentifier("livetranslate.overlay.region.\(presentation.regionID.rawValue)")
@@ -872,18 +1021,32 @@ struct LiveTranslateOverlayView: View {
             // empty ink around a short translation (the owner's device verdict,
             // 2026-09-17: "the bubbles are blue background with white text").
             //
-            // The fill is the app's ink and the text is the app's background —
-            // an opaque dark box, never a white one: it *replaces* the printed
-            // text it covers, and the elder reads it against whatever the
-            // camera sees, so the pair has to carry its own contrast (owner UX
-            // rework, 2026-09-17). Being a colour *pair* from the token table,
-            // it is equally high-contrast in either appearance mode; there is
-            // no scheme-dependent branch that could go pale in light mode.
+            // The fill is the owner's transparent green wash over the print,
+            // and the text inside it is the app's darkest ink (owner spec,
+            // 2026-09-18: "the whole idea was to overlay the extracted OCR text
+            // over the text in the picture, then translate once OCR is solid …
+            // the bounding box can be TRANSPARENT GREEN with DARK COLORED
+            // TEXT"). It replaces the opaque navy-and-white box of 2026-09-17,
+            // which the same owner had already rejected on the device ("the
+            // bubbles are blue background with white text") for the reason this
+            // fixes: an opaque box *buries* the sign it is drawn over, so the
+            // elder cannot check the translation against the print — and when
+            // the box is held or gliding, they cannot even tell which words it
+            // is about. The wash lets the original read through at
+            // `overlayHighlightOpacity` (about two fifths), which is heavy
+            // enough to see the highlight at arm's length and light enough that
+            // the printed text under it is still legible.
+            //
+            // Dark ink on that wash rather than white on navy: #0B1F44 over
+            // #34A853 at 40 % on paper measures ~10.5:1, and even where the
+            // camera sees something dark the wash is over the *print* — the
+            // pairing was chosen for the surface it is actually drawn on, not
+            // for the worst pixel the sensor could hand it.
             //
             // The corner is the config's own, not the bubble token's: a radius
             // that hugs a line of type reads as the sign's own lettering
-            // replaced, where the pill radius reads as a bubble laid over the
-            // picture. The callout below keeps the token's.
+            // highlighted, where the pill radius reads as a bubble laid over
+            // the picture. The callout below keeps the token's.
             //
             // A **block** is drawn here as one panel: all of the placement's
             // lines, stacked in the order they were measured (owner direction,
@@ -894,7 +1057,7 @@ struct LiveTranslateOverlayView: View {
             panelRows(presentation)
                 .padding(surface.policy.inPlacePadding)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(DesignTokens.textPrimary)
+                .background(surface.highlightFill)
                 .clipShape(RoundedRectangle(cornerRadius: surface.policy.inPlaceCornerRadius))
 
         case .scrollablePanel:
@@ -917,10 +1080,22 @@ struct LiveTranslateOverlayView: View {
             }
             .padding(surface.policy.inPlacePadding)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(DesignTokens.textPrimary)
+            .background(surface.highlightFill)
             .clipShape(RoundedRectangle(cornerRadius: surface.policy.inPlaceCornerRadius))
 
         case .callout:
+            // The one surface that keeps its opaque ink (green-overlay rework,
+            // 2026-09-18). Every other form is drawn *over the text it is about*
+            // — the print under the wash is the thing the elder is comparing
+            // against, which is why it may show through. A callout is the form
+            // the placement falls back to when the region has nowhere to draw a
+            // box at all: it floats beside the text, over whatever part of the
+            // picture happens to be there, with a leader line pointing home.
+            // Nothing is underneath it to read, and a green wash over an
+            // unknown patch of photograph is exactly where dark type loses its
+            // contrast — so the pill carries its own background, as it did
+            // before the rework, and the leader line stays the secondary ink.
+            //
             // Laid out with the *same* policy values the pill was sized with.
             VStack(spacing: surface.policy.lineSpacing) {
                 line(presentation.lines.first, colour: DesignTokens.background)
@@ -944,14 +1119,23 @@ struct LiveTranslateOverlayView: View {
     /// bounded scrollable one are the *same surface* to the elder, and the only
     /// difference between them is whether the box around these rows scrolls.
     /// Two copies of this stack could drift into two appearances for one block.
+    ///
+    /// **One ink for both weights** (green-overlay rework, 2026-09-18). The old
+    /// pair said which line was which by colour — white for the translation,
+    /// pale pink for the original — because it was drawn on an opaque navy box.
+    /// On the green wash there is no such pair to be had: the pink is invisible,
+    /// and every lower-contrast grey in the token table (the secondary ink at
+    /// #6B7280 measures ~3.1:1 on this wash) drops the original line under the
+    /// 4.5:1 floor this feature holds itself to. So the two lines are
+    /// distinguished the way the type scale already distinguishes them — the
+    /// translation is the bold line at the body floor, the original the regular
+    /// line at the caption floor, under it — which is also the difference that
+    /// survives for an elder who cannot see colour at all.
     @ViewBuilder
     private func panelRows(_ presentation: RegionPresentation) -> some View {
         VStack(spacing: surface.policy.lineSpacing) {
             ForEach(Array(presentation.lines.enumerated()), id: \.offset) { _, textLine in
-                line(textLine,
-                     colour: textLine.weight == .secondary
-                         ? DesignTokens.brandBlush
-                         : DesignTokens.background)
+                line(textLine, colour: DesignTokens.textPrimary)
             }
         }
     }

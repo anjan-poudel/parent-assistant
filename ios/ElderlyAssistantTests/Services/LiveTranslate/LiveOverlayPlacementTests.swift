@@ -384,7 +384,8 @@ final class LiveOverlayPlacementTests: XCTestCase {
         let box = LiveOverlayPlacement.inPlaceTightBox(regionRect: regionRect,
                                                        textSize: text,
                                                        ceiling: ceiling,
-                                                       padding: padding)
+                                                       padding: padding,
+                                                       highlightPadding: policy.highlightPadding)
 
         XCTAssertGreaterThan(text.width + 2 * padding, regionRect.width,
                              "the premise: the translation needs more room than the sign has")
@@ -404,33 +405,42 @@ final class LiveOverlayPlacementTests: XCTestCase {
                                      min(text.height + 2 * padding, ceiling.height)) + 1e-9)
         XCTAssertLessThan(box.width, ceiling.width,
                           "the box stops well inside the ceiling the fit was measured against")
-        // The two properties the rework must not have traded away.
+        // The three properties the rework must not have traded away.
         XCTAssertTrue(box.insetBy(dx: -1e-9, dy: -1e-9).contains(regionRect),
                       "the printed text it replaces is covered")
         XCTAssertTrue(ceiling.insetBy(dx: -1e-9, dy: -1e-9).contains(box),
                       "and the box can only shrink a rect already proved clear of its neighbours")
+        XCTAssertTrue(box.insetBy(dx: -1e-9, dy: -1e-9).contains(
+            regionRect.insetBy(dx: -policy.highlightPadding, dy: -policy.highlightPadding)
+                .intersection(ceiling)),
+                      "and the detected region is in it at the highlight's own padding, so the "
+                      + "green wash points at the print and not only at the re-rendered type")
     }
 
     /// A translation shorter than the sign it replaces: the box is the sign's
-    /// own rect — it never shrinks below the printed text and never pads it out
-    /// into a bubble.
-    func testAShortTranslationInABigSignDrawsTheSignsOwnRect() {
+    /// own rect, grown by the highlight padding — it never shrinks below the
+    /// printed text and never pads it out into a bubble. The growth is the
+    /// owner's "small padding ~5pt" (2026-09-18): the wash is a halo around the
+    /// words the elder is looking at, not a frame exactly on their edges.
+    func testAShortTranslationInABigSignDrawsTheSignsOwnRectAndTheHighlightPadding() {
         let policy = surfacePolicy()
         let (region, result) = resolvedScene()
         let own = rect(of: region)
+        let padding = policy.highlightPadding
 
         guard case .fits(let box, _) = outcome(own, result: result) else {
             return XCTFail("the premise: the translation fits in place")
         }
         // Component-wise, to a millionth of a point: the box is the printed
-        // rect *unioned* with the text block, and a union is a new rectangle
-        // whose edges may land one unit in the last place away from the rect it
-        // was made from. The claim is geometric — "the box is the sign's own
-        // rect" — so the comparison is too.
-        XCTAssertEqual(box.minX, own.minX, accuracy: 1e-6)
-        XCTAssertEqual(box.minY, own.minY, accuracy: 1e-6)
-        XCTAssertEqual(box.width, own.width, accuracy: 1e-6)
-        XCTAssertEqual(box.height, own.height, accuracy: 1e-6)
+        // rect *unioned* with the text block and the highlight band, and a union
+        // is a new rectangle whose edges may land one unit in the last place
+        // away from the rect it was made from. The claim is geometric — "the box
+        // is the sign's own rect plus the padding" — so the comparison is too.
+        XCTAssertGreaterThan(padding, 0, "the premise: the highlight has a padding to add")
+        XCTAssertEqual(box.minX, own.minX - padding, accuracy: 1e-6)
+        XCTAssertEqual(box.minY, own.minY - padding, accuracy: 1e-6)
+        XCTAssertEqual(box.width, own.width + 2 * padding, accuracy: 1e-6)
+        XCTAssertEqual(box.height, own.height + 2 * padding, accuracy: 1e-6)
     }
 
     /// The in-place look is the config's, and it is deliberately not the
@@ -474,6 +484,59 @@ final class LiveOverlayPlacementTests: XCTestCase {
                                                           alwaysShowOriginal: false).geometryStickiness,
                        0.08,
                        "moving the config moves what the overlay holds")
+    }
+
+    /// The green highlight's own values are the config's, carried in the policy
+    /// for the one construction site to fill — and each is read by exactly the
+    /// layer that owns it, so no two layers can disagree about the look the
+    /// owner asked for (2026-09-18).
+    func testTheHighlightValuesAreTheConfigsValues() {
+        let config = LiveTranslateConfig.default
+        let policy = surfacePolicy()
+
+        XCTAssertEqual(policy.highlightPadding, config.overlayHighlightPadding,
+                       "the placement grows the detected region by this, so the wash covers the print")
+        XCTAssertEqual(policy.highlightOpacity, config.overlayHighlightOpacity,
+                       "the view washes the box at this, so the print reads through it")
+        XCTAssertEqual(policy.boxLerpFactor, config.overlayBoxLerpFactor,
+                       "the geometry memory glides at this, so a moving box does not jump")
+
+        var tuned = config
+        tuned.overlayHighlightOpacity = 0.75
+        tuned.overlayHighlightPadding = 12
+        tuned.overlayBoxLerpFactor = 0.5
+        let moved = LiveTranslateOverlaySurface.policy(config: tuned, alwaysShowOriginal: false)
+        XCTAssertEqual(moved.highlightOpacity, 0.75)
+        XCTAssertEqual(moved.highlightPadding, 12)
+        XCTAssertEqual(moved.boxLerpFactor, 0.5)
+
+        // Bands, not pins: the values are the owner's to tune on a device, and
+        // each band is the range in which the look still works — under the low
+        // end the highlight stops reading as a highlight, over the high end it
+        // buries the text it is drawn over or the box lags its sign.
+        XCTAssertGreaterThanOrEqual(policy.highlightOpacity, 0.25)
+        XCTAssertLessThanOrEqual(policy.highlightOpacity, 0.5)
+        XCTAssertGreaterThanOrEqual(policy.highlightPadding, 3)
+        XCTAssertLessThanOrEqual(policy.highlightPadding, 8)
+        XCTAssertGreaterThan(policy.boxLerpFactor, 0)
+        XCTAssertLessThanOrEqual(policy.boxLerpFactor, 1)
+    }
+
+    /// The padding is the placement's (it is geometry), and the other two are
+    /// the view's (an opacity and a glide rate are not geometry): each value is
+    /// read by the one layer that can honour it, and the scan is what stops a
+    /// second reader appearing.
+    func testThePlacementReadsItsOwnHighlightValueAndNotTheViews() {
+        let file = FeatureSourceScan.iosDirectory().appendingPathComponent(
+            "ElderlyAssistant/Services/LiveTranslate/LiveOverlayPlacement.swift")
+        let code = FeatureSourceScan.codeText(of: file)
+        XCTAssertNotNil(FeatureSourceScan.firstMatch(of: "policy\\.highlightPadding", in: code),
+                        "the placement is where the detected region is grown: it reads the padding")
+        XCTAssertNil(FeatureSourceScan.firstMatch(of: "\\.highlightOpacity", in: code),
+                     "a colour wash is not placement: the view reads the opacity, the placement "
+                     + "only carries it")
+        XCTAssertNil(FeatureSourceScan.firstMatch(of: "\\.boxLerpFactor", in: code),
+                     "nor is a glide rate: the geometry memory owns the EMA")
     }
 
     /// The placement **carries** the threshold and never **reads** it: the

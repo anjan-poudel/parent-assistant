@@ -97,6 +97,76 @@ enum OverlayRenderProbe {
         return Ink(minX: minX, minY: minY, maxX: maxX, maxY: maxY, count: count)
     }
 
+    /// What a region of a rendering looks like, in colour terms: the average
+    /// straight-sRGB components of its pixels, and the share of them that are
+    /// darker than `darkBelow` in relative luminance.
+    ///
+    /// The colour half is what the green-highlight suite measures ("the box is
+    /// a wash of green", "the wash lets the print through"); the dark half is
+    /// the "there is dark type inside it" half of the same claim, which no
+    /// average can show — half dark ink and half white paper averages to a
+    /// grey that is neither.
+    struct Swatch: Equatable {
+        let red: Double
+        let green: Double
+        let blue: Double
+        let darkFraction: Double
+
+        var luminance: Double {
+            func linear(_ v: Double) -> Double {
+                v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
+            }
+            return 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue)
+        }
+
+        /// How green the region reads: its green channel less its red one. A
+        /// grey or white surface measures ~0; the shipped wash measures well
+        /// over 0.1 over white paper.
+        var greenCast: Double { green - red }
+    }
+
+    /// The swatch of `rect` (container points), composited over whatever the
+    /// rendering drew beneath it. `darkBelow` is the luminance under which a
+    /// pixel counts as ink — 0.25 is comfortably darker than the app's
+    /// `textPrimary` (#0B1F44 is ~0.015) and comfortably lighter than the
+    /// green wash over paper (~0.63).
+    static func swatch(in image: UIImage, within rect: CGRect,
+                       darkBelow: Double = 0.25) throws -> Swatch {
+        let pixels = try pixelBytes(of: image)
+        let scale = image.scale
+        let minX = max(0, Int((rect.minX * scale).rounded(.down)))
+        let minY = max(0, Int((rect.minY * scale).rounded(.down)))
+        let maxX = min(pixels.width, Int((rect.maxX * scale).rounded(.up)))
+        let maxY = min(pixels.height, Int((rect.maxY * scale).rounded(.up)))
+        guard maxX > minX, maxY > minY else {
+            throw NSError(domain: "OverlayRenderProbe", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: "the swatch rect \(rect) is outside the rendering",
+            ])
+        }
+
+        var red = 0.0, green = 0.0, blue = 0.0
+        var dark = 0
+        var total = 0
+        func linear(_ v: Double) -> Double {
+            v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
+        }
+        for row in minY..<maxY {
+            for column in minX..<maxX {
+                let offset = (row * pixels.width + column) * 4
+                let r = Double(pixels.bytes[offset]) / 255
+                let g = Double(pixels.bytes[offset + 1]) / 255
+                let b = Double(pixels.bytes[offset + 2]) / 255
+                red += r; green += g; blue += b
+                total += 1
+                if 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b) < darkBelow { dark += 1 }
+            }
+        }
+        return Swatch(red: red / Double(total),
+                      green: green / Double(total),
+                      blue: blue / Double(total),
+                      darkFraction: Double(dark) / Double(total))
+    }
+
     /// Asserts that everything drawn lies inside `rect` (union with any
     /// `allowed` extras, like the overlay's own chrome strip), within a
     /// one-and-a-half point antialiasing tolerance. Fails loudly when nothing

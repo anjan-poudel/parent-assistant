@@ -521,8 +521,14 @@ final class LiveTranslateAppLayerHygieneTests: XCTestCase {
             return XCTFail("the geometry memory's declaration has no end")
         }
         let memory = String(tail[..<end.upperBound])
-        XCTAssertTrue(memory.contains("private var drawn: [String: LiveOverlayFormGeometry]"),
+        XCTAssertTrue(memory.contains("private var entries: [String: Entry]"),
                       "the memory's one store is geometry per view identity, held privately: \(memory)")
+        XCTAssertTrue(memory.contains("private struct Entry")
+                      && memory.contains("var rendered: LiveOverlayFormGeometry")
+                      && memory.contains("var target: LiveOverlayFormGeometry"),
+                      "the memory holds the pair a glide needs and nothing more — where the box "
+                      + "is drawn and where the placement last asked it to be — both geometry, "
+                      + "both private: \(memory)")
         for forbidden in ["TranslationResult", "TranslationOutcome", "LiveOverlayTextLine",
                           "translation", "outcome", "tier"] {
             XCTAssertNil(FeatureSourceScan.firstMatch(of: forbidden, in: memory),
