@@ -506,6 +506,130 @@ final class TextRegionStabilizerTests: XCTestCase {
         XCTAssertEqual(stabilizer.visible.map(\.id), [identity])
     }
 
+    // MARK: - Block identity (scene-block rework, 2026-09-18)
+
+    /// A region as the grouper hands it over: one surface, carrying the
+    /// identity of the block it is.
+    private func block(_ identity: String,
+                       _ text: String,
+                       _ normalizedBox: NormalizedBox,
+                       confidence: Double = 0.9) -> LiveTextDetector.DetectedTextRegion {
+        LiveTextDetector.DetectedTextRegion(text: text,
+                                            normalizedBox: normalizedBox,
+                                            detectedLanguage: nil,
+                                            confidence: confidence,
+                                            blockIdentity: identity)
+    }
+
+    /// The claim block identity exists for: one line inside a panel is
+    /// misread, the panel's text changes, and it is still the same panel.
+    ///
+    /// The string cannot make that claim — it changed — and the box cannot
+    /// either once the misread line is a different length. The block's identity
+    /// can, because it is the grouper's own statement that these lines are one
+    /// surface.
+    func testABlockWhoseMemberLineIsMisreadKeepsItsIdentity() {
+        var stabilizer = TextRegionStabilizer(config: immediateConfig())
+        let identity = "object\u{1}microwave\u{1}3,3"
+        let appeared = stabilizer.consume(regions: [
+            block(identity, "START\n2 MIN", box(0.2, 0.3, width: 0.3, height: 0.2))
+        ])
+        guard case .appeared(let regionID) = appeared.first else {
+            return XCTFail("expected an appeared event, got \(appeared)")
+        }
+
+        let misread = stabilizer.consume(regions: [
+            block(identity, "START\n2 M1N", box(0.2, 0.3, width: 0.32, height: 0.2))
+        ])
+        XCTAssertEqual(stabilizer.visible.map(\.id), [regionID],
+                       "the panel kept its identity across the misread line: \(misread)")
+    }
+
+    /// And the converse, which is what makes the test above mean something: a
+    /// *different* block's text on that geometry is a new surface, not the old
+    /// panel with new words.
+    func testADifferentBlocksTextOnTheSameGeometryIsANewRegion() {
+        var stabilizer = TextRegionStabilizer(config: immediateConfig())
+        let microwave = "object\u{1}microwave\u{1}3,3"
+        let television = "object\u{1}television\u{1}3,3"
+        let appeared = stabilizer.consume(regions: [
+            block(microwave, "START\n2 MIN", box(0.2, 0.3, width: 0.3, height: 0.2))
+        ])
+        guard case .appeared(let firstID) = appeared.first else {
+            return XCTFail("expected an appeared event, got \(appeared)")
+        }
+
+        _ = stabilizer.consume(regions: [
+            block(television, "PLAY\nVOLUME", box(0.2, 0.3, width: 0.3, height: 0.2))
+        ])
+        XCTAssertEqual(stabilizer.visible.count, 1)
+        XCTAssertNotEqual(stabilizer.visible.map(\.id), [firstID],
+                          "a different block is a different surface, however still its box was")
+    }
+
+    /// An object block's key is quantised, so a panel sitting near a cell edge
+    /// changes its key without anything in the scene having moved. It is still
+    /// the one panel, and it must keep its identifier — and its translation —
+    /// rather than being re-keyed, re-asked, and drawn twice for the passes it
+    /// takes the first copy to leave.
+    func testAnObjectBlockWhoseQuantisedCellChangedKeepsItsRegion() {
+        var stabilizer = TextRegionStabilizer(config: immediateConfig())
+        let before = "object\u{1}microwave\u{1}4,4"
+        let after = "object\u{1}microwave\u{1}5,5"
+        let geometry = box(0.2, 0.3, width: 0.3, height: 0.2)
+        let appeared = stabilizer.consume(regions: [block(before, "START\n2 MIN", geometry)])
+        guard case .appeared(let regionID) = appeared.first else {
+            return XCTFail("expected an appeared event, got \(appeared)")
+        }
+
+        let second = stabilizer.consume(regions: [block(after, "START\n2 MIN", geometry)])
+
+        XCTAssertEqual(stabilizer.visible.map(\.id), [regionID],
+                       "a cell edge is not a new surface: the panel kept its identifier")
+        XCTAssertEqual(second, [],
+                       "…and nothing about it changed, so nothing was re-asked")
+
+        // And the new key is the region's, now: a pass carrying it again is the
+        // same unchanged panel, not a third surface.
+        XCTAssertEqual(stabilizer.consume(regions: [block(after, "START\n2 MIN", geometry)]), [])
+        XCTAssertEqual(stabilizer.visible.map(\.id), [regionID],
+                       "one panel across the cell edge, in both directions")
+    }
+
+    /// A block claim outranks a string claim: when the grouper says this is the
+    /// block, the region does not need its text to have survived.
+    func testABlockClaimOutranksAStringClaim() {
+        var stabilizer = TextRegionStabilizer(config: immediateConfig())
+        let blockIdentity = "text\u{1}cold drinks\u{1}water rs 20"
+        _ = stabilizer.consume(regions: [
+            block(blockIdentity, "Cold Drinks\nWater Rs 20", box(0.1, 0.1, width: 0.4, height: 0.3))
+        ])
+        let identity = stabilizer.visible.map(\.id)
+
+        // The same block, recognized with one line dropped and its box moved:
+        // the block's identity still claims the region.
+        let moved = stabilizer.consume(regions: [
+            block(blockIdentity, "Cold Drinks", box(0.1, 0.5, width: 0.4, height: 0.1))
+        ])
+        XCTAssertEqual(moved, [.textChanged(id: identity[0])],
+                       "one surface, one translation event — even when a member line dropped out")
+        XCTAssertEqual(stabilizer.visible.map(\.id), identity)
+    }
+
+    /// A region that arrived without a block identity (a test fake, a plain
+    /// OCR pass) is matched exactly as it always was: the field is an
+    /// additional signal, never a required one.
+    func testARegionWithoutABlockIdentityStillMatchesByItsString() {
+        var stabilizer = TextRegionStabilizer(config: immediateConfig())
+        let appeared = stabilizer.consume(regions: [observation("Wash", box(0.05, 0.05))])
+        guard case .appeared(let identity) = appeared.first else {
+            return XCTFail("expected an appeared event, got \(appeared)")
+        }
+        _ = stabilizer.consume(regions: [observation("Wash", box(0.05, 0.45, width: 0.10, height: 0.05))])
+        XCTAssertEqual(stabilizer.visible.map(\.id), [identity],
+                       "a nil block identity leaves the string-identity rule in charge")
+    }
+
     // MARK: - Change-only gate
 
     func testAnUnchangedSceneEmitsNothingAfterThePublishPass() {
