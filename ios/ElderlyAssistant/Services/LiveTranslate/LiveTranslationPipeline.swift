@@ -909,6 +909,7 @@ actor LiveTranslationPipeline {
             outcomes[region.id] = .resolved(originalText: region.text,
                                             translation: hit.translation,
                                             tier: hit.tier)
+            events.translationResolved(tier: hit.tier, origin: "cache", count: 1)
         }
     }
 
@@ -1217,6 +1218,23 @@ actor LiveTranslationPipeline {
     private func settle(_ answered: [(CloudTranslationTier.Item, TranslationResult)]) {
         attemptKeys.subtract(answered.map(\.0.id))
         for (item, result) in answered { settledOutcomes[item.id] = result }
+        // The cascade's provenance (owner ask, 2026-09-19): which tier
+        // answered, per tier, counts only.
+        for (tier, count) in answeredTierCounts(answered) {
+            events.translationResolved(tier: tier, origin: "fresh", count: count)
+        }
+    }
+
+    /// The tier histogram of one settle — one entry per tier present.
+    private func answeredTierCounts(_ answered: [(CloudTranslationTier.Item, TranslationResult)])
+        -> [(TranslationTier, Int)] {
+        var counts: [TranslationTier: Int] = [:]
+        for (_, result) in answered {
+            if case .resolved(_, _, tier: let tier) = result.outcome {
+                counts[tier, default: 0] += 1
+            }
+        }
+        return counts.sorted { $0.key.rawValue < $1.key.rawValue }
     }
 
     private func cancelResolutionTasks() {

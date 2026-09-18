@@ -264,6 +264,11 @@ enum ModelCatalog {
     /// The Q8_0 build is THE ship quant: the Q5_K_M export of the same
     /// checkpoint failed 2 of 12 runtime probes and is not published.
     static let nmtEnNeQwen17bR2bQ8 = ModelID("nmt-en-ne-qwen17b-r2b-q8_0")
+    /// TESTING-ONLY quant of the same checkpoint (owner device test,
+    /// 2026-09-19): fits standard-class phones with headroom. Fails 1 probe
+    /// row (S02) — the negation router gates those; REPLACED by the round-3
+    /// quant when it lands. Sideloaded; not in the download row list.
+    static let nmtEnNeQwen17bR2bQ4 = ModelID("nmt-en-ne-qwen17b-r2b-q4_k_m")
     /// The GEMMA leg of the bake-off (2026-09-07): the QLoRA fine-tune
     /// over google/gemma-3-1b-it, merged to fp16 and exported Q4_K_M
     /// (`intent-ne-gemma-q4_k_m.gguf`, release v7). A real, hosted
@@ -944,6 +949,25 @@ enum ModelCatalog {
             minDeviceRAMBytes: 4_000_000_000,
             dependsOn: nil,
             // Language tag: ne-only model (it translates INTO Nepali).
+            languages: ["ne"]
+        ),
+        ModelCatalogEntry(
+            id: nmtEnNeQwen17bR2bQ4,
+            kind: .llamaBase,
+            // TESTING-ONLY entry (owner device test, 2026-09-19): the
+            // standard-class quant of the same round-2b checkpoint,
+            // sideloaded — not in `availableTranslationEntries`, so the
+            // settings row never offers a download for it. Fails 1 probe
+            // row (S02); the negation router gates those. REPLACED by the
+            // round-3 quant when it lands.
+            displayName: "Translate — English to Nepali (Qwen 1.7B, Q4 test)",
+            filename: "translate-en-ne-qwen17b-r2b-q4_k_m.gguf",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v18/translate-en-ne-qwen17b-r2b-q4_k_m.gguf")!,
+            sizeBytes: 1_107_408_608,
+            // Server-original digest (round2b Q4 export):
+            sha256: "a557dc2a066c482a9127396c5d7836305c54112aee9dd721b11309c45c01a156",
+            minDeviceRAMBytes: 3_000_000_000,
+            dependsOn: nil,
             languages: ["ne"]
         ),
         ModelCatalogEntry(

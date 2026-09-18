@@ -39,6 +39,8 @@ final class LiveTranslateEventsTests: XCTestCase {
         events.brainTranslationBatch(resolvedCount: 3, unresolvedCount: 1, durationMs: 4200)
         events.brainTranslationUnavailable(.modelNotInstalled, stage: .availability)
         events.translationDegraded(reason: .noNetwork, regionCount: 1)
+        events.translationResolved(tier: .cloud, origin: "fresh", count: 2)
+        events.translationResolved(tier: .dictionary, origin: "cache", count: 1)
         events.translationDedupeHit(keyCount: 2)
         events.textQuarantined(count: 1)
         events.consentPromptShown()
@@ -150,6 +152,8 @@ final class LiveTranslateEventsTests: XCTestCase {
                 "no_capture_device", "configuration_failed", "resource_in_use",
                 "backgrounded", "system_interruption", "thermal",
                 "curated_dictionary", "persisted",
+                // [CASCADE-PROVENANCE] translation_resolved.origin tokens.
+                "fresh", "cache",
                 "tap", "read_all", "repeat_last",
                 // T-026 added the command handler's re-prompt to the speech
                 // modes; the token joins the closed vocabulary here rather

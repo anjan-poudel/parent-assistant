@@ -67,7 +67,19 @@ final class LiveTranslateAllowListTests: XCTestCase {
             "regionCount", "stringCount", "batchIndex", "batchCount", "resolvedCount",
             "unresolvedCount", "durationMs", "keyCount", "count", "origin", "mode",
             "reason", "disclosureVersion", "cap", "errorCode",
-            "provider", "threshold", "confidence"
+            "provider", "threshold", "confidence",
+            // [CASCADE-PROVENANCE] (2026-09-19) Which tier answered a settle.
+            "tier",
+            // Declared by the work merged since the extension baseline:
+            // [MODEL-WARDEN] (slots, reservations, cost model, footprints)
+            "slot", "purpose", "priority", "isLargeLoad", "heldSeconds",
+            "transientLiveBytes", "liveBytes", "budgetBytes", "ceiling_bytes",
+            "working_set_bytes", "phys_footprint", "projected_peak_bytes",
+            "load_ms", "freed_bytes", "evicted",
+            // [SCOPE-LEDGER] + [DEAD-TAP] + [DECODE-DIAGNOSTIC]
+            "calendar", "contacts", "chunks", "decode_detail",
+            // [LLAMADEBUG] failure stage + [EMPTY-OVERLAY] region-set hash
+            "failureStage", "regionSetHash"
         ], "the extension is exactly the union of the two declared key sets")
         XCTAssertNil(sanitisedMetadata(["somethingNoOneDeclared": "x"])["somethingNoOneDeclared"],
                      "unknown keys are still dropped outright")
