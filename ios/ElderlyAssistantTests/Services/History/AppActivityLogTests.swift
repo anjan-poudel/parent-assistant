@@ -215,6 +215,65 @@ final class AppActivityLogTests: XCTestCase {
         XCTAssertEqual(rows.first?.phone, "")
     }
 
+    // MARK: - Tolerant decode (missed-calls fix, 2026-09-18)
+
+    /// The decode MIGRATION contract: a payload written by an older build
+    /// (or hand-edited) that lacks the contact fields still loads — `phone`
+    /// and `contactName` read as "" (the exact shape of the anonymous
+    /// unanswered rows the missed-calls feature has stored since
+    /// 2026-09-07), and the optional fields read as nil. The identity keys
+    /// stay required: a row missing them is not a row.
+    func testTolerantDecodeDefaultsMissingContactFields() throws {
+        let legacyJSON = """
+        [
+          {
+            "id": "\(UUID().uuidString)",
+            "timestamp": 1783000000,
+            "kind": "call",
+            "channel": "unanswered"
+          }
+        ]
+        """
+        let rows = try JSONDecoder().decode([AppActivityEntry].self,
+                                            from: Data(legacyJSON.utf8))
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0].contactName, "")
+        XCTAssertEqual(rows[0].phone, "")
+        XCTAssertNil(rows[0].messengerHandle)
+        XCTAssertNil(rows[0].body)
+    }
+
+    /// A full modern row round-trips byte-compatibly through the custom
+    /// decoder: number, name, handle and body all survive.
+    func testTolerantDecodeRoundTripsModernRows() throws {
+        let row = AppActivityEntry(kind: .call, channel: .unanswered,
+                                   contactName: "बुबा", phone: "9841234567")
+        let encoded = try JSONEncoder().encode([row])
+        let decoded = try JSONDecoder().decode([AppActivityEntry].self, from: encoded)
+        XCTAssertEqual(decoded, [row])
+        XCTAssertEqual(decoded[0].contactName, "बुबा")
+        XCTAssertEqual(decoded[0].phone, "9841234567")
+    }
+
+    /// An UNKNOWN raw value in an identity key still fails the decode (the
+    /// whole payload then reads as empty — the store's existing corrupt
+    /// tolerance), so a mislabelled row can never masquerade as a channel.
+    func testTolerantDecodeStillRequiresIdentityKeys() {
+        let corruptJSON = """
+        [
+          {
+            "id": "\(UUID().uuidString)",
+            "timestamp": 1783000000,
+            "kind": "call",
+            "channel": "carrier-pigeon"
+          }
+        ]
+        """
+        XCTAssertThrowsError(
+            try JSONDecoder().decode([AppActivityEntry].self,
+                                     from: Data(corruptJSON.utf8)))
+    }
+
     // MARK: - Corrupt / missing data tolerance
 
     /// Missing key on first launch → empty history, and the first append
