@@ -16,19 +16,24 @@ import Foundation
 //    proxy for "short dictionary label") is gone: the fit is now decided by
 //    measuring the translation against the box it would be drawn in, which is
 //    what actually matters.
-//  - **A block is one panel, or nothing** (scene-block rework, 2026-09-18;
-//    owner direction: "maximize text regions — bigger but fewer translations —
-//    and use object detection bounding boxes"). A region whose text is several
-//    lines — the grouper's blocks, which is what the detector reports since the
-//    rework — is drawn as **one panel** on the block's own rect, its lines
-//    stacked inside it at the body floor, never as one callout per line. A
-//    block whose translation cannot be drawn at that size gets **no** live
-//    presentation at all: the snapshot card is the reading surface for a dense
-//    scene, and a swarm of small bubbles is exactly what the elder rejected.
-//    A block the tier has not answered for yet is the same panel carrying the
-//    honest state sentence (or, with no state copy to draw, the block's own
-//    recognized lines): the surface appears where the text stood and fills in,
-//    rather than a pill appearing beside it and being replaced by it.
+//  - **A block is one panel** (scene-block rework, 2026-09-18; owner direction:
+//    "maximize text regions — bigger but fewer translations — and use object
+//    detection bounding boxes"). A region whose text is several lines — the
+//    grouper's blocks, which is what the detector reports since the rework — is
+//    drawn as **one panel** on the block's own rect, its lines stacked inside it
+//    at the body floor, never as one callout per line. A block the tier has not
+//    answered for yet is the same panel carrying the honest state sentence (or,
+//    with no state copy to draw, the block's own recognized lines): the surface
+//    appears where the text stood and fills in, rather than a pill appearing
+//    beside it and being replaced by it.
+//    **A block that cannot stand as a panel falls back to the callout, never to
+//    nothing** (owner device verdict, 2026-09-18: "the camera says it can't
+//    find anything to read"). Still one surface for the block — not one bubble
+//    per line — and still at the body floor; the snapshot card remains the
+//    reading surface for text a pill cannot hold. The one thing the live
+//    overlay may never do is drop a region it recognized: the empty state is
+//    for a scene with no text in it, and showing it over text is the feature
+//    telling the elder something untrue.
 //    Single-line regions are untouched — in place when the translation fits,
 //    a callout when it does not — so the per-line machinery below is the same
 //    code it always was.
@@ -531,8 +536,10 @@ enum LiveOverlayPlacement {
     /// The owner's bound is the reason there is no smaller candidate here
     /// ("translated lines inside at ≥18pt where the block allows"). A panel
     /// that cannot be drawn at the body floor is not shrunk until it fits —
-    /// that is precisely the illegible small type the rework removes — it is
-    /// left to the snapshot card, which is the reading surface.
+    /// that is precisely the illegible small type the rework removes — so it
+    /// gets no panel: the block is drawn as the one callout that always has
+    /// somewhere to go, and the snapshot card remains the reading surface for
+    /// text a pill cannot hold.
     static func panelPointSize(policy: Policy) -> CGFloat { policy.minPointSize }
 
     /// The size of a stack of lines: the widest line, the total height, and the
@@ -569,9 +576,10 @@ enum LiveOverlayPlacement {
     /// The box is the region's own rect grown into free space only
     /// (`inPlaceMaxBox`, so the half-gap law between two blocks holds exactly as
     /// it does between two lines), and the fit is the stacked block at the body
-    /// floor. Anything that does not fit returns `.doesNotFit` — the caller
-    /// draws nothing for that block rather than a smaller, illegible version of
-    /// it.
+    /// floor. Anything that does not fit returns `.doesNotFit` — never a
+    /// smaller, illegible version of the panel. What the caller draws instead is
+    /// the callout: the shot at a panel is the decision, and a block that does
+    /// not get one is still a block the overlay shows.
     static func panelOutcome(regionRect: CGRect,
                              lines: [LiveOverlayTextLine],
                              obstacles: [CGRect] = [],
@@ -693,11 +701,12 @@ enum LiveOverlayPlacement {
             guard let regionRect = rects[region.id] else { continue }
             let result = results[region.id] ?? .pending(region.text)
 
-            // A **block** is one panel or nothing (scene-block rework): its
-            // lines are stacked inside one box on the block's own rect, and a
-            // block whose text cannot be drawn at the body floor gets no live
-            // presentation at all — the snapshot card is the reading surface,
-            // and per-line callouts are exactly what the elder rejected.
+            // A **block** is one panel the snapshot can read in full and one
+            // panel the overlay draws (scene-block rework): its lines are
+            // stacked inside one box on the block's own rect, at the body
+            // floor, never one callout per line. A block whose text cannot be
+            // drawn at that size falls through to the callout below — one pill
+            // for the block, not nothing for it.
             //
             // A block the tier has not answered for yet is drawn the same way,
             // carrying the honest state sentence instead of a translation: the
@@ -724,7 +733,48 @@ enum LiveOverlayPlacement {
                                                 result: result,
                                                 form: .inPlace(regionID: region.id, rect: box),
                                                 lines: panelLines))
+                    continue
                 }
+
+                // **A block that cannot stand as a panel still speaks.** The
+                // panel is the form the owner asked for and it is tried first,
+                // but the fallback is the callout and not nothing: the pill is
+                // the one presentation that always has somewhere to go (it
+                // clamps rather than dropping), it is still **one** surface for
+                // the *block* rather than one bubble per line, and it is still
+                // drawn at the body floor.
+                //
+                // This is the owner's device verdict on the rework, at the line
+                // it is about: "the camera says it can't find anything to
+                // read". A pass whose blocks all failed the panel fit used to
+                // publish no presentation at all, which the overlay renders as
+                // its empty state over a picture full of text the pass had just
+                // read. A block the panel cannot hold is a block the *snapshot
+                // card* reads best, not one the live overlay may silently drop.
+                // The pill carries the block's own panel lines — there is no
+                // reason to re-derive them, and every reason not to: the two
+                // paths would answer differently for a state sentence. The
+                // state copy is consulted only in the degenerate case where the
+                // block has no line to draw at all (an empty recognized string
+                // and no copy), so the pill is never an empty bubble.
+                let pillLines = lines.isEmpty
+                    ? calloutLines(for: result, policy: policy, stateCopy: stateCopy).all
+                    : lines
+                let callout = calloutPlacement(
+                    regionRect: regionRect,
+                    lines: pillLines,
+                    bounds: bounds,
+                    obstacles: occupiedRects + otherBoxes(region.id) + pills,
+                    policy: policy,
+                    measure: measure)
+                pills.append(callout.rect)
+                placed.append(PlacedOverlay(region: region,
+                                            result: result,
+                                            form: .callout(regionID: region.id,
+                                                           anchor: callout.anchor,
+                                                           pillRect: callout.rect),
+                                            lines: pillLines,
+                                            isClampedFallback: callout.isClampedFallback))
                 continue
             }
 

@@ -534,6 +534,29 @@ final class LiveTextDetector {
     /// Vision runs here and nowhere else: one pass at a time, so two passes
     /// can never share a request handler.
     private let visionQueue = DispatchQueue(label: "com.elderlyassistant.livetranslate.vision")
+
+    /// The object pass's own serial queue, and deliberately not `visionQueue`.
+    ///
+    /// The two passes have opposite urgencies: the OCR pass is the one the
+    /// elder is waiting on, and the object pass is a slow scene description
+    /// that only decides how the next pass *groups* what it read. Serialising
+    /// them would put a saliency request — and, on a device's first one, a
+    /// model load — in front of the first text of a session, which is exactly
+    /// the delay the owner reported. One object pass at a time, on its own
+    /// queue, and the text path never joins it.
+    private let objectQueue = DispatchQueue(
+        label: "com.elderlyassistant.livetranslate.objects")
+
+    /// Whether an object pass is running. Read and written under the lock, and
+    /// the reason the cadence cannot queue detections behind a slow one.
+    private var objectPassInFlight = false
+
+    /// Bumped whenever the picture an object pass was measuring stops being the
+    /// one this session is reading: `begin`, `end`, and a window change. A
+    /// detection that lands after that describes a scene nobody is looking at,
+    /// so it is discarded rather than grouped against.
+    private var objectPassEpoch = 0
+
     private let lock = NSLock()
 
     // MARK: State (lock-guarded)
@@ -607,6 +630,9 @@ final class LiveTextDetector {
         let wasIdle = withLock { () -> Bool in
             guard currentState == .idle else { return false }
             currentState = .ready
+            // A detection scheduled by an earlier session described a picture
+            // this one is not reading.
+            objectPassEpoch += 1
             return true
         }
         guard wasIdle else { return .success(()) }
@@ -637,6 +663,7 @@ final class LiveTextDetector {
             currentState = .idle
             trackingAvailable = false
             objectsAvailable = false
+            objectPassEpoch += 1
             lastOCRPassAt = nil
             lastObjectPassAt = nil
             rememberedKeys = []
@@ -790,10 +817,11 @@ final class LiveTextDetector {
 
         do {
             let found = try engine.recognizeText(in: frame.cropped(to: crop))
-            // The objects this pass groups with: the cached set or a fresh
-            // detection, decided by the object cadence. Never a reason for the
-            // pass to fail — a scene with no objects is grouped by text
-            // geometry, which is what every pass did before this rework.
+            // The objects this pass groups with: the cached set, and a fresh
+            // detection *scheduled* when the object cadence is due — never
+            // awaited. Never a reason for the pass to fail or to wait: a scene
+            // with no objects yet is grouped by text geometry, which is what
+            // every pass did before this rework.
             let sceneObjects = objectsForPass(in: frame, crop: crop)
             // Vision's boxes are normalized to the buffer it was handed — the
             // window — and every consumer of a box speaks the frame's
@@ -811,10 +839,13 @@ final class LiveTextDetector {
                                normalizedBox: $0.normalizedBox,
                                confidence: $0.confidence)
             }
-            let blocks = SceneBlockGrouper.group(lines: lines,
-                                                 objects: objects,
-                                                 config: config,
-                                                 limit: limit)
+            let blocks = Self.publishedBlocks(
+                from: SceneBlockGrouper.group(lines: lines,
+                                              objects: objects,
+                                              config: config,
+                                              limit: limit),
+                fallbackLines: lines,
+                limit: limit)
             let regions = blocks.map {
                 DetectedTextRegion(text: $0.text,
                                    normalizedBox: $0.normalizedBox,
@@ -849,6 +880,26 @@ final class LiveTextDetector {
             events.ocrPassFailed(failure)
             return .failure(failure)
         }
+    }
+
+    /// The blocks a pass publishes: the grouper's own decision, or — when it
+    /// formed none — **one block per recognized line**.
+    ///
+    /// The never-empty rule, at the one place a pass decides what it is
+    /// publishing (see `SceneBlockGrouper.perLineBlocks`). The alternative is
+    /// the failure the owner's device verdict reported: lines recognized, no
+    /// blocks formed, and therefore nothing published — which the overlay
+    /// renders as its empty state, "I don't see any text yet", over a picture
+    /// full of text the pass had just read.
+    ///
+    /// A group failure degrades the grouping. It may never degrade the text:
+    /// the per-line blocks are the publication this feature shipped before
+    /// grouping existed, so the elder loses the *merge* and not the words.
+    static func publishedBlocks(from blocks: [SceneBlock],
+                                fallbackLines lines: [SceneTextLine],
+                                limit: Int?) -> [SceneBlock] {
+        guard blocks.isEmpty else { return blocks }
+        return SceneBlockGrouper.perLineBlocks(from: lines, limit: limit)
     }
 
     private func runTrackingPass(on frame: CameraFrame, crop: LiveCameraCrop) -> Result<Pass, LiveTranslateError> {
@@ -889,8 +940,8 @@ final class LiveTextDetector {
         return boxes
     }
 
-    /// The scene's objects for this pass: the cached set when the object
-    /// cadence is not yet due, a fresh detection when it is.
+    /// The scene's objects for this pass: **the cached set, always** — and a
+    /// fresh detection *scheduled* when the object cadence is due.
     ///
     /// The cache is the whole point of the cadence. An object pass costs one
     /// saliency request plus up to one classification request per object, and
@@ -898,44 +949,96 @@ final class LiveTextDetector {
     /// frame-by-frame property. Running it every pass would spend the frame
     /// budget re-learning the same kitchen.
     ///
-    /// A failed object pass degrades the *grouping* and nothing else: the cache
-    /// is dropped (stale objects would group this frame's text by a previous
-    /// frame's picture), the pass continues with text-geometry grouping, and
-    /// the capability is reported lost once. The text the elder sees is
-    /// unaffected.
+    /// **The pass never waits for a detection.** The object pass is the slow
+    /// pass, and the OCR pass is the one the elder is waiting on, so the
+    /// detection runs on `objectQueue` — off this pass's critical path — and
+    /// what it finds groups the *next* pass of the scene. That is the isolation
+    /// the owner's device verdict ("fires after a long delay") is about: a
+    /// saliency request that takes a second, or that never returns, or that the
+    /// runtime refuses outright, costs the text pass nothing at all. Its worst
+    /// case is the one it always had — the pass groups by text geometry, which
+    /// is what every pass did before the rework.
+    ///
+    /// The cached set is what the pass reports. A detection that has not landed
+    /// yet is not an object set this pass saw, and reporting it as one would be
+    /// claiming a scene description the pass did not have.
     private func objectsForPass(in frame: CameraFrame, crop: LiveCameraCrop) -> [DetectedSceneObject] {
         let due = withLock { () -> Bool in
-            guard objectsAvailable else { return false }
+            // One at a time: a detection that outlives its cadence must not
+            // queue a second behind it, however slow the runtime is.
+            guard objectsAvailable, !objectPassInFlight else { return false }
             guard let last = lastObjectPassAt else { return true }
             return now() - last >= config.objectPassCadenceSeconds
         }
-        guard due else { return withLock { objects } }
+        if due { scheduleObjectPass(in: frame, crop: crop) }
+        return withLock { objects }
+    }
 
-        // Stamped before the request, like the OCR cadence and for the same
-        // reason: a failing object pass must not become a per-frame retry loop.
-        withLock { lastObjectPassAt = now() }
-        do {
-            let found = try objectEngine.detectObjects(in: frame.cropped(to: crop))
-            let mapped = found.map {
-                DetectedSceneObject(classLabel: $0.classLabel,
-                                    normalizedBox: crop.frameBox(ofCropBox: $0.normalizedBox),
-                                    confidence: $0.confidence)
+    /// Starts one object pass on the object queue. Returns immediately.
+    ///
+    /// Stamped at *schedule* time, like the OCR cadence and for the same
+    /// reason: a failing object pass must not become a per-frame retry loop.
+    /// The epoch is captured with it, so a detection that lands after the
+    /// session ended, restarted or moved its window is discarded rather than
+    /// describing a picture this session is no longer reading.
+    private func scheduleObjectPass(in frame: CameraFrame, crop: LiveCameraCrop) {
+        let epoch = withLock { () -> Int in
+            lastObjectPassAt = now()
+            objectPassInFlight = true
+            return objectPassEpoch
+        }
+        objectQueue.async { [self] in
+            let landed: Result<[DetectedSceneObject], Error>
+            do {
+                let found = try objectEngine.detectObjects(in: frame.cropped(to: crop))
+                landed = .success(found.map {
+                    DetectedSceneObject(classLabel: $0.classLabel,
+                                        normalizedBox: crop.frameBox(ofCropBox: $0.normalizedBox),
+                                        confidence: $0.confidence)
+                })
+            } catch {
+                landed = .failure(error)
             }
-            withLock { objects = mapped }
-            events.objectPass(objectCount: mapped.count)
-            return mapped
-        } catch {
-            withLock { objects = [] }
-            // A refusal, not an absent capability: recorded with its taxonomy
-            // code, and the pass stops asking rather than retrying every frame
-            // (the cadence is stamped, so a broken runtime is one event and one
-            // request, not a loop). `object_detection_unsupported` is for the
-            // runtime that never had the capability, and `begin` is where that
-            // one is announced.
-            events.objectPassFailed((error as? LiveTranslateError)
-                                    ?? .ocrPassFailed(.requestFailed))
-            stopAskingForObjects()
-            return []
+
+            // Whatever happened to the session meanwhile, the slot is free
+            // again: the in-flight flag is a property of this pass, not of the
+            // scene it was measuring.
+            let stale = withLock { () -> Bool in
+                objectPassInFlight = false
+                return objectPassEpoch != epoch
+            }
+            guard !stale else { return }
+
+            switch landed {
+            case .success(let mapped):
+                withLock { objects = mapped }
+                events.objectPass(objectCount: mapped.count)
+            case .failure(let error):
+                withLock { objects = [] }
+                // A refusal, not an absent capability: recorded with its
+                // taxonomy code, and the pass stops asking rather than retrying
+                // every frame (the cadence is stamped, so a broken runtime is
+                // one event and one request, not a loop).
+                // `object_detection_unsupported` is for the runtime that never
+                // had the capability, and `begin` is where that one is
+                // announced.
+                events.objectPassFailed((error as? LiveTranslateError)
+                                        ?? .ocrPassFailed(.requestFailed))
+                stopAskingForObjects()
+            }
+        }
+    }
+
+    /// Waits for every object pass this detector has scheduled to land.
+    ///
+    /// The object pass is asynchronous by design — it must never delay a text
+    /// pass — which makes "the detection has landed" an event rather than a
+    /// return value. A test (and a diagnostic) that wants to observe what the
+    /// object pass did after the fact waits here: the object queue is serial,
+    /// so this returns once the passes already scheduled have finished.
+    func awaitObjectPass() async {
+        await withCheckedContinuation { continuation in
+            objectQueue.async { continuation.resume() }
         }
     }
 
@@ -973,6 +1076,9 @@ final class LiveTextDetector {
             // window detects the objects that are actually in it.
             objects = []
             lastObjectPassAt = nil
+            // A detection in flight measured the *old* window's picture, so its
+            // boxes describe pixels this session has panned away from.
+            objectPassEpoch += 1
             return true
         }
         guard changed else { return }

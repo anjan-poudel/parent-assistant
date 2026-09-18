@@ -179,8 +179,7 @@ enum SceneBlockGrouper {
         //    the string, then the box. Total, so ties cannot fall back on
         //    whatever order the detector happened to report.
         let usable = lines
-            .filter { !LiveTranslateTextNormalization.normalized($0.text).isEmpty
-                      && $0.normalizedBox.isValid }
+            .filter(isUsable)
             .sorted(by: precedes)
         let usableObjects = objects.filter { $0.normalizedBox.isValid }
 
@@ -250,6 +249,49 @@ enum SceneBlockGrouper {
         guard let visible = limit else { return readingOrder(ranked) }
 
         return readingOrder(Array(ranked.prefix(max(0, visible))))
+    }
+
+    // MARK: - The never-empty rule
+
+    /// The rule that keeps a pass from publishing **nothing**: when the
+    /// grouping can form no block, every recognized line is a block of its own.
+    ///
+    /// `group` is total over the lines it can carry, so this is the guard for
+    /// the ways it can still come back empty — no usable line at all, a cap of
+    /// zero, and any future grouping rule that drops a line it should have
+    /// kept — and it is deliberately *not* a second kind of block. One line in,
+    /// one block out, with the line's own text and box and the grouper's own
+    /// text identity: the degenerate grouping is the per-line publication the
+    /// feature shipped before blocks existed, expressed in the same vocabulary,
+    /// so nothing downstream needs to know a fallback happened.
+    ///
+    /// The alternative this exists to rule out is the one the owner's device
+    /// verdict was about: a pass whose lines were all recognized and whose
+    /// publication was empty, which the overlay renders as "I don't see any
+    /// text yet" — the feature telling the elder there is nothing to read while
+    /// it is holding text it read. Grouping is an improvement on the lines; it
+    /// is never a precondition for them.
+    ///
+    /// The cap still applies: a caller that asked for zero surfaces gets none.
+    /// A realistic cap can never turn a non-empty line set into an empty
+    /// publication, which is the property the rule is for.
+    static func perLineBlocks(from lines: [SceneTextLine], limit: Int?) -> [SceneBlock] {
+        let blocks = lines.filter(isUsable).map { line in
+            SceneBlock(kind: .text,
+                       normalizedBox: line.normalizedBox,
+                       lines: [line],
+                       identityKey: textIdentity(of: [line]))
+        }
+        guard let visible = limit else { return blocks }
+        return Array(blocks.prefix(max(0, visible)))
+    }
+
+    /// Whether a line is one the grouping can carry: something to translate,
+    /// and a box that can be geometry. The **one** definition of "usable",
+    /// shared by the grouping and by the per-line fallback, so the two cannot
+    /// disagree about which recognized lines a pass publishes.
+    static func isUsable(_ line: SceneTextLine) -> Bool {
+        !LiveTranslateTextNormalization.normalized(line.text).isEmpty && line.normalizedBox.isValid
     }
 
     // MARK: - Object membership
