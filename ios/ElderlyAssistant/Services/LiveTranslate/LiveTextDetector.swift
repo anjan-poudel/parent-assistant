@@ -6,6 +6,35 @@ import Vision
 
 // C02 — on-device text detection (T-007, FR-LCT-003/004, NFR-LCT-001/002/005).
 //
+// Scene-block rework, 2026-09-18 (owner device verdict: "still shaky,
+// illegible, unusable as a gimmick"; direction: "maximize text regions —
+// bigger but fewer translations — and use object detection bounding boxes").
+// Three things joined this file, and nothing else in the feature changed
+// shape:
+//
+//  - **An object pass.** `LiveObjectDetectionEngine` detects the physical
+//    objects in the frame and returns boxes (with class labels where the
+//    runtime can name one). It runs on its own, much slower cadence
+//    (`objectPassCadenceSeconds`) and its result is cached, because an
+//    appliance does not become a different appliance between two OCR passes;
+//    a failed object pass degrades the *grouping* and never the text.
+//  - **Grouping.** The OCR pass's lines and the cached objects go through
+//    `SceneBlockGrouper`, and what the pass reports is **blocks** — one
+//    surface each, not one box per recognized line. Everything downstream
+//    (the stabiliser, the translation request, the placement, the overlay)
+//    therefore works on blocks without being told that anything changed: a
+//    block *is* a region whose text is its member lines.
+//  - **A block identity on every region.** `DetectedTextRegion.blockIdentity`
+//    carries the grouper's key, so the stabiliser can hold a block's identity
+//    across OCR wobble inside an object panel — the case that used to re-key a
+//    region (and repaint the overlay) on nearly every pass.
+//
+// The tracking path is unchanged in kind and now reports **block** geometry:
+// the engine still follows one rectangle per recognized *line* (that is the
+// only rectangle Vision has), and the detector unions a block's members into
+// the box the block reports. A block whose members were all lost is a
+// tracking loss, exactly as a single lost line was.
+//
 // What this file exists to make true:
 //
 //  - **Two non-interchangeable request kinds.** A *tracking pass* carries
@@ -70,6 +99,164 @@ protocol LiveTextRecognitionEngine: AnyObject {
 
     /// Drops the remembered rectangles (the OCR pass's observations).
     func forgetRememberedRectangles()
+}
+
+// MARK: - Object-detection seam
+
+/// The object pass's seam: the physical objects in one frame, in the
+/// detector's own vocabulary.
+///
+/// Separate from `LiveTextRecognitionEngine` because the two answer different
+/// questions on different cadences: text recognition is the feature's
+/// high-frequency pass and its output can change a region's *string*, while
+/// object detection is a slow, cached scene description that can only change
+/// how the strings are *grouped*.
+protocol LiveObjectDetectionEngine: AnyObject {
+
+    /// Whether an object-detection request can be created and run here.
+    /// `false` leaves the detector grouping by text geometry alone, before the
+    /// first pass.
+    var supportsObjectDetection: Bool { get }
+
+    /// Runs an object pass over the frame. One entry per detected object, in
+    /// the runtime's own order. Throws when the request could not be run at
+    /// all — a refusal, not an empty scene.
+    func detectObjects(in pixelBuffer: CVPixelBuffer) throws -> [LiveTextDetector.DetectedSceneObject]
+}
+
+/// The shipped object engine: Vision, on device.
+///
+/// **What this runtime actually provides.** The task's premise was
+/// `VNRecognizeObjectsRequest`'s built-in object classes. That request is not
+/// in this SDK: it was deprecated in iOS 13 and is now absent from the
+/// framework headers entirely (`VNRecognizeObjectsRequest` appears nowhere in
+/// the iOS 26.5 simulator SDK; `VNRecognizedObjectObservation` survives, but
+/// only `VNRecognizeAnimalsRequest` produces one, and it knows dogs and cats).
+/// So the shipped engine composes the two requests that *do* exist and answer
+/// the same question — where are the objects, and what are they:
+///
+///  1. **Where.** `VNGenerateObjectnessBasedSaliencyImageRequest` returns a
+///     heat map whose `salientObjects` are the bounding boxes of the distinct
+///     object-like regions in the frame (iOS 13 and later). This is the
+///     geometry: a panel, a screen, a remote, a box of packaging — objectness
+///     does not care which.
+///  2. **What.** `VNClassifyImageRequest`, run with `regionOfInterest` set to
+///     one box, returns the classifier's labels for *that part of the frame* —
+///     the same taxonomy the old built-in object model used, so
+///     "remote control", "television", "microwave" and "screen" are in it. The
+///     top label above `minimumClassConfidence` becomes the object's class.
+///
+/// Bounded like the tracking pass, and for the same reason: one classification
+/// request per object, so at most `maximumObjects` of them per pass — the
+/// largest regions first, because those are the surfaces a panel would be
+/// drawn on.
+final class VisionObjectDetectionEngine: LiveObjectDetectionEngine {
+
+    private let saliencyRequest = VNGenerateObjectnessBasedSaliencyImageRequest()
+    private let classifyRequest = VNClassifyImageRequest()
+
+    /// Objects reported per pass, at most. Defaulted from the config's own
+    /// block bound — a scene that resolves to a handful of surfaces does not
+    /// need classes for regions the overlay could never draw.
+    private let maximumObjects: Int
+    /// The smallest share of the frame an object may occupy to be reported.
+    /// A property of the request rather than a policy of the feature: a
+    /// saliency box under a hundredth of the frame is noise, not an object.
+    private let minimumObjectArea: Double
+    /// The lowest classifier confidence that names an object. Below it the
+    /// object is still an object — it groups its own text — it is just
+    /// unnamed, which is the honest report rather than a guessed class.
+    private let minimumClassConfidence: Float
+
+    init(maximumObjects: Int = LiveTranslateConfig.default.maxVisibleBlocks,
+         minimumObjectArea: Double = 0.01,
+         minimumClassConfidence: Float = 0.15) {
+        self.maximumObjects = maximumObjects
+        self.minimumObjectArea = minimumObjectArea
+        self.minimumClassConfidence = minimumClassConfidence
+    }
+
+    /// The requests exist on every OS this app deploys to (objectness saliency
+    /// and image classification are both iOS 13 APIs, and the deployment target
+    /// is above that), so there is no honest "no" a probe could return here. A
+    /// device where the request cannot be *run* is handled where it happens:
+    /// the pass throws and the detector degrades with its own event.
+    var supportsObjectDetection: Bool { true }
+
+    func detectObjects(in pixelBuffer: CVPixelBuffer) throws -> [LiveTextDetector.DetectedSceneObject] {
+        let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, options: [:])
+        do {
+            try handler.perform([saliencyRequest])
+        } catch {
+            throw LiveTranslateError.ocrPassFailed(.requestFailed)
+        }
+
+        let boxes = Self.objectBoxes(from: saliencyRequest.results?.first,
+                                     maximum: maximumObjects,
+                                     minimumArea: minimumObjectArea)
+        return boxes.map { box in
+            LiveTextDetector.DetectedSceneObject(
+                classLabel: classLabel(in: pixelBuffer, region: box),
+                // Vision's origin is bottom-left and the feature's is
+                // top-left: mirrored here, once, exactly as the text path does.
+                normalizedBox: Self.normalizedBox(from: box),
+                confidence: 1)
+        }
+    }
+
+    /// The frame's object boxes, largest first, capped and filtered.
+    ///
+    /// Pure and static so the policy — which regions of a dense scene are
+    /// worth a classification request — is a fact a test can pin without a
+    /// camera or a rendered frame.
+    static func objectBoxes(from observation: VNSaliencyImageObservation?,
+                            maximum: Int,
+                            minimumArea: Double) -> [CGRect] {
+        guard maximum > 0, let observation else { return [] }
+        let salient: [VNRectangleObservation] = observation.salientObjects ?? []
+        var candidates: [CGRect] = []
+        for box in salient.map({ $0.boundingBox }) {
+            guard box.width > 0, box.height > 0,
+                  Double(box.width * box.height) >= minimumArea else { continue }
+            candidates.append(box)
+        }
+        candidates.sort(by: Self.objectOrder)
+        return Array(candidates.prefix(maximum))
+    }
+
+    /// Largest first, ties broken by position — so which boxes survive the cap
+    /// is a fact about the frame rather than about the sort's stability.
+    ///
+    /// Its own function rather than an inline closure: the chained expression
+    /// it came from was expensive enough for the compiler to give up on the
+    /// enclosing function, and this reads better besides.
+    static func objectOrder(_ left: CGRect, _ right: CGRect) -> Bool {
+        let leftArea = Double(left.width * left.height)
+        let rightArea = Double(right.width * right.height)
+        if leftArea != rightArea { return leftArea > rightArea }
+        if left.minY != right.minY { return left.minY > right.minY }
+        return left.minX < right.minX
+    }
+
+    /// The classifier's name for the region, or nil when it could not name one
+    /// confidently. Vision's own answer or nothing — never substituted.
+    private func classLabel(in pixelBuffer: CVPixelBuffer, region: CGRect) -> String? {
+        classifyRequest.regionOfInterest = region
+        let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, options: [:])
+        guard (try? handler.perform([classifyRequest])) != nil,
+              let top = classifyRequest.results?.first,
+              top.confidence >= minimumClassConfidence else { return nil }
+        return top.identifier
+    }
+
+    private static func normalizedBox(from visionBox: CGRect) -> NormalizedBox {
+        let box = NormalizedBox(
+            xMin: Double(visionBox.minX).clampedToUnitInterval,
+            yMin: Double(1 - visionBox.maxY).clampedToUnitInterval,
+            xMax: Double(visionBox.maxX).clampedToUnitInterval,
+            yMax: Double(1 - visionBox.minY).clampedToUnitInterval)
+        return box.isValid ? box : NormalizedBox(xMin: 0, yMin: 0, xMax: 0, yMax: 0)
+    }
 }
 
 /// The shipped engine: Vision, on device, one request kind per entry point.
@@ -245,26 +432,84 @@ final class LiveTextDetector {
 
     /// One recognized string from an OCR pass. The only type in the feature
     /// that carries recognized text out of Vision.
+    ///
+    /// Since the scene-block rework this is one **block**: `text` is the
+    /// block's member lines joined by `SceneBlock.lineSeparator`,
+    /// `normalizedBox` is the block's rect (an object's box clipped to its text,
+    /// or the union of merged lines), and `blockIdentity` is the grouper's
+    /// stable key for it. The type keeps its name and shape for the same reason
+    /// the whole feature keeps working unchanged: a block **is** a region — one
+    /// surface, one string — so nothing downstream has to know.
     struct DetectedTextRegion: Equatable {
         let text: String
         /// The feature's one box representation — the same `NormalizedBox` the
         /// stabiliser, the placement mapper and the shipped overlay maths
         /// consume (T-009/T-020, NFR-LCT-012).
         let normalizedBox: NormalizedBox
-        /// Vision's report, or `nil` when it did not make one. Never guessed.
+        /// The runtime's report, or `nil` when it did not make one. Never
+        /// guessed.
         let detectedLanguage: String?
+        let confidence: Double
+        /// The grouper's identity for the block this region is, when the region
+        /// came from the grouper — the member-string set, or the object class
+        /// plus its quantised centroid. `nil` for a region from any other path
+        /// (a test fake, a plain OCR pass): the stabiliser then identifies the
+        /// region by its string, exactly as it always has.
+        let blockIdentity: String?
+
+        init(text: String,
+             normalizedBox: NormalizedBox,
+             detectedLanguage: String?,
+             confidence: Double,
+             blockIdentity: String? = nil) {
+            self.text = text
+            self.normalizedBox = normalizedBox
+            self.detectedLanguage = detectedLanguage
+            self.confidence = confidence
+            self.blockIdentity = blockIdentity
+        }
+    }
+
+    /// One detected physical object from an object pass: where it is, and what
+    /// the runtime could name it (or `nil` when it could not).
+    ///
+    /// The same box representation as a region's, deliberately — the grouper's
+    /// whole job is deciding which boxes contain which, and two box types would
+    /// make that a conversion rather than a comparison.
+    struct DetectedSceneObject: Equatable {
+        /// The runtime's own name for the object, or `nil`. Never guessed: an
+        /// unnamed object is still an object and still groups its text.
+        let classLabel: String?
+        let normalizedBox: NormalizedBox
         let confidence: Double
     }
 
-    /// One pass's output. An OCR pass fills `regions` and leaves
-    /// `trackedBoxes` empty; a tracking pass fills `trackedBoxes` and leaves
-    /// `regions` empty. A caller that reads text from `trackedBoxes` has
-    /// nothing to read: there is no string in it.
+    /// One pass's output. An OCR pass fills `regions` and leaves `trackedBoxes`
+    /// empty; a tracking pass fills `trackedBoxes` and leaves `regions` empty. A
+    /// caller that reads text from `trackedBoxes` has nothing to read: there is
+    /// no string in it.
     struct Pass: Equatable {
         let regions: [DetectedTextRegion]
         /// Tracked key → geometry, for the keys the tracker still holds. A
-        /// missing key is a tracking loss.
+        /// missing key is a tracking loss. Since the rework the keys are
+        /// **block** texts: a block is what the stabiliser tracks, so a block is
+        /// what the tracker reports.
         let trackedBoxes: [String: NormalizedBox]
+        /// The scene's objects as of this pass — freshly detected or the cached
+        /// set, whichever the cadence allowed. Always empty on a tracking pass
+        /// (an object pass never runs there) and on any detector whose runtime
+        /// cannot detect objects. Reported rather than hidden because the
+        /// grouping is only as good as they are, and this is where a caller can
+        /// see which grouping actually happened.
+        let objects: [DetectedSceneObject]
+
+        init(regions: [DetectedTextRegion],
+             trackedBoxes: [String: NormalizedBox],
+             objects: [DetectedSceneObject] = []) {
+            self.regions = regions
+            self.trackedBoxes = trackedBoxes
+            self.objects = objects
+        }
     }
 
     /// Which request a pass is. Not a mode to be toggled by callers: the
@@ -279,19 +524,58 @@ final class LiveTextDetector {
     let config: LiveTranslateConfig
     private let events: LiveTranslateEvents
     private let engine: LiveTextRecognitionEngine
+    /// The object pass's engine. Separate from the text engine because the two
+    /// are separate requests on separate cadences — a runtime can have text
+    /// recognition and no way to name an object, and the detector must then
+    /// group by text geometry rather than fail.
+    private let objectEngine: LiveObjectDetectionEngine
     private let now: () -> TimeInterval
 
     /// Vision runs here and nowhere else: one pass at a time, so two passes
     /// can never share a request handler.
     private let visionQueue = DispatchQueue(label: "com.elderlyassistant.livetranslate.vision")
+
+    /// The object pass's own serial queue, and deliberately not `visionQueue`.
+    ///
+    /// The two passes have opposite urgencies: the OCR pass is the one the
+    /// elder is waiting on, and the object pass is a slow scene description
+    /// that only decides how the next pass *groups* what it read. Serialising
+    /// them would put a saliency request — and, on a device's first one, a
+    /// model load — in front of the first text of a session, which is exactly
+    /// the delay the owner reported. One object pass at a time, on its own
+    /// queue, and the text path never joins it.
+    private let objectQueue = DispatchQueue(
+        label: "com.elderlyassistant.livetranslate.objects")
+
+    /// Whether an object pass is running. Read and written under the lock, and
+    /// the reason the cadence cannot queue detections behind a slow one.
+    private var objectPassInFlight = false
+
+    /// Bumped whenever the picture an object pass was measuring stops being the
+    /// one this session is reading: `begin`, `end`, and a window change. A
+    /// detection that lands after that describes a scene nobody is looking at,
+    /// so it is discarded rather than grouped against.
+    private var objectPassEpoch = 0
+
     private let lock = NSLock()
 
     // MARK: State (lock-guarded)
 
     private var currentState: State = .idle
     private var trackingAvailable = false
+    private var objectsAvailable = false
     private var lastOCRPassAt: TimeInterval?
+    private var lastObjectPassAt: TimeInterval?
     private var rememberedKeys: Set<String> = []
+    /// The last OCR pass's blocks: block text → its member strings, in reading
+    /// order. A tracking pass re-keys the per-line geometry the engine followed
+    /// into the block geometry the stabiliser tracks, and this is the only
+    /// place that mapping is known.
+    private var blockMembers: [String: [String]] = [:]
+    /// The object pass's cached result. Objects belong to the *scene*, not to
+    /// one frame: an appliance does not become a different appliance between two
+    /// OCR passes, so the set is reused until the cadence says otherwise.
+    private var objects: [DetectedSceneObject] = []
     private var passesInFlight = 0
 
     /// The frame-change gate's state: the signature of the last frame
@@ -316,6 +600,7 @@ final class LiveTextDetector {
     init(config: LiveTranslateConfig = .default,
          observabilityBus: ObservabilityBus,
          engine: LiveTextRecognitionEngine? = nil,
+         objectEngine: LiveObjectDetectionEngine? = nil,
          now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
         self.config = config
         self.events = LiveTranslateEvents(bus: observabilityBus, config: config)
@@ -325,6 +610,11 @@ final class LiveTextDetector {
         self.engine = engine
             ?? VisionTextRecognitionEngine(
                 maximumRectanglesPerPass: config.trackingMaxRectanglesPerPass)
+        // Same rule for the object engine: the shipped one unless a caller
+        // hands in its own, and the shipped one takes the block bound from the
+        // config like everything else.
+        self.objectEngine = objectEngine
+            ?? VisionObjectDetectionEngine(maximumObjects: config.maxVisibleBlocks)
         self.now = now
     }
 
@@ -340,6 +630,9 @@ final class LiveTextDetector {
         let wasIdle = withLock { () -> Bool in
             guard currentState == .idle else { return false }
             currentState = .ready
+            // A detection scheduled by an earlier session described a picture
+            // this one is not reading.
+            objectPassEpoch += 1
             return true
         }
         guard wasIdle else { return .success(()) }
@@ -348,6 +641,16 @@ final class LiveTextDetector {
         withLock { trackingAvailable = config.trackingEnabled && engineSupportsTracking }
         if config.trackingEnabled && !engineSupportsTracking {
             events.trackingUnsupported()
+        }
+
+        // Object detection is the same kind of capability: a SHOULD that the
+        // detector can do without. There is no config switch for it — the
+        // feature always wants the grouping — so the only "off" is a runtime
+        // that cannot do it, and that is reported once, honestly.
+        let engineSupportsObjects = objectEngine.supportsObjectDetection
+        withLock { objectsAvailable = engineSupportsObjects }
+        if !engineSupportsObjects {
+            events.objectDetectionUnsupported()
         }
         return .success(())
     }
@@ -359,8 +662,13 @@ final class LiveTextDetector {
             guard currentState == .ready else { return false }
             currentState = .idle
             trackingAvailable = false
+            objectsAvailable = false
+            objectPassEpoch += 1
             lastOCRPassAt = nil
+            lastObjectPassAt = nil
             rememberedKeys = []
+            blockMembers = [:]
+            objects = []
             frameDetector.forget()
             sceneChanged = true
             lastPassCrop = .whole
@@ -388,7 +696,7 @@ final class LiveTextDetector {
         // reads (owner follow-up, 2026-09-18). A frame from a session that has
         // neither zoomed nor panned carries `.whole`, and this is then the
         // whole-buffer pass this feature has always run.
-        await perform(frame, crop: frame.crop) { [self] in
+        await perform(frame, crop: frame.crop, limit: config.maxVisibleBlocks) { [self] in
             // Measured before the pass kind is chosen, because the answer is
             // what chooses it (a still scene has no geometry worth following).
             noteSceneChange(of: frame)
@@ -414,15 +722,23 @@ final class LiveTextDetector {
     /// is drawn from the frame's own buffer (`LiveTranslateSnapshotPath` places
     /// it with `.whole`), so it is the buffer Vision must read, or the boxes
     /// would be geometry of a picture that is not on screen.
+    ///
+    /// No block cap here (`limit: nil`): the cap exists because the live
+    /// overlay can only carry a few readable surfaces, and the still path has no
+    /// overlay — every block it resolves is one more line the snapshot card can
+    /// show at a legible size.
     func recognizeStillFrame(_ frame: CameraFrame) async -> Result<Pass, LiveTranslateError> {
-        await perform(frame, crop: .whole) { .ocr }
+        await perform(frame, crop: .whole, limit: nil) { .ocr }
     }
 
     /// The one pass implementation both entries share, so "a pass" means one
     /// thing: the lifecycle guard, the serial queue and the pass-kind decision
-    /// happen here and nowhere else.
+    /// happen here and nowhere else. `limit` is the pass's block cap, and it is
+    /// the caller's because it is a property of *where the blocks are going*,
+    /// not of the grouping.
     private func perform(_ frame: CameraFrame,
                          crop: LiveCameraCrop,
+                         limit: Int?,
                          kind: @escaping () -> PassKind) async -> Result<Pass, LiveTranslateError> {
         guard markPassStarted() else {
             // No OCR request has been created: `begin()` was never called (or
@@ -444,7 +760,7 @@ final class LiveTextDetector {
                 noteCropChange(to: crop)
                 switch kind() {
                 case .ocr:
-                    continuation.resume(returning: runOCRPass(on: frame, crop: crop))
+                    continuation.resume(returning: runOCRPass(on: frame, crop: crop, limit: limit))
                 case .tracking:
                     continuation.resume(returning: runTrackingPass(on: frame, crop: crop))
                 }
@@ -491,7 +807,9 @@ final class LiveTextDetector {
 
     // MARK: Pass implementation (visionQueue)
 
-    private func runOCRPass(on frame: CameraFrame, crop: LiveCameraCrop) -> Result<Pass, LiveTranslateError> {
+    private func runOCRPass(on frame: CameraFrame,
+                            crop: LiveCameraCrop,
+                            limit: Int?) -> Result<Pass, LiveTranslateError> {
         // Stamped at the start, before recognition: the cadence bounds how
         // often Vision runs, on success and on failure alike, so a failing
         // scene cannot become a per-frame retry loop.
@@ -499,20 +817,51 @@ final class LiveTextDetector {
 
         do {
             let found = try engine.recognizeText(in: frame.cropped(to: crop))
-            let regions = found.map {
+            // The objects this pass groups with: the cached set, and a fresh
+            // detection *scheduled* when the object cadence is due — never
+            // awaited. Never a reason for the pass to fail or to wait: a scene
+            // with no objects yet is grouped by text geometry, which is what
+            // every pass did before this rework.
+            let sceneObjects = objectsForPass(in: frame, crop: crop)
+            // Vision's boxes are normalized to the buffer it was handed — the
+            // window — and every consumer of a box speaks the frame's
+            // coordinates, so they are mapped back here, once, where the window
+            // is known. The same mapping covers the lines and the objects, which
+            // is what lets the grouper compare them at all.
+            let lines = found.map {
+                SceneTextLine(text: $0.text,
+                              normalizedBox: crop.frameBox(ofCropBox: $0.normalizedBox),
+                              confidence: $0.confidence,
+                              detectedLanguage: $0.detectedLanguage)
+            }
+            let objects = sceneObjects.map {
+                SceneObjectBox(classLabel: $0.classLabel,
+                               normalizedBox: $0.normalizedBox,
+                               confidence: $0.confidence)
+            }
+            let blocks = Self.publishedBlocks(
+                from: SceneBlockGrouper.group(lines: lines,
+                                              objects: objects,
+                                              config: config,
+                                              limit: limit),
+                fallbackLines: lines,
+                limit: limit)
+            let regions = blocks.map {
                 DetectedTextRegion(text: $0.text,
-                                   // Vision's boxes are normalized to the
-                                   // buffer it was handed — the window — and
-                                   // every consumer of a region box speaks the
-                                   // frame's coordinates, so they are mapped
-                                   // back here, once, where the window is
-                                   // known.
-                                   normalizedBox: crop.frameBox(ofCropBox: $0.normalizedBox),
+                                   normalizedBox: $0.normalizedBox,
                                    detectedLanguage: $0.detectedLanguage,
-                                   confidence: $0.confidence)
+                                   confidence: $0.confidence,
+                                   blockIdentity: $0.identityKey)
             }
             withLock {
                 rememberedKeys = Set(regions.map(\.text))
+                // The block map the tracking pass re-keys through. Two blocks
+                // can legitimately share a text (the same sign twice in one
+                // frame), and the first is as good as the second: the entry
+                // exists to turn line geometry into block geometry, and either
+                // block's members answer that.
+                blockMembers = Dictionary(blocks.map { ($0.text, $0.memberStrings) },
+                                          uniquingKeysWith: { first, _ in first })
                 // This is "the last OCR'd frame" every later comparison is
                 // made against. Committed on success only: a failed pass made
                 // no claim about the scene, and letting a frame Vision could
@@ -525,7 +874,7 @@ final class LiveTextDetector {
             // An OCR pass has no tracked geometry to report — it is the
             // anchor, not the carrier. Zero regions is the empty-state hint,
             // not a failure.
-            return .success(Pass(regions: regions, trackedBoxes: [:]))
+            return .success(Pass(regions: regions, trackedBoxes: [:], objects: sceneObjects))
         } catch {
             let failure = (error as? LiveTranslateError) ?? .ocrPassFailed(.requestFailed)
             events.ocrPassFailed(failure)
@@ -533,15 +882,163 @@ final class LiveTextDetector {
         }
     }
 
+    /// The blocks a pass publishes: the grouper's own decision, or — when it
+    /// formed none — **one block per recognized line**.
+    ///
+    /// The never-empty rule, at the one place a pass decides what it is
+    /// publishing (see `SceneBlockGrouper.perLineBlocks`). The alternative is
+    /// the failure the owner's device verdict reported: lines recognized, no
+    /// blocks formed, and therefore nothing published — which the overlay
+    /// renders as its empty state, "I don't see any text yet", over a picture
+    /// full of text the pass had just read.
+    ///
+    /// A group failure degrades the grouping. It may never degrade the text:
+    /// the per-line blocks are the publication this feature shipped before
+    /// grouping existed, so the elder loses the *merge* and not the words.
+    static func publishedBlocks(from blocks: [SceneBlock],
+                                fallbackLines lines: [SceneTextLine],
+                                limit: Int?) -> [SceneBlock] {
+        guard blocks.isEmpty else { return blocks }
+        return SceneBlockGrouper.perLineBlocks(from: lines, limit: limit)
+    }
+
     private func runTrackingPass(on frame: CameraFrame, crop: LiveCameraCrop) -> Result<Pass, LiveTranslateError> {
         do {
             let followed = try engine.followRememberedRectangles(in: frame.cropped(to: crop))
-            let tracked = followed.mapValues { crop.frameBox(ofCropBox: $0) }
+            let frameBoxes = followed.mapValues { crop.frameBox(ofCropBox: $0) }
+            let tracked = Self.blockBoxes(from: frameBoxes, members: withLock { blockMembers })
             // Geometry only: no region and no string can come out of here.
             return .success(Pass(regions: [], trackedBoxes: tracked))
         } catch {
             degradeTracking()
             return .failure(.trackingUnsupported)
+        }
+    }
+
+    /// Turns the per-line geometry a tracking pass followed into the per-block
+    /// geometry the stabiliser tracks: a block's box is the union of the boxes
+    /// its members are still tracked at.
+    ///
+    /// A block with no tracked member is **absent** from the result rather than
+    /// reported at stale geometry — and that is the documented tracking-loss
+    /// case, unchanged in meaning: the stabiliser holds the last OCR-confirmed
+    /// geometry for it. Putting a block's key in with a box nothing was
+    /// followed at would be an invented observation.
+    ///
+    /// Pure, and a function of two dictionaries rather than of Vision: the
+    /// re-keying rule is testable without a camera, which matters because it is
+    /// the one place where a text-keyed engine and a block-keyed stabiliser
+    /// have to agree.
+    static func blockBoxes(from followed: [String: NormalizedBox],
+                           members: [String: [String]]) -> [String: NormalizedBox] {
+        var boxes: [String: NormalizedBox] = [:]
+        for (block, lines) in members {
+            let tracked = lines.compactMap { followed[$0] }
+            guard !tracked.isEmpty else { continue }
+            boxes[block] = SceneBlockGrouper.union(tracked)
+        }
+        return boxes
+    }
+
+    /// The scene's objects for this pass: **the cached set, always** — and a
+    /// fresh detection *scheduled* when the object cadence is due.
+    ///
+    /// The cache is the whole point of the cadence. An object pass costs one
+    /// saliency request plus up to one classification request per object, and
+    /// its answer — which appliances are in the picture — is not a
+    /// frame-by-frame property. Running it every pass would spend the frame
+    /// budget re-learning the same kitchen.
+    ///
+    /// **The pass never waits for a detection.** The object pass is the slow
+    /// pass, and the OCR pass is the one the elder is waiting on, so the
+    /// detection runs on `objectQueue` — off this pass's critical path — and
+    /// what it finds groups the *next* pass of the scene. That is the isolation
+    /// the owner's device verdict ("fires after a long delay") is about: a
+    /// saliency request that takes a second, or that never returns, or that the
+    /// runtime refuses outright, costs the text pass nothing at all. Its worst
+    /// case is the one it always had — the pass groups by text geometry, which
+    /// is what every pass did before the rework.
+    ///
+    /// The cached set is what the pass reports. A detection that has not landed
+    /// yet is not an object set this pass saw, and reporting it as one would be
+    /// claiming a scene description the pass did not have.
+    private func objectsForPass(in frame: CameraFrame, crop: LiveCameraCrop) -> [DetectedSceneObject] {
+        let due = withLock { () -> Bool in
+            // One at a time: a detection that outlives its cadence must not
+            // queue a second behind it, however slow the runtime is.
+            guard objectsAvailable, !objectPassInFlight else { return false }
+            guard let last = lastObjectPassAt else { return true }
+            return now() - last >= config.objectPassCadenceSeconds
+        }
+        if due { scheduleObjectPass(in: frame, crop: crop) }
+        return withLock { objects }
+    }
+
+    /// Starts one object pass on the object queue. Returns immediately.
+    ///
+    /// Stamped at *schedule* time, like the OCR cadence and for the same
+    /// reason: a failing object pass must not become a per-frame retry loop.
+    /// The epoch is captured with it, so a detection that lands after the
+    /// session ended, restarted or moved its window is discarded rather than
+    /// describing a picture this session is no longer reading.
+    private func scheduleObjectPass(in frame: CameraFrame, crop: LiveCameraCrop) {
+        let epoch = withLock { () -> Int in
+            lastObjectPassAt = now()
+            objectPassInFlight = true
+            return objectPassEpoch
+        }
+        objectQueue.async { [self] in
+            let landed: Result<[DetectedSceneObject], Error>
+            do {
+                let found = try objectEngine.detectObjects(in: frame.cropped(to: crop))
+                landed = .success(found.map {
+                    DetectedSceneObject(classLabel: $0.classLabel,
+                                        normalizedBox: crop.frameBox(ofCropBox: $0.normalizedBox),
+                                        confidence: $0.confidence)
+                })
+            } catch {
+                landed = .failure(error)
+            }
+
+            // Whatever happened to the session meanwhile, the slot is free
+            // again: the in-flight flag is a property of this pass, not of the
+            // scene it was measuring.
+            let stale = withLock { () -> Bool in
+                objectPassInFlight = false
+                return objectPassEpoch != epoch
+            }
+            guard !stale else { return }
+
+            switch landed {
+            case .success(let mapped):
+                withLock { objects = mapped }
+                events.objectPass(objectCount: mapped.count)
+            case .failure(let error):
+                withLock { objects = [] }
+                // A refusal, not an absent capability: recorded with its
+                // taxonomy code, and the pass stops asking rather than retrying
+                // every frame (the cadence is stamped, so a broken runtime is
+                // one event and one request, not a loop).
+                // `object_detection_unsupported` is for the runtime that never
+                // had the capability, and `begin` is where that one is
+                // announced.
+                events.objectPassFailed((error as? LiveTranslateError)
+                                        ?? .ocrPassFailed(.requestFailed))
+                stopAskingForObjects()
+            }
+        }
+    }
+
+    /// Waits for every object pass this detector has scheduled to land.
+    ///
+    /// The object pass is asynchronous by design — it must never delay a text
+    /// pass — which makes "the detection has landed" an event rather than a
+    /// return value. A test (and a diagnostic) that wants to observe what the
+    /// object pass did after the fact waits here: the object queue is serial,
+    /// so this returns once the passes already scheduled have finished.
+    func awaitObjectPass() async {
+        await withCheckedContinuation { continuation in
+            objectQueue.async { continuation.resume() }
         }
     }
 
@@ -570,6 +1067,18 @@ final class LiveTextDetector {
             guard lastPassCrop != crop else { return false }
             lastPassCrop = crop
             rememberedKeys = []
+            blockMembers = [:]
+            // The cached objects are geometry of the old window: their boxes
+            // were mapped out of a buffer this session is no longer reading, so
+            // grouping the new window's text with them would put a panel over
+            // whatever now happens to sit where the old appliance was. Dropped,
+            // and the pass is made due again, so the first OCR pass at the new
+            // window detects the objects that are actually in it.
+            objects = []
+            lastObjectPassAt = nil
+            // A detection in flight measured the *old* window's picture, so its
+            // boxes describe pixels this session has panned away from.
+            objectPassEpoch += 1
             return true
         }
         guard changed else { return }
@@ -585,6 +1094,15 @@ final class LiveTextDetector {
             return true
         }
         if firstTime { events.trackingUnsupported() }
+    }
+
+    /// The object pass is not asked for again. Says nothing on the event bus:
+    /// the two ways this happens — a runtime without the capability, and a
+    /// request it refused — have already been recorded by their own events, and
+    /// the difference is the whole reason they are two events rather than one
+    /// call to this function that reports as well as stops.
+    private func stopAskingForObjects() {
+        withLock { objectsAvailable = false }
     }
 
     // MARK: Plumbing

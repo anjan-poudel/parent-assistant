@@ -171,6 +171,55 @@ final class SessionRecognitionEngine: LiveTextRecognitionEngine {
     }
 }
 
+/// The object seam, scripted: the detector asks this for the scene's objects
+/// instead of paying for a real saliency + classification pass.
+///
+/// Every test that scripts recognition scripts this too, even when it has no
+/// objects to give: a scripted test's whole value is that a pass is decided by
+/// the fixture, and a real Vision request would put the simulator's opinion of
+/// a synthetic buffer into the result.
+final class StubObjectDetectionEngine: LiveObjectDetectionEngine {
+    var supportsObjectDetection: Bool
+    var objects: [LiveTextDetector.DetectedSceneObject] = []
+    var errorToThrow: Error?
+
+    /// Run at the start of every detection, before anything else. A test that
+    /// wants an object pass that is *slow* — the shape a device's first
+    /// saliency request has, and the one the text path must not wait for —
+    /// hands the detector a verdict through here and blocks on its own
+    /// semaphore, which is what makes "the text pass did not wait" an
+    /// observation rather than a wall-clock guess.
+    var onDetect: ((CVPixelBuffer) -> Void)?
+
+    private let lock = NSLock()
+    private var calls = 0
+    private var completed = 0
+
+    init(supportsObjectDetection: Bool = true) {
+        self.supportsObjectDetection = supportsObjectDetection
+    }
+
+    var detectCallCount: Int {
+        lock.lock(); defer { lock.unlock() }
+        return calls
+    }
+
+    /// Detections that have returned — answered or refused. The gap between
+    /// this and `detectCallCount` is an object pass still in flight.
+    var completedDetections: Int {
+        lock.lock(); defer { lock.unlock() }
+        return completed
+    }
+
+    func detectObjects(in pixelBuffer: CVPixelBuffer) throws -> [LiveTextDetector.DetectedSceneObject] {
+        lock.lock(); calls += 1; lock.unlock()
+        onDetect?(pixelBuffer)
+        lock.lock(); completed += 1; lock.unlock()
+        if let errorToThrow { throw errorToThrow }
+        return objects
+    }
+}
+
 /// The shipped speech path, narrowed to what C12 uses and logged.
 final class SessionSpeechPath: LiveTranslateSpeechPath {
     private let log: SessionLog
@@ -290,6 +339,9 @@ struct LiveTranslateSessionTestParts {
     let capture: SessionCaptureLayer
     let detector: LiveTextDetector
     let engine: SessionRecognitionEngine
+    /// The scripted object seam the detector was built with, so a test can
+    /// decide what the scene's objects are (and count the passes that asked).
+    let objects: StubObjectDetectionEngine
     let speech: SessionSpeechPath
     let device: SessionDevice
     let audio: SessionAudioSession
@@ -355,9 +407,11 @@ func makeLiveTranslateSessionTestParts(
                                    notificationCenter: notifications,
                                    now: { clock.now })
     let engine = SessionRecognitionEngine(log: log)
+    let objects = StubObjectDetectionEngine()
     let detector = LiveTextDetector(config: config,
                                     observabilityBus: bus,
                                     engine: engine,
+                                    objectEngine: objects,
                                     now: { clock.now })
     let speech = SessionSpeechPath(log: log)
     let device = SessionDevice(log: log)
@@ -386,6 +440,7 @@ func makeLiveTranslateSessionTestParts(
                                          capture: capture,
                                          detector: detector,
                                          engine: engine,
+                                         objects: objects,
                                          speech: speech,
                                          device: device,
                                          audio: audio,

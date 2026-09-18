@@ -997,6 +997,177 @@ final class LiveOverlayPlacementTests: XCTestCase {
                        "top to bottom, then left to right — the order a spoken reading walks (C12)")
     }
 
+    // MARK: Block panels (scene-block rework, 2026-09-18)
+
+    /// A **block**: one region whose text is several lines, which is exactly
+    /// what the grouper's separator means to the placement.
+    private func blockRegion(_ rawID: Int,
+                             lines: [String],
+                             box: (Double, Double, Double, Double))
+        -> TextRegionStabilizer.StableTextRegion {
+        region(rawID, text: lines.joined(separator: "\n"), box: box)
+    }
+
+    func testAResolvedBlockIsOnePanelCarryingEveryLineInOrder() {
+        let block = blockRegion(1, lines: ["START", "2 MIN"], box: (0.10, 0.30, 0.70, 0.60))
+        let policy = surfacePolicy()
+        let result = translated(block, "सुरु\n२ मिनेट", tier: .cloud)
+
+        let placements = place([block], results: [block.id: result])
+
+        XCTAssertEqual(placements.count, 1,
+                       "a block is one surface: no per-line callouts in live mode")
+        let panel = placements[0]
+        XCTAssertNotNil(inPlaceRect(panel), "a resolved block stands on its own rect")
+        XCTAssertNil(calloutRect(panel), "…and never as a pill beside it")
+        XCTAssertEqual(panel.lines.map(\.text), ["सुरु", "२ मिनेट"],
+                       "the translated lines in the order they were recognized")
+        XCTAssertEqual(panel.lines.map(\.pointSize),
+                       [policy.minPointSize, policy.minPointSize],
+                       "one panel is drawn at one size — the body floor — not per-line sizes")
+        XCTAssertEqual(Set(panel.lines.map(\.weight)), [.primary])
+    }
+
+    func testThePanelFloorIsTheBodyFloorAndItIsAboveTheOwnersBound() {
+        let policy = surfacePolicy()
+        XCTAssertEqual(LiveOverlayPlacement.panelPointSize(policy: policy), policy.minPointSize,
+                       "a panel is drawn at the body floor or not at all: shrinking it is "
+                       + "exactly the illegible small type the rework removes")
+        XCTAssertGreaterThanOrEqual(policy.minPointSize, 18,
+                                    "the owner's bound on a live translation line")
+    }
+
+    func testAlwaysShowOriginalStacksTheOriginalLinesUnderTheTranslation() {
+        let block = blockRegion(1, lines: ["OPEN", "7AM"], box: (0.10, 0.30, 0.70, 0.60))
+        let policy = surfacePolicy(alwaysShowOriginal: true)
+        let result = translated(block, "खुला\nबिहान ७", tier: .cloud)
+
+        let placements = place([block], results: [block.id: result], policy: policy)
+
+        XCTAssertEqual(placements.first?.lines.map(\.text), ["खुला", "बिहान ७", "OPEN", "7AM"],
+                       "the preference is honoured in the panel too, translation first")
+        XCTAssertEqual(placements.first?.lines.filter { $0.weight == .secondary }.map(\.pointSize),
+                       [policy.secondaryPointSize, policy.secondaryPointSize])
+    }
+
+    /// The owner's device verdict, at the line it is about: **a block the panel
+    /// cannot hold is still published.**
+    ///
+    /// The rework's first cut left `place` with a bare `continue` here, so a
+    /// pass whose blocks all failed the panel fit produced no placements at
+    /// all — and the overlay renders an empty placement list as its empty
+    /// state, "I don't see any text yet", over a picture full of text the pass
+    /// had just read. Since most regions of a real scene are multi-line blocks
+    /// (the object grouping merges them), that was most scenes on the owner's
+    /// device: "the camera says it can't find anything to read".
+    ///
+    /// The policy itself is unchanged — a panel is drawn at the floor or not at
+    /// all — so this pins both halves: the panel decision still refuses to
+    /// shrink, and the refusal degrades to **one callout for the block**, never
+    /// to nothing.
+    func testABlockThatCannotStandAsAPanelStillGetsOneCalloutForTheBlock() {
+        // Type far taller than any box this region can grow into.
+        let block = blockRegion(1, lines: ["one", "two", "three"], box: (0.42, 0.44, 0.50, 0.50))
+        let policy = surfacePolicy()
+        let result = translated(block, "एक\nदुई\nतीन", tier: .cloud)
+        let measure: LiveOverlayPlacement.Measure = { _, pointSize, _, _ in
+            CGSize(width: pointSize * 4, height: pointSize * 10)
+        }
+
+        let outcome = LiveOverlayPlacement.panelOutcome(regionRect: rect(of: block),
+                                                        lines: LiveOverlayPlacement.panelLines(
+                                                            result.text,
+                                                            pointSize: policy.minPointSize),
+                                                        bounds: bounds,
+                                                        policy: policy,
+                                                        measure: measure)
+        XCTAssertEqual(outcome, .doesNotFit,
+                       "the panel rule is unchanged: a panel nobody can read is the thing "
+                       + "being removed, so a panel below the floor is never drawn")
+
+        let placements = place([block], results: [block.id: result], measure: measure)
+        XCTAssertEqual(placements.count, 1,
+                       "a block that cannot be drawn as a panel is still published: an empty "
+                       + "placement list is the overlay's empty state over text the pass read")
+        XCTAssertNil(inPlaceRect(placements[0]), "…and not as a panel: the floor is the floor")
+        XCTAssertNotNil(calloutRect(placements[0]),
+                        "…but as the one pill that carries the block")
+        XCTAssertEqual(placements[0].lines.map(\.text), ["एक", "दुई", "तीन"],
+                       "the block's translated lines, in order, in the one pill — one surface "
+                       + "for the block, not one bubble per line")
+        XCTAssertEqual(Set(placements[0].lines.map(\.pointSize)), [policy.minPointSize],
+                       "the pill is drawn at the body floor, like every live surface")
+    }
+
+    func testTwoPanelsNeverStack() {
+        let first = blockRegion(1, lines: ["A1", "A2"], box: (0.05, 0.05, 0.45, 0.25))
+        let second = blockRegion(2, lines: ["B1", "B2"], box: (0.55, 0.05, 0.95, 0.25))
+        let placements = place([first, second],
+                               results: [first.id: translated(first, "क\nख", tier: .cloud),
+                                         second.id: translated(second, "ग\nघ", tier: .cloud)])
+
+        XCTAssertEqual(placements.count, 2)
+        let boxes = placements.compactMap(inPlaceRect)
+        XCTAssertEqual(boxes.count, 2, "both blocks are panels")
+        XCTAssertFalse(boxes[0].intersects(boxes[1]),
+                       "the half-gap law holds for panels exactly as it does for lines")
+    }
+
+    func testAnUnresolvedBlockIsTheSamePanelCarryingTheHonestState() {
+        let block = blockRegion(1, lines: ["START", "2 MIN"], box: (0.10, 0.30, 0.70, 0.60))
+
+        let placements = place([block], stateCopy: { _ in "पर्खंदै" })
+
+        XCTAssertEqual(placements.count, 1,
+                       "a tier that has not answered must not make a recognized block vanish")
+        XCTAssertNotNil(inPlaceRect(placements[0]),
+                        "the surface stands where the text stood and fills in, rather than "
+                        + "a pill appearing beside it to be replaced")
+        XCTAssertNil(calloutRect(placements[0]))
+        XCTAssertEqual(placements[0].lines.map(\.text), ["पर्खंदै"])
+    }
+
+    func testAnUnresolvedBlockWithNoStateCopyStillShowsItsOwnLines() {
+        let block = blockRegion(1, lines: ["START", "2 MIN"], box: (0.10, 0.30, 0.70, 0.60))
+
+        let placements = place([block], stateCopy: { _ in nil })
+
+        XCTAssertEqual(placements.map { $0.lines.map(\.text) }, [["START", "2 MIN"]],
+                       "with nothing honest to say yet, the block's own recognized lines "
+                       + "stand in — the region never vanishes (NFR-LCT-010)")
+    }
+
+    func testPanelLinesDropBlankRowsAndKeepTheRecognizedOrder() {
+        let lines = LiveOverlayPlacement.panelLines("first\n\nsecond\n\n", pointSize: 21)
+        XCTAssertEqual(lines.map(\.text), ["first", "second"],
+                       "a blank row is not text the elder reads, and drawing it spends "
+                       + "panel height on nothing")
+        XCTAssertEqual(lines.map(\.weight), [.primary, .primary])
+    }
+
+    func testPanelTextSizeStacksItsLinesWithThePolicySpacing() {
+        let lines = [LiveOverlayTextLine(text: "one", pointSize: 20, weight: .primary),
+                     LiveOverlayTextLine(text: "two", pointSize: 20, weight: .primary),
+                     LiveOverlayTextLine(text: "three", pointSize: 20, weight: .primary)]
+        let measure: LiveOverlayPlacement.Measure = { text, pointSize, _, width in
+            CGSize(width: min(CGFloat(text.count) * pointSize, width), height: pointSize)
+        }
+        let size = LiveOverlayPlacement.panelTextSize(lines, lineSpacing: 4,
+                                                      maxWidth: 500, measure: measure)
+        XCTAssertEqual(size.height, 3 * 20 + 2 * 4, "three lines, two gaps")
+        XCTAssertEqual(size.width, 5 * 20, "the widest line decides the width")
+    }
+
+    func testABlockIsASingleLineRegionOnlyWhenItHoldsOneLine() {
+        let single = region(1, text: "EXIT", box: (0.1, 0.1, 0.4, 0.2))
+        let multi = blockRegion(2, lines: ["EXIT", "FIRE"], box: (0.1, 0.4, 0.4, 0.6))
+
+        XCTAssertFalse(LiveOverlayPlacement.isBlock(single),
+                       "one recognized line is the path it always was")
+        XCTAssertTrue(LiveOverlayPlacement.isBlock(multi),
+                      "the grouper's separator is the one deterministic signal of a block")
+    }
+
     // MARK: Helpers
 
     private func anchor(of placement: LiveOverlayPlacement.PlacedOverlay) -> CGPoint? {
