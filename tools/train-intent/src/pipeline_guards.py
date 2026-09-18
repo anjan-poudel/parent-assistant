@@ -20,6 +20,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import signal
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -127,18 +128,72 @@ def leak_refusals(utterances, keys: set[str]) -> int:
     return sum(1 for u in utterances if normalize(u) in keys)
 
 
-def gpu_snapshot() -> dict:
+def _kill_group(proc: subprocess.Popen) -> None:
+    """SIGKILL the child's whole process group, then reap without blocking.
+
+    The group matters: a killed guard whose own children survive keeps holding
+    the resource the guard was measuring. The bounded reap matters more: a task
+    wedged in uninterruptible D-state ignores SIGKILL until the kernel releases
+    it, and waiting for that is the hang this exists to avoid — one zombie
+    beats a pinned pipeline.
+    """
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except OSError:
+        # Already gone, or not ours to group-kill; best effort on the child.
+        try:
+            proc.kill()
+        except OSError:
+            pass
+    for pipe in (proc.stdout, proc.stderr):
+        # communicate() closes these only on the non-timeout path; abandoning
+        # them here keeps a timed-out probe from leaking two fds per call.
+        if pipe is not None:
+            pipe.close()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def run_with_timeout(cmd: list[str], timeout: float) -> subprocess.CompletedProcess:
+    """subprocess.run(capture_output=True, text=True, timeout=...) that can exit.
+
+    `subprocess.run`'s timeout is not an escape hatch: on expiry CPython calls
+    `process.kill()` and then `process.wait()`, and that wait blocks forever
+    when the child is stuck in D-state — SIGKILL cannot reap a task the kernel
+    has not released (observed live 2026-09-18: a probe watcher pinned inside
+    nvidia-smi for the whole GPU driver wedge, because the guard could not
+    return). We give the child its own session and kill the group instead.
+
+    Raises subprocess.TimeoutExpired exactly as run() would (same message), so
+    callers keep their existing except clauses unchanged.
+    """
+    proc = subprocess.Popen([str(c) for c in cmd], stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True,
+                            start_new_session=True)
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except BaseException:
+        _kill_group(proc)   # KeyboardInterrupt included: never orphan the child
+        raise
+    return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
+
+
+def gpu_snapshot(timeout: float = 15) -> dict:
     """nvidia-smi compute-process snapshot — counters only, never a command line.
 
     `nvidia-smi --query-compute-apps=pid,used_memory` reports memory in MiB per
     process; we deliberately do not request process names or command lines
     (they can carry paths/PII on a shared box).
+
+    The timeout is honoured by run_with_timeout: a hung driver yields the
+    `available: False` sentinel instead of pinning the caller (2026-09-18).
     """
     try:
-        out = subprocess.run(
+        out = run_with_timeout(
             ["nvidia-smi", "--query-compute-apps=pid,used_memory",
-             "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=15, check=False)
+             "--format=csv,noheader,nounits"], timeout)
     except (FileNotFoundError, subprocess.TimeoutExpired) as e:
         return {"available": False, "reason": f"{type(e).__name__}: {e}"}
     procs = []
