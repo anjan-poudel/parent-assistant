@@ -97,7 +97,7 @@ final class ModelCatalogLanguageTests: XCTestCase {
         // 2026-09-19, sideloaded — deliberately not offered for download);
         // the row still offers the shipped head it can actually download.
         XCTAssertEqual(LiveTranslateConfig.default.brainTranslationModelIDs.first,
-                       ModelCatalog.nmtEnNeQwen17bR2bQ5,
+                       ModelCatalog.nmtEnNeQwen17bR2bQ4,
                        "the tier leads with the testing quant")
         XCTAssertEqual(LiveTranslateConfig.default.brainTranslationModelIDs.dropFirst().first,
                        offered.first,

@@ -1070,7 +1070,7 @@ struct LiveTranslateConfig: Equatable {
     /// A follow-up may want this to follow the elder's brain selection
     /// (`AppCoordinator.resolvedBrainModelID`); that is a product decision,
     /// not a lookup to hide in here.
-    var brainTranslationModelIDs: [ModelID] = [ModelCatalog.nmtEnNeQwen17bR2bQ5,
+    var brainTranslationModelIDs: [ModelID] = [ModelCatalog.nmtEnNeQwen17bR2bQ4,
                                               ModelCatalog.nmtEnNeQwen17bR2bQ8,
                                               ModelCatalog.intentQwen4BSlotCanon,
                                               ModelCatalog.intentQwen4BS43]

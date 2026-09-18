@@ -385,7 +385,7 @@ final class LiveTranslateConfigTests: XCTestCase {
     /// fallbacks a device that has one but not the head keeps working on.
     func testTheTranslationListLeadsWithTheShippedTranslationModel() {
         let ids = LiveTranslateConfig.default.brainTranslationModelIDs
-        XCTAssertEqual(ids, [ModelCatalog.nmtEnNeQwen17bR2bQ5,
+        XCTAssertEqual(ids, [ModelCatalog.nmtEnNeQwen17bR2bQ4,
                              ModelCatalog.nmtEnNeQwen17bR2bQ8,
                              ModelCatalog.intentQwen4BSlotCanon,
                              ModelCatalog.intentQwen4BS43],
