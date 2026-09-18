@@ -203,7 +203,11 @@ enum LiveTranslateEventCatalogue {
 
         "region_appeared": Entry(outcomes: ["success"], metadataKeys: []),
         "region_removed": Entry(outcomes: ["success"], metadataKeys: []),
-        "text_change": Entry(outcomes: ["success"], metadataKeys: ["regionCount"]),
+        // `regionSetHash` added 2026-09-18 with the owner's identity-churn
+        // report: the count alone cannot tell a changed reading from a re-keyed
+        // region, and both were arriving as the same line of console.
+        "text_change": Entry(outcomes: ["success"],
+                             metadataKeys: ["regionCount", "regionSetHash"]),
 
         "translation_batch_requested": Entry(outcomes: ["success"],
                                              metadataKeys: ["stringCount", "batchIndex", "batchCount"]),
@@ -280,6 +284,10 @@ struct LiveTranslateEvents {
     /// test pins this enum against that set, so the two cannot drift.
     enum MetadataKey: String, CaseIterable {
         case regionCount
+        /// The content-free digest of the visible text set a `text_change`
+        /// carries (2026-09-18). A `UInt32`, rendered `xxxx:xxxx` by the
+        /// emitter — never a recognized string, and never a region identity.
+        case regionSetHash
         case stringCount
         case batchIndex
         case batchCount
@@ -428,9 +436,54 @@ struct LiveTranslateEvents {
         emit("region_removed", outcome: "success")
     }
 
-    func textChange(regionCount: Int) {
+    /// A change on screen, with the two content-free facts the next device
+    /// capture needs to tell one failure from the other (owner verdict,
+    /// 2026-09-18): how many regions the screen has, and a **digest of the text
+    /// set** they carry.
+    ///
+    /// The count alone could not separate the two stories the same log tells:
+    /// "the reading really changed, so the session is re-asking" and "the
+    /// identity churned, so the overlay is re-drawing" produce the same count on
+    /// every pass. With the digest the two part company — a constant digest under
+    /// a stream of `text_change` events is identity churn, a changing one is a
+    /// changing reading — and neither number carries a recognized string, a
+    /// translation or a region identity.
+    ///
+    /// The digest is rendered here, from a `UInt32`, so no call site can hand
+    /// this emitter anything but a number: free text has no parameter to travel
+    /// in (`LiveTranslateSourceHygieneTests` pins that structurally).
+    func textChange(regionCount: Int, regionSetHash: UInt32) {
         emit("text_change", outcome: "success",
-             metadata: [.regionCount: String(regionCount)])
+             metadata: [.regionCount: String(regionCount),
+                        .regionSetHash: Self.regionSetHashHex(regionSetHash)])
+    }
+
+    /// How a region-set digest is spelled in the log: two groups of four hex
+    /// digits, `"a1b2:c3d4"`.
+    ///
+    /// The **colon is load-bearing**, not decoration. `LogSanitiser`'s
+    /// defence-in-depth scrub redacts anything matching a phone number — a digit
+    /// followed by six or more digits, spaces, hyphens, dots or parentheses and
+    /// another digit — so a digest that happened to come out all digits (about
+    /// one in forty of them) would be logged as `[redacted]` and the one line the
+    /// owner is reading would lose its discriminator, intermittently and
+    /// invisibly. A colon is outside that pattern's character class, so no
+    /// rendering of these eight hex digits can match it. The value is also short
+    /// enough (nine characters) to stay under the bus's unbroken-run bound, and
+    /// it is not routed through the code-shaped bound (`codeShapedMetadataKeys`
+    /// lists `errorCode` alone).
+    ///
+    /// The name says "hex" and not "text" deliberately: the release log-safety
+    /// gate flags any event-field expression containing a content word
+    /// (`…Text`, `text`, transcript, translated, recognized, prompt), and this
+    /// helper is called from inside a `metadata:` literal. A content-worded name
+    /// there is indistinguishable, to that scanner, from an emitter that really
+    /// does render a string into the log; renaming keeps the gate meaningful for
+    /// the code that *should* trip it instead of teaching it to ignore a line.
+    static func regionSetHashHex(_ digest: UInt32) -> String {
+        let hex = String(digest, radix: 16, uppercase: false)
+        let padded = String(repeating: "0", count: max(0, 8 - hex.count)) + hex
+        return "\(padded.prefix(4)):\(padded.suffix(4))"
     }
 
     // MARK: Tier 2 (C08)

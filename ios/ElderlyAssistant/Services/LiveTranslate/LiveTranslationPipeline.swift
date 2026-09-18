@@ -259,6 +259,75 @@ struct LiveTranslatePublication: Equatable {
     }
 }
 
+// MARK: - The content-free scene digest
+
+/// The digest a `text_change` carries beside its region count (owner device
+/// verdict, 2026-09-18). **It is a discriminator, not content.**
+///
+/// The owner had two stories arriving as one line of console: four
+/// `ocr_pass success regionCount=4` and four `text_change regionCount=4` every
+/// pass, with `region_removed`/`region_appeared` pairs in between. The count
+/// cannot separate *the reading really changed* from *the identity churned*, so
+/// the next capture needed one more number — and the number had to be one that
+/// says the same thing about a scene without carrying the scene.
+///
+/// What it is, exactly:
+///
+///  - **a digest of the set**, not of the order: the visible regions'
+///    normalized strings, sorted, each length-prefixed, folded by FNV-1a
+///    (32-bit). Two passes over the same text produce the same digest whatever
+///    order the stabiliser drew them in, and a box that moved is not a change;
+///  - **salted**, with a per-pipeline random value that is never logged, never
+///    stored and never sent anywhere. Without it the digest of a *small* set —
+///    a shop sign has a handful of readings — is a dictionary attack away from
+///    confirming a guess at what the camera saw, which is precisely the content
+///    this feature refuses to log. With it the value is only ever comparable
+///    inside one session's own log, which is the comparison the owner makes;
+///  - **32 bits, rendered nine characters** (`xxxx:xxxx`, see
+///    `LiveTranslateEvents.regionSetHashHex`): long enough that a false match
+///    between two different scenes is a one-in-four-billion event, short enough
+///    that it cannot be mistaken for a hash anyone could key a store on.
+///
+/// What it is not: it is not derived from the device, the session or the user;
+/// it is not stable across sessions or across launches (the salt sees to that);
+/// it is not reversible to a string, or to the *number* of strings, or to any
+/// one of them; and it is not a commitment about the content — a reader who
+/// already knows what the scene said cannot use the digest to prove it, and a
+/// reader who does not cannot recover it.
+///
+/// FNV-1a rather than `Hasher`: Swift's own `hashValue` is seeded per process,
+/// so it is *stable within a run* but its value differs between runs of the same
+/// input — the opposite of what a log line the owner will compare next week
+/// needs. FNV-1a is written out here (both constants are its published ones) so
+/// "the same scene logs the same digest" is a property of this file.
+enum LiveTranslateRegionSetDigest {
+
+    /// The digest of a visible text set, under `salt`.
+    static func digest(of texts: [String], salt: UInt) -> UInt32 {
+        var hash: UInt32 = 2166136261
+        func fold(_ byte: UInt8) {
+            hash ^= UInt32(byte)
+            hash = hash &* 16777619
+        }
+        // The salt first, so two sessions cannot be compared by digest alone.
+        withUnsafeBytes(of: salt.littleEndian) { bytes in
+            for byte in bytes { fold(byte) }
+        }
+        // Sorted, so the digest describes the *set*: the stabiliser's order is
+        // its own bookkeeping and must not show up as a change. Length-prefixed
+        // so no two different sets can fold to one digest by a boundary shift
+        // ("ab" + "c" is not "a" + "bc").
+        for text in texts.sorted() {
+            var length = UInt32(text.utf8.count).littleEndian
+            withUnsafeBytes(of: &length) { bytes in
+                for byte in bytes { fold(byte) }
+            }
+            for byte in text.utf8 { fold(byte) }
+        }
+        return hash
+    }
+}
+
 // MARK: - The pipeline
 
 /// C13's orchestration: the frame tick, the layers in order, the gate, the
@@ -295,6 +364,19 @@ actor LiveTranslationPipeline {
     private weak var backpressure: LiveTranslateBackpressure?
     private let events: LiveTranslateEvents
     private let publishToSink: PublicationSink
+
+    /// The salt this session's scene digests are taken under
+    /// (`LiveTranslateRegionSetDigest`). Drawn per pipeline and never logged,
+    /// stored or sent: it exists so the digest in the log is a discriminator
+    /// *within one session* and not a value a reader could match a guess about
+    /// the scene against. A test that pins a digest's exact value passes its own.
+    ///
+    /// A word-sized `UInt` rather than a spelled-out `UInt64`: the feature's
+    /// sources are scanned for the configured defaults (`NFR-LCT-011`) and a
+    /// `64` in a type name reads to that scan exactly like a re-declared
+    /// `translationMaxLengthAllowance`. The word is 64 bits on every platform
+    /// this app ships to, which is the whole width the salt needs.
+    private let regionDigestSalt: UInt
 
     /// The session's one clock, injected (the consent gate's `now:` seam,
     /// same convention). The pipeline is not time-driven — it is a frame tick,
@@ -414,6 +496,11 @@ actor LiveTranslationPipeline {
          observabilityBus: ObservabilityBus,
          brain: LocalBrainTranslating? = nil,
          now: @escaping () -> Date = Date.init,
+         /// The scene digest's salt (`LiveTranslateRegionSetDigest`). Random per
+         /// pipeline by default — a digest the log carries is only ever compared
+         /// with another from the same session's own log — and injectable for the
+         /// one test that pins a digest's exact value.
+         regionDigestSalt: UInt = UInt.random(in: .min ... .max),
          publish: @escaping PublicationSink) {
         self.locale = locale
         self.targetLanguage = targetLanguage
@@ -439,6 +526,7 @@ actor LiveTranslationPipeline {
                                                         targetLanguage: targetLanguage)
         self.publishToSink = publish
         self.now = now
+        self.regionDigestSalt = regionDigestSalt
         self.stabilizer = TextRegionStabilizer(config: config)
     }
 
@@ -706,7 +794,10 @@ actor LiveTranslationPipeline {
 
     /// Change events are content-free (a region identity and nothing else), so
     /// recording them cannot leak a string. The single `text_change` carries
-    /// the visible-region count, which is the shape the elder's screen has.
+    /// the visible-region count and the scene digest, which are the shape of the
+    /// elder's screen and nothing of what is on it — the two numbers that let
+    /// the next device capture tell a changed reading from a re-keyed region
+    /// (`LiveTranslateRegionSetDigest`).
     private func record(_ changes: [TextRegionStabilizer.RegionChangeEvent]) {
         guard !changes.isEmpty else { return }
         for change in changes {
@@ -716,7 +807,10 @@ actor LiveTranslationPipeline {
             case .disappeared: events.regionRemoved()
             }
         }
-        events.textChange(regionCount: stabilizer.visible.count)
+        events.textChange(regionCount: stabilizer.visible.count,
+                          regionSetHash: LiveTranslateRegionSetDigest.digest(
+                              of: stabilizer.visible.map(\.normalizedText),
+                              salt: regionDigestSalt))
     }
 
     /// The visible set is the only set: a region's outcome survives a cycle

@@ -843,6 +843,111 @@ final class TextRegionStabilizerTests: XCTestCase {
         XCTAssertEqual(stabilizer.visible.map(\.text), ["मा"])
     }
 
+    // MARK: - One-line blocks (owner device regression, 2026-09-18)
+
+    /// The owner's device trace, at this level: **a one-line block whose reading
+    /// wobbles must not become a new region while its box stands still.**
+    ///
+    /// This is the shape the device actually reported — `ocr_pass
+    /// regionCount=4` and `text_change regionCount=4` on every pass with the
+    /// count never moving, and `region_removed`/`region_appeared` pairs while the
+    /// scene was unchanged. A one-line block's key carries one member line, so
+    /// two readings of it are *disjoint* keys, and the stabiliser's one
+    /// subtractive rule read that as "two different surfaces" and refused the
+    /// geometry match every time. The region was re-minted on every second pass,
+    /// the appear hysteresis restarted, and the overlay redrew from scratch.
+    ///
+    /// The remedy is in the rule, not in the numbers: a one-line key is not a
+    /// grouping, so it cannot take the box's decision away. What must survive is
+    /// the whole of it — the identifier, the publish, and the never-empty
+    /// overlay — while the *reading* is still reported as what it is, a text
+    /// change on a region that has not moved.
+    func testAOneLineBlocksWobblingReadingKeepsItsRegionAndItsPublish() {
+        var stabilizer = TextRegionStabilizer(config: LiveTranslateConfig())
+        let sign = box(0.2, 0.3)
+        let readings = ["START", "5TART"]
+
+        let first = stabilizer.consume(regions: [block("text\u{1}start", "START", sign)])
+        XCTAssertEqual(first, [], "one sighting is not yet a region")
+        let second = stabilizer.consume(regions: [block("text\u{1}5tart", "5TART", sign)])
+        guard case .appeared(let identity) = second.first else {
+            return XCTFail("the second sighting is the appear hysteresis satisfied, got \(second)")
+        }
+
+        for pass in 2..<10 {
+            let reading = readings[pass % 2]
+            let changes = stabilizer.consume(regions: [
+                block("text\u{1}" + reading.lowercased(), reading, sign)
+            ])
+            XCTAssertEqual(stabilizer.visible.map(\.id), [identity],
+                           "pass \(pass): the sign was re-keyed while its box stood still")
+            XCTAssertEqual(changes, [.textChanged(id: identity)],
+                           "pass \(pass): the new reading is a text change on the same region, "
+                           + "never a departure and a fresh appearance")
+            XCTAssertEqual(stabilizer.activeRegionCount, 1,
+                           "pass \(pass): no phantom candidate was left behind the visible region")
+        }
+    }
+
+    /// And the device's own scene: **four** one-line signs, their readings
+    /// wobbling out of step with one another. The identity set is what must not
+    /// move — the count was never the problem, the identities were.
+    func testASceneOfOneLineSignsReadWobblyKeepsEveryIdentityForTenPasses() {
+        var stabilizer = TextRegionStabilizer(config: LiveTranslateConfig())
+        let readings = ["START", "5TART", "MENU", "M3NU", "EXIT", "3XIT", "OPEN", "0PEN"]
+        func scene(_ pass: Int) -> [LiveTextDetector.DetectedTextRegion] {
+            (0..<4).map { index in
+                let reading = readings[index * 2 + ((pass / 2) + index) % 2]
+                return block("text\u{1}" + reading.lowercased(), reading,
+                             box(0.2, 0.1 + Double(index) * 0.2))
+            }
+        }
+
+        _ = stabilizer.consume(regions: scene(0))
+        _ = stabilizer.consume(regions: scene(1))
+        let published = stabilizer.visible.map(\.id)
+        XCTAssertEqual(published.count, 4, "the scene published four signs")
+
+        for pass in 2..<10 {
+            let changes = stabilizer.consume(regions: scene(pass))
+            XCTAssertEqual(stabilizer.visible.map(\.id), published,
+                           "pass \(pass): the scene re-keyed its regions: "
+                           + "\(stabilizer.visible.map(\.id.rawValue))")
+            XCTAssertFalse(changes.contains { if case .disappeared = $0 { return true }; return false },
+                           "pass \(pass): a region departed a scene that stood still: \(changes)")
+            XCTAssertFalse(changes.contains { if case .appeared = $0 { return true }; return false },
+                           "pass \(pass): a region appeared over a region that never left: \(changes)")
+            XCTAssertEqual(stabilizer.visible.count, 4,
+                           "pass \(pass): the visible set emptied and refilled, which is the overlay blanking")
+        }
+    }
+
+    /// The arity rule's boundary, pinned: the refusal needs **both** keys to be
+    /// grouping something.
+    ///
+    /// A one-line key asserts a reading, not a grouping, so a grouped block
+    /// arriving on that box is not shown to be a different surface by it — the
+    /// box decides, and the region keeps its identifier. Reading it the other way
+    /// costs the elder a flicker on a panel the OCR regrouped, which is the
+    /// failure the whole block-identity rework exists to remove.
+    func testAOneLineKeyDoesNotRefuseTheBoxThatGroupsItLater() {
+        var stabilizer = TextRegionStabilizer(config: immediateConfig())
+        let sign = box(0.2, 0.3, width: 0.3, height: 0.2)
+        let appeared = stabilizer.consume(regions: [block("text\u{1}start", "START", sign)])
+        guard case .appeared(let identity) = appeared.first else {
+            return XCTFail("expected an appeared event, got \(appeared)")
+        }
+
+        // The object pass now groups that line with another one, and the reading
+        // it grouped carries nothing the region's own key shares.
+        let regrouped = stabilizer.consume(regions: [
+            block("text\u{1}menu\u{1}open 9-5", "MENU\nOPEN 9-5", sign)
+        ])
+        XCTAssertEqual(stabilizer.visible.map(\.id), [identity],
+                       "a one-line key is not a grouping claim: the box still decided")
+        XCTAssertEqual(regrouped, [.textChanged(id: identity)])
+    }
+
     // MARK: - Content-free events
 
     func testNoRecognizedStringCanTravelInAnEvent() {
@@ -873,7 +978,8 @@ final class TextRegionStabilizerTests: XCTestCase {
             XCTAssertFalse(described.contains("परीक्षण"))
             switch event {
             case .appeared: events.regionAppeared()
-            case .textChanged: events.textChange(regionCount: stabilizer.visible.count)
+            case .textChanged:
+                events.textChange(regionCount: stabilizer.visible.count, regionSetHash: 0)
             case .disappeared: events.regionRemoved()
             }
         }

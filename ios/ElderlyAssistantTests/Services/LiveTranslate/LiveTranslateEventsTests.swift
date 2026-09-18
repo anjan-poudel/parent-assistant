@@ -33,7 +33,7 @@ final class LiveTranslateEventsTests: XCTestCase {
         events.objectDetectionUnsupported()
         events.regionAppeared()
         events.regionRemoved()
-        events.textChange(regionCount: 2)
+        events.textChange(regionCount: 2, regionSetHash: 0x1a2b_3c4d)
         events.translationBatchRequested(stringCount: 5, batchIndex: 0, batchCount: 1)
         events.translationBatchResolved(resolvedCount: 4, unresolvedCount: 1, durationMs: 812)
         events.brainTranslationBatch(resolvedCount: 3, unresolvedCount: 1, durationMs: 4200)
@@ -162,6 +162,16 @@ final class LiveTranslateEventsTests: XCTestCase {
         for event in bus.events {
             for (key, value) in event.metadata {
                 if Int(value) != nil { continue }
+                // The one value that is neither a count nor a closed token: the
+                // scene digest (owner device report, 2026-09-18). It is pinned
+                // to a *shape* here rather than waved through — eight hex
+                // digits around a colon, nine characters in all, built by
+                // `regionSetHashHex` from a `UInt32` with no string in reach.
+                // Prose, a path, a URL, a key or a recognized string cannot
+                // satisfy that pattern.
+                if key == LiveTranslateEvents.MetadataKey.regionSetHash.rawValue,
+                   value.range(of: "^[0-9a-f]{4}:[0-9a-f]{4}$",
+                               options: .regularExpression) != nil { continue }
                 XCTAssertTrue(allowedTokens.contains(value),
                               "\(event.eventType).\(key) carries a value outside the closed vocabulary: \(value)")
                 XCTAssertFalse(value.contains(" "),
@@ -263,6 +273,32 @@ final class LiveTranslateEventsTests: XCTestCase {
         XCTAssertEqual(event?.outcome, "degraded")
         XCTAssertEqual(event?.metadata["reason"], "cost_budget_exhausted")
         XCTAssertEqual(event?.metadata["regionCount"], "3")
+    }
+
+    // MARK: Scenario: the scene digest is a discriminator, not a content channel
+
+    /// What the owner reads off the next device capture: two four-digit halves,
+    /// lowercase hex, one colon, always nine characters — so two lines of a log
+    /// can be compared at a glance and neither can be mistaken for prose.
+    func testTheSceneDigestRendersAsAFixedWidthHexPair() {
+        XCTAssertEqual(LiveTranslateEvents.regionSetHashHex(0x1a2b_3c4d), "1a2b:3c4d")
+        XCTAssertEqual(LiveTranslateEvents.regionSetHashHex(0), "0000:0000")
+        XCTAssertEqual(LiveTranslateEvents.regionSetHashHex(0xabcd), "0000:abcd")
+        XCTAssertEqual(LiveTranslateEvents.regionSetHashHex(0xffff_ffff), "ffff:ffff")
+        XCTAssertEqual(LiveTranslateEvents.regionSetHashHex(0x1234_5678).count, 9)
+    }
+
+    /// The colon is load-bearing. A digest is a `UInt32` and can be all digits;
+    /// the sanitiser's phone-number guard matches a run of seven or more digits
+    /// and would redact the whole value, silently turning "the scene is the
+    /// same" into "[redacted]" and making a stable scene look like a changing
+    /// one. The colon takes the value out of that guard's character class.
+    func testAnAllDigitDigestSurvivesTheSanitiserVerbatim() {
+        events.textChange(regionCount: 4, regionSetHash: 0x1234_5678)
+        let event = bus.events(named: "text_change").first
+        XCTAssertEqual(event?.metadata["regionSetHash"], "1234:5678")
+        XCTAssertNotEqual(event?.metadata["regionSetHash"], "[redacted]")
+        XCTAssertEqual(event?.metadata["regionCount"], "4")
     }
 
     func testCameraEventsCarryOnlyClosedReasonTokens() {

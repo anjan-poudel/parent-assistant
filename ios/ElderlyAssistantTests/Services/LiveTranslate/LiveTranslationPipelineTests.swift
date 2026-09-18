@@ -271,7 +271,13 @@ final class LiveTranslationPipelineTests: XCTestCase {
                              /// 2026-09-18). Defaulted so every scenario that
                              /// predates the mode keeps the translated view it
                              /// asserts about.
-                             extractionMode: Bool = false) -> Harness {
+                             extractionMode: Bool = false,
+                             /// The session's scene-digest salt. Production
+                             /// draws it at random and never logs it; the
+                             /// harness pins it, so a scenario can assert the
+                             /// *value* the digest events carry instead of
+                             /// only its shape.
+                             regionDigestSalt: UInt = 0x51_7a2f_1b3c_4d5e) -> Harness {
         let bus = LiveTranslateSanitisingBus()
         // The brain is behind its own seam, so these tests never build a
         // `ModelStore` or touch a model file: the cascade is what is under
@@ -329,6 +335,7 @@ final class LiveTranslationPipelineTests: XCTestCase {
                                                observabilityBus: bus,
                                                brain: handedInBrain,
                                                now: now,
+                                               regionDigestSalt: regionDigestSalt,
                                                publish: { publication in
                                                    await recorder.record(publication)
                                                })
@@ -809,6 +816,315 @@ final class LiveTranslationPipelineTests: XCTestCase {
         let movedRegion = try XCTUnwrap(region(cloudText, in: afterMove))
         XCTAssertEqual(movedRegion.box.yMin, 0.05, accuracy: 1e-9,
                        "geometry-only drift still adopts the new box")
+    }
+
+    // MARK: - Scenario: The stabilization moves the picture, never the identities
+    //
+    // The owner's device log (2026-09-18) showed `ocr_pass regionCount=4` and
+    // `text_change regionCount=4` on **every** pass with the count never
+    // changing, and `region_removed`/`region_appeared` pairs mid-stream over a
+    // scene nobody had touched: the identities were being re-keyed while the
+    // reading was not. The prime hypothesis was that the frame stabilization
+    // had leaked into the matching space — a correction applied to the boxes
+    // between OCR and the stabiliser re-keys every region on every pass, since
+    // no two passes would ever put a box where the last one did. It had not
+    // leaked (the churn was one-line block keys; see
+    // `TextRegionStabilizerTests`), but the contract it named is the one this
+    // feature is most likely to lose next, so it is pinned here end to end:
+    // recognition reads the **raw** frame, the pipeline's published boxes are
+    // the raw boxes whatever the correction says, and the identities follow the
+    // text rather than the window. The view-side composition is untouched and
+    // stays the merged one-map rule: the *placements* follow the window, and
+    // the scenarios below assert that they do, so a pipeline that ignored the
+    // reported window entirely could not pass them by accident.
+
+    /// Four one-line signs at boxes that never move, all well inside the window
+    /// every stabilization offset these scenarios use leaves on screen — the
+    /// composed window is `whole` inset by the margin with an offset of at most
+    /// that margin, so `[0.05, 0.95]` at the extremes.
+    private func oneLineSigns() -> [LiveTextDetector.DetectedTextRegion] {
+        [detected("Closed", box: box(0.10, 0.10, 0.40, 0.20)),
+         detected("Push", box: box(0.55, 0.10, 0.85, 0.20)),
+         detected("Exit", box: box(0.10, 0.35, 0.40, 0.45)),
+         detected("Mind the step", box: box(0.55, 0.35, 0.90, 0.45))]
+    }
+
+    /// The four signs as the **grouper** hands them over: each carrying the
+    /// identity of the one-line block it is — `"text\u{1}<reading>"`, the exact
+    /// form the device's log was produced with, and therefore a *different* key
+    /// the moment the reading differs. This is the case that churned, and a fake
+    /// that leaves `blockIdentity` nil cannot exercise it.
+    private func grouped(_ readings: [String],
+                         boxes: [NormalizedBox]) -> [LiveTextDetector.DetectedTextRegion] {
+        zip(readings, boxes).map { reading, box in
+            LiveTextDetector.DetectedTextRegion(text: reading,
+                                                normalizedBox: box,
+                                                detectedLanguage: "en",
+                                                confidence: 0.9,
+                                                blockIdentity: "text\u{1}" + reading)
+        }
+    }
+
+    /// The four signs answered on device, so a scenario about identity has no
+    /// cloud work in flight while it counts publications — the counts below are
+    /// then a fact about the passes and not about when a request landed.
+    private var oneLineSignTranslations: [String: String] {
+        ["closed": "बन्द", "clased": "बन्द",
+         "push": "धकेल्नु", "push the": "धकेल्नु",
+         "exit": "निस्कने", "exil": "निस्कने",
+         "mind the step": "सिँढी ध्यान", "mind the stops": "सिँढी ध्यान"]
+    }
+
+    /// The layout the view reports while the picture is being held still: its
+    /// window is the frame's own, composed with the correction. This is the
+    /// one-map rule from the view's side, and it is the *only* place the
+    /// correction becomes geometry.
+    private func layout(pushedThrough stabilization: FrameStabilization) -> LiveTranslateLayout {
+        var layout = self.layout
+        layout.crop = LiveCameraCrop.whole.stabilized(by: stabilization)
+        return layout
+    }
+
+    /// The oscillation these scenarios drive: a correction that never settles,
+    /// panning the picture left and right by more than the follow dead zone on
+    /// every pass, with the window composed from it exactly as the view does.
+    private func oscillatingStabilization(pass: Int, margin: Double) -> FrameStabilization {
+        FrameStabilization(offset: pass.isMultiple(of: 2)
+                                ? CGPoint(x: 0.02, y: -0.01)
+                                : CGPoint(x: -0.02, y: 0.01),
+                           margin: margin)
+    }
+
+    @MainActor
+    func testScenarioAnOscillatingStabilizationNeverReKeysTheScene() async throws {
+        let harness = makeHarness(dictionary: oneLineSignTranslations,
+                                  regionDigestSalt: 0x51_7a2f_1b3c_4d5e)
+        var frame = try makeFrame()
+        harness.recogniser.defaultStep = .regions(oneLineSigns())
+
+        // Two warm-up passes at the identity window: the signs reach the
+        // stabiliser's appearance hysteresis and are published once.
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+        let settled = try await latest(harness)
+        XCTAssertEqual(settled.regions.count, 4, "the four signs are on screen")
+
+        // Ten passes of a correction that never settles. The scene does not
+        // change at all: same four signs, same readings, same boxes.
+        var identities = Set(settled.regions.map(\.id))
+        var boxesPerPass: [Set<[Double]>] = [boxes(settled.regions.map(\.box))]
+        var formsPerPass: [[LiveOverlayPlacement.Form]] = []
+        for pass in 0..<10 {
+            let stabilization = oscillatingStabilization(pass: pass,
+                                                          margin: harness.config.frameStabMargin)
+            // The view reports the composed window (it moved), and the frame
+            // carries the correction to it (it moved too). Neither is an input
+            // to what a region *is*.
+            await harness.pipeline.updateLayout(layout(pushedThrough: stabilization))
+            frame.stabilization = stabilization
+            await harness.pipeline.ingest(frame)
+
+            let published = try await latest(harness)
+            XCTAssertEqual(published.regions.count, 4,
+                           "pass \(pass): the four signs stay on screen")
+            identities.formUnion(published.regions.map(\.id))
+            boxesPerPass.append(boxes(published.regions.map(\.box)))
+            formsPerPass.append(published.placements.map(\.form))
+            assertEveryRegionIsRendered(published)
+        }
+
+        // One identity per sign and not one more: ten passes, four identities.
+        XCTAssertEqual(identities.count, 4,
+                       "the correction re-keyed a region: the window moved and the boxes did not")
+        // The published boxes are the raw ones — the scripted boxes, unchanged
+        // by the correction that was panning the picture the whole time — and
+        // they are the same boxes on every pass, so the text the elder is
+        // reading never jumps with the window.
+        let rawBoxes = boxes(oneLineSigns().map(\.normalizedBox))
+        for (pass, passBoxes) in boxesPerPass.enumerated() {
+            XCTAssertEqual(passBoxes, rawBoxes,
+                           "pass \(pass): a published box moved with the stabilization")
+        }
+        // The picture *is* being panned: the placements follow the composed
+        // window, or the one-map rule has been lost and this test proves nothing.
+        XCTAssertNotEqual(formsPerPass[0], formsPerPass[1],
+                          "the placements must follow the window the view reported")
+
+        // The churn events, which is what the owner read off the console: one
+        // appearance per sign, no departure, and one change event for a scene
+        // whose reading never changed.
+        XCTAssertEqual(harness.bus.events(named: "region_appeared").count, 4,
+                       "each sign appears once and is never re-keyed")
+        XCTAssertEqual(harness.bus.events(named: "region_removed").count, 0,
+                       "nothing left the screen, so nothing may be reported as gone")
+        XCTAssertEqual(harness.bus.events(named: "text_change").count, 1,
+                       "twelve passes, one reading: the change event must not fire per pass")
+    }
+
+    /// The boxes of a set of regions as a comparable value. `NormalizedBox` is
+    /// not `Hashable`, and the point here is a set comparison — a re-keyed
+    /// region would arrive as a different box under the same text.
+    private func boxes(_ boxes: [NormalizedBox]) -> Set<[Double]> {
+        Set(boxes.map { [$0.xMin, $0.yMin, $0.xMax, $0.yMax] })
+    }
+
+    /// The owner's own defect shape, end to end on the published stream: a scene
+    /// of one-line signs whose readings wobble the way OCR wobbles, over a
+    /// picture the correction is panning at the same time. The reading really
+    /// does change — that is a change event, and the digest below is what says
+    /// *which* — and the identity must not. The `region_removed` /
+    /// `region_appeared` pairs are what the owner read off the console, and a
+    /// scene that stood still must not produce them.
+    @MainActor
+    func testScenarioAOneLineWobbleOverAFollowedPictureKeepsEveryIdentity() async throws {
+        let harness = makeHarness(dictionary: oneLineSignTranslations)
+        var frame = try makeFrame()
+
+        // The same four signs, a plausible misread each — same boxes, one line.
+        let boxes = oneLineSigns().map(\.normalizedBox)
+        let steady = grouped(["Closed", "Push", "Exit", "Mind the step"], boxes: boxes)
+        let wobbly = grouped(["Clased", "Push the", "Exil", "Mind the stops"], boxes: boxes)
+
+        var identities: Set<TextRegionStabilizer.RegionIdentity> = []
+        for pass in 0..<10 {
+            harness.recogniser.defaultStep = .regions(pass.isMultiple(of: 2) ? steady : wobbly)
+            let stabilization = oscillatingStabilization(pass: pass,
+                                                          margin: harness.config.frameStabMargin)
+            await harness.pipeline.updateLayout(layout(pushedThrough: stabilization))
+            frame.stabilization = stabilization
+            await harness.pipeline.ingest(frame)
+
+            let published = try await latest(harness)
+            // The first pass only tracks: a region is published once it has
+            // been seen twice (the appearance hysteresis).
+            if pass > 0 {
+                XCTAssertEqual(published.regions.count, 4, "pass \(pass): four signs, one per box")
+            }
+            identities.formUnion(published.regions.map(\.id))
+            assertEveryRegionIsRendered(published)
+        }
+
+        // Four identities for ten passes of changing readings: the identity
+        // followed the *text's* answer and never the wobble.
+        XCTAssertEqual(identities.count, 4,
+                       "a wobbling one-line reading re-keyed its region — the device defect")
+        XCTAssertEqual(harness.bus.events(named: "region_appeared").count, 4,
+                       "each sign appears once; an appear/remove pair is the churn")
+        XCTAssertEqual(harness.bus.events(named: "region_removed").count, 0)
+        XCTAssertGreaterThan(harness.bus.events(named: "text_change").count, 1,
+                             "the reading really did change, and text_change is the event for it")
+    }
+
+    /// The same scene and the same ten passes, run with and without a
+    /// correction on the frames, for the comparison below.
+    @MainActor
+    private func runStaticScene(withCorrection: Bool) async throws
+        -> (count: Int, sequence: Int, stream: [LiveTranslatePublication]) {
+        let harness = makeHarness(dictionary: oneLineSignTranslations)
+        await harness.pipeline.updateLayout(layout)
+        var frame = try makeFrame()
+        harness.recogniser.defaultStep = .regions(oneLineSigns())
+        for pass in 0..<10 {
+            if withCorrection {
+                frame.stabilization = oscillatingStabilization(
+                    pass: pass, margin: harness.config.frameStabMargin)
+            }
+            await harness.pipeline.ingest(frame)
+        }
+        return (await publicationCount(harness),
+                await publishedSequence(harness),
+                await publications(harness))
+    }
+
+    /// The same oscillation with the window held still proves the *other* half:
+    /// the stabilization is not an input to the publication sequence either.
+    /// Two harnesses, one script, one difference (`frame.stabilization`), and
+    /// the counters must not be able to tell them apart.
+    @MainActor
+    func testScenarioACorrectionTheViewNeverReportsChangesNoPublication() async throws {
+        let plain = try await runStaticScene(withCorrection: false)
+        let corrected = try await runStaticScene(withCorrection: true)
+
+        XCTAssertEqual(corrected.count, plain.count,
+                       "a correction the view has not composed into the layout is not news")
+        XCTAssertEqual(corrected.sequence, plain.sequence)
+        XCTAssertEqual(corrected.stream, plain.stream,
+                       "the frame's correction must not reach the published value at all")
+    }
+
+    // MARK: - Scenario: The scene digest is the elder's screen and nothing else
+
+    /// The diagnostic the owner's next device capture reads. It has to answer
+    /// exactly one question — *did the reading change, or did the identity?* —
+    /// and it has to be able to answer it without carrying a character of the
+    /// scene. So: the same reading twice is the same value, a changed reading
+    /// is a different one, and the value is a 32-bit digest of the visible
+    /// **normalized** strings under a salt that is drawn per session and never
+    /// logged.
+    @MainActor
+    func testScenarioTheSceneDigestFollowsTheReadingAndNothingElse() async throws {
+        let salt: UInt = 0x51_7a2f_1b3c_4d5e
+        let harness = makeHarness(dictionary: oneLineSignTranslations, regionDigestSalt: salt)
+        await harness.pipeline.updateLayout(layout)
+        var frame = try makeFrame()
+
+        let signs = oneLineSigns()
+        harness.recogniser.defaultStep = .regions(signs)
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        // One change event for one reading, whatever the window was doing, and
+        // its value is exactly the digest of the normalized strings on screen.
+        let first = harness.bus.events(named: "text_change")
+        XCTAssertEqual(first.count, 1)
+        let logged = try XCTUnwrap(first.first?.metadata["regionSetHash"])
+        let expected = LiveTranslateRegionSetDigest.digest(
+            of: signs.map { LiveTranslateTextNormalization.normalized($0.text) }, salt: salt)
+        XCTAssertEqual(logged, LiveTranslateEvents.regionSetHashHex(expected),
+                       "the digest is taken over the normalized visible set")
+
+        // The same set in another order is the same set: the digest is over the
+        // scene, not over the order a pass happened to see it in.
+        XCTAssertEqual(LiveTranslateRegionSetDigest.digest(
+            of: signs.reversed().map { LiveTranslateTextNormalization.normalized($0.text) }, salt: salt),
+                       expected)
+        // The same call twice is the same value — the owner compares two lines
+        // of one log, so "stable within a session" has to be exact — and a
+        // different session's salt is a different one, which is what makes the
+        // value unguessable from the scene rather than a lookup table for it.
+        XCTAssertEqual(LiveTranslateRegionSetDigest.digest(
+            of: signs.map { LiveTranslateTextNormalization.normalized($0.text) }, salt: salt), expected)
+        XCTAssertNotEqual(LiveTranslateRegionSetDigest.digest(
+            of: signs.map { LiveTranslateTextNormalization.normalized($0.text) }, salt: salt &+ 1), expected)
+        // The set's own boundary is part of the input, so two different readings
+        // cannot collide through their concatenation.
+        XCTAssertNotEqual(LiveTranslateRegionSetDigest.digest(of: ["ab", "c"], salt: salt),
+                          LiveTranslateRegionSetDigest.digest(of: ["a", "bc"], salt: salt))
+        // A different reading — one sign re-read — is a different value, and it
+        // still says nothing about what changed.
+        let changed = LiveTranslateRegionSetDigest.digest(
+            of: signs.dropLast().map { LiveTranslateTextNormalization.normalized($0.text) } + ["Mind the gap"],
+            salt: salt)
+        XCTAssertNotEqual(changed, expected)
+
+        // What reaches the log has no source string in it — not one of them, and
+        // not a run of one: the value is nine characters of hex and a colon.
+        for text in signs.map(\.text) + ["Mind the gap"] {
+            XCTAssertFalse(logged.contains(text), "\(text) is readable in the logged value")
+            let characters = Array(text)
+            for length in 3...characters.count {
+                for start in 0...(characters.count - length) {
+                    let run = String(characters[start..<(start + length)])
+                    XCTAssertFalse(logged.contains(run),
+                                   "\"\(run)\" of \(text) is recoverable from the logged value")
+                }
+            }
+        }
+        XCTAssertTrue(logged.range(of: "^[0-9a-f]{4}:[0-9a-f]{4}$",
+                                   options: .regularExpression) != nil,
+                      "the logged digest is not a bare hex rendering: \(logged)")
+        XCTAssertEqual(harness.bus.events(named: "text_change").first?.metadata["regionCount"], "4")
     }
 
     // MARK: - Scenario: A camera that leaves clears the overlay, and a camera

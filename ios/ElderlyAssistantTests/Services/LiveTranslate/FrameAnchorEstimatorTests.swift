@@ -115,47 +115,110 @@ final class FrameAnchorEstimatorTests: XCTestCase {
                              "the tremor this absorbs is over 2 pt on the glass: not a rounding artifact")
     }
 
-    func testADeliberateMovementIsFollowedSmoothlyRatherThanJumped() {
-        // The elder re-frames: the phone moves 8 % of the frame to the right, in
-        // one step, and stops there. The window takes a share of the way per
-        // measurement, so the movement is *seen* — the part that has not been
-        // followed yet is what the elder watches the picture travel by — and it
-        // ends where the elder pointed.
-        let policy = lawPolicy()
-        let cumulative = CGPoint(x: 0.08, y: 0)
+    /// Runs the law over one movement and a held hand, the way the estimator
+    /// feeds it: the movement in the first measurement's interval, a zero
+    /// interval after that.
+    private func runHold(motion: CGFloat,
+                         measurements: Int,
+                         policy: FrameStabilizationPolicy) -> (offsets: [CGPoint], onScreen: [CGFloat]) {
+        let cumulative = CGPoint(x: motion, y: 0)
         var offset = CGPoint.zero
         var offsets: [CGPoint] = []
         var onScreen: [CGFloat] = []
-
-        for index in 0..<12 {
-            // The hand moves once and then holds still; the estimator's interval
-            // is the content's motion since the *last* measurement, so every
-            // measurement after the first has a zero interval.
-            let interval = CGPoint(x: index == 0 ? 0.08 : 0, y: 0)
+        for index in 0..<measurements {
+            let interval = CGPoint(x: index == 0 ? motion : 0, y: 0)
             let residual = FrameStabilizationLaw.residual(cumulative: cumulative, offset: offset,
                                                           offsetAtAnchor: .zero)
             offset = FrameStabilizationLaw.offset(offset, interval: interval, cumulative: cumulative,
                                                   residual: residual, policy: policy)
-            let after = FrameStabilizationLaw.residual(cumulative: cumulative, offset: offset,
-                                                       offsetAtAnchor: .zero)
             offsets.append(offset)
-            onScreen.append(after.x)
+            onScreen.append(FrameStabilizationLaw.residual(cumulative: cumulative, offset: offset,
+                                                           offsetAtAnchor: .zero).x)
         }
+        return (offsets, onScreen)
+    }
 
-        XCTAssertEqual(offsets[0].x, 0.028, accuracy: 1e-12,
-                       "one measurement is a share of the movement (0.35 × 0.08), never the whole of it")
+    /// The band just past the dead zone, where a movement is *shown*: the elder
+    /// is panning slowly, the picture is allowed to travel, and the whole of it
+    /// is followed over a few measurements rather than in one.
+    func testASmallDeliberateMovementIsFollowedSmoothlyRatherThanJumped() {
+        // A re-frame of under two dead zones — the band where a hand's tremor
+        // and a slow pan cannot be told apart by amplitude, so the law keeps the
+        // smooth factor and lets the movement be seen.
+        let policy = lawPolicy()
+        let motion: CGFloat = 0.018
+        let (offsets, onScreen) = runHold(motion: motion, measurements: 8, policy: policy)
+
+        XCTAssertEqual(offsets[0].x, 0.35 * motion, accuracy: 1e-12,
+                       "one measurement is a share of the movement, never the whole of it")
         XCTAssertGreaterThan(onScreen[0], policy.deadZone,
                              "and the elder sees the picture move by the part that is not yet followed")
         XCTAssertTrue(zip(onScreen, onScreen.dropFirst()).allSatisfy { $0 >= $1 },
-                      "the residual never grows: the pan reads as a pan and never as a bounce")
-        XCTAssertGreaterThan(onScreen[0] - onScreen.last!, 0.04,
+                      "the residual never grows: the movement reads as a movement and never as a bounce")
+        XCTAssertGreaterThan(onScreen[0] - onScreen.last!, 0.002,
                              "and it shrinks by much more than an epsilon on the way to rest")
-        XCTAssertTrue(offsets.allSatisfy { $0.x <= cumulative.x + 1e-12 },
+        XCTAssertTrue(offsets.allSatisfy { $0.x <= motion + 1e-12 },
                       "the window closes the gap from behind and never overshoots")
         XCTAssertEqual(Array(offsets.suffix(4)), Array(repeating: offsets.last!, count: 4),
                        "a hand that has stopped leaves the picture still: the law comes to rest, it does not creep")
         XCTAssertLessThanOrEqual(onScreen.last!, policy.deadZone,
                                  "and it rests inside the dead zone, so any further tremor is absorbed whole")
+    }
+
+    /// The owner's second device symptom, in the arithmetic it lives in
+    /// (2026-09-18): *"when the viewport moves it's too slow to respond."*
+    ///
+    /// A pan this far outside the dead zone is not a movement to be *shown*, it
+    /// is a statement about where the elder wants the camera, and the picture has
+    /// to arrive. The fixed 0.35 that makes a small re-frame legible leaves 65 %
+    /// of an 8 % pan on the glass a measurement later — the lag they reported. At
+    /// 0.85 what is still behind is a seventh of the movement, and it is inside
+    /// the dead zone on the next measurement, so the picture stops at the framing
+    /// the elder asked for and stays there.
+    func testAPanClearlyPastTheDeadZoneIsFollowedFastRatherThanShown() {
+        let policy = lawPolicy()
+        let pan: CGFloat = 0.08
+        let (offsets, onScreen) = runHold(motion: pan, measurements: 8, policy: policy)
+
+        XCTAssertEqual(offsets[0].x, 0.85 * pan, accuracy: 1e-12,
+                       "one measurement takes 85 % of a lag this size: the smooth factor is what made a pan read as lag")
+        XCTAssertLessThanOrEqual(onScreen[0], 0.15 * pan + 1e-12,
+                                 "so what the elder still sees behind the picture is under a fifth of the movement")
+        XCTAssertLessThanOrEqual(onScreen[1], policy.deadZone,
+                                 "and it is inside the dead zone on the very next measurement: at the shipped "
+                                 + "cadence the picture is at the elder's framing one interval after the pan is measured")
+        XCTAssertTrue(zip(onScreen, onScreen.dropFirst()).allSatisfy { $0 >= $1 },
+                      "the residual never grows: catching up is still not a bounce")
+        XCTAssertTrue(offsets.allSatisfy { $0.x <= pan + 1e-12 },
+                      "the window closes the gap from behind and never overshoots")
+        XCTAssertEqual(Array(offsets.suffix(4)), Array(repeating: offsets.last!, count: 4),
+                       "a hand that has stopped leaves the picture still: the law comes to rest, it does not creep")
+        XCTAssertLessThanOrEqual(onScreen.last!, policy.deadZone,
+                                 "and it rests inside the dead zone, so any further tremor is absorbed whole")
+    }
+
+    /// Where the two bands part company, and that the threshold travels with the
+    /// dead zone rather than being a lag of its own: the quantity that separates
+    /// a tremor from a pan is how far behind the picture is, and the dead zone is
+    /// already this feature's measurement of that.
+    func testTheFastFollowSwitchesAtTwiceTheDeadZoneAndNotBeforeIt() {
+        let justInside = lawStep(deadZone: 0.01, motion: 0.0199)
+        XCTAssertEqual(justInside.offset.x, 0.35 * 0.0199, accuracy: 1e-12,
+                       "under two dead zones the smooth factor still governs")
+
+        let atTheSwitch = lawStep(deadZone: 0.01, motion: 0.02)
+        XCTAssertEqual(atTheSwitch.offset.x, 0.85 * 0.02, accuracy: 1e-12,
+                       "and at exactly two dead zones the picture is unmistakably behind, so the fast rate applies")
+
+        let wideZone = lawStep(deadZone: 0.04, motion: 0.05)
+        XCTAssertEqual(wideZone.offset.x, 0.35 * 0.05, accuracy: 1e-12,
+                       "the switch moves with the dead zone: 5 % is inside two 4 % zones")
+        let wideZonePan = lawStep(deadZone: 0.04, motion: 0.081)
+        XCTAssertEqual(wideZonePan.offset.x, 0.85 * 0.081, accuracy: 1e-12)
+
+        let exactFollow = lawStep(deadZone: 0.01, motion: 0.08, followFactor: 1)
+        XCTAssertEqual(exactFollow.offset.x, 0.08, accuracy: 1e-12,
+                       "a policy that already follows exactly keeps doing so: the fast rate is a floor, not a cap")
     }
 
     func testTheDeadZoneBoundaryIsInsideTheZoneAndOneHairPastItIsNot() {
@@ -189,7 +252,8 @@ final class FrameAnchorEstimatorTests: XCTestCase {
         let offset = FrameStabilizationLaw.offset(.zero, interval: cumulative, cumulative: cumulative,
                                                   residual: residual, policy: policy)
 
-        XCTAssertEqual(offset.x, 0.35 * 0.09, accuracy: 1e-12, "past the dead zone: followed")
+        XCTAssertEqual(offset.x, 0.85 * 0.09, accuracy: 1e-12,
+                       "clearly past the dead zone: followed at the fast rate")
         XCTAssertEqual(offset.y, 0.004, accuracy: 1e-12, "inside it: absorbed whole")
     }
 
@@ -535,17 +599,81 @@ final class FrameAnchorEstimatorTests: XCTestCase {
         XCTAssertEqual(anchor.midY, 0.5 + tremor.y, accuracy: 1e-9)
     }
 
+    /// The fast band end to end, through the estimator's own anchor bookkeeping
+    /// rather than the law in isolation — the owner's *"when the viewport moves
+    /// it's too slow to respond"* as a device would see it (2026-09-18).
+    ///
+    /// A deliberate small re-frame of 2.5 % of the frame, inside the window's
+    /// travel so the correction can answer it in full: the window is 85 % of the
+    /// way to it in the measurement that saw it, and inside the dead zone on the
+    /// next. A fixed 0.35 spent five measurements getting there — at the shipped
+    /// sampling interval, the picture visibly trailing the phone for over a
+    /// second.
+    func testASmallPanIsCaughtUpInTheMeasurementThatSawIt() throws {
+        let pan = CGPoint(x: 0.025, y: 0)
+        let registration = ScriptedRegistration([FrameMotionMap.translation(pan),
+                                                 FrameMotionMap.translation(.zero)])
+        var estimator = makeEstimator(registration)
+        let buffer = try frameBuffer()
+        _ = estimator.observe(pixelBuffer: buffer, pixelSize: frameSize, timestamp: 0)
+
+        let first = estimator.observe(pixelBuffer: buffer, pixelSize: frameSize, timestamp: 0.25)
+        XCTAssertEqual(first.offset.x, 0.85 * pan.x, accuracy: 1e-9,
+                       "the re-frame is caught up in the measurement that saw it")
+        XCTAssertLessThanOrEqual(pan.x - first.offset.x, 0.15 * pan.x + 1e-9,
+                                 "…leaving a seventh of the movement on the glass, not two thirds")
+
+        let second = estimator.observe(pixelBuffer: buffer, pixelSize: frameSize, timestamp: 0.5)
+        XCTAssertLessThanOrEqual(pan.x - second.offset.x, 0.01,
+                                 "and it is inside the dead zone of the elder's framing on the next measurement")
+        XCTAssertLessThanOrEqual(second.offset.x, pan.x,
+                                 "the window closed the gap from behind and never overshot")
+        XCTAssertLessThanOrEqual(Double(second.offset.x), second.travelLimit,
+                                 "…within the travel the inset bought")
+    }
+
+    /// And a pan wider than the window has travel for — the whip-pan case the
+    /// margin clamps. The window still answers at the fast rate: it spends 85 %
+    /// of its whole travel in the measurement that saw the pan, rather than the
+    /// third of it the fixed factor spent, so the picture is at the edge of what
+    /// the correction can do almost at once and the elder's own framing has
+    /// nothing left to settle. The rest of the motion is the documented price —
+    /// the picture takes it, because the window has no more room (FR-LCT-014's
+    /// no-black-sliver rule).
+    func testAPanWiderThanTheWindowSpendsItsTravelAtTheFastRate() throws {
+        let pan = CGPoint(x: 0.08, y: 0)
+        let registration = ScriptedRegistration([FrameMotionMap.translation(pan),
+                                                 FrameMotionMap.translation(.zero)])
+        var estimator = makeEstimator(registration)
+        let buffer = try frameBuffer()
+        _ = estimator.observe(pixelBuffer: buffer, pixelSize: frameSize, timestamp: 0)
+
+        let first = estimator.observe(pixelBuffer: buffer, pixelSize: frameSize, timestamp: 0.25)
+        XCTAssertEqual(first.offset.x, 0.85 * first.travelLimit, accuracy: 1e-9,
+                       "85 % of the window's whole travel, in the measurement that saw the pan")
+        XCTAssertLessThanOrEqual(Double(first.offset.x), first.travelLimit,
+                                 "and never past the budget: the clamp is the geometry, not a rule after the fact")
+
+        let second = estimator.observe(pixelBuffer: buffer, pixelSize: frameSize, timestamp: 0.5)
+        XCTAssertGreaterThan(second.offset.x, first.offset.x,
+                             "the window keeps closing on the budget rather than resting short of it")
+        XCTAssertLessThanOrEqual(Double(second.offset.x), second.travelLimit)
+    }
+
     func testARegistrationThatCannotMeasureHoldsTheWindowAndSaysSo() throws {
         // The registration refuses (a frozen frame, a scene with nothing to
         // register, a format it declined). An estimate that is not being made
         // must not move the picture — and must not throw away the one it has.
-        let motion = FrameMotionMap.translation(CGPoint(x: 0.02, y: 0))
+        // A motion inside the band the smooth factor governs (past the dead
+        // zone, under twice it): this test is about a refusal holding the window,
+        // not about which rate a lag is followed at.
+        let motion = FrameMotionMap.translation(CGPoint(x: 0.015, y: 0))
         let registration = ScriptedRegistration([motion, nil, nil, motion])
         var estimator = makeEstimator(registration)
         let buffer = try frameBuffer()
         _ = estimator.observe(pixelBuffer: buffer, pixelSize: frameSize, timestamp: 0)
         let measured = estimator.observe(pixelBuffer: buffer, pixelSize: frameSize, timestamp: 0.25)
-        XCTAssertEqual(measured.offset.x, 0.007, accuracy: 1e-9,
+        XCTAssertEqual(measured.offset.x, 0.35 * 0.015, accuracy: 1e-9,
                        "past the 1 % dead zone, so the window is 0.35 of the way")
 
         for attempt in 1...2 {
