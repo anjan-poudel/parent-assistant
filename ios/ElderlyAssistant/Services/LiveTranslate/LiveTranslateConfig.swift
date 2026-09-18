@@ -832,6 +832,77 @@ struct LiveTranslateConfig: Equatable {
     /// persisted state — `LiveTranslateSettings` owns the persisted value.
     var alwaysShowOriginalDefault: Bool = false
 
+    // MARK: Overlay presentation — the green highlight (owner spec, 2026-09-18)
+
+    // The owner's own description of the look this section configuration-drives:
+    // "The whole idea was to overlay the extracted OCR text over the text in
+    // the picture, then translate once OCR is solid. Stabilise the extracted
+    // text and stabilise the overlay. The bounding box can be TRANSPARENT GREEN
+    // with DARK COLORED TEXT — text plus the transparent green overlay." The
+    // grammar — the corner, the fill, the ink — is the token table's
+    // (`DesignTokens.overlayHighlight`, `DesignTokens.textPrimary`); the three
+    // numbers below are operational, because a device check on a dim kitchen or
+    // a bright shopfront is exactly what would move them.
+
+    /// How much of the picture the green wash lets through: `0.4` ⇒ the box is
+    /// 40 % green and 60 % whatever the camera sees under it.
+    ///
+    /// The band this value has to stay in is the owner's ("transparent green …
+    /// the green wash must not obscure the original text beneath it"): below
+    /// ~0.25 the box stops reading as a highlight at all and the elder cannot
+    /// tell which text the app has recognized, and above ~0.5 the wash starts
+    /// to bury the printed text it is drawn over — which is precisely what the
+    /// opaque panel this replaces did, and what the owner rejected.
+    ///
+    /// The value has a second job, and it is the one that is easy to miss:
+    /// `DesignTokens.textPrimary` is drawn *inside* the wash, so the wash is the
+    /// text's background. At 0.4 over a white page the composite is a light
+    /// green that near-black type clears by a wide margin; a household that
+    /// raises this key past 0.5 is trading the dark text's contrast for the
+    /// picture's, and the token test that measures that pair is where the trade
+    /// is recorded.
+    var overlayHighlightOpacity: Double = 0.4
+
+    /// The room between the detected text region and the green box's edge, in
+    /// points — the owner's "small padding ~5pt".
+    ///
+    /// This is the *green box's* padding, not the pill's and not the panel's
+    /// internal spacing: the box is the detected region plus this much on each
+    /// side, so the elder sees the app's claim ("these words, here") as a band
+    /// around the words rather than a box that clips them. Small on purpose —
+    /// the box has to read as the text's own highlight, and a wide margin is the
+    /// bubble floating over the picture the owner rejected on 2026-09-17.
+    ///
+    /// The placement honours it exactly: the drawn box is never smaller than
+    /// the detected region grown by this much (bounded only by the box already
+    /// proved clear of its neighbours, so two boxes still cannot stack), and the
+    /// view insets the rows it draws by the same value — so the text sits
+    /// *inside* the wash with this much air around it.
+    var overlayHighlightPadding: CGFloat = 5
+
+    /// How far the drawn box travels toward a newly measured rect on each
+    /// update, as an exponential moving average factor: `0.3` ⇒ a box that has
+    /// just been handed a new measurement moves 30 % of the remaining distance
+    /// to it, and 30 % of what is left after that, and so on.
+    ///
+    /// This is the stabilisation the owner asked for by name ("stabilise the
+    /// overlay"), and it is deliberately *in addition to* the geometry
+    /// stickiness above rather than instead of it. The threshold answers "is
+    /// this a move at all?" — sub-threshold jitter never becomes the box's
+    /// target, so it is ignored outright. The EMA answers "how does the box
+    /// travel to a move that is real?" — it glides, continuously, instead of
+    /// stepping in threshold-sized jumps, which is what makes a slow drift a
+    /// follow rather than a series of small hops.
+    ///
+    /// The value is a *rate*, and the update cadence is the recognition
+    /// cadence, so 0.3 is roughly "two thirds of the way there in four passes"
+    /// (≈1 s at the nominal cadence). Lower is calmer and lags the sign more;
+    /// higher is more responsive and nearer to the old jump. `0` freezes the
+    /// drawn box (it never adopts a new rect — the same behaviour as an
+    /// infinite stickiness, spelled the other way); `1` disables the smoothing
+    /// and snaps each adopted rect, which is the pre-rework behaviour.
+    var overlayBoxLerpFactor: Double = 0.3
+
     // MARK: Tier 1 — the on-device brain
 
     /// The Nepali brain the on-device translation tier runs, newest first:

@@ -144,6 +144,34 @@ enum LiveOverlayPlacement {
         /// a corner that hugs the text line height rather than the bubble
         /// token's pill radius.
         let inPlaceCornerRadius: CGFloat
+        /// The room between the **detected text region** and the edge of the
+        /// box drawn over it, in points (`overlayHighlightPadding`) — the
+        /// owner's "small padding ~5pt" (2026-09-18).
+        ///
+        /// Distinct from `inPlacePadding`, and both are stated because they
+        /// answer two different questions. `inPlacePadding` is the room the
+        /// *translation* is given inside its own box (that is a typographic
+        /// value). This one is the room the *detection* is given around it: the
+        /// drawn box is never smaller than the region the app actually saw,
+        /// grown by this much — so a short translation is still framed as a
+        /// highlight over the recognized words rather than as a box that has
+        /// shrunk onto them, and so the elder can see the app's claim without
+        /// reading the text inside it.
+        let highlightPadding: CGFloat
+        /// How much of the picture the highlight fill lets through
+        /// (`overlayHighlightOpacity`). Carried in the policy because the fill
+        /// is a property of the *presentation* the placement describes, and the
+        /// view decides nothing: a test can read what the overlay was told to
+        /// draw without rendering it.
+        let highlightOpacity: Double
+        /// How far the drawn box travels toward a newly measured rect on each
+        /// update, as an exponential moving average factor
+        /// (`overlayBoxLerpFactor`). Consumed by the overlay's geometry memory
+        /// rather than by the placement, and carried here for the reason
+        /// `geometryStickiness` is: the two are the same mechanism's two halves
+        /// — one decides *whether* a box moves, the other *how* — and a caller
+        /// holding the policy holds both.
+        let boxLerpFactor: Double
         /// The largest fraction of the container a **bounded panel**'s height
         /// may be (`panelMaxHeightFraction`). Carried in the policy for the
         /// same reason `geometryStickiness` is: it is a share of the container
@@ -413,7 +441,8 @@ enum LiveOverlayPlacement {
             return .fits(box: inPlaceTightBox(regionRect: regionRect,
                                               textSize: measured,
                                               ceiling: box,
-                                              padding: policy.inPlacePadding),
+                                              padding: policy.inPlacePadding,
+                                              highlightPadding: policy.highlightPadding),
                          line: LiveOverlayTextLine(text: drawn,
                                                    pointSize: pointSize,
                                                    weight: .primary))
@@ -434,7 +463,8 @@ enum LiveOverlayPlacement {
             return .fits(box: inPlaceTightBox(regionRect: regionRect,
                                               textSize: measured,
                                               ceiling: box,
-                                              padding: policy.inPlacePadding),
+                                              padding: policy.inPlacePadding,
+                                              highlightPadding: policy.highlightPadding),
                          line: LiveOverlayTextLine(text: result.text,
                                                    pointSize: pointSize,
                                                    weight: .primary))
@@ -444,8 +474,8 @@ enum LiveOverlayPlacement {
     }
 
     /// The box the in-place form is **drawn** in: the region's own printed rect
-    /// and the measured text block — plus the policy's padding — and nothing
-    /// else.
+    /// (plus the green highlight's `highlightPadding`), the measured text block
+    /// — plus the policy's `inPlacePadding` — and nothing else.
     ///
     /// `inPlaceMaxBox` is where the box *may* reach; this is where it *stops*.
     /// Until 2026-09-17 the drawn box was the ceiling itself, so a short
@@ -455,12 +485,16 @@ enum LiveOverlayPlacement {
     /// second half of the answer, and the first is the geometry memory that
     /// stops the box moving at all.
     ///
-    /// Three properties, all of them load-bearing:
+    /// Four properties, all of them load-bearing:
     ///
     ///  1. **The region's own rect is always covered.** The box is the union
-    ///     with it, never a rect placed inside it: the translation *replaces*
-    ///     the printed text, so the printed text is under an opaque fill, and
-    ///     the box never reveals the original around its own edges.
+    ///     with it, never a rect placed inside it: the translation *stands in*
+    ///     for the printed text, so the words it answers must be under the box,
+    ///     and the box never stops short of the line's own edges. (Since the
+    ///     green-overlay rework, 2026-09-18, "under" means under a wash the
+    ///     elder can still read through — which makes covering the whole region
+    ///     more important, not less: a box that clipped a line in half would
+    ///     highlight half a sentence.)
     ///  2. **The text block and its padding are always inside.** The union
     ///     contains the padded block, so the view cannot clip what the fit
     ///     condition just measured — and the width is additionally floored at
@@ -471,10 +505,16 @@ enum LiveOverlayPlacement {
     ///     `ceiling` is inside `ceiling`, so the no-two-boxes-stack property
     ///     `inPlaceMaxBox` establishes is untouched: the tight box is a subset
     ///     of the box that was proved not to overlap its neighbours.
+    ///  4. **The detected region plus `highlightPadding` is inside it too.**
+    ///     The green wash's job is to point at the print (owner spec: "the
+    ///     bounding box can be transparent green with dark colored text …
+    ///     small padding ~5pt"), so the box is the region grown by that much on
+    ///     every side, clipped to the ceiling. See the band below.
     static func inPlaceTightBox(regionRect: CGRect,
                                 textSize: CGSize,
                                 ceiling: CGRect,
-                                padding: CGFloat) -> CGRect {
+                                padding: CGFloat,
+                                highlightPadding: CGFloat) -> CGRect {
         guard regionRect.width > 0, regionRect.height > 0,
               ceiling.width > 0, ceiling.height > 0 else { return ceiling }
 
@@ -486,7 +526,26 @@ enum LiveOverlayPlacement {
                                  y: regionRect.midY - height / 2,
                                  width: width, height: height),
                           into: ceiling)
-        return regionRect.union(block)
+        // The **highlight band**: the region the app actually detected, grown by
+        // the policy's `highlightPadding` on every side (owner spec,
+        // 2026-09-18 — "the bounding box can be transparent green with dark
+        // colored text", "small padding ~5pt"). It is the fourth property this
+        // box has to have, and the reason the green wash reads as a highlight
+        // *of the words* rather than as a label that happens to be nearby: the
+        // box is never a tight shrink-wrap around the re-rendered translation,
+        // which on a long sign is a different, larger rect than the print the
+        // elder is looking at.
+        //
+        // Bounded by the same ceiling as everything else here — the grown rect
+        // is clipped to it rather than clamped (a clamp moves a rect, so an
+        // over-large band would push the box out past the space that was proved
+        // clear of its neighbours and the no-two-boxes-stack property would go
+        // with it). Where the ceiling gives no room for the band, the box is
+        // simply the region's own rect: the padding is a comfort, never a
+        // reason to overlap the sign next to this one.
+        let band = regionRect.insetBy(dx: -highlightPadding, dy: -highlightPadding)
+            .intersection(ceiling)
+        return regionRect.union(block).union(band)
     }
 
     /// The point sizes the in-place form is tried at, **largest first**: the
@@ -698,7 +757,8 @@ enum LiveOverlayPlacement {
         return .fits(box: inPlaceTightBox(regionRect: regionRect,
                                           textSize: size,
                                           ceiling: box,
-                                          padding: policy.inPlacePadding),
+                                          padding: policy.inPlacePadding,
+                                          highlightPadding: policy.highlightPadding),
                      lines: lines)
     }
 
@@ -780,6 +840,16 @@ enum LiveOverlayPlacement {
 
     /// Places every region: in place when the translation fits the region's own
     /// box, an anchored callout otherwise, in reading order.
+    ///
+    /// **The rect a box is anchored to is `region.box`, whatever that box came
+    /// from** (owner spec, 2026-09-18: "object-box anchoring where available").
+    /// For a block that sits inside a detected object — a menu board, a sign,
+    /// a poster — the grouper has already made that the object's box clipped to
+    /// the union of its member lines (`SceneBlockGrouper.objectBox(_:holding:)`),
+    /// so the green box covers the whole board rather than one line of it; for
+    /// a free-standing region it is the text line's own rect. Nothing here has
+    /// to know which: the placement consumes one rect and the same law applies
+    /// to both, and an anchoring test pins the identity rather than trusting it.
     ///
     ///  - `safeArea` is the container-space rect the placement must stay inside
     ///    (the preview's safe area). An empty rect means "the whole container",

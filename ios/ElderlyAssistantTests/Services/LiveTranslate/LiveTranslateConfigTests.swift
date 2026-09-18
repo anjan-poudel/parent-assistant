@@ -75,6 +75,35 @@ final class LiveTranslateConfigTests: XCTestCase {
         XCTAssertTrue(config.brainTranslationDefersToResidentBrain)
     }
 
+    /// The green highlight's three values (owner spec, 2026-09-18: "the
+    /// bounding box can be TRANSPARENT GREEN with DARK COLORED TEXT … stabilise
+    /// the overlay"). Pinned, because each one is a look the owner approved on
+    /// a device rather than a number that can drift: how heavy the wash is, how
+    /// much air the detected text is given around it, and how far the drawn box
+    /// travels toward a new measurement on each frame.
+    func testTheGreenHighlightDefaultsAreTheOwnersNumbers() {
+        let config = LiveTranslateConfig.default
+
+        XCTAssertEqual(config.overlayHighlightOpacity, 0.4,
+                       "two fifths green: the print underneath still reads through it")
+        XCTAssertEqual(config.overlayHighlightPadding, 5,
+                       "the owner's 'small padding ~5pt' around the detected text")
+        XCTAssertEqual(config.overlayBoxLerpFactor, 0.3,
+                       "three tenths of the remaining distance per frame: a glide, not a landing")
+        // Bands, not just pins: each is the range in which the look still works,
+        // and a device check may move its value inside one.
+        XCTAssertGreaterThanOrEqual(config.overlayHighlightOpacity, 0.25,
+                                    "below this the box stops reading as a highlight at arm's length")
+        XCTAssertLessThanOrEqual(config.overlayHighlightOpacity, 0.5,
+                                 "above this the wash starts to bury the printed text")
+        XCTAssertGreaterThanOrEqual(config.overlayHighlightPadding, 3)
+        XCTAssertLessThanOrEqual(config.overlayHighlightPadding, 8,
+                                 "more than this and the box stops hugging the words it is about")
+        XCTAssertGreaterThan(config.overlayBoxLerpFactor, 0)
+        XCTAssertLessThan(config.overlayBoxLerpFactor, 1,
+                          "1 is the jump the rework removed; 0 freezes a box mid-flight")
+    }
+
     /// The resource knobs have to be *knobs*: a device that idles differently,
     /// or a scene that changes faster than these assume, is tuned by changing
     /// one value and not by editing the components.
