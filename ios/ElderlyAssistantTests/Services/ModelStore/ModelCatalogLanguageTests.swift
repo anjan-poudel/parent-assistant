@@ -60,6 +60,24 @@ final class ModelCatalogLanguageTests: XCTestCase {
         }
     }
 
+    /// The live-translate tier's head model (round-2b EN→NE, 2026-09-18) is
+    /// tagged for the language it translates INTO — and it is deliberately
+    /// not an assistant-brain picker choice, which is the reason it carries
+    /// a tag no picker consumes.
+    func testTheTranslationBrainIsTaggedNepaliAndNotOfferedAsABrain() {
+        let entry = ModelCatalog.entry(for: ModelCatalog.nmtEnNeQwen17bR2bQ8)
+        XCTAssertEqual(entry?.languages, ["ne"],
+                       "it translates INTO Nepali — [\"ne\"]")
+        XCTAssertEqual(entry?.kind, .llamaBase)
+        XCTAssertFalse(ModelCatalog.availableBrainEntries.contains {
+            $0.id == ModelCatalog.nmtEnNeQwen17bR2bQ8
+        })
+        // The tag has to be one the language machinery understands, and the
+        // tier's target language is the one it must match.
+        XCTAssertTrue(LanguageModelResolver.isLanguageCompatible(entry!,
+                                                                language: AppLanguage.nepali.rawValue))
+    }
+
     func testStockQwenAndLlamaBrainsAreLanguageNeutral() {
         let neutral: [ModelID] = [
             ModelCatalog.qwen3_1_7BInstruct,

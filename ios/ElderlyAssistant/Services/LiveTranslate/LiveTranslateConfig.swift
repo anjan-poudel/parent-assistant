@@ -834,7 +834,7 @@ struct LiveTranslateConfig: Equatable {
 
     // MARK: Tier 1 — the on-device brain
 
-    /// The 4B Nepali brain the on-device translation tier runs, newest first:
+    /// The Nepali brain the on-device translation tier runs, newest first:
     /// the first entry that is installed and complete is the one that runs.
     ///
     /// A pinned list rather than "whatever the elder picked for the assistant
@@ -843,22 +843,40 @@ struct LiveTranslateConfig: Equatable {
     /// would make the tier's availability change under a running session for
     /// reasons unrelated to translation.
     ///
-    /// Why two entries and not one. `intentQwen4BSlotCanon` is the app's
-    /// current brain (`AppCoordinator.defaultBrainModelID`) — the artifact a
-    /// device that has used the assistant at all will have. `intentQwen4BS43`
-    /// is the seed-43 fine-tune the owner named when this tier was specified;
-    /// it is a hidden (superseded, not removed) catalog entry, so a device
-    /// that cached it keeps it and a device that never did is not left without
-    /// a brain. A single pinned id would leave the tier unavailable on every
-    /// device holding the other one — the exact "can't translate" the tier
-    /// exists to remove — so the list is the honest shape of "a brain is
-    /// installed, either of these will do". Order matters only when a device
-    /// holds both.
+    /// Why more than one entry. `nmtEnNeQwen17bR2bQ8` (round-2b, 2026-09-18)
+    /// is the artifact the tier was built for: a real EN→NE translation
+    /// fine-tune that passes the tier's own raw-prompt + `json_schema`
+    /// contract (88.2% usable, 0/34 polarity, 0/12 probes). The two entries
+    /// after it are the pre-translation-model fallbacks — `intentQwen4BSlotCanon`
+    /// is the app's current assistant brain (`AppCoordinator.defaultBrainModelID`),
+    /// the artifact a device that has used the assistant at all will have,
+    /// and `intentQwen4BS43` is the seed-43 fine-tune the owner named when
+    /// this tier was specified; it is a hidden (superseded, not removed)
+    /// catalog entry, so a device that cached it keeps it and a device that
+    /// never did is not left without a brain. A single pinned id would leave
+    /// the tier unavailable on every device holding another one — the exact
+    /// "can't translate" the tier exists to remove — so the list is the
+    /// honest shape of "a brain is installed, any of these will do".
+    ///
+    /// **Order matters** — but only as "first INSTALLED wins"
+    /// (`LocalBrainTranslationTier.installedModel`): the head is used when it
+    /// is on disk, and there is no per-attempt retry down this list (a load
+    /// the warden refuses does not fall through to the next id — the strings
+    /// go to the tier behind this one). The head is therefore the newest
+    /// artifact, and installing it is what opts a device into the better
+    /// translations; a device holding only a fallback keeps working.
+    ///
+    /// Note the head is `roomy`-class only under `ModelBudgetPolicy`
+    /// (1.83 GB takes the 3B weight band → 2.63 GB live, over both the
+    /// compact and the standard co-residency budget — see the catalog
+    /// entry). On a 6 GB phone the warden refuses its load and the strings
+    /// fall to the cloud tier; that is the policy's call, not this list's.
     ///
     /// A follow-up may want this to follow the elder's brain selection
     /// (`AppCoordinator.resolvedBrainModelID`); that is a product decision,
     /// not a lookup to hide in here.
-    var brainTranslationModelIDs: [ModelID] = [ModelCatalog.intentQwen4BSlotCanon,
+    var brainTranslationModelIDs: [ModelID] = [ModelCatalog.nmtEnNeQwen17bR2bQ8,
+                                              ModelCatalog.intentQwen4BSlotCanon,
                                               ModelCatalog.intentQwen4BS43]
 
     /// Deadline for one brain translation attempt. Latency here is seconds,

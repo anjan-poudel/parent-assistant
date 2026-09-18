@@ -530,13 +530,16 @@ enum ModelLifecycleInventory {
     /// pageable, `actorDeferredFree` — the bytes the tier allocates are a
     /// brain's bytes), but a separate function so the *fallback* is the
     /// tier's own model and not the picker's. `brainFootprint(modelID:)`'s
-    /// fallback is the 807 MB shipped picker default; the tier's first-choice
-    /// model is the 4B slot-canon (`LiveTranslateConfig.brainTranslationModelIDs`,
-    /// `ModelCatalog.intentQwen4BSlotCanon`), whose catalog-declared
-    /// 2,497,278,784 B is the value an unknown/sideloaded id must not
-    /// under-count to. With no id at all the ledger has no slot contents to
-    /// describe, so it resolves the tier's installed default through the
-    /// catalog exactly as a real load would.
+    /// fallback is the 807 MB shipped picker default; the tier list
+    /// (`LiveTranslateConfig.brainTranslationModelIDs`) can hold several
+    /// artifacts, so the fallback is the LARGEST of them —
+    /// `ModelCatalog.intentQwen4BSlotCanon`, catalog-declared
+    /// 2,497,278,784 B. Since 2026-09-18 the list's HEAD is the smaller
+    /// 1.83 GB `nmtEnNeQwen17bR2bQ8` translation model, so this fallback
+    /// now deliberately OVER-counts an unknown id rather than under-count
+    /// it: a ledger that guesses low is the one that gets the app killed.
+    /// With no id at all the ledger has no slot contents to describe, so it
+    /// resolves through the catalog exactly as a real load would.
     ///
     /// Field notes §2: the 4B is `roomy`-only, and this position is **not**
     /// in `admitsSoloOverBudget` — a tier brain that does not fit the device

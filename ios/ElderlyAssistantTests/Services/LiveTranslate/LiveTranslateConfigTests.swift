@@ -274,6 +274,101 @@ final class LiveTranslateConfigTests: XCTestCase {
         XCTAssertNotEqual(copy, LiveTranslateConfig.default)
     }
 
+    // MARK: Tier 1's model list, newest first (round-2b ship, 2026-09-18)
+
+    /// The list is `installedModel()`'s whole input (`first { isAvailable }`),
+    /// so its ORDER is the ship decision: the round-2b EN→NE translation
+    /// fine-tune leads, and the two pre-translation brains stay as the
+    /// fallbacks a device that has one but not the head keeps working on.
+    func testTheTranslationListLeadsWithTheShippedTranslationModel() {
+        let ids = LiveTranslateConfig.default.brainTranslationModelIDs
+        XCTAssertEqual(ids, [ModelCatalog.nmtEnNeQwen17bR2bQ8,
+                             ModelCatalog.intentQwen4BSlotCanon,
+                             ModelCatalog.intentQwen4BS43],
+                       "the round-2b translation fine-tune leads; the intent "
+                       + "brains stay behind it as fallbacks")
+        // A list is only a list if every entry can be resolved — an id with
+        // no catalog entry can never be installed and would silently be a
+        // hole in the order.
+        for id in ids {
+            XCTAssertNotNil(ModelCatalog.entry(for: id),
+                            "\(id.rawValue) is in the tier list but not in "
+                            + "the catalog")
+        }
+        // The head is a TRANSLATION model, not an assistant brain: it must
+        // never be offered to `LlamaCommandInterpreter`'s picker, whose
+        // prompt this artifact was not trained on.
+        XCTAssertFalse(ModelCatalog.availableBrainEntries.contains {
+            $0.id == ModelCatalog.nmtEnNeQwen17bR2bQ8
+        }, "the translation model is not an assistant-brain choice")
+    }
+
+    /// The shipped artifact itself: the digest the 1.83 GB download is
+    /// verified against (`ModelStore.finalize` fails on any other bytes), the
+    /// exact release asset, and the single-file delivery. A drift in any of
+    /// these ships a model nobody can install (2026-09-14's 18-byte
+    /// "reassembly" is the precedent for pinning the URL, not just the id).
+    func testTheShippedTranslationArtifactIsPinned() throws {
+        let entry = try XCTUnwrap(
+            ModelCatalog.entry(for: ModelCatalog.nmtEnNeQwen17bR2bQ8),
+            "the tier's head model must exist in the catalog")
+        XCTAssertEqual(ModelCatalog.nmtEnNeQwen17bR2bQ8.rawValue,
+                       "nmt-en-ne-qwen17b-r2b-q8_0")
+        XCTAssertEqual(entry.kind, .llamaBase)
+        XCTAssertEqual(entry.filename, "translate-en-ne-qwen17b-r2b-q8_0.gguf")
+        XCTAssertEqual(entry.sizeBytes, 1_834_426_080,
+                       "the shipped round-2b Q8_0 artifact's size on disk")
+        XCTAssertEqual(entry.sha256,
+                       "cae02965ab261a16fd375de12ecc012a1138d0f589fd74386b14aa058b2690b3",
+                       "the server original and the release asset agree on "
+                       + "this digest — the downloader verifies it")
+        XCTAssertEqual(entry.sha256.count, 64)
+        XCTAssertNotEqual(entry.sha256, ModelCatalogEntry.pendingSHA256,
+                          "a placeholder can only ever fail `finalize`")
+        XCTAssertEqual(entry.minDeviceRAMBytes, 4_000_000_000,
+                       "the same 4 GB floor the other >1 GB brains carry")
+        XCTAssertEqual(entry.languages, ["ne"])
+        XCTAssertNil(entry.dependsOn)
+
+        // The asset is ONE file: 1.83 GB is under GitHub's 2 GiB per-asset
+        // cap, so there is nothing for the multipart path to reassemble.
+        XCTAssertLessThan(Int64(entry.sizeBytes), 2_147_483_648,
+                          "over the cap the release would need part assets")
+        XCTAssertNil(entry.downloadPartURLs,
+                     "a single-asset delivery must not carry part URLs")
+        XCTAssertEqual(entry.downloadURL.absoluteString,
+                       "https://github.com/anjan-poudel/elderly-ai-assistant-models"
+                       + "/releases/download/v18/translate-en-ne-qwen17b-r2b-q8_0.gguf",
+                       "the release the artifact was published to (v18)")
+        XCTAssertEqual(entry.downloadURL.lastPathComponent, entry.filename,
+                       "the asset name is the on-disk name, so "
+                       + "`LlamaBrainTextGenerator.modelID(forURL:)` resolves "
+                       + "the id from the installed file")
+    }
+
+    /// The head's admission — which phones can run the model this list
+    /// leads with — is a policy verdict, and it is pinned where the policy
+    /// lives: `ModelBudgetPolicyTests`
+    /// (`testTheTranslationBrainIsOverTheStandardClassAndAdmittedOnlyOnRoomy`).
+    /// The short version, because it is the reason this list has fallbacks
+    /// at all: the 1.83 GB file takes the 3B weight band's 800 MB overhead
+    /// (2.63 GB live), which is over the compact budget and over the
+    /// standard budget beside a warm STT — so on a 6 GB phone the warden
+    /// refuses the head's load and the strings go to the cloud tier.
+    func testTheTranslationHeadsClassVerdictIsOutOfThisSuitesHands() {
+        let head = ModelCatalog.entry(for: ModelCatalog.nmtEnNeQwen17bR2bQ8)!
+        XCTAssertEqual(ModelLifecycleInventory
+            .footprint(for: .translateBrain, modelID: head.id).liveBytes,
+                       2_634_426_080,
+                       "the arithmetic the policy verdicts are derived from")
+        XCTAssertFalse(ModelBudgetPolicy.standard
+            .availability(of: head, physicalMemoryBytes: 6_000_000_000)
+            .isAvailable,
+                       "a 6 GB phone does not run the head — see "
+                       + "ModelBudgetPolicyTests for the reason")
+        XCTAssertTrue(ModelBudgetPolicy.roomy
+            .availability(of: head, physicalMemoryBytes: 8_000_000_000)
+            .isAvailable)
     // MARK: The OCR-first rework (owner verdict, 2026-09-18)
 
     /// The recognition settings' defaults, pinned the same way the rest of the
