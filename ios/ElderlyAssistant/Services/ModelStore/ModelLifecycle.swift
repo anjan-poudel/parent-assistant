@@ -265,9 +265,14 @@ enum ModelSlot: String, CaseIterable, Codable {
     /// phone.
     var admitsSoloOverBudget: Bool {
         switch self {
-        case .brain, .intentBrain: return true
+        // `.translateBrain` joins the escape (owner device verdict,
+        // 2026-09-19): the live-translate session's own model must be able
+        // to boot lower-priority residents, exactly as the assistant brain
+        // can — refused loads on a standard phone turned the on-device tier
+        // into a cloud-only tier.
+        case .brain, .intentBrain, .translateBrain: return true
         case .speechToText, .intentEncoder, .sttCorrector,
-             .ttsVoices, .wakeWord, .vad, .translateBrain: return false
+             .ttsVoices, .wakeWord, .vad: return false
         }
     }
 }

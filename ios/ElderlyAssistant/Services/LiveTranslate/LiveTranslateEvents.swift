@@ -37,6 +37,13 @@ enum LiveTranslateCacheOrigin: String, Equatable, CaseIterable {
     case persisted = "persisted"
 }
 
+/// Closed vocabulary for `translation_resolved.origin` (cascade provenance,
+/// 2026-09-19): a settle's answer came from storage or was computed now.
+enum LiveTranslateResolutionOrigin: String, Equatable, CaseIterable {
+    case fresh = "fresh"
+    case cache = "cache"
+}
+
 /// Closed vocabulary for the `reason` metadata key on the on-device tier's
 /// events: why a batch was not answered by the brain.
 ///
@@ -523,10 +530,10 @@ struct LiveTranslateEvents {
     /// tier that answered (`dictionary` / `onDeviceBrain` / `cloud`) and the
     /// origin (`cache` for a persisted answer, `fresh` for a new one). One
     /// event per tier per settle, so a mixed batch reads as a tier histogram.
-    func translationResolved(tier: TranslationTier, origin: String, count: Int) {
+    func translationResolved(tier: TranslationTier, origin: LiveTranslateResolutionOrigin, count: Int) {
         emit("translation_resolved", outcome: "success",
              metadata: [.tier: tier.rawValue,
-                        .origin: origin,
+                        .origin: origin.rawValue,
                         .count: String(count)])
     }
 

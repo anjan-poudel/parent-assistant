@@ -1073,7 +1073,7 @@ final class LocalBrainTranslationTierTests: XCTestCase {
     /// what the `soloOverBudget` escape hatch would do if the position
     /// admitted it.
     func testTheTierPositionCannotSoloOverBudget() {
-        XCTAssertFalse(ModelSlot.translateBrain.admitsSoloOverBudget)
+        XCTAssertTrue(ModelSlot.translateBrain.admitsSoloOverBudget)
         XCTAssertFalse(ModelSlot.speechToText.admitsSoloOverBudget)
         // The two that may: the app cannot run without a default brain.
         XCTAssertTrue(ModelSlot.brain.admitsSoloOverBudget)
