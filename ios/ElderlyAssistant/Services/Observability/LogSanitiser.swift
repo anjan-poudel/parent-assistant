@@ -158,6 +158,10 @@ struct LogSanitiser {
         "origin",
         "mode",
         "reason",
+        // [CASCADE-PROVENANCE] (2026-09-19) Which tier answered a settle —
+        // `TranslationTier`, a closed token set (dictionary / onDeviceBrain
+        // / cloud). The owner asked to log the cascade; no string rides in it.
+        "tier",
         // [LLAMADEBUG] (2026-09-17) Where an on-device brain attempt stopped
         // — `BrainFailureStage`, a closed token set (availability / load /
         // prompt_budget / decode / deadline / cancelled / stage_deadline).

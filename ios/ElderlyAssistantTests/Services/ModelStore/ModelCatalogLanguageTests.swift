@@ -93,9 +93,15 @@ final class ModelCatalogLanguageTests: XCTestCase {
         let offered = ModelCatalog.availableTranslationEntries.map(\.id)
         XCTAssertEqual(offered, [ModelCatalog.nmtEnNeQwen17bR2bQ8],
                        "the section offers the tier's shipped head, alone")
-        XCTAssertEqual(offered.first,
-                       LiveTranslateConfig.default.brainTranslationModelIDs.first,
-                       "the row must offer what the tier leads with")
+        // The tier list leads with the Q5 TESTING quant (owner device test,
+        // 2026-09-19, sideloaded — deliberately not offered for download);
+        // the row still offers the shipped head it can actually download.
+        XCTAssertEqual(LiveTranslateConfig.default.brainTranslationModelIDs.first,
+                       ModelCatalog.nmtEnNeQwen17bR2bQ5,
+                       "the tier leads with the testing quant")
+        XCTAssertEqual(LiveTranslateConfig.default.brainTranslationModelIDs.dropFirst().first,
+                       offered.first,
+                       "the offered row is the tier's shipped head")
         for id in offered {
             XCTAssertNotNil(ModelCatalog.entry(for: id),
                             "\(id.rawValue) is offered but not in the catalog")
