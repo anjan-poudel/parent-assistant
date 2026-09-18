@@ -183,8 +183,17 @@ final class StubObjectDetectionEngine: LiveObjectDetectionEngine {
     var objects: [LiveTextDetector.DetectedSceneObject] = []
     var errorToThrow: Error?
 
+    /// Run at the start of every detection, before anything else. A test that
+    /// wants an object pass that is *slow* — the shape a device's first
+    /// saliency request has, and the one the text path must not wait for —
+    /// hands the detector a verdict through here and blocks on its own
+    /// semaphore, which is what makes "the text pass did not wait" an
+    /// observation rather than a wall-clock guess.
+    var onDetect: ((CVPixelBuffer) -> Void)?
+
     private let lock = NSLock()
     private var calls = 0
+    private var completed = 0
 
     init(supportsObjectDetection: Bool = true) {
         self.supportsObjectDetection = supportsObjectDetection
@@ -195,8 +204,17 @@ final class StubObjectDetectionEngine: LiveObjectDetectionEngine {
         return calls
     }
 
+    /// Detections that have returned — answered or refused. The gap between
+    /// this and `detectCallCount` is an object pass still in flight.
+    var completedDetections: Int {
+        lock.lock(); defer { lock.unlock() }
+        return completed
+    }
+
     func detectObjects(in pixelBuffer: CVPixelBuffer) throws -> [LiveTextDetector.DetectedSceneObject] {
         lock.lock(); calls += 1; lock.unlock()
+        onDetect?(pixelBuffer)
+        lock.lock(); completed += 1; lock.unlock()
         if let errorToThrow { throw errorToThrow }
         return objects
     }

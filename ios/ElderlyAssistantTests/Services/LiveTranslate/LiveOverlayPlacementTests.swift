@@ -1050,9 +1050,23 @@ final class LiveOverlayPlacementTests: XCTestCase {
                        [policy.secondaryPointSize, policy.secondaryPointSize])
     }
 
-    func testABlockThatCannotBeDrawnAtTheFloorGetsNoPanelAtAll() {
-        // Type far taller than any box this region can grow into: the honest
-        // answer is the snapshot card, not a smaller panel.
+    /// The owner's device verdict, at the line it is about: **a block the panel
+    /// cannot hold is still published.**
+    ///
+    /// The rework's first cut left `place` with a bare `continue` here, so a
+    /// pass whose blocks all failed the panel fit produced no placements at
+    /// all — and the overlay renders an empty placement list as its empty
+    /// state, "I don't see any text yet", over a picture full of text the pass
+    /// had just read. Since most regions of a real scene are multi-line blocks
+    /// (the object grouping merges them), that was most scenes on the owner's
+    /// device: "the camera says it can't find anything to read".
+    ///
+    /// The policy itself is unchanged — a panel is drawn at the floor or not at
+    /// all — so this pins both halves: the panel decision still refuses to
+    /// shrink, and the refusal degrades to **one callout for the block**, never
+    /// to nothing.
+    func testABlockThatCannotStandAsAPanelStillGetsOneCalloutForTheBlock() {
+        // Type far taller than any box this region can grow into.
         let block = blockRegion(1, lines: ["one", "two", "three"], box: (0.42, 0.44, 0.50, 0.50))
         let policy = surfacePolicy()
         let result = translated(block, "एक\nदुई\nतीन", tier: .cloud)
@@ -1067,12 +1081,22 @@ final class LiveOverlayPlacementTests: XCTestCase {
                                                         bounds: bounds,
                                                         policy: policy,
                                                         measure: measure)
-        XCTAssertEqual(outcome, .doesNotFit)
+        XCTAssertEqual(outcome, .doesNotFit,
+                       "the panel rule is unchanged: a panel nobody can read is the thing "
+                       + "being removed, so a panel below the floor is never drawn")
 
         let placements = place([block], results: [block.id: result], measure: measure)
-        XCTAssertTrue(placements.isEmpty,
-                      "a block that cannot be drawn legibly is left to the snapshot card: "
-                      + "a panel nobody can read is the thing being removed")
+        XCTAssertEqual(placements.count, 1,
+                       "a block that cannot be drawn as a panel is still published: an empty "
+                       + "placement list is the overlay's empty state over text the pass read")
+        XCTAssertNil(inPlaceRect(placements[0]), "…and not as a panel: the floor is the floor")
+        XCTAssertNotNil(calloutRect(placements[0]),
+                        "…but as the one pill that carries the block")
+        XCTAssertEqual(placements[0].lines.map(\.text), ["एक", "दुई", "तीन"],
+                       "the block's translated lines, in order, in the one pill — one surface "
+                       + "for the block, not one bubble per line")
+        XCTAssertEqual(Set(placements[0].lines.map(\.pointSize)), [policy.minPointSize],
+                       "the pill is drawn at the body floor, like every live surface")
     }
 
     func testTwoPanelsNeverStack() {

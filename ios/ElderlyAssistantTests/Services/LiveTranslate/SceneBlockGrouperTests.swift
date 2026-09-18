@@ -391,4 +391,83 @@ final class SceneBlockGrouperTests: XCTestCase {
         let tv = blocks.first { $0.kind == .object(classLabel: "television") }
         XCTAssertEqual(tv?.memberStrings, ["first", "second"])
     }
+
+    // MARK: Scenario: the never-empty rule
+
+    /// The rule the owner's device verdict is about, stated as a property of
+    /// the fallback: **one line in, one block out.**
+    ///
+    /// `group` is total over the lines it can carry, so this is the guard for
+    /// what it cannot: a caller whose grouping came back empty for any reason
+    /// publishes the lines themselves rather than nothing. The degenerate
+    /// grouping is the per-line publication the feature shipped before blocks
+    /// existed — same text, same box, the grouper's own text identity — so
+    /// nothing downstream can tell that a fallback happened, and the elder
+    /// loses the *merge* and not the words.
+    func testThePerLineFallbackTurnsEveryUsableLineIntoItsOwnBlock() {
+        let lines = [line("START", 0.20, 0.20, 0.60, 0.28),
+                     line("2 MIN", 0.20, 0.32, 0.60, 0.40)]
+
+        let blocks = SceneBlockGrouper.perLineBlocks(from: lines, limit: nil)
+
+        XCTAssertEqual(blocks.count, 2,
+                       "each line is a block: the fallback is a grouping of one")
+        XCTAssertEqual(blocks.flatMap(\.memberStrings), ["START", "2 MIN"])
+        XCTAssertEqual(blocks.map(\.normalizedBox), lines.map(\.normalizedBox),
+                       "the block's rect is the line's own box: the fallback invents no geometry")
+        XCTAssertTrue(blocks.allSatisfy { $0.kind == .text },
+                      "a fallback block is a text block — no object was detected for it")
+        XCTAssertEqual(blocks.map(\.identityKey),
+                       lines.map { SceneBlockGrouper.textIdentity(of: [$0]) },
+                       "…and it carries the grouper's own identity for that line, so the "
+                       + "stabiliser keys it exactly as it keys any other block")
+        XCTAssertEqual(blocks.map(\.text), ["START", "2 MIN"],
+                       "the block's text is the line's text: this is what the tier is asked "
+                       + "and what the panel draws")
+    }
+
+    /// The rule is a *floor*, not a second opinion: it carries exactly the
+    /// lines the grouping would carry — the ones with something to translate
+    /// and a box that can be geometry — so the two cannot disagree about which
+    /// recognized lines a pass publishes.
+    func testThePerLineFallbackCarriesExactlyTheLinesTheGroupingWouldCarry() {
+        let blank = line("   ", 0.20, 0.20, 0.60, 0.28)
+        let degenerate = SceneTextLine(text: "zero area",
+                                       normalizedBox: box(0.20, 0.40, 0.20, 0.40),
+                                       confidence: 0.9,
+                                       detectedLanguage: nil)
+        let real = line("real", 0.20, 0.60, 0.60, 0.68)
+
+        let blocks = SceneBlockGrouper.perLineBlocks(from: [blank, degenerate, real], limit: nil)
+
+        XCTAssertEqual(blocks.flatMap(\.memberStrings), ["real"],
+                       "a line with nothing to translate or no geometry is not published by "
+                       + "the fallback either — the same rule the grouping uses")
+        for line in [blank, degenerate, real] {
+            XCTAssertEqual(SceneBlockGrouper.isUsable(line),
+                           blocks.contains { $0.memberStrings == [line.text] },
+                           "'usable' is one definition shared by the grouping and the "
+                           + "fallback: \(line.text)")
+        }
+    }
+
+    /// The cap is the caller's, in the fallback exactly as in the grouping:
+    /// the live overlay's few surfaces, and the snapshot card's uncapped list.
+    func testThePerLineFallbackRespectsTheCallersCap() {
+        let lines = (0..<6).map { index in
+            line("L\(index)", 0.20, 0.05 + Double(index) * 0.15, 0.60, 0.12 + Double(index) * 0.15)
+        }
+
+        XCTAssertEqual(SceneBlockGrouper.perLineBlocks(from: lines, limit: 4).count, 4,
+                       "the live path's cap still bounds the fallback")
+        XCTAssertEqual(SceneBlockGrouper.perLineBlocks(from: lines, limit: nil).count, 6,
+                       "and the snapshot path is uncapped here too")
+    }
+
+    /// Zero lines is the one case where publishing nothing is the honest
+    /// answer — the rule is "never empty *over lines it read*", not "never
+    /// empty".
+    func testThePerLineFallbackPublishesNothingWhenNothingWasRecognized() {
+        XCTAssertTrue(SceneBlockGrouper.perLineBlocks(from: [], limit: nil).isEmpty)
+    }
 }

@@ -572,6 +572,98 @@ final class LiveTextDetectorTests: XCTestCase {
         XCTAssertTrue(code.contains("import Vision"), "recognition is Vision's, and it is local")
     }
 
+    // MARK: Scenario: a pass never publishes nothing
+
+    private func sceneLine(_ text: String, x: Double, y: Double) -> SceneTextLine {
+        SceneTextLine(text: text,
+                      normalizedBox: NormalizedBox(xMin: x, yMin: y,
+                                                   xMax: x + 0.4, yMax: y + 0.08),
+                      confidence: 0.9,
+                      detectedLanguage: nil)
+    }
+
+    /// The owner's device verdict, at the one seam that decides it: **lines
+    /// recognized, grouping empty, publication still carries the lines.**
+    ///
+    /// `SceneBlockGrouper.group` is total over the lines it can carry, so this
+    /// is the guard for the ways a pass could still end up publishing nothing —
+    /// and it is the guarantee the feature's contract needs whatever a future
+    /// grouping rule does: the fallback is the per-line publication the feature
+    /// shipped before blocks existed. The alternative is the failure the owner's
+    /// device report was about — the overlay's empty state, "I don't see any
+    /// text yet", drawn over a picture full of text this pass had just read.
+    func testAPassWhoseGroupingFormedNoBlockStillPublishesItsLines() throws {
+        let lines = [sceneLine("START", x: 0.2, y: 0.2),
+                     sceneLine("2 MIN", x: 0.2, y: 0.4)]
+
+        let published = LiveTextDetector.publishedBlocks(from: [],
+                                                         fallbackLines: lines,
+                                                         limit: 4)
+
+        XCTAssertEqual(published.map(\.text), ["START", "2 MIN"],
+                       "the lines a pass recognized are published even when the grouping "
+                       + "formed no block: a group failure degrades the merge, never the text")
+        XCTAssertEqual(published.map(\.normalizedBox), lines.map(\.normalizedBox),
+                       "each line is published at its own geometry, nothing invented")
+        XCTAssertEqual(published.map(\.memberStrings), [["START"], ["2 MIN"]])
+    }
+
+    /// The fallback is a floor and not a policy: when the grouping *did* form
+    /// blocks, they are what the pass publishes — same array, same order, same
+    /// identities, so nothing downstream can tell whether the floor was needed.
+    func testAPassPublishesTheGroupingsBlocksWheneverTheGroupingFormedThem() {
+        let lines = [sceneLine("START", x: 0.2, y: 0.2),
+                     sceneLine("2 MIN", x: 0.2, y: 0.3)]
+        let grouping = SceneBlockGrouper.group(lines: lines, objects: [], config: .default, limit: 4)
+        XCTAssertEqual(grouping.count, 1, "the fixture is one merged surface")
+
+        let published = LiveTextDetector.publishedBlocks(from: grouping,
+                                                         fallbackLines: lines,
+                                                         limit: 4)
+
+        XCTAssertEqual(published, grouping,
+                       "a grouping that formed blocks is published untouched — the fallback "
+                       + "is for an empty grouping, not a second opinion about a full one")
+    }
+
+    /// …and the floor is bounded by the caller's cap like everything else, so
+    /// the live overlay still carries the few surfaces it can draw.
+    func testTheFallbackPublicationRespectsThePassCap() {
+        let lines = (0..<6).map { sceneLine("L\($0)", x: 0.1, y: 0.05 + Double($0) * 0.15) }
+
+        XCTAssertEqual(LiveTextDetector.publishedBlocks(from: [],
+                                                        fallbackLines: lines,
+                                                        limit: LiveTranslateConfig.default.maxVisibleBlocks).count,
+                       LiveTranslateConfig.default.maxVisibleBlocks)
+        XCTAssertEqual(LiveTextDetector.publishedBlocks(from: [], fallbackLines: lines, limit: nil).count,
+                       6,
+                       "…and the snapshot pass, which asks for no cap, gets every line")
+    }
+
+    /// The floor, through the shipped pass: a scene whose object request is
+    /// **refused** still publishes its recognized text.
+    ///
+    /// This is the device regression end to end — the object pass is a SHOULD,
+    /// and on the owner's device it was the thing that failed — so the pass's
+    /// published regions are the assertion, not an internal.
+    func testARefusedObjectPassStillPublishesThePassesText() async throws {
+        objects.errorToThrow = StubFailure(message: "saliency refused this frame")
+        engine.regions = [region("Exit"), region("Push", x: 0.2, y: 0.4)]
+        let detector = makeDetector()
+        _ = detector.begin()
+
+        let result = try await ocrPass(detector, luma: 0)
+        await detector.awaitObjectPass()
+
+        guard case .success(let pass) = result else { return XCTFail("expected a pass: \(result)") }
+        XCTAssertFalse(pass.regions.isEmpty,
+                       "a scene whose object request was refused still publishes the text "
+                       + "the pass recognized")
+        XCTAssertEqual(pass.regions.flatMap { $0.text.split(separator: "\n").map(String.init) },
+                       ["Exit", "Push"],
+                       "as per-line blocks: the grouping degraded, the words did not")
+    }
+
     // MARK: Scenario: the object pass is the slow pass, so it runs on its own cadence
 
     private func sceneObject(_ label: String?,
@@ -598,22 +690,74 @@ final class LiveTextDetectorTests: XCTestCase {
         _ = detector.begin()
 
         _ = try await ocrPass(detector, luma: 0)
+        await detector.awaitObjectPass()
         XCTAssertEqual(objects.detectCallCount, 1, "the first OCR of a scene detects")
 
         // Inside the cadence, the pass reuses what it has: the object is the
         // expensive request, and a scene's objects do not change between two
         // frames a fifth of a second apart.
         _ = try await ocrPass(detector, luma: 30)
+        await detector.awaitObjectPass()
         XCTAssertEqual(objects.detectCallCount, 1,
                        "the object pass is the slow pass: it is not run per frame")
 
         clock.advance(by: detector.config.objectPassCadenceSeconds + 1)
         _ = try await ocrPass(detector, luma: 60)
+        await detector.awaitObjectPass()
         XCTAssertEqual(objects.detectCallCount, 2, "once the cadence is due, it runs again")
 
         XCTAssertEqual(bus.events(named: "object_pass").count, 2)
         XCTAssertEqual(bus.events(named: "object_pass").last?.metadata["count"], "1")
         XCTAssertEqual(bus.events(named: "object_pass").first?.outcome, "success")
+    }
+
+    /// The isolation rule, and the owner's "fires after a long delay" in the
+    /// shape a test can decide: a pass's text is published **while** the object
+    /// pass is still running.
+    ///
+    /// The object pass is the slow pass on real hardware — a saliency request
+    /// and, on the first one of a session, the model load behind it — and it
+    /// answers a question about *grouping* that the text does not depend on.
+    /// So the text pass may not wait for it, in either direction: not for a
+    /// detection that is slow, and not for one that never answers at all.
+    ///
+    /// The stub is held inside `detectObjects` on the test's own semaphore, so
+    /// "the text pass returned before the object pass answered" is an observed
+    /// fact (the object pass had started and had not finished) rather than a
+    /// wall-clock guess. A detector that waited for the object pass fails this
+    /// in its first assertion: it can only return after the gate's own timeout.
+    func testASlowObjectPassCannotDelayTheTextThePassPublishes() async throws {
+        engine.regions = [region("Exit")]
+        let started = DispatchSemaphore(value: 0)
+        let gate = DispatchSemaphore(value: 0)
+        objects.objects = [sceneObject("microwave", 0.1, 0.1, 0.6, 0.6)]
+        objects.onDetect = { _ in
+            started.signal()
+            // Bounded, so a detector that *does* wait on the object pass fails
+            // the assertions below rather than hanging the suite.
+            _ = gate.wait(timeout: .now() + 5)
+        }
+        let detector = makeDetector()
+        _ = detector.begin()
+
+        let result = try await ocrPass(detector, luma: 0)
+
+        XCTAssertEqual(started.wait(timeout: .now() + 2), .success,
+                       "the object pass was started by the first OCR pass")
+        XCTAssertEqual(objects.detectCallCount, 1, "…and it is the pass it started")
+        XCTAssertEqual(objects.completedDetections, 0,
+                       "the object pass is still running, and the text pass has already "
+                       + "returned: the text path does not join the object path")
+        guard case .success(let pass) = result else { return XCTFail("expected a pass: \(result)") }
+        XCTAssertEqual(pass.regions.map(\.text), ["Exit"],
+                       "the text the pass recognized is published, not held back for the "
+                       + "object pass to finish")
+
+        gate.signal()
+        await detector.awaitObjectPass()
+        XCTAssertEqual(objects.completedDetections, 1, "…and the object pass lands on its own")
+        XCTAssertEqual(bus.events(named: "object_pass").count, 1)
+        XCTAssertEqual(bus.events(named: "object_pass").first?.metadata["count"], "1")
     }
 
     func testTheCachedObjectsStillGroupThePassThatDidNotDetect() async throws {
@@ -623,7 +767,9 @@ final class LiveTextDetectorTests: XCTestCase {
         _ = detector.begin()
 
         _ = try await ocrPass(detector, luma: 0)
+        await detector.awaitObjectPass()
         let second = try await ocrPass(detector, luma: 30)
+        await detector.awaitObjectPass()
         XCTAssertEqual(objects.detectCallCount, 1, "no second detection")
 
         guard case .success(let pass) = second else { return XCTFail("expected a pass: \(second)") }
@@ -639,6 +785,7 @@ final class LiveTextDetectorTests: XCTestCase {
         _ = detector.begin()
 
         let result = try await ocrPass(detector, luma: 0)
+        await detector.awaitObjectPass()
 
         guard case .success(let pass) = result else {
             return XCTFail("the object pass is a SHOULD: a scene with no objects is grouped "
@@ -657,6 +804,7 @@ final class LiveTextDetectorTests: XCTestCase {
 
         // And it stays degraded: the request is not retried every frame.
         _ = try await ocrPass(detector, luma: 30)
+        await detector.awaitObjectPass()
         XCTAssertEqual(objects.detectCallCount, 1,
                        "a failed object pass is not a per-frame retry loop")
     }
@@ -721,7 +869,14 @@ final class LiveTextDetectorTests: XCTestCase {
         let detector = makeDetector()
         _ = detector.begin()
 
-        let first = await detector.recognize(try frame(luma: 0))
+        // The object pass is asynchronous — the text path never waits for it —
+        // so the detection the first OCR pass schedules lands *after* that pass
+        // has grouped. The measured passes come after it: one throwaway pass
+        // warms the cache, then the scene is read with the appliance known.
+        _ = try await ocrPass(detector, luma: 0)
+        await detector.awaitObjectPass()
+
+        let first = try await ocrPass(detector, luma: 60)
         guard case .success(let firstPass) = first else { return XCTFail("expected a pass: \(first)") }
         XCTAssertEqual(firstPass.regions.map(\.text), ["START\n2 MIN"],
                        "the object's lines are one surface")
