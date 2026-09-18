@@ -133,6 +133,20 @@ struct LogSanitiser {
         // tests enforce that, and the values that land are integers, closed
         // tokens and the disclosure version stamp.
         "regionCount",
+        // [LIVE-CAMERA-TRANSLATION] (2026-09-18) The one addition the owner's
+        // identity-churn report asked for: `regionSetHash`, a 32-bit digest of
+        // the *set* of normalized strings on screen, rendered `xxxx:xxxx` by
+        // `LiveTranslateEvents.regionSetHashHex` from a `UInt32` — the emitter
+        // takes no string, so no recognized text can reach this key. It is a
+        // discriminator and nothing more: it is derived from the scene, not from
+        // the device, the session or the user, it is never stored, and it is
+        // stable only within one session's own log (where the owner compares two
+        // lines). It carries no string, no substring and no per-region value;
+        // being truncated to 32 bits it is not a commitment about the content
+        // either. The colon in the rendering is deliberate: it is outside the
+        // phone-number guard's character class below, which would otherwise
+        // redact an all-digit digest intermittently and silently.
+        "regionSetHash",
         "stringCount",
         "batchIndex",
         "batchCount",

@@ -389,6 +389,10 @@ enum FrameStabilizationLaw {
     ///    converges on the dead zone and stops there: a hand that has stopped
     ///    moving leaves the picture still, at the framing the movement asked
     ///    for.
+    ///  - **clearly past it — beyond `adaptiveFollowMultiple` dead zones —
+    ///    followed fast.** See `adaptiveFollowFloor`: the smooth factor is an
+    ///    opinion about how much of a deliberate movement the elder should be
+    ///    shown, and it is the wrong opinion once the lag is unmistakable.
     ///
     /// The two branches part company on what a *still hand* means, and it is
     /// the distinction the owner's verdict turns on:
@@ -444,10 +448,53 @@ enum FrameStabilizationLaw {
         // A deliberate movement, followed: the window travels a share of the
         // way to where the content now is (a share and not the whole interval,
         // so the movement is *seen*), and no further than the travel the frame
-        // has room for.
+        // has room for. A lag this wide is not a movement being *shown*, it is
+        // the picture being behind — see `adaptiveFollowFloor`.
         let target = min(limit, max(-limit, cumulative))
-        return current + follow * (target - current)
+        let rate = abs(residual) >= adaptiveFollowMultiple * deadZone
+            ? max(follow, adaptiveFollowFloor)
+            : follow
+        return current + rate * (target - current)
     }
+
+    /// How far past the dead zone the residual has to be before the law stops
+    /// showing the elder a movement and starts catching up with it: two dead
+    /// zones, measured on the same quantity the dead zone itself is.
+    ///
+    /// The owner's second device symptom (2026-09-18) is what this answers:
+    /// *"when the viewport moves it's too slow to respond."* A fixed follow
+    /// factor cannot be both — at 0.4 a deliberate pan is still visibly behind a
+    /// quarter of a second later, which is the lag they reported; at 0.85 the
+    /// tremor in the band just outside the dead zone would reach the glass,
+    /// which is the complaint the dead zone exists to answer. The two bands are
+    /// therefore told apart by *how far behind the picture is*, which is the only
+    /// quantity that separates them: a hand's tremor at 1.5 % of the frame has to
+    /// keep coming back and forth to stay outside the dead zone, while a pan
+    /// leaves the picture 8 % behind and stays there. Inside two dead zones the
+    /// law cannot tell them apart and keeps the smooth factor — deliberately slow
+    /// at that amplitude, because that is the band where a tremor lives.
+    private static let adaptiveFollowMultiple: CGFloat = 2
+
+    /// The rate a *clearly* lagging picture is caught up at: a floor under the
+    /// configured `followFactor`, not a replacement for it.
+    ///
+    /// `max(followFactor, 0.85)` rather than a key of its own, because this is
+    /// not a second opinion about how much of a deliberate movement to show —
+    /// it is the point at which showing the movement has stopped being worth the
+    /// lag. A policy that already follows exactly (`followFactor: 1`) is left
+    /// alone: it is faster than the floor already, and the clamp the margin
+    /// applies is what bounds it either way.
+    ///
+    /// The number is the one the arithmetic allows rather than one tuned on a
+    /// device: a 4 % lag — twice the shipped dead zone, i.e. the smallest this
+    /// branch ever answers — leaves under 1 % after one measurement, which is
+    /// inside the dead zone, so the visible error is gone inside a single
+    /// measurement of the shipped cadence rather than over the half second the
+    /// fixed factor needed. It does not follow *exactly*, and must not: `1` would
+    /// track the content perfectly and the picture would appear to stand still
+    /// while the phone moved, which is the one thing the follow branch exists to
+    /// avoid.
+    private static let adaptiveFollowFloor: CGFloat = 0.85
 
     /// The residual after the window has moved: the picture's displacement on
     /// screen, derived rather than accumulated, so no rounding can make the law

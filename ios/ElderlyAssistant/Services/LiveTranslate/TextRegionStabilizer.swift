@@ -474,6 +474,19 @@ struct TextRegionStabilizer {
             // the frame was. Only the string can still identify the region in
             // that case.
             //
+            // **Both keys must be grouping something for that to hold** (owner
+            // device report, 2026-09-18). The claim is about *groupings*, and a
+            // key with one member line is not one: it is a plain reading with a
+            // label on it. Two such keys are disjoint exactly when their strings
+            // differ — which is every OCR wobble — so firing the refusal on them
+            // took the geometry match away from a region whose box had not moved,
+            // and every pass re-keyed it. The owner's own trace is that shape:
+            // four one-line signs, a constant `regionCount=4`, and
+            // `region_removed`/`region_appeared` pairs on every pass while the
+            // scene stood still. `publishedBlocks` keys *every* block, one-line
+            // ones included, so this was the device's ordinary case and not an
+            // edge.
+            //
             // Nothing else is refused. Same text under a different *grouping* is
             // one surface, and that is what the object pass produces every time
             // it changes its mind; a shared member line with one of them misread
@@ -481,9 +494,15 @@ struct TextRegionStabilizer {
             // box exactly as a region carrying no key at all would be — a member
             // line the OCR stumbled on does not re-key the panel it belongs to.
             // A `nil` on either side is not a claim, so a plain OCR region is
-            // unaffected.
+            // unaffected. A one-line key against a grouped one is not a claim
+            // either: the grouped block said which lines belong together, and the
+            // single line did not say it belongs elsewhere — so the box decides,
+            // which for a panel being re-read (or re-grouped) is the answer that
+            // keeps it on screen.
             if let claimed = observation.blockIdentity, let held = region.blockIdentity,
                SceneBlockGrouper.identitiesAreKnownToBeDifferentSurfaces(claimed, held),
+               SceneBlockGrouper.identityAssertsGrouping(claimed),
+               SceneBlockGrouper.identityAssertsGrouping(held),
                !sameString {
                 continue
             }

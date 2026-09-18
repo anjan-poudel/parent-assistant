@@ -316,6 +316,11 @@ final class SceneBlockGrouperTests: XCTestCase {
     /// *sure* of. A key that merely differs must not take away a match the plain
     /// string-and-box rule would have made, or an OCR stumble on one member line
     /// would re-key the panel it belongs to.
+    ///
+    /// Two relations, kept separate: this one is the pure member-set question,
+    /// and the stabiliser gates it on `identityAssertsGrouping` for both keys
+    /// before it refuses anything — a pair of one-line keys is not a pair of
+    /// conflicting groupings, whatever their sets say.
     func testDifferentTextIsNeverTheSameSurface() {
         let panel = SceneBlockGrouper.textIdentity(of: [line("MENU", 0.30, 0.30, 0.60, 0.36),
                                                         line("Tea Rs 40", 0.30, 0.36, 0.60, 0.42)])
@@ -357,6 +362,35 @@ final class SceneBlockGrouperTests: XCTestCase {
         XCTAssertFalse(SceneBlockGrouper.identitiesDescribeTheSameSurface(panel, aDifferentLine),
                        "a misread line is not a piece of anything: it is a different string, "
                        + "and the stabiliser's own gates decide that case")
+    }
+
+    /// Which keys may make a *grouping* claim at all, pinned where the key
+    /// format lives.
+    ///
+    /// The stabiliser's one subtractive rule is gated on this (owner device
+    /// report, 2026-09-18). Two one-line keys whose readings differ are disjoint
+    /// keys — one member each, nothing shared — and read as a grouping claim that
+    /// meant "two different surfaces", which took the box's own decision away
+    /// from a region that had not moved and re-keyed it on every pass. A one-line
+    /// key names a reading; only a block that grouped lines is claiming anything
+    /// about what belongs with what.
+    func testOnlyAKeyWithMoreThanOneMemberLineAssertsAGrouping() {
+        let panel = SceneBlockGrouper.textIdentity(of: [line("MENU", 0.30, 0.30, 0.60, 0.36),
+                                                        line("Tea Rs 40", 0.30, 0.36, 0.60, 0.42)])
+        let oneLine = SceneBlockGrouper.textIdentity(of: [line("START", 0.30, 0.30, 0.60, 0.60)])
+        let twoIdenticalLines = SceneBlockGrouper.textIdentity(of: [
+            line("START", 0.30, 0.30, 0.60, 0.36), line("START", 0.30, 0.36, 0.60, 0.42)
+        ])
+
+        XCTAssertTrue(SceneBlockGrouper.identityAssertsGrouping(panel))
+        XCTAssertFalse(SceneBlockGrouper.identityAssertsGrouping(oneLine),
+                       "a one-line block's key is a reading with a label on it, not a grouping")
+        XCTAssertFalse(SceneBlockGrouper.identityAssertsGrouping(twoIdenticalLines),
+                       "the identity is the member *set*: two identical lines are the key of one line")
+        XCTAssertFalse(SceneBlockGrouper.identityAssertsGrouping("a caller's own key"),
+                       "a key that is not one of this type's groups nothing")
+        XCTAssertFalse(SceneBlockGrouper.identityAssertsGrouping("text"),
+                       "…and a bare prefix parses to no members at all")
     }
 
     // MARK: Scenario: the same scene groups the same way, twice

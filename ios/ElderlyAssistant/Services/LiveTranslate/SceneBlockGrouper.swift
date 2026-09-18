@@ -526,6 +526,31 @@ enum SceneBlockGrouper {
         return leftMembers.isDisjoint(with: rightMembers)
     }
 
+    /// Whether a key **asserts a grouping**: it is one of this type's, and it
+    /// carries more than one member line.
+    ///
+    /// This is the whole of what a key can say beyond its own strings, and it
+    /// is what the stabiliser's one *subtractive* rule is gated on (owner device
+    /// report, 2026-09-18). A one-line block is a plain reading with a label
+    /// attached: `"text\u{1}START"` asserts "the line reads START" and nothing
+    /// about what belongs with what, so two of them have nothing to say to each
+    /// other that the ordinary string-and-box rule cannot already decide. Read as
+    /// a grouping claim they said something else, and badly: two one-line signs
+    /// whose readings differed were *disjoint* — one member each, nothing in
+    /// common — so the stabiliser refused the geometry match, re-keyed a region
+    /// whose box had not moved a pixel, and the overlay the elder was reading
+    /// flickered out and back on every pass. The object decides which lines are
+    /// one block; only a block that actually grouped lines has made that
+    /// decision.
+    ///
+    /// Measured on the member **set**, like the surface relation itself, so a
+    /// block of two identical lines is one member here and reads as no grouping
+    /// — which is what its key already is: the key of one line.
+    static func identityAssertsGrouping(_ key: String) -> Bool {
+        guard let members = members(of: key) else { return false }
+        return members.count > 1
+    }
+
     /// The member strings an identity key was built from, or nil for a key that
     /// is not one of this type's (a caller's own key, a plain OCR region's).
     private static func members(of key: String) -> Set<String>? {
