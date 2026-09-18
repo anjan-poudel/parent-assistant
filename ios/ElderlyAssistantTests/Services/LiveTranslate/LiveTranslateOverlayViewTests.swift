@@ -261,52 +261,6 @@ final class LiveTranslateOverlayViewTests: XCTestCase {
         }
     }
 
-    // MARK: - Scenario: a block is one panel, drawn and announced whole
-    // (scene-block rework, 2026-09-18)
-
-    func testABlockPanelDrawsItsLinesInOrderAndAnnouncesAllOfThem() throws {
-        let policy = LiveTranslateOverlaySurface.policy(config: config, alwaysShowOriginal: false)
-        let block = region(1, "START\n2 MIN", box: box(0.10, 0.30, 0.70, 0.60))
-        let result = TranslationResult.resolved(originalText: "START\n2 MIN",
-                                                translation: "सुरु\n२ मिनेट", tier: .cloud)
-        let surface = makeSurface(regions: [block], results: [identity(1): result])
-
-        let presentation = try XCTUnwrap(surface.presentations.first)
-        XCTAssertEqual(presentation.state, .resolved)
-        guard case .inPlace(_, let rect) = presentation.form else {
-            return XCTFail("a resolved block is one panel on its own rect, not a pill: "
-                           + "\(presentation.form)")
-        }
-        XCTAssertEqual(presentation.frameRect, rect)
-        XCTAssertEqual(presentation.lines.map(\.text), ["सुरु", "२ मिनेट"],
-                       "the panel's rows are the translated lines in the order they were recognized")
-        XCTAssertEqual(presentation.lines.map(\.pointSize),
-                       [policy.minPointSize, policy.minPointSize],
-                       "one panel, one size — the body floor")
-        XCTAssertEqual(presentation.accessibilityLabel, "सुरु २ मिनेट",
-                       "the elder hears the block the panel shows, not its first row")
-        XCTAssertEqual(presentation.accessibilityValue, "START\n2 MIN",
-                       "…and the original is still reachable beside it")
-        XCTAssertTrue(presentation.speaksTranslation,
-                      "tap-to-hear speaks the block's lines in order")
-    }
-
-    func testADegradedBlockPanelSaysWhatItHonestlyCanRatherThanStayingSilent() throws {
-        let block = region(1, "START\n2 MIN", box: box(0.10, 0.30, 0.70, 0.60))
-        let result = TranslationResult.degraded(originalText: "START\n2 MIN", reason: .noNetwork)
-        let surface = makeSurface(regions: [block], results: [identity(1): result])
-
-        let presentation = try XCTUnwrap(surface.presentations.first)
-        XCTAssertEqual(presentation.state, .degraded)
-        XCTAssertFalse(presentation.speaksTranslation,
-                       "a panel with nothing to say is not a button that does nothing")
-        XCTAssertEqual(presentation.lines.map(\.text),
-                       [try XCTUnwrap(surface.stateCopy(for: result))],
-                       "the panel carries the honest sentence, not a stub translation")
-        XCTAssertNil(presentation.accessibilityValue,
-                     "the sentence is the label; there is no second fact to announce")
-    }
-
     // MARK: - Scenario: text and controls meet the accessibility standards
 
     func testTextRendersAtOrAboveTheMinimumPointSizeInThePrimaryWeight() {

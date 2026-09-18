@@ -465,55 +465,6 @@ struct LiveTranslateConfig: Equatable {
     /// stable boxes rather than many small ones (owner UX rework, 2026-09-17).
     var declutterMaxRegions: Int = 6
 
-    // MARK: Scene blocks (owner UX verdict, 2026-09-18)
-
-    /// Seconds between two object passes.
-    ///
-    /// The object pass is the feature's **slow** pass, and the cadence is the
-    /// reason it can afford to exist: it costs one objectness-saliency request
-    /// plus one classification request per object, and what it answers — which
-    /// appliances and screens are in the picture — is a property of the scene,
-    /// not of a frame. An appliance does not become a different appliance
-    /// between two OCR passes, so the result is cached and reused until this
-    /// interval has passed.
-    ///
-    /// Two seconds is deliberately several OCR passes (the nominal pass is a
-    /// quarter second): the grouping the objects feed changes only when the
-    /// elder points the camera at something else, and the text the elder reads
-    /// is refreshed at the OCR cadence throughout. The first pass of a session
-    /// always runs the object pass — there is nothing cached to reuse yet.
-    var objectPassCadenceSeconds: TimeInterval = 2
-
-    /// How far apart two recognized lines may be, in normalized frame units,
-    /// and still be merged into one block.
-    ///
-    /// The owner's direction is the value: **fewer, bigger** translations, not
-    /// per-line fidelity ("maximize text regions — bigger but fewer
-    /// translations"). Lines of one paragraph sit a small fraction of the frame
-    /// height apart; a menu read as five lines is one surface to the elder, and
-    /// at a tight distance it renders as five panels fighting for the same
-    /// pixels. Generous on purpose — 10% of the frame height — because the
-    /// failure it prevents (a swarm of small boxes) is the one the elder
-    /// actually saw, while the failure it risks (two unrelated signs a tenth of
-    /// a frame apart merging) is bounded by the second half of the merge rule:
-    /// two lines only merge if they also share a column.
-    var blockMergeDistance: Double = 0.1
-
-    /// Blocks emitted per pass, at most.
-    ///
-    /// The count the overlay is allowed to draw. Four is the owner's own bound
-    /// ("a small number (≤3–4 visible) of large, stable, translation-ready
-    /// surfaces") and it is the whole point of the rework: a dense scene is not
-    /// served by translating every line, it is served by the few surfaces a
-    /// person can actually read, with the snapshot card as the reading surface
-    /// for everything else.
-    ///
-    /// The blocks outside the bound are not errors and lose no text — they are
-    /// exactly what the snapshot card exists for — and the bound is what the
-    /// object pass uses too (a scene that resolves to four surfaces does not
-    /// need classes for regions the overlay could never draw).
-    var maxVisibleBlocks: Int = 4
-
     // MARK: Publication (T-026)
 
     /// The largest per-coordinate movement of a region's box that is treated

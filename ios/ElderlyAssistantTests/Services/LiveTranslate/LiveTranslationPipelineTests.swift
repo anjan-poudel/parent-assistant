@@ -1766,10 +1766,7 @@ final class LiveTranslationPipelineTests: XCTestCase {
         // A clock that clears the OCR interval keeps every hand-delivered
         // frame an OCR pass rather than a tracking pass.
         let clock = AdvancingClock()
-        let detector = LiveTextDetector(observabilityBus: bus,
-                                        engine: engine,
-                                        objectEngine: StubObjectDetectionEngine(),
-                                        now: clock.next)
+        let detector = LiveTextDetector(observabilityBus: bus, engine: engine, now: clock.next)
         let indicator = CloudActivityIndicatorModel(observabilityBus: bus, config: config)
         let client = GeminiClient(configStore: store, observabilityBus: bus,
                                   transport: Self.respondingTransport(), costGovernor: governor)

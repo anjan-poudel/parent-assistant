@@ -18,9 +18,6 @@ final class LiveTextDetectorTests: XCTestCase {
 
     private var bus: LiveTranslateSanitisingBus!
     private var engine: ScriptedRecognitionEngine!
-    /// The object seam, scripted and empty by default: a policy test decides
-    /// the scene's objects the way it decides its lines.
-    private var objects: StubObjectDetectionEngine!
     private var clock: Clock!
 
     /// The injectable time source: the cadence is advanced, never slept.
@@ -33,7 +30,6 @@ final class LiveTextDetectorTests: XCTestCase {
         super.setUp()
         bus = LiveTranslateSanitisingBus()
         engine = ScriptedRecognitionEngine()
-        objects = StubObjectDetectionEngine()
         clock = Clock()
     }
 
@@ -41,7 +37,6 @@ final class LiveTextDetectorTests: XCTestCase {
         LiveTextDetector(config: config,
                          observabilityBus: bus,
                          engine: engine,
-                         objectEngine: objects,
                          now: { [clock] in clock?.now ?? 0 })
     }
 
@@ -116,7 +111,7 @@ final class LiveTextDetectorTests: XCTestCase {
     // MARK: Scenario: the OCR pass is the only source of recognized text
 
     func testAnOCRPassProducesTextAndNoTrackedGeometry() async throws {
-        engine.regions = [region("Exit"), region("Push", y: 0.6)]
+        engine.regions = [region("Exit"), region("Push")]
         let detector = makeDetector()
         XCTAssertTrue(detector.begin().isSuccess)
 
@@ -131,7 +126,7 @@ final class LiveTextDetectorTests: XCTestCase {
     }
 
     func testATrackingPassProducesGeometryOnlyAndCannotChangeText() async throws {
-        engine.regions = [region("Exit"), region("Push", y: 0.6)]
+        engine.regions = [region("Exit"), region("Push")]
         engine.trackedBoxes = ["Exit": box(0.25), "Push": box(0.55)]
         let detector = makeDetector()
         XCTAssertTrue(detector.begin().isSuccess)
@@ -150,7 +145,7 @@ final class LiveTextDetectorTests: XCTestCase {
     // MARK: Scenario: tracking carries position between OCR passes
 
     func testATrackingLossOmitsTheKeyRatherThanMovingOrDroppingTheRegion() async throws {
-        engine.regions = [region("Exit"), region("Push", y: 0.6)]
+        engine.regions = [region("Exit"), region("Push")]
         // The tracker held "Exit" and lost "Push" on this frame.
         engine.trackedBoxes = ["Exit": box(0.25)]
         let detector = makeDetector()
@@ -245,7 +240,7 @@ final class LiveTextDetectorTests: XCTestCase {
     }
 
     func testNoRecognizedTextReachesTheEvents() async throws {
-        engine.regions = [region("Emergency Exit"), region("आपतकालीन निकास", y: 0.6)]
+        engine.regions = [region("Emergency Exit"), region("आपतकालीन निकास")]
         engine.trackedBoxes = ["Emergency Exit": box(0.3)]
         let detector = makeDetector()
         _ = detector.begin()
@@ -570,175 +565,6 @@ final class LiveTextDetectorTests: XCTestCase {
                          "\(token) does not belong in on-device recognition (FR-LCT-003)")
         }
         XCTAssertTrue(code.contains("import Vision"), "recognition is Vision's, and it is local")
-    }
-
-    // MARK: Scenario: the object pass is the slow pass, so it runs on its own cadence
-
-    private func sceneObject(_ label: String?,
-                             _ xMin: Double, _ yMin: Double,
-                             _ xMax: Double, _ yMax: Double) -> LiveTextDetector.DetectedSceneObject {
-        LiveTextDetector.DetectedSceneObject(
-            classLabel: label,
-            normalizedBox: NormalizedBox(xMin: xMin, yMin: yMin, xMax: xMax, yMax: yMax),
-            confidence: 0.7)
-    }
-
-    /// One OCR pass per call, by advancing the clock past the OCR interval
-    /// before each frame.
-    private func ocrPass(_ detector: LiveTextDetector, luma: UInt8) async throws
-        -> Result<LiveTextDetector.Pass, LiveTranslateError> {
-        clock.advance(by: detector.config.ocrSampleInterval + 1)
-        return await detector.recognize(try frame(luma: luma))
-    }
-
-    func testTheObjectPassRunsOnTheFirstOCROfASceneAndThenOnItsCadence() async throws {
-        objects.objects = [sceneObject("microwave", 0.1, 0.1, 0.6, 0.6)]
-        engine.regions = [region("START", x: 0.2, y: 0.2)]
-        let detector = makeDetector()
-        _ = detector.begin()
-
-        _ = try await ocrPass(detector, luma: 0)
-        XCTAssertEqual(objects.detectCallCount, 1, "the first OCR of a scene detects")
-
-        // Inside the cadence, the pass reuses what it has: the object is the
-        // expensive request, and a scene's objects do not change between two
-        // frames a fifth of a second apart.
-        _ = try await ocrPass(detector, luma: 30)
-        XCTAssertEqual(objects.detectCallCount, 1,
-                       "the object pass is the slow pass: it is not run per frame")
-
-        clock.advance(by: detector.config.objectPassCadenceSeconds + 1)
-        _ = try await ocrPass(detector, luma: 60)
-        XCTAssertEqual(objects.detectCallCount, 2, "once the cadence is due, it runs again")
-
-        XCTAssertEqual(bus.events(named: "object_pass").count, 2)
-        XCTAssertEqual(bus.events(named: "object_pass").last?.metadata["count"], "1")
-        XCTAssertEqual(bus.events(named: "object_pass").first?.outcome, "success")
-    }
-
-    func testTheCachedObjectsStillGroupThePassThatDidNotDetect() async throws {
-        objects.objects = [sceneObject("microwave", 0.1, 0.1, 0.6, 0.6)]
-        engine.regions = [region("START", x: 0.2, y: 0.2)]
-        let detector = makeDetector()
-        _ = detector.begin()
-
-        _ = try await ocrPass(detector, luma: 0)
-        let second = try await ocrPass(detector, luma: 30)
-        XCTAssertEqual(objects.detectCallCount, 1, "no second detection")
-
-        guard case .success(let pass) = second else { return XCTFail("expected a pass: \(second)") }
-        XCTAssertEqual(pass.objects.count, 1,
-                       "the cached objects are the pass's objects: a pass without a detection "
-                       + "groups against the scene the last detection described")
-    }
-
-    func testAFailedObjectPassDegradesAndThePassStillSucceeds() async throws {
-        objects.errorToThrow = StubFailure(message: "no saliency here")
-        engine.regions = [region("Exit")]
-        let detector = makeDetector()
-        _ = detector.begin()
-
-        let result = try await ocrPass(detector, luma: 0)
-
-        guard case .success(let pass) = result else {
-            return XCTFail("the object pass is a SHOULD: a scene with no objects is grouped "
-                           + "by text geometry, which is what every pass did before: \(result)")
-        }
-        XCTAssertEqual(pass.regions.map(\.text), ["Exit"])
-        XCTAssertTrue(pass.objects.isEmpty)
-        XCTAssertEqual(bus.events(named: "object_pass_failed").count, 1,
-                       "a refused object request is reported as a failure, once")
-        XCTAssertEqual(bus.events(named: "object_pass_failed").first?.errorCode,
-                       LiveTranslateError.ocrPassFailed(.requestFailed).logSafeErrorCode,
-                       "the taxonomy's code, in the shape ocr_pass_failed records one")
-        XCTAssertTrue(bus.events(named: "object_detection_unsupported").isEmpty,
-                      "the runtime has the capability: it refused this request, which is a "
-                      + "different fact and a different event")
-
-        // And it stays degraded: the request is not retried every frame.
-        _ = try await ocrPass(detector, luma: 30)
-        XCTAssertEqual(objects.detectCallCount, 1,
-                       "a failed object pass is not a per-frame retry loop")
-    }
-
-    func testAnEngineWithNoObjectSupportAnnouncesItOnceAndStaysUsable() async throws {
-        let unsupported = StubObjectDetectionEngine(supportsObjectDetection: false)
-        let detector = LiveTextDetector(config: .default,
-                                        observabilityBus: bus,
-                                        engine: engine,
-                                        objectEngine: unsupported,
-                                        now: { [clock] in clock?.now ?? 0 })
-        engine.regions = [region("Exit")]
-        XCTAssertTrue(detector.begin().isSuccess)
-        XCTAssertEqual(bus.events(named: "object_detection_unsupported").count, 1)
-
-        let result = try await ocrPass(detector, luma: 0)
-        guard case .success(let pass) = result else { return XCTFail("expected a pass: \(result)") }
-        XCTAssertEqual(pass.regions.map(\.text), ["Exit"])
-        XCTAssertTrue(bus.events(named: "object_pass").isEmpty,
-                      "an unsupported engine is never asked, so it never reports a pass")
-    }
-
-    func testTheLivePassIsCappedAndTheStillPassIsNot() async throws {
-        // Five separated panels: more surfaces than the cap allows.
-        var lines: [LiveTextDetector.DetectedTextRegion] = []
-        for panel in 0..<5 {
-            let y = 0.02 + Double(panel) * 0.18
-            lines.append(LiveTextDetector.DetectedTextRegion(
-                text: "P\(panel)",
-                normalizedBox: NormalizedBox(xMin: 0.1, yMin: y, xMax: 0.6, yMax: y + 0.06),
-                detectedLanguage: nil, confidence: 0.9))
-        }
-        engine.regions = lines
-        let detector = makeDetector()
-        _ = detector.begin()
-
-        let live = await detector.recognize(try frame())
-        guard case .success(let livePass) = live else { return XCTFail("expected a pass: \(live)") }
-        XCTAssertEqual(livePass.regions.count, detector.config.maxVisibleBlocks,
-                       "the live overlay carries the few surfaces a person can read")
-
-        let still = await detector.recognizeStillFrame(try frame())
-        guard case .success(let stillPass) = still else { return XCTFail("expected a pass: \(still)") }
-        XCTAssertEqual(stillPass.regions.count, 5,
-                       "the snapshot card is the fully-readable mode: it has no overlay to crowd")
-        XCTAssertTrue(livePass.regions.allSatisfy { stillPass.regions.contains($0) },
-                      "the still path's blocks are the live path's blocks — the cap selects "
-                      + "from one grouping rather than regrouping the scene")
-    }
-
-    func testATrackingPassCarriesABlocksGeometryUnderTheBlocksIdentity() async throws {
-        // Two lines inside one object: the pass hands the stabiliser one
-        // surface, and a tracking pass follows that surface — not its lines.
-        objects.objects = [sceneObject("microwave", 0.1, 0.1, 0.7, 0.7)]
-        engine.regions = [region("START", x: 0.2, y: 0.2), region("2 MIN", x: 0.2, y: 0.35)]
-        // The engine follows *lines* — that is what it was given — and the
-        // detector re-keys them into the block the stabiliser holds.
-        engine.trackedBoxes = ["START": NormalizedBox(xMin: 0.25, yMin: 0.25,
-                                                      xMax: 0.45, yMax: 0.35),
-                               "2 MIN": NormalizedBox(xMin: 0.25, yMin: 0.40,
-                                                      xMax: 0.45, yMax: 0.50)]
-        let detector = makeDetector()
-        _ = detector.begin()
-
-        let first = await detector.recognize(try frame(luma: 0))
-        guard case .success(let firstPass) = first else { return XCTFail("expected a pass: \(first)") }
-        XCTAssertEqual(firstPass.regions.map(\.text), ["START\n2 MIN"],
-                       "the object's lines are one surface")
-        XCTAssertNotNil(firstPass.regions.first?.blockIdentity,
-                        "a block reaches the stabiliser with the identity that makes it sticky")
-
-        clock.advance(by: detector.config.ocrSampleInterval / 2)
-        let second = await detector.recognize(try frame(luma: 90))
-        guard case .success(let secondPass) = second else { return XCTFail("expected a pass: \(second)") }
-        XCTAssertTrue(secondPass.regions.isEmpty, "a tracking pass has no text")
-        XCTAssertEqual(secondPass.trackedBoxes.count, 1)
-        let tracked = secondPass.trackedBoxes["START\n2 MIN"]
-        XCTAssertEqual(tracked?.xMin ?? -1, 0.25, accuracy: 0.0001,
-                       "the block's geometry comes back under the block's own key")
-        XCTAssertEqual(tracked?.yMin ?? -1, 0.25, accuracy: 0.0001,
-                       "…and it is the union of the members that were followed")
-        XCTAssertEqual(tracked?.yMax ?? -1, 0.50, accuracy: 0.0001)
     }
 }
 

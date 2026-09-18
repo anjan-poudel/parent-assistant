@@ -484,20 +484,9 @@ struct LiveTranslateOverlaySurface: Equatable {
 
         // The bubbles are drawn from the placement's lines — the same strings
         // the placement measured — so the announcement cannot claim a
-        // translation the pixels do not show. A **block** is one panel holding
-        // several lines, and its announcement is the whole of it: every primary
-        // line in the order the panel draws them, then every supporting line,
-        // so the elder hears the same block the panel shows instead of its
-        // first row (scene-block rework, 2026-09-18). A single-line region is
-        // the same expression with one line in it, and reads exactly as it did.
-        let primaryLines = placement.lines.filter { $0.weight == .primary }.map(\.text)
-        let supportingLines = placement.lines.filter { $0.weight == .secondary }.map(\.text)
-        let primary = primaryLines.isEmpty
-            ? placement.result.text
-            : primaryLines.joined(separator: " ")
-        var supporting = supportingLines.isEmpty
-            ? nil
-            : supportingLines.joined(separator: " ")
+        // translation the pixels do not show.
+        let primary = placement.lines.first?.text ?? placement.result.text
+        var supporting = placement.lines.count > 1 ? placement.lines[1].text : nil
         if supporting == nil, placement.result.sourceTier != nil {
             // An in-place box draws the translation alone — the original is
             // *covered* by design — so the supporting line is not drawn and has
@@ -684,25 +673,11 @@ struct LiveTranslateOverlayView: View {
             // that hugs a line of type reads as the sign's own lettering
             // replaced, where the pill radius reads as a bubble laid over the
             // picture. The callout below keeps the token's.
-            //
-            // A **block** is drawn here as one panel: all of the placement's
-            // lines, stacked in the order they were measured (owner direction,
-            // 2026-09-18 — "bigger but fewer translations"; one surface per
-            // object or merged text block, never one bubble per line). A
-            // single-line region is the same code with one line in it, so the
-            // per-line rendering the feature shipped is unchanged.
-            VStack(spacing: surface.policy.lineSpacing) {
-                ForEach(Array(presentation.lines.enumerated()), id: \.offset) { _, textLine in
-                    line(textLine,
-                         colour: textLine.weight == .secondary
-                             ? DesignTokens.brandBlush
-                             : DesignTokens.background)
-                }
-            }
-            .padding(surface.policy.inPlacePadding)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(DesignTokens.textPrimary)
-            .clipShape(RoundedRectangle(cornerRadius: surface.policy.inPlaceCornerRadius))
+            line(presentation.lines.first, colour: DesignTokens.background)
+                .padding(surface.policy.inPlacePadding)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(DesignTokens.textPrimary)
+                .clipShape(RoundedRectangle(cornerRadius: surface.policy.inPlaceCornerRadius))
 
         case .callout:
             // Laid out with the *same* policy values the pill was sized with.
