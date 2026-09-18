@@ -167,6 +167,11 @@ final class IntentRouter: CommandInterpreter {
     func interpret(transcript: String,
                    context: InterpreterContext,
                    completion: @escaping (InterpretedCommand?) -> Void) {
+        // [GEMINI-SOLIDIFY] A fresh chain entry starts clean: any cloud
+        // failure from a PREVIOUS turn is cleared here, so this turn's
+        // bottom-out can never speak a stale reason (the one entry point
+        // every ladder below shares).
+        clearCloudFailure()
         // Layer 2 — cache. Bypasses interpretation only; downstream
         // confirmation is untouched (spec §4.2 invariant 1).
         if let cached = cache.command(for: transcript) {
@@ -328,14 +333,19 @@ final class IntentRouter: CommandInterpreter {
     /// llama retry would only add ~7 s of latency for a worse answer.
     ///
     /// Time-bounding (the coupled-numbers family): the cloud leg is
-    /// bounded by `GeminiClient`'s own 25 s HTTP timeout, the local leg
-    /// by the llama interpreter's 10 s inference timeout — 35 s worst
-    /// case in total, the SAME bound as the legacy local-first ladder
-    /// (10 s local + 25 s escalation), which stays inside
-    /// `VoicePipeline.turnPendingSafetySeconds` (35 s) and the 60 s
-    /// voice watchdog. The single `completion` fires exactly once on
-    /// every path, so `CommandRouter`'s turn-reply-pending token
-    /// resolves exactly as it does today.
+    /// bounded by `GeminiClient`'s own 25 s HTTP timeout — plus, since
+    /// [GEMINI-SOLIDIFY] (2026-09-18), ONE transport-error retry with
+    /// 0.5 s backoff, a worst case of ≈50.5 s on the rare double
+    /// transport-failure turn. The local leg adds its own 10 s inference
+    /// timeout on the fallback. `VoicePipeline.turnPendingSafetySeconds`
+    /// (45 s) is a deferred-idle HOLD, not a correctness gate: a turn
+    /// whose reply outlives it still commits and speaks when it lands —
+    /// the hold timeout only releases the pipeline to idle early. The
+    /// 60 s voice watchdog never fires here (it only fires in
+    /// `.listening`, never during understanding). The single
+    /// `completion` fires exactly once on every path, so
+    /// `CommandRouter`'s turn-reply-pending token resolves exactly as it
+    /// does today.
     private func interpretCloudFirst(transcript: String,
                                      context: InterpreterContext,
                                      completion: @escaping (InterpretedCommand?) -> Void) {
@@ -611,5 +621,27 @@ final class IntentRouter: CommandInterpreter {
                 "reason": InterpreterSelectionReason.localFailedFallback.rawValue
             ]
         ))
+    }
+}
+
+// MARK: - CloudFailureReporting (forwarding)
+
+/// [GEMINI-SOLIDIFY] (2026-09-18) The router is the interpreter
+/// `CommandRouter` actually holds, so the chain's bottom-out reads the
+/// cloud failure THROUGH the router: the report of whichever cloud brain
+/// the ladder consulted — the cascade tier's provider interpreter when a
+/// tier is wired, else the raw `cloudBrain` slot (the two are the SAME
+/// object in the shipped wiring, exactly like `escalationBrain`).
+/// `clearCloudFailure` forwards to both, so a stale report can never
+/// survive a fresh chain entry no matter which slot held it.
+extension IntentRouter: CloudFailureReporting {
+    var lastCloudFailureClass: GeminiFailureClass? {
+        (cloudCascade?.endpoint.interpreter as? CloudFailureReporting)?.lastCloudFailureClass
+            ?? (cloudBrain as? CloudFailureReporting)?.lastCloudFailureClass
+    }
+
+    func clearCloudFailure() {
+        (cloudCascade?.endpoint.interpreter as? CloudFailureReporting)?.clearCloudFailure()
+        (cloudBrain as? CloudFailureReporting)?.clearCloudFailure()
     }
 }

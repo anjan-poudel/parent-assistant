@@ -1213,9 +1213,12 @@ final class AppCoordinator: ObservableObject {
         storage: storage,
         observabilityBus: observabilityBus
     )
-    private lazy var geminiClient = GeminiClient(configStore: geminiConfigStore,
-                                                 observabilityBus: observabilityBus,
-                                                 costGovernor: geminiCostGovernor)
+    /// [GEMINI-SOLIDIFY] `private(set)` (was `private`): the Gemini
+    /// settings leaf's "Test connection" button calls
+    /// `testConnection()` on the SAME client every real call uses.
+    private(set) lazy var geminiClient = GeminiClient(configStore: geminiConfigStore,
+                                                      observabilityBus: observabilityBus,
+                                                      costGovernor: geminiCostGovernor)
     private lazy var geminiSpeechRecognizer = GeminiSpeechRecognizer(
         client: geminiClient,
         observabilityBus: observabilityBus
