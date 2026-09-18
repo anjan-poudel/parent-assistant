@@ -495,7 +495,7 @@ final class LiveTranslateConfigTests: XCTestCase {
                        + "invisible to the pass, which is the complaint")
         XCTAssertTrue(config.ocrUsesLabelVocabulary)
         XCTAssertTrue(config.ocrLargeTextRetryEnabled)
-        XCTAssertTrue(config.extractModeDefault,
+        XCTAssertFalse(config.extractModeDefault,
                       "a session opens showing the recognized text (owner verdict, 2026-09-18)")
     }
 
