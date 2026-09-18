@@ -1018,24 +1018,35 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
         // tier. The load still runs inside the caller's deadline (see
         // `run`), so a granted reservation that takes too long is bounded
         // exactly as before.
-        let reservation: ModelReservation
-        switch lifecycle.reserve(ModelLoadRequest(
-            slot: .translateBrain,
-            modelID: modelID,
-            owner: slot,
-            purpose: .liveTranslate,
-            replacesSlotContents: true)) {
-        case .success(let granted):
-            reservation = granted
-        case .failure(let denial):
-            throw BrainGenerationFailure.loadDenied(denial)
+        // [WARDEN-TESTING-BYPASS] (2026-09-19) The owner asked to test the
+        // local model on device without the warden's arithmetic in the way:
+        // while `wardenBypassForTesting` is on, the load skips the
+        // reserve/admit gate entirely — no permit, no eviction, no denial.
+        // Residency is still recorded (didLoad below), so the ledger stays
+        // honest about what is in memory. Testing-only; reverts to the gated
+        // path when the round-3 quant ships.
+        let reservation: ModelReservation?
+        if config.wardenBypassForTesting {
+            reservation = nil
+        } else {
+            switch lifecycle.reserve(ModelLoadRequest(
+                slot: .translateBrain,
+                modelID: modelID,
+                owner: slot,
+                purpose: .liveTranslate,
+                replacesSlotContents: true)) {
+            case .success(let granted):
+                reservation = granted
+            case .failure(let denial):
+                throw BrainGenerationFailure.loadDenied(denial)
+            }
         }
         // Every exit that is not a committed load hands the permit back —
         // a throw from the construction, and (though this method has no
         // suspension point today) anything the runtime adds later.
         var committed = false
         defer {
-            if !committed {
+            if let reservation, !committed {
                 lifecycle.abandon(reservation, reason: .loadFailed)
             }
         }
@@ -1066,8 +1077,11 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
         // Committed even when the caller's stage deadline has already
         // expired — the 2.5 GB IS resident, and a ledger that declined to
         // count it would be exactly the undercount this migration exists to
-        // remove.
-        lifecycle.commit(reservation)
+        // remove. Under the testing bypass there is no permit to commit;
+        // didLoad above already recorded the residency.
+        if let reservation {
+            lifecycle.commit(reservation)
+        }
         committed = true
         return created
     }

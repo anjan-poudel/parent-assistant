@@ -1193,6 +1193,13 @@ struct LiveTranslateConfig: Equatable {
     /// talking to, so it is the one that keeps the device.
     var brainTranslationDefersToResidentBrain: Bool = true
 
+    /// [WARDEN-TESTING-BYPASS] (2026-09-19) The owner asked to test the
+    /// local translation model on device without the warden's reserve/admit
+    /// gate in the way. While true, the tier's load skips the reservation
+    /// entirely (residency still recorded); false restores the gated path.
+    /// Testing-only — reverts to false when the round-3 quant ships.
+    var wardenBypassForTesting: Bool = true
+
     // MARK: Tier 2
 
     /// Base timeout for one tier-2 request. **Derived, never stored (CL-8):**
