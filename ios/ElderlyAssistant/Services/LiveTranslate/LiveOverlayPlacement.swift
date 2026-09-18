@@ -26,14 +26,20 @@ import Foundation
 //    with no state copy to draw, the block's own recognized lines): the surface
 //    appears where the text stood and fills in, rather than a pill appearing
 //    beside it and being replaced by it.
-//    **A block that cannot stand as a panel falls back to the callout, never to
-//    nothing** (owner device verdict, 2026-09-18: "the camera says it can't
-//    find anything to read"). Still one surface for the block — not one bubble
-//    per line — and still at the body floor; the snapshot card remains the
-//    reading surface for text a pill cannot hold. The one thing the live
-//    overlay may never do is drop a region it recognized: the empty state is
-//    for a scene with no text in it, and showing it over text is the feature
-//    telling the elder something untrue.
+//    **A block that cannot stand as a panel falls back to the bounded panel,
+//    and then to the callout — never to nothing** (owner device verdict,
+//    2026-09-18: "the camera says it can't find anything to read"; owner
+//    refinement, 2026-09-18: a block too tall for its own box is drawn as a
+//    *scrollable* panel, not as one pill). The bounded panel is the same
+//    surface as the panel — the block's own lines, in order, at the body
+//    floor, and now with the original stacked under them where the preference
+//    asks for it — inside a box capped at `panelMaxHeightFraction` of the
+//    container and scrolled when the lines overflow it. Still one surface for
+//    the block — not one bubble per line — and still at the body floor; the
+//    snapshot card remains the reading surface for text a pill cannot hold.
+//    The one thing the live overlay may never do is drop a region it
+//    recognized: the empty state is for a scene with no text in it, and
+//    showing it over text is the feature telling the elder something untrue.
 //    Single-line regions are untouched — in place when the translation fits,
 //    a callout when it does not — so the per-line machinery below is the same
 //    code it always was.
@@ -138,6 +144,12 @@ enum LiveOverlayPlacement {
         /// a corner that hugs the text line height rather than the bubble
         /// token's pill radius.
         let inPlaceCornerRadius: CGFloat
+        /// The largest fraction of the container a **bounded panel**'s height
+        /// may be (`panelMaxHeightFraction`). Carried in the policy for the
+        /// same reason `geometryStickiness` is: it is a share of the container
+        /// the rects were measured in, so it means the same thing to the
+        /// placement that measures the panel and to the view that draws it.
+        let panelMaxHeightFraction: Double
         /// How far a region's rect may drift from the rect last rendered for
         /// it before the overlay adopts the new geometry, as a fraction of the
         /// container dimension (`overlayGeometryStickiness`). Carried in the
@@ -228,6 +240,17 @@ enum LiveOverlayPlacement {
         /// covers the region's own text box and no more free space than it
         /// needed.
         case inPlace(regionID: TextRegionStabilizer.RegionIdentity, rect: CGRect)
+        /// The same one-panel surface for a **block** whose lines could not be
+        /// stacked as a panel at the body floor inside the block's own grown
+        /// box: bounded to `panelMaxHeightFraction` of the container, with the
+        /// block's lines drawn inside it at that floor and scrolled when they
+        /// overflow (owner refinement, 2026-09-18).
+        ///
+        /// It is a *form* and not a flag on `inPlace` because the view has to
+        /// choose a different surface for it — a scroll view rather than a
+        /// stack — and the view decides nothing: which surface a region is
+        /// drawn on is a fact of the placement, exactly as the box is.
+        case scrollablePanel(regionID: TextRegionStabilizer.RegionIdentity, rect: CGRect)
         /// A pill beside the region, with a leader line to `anchor` — the
         /// closest point on the region's rect to the pill, so the line always
         /// points at the region it belongs to.
@@ -537,9 +560,10 @@ enum LiveOverlayPlacement {
     /// ("translated lines inside at ≥18pt where the block allows"). A panel
     /// that cannot be drawn at the body floor is not shrunk until it fits —
     /// that is precisely the illegible small type the rework removes — so it
-    /// gets no panel: the block is drawn as the one callout that always has
-    /// somewhere to go, and the snapshot card remains the reading surface for
-    /// text a pill cannot hold.
+    /// stops being a *static* panel: the block is drawn as the bounded panel
+    /// (the same lines, the same floor, a capped and scrollable box), or, with
+    /// no box to draw in at all, as the one callout that always has somewhere
+    /// to go. The floor never moves; only the box around it does.
     static func panelPointSize(policy: Policy) -> CGFloat { policy.minPointSize }
 
     /// The size of a stack of lines: the widest line, the total height, and the
@@ -578,8 +602,9 @@ enum LiveOverlayPlacement {
     /// it does between two lines), and the fit is the stacked block at the body
     /// floor. Anything that does not fit returns `.doesNotFit` — never a
     /// smaller, illegible version of the panel. What the caller draws instead is
-    /// the callout: the shot at a panel is the decision, and a block that does
-    /// not get one is still a block the overlay shows.
+    /// the **bounded panel** (`boundedPanelOutcome`): the decision here is
+    /// "the whole block, at the floor, in the block's own box", and a block
+    /// that does not get that is still a block the overlay shows.
     static func panelOutcome(regionRect: CGRect,
                              lines: [LiveOverlayTextLine],
                              obstacles: [CGRect] = [],
@@ -603,6 +628,80 @@ enum LiveOverlayPlacement {
                                           ceiling: box,
                                           padding: policy.inPlacePadding),
                      lines: lines)
+    }
+
+    // MARK: - Bounded panels (owner refinement, 2026-09-18)
+
+    /// The tallest a bounded panel may be: `panelMaxHeightFraction` of the
+    /// container, and never more than the safe area it is drawn in.
+    ///
+    /// The two bounds answer two different questions. The fraction is the
+    /// elder's: however long a block's translation is, its panel is never more
+    /// than a fixed share of what they are looking at. The safe area is the
+    /// screen's: a panel may not run under the notch or into the home
+    /// indicator, cap or no cap.
+    static func panelMaxHeight(containerSize: CGSize,
+                               bounds: CGRect,
+                               policy: Policy) -> CGFloat {
+        guard containerSize.height > 0, bounds.height > 0 else { return 0 }
+        let fraction = max(0, CGFloat(policy.panelMaxHeightFraction))
+        return min(containerSize.height * fraction, bounds.height)
+    }
+
+    /// The bounded panel's own decision, in the same shape as the panel's: the
+    /// box the block's lines are drawn in, or the honest "even this has nowhere
+    /// to go".
+    enum BoundedPanelOutcome: Equatable {
+        case fits(box: CGRect)
+        case doesNotFit
+    }
+
+    /// **The** bounded-panel decision, for a block the plain panel could not
+    /// hold.
+    ///
+    /// The box is the *block's own* grown box — the very rect `panelOutcome`
+    /// measured against, so the half-gap law between two blocks holds here
+    /// exactly as it does between two panels — cut down to the policy's cap.
+    /// Capping the height rather than the whole box is deliberate: the block
+    /// has already been proved to have this room, and what it does not have is
+    /// the *vertical* room for every line at once. The lines are not shrunk and
+    /// not dropped — the surface scrolls, which is the one thing a static panel
+    /// cannot do.
+    ///
+    /// Nothing is measured here, and nothing needs to be: the lines are drawn
+    /// at the floor the panel path already fixed, wrapped to the box the view
+    /// draws (a scroll view absorbs however tall that turns out to be), and the
+    /// cap bounds the box whatever the content does. A caller that gets a box
+    /// back can draw every line it handed in.
+    static func boundedPanelOutcome(regionRect: CGRect,
+                                    obstacles: [CGRect] = [],
+                                    bounds: CGRect,
+                                    containerSize: CGSize,
+                                    policy: Policy) -> BoundedPanelOutcome {
+        guard regionRect.width > 0, regionRect.height > 0 else { return .doesNotFit }
+
+        let ceiling = inPlaceMaxBox(regionRect: regionRect,
+                                    obstacles: obstacles,
+                                    bounds: bounds,
+                                    growth: policy.inPlaceMaxGrowth)
+        guard ceiling.width > 0, ceiling.height > 0 else { return .doesNotFit }
+
+        let height = min(ceiling.height,
+                         panelMaxHeight(containerSize: containerSize,
+                                        bounds: bounds,
+                                        policy: policy))
+        guard height > 0 else { return .doesNotFit }
+
+        // Centred on the text it stands over — the block's own middle, which is
+        // where the elder is already looking — and then kept inside the box
+        // that was proved clear of its neighbours. `clamp` moves a rect, never
+        // resizes one, so the cap survives the move.
+        let box = clamp(CGRect(x: ceiling.minX,
+                               y: regionRect.midY - height / 2,
+                               width: ceiling.width,
+                               height: height),
+                        into: ceiling)
+        return .fits(box: box)
     }
 
     // MARK: - Placement
@@ -704,9 +803,12 @@ enum LiveOverlayPlacement {
             // A **block** is one panel the snapshot can read in full and one
             // panel the overlay draws (scene-block rework): its lines are
             // stacked inside one box on the block's own rect, at the body
-            // floor, never one callout per line. A block whose text cannot be
-            // drawn at that size falls through to the callout below — one pill
-            // for the block, not nothing for it.
+            // floor, never one callout per line. A block whose whole text
+            // cannot be stacked at that size falls through to the **bounded
+            // panel** — the same surface, capped to a share of the container
+            // and scrolled — and only a block with no box to draw in at all
+            // falls through to the callout below: one pill for the block,
+            // never nothing for it.
             //
             // A block the tier has not answered for yet is drawn the same way,
             // carrying the honest state sentence instead of a translation: the
@@ -736,13 +838,37 @@ enum LiveOverlayPlacement {
                     continue
                 }
 
+                // A block whose lines do not fit even the block's own grown box
+                // is drawn as the **bounded panel**: the same lines, at the
+                // same body floor, in a box capped at a share of the container
+                // and scrolled when they overflow (owner refinement,
+                // 2026-09-18). This is the rung that keeps a long block a
+                // *panel* — a surface the elder reads in place — instead of
+                // handing it to a pill that shows its first line and hides the
+                // rest. The cap is what stops the last-resort surface from
+                // becoming the screen; the scroll is what stops the cap from
+                // becoming a truncation.
+                if !lines.isEmpty,
+                   case .fits(let box) = boundedPanelOutcome(regionRect: regionRect,
+                                                             obstacles: occupiedRects + otherRects(region.id),
+                                                             bounds: bounds,
+                                                             containerSize: containerSize,
+                                                             policy: policy) {
+                    placed.append(PlacedOverlay(region: region,
+                                                result: result,
+                                                form: .scrollablePanel(regionID: region.id,
+                                                                       rect: box),
+                                                lines: lines))
+                    continue
+                }
+
                 // **A block that cannot stand as a panel still speaks.** The
-                // panel is the form the owner asked for and it is tried first,
-                // but the fallback is the callout and not nothing: the pill is
-                // the one presentation that always has somewhere to go (it
-                // clamps rather than dropping), it is still **one** surface for
-                // the *block* rather than one bubble per line, and it is still
-                // drawn at the body floor.
+                // panel is the form the owner asked for and it is tried first;
+                // the bounded panel is tried second, and covers every block
+                // with a box to draw in. The pill below is the last resort —
+                // the one presentation that always has *somewhere* to go (it
+                // clamps rather than dropping), for a block with no line to
+                // draw at all or one with no box at all.
                 //
                 // This is the owner's device verdict on the rework, at the line
                 // it is about: "the camera says it can't find anything to

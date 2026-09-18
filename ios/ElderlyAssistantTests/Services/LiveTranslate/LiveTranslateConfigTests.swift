@@ -40,6 +40,8 @@ final class LiveTranslateConfigTests: XCTestCase {
         // Overlay (D1, OD2)
         XCTAssertEqual(config.inPlaceMinPointSize, 16)
         XCTAssertEqual(config.inPlaceMaxGrowth, 1.4)
+        XCTAssertEqual(config.panelMaxHeightFraction, 0.45,
+                       "the bounded panel's cap (owner refinement, 2026-09-18)")
         XCTAssertEqual(config.overlayMinPointSize, 18)
         XCTAssertFalse(config.alwaysShowOriginalDefault)
 
