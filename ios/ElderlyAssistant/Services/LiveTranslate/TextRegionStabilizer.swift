@@ -209,12 +209,11 @@ struct TextRegionStabilizer {
         var confidence: Double
         /// The grouper's identity for the block this region is, when the
         /// detector reported one (scene-block rework, 2026-09-18). It is the
-        /// strongest identity signal there is — the member-string *set* for a
-        /// text block, the object class plus quantised centroid for an object
-        /// block — because it is the same claim the grouper already made when
-        /// it decided which lines are one surface. `nil` for a region that
-        /// arrived by any other path, and updated on every match so it can
-        /// never outlive the block it names.
+        /// strongest identity signal there is — the member-string *set* of the
+        /// block, for every block — because it is the same claim the grouper
+        /// already made when it decided which lines are one surface. `nil` for
+        /// a region that arrived by any other path, and updated on every match
+        /// so it can never outlive the block it names.
         var blockIdentity: String?
         /// The pass number this region was last observed in — recognized or
         /// tracked. The string-identity window is measured from here, so a
@@ -400,27 +399,37 @@ struct TextRegionStabilizer {
     /// matches it.
     ///
     /// **A block claim outranks everything.** When the detector reports a
-    /// `blockIdentity` — the grouper's member-string set, or an object's class
-    /// plus quantised centroid — and a region carries the same one, seen within
+    /// `blockIdentity` — the grouper's member-string set, for every block,
+    /// object or not — and a region is *the same surface of text*, seen within
     /// `regionStringIdentityPasses`, the two are the same surface whatever
     /// happened to the string inside it. This is the case the rework exists
     /// for: an OCR misread of one word of an appliance panel is not a new
     /// panel, and without this signal the region would be re-keyed and the
     /// panel repainted.
     ///
-    /// **A conflicting block claim is a refusal.** When both sides carry a
-    /// block identity of *different scope* — an object where a text block was,
-    /// a microwave where a television was — the observation cannot take that
-    /// region by geometry: the grouper has already said these are two surfaces,
-    /// and only the string can still identify the region. Without this, a scene
-    /// that resolved differently for one frame would hand one surface the
-    /// other's identifier, and with it the other's translation, drawn over the
-    /// wrong thing.
+    /// "The same surface" includes a *regrouping* of the same lines — a panel
+    /// and the pieces of itself — because the object pass is a cadenced,
+    /// best-effort signal that changes its mind (`object_pass outcome=empty`
+    /// over the very text it grouped a moment earlier). Treating a regrouping
+    /// as a new surface is what left the owner's device drawing nothing: the
+    /// region never reached `regionAppearPasses` again.
     ///
-    /// **A *same-scope* block claim with a different key is not.** An object
-    /// key carries a quantised centroid, and a panel sitting near a cell edge
-    /// crosses it for a hundredth of the frame; the surface is the same one and
-    /// the geometry gate below is the honest way to recognise it.
+    /// **A conflicting block claim is a refusal, and only an unambiguous one
+    /// is.** When both sides carry a block identity whose member lines have
+    /// *nothing in common* — a panel and the sign beside it, a microwave's label
+    /// where a television's was — the observation cannot take that region by
+    /// geometry: the grouper has already said these are two surfaces, and only
+    /// the string can still identify the region. Without this, a scene that
+    /// resolved differently for one frame would hand one surface the other's
+    /// identifier, and with it the other's translation, drawn over the wrong
+    /// thing.
+    ///
+    /// A key that merely *differs* is not that case, which is what keeps the
+    /// key additive: it can add a match, and it can refuse one between texts
+    /// with nothing in common, but it can never take away a match the plain
+    /// string-and-box rule would have made. An OCR misread of one member line
+    /// shares the rest of them, so it is matched by the box that did not move —
+    /// exactly as a region carrying no key at all would be.
     ///
     /// **The string is the identity; geometry is the tiebreaker and the
     /// fallback.** A region whose normalized text equals the observation's,
@@ -450,24 +459,32 @@ struct TextRegionStabilizer {
         for (index, region) in regions.enumerated() where !seen.contains(region.id) {
             let iou = Self.intersectionOverUnion(region.box, observation.normalizedBox)
             let distance = Self.centroidDistance(region.box, observation.normalizedBox)
-            let sameBlock = observation.blockIdentity != nil
-                && region.blockIdentity == observation.blockIdentity
-                && passIndex - region.lastSeenPass <= config.regionStringIdentityPasses
+            let sameBlock: Bool
+            if let claimed = observation.blockIdentity, let held = region.blockIdentity {
+                sameBlock = passIndex - region.lastSeenPass <= config.regionStringIdentityPasses
+                    && SceneBlockGrouper.identitiesDescribeTheSameSurface(claimed, held)
+            } else {
+                sameBlock = false
+            }
             let sameString = region.normalizedText == normalized
                 && passIndex - region.lastSeenPass <= config.regionStringIdentityPasses
-            // Two blocks of *different scope* are two different surfaces, and
-            // geometry cannot make one into the other: an object the runtime
-            // named, and the panel beside it, are not interchangeable however
-            // still the frame was. Only the string can still identify the region
-            // in that case — which is the case that matters, a panel whose line
-            // was misread and whose box therefore moved with it. A `nil` on
-            // either side is not a claim, so a plain OCR region is unaffected.
+            // Two blocks whose member lines have nothing in common are two
+            // different surfaces, and geometry cannot make one into the other: a
+            // panel and the sign beside it are not interchangeable however still
+            // the frame was. Only the string can still identify the region in
+            // that case.
             //
-            // Same scope, different key is *not* a refusal: it is the object
-            // quantiser's cell edge, crossed by a panel that did not move, and
-            // the geometry gate below is exactly the right answer for it.
+            // Nothing else is refused. Same text under a different *grouping* is
+            // one surface, and that is what the object pass produces every time
+            // it changes its mind; a shared member line with one of them misread
+            // is not a different surface either, so the region is matched by its
+            // box exactly as a region carrying no key at all would be — a member
+            // line the OCR stumbled on does not re-key the panel it belongs to.
+            // A `nil` on either side is not a claim, so a plain OCR region is
+            // unaffected.
             if let claimed = observation.blockIdentity, let held = region.blockIdentity,
-               !SceneBlockGrouper.identitiesShareScope(claimed, held), !sameString {
+               SceneBlockGrouper.identitiesAreKnownToBeDifferentSurfaces(claimed, held),
+               !sameString {
                 continue
             }
             guard sameBlock

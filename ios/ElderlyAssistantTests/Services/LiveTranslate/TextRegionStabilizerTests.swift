@@ -521,28 +521,37 @@ final class TextRegionStabilizerTests: XCTestCase {
                                             blockIdentity: identity)
     }
 
-    /// The claim block identity exists for: one line inside a panel is
-    /// misread, the panel's text changes, and it is still the same panel.
+    /// A member line misread is not a new panel, and this is the case that says
+    /// how far a block key reaches: exactly as far as *adding* what the plain
+    /// rule would do.
     ///
-    /// The string cannot make that claim — it changed — and the box cannot
-    /// either once the misread line is a different length. The block's identity
-    /// can, because it is the grouper's own statement that these lines are one
-    /// surface.
-    func testABlockWhoseMemberLineIsMisreadKeepsItsIdentity() {
+    /// The two keys are not equal — the key is the member set, and one of its
+    /// members came back differently — but they are not disjoint either: they
+    /// share the lines that were read the same way. So this is not the
+    /// unambiguous conflict that refuses a match, and the box that did not move
+    /// keeps the region, exactly as it would for a region carrying no key at
+    /// all.
+    ///
+    /// A key that refused here would re-key the panel mid-read for an OCR
+    /// stumble: the elder's overlay goes blank for the grace window and the
+    /// session re-asks what it has already answered.
+    func testAMisreadMemberLineDoesNotRekeyThePanel() {
         var stabilizer = TextRegionStabilizer(config: immediateConfig())
-        let identity = "object\u{1}microwave\u{1}3,3"
         let appeared = stabilizer.consume(regions: [
-            block(identity, "START\n2 MIN", box(0.2, 0.3, width: 0.3, height: 0.2))
+            block("text\u{1}start\u{1}2 min", "START\n2 MIN", box(0.2, 0.3, width: 0.3, height: 0.2))
         ])
         guard case .appeared(let regionID) = appeared.first else {
             return XCTFail("expected an appeared event, got \(appeared)")
         }
 
         let misread = stabilizer.consume(regions: [
-            block(identity, "START\n2 M1N", box(0.2, 0.3, width: 0.32, height: 0.2))
+            block("text\u{1}start\u{1}2 m1n", "START\n2 M1N",
+                  box(0.2, 0.3, width: 0.32, height: 0.2))
         ])
         XCTAssertEqual(stabilizer.visible.map(\.id), [regionID],
-                       "the panel kept its identity across the misread line: \(misread)")
+                       "the panel kept its identifier across the misread line: \(misread)")
+        XCTAssertEqual(misread, [.textChanged(id: regionID)],
+                       "…and it reports the new reading rather than keeping the stale one")
     }
 
     /// And the converse, which is what makes the test above mean something: a
@@ -550,70 +559,93 @@ final class TextRegionStabilizerTests: XCTestCase {
     /// panel with new words.
     func testADifferentBlocksTextOnTheSameGeometryIsANewRegion() {
         var stabilizer = TextRegionStabilizer(config: immediateConfig())
-        let microwave = "object\u{1}microwave\u{1}3,3"
-        let television = "object\u{1}television\u{1}3,3"
+        let menu = "text\u{1}cold drinks\u{1}water rs 20"
+        let elsewhere = "text\u{1}play\u{1}volume"
         let appeared = stabilizer.consume(regions: [
-            block(microwave, "START\n2 MIN", box(0.2, 0.3, width: 0.3, height: 0.2))
+            block(menu, "Cold Drinks\nWater Rs 20", box(0.2, 0.3, width: 0.3, height: 0.2))
         ])
         guard case .appeared(let firstID) = appeared.first else {
             return XCTFail("expected an appeared event, got \(appeared)")
         }
 
         _ = stabilizer.consume(regions: [
-            block(television, "PLAY\nVOLUME", box(0.2, 0.3, width: 0.3, height: 0.2))
+            block(elsewhere, "PLAY\nVOLUME", box(0.2, 0.3, width: 0.3, height: 0.2))
         ])
         XCTAssertEqual(stabilizer.visible.count, 1)
         XCTAssertNotEqual(stabilizer.visible.map(\.id), [firstID],
                           "a different block is a different surface, however still its box was")
     }
 
-    /// An object block's key is quantised, so a panel sitting near a cell edge
-    /// changes its key without anything in the scene having moved. It is still
-    /// the one panel, and it must keep its identifier — and its translation —
-    /// rather than being re-keyed, re-asked, and drawn twice for the passes it
-    /// takes the first copy to leave.
-    func testAnObjectBlockWhoseQuantisedCellChangedKeepsItsRegion() {
+    /// The owner's device regression at this level (2026-09-18): the object pass
+    /// changes its mind between passes, so the same lines are grouped as one
+    /// panel on one pass and as their own blocks on the next.
+    ///
+    /// Those are two *groupings* of one surface, and a region must keep its
+    /// identifier through both. When it did not — when the regrouping was read
+    /// as a new surface — every pass minted new regions, the appear hysteresis
+    /// was never reached again, and the overlay drew nothing over text it had
+    /// just read.
+    func testARegroupingOfOneSurfaceKeepsItsRegion() {
         var stabilizer = TextRegionStabilizer(config: immediateConfig())
-        let before = "object\u{1}microwave\u{1}4,4"
-        let after = "object\u{1}microwave\u{1}5,5"
+        let panelIdentity = "text\u{1}prewash 40\u{1}rinse aid"
+        let firstPiece = "text\u{1}prewash 40"
+        let secondPiece = "text\u{1}rinse aid"
         let geometry = box(0.2, 0.3, width: 0.3, height: 0.2)
-        let appeared = stabilizer.consume(regions: [block(before, "START\n2 MIN", geometry)])
-        guard case .appeared(let regionID) = appeared.first else {
-            return XCTFail("expected an appeared event, got \(appeared)")
-        }
 
-        let second = stabilizer.consume(regions: [block(after, "START\n2 MIN", geometry)])
+        // The text pass groups the lines separately…
+        _ = stabilizer.consume(regions: [
+            block(firstPiece, "PREWASH 40", geometry),
+            block(secondPiece, "RINSE AID", box(0.2, 0.55, width: 0.3, height: 0.06))
+        ])
+        let identities = stabilizer.visible.map(\.id)
+        XCTAssertEqual(identities.count, 2)
 
-        XCTAssertEqual(stabilizer.visible.map(\.id), [regionID],
-                       "a cell edge is not a new surface: the panel kept its identifier")
-        XCTAssertEqual(second, [],
-                       "…and nothing about it changed, so nothing was re-asked")
+        // …the object lands and groups them into its panel…
+        _ = stabilizer.consume(regions: [block(panelIdentity, "PREWASH 40\nRINSE AID", geometry)])
+        XCTAssertTrue(identities.contains(stabilizer.visible[0].id),
+                      "the panel is one of the pieces' own region, carried forward: "
+                      + "\(stabilizer.visible.map(\.id))")
 
-        // And the new key is the region's, now: a pass carrying it again is the
-        // same unchanged panel, not a third surface.
-        XCTAssertEqual(stabilizer.consume(regions: [block(after, "START\n2 MIN", geometry)]), [])
-        XCTAssertEqual(stabilizer.visible.map(\.id), [regionID],
-                       "one panel across the cell edge, in both directions")
+        // …and the object pass comes back empty, which is the device's own log.
+        _ = stabilizer.consume(regions: [
+            block(firstPiece, "PREWASH 40", geometry),
+            block(secondPiece, "RINSE AID", box(0.2, 0.55, width: 0.3, height: 0.06))
+        ])
+
+        XCTAssertTrue(stabilizer.visible.contains { identities.contains($0.id) },
+                      "a reappearance of the pieces is not a new surface either: the region "
+                      + "that carried them is still on screen")
+        XCTAssertFalse(stabilizer.visible.isEmpty,
+                       "…and the overlay was never asked to draw nothing")
     }
 
-    /// A block claim outranks a string claim: when the grouper says this is the
-    /// block, the region does not need its text to have survived.
+    /// A block claim outranks a string claim: when the grouper says these lines
+    /// are one surface, the region does not need its text — or its box — to
+    /// have survived.
+    ///
+    /// The panel is drawn, the object pass then comes back empty, and the same
+    /// lines arrive as the piece they are: a *regrouping*, on a box that moved
+    /// with it. The piece's key is contained in the panel's, so the claim
+    /// carries the match with no geometry to help it, and the panel is updated
+    /// in place rather than replaced by a second region drawn over the first.
     func testABlockClaimOutranksAStringClaim() {
         var stabilizer = TextRegionStabilizer(config: immediateConfig())
-        let blockIdentity = "text\u{1}cold drinks\u{1}water rs 20"
+        let panel = "text\u{1}cold drinks\u{1}water rs 20"
+        let piece = "text\u{1}cold drinks"
         _ = stabilizer.consume(regions: [
-            block(blockIdentity, "Cold Drinks\nWater Rs 20", box(0.1, 0.1, width: 0.4, height: 0.3))
+            block(panel, "Cold Drinks\nWater Rs 20", box(0.1, 0.1, width: 0.4, height: 0.3))
         ])
         let identity = stabilizer.visible.map(\.id)
 
-        // The same block, recognized with one line dropped and its box moved:
-        // the block's identity still claims the region.
-        let moved = stabilizer.consume(regions: [
-            block(blockIdentity, "Cold Drinks", box(0.1, 0.5, width: 0.4, height: 0.1))
+        // The object went away: one line of the panel is now its own block, and
+        // its box is nowhere near where the panel's was.
+        let regrouped = stabilizer.consume(regions: [
+            block(piece, "Cold Drinks", box(0.1, 0.5, width: 0.4, height: 0.1))
         ])
-        XCTAssertEqual(moved, [.textChanged(id: identity[0])],
-                       "one surface, one translation event — even when a member line dropped out")
-        XCTAssertEqual(stabilizer.visible.map(\.id), identity)
+        XCTAssertEqual(regrouped, [.textChanged(id: identity[0])],
+                       "one surface, one translation event — though the grouping and the box both moved")
+        XCTAssertEqual(stabilizer.visible.map(\.id), identity,
+                       "the regrouping did not mint a second region for the same text")
     }
 
     /// A region that arrived without a block identity (a test fake, a plain

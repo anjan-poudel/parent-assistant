@@ -254,78 +254,109 @@ final class SceneBlockGrouperTests: XCTestCase {
                        + "repaint the panel and re-ask a question already answered")
     }
 
-    func testAnObjectBlocksIdentityQuantisesItsCentroidAtTheMergeDistance() {
-        let steady = SceneBlockGrouper.objectIdentity(classLabel: "microwave",
-                                                      box: box(0.27, 0.27, 0.57, 0.57),
-                                                      mergeDistance: 0.1)
-        let jittered = SceneBlockGrouper.objectIdentity(classLabel: "microwave",
-                                                        box: box(0.28, 0.29, 0.58, 0.59),
-                                                        mergeDistance: 0.1)
+    /// The owner's device regression, as the grouper's own claim (2026-09-18):
+    /// **the object pass cannot re-key the text it grouped.**
+    ///
+    /// The same three lines under one appliance cluster as two text blocks on
+    /// their own — the gap between the first two is wider than the merge
+    /// distance — so the object's arrival changes the *grouping* and must not
+    /// change the *identity*. When it did, every block the text pass had just
+    /// grouped was re-keyed by the next pass's object answer, the stabiliser
+    /// never reached its appear hysteresis for any of them, and the overlay
+    /// drew nothing over four regions it had just read.
+    func testTheObjectPassCannotRekeyTheLinesItGrouped() {
+        let lines = [line("PREWASH 40", 0.10, 0.20, 0.50, 0.28),
+                     line("RINSE AID", 0.10, 0.50, 0.50, 0.58),
+                     line("NO SPIN", 0.10, 0.66, 0.50, 0.74)]
+        let appliance = [object("microwave", 0.05, 0.15, 0.55, 0.80)]
 
-        XCTAssertEqual(steady, jittered,
-                       "a panel that jitters inside its cell keeps its key — and with it its "
-                       + "panel, its translation and its place in the overlay")
-        XCTAssertNotEqual(steady,
-                          SceneBlockGrouper.objectIdentity(classLabel: "microwave",
-                                                           box: box(0.50, 0.50, 0.80, 0.80),
-                                                           mergeDistance: 0.1),
-                          "a panel that moved a real distance is a different key")
+        let withObject = SceneBlockGrouper.group(lines: lines, objects: appliance, config: .default)
+        let without = SceneBlockGrouper.group(lines: lines, objects: [], config: .default)
+
+        XCTAssertEqual(withObject.count, 1, "the appliance holds all three lines")
+        XCTAssertEqual(without.count, 2, "the text geometry keeps the gap: \(without.map(\.text))")
+
+        let panel = withObject[0]
+        guard case .object(let label) = panel.kind else {
+            return XCTFail("the object's text is an object block: \(panel.kind)")
+        }
+        XCTAssertEqual(label, "microwave", "the class label is still the block's own: it is "
+                       + "grouping evidence, and the placement reads it")
+        XCTAssertEqual(panel.identityKey, SceneBlockGrouper.textIdentity(of: panel.lines),
+                       "…and it is not identity evidence: the block is the text it holds")
+
+        // Both of the blocks the text pass formed are the panel's own surface.
+        for piece in without {
+            XCTAssertTrue(
+                SceneBlockGrouper.identitiesDescribeTheSameSurface(panel.identityKey,
+                                                                    piece.identityKey),
+                "\(piece.text) is a piece of the panel, not a second sign")
+        }
     }
 
-    func testACrossedCellEdgeChangesTheKeyButNotTheScope() {
-        // The grid's cost, stated as a fact rather than hidden: an object whose
-        // centroid sits on a cell edge crosses it for the smallest jitter, so
-        // the *key* changes while nothing in the scene did. What makes that
-        // harmless is that the scope — the kind of surface — did not, and the
-        // stabiliser matches on scope plus geometry. Both halves are pinned
-        // here; the stabiliser's half is pinned in its own suite.
-        let before = SceneBlockGrouper.objectIdentity(classLabel: "microwave",
-                                                      box: box(0.30, 0.30, 0.60, 0.60),
-                                                      mergeDistance: 0.1)
-        let after = SceneBlockGrouper.objectIdentity(classLabel: "microwave",
-                                                     box: box(0.31, 0.31, 0.61, 0.61),
-                                                     mergeDistance: 0.1)
+    /// An object the runtime could not name groups text exactly like one it
+    /// could: the class was never the identity.
+    func testAnUnnamedObjectGroupsAndIsNamedByItsText() {
+        let lines = [line("PREWASH 40", 0.10, 0.20, 0.50, 0.28),
+                     line("RINSE AID", 0.10, 0.50, 0.50, 0.58)]
+        let held = SceneBlockGrouper.group(lines: lines,
+                                           objects: [object(nil, 0.05, 0.15, 0.55, 0.80)],
+                                           config: .default)
 
-        XCTAssertNotEqual(before, after, "the centroid crossed a quantisation cell")
-        XCTAssertTrue(SceneBlockGrouper.identitiesShareScope(before, after),
-                      "…and it is still one microwave panel, so geometry decides — rather "
-                      + "than the panel being re-keyed, re-asked and briefly drawn twice")
+        XCTAssertEqual(held.count, 1, "an unnamed object is still an object and still groups")
+        XCTAssertEqual(held[0].kind, .object(classLabel: nil))
+        XCTAssertEqual(held[0].identityKey, SceneBlockGrouper.textIdentity(of: held[0].lines))
     }
 
-    func testScopeSeparatesTheThingsGeometryMayNotConfuse() {
-        let microwave = SceneBlockGrouper.objectIdentity(classLabel: "microwave",
-                                                         box: box(0.30, 0.30, 0.60, 0.60),
-                                                         mergeDistance: 0.1)
-        let television = SceneBlockGrouper.objectIdentity(classLabel: "television",
-                                                          box: box(0.30, 0.30, 0.60, 0.60),
-                                                          mergeDistance: 0.1)
-        let sameClassOverThere = SceneBlockGrouper.objectIdentity(
-            classLabel: "microwave", box: box(0.70, 0.70, 0.90, 0.90), mergeDistance: 0.1)
-        let text = SceneBlockGrouper.textIdentity(of: [line("START", 0.30, 0.30, 0.60, 0.60)])
-        let otherText = SceneBlockGrouper.textIdentity(of: [line("PLAY", 0.30, 0.30, 0.60, 0.60)])
+    /// The refusal the new relation must keep: two surfaces of *different text*
+    /// are two surfaces, whatever the geometry says.
+    ///
+    /// The refusal the stabiliser applies is the narrower of the two — nothing
+    /// in common at all — because that is the only case a block key can be
+    /// *sure* of. A key that merely differs must not take away a match the plain
+    /// string-and-box rule would have made, or an OCR stumble on one member line
+    /// would re-key the panel it belongs to.
+    func testDifferentTextIsNeverTheSameSurface() {
+        let panel = SceneBlockGrouper.textIdentity(of: [line("MENU", 0.30, 0.30, 0.60, 0.36),
+                                                        line("Tea Rs 40", 0.30, 0.36, 0.60, 0.42)])
+        let beside = SceneBlockGrouper.textIdentity(of: [line("START", 0.30, 0.30, 0.60, 0.60)])
+        let elsewhere = SceneBlockGrouper.textIdentity(of: [line("PLAY", 0.70, 0.70, 0.90, 0.76)])
+        let misread = SceneBlockGrouper.textIdentity(of: [line("MENU", 0.30, 0.30, 0.60, 0.36),
+                                                          line("Tea Rs 4O", 0.30, 0.36, 0.60, 0.42)])
 
-        XCTAssertFalse(SceneBlockGrouper.identitiesShareScope(microwave, television),
-                       "the runtime said these are two things: geometry may not overrule it")
-        XCTAssertFalse(SceneBlockGrouper.identitiesShareScope(microwave, text),
-                       "an object where a text panel was is a different surface")
-        XCTAssertFalse(SceneBlockGrouper.identitiesShareScope(text, otherText),
-                       "a text key has no geometry in it: its member set is its identity")
-        XCTAssertTrue(SceneBlockGrouper.identitiesShareScope(microwave, sameClassOverThere),
-                      "the same class of object elsewhere is the same *kind* of surface, which "
-                      + "is true: the two are told apart by their keys and their geometry, "
-                      + "which is what the scope delegates to")
+        XCTAssertFalse(SceneBlockGrouper.identitiesDescribeTheSameSurface(panel, beside),
+                       "a panel is not the sign beside it: the text decides, not the boxes")
+        XCTAssertFalse(SceneBlockGrouper.identitiesDescribeTheSameSurface(beside, elsewhere))
+        XCTAssertTrue(SceneBlockGrouper.identitiesDescribeTheSameSurface(panel, panel))
+
+        XCTAssertTrue(SceneBlockGrouper.identitiesAreKnownToBeDifferentSurfaces(panel, beside),
+                      "nothing in common is the refusal the stabiliser applies")
+        XCTAssertTrue(SceneBlockGrouper.identitiesAreKnownToBeDifferentSurfaces(beside, elsewhere))
+        XCTAssertFalse(SceneBlockGrouper.identitiesAreKnownToBeDifferentSurfaces(panel, panel),
+                       "a surface is never known to be different from itself")
+        XCTAssertFalse(SceneBlockGrouper.identitiesAreKnownToBeDifferentSurfaces(panel, misread),
+                       "a panel is not *known different* from itself because one of its lines was "
+                       + "misread: the two share MENU, and the box is left to decide")
+        XCTAssertFalse(
+            SceneBlockGrouper.identitiesAreKnownToBeDifferentSurfaces("a caller's own key", panel),
+            "a key that is not one of this type's is not a claim either way")
     }
 
-    func testAnUnnamedObjectStillHasAnIdentity() {
-        let unnamed = SceneBlockGrouper.objectIdentity(classLabel: nil,
-                                                       box: box(0.30, 0.30, 0.60, 0.60),
-                                                       mergeDistance: 0.1)
-        XCTAssertFalse(unnamed.isEmpty)
-        XCTAssertNotEqual(unnamed,
-                          SceneBlockGrouper.objectIdentity(classLabel: "microwave",
-                                                           box: box(0.30, 0.30, 0.60, 0.60),
-                                                           mergeDistance: 0.1),
-                          "an object the runtime could not name is still its own surface")
+    /// One line, seen twice: the member set is the identity, so the *set* is
+    /// what has to match — a line that was misread is a different set, and the
+    /// stabiliser's string and geometry gates are what carry that case.
+    func testTheIdentityIsTheMemberSetNotTheReadingOrder() {
+        let lines = [line("Beta", 0.20, 0.20, 0.60, 0.28),
+                     line("Alpha", 0.20, 0.30, 0.60, 0.38)]
+        let panel = SceneBlockGrouper.textIdentity(of: lines)
+        let oneMember = SceneBlockGrouper.textIdentity(of: [lines[0]])
+        let aDifferentLine = SceneBlockGrouper.textIdentity(of: [line("Beta 2", 0.20, 0.20, 0.60, 0.28)])
+
+        XCTAssertTrue(SceneBlockGrouper.identitiesDescribeTheSameSurface(panel, oneMember),
+                      "one of the panel's lines is a piece of the panel")
+        XCTAssertFalse(SceneBlockGrouper.identitiesDescribeTheSameSurface(panel, aDifferentLine),
+                       "a misread line is not a piece of anything: it is a different string, "
+                       + "and the stabiliser's own gates decide that case")
     }
 
     // MARK: Scenario: the same scene groups the same way, twice
