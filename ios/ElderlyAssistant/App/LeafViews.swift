@@ -1028,6 +1028,13 @@ struct CallView: View {
             // request and prefill; a fresh publish while the leaf was
             // already open is picked up by the onChange below.
             consumePendingVoiceRequestIfPresent()
+            // The missed-call list lives on this leaf too: the
+            // correlation's point of use (missed-calls fix, 2026-09-18)
+            // — a numbered missed row the family list cannot name may
+            // ask the native address book here, including the one-time
+            // permission request; denial stays quiet and the raw number
+            // keeps showing.
+            coordinator.refreshMissedCallCorrelations(promptIfNeeded: true)
         }
         // Re-resolve the search rows' faces when the query or the roster
         // changes — never during body evaluation (see `resultPhotos`).
@@ -1863,7 +1870,9 @@ struct CallView: View {
                       tint: recentChannelTint(for: entry.channel),
                       diameter: 40)
             VStack(alignment: .leading, spacing: 4) {
-                Text(ActivityRowText.name(for: entry, locale: coordinator.activeLocale))
+                Text(ActivityRowText.name(for: entry,
+                                          locale: coordinator.activeLocale,
+                                          correlatedName: coordinator.missedCallDisplayNames[entry.id]))
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
                     .foregroundStyle(DesignTokens.textPrimary)
                 Text(recentActivityTimeText(entry))
@@ -1893,10 +1902,11 @@ struct CallView: View {
     /// rows say "call <name> back", message rows say "message <name>"
     /// (history.callbackLabel / history.messageLabel), so one gesture
     /// reads the row's action. An UNANSWERED row (missed-calls task,
-    /// 2026-09-07; attribution, call-tracking task 2026-09-13) announces
-    /// what the row is and what its tap does — "Unanswered call, Open
-    /// Phone app" for the anonymous row, "Missed call: बुबा, Open Phone
-    /// app" when the app placed the call itself — mirror of
+    /// 2026-09-07; attribution, call-tracking task 2026-09-13;
+    /// missed-calls fix, 2026-09-18) announces what the row is and what
+    /// its tap does — "Call <identity> back" when the row carries a
+    /// number (the tap DIALS BACK now), "Unanswered call, Open Phone
+    /// app" when it carries none — mirror of
     /// HistoryView.rowAccessibilityLabel; keep in step. A cloud-cascade
     /// row ([CLOUD-CASCADE], 2026-09-16) also mirrors the leaf there: it
     /// is informational and announces only what it is — no action verb,
@@ -1907,10 +1917,13 @@ struct CallView: View {
             return ActivityRowText.name(for: entry, locale: locale)
         }
         if entry.channel == .unanswered {
-            let described = entry.contactName.isEmpty
-                ? L10n.str("history.unanswered", locale: locale)
-                : MissedCallPresentation.title(for: entry, locale: locale)
-            return "\(described), " + L10n.str("history.openPhone", locale: locale)
+            if let identity = ActivityRowText.unansweredIdentity(
+                for: entry,
+                correlatedName: coordinator.missedCallDisplayNames[entry.id]) {
+                return L10n.fmt("history.callbackLabel", locale: locale, identity)
+            }
+            return "\(L10n.str("history.unanswered", locale: locale)), "
+                + L10n.str("history.openPhone", locale: locale)
         }
         if entry.kind == .call {
             return L10n.fmt("history.callbackLabel", locale: locale, entry.contactName)
@@ -1969,11 +1982,12 @@ struct CallView: View {
     /// rows re-present the compose sheet, and rows whose stored identity
     /// (number for phone/WhatsApp, handle for Messenger) normalized to
     /// nothing speak the honest line instead of a silent dead tap.
-    /// UNANSWERED rows (missed-calls task, 2026-09-07) have no stored
-    /// identity at all by design — iOS masks the caller — so their tap
-    /// opens the Phone app (Recents is one tab away) rather than
-    /// speaking a dead-row line: the dialer open resolves the row
-    /// honestly.
+    /// UNANSWERED rows (missed-calls task, 2026-09-07; missed-calls fix,
+    /// 2026-09-18) DIAL BACK through the house deep-link resolution when
+    /// they carry a number (captured at the dial for the app's own
+    /// calls), and open the Phone app (Recents is one tab away) when
+    /// they carry none — iOS masks the caller there, and the dialer open
+    /// resolves the row honestly.
     private func initiateRecentActivity(_ entry: AppActivityEntry) {
         let name = entry.contactName
         let phone = entry.phone
@@ -2008,12 +2022,16 @@ struct CallView: View {
         case .sms:
             coordinator.presentMessageDraft(phone: phone, name: name, body: "")
         case .unanswered:
-            // No number exists to dial — the caller is anonymous by
-            // platform design (iOS masks identity AND number) — so the
-            // row opens the Phone app, where the call genuinely lives in
-            // Recents, one tab away (missed-calls task, 2026-09-07).
-            // Mirror of HistoryView's `.unanswered` case; keep in step.
-            PhoneAppOpener.openDialer()
+            // Missed-calls fix (2026-09-18): a row WITH a number dials
+            // it back through the house deep-link resolution (matched
+            // family contact's preferred app, else the global default,
+            // `tel:` always in the chain — see `dialBackMissedCall`).
+            // A numberless row (an old anonymous entry, or a caller iOS
+            // masked) opens the Phone app, where the call genuinely
+            // lives in Recents, one tab away (missed-calls task,
+            // 2026-09-07). Mirror of HistoryView's `.unanswered` case;
+            // keep in step.
+            coordinator.dialBackMissedCall(entry)
         case .cloud:
             // [CLOUD-CASCADE] (2026-09-16) Mirror of HistoryView's
             // `.cloud` case; keep in step. The row is INFORMATIONAL and
