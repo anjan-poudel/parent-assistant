@@ -21,6 +21,17 @@ import Foundation
 //      same session-scoped task as the cloud attempt, so the cadence never
 //      waits on a generation.
 //
+//      Since [NEGATION-ROUTER] (owner decision, 2026-09-19) the middle step has
+//      an input rule: a string that carries a negation is not handed to the
+//      on-device brain at all. The decision is the owner's, the classifier is
+//      `NegationTextRouter` (pure, curated, unit-tested), and the wiring is one
+//      filter in `dispatchResolutionNeeds` plus one count-only event — the
+//      cascade's order, the gate, consent and the output gate are all
+//      unchanged. Everything else the file says below about the brain step
+//      still holds: the routed strings simply arrive at the gate as if the
+//      brain had answered nothing, which is a shape the stage already handles
+//      for every failure it has.
+//
 //   2. **One cycle, one coherent publication.** A cycle's regions, outcomes,
 //      placements and the policy they were measured under are published as a
 //      single value, so a consumer can never observe a new region with an old
@@ -936,6 +947,16 @@ actor LiveTranslationPipeline {
     /// a string the brain has already been asked about is carried straight to
     /// the gate, so the tick that follows the elder's answer reaches the cloud
     /// without paying for the same generation twice.
+    ///
+    /// The negation router runs inside this step and not before it, and that
+    /// ordering is the dictionary's exemption made structural: a string the
+    /// curated table answered was settled by `resolveFromTheDevice` and is not
+    /// pending, so it never reaches this function, never reaches the router and
+    /// is never second-guessed. Tier 0 is reviewed Nepali — including, if the
+    /// table ever carries one, a reviewed negation — and the router's job is to
+    /// decide which *unanswered* strings the local tier may be asked about, not
+    /// to overrule a translation somebody approved.
+    ///
     /// `only` narrows the hand-over to one string's key — extract mode's
     /// tap-to-translate, which must not become a dispatch for the whole scene.
     /// `nil` is every pending region, which is the mode-off behaviour the
@@ -957,7 +978,35 @@ actor LiveTranslationPipeline {
         guard !items.isEmpty else { return }
 
         attemptKeys.formUnion(items.map(\.id))
-        let unanswered = items.filter { !brainAttemptedKeys.contains($0.id) }
+        // The source-side negation router (owner decision, 2026-09-19). It runs
+        // here, at the per-string dispatch, because this is the only place the
+        // cascade is decided one string at a time — and because the tier is the
+        // thing the rule is about: a routed string is not merely unanswered by
+        // the local tier, it is never handed to it (`brain.calls` shows the
+        // strings the tier was actually asked about, and a routed one is not
+        // among them).
+        //
+        // What happens to the routed strings is the cascade's ordinary path,
+        // not a new one: they are absent from `unanswered`, so they are not in
+        // `fresh`, so the `onward` filter below carries them to the gate and the
+        // cloud in this same cycle. When everything in a scene is routed, the
+        // local stage is asked for nothing at all — the deadline is not spent
+        // on a generation that would be refused, and the cycle goes straight to
+        // the tier the owner's rule sends a negation to.
+        //
+        // The event is emitted per dispatch, once, and only when something was
+        // routed (counts only — no string, no marker). A dispatch is already
+        // deduplicated by `attemptKeys`, so this is not a per-frame line; a
+        // string whose attempt is released for the consent prompt is routed
+        // again on the tick that carries it, which is the same shape
+        // `translation_batch_requested` has and is the honest record: that
+        // dispatch withheld it again.
+        let routed = Self.negationRoutedIDs(in: items, config: config)
+        if !routed.isEmpty {
+            events.brainNegationRouted(routedCount: routed.count, stringCount: items.count)
+        }
+        let answerable = routed.isEmpty ? items : items.filter { !routed.contains($0.id) }
+        let unanswered = answerable.filter { !brainAttemptedKeys.contains($0.id) }
         brainAttemptedKeys.formUnion(unanswered.map(\.id))
         let fresh = Set(unanswered.map(\.id))
 
@@ -976,6 +1025,25 @@ actor LiveTranslationPipeline {
             }
             await self.forget(task: token)
         }
+    }
+
+    /// The ids of the items the source-side negation router keeps away from
+    /// the local tier, or an empty set when it is off.
+    ///
+    /// One call into one pure classifier (`NegationTextRouter`), read by key
+    /// rather than by text so the split survives two regions that normalize
+    /// onto the same key: the dispatch has already deduplicated by key, so an
+    /// id identifies exactly one string.
+    ///
+    /// `negationRouterEnabled` is read here rather than inside the router, so
+    /// the router stays a decision about a string with no configuration to
+    /// disagree with its call site. Off means the pre-router cascade exactly:
+    /// nothing is withheld and the routing event is not emitted, because
+    /// nothing was routed.
+    static func negationRoutedIDs(in items: [CloudTranslationTier.Item],
+                                  config: LiveTranslateConfig) -> Set<String> {
+        guard config.negationRouterEnabled else { return [] }
+        return Set(items.filter { NegationTextRouter.routesAway($0.text) }.map(\.id))
     }
 
     /// Tier 1: the on-device brain, before anything leaves the device.

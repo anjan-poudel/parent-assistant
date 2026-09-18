@@ -232,6 +232,20 @@ enum LiveTranslateEventCatalogue {
         // vocabularies, so neither can carry content.
         "brain_translation_unavailable": Entry(outcomes: ["degraded"],
                                                metadataKeys: ["reason", "failureStage"]),
+        // [NEGATION-ROUTER] (owner decision, 2026-09-19) — the tier was not
+        // asked, on purpose. `brain_negation_routed` says the router withheld
+        // strings from the local tier because they carry a negation, and how
+        // many of how many this dispatch considered. It is not a failure and
+        // it is not `brain_translation_unavailable`: nothing was unavailable
+        // and nothing was attempted — the strings went to the tier behind this
+        // one by a rule, and `routed` is the outcome token that says so.
+        //
+        // Counts only, like every event in this file: the *strings* are the
+        // thing this feature may never log, and the marker that fired is not on
+        // the schema — a count is all a capture needs to see the router acting
+        // (and, with `stringCount` beside it, how much of a scene it took).
+        "brain_negation_routed": Entry(outcomes: ["routed"],
+                                       metadataKeys: ["routedCount", "stringCount"]),
         "translation_batch_resolved": Entry(outcomes: ["success", "partial"],
                                            metadataKeys: ["resolvedCount", "unresolvedCount", "durationMs"]),
         "translation_degraded": Entry(outcomes: ["degraded"], metadataKeys: ["reason", "regionCount"]),
@@ -297,6 +311,11 @@ struct LiveTranslateEvents {
         case batchCount
         case resolvedCount
         case unresolvedCount
+        /// How many strings the source-side negation router kept away from the
+        /// local tier (`brain_negation_routed`, 2026-09-19). The count pair is
+        /// `routedCount` of `stringCount`, the same shape the batch events use:
+        /// a count with nothing to be a fraction of says less than it could.
+        case routedCount
         case durationMs
         case keyCount
         case count
@@ -574,6 +593,23 @@ struct LiveTranslateEvents {
                                      stage: BrainFailureStage) {
         emit("brain_translation_unavailable", outcome: "degraded",
              metadata: [.reason: reason.rawValue, .failureStage: stage.rawValue])
+    }
+
+    /// The source-side negation router withheld strings from the local tier
+    /// (owner decision, 2026-09-19).
+    ///
+    /// The record of a *decision*, not of a failure: these strings were not
+    /// attempted on the device and are not lost — they are the next tier's,
+    /// which is where the owner's rule puts a negation. Content-free by
+    /// construction, and by the same rule as the two events above: two counts,
+    /// both integers, and no parameter through which a string could travel. The
+    /// marker that fired is deliberately not here (the router's own type keeps
+    /// it, for tests); a capture needs to see that the router acted and how
+    /// much of the scene it took, not which word it read.
+    func brainNegationRouted(routedCount: Int, stringCount: Int) {
+        emit("brain_negation_routed", outcome: "routed",
+             metadata: [.routedCount: String(routedCount),
+                        .stringCount: String(stringCount)])
     }
 
     // MARK: Sanitisation (C07)

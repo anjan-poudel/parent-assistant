@@ -79,7 +79,11 @@ final class LiveTranslateAllowListTests: XCTestCase {
             // [SCOPE-LEDGER] + [DEAD-TAP] + [DECODE-DIAGNOSTIC]
             "calendar", "contacts", "chunks", "decode_detail",
             // [LLAMADEBUG] failure stage + [EMPTY-OVERLAY] region-set hash
-            "failureStage", "regionSetHash"
+            "failureStage", "regionSetHash",
+            // [NEGATION-ROUTER] (owner decision, 2026-09-19) the source-side
+            // negation router's count (`brain_negation_routed`). An integer
+            // count of withheld strings — never a string.
+            "routedCount"
         ], "the extension is exactly the union of the two declared key sets")
         XCTAssertNil(sanitisedMetadata(["somethingNoOneDeclared": "x"])["somethingNoOneDeclared"],
                      "unknown keys are still dropped outright")
@@ -118,6 +122,13 @@ final class LiveTranslateAllowListTests: XCTestCase {
 
     func testUnresolvedCountSurvivesSanitisation() {
         XCTAssertEqual(sanitisedMetadata(["unresolvedCount": "2"])["unresolvedCount"], "2")
+    }
+
+    /// [NEGATION-ROUTER] The routing count — how many strings the source-side
+    /// router kept away from the local tier. Count-shaped by construction (the
+    /// emitter takes an `Int`), so no recognized string can ride this key.
+    func testRoutedCountSurvivesSanitisation() {
+        XCTAssertEqual(sanitisedMetadata(["routedCount": "2"])["routedCount"], "2")
     }
 
     func testDurationMsSurvivesSanitisation() {

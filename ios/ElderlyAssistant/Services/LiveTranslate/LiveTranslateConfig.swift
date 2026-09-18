@@ -1193,6 +1193,35 @@ struct LiveTranslateConfig: Equatable {
     /// talking to, so it is the one that keeps the device.
     var brainTranslationDefersToResidentBrain: Bool = true
 
+    /// Whether the source-side negation router runs (owner decision,
+    /// 2026-09-19).
+    ///
+    /// On by default, because the thing it prevents is not a quality
+    /// regression but a wrong safety instruction: the standard-class quant
+    /// failed two negation-bearing probe rows, and a negation answered by a
+    /// tier that gets polarity wrong is read by the elder as the *opposite*
+    /// instruction. While it is on, a string carrying a negation is never
+    /// handed to the local tier (see `NegationTextRouter`); it goes to the
+    /// cloud, or to the honest degraded state when the cloud is declined or
+    /// unavailable. A positive string is unaffected — the device still answers
+    /// what it can, which is the whole reason the tier exists.
+    ///
+    /// Why a knob at all, when the marker tables beside it are code constants:
+    /// the tables are the *decision* (curated, reviewed, unit-tested), while
+    /// this is a *behaviour* a device session may need to be measured without.
+    /// The owner's plan is a positive-scene measurement on the standard
+    /// class's quant, and "with the router on" and "with the router off" are
+    /// the two arms of it; a measurement that cannot be run without a rebuild
+    /// is a measurement nobody runs twice.
+    ///
+    /// Off is the pre-router behaviour exactly: every unresolved string goes
+    /// to the local tier, and `brain_negation_routed` is not emitted at all
+    /// (nothing was routed). The safe-side cost of leaving it on — a cloud
+    /// call for a positive string a marker misread — is bounded and visible on
+    /// that event's own counts, which is what makes the knob decidable with
+    /// evidence rather than by argument.
+    var negationRouterEnabled: Bool = true
+
     // MARK: Tier 2
 
     /// Base timeout for one tier-2 request. **Derived, never stored (CL-8):**

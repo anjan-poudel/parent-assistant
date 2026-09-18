@@ -2757,4 +2757,227 @@ final class LiveTranslationPipelineTests: XCTestCase {
                        + "changes what an *unanswered* block draws, never what an answered "
                        + "one does")
     }
+
+    // MARK: - [NEGATION-ROUTER] the source-side negation router
+    //
+    // Owner decision, 2026-09-19. The measured fact behind it: the
+    // standard-class quant (r2b Q5_K_M) answered "Do not store the medicine in
+    // the bathroom" with the *positive* storage instruction. A wrong
+    // translation of a sign is a bad translation; a wrong translation of a
+    // negation is the opposite instruction, so no negation-bearing source
+    // string may be answered by the local tier.
+    //
+    // The classifier itself is pinned string by string in
+    // `NegationTextRouterTests`. What these tests pin is the *wiring*, which
+    // is the part that could be right in the unit suite and wrong in the
+    // cascade: zero local-tier calls, no dropped region, counts-only event,
+    // tier 0's exemption, and the switch that restores the old behaviour.
+
+    /// Tier 1's own record of what it was asked is the evidence: a routed
+    /// string is not merely unanswered by the local tier, it is never handed
+    /// to it (`brain.calls` stays empty).
+    ///
+    /// The fake brain **would** answer this string, and with the wrong
+    /// polarity — so if the routing ever stopped, this test fails holding the
+    /// opposite instruction rather than passing quietly.
+    @MainActor
+    func testScenarioANegationBearingStringIsNeverHandedToTheLocalTier() async throws {
+        let probe = "Do not store the medicine in the bathroom"
+        let wrongPolarity = "ने:the medicine is stored in the bathroom"
+        let brain = RecordingBrain()
+        brain.answers = [probe: wrongPolarity]
+        let harness = makeHarness(consent: true,
+                                  transport: Self.respondingTransport(),
+                                  brain: brain)
+        await harness.pipeline.updateLayout(layout)
+        harness.recogniser.defaultStep = .regions([detected(probe)])
+
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        let asked = probe
+        await waitUntil("the routed string's cloud answer to be published") {
+            guard let latest = await harness.recorder.latest,
+                  let region = latest.regions.first(where: { $0.text == asked }) else {
+                return false
+            }
+            return latest.result(for: region).sourceTier == .cloud
+        }
+
+        let brainCalls = harness.brain.calls
+        XCTAssertTrue(brainCalls.isEmpty,
+                      "the local tier was asked about a negation-bearing string: \(brainCalls)")
+        XCTAssertEqual(requests(carrying: probe, in: harness), 1,
+                       "a routed string is not dropped — it is asked of the next tier")
+
+        let publication = try await latest(harness)
+        let region = try XCTUnwrap(region(probe, in: publication))
+        XCTAssertEqual(publication.result(for: region).sourceTier, .cloud)
+        XCTAssertNotEqual(publication.result(for: region).text, wrongPolarity,
+                          "the elder must never be shown the positive instruction here")
+    }
+
+    /// The routing's own record: counts, and nothing else. The event is the
+    /// reason a device capture can say the router is working at all, so it
+    /// must say only how many strings it withheld.
+    @MainActor
+    func testScenarioTheRoutingEventCarriesCountsAndNoText() async throws {
+        let missed = "Do not store the medicine in the bathroom"
+        let second = "Keep away from children"
+        let harness = makeHarness(consent: true, transport: Self.respondingTransport())
+        await harness.pipeline.updateLayout(layout)
+        harness.recogniser.defaultStep = .regions([
+            detected(missed, box: box(0.1, 0.2, 0.4, 0.3)),
+            detected(second, box: box(0.5, 0.2, 0.8, 0.3))
+        ])
+
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+        await waitUntil("both routed strings to be answered") {
+            guard let latest = await harness.recorder.latest, !latest.regions.isEmpty else {
+                return false
+            }
+            return latest.regions.allSatisfy { latest.result(for: $0).sourceTier == .cloud }
+        }
+
+        let routed = harness.bus.events(named: "brain_negation_routed")
+        XCTAssertEqual(routed.count, 1, "one routing record per dispatch, not one per frame")
+        let event = try XCTUnwrap(routed.first)
+        XCTAssertEqual(event.outcome, "routed")
+        XCTAssertEqual(event.component, "livetranslate")
+        XCTAssertEqual(event.metadata, ["routedCount": "2", "stringCount": "2"],
+                       "the routing record is counts only — a value here that is not an "
+                       + "integer is the one thing this event must never carry")
+        for (key, value) in event.metadata {
+            XCTAssertNotNil(Int(value), "\(key) carries a non-count value: \(value)")
+        }
+        XCTAssertNil(event.errorCode)
+    }
+
+    /// The mixed scene: the positive string is still answered on the device in
+    /// the same cycle, and only the negation is withheld from the batch. A
+    /// router that withheld the whole batch would show up here as a cloud
+    /// request carrying the positive string.
+    @MainActor
+    func testScenarioAMixedSceneKeepsThePositiveLocalAndSendsTheNegationOn() async throws {
+        let positive = "Store in a cool dry place"
+        let negative = "Keep away from children"
+        let brain = RecordingBrain()
+        brain.answers = [positive: brainTranslation]
+        let harness = makeHarness(consent: true,
+                                  transport: Self.respondingTransport(),
+                                  brain: brain)
+        await harness.pipeline.updateLayout(layout)
+        harness.recogniser.defaultStep = .regions([
+            detected(positive, box: box(0.1, 0.2, 0.4, 0.3)),
+            detected(negative, box: box(0.5, 0.2, 0.8, 0.3))
+        ])
+
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        let asked = negative
+        await waitUntil("the routed string's cloud answer to be published") {
+            guard let latest = await harness.recorder.latest,
+                  let region = latest.regions.first(where: { $0.text == asked }) else {
+                return false
+            }
+            return latest.result(for: region).sourceTier == .cloud
+        }
+
+        XCTAssertEqual(harness.brain.calls, [[positive]],
+                       "the batch carried a routed string, or lost the positive one: "
+                       + "\(harness.brain.calls)")
+        XCTAssertEqual(requests(carrying: positive, in: harness), 0,
+                       "the device answered the positive string; the cloud must not be asked")
+        XCTAssertEqual(requests(carrying: negative, in: harness), 1)
+
+        let publication = try await latest(harness)
+        let answered = try XCTUnwrap(region(positive, in: publication))
+        let routed = try XCTUnwrap(region(negative, in: publication))
+        XCTAssertEqual(publication.result(for: answered).sourceTier, .onDeviceBrain)
+        XCTAssertEqual(publication.result(for: answered).text, brainTranslation)
+        XCTAssertEqual(publication.result(for: routed).sourceTier, .cloud)
+
+        let events = harness.bus.events(named: "brain_negation_routed")
+        XCTAssertEqual(events.first?.metadata["routedCount"], "1")
+        XCTAssertEqual(events.first?.metadata["stringCount"], "2")
+    }
+
+    /// Tier 0's exemption, end to end: a curated translation is authoritative
+    /// — including a negation — because a curated hit is settled before the
+    /// dispatch runs, so the router never sees it.
+    ///
+    /// The curated table carries no negation today (pinned in
+    /// `NegationTextRouterTests`); the dictionary is injected here so the
+    /// exemption is tested as the *structural* rule it is rather than as an
+    /// accident of today's table.
+    @MainActor
+    func testScenarioACuratedNegationIsAnsweredByTierZeroAndNeverRouted() async throws {
+        let curatedNegation = "do not use near water"
+        let curatedAnswer = "पानीको नजिक प्रयोग नगर्नुहोस्"
+        let brain = RecordingBrain()
+        brain.answers = [curatedNegation: brainTranslation]
+        let harness = makeHarness(transport: Self.respondingTransport(),
+                                  dictionary: [curatedNegation: curatedAnswer],
+                                  brain: brain)
+        await harness.pipeline.updateLayout(layout)
+        harness.recogniser.defaultStep = .regions([detected(curatedNegation)])
+
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+        await settleTheCycle()
+
+        let publication = try await latest(harness)
+        let region = try XCTUnwrap(region(curatedNegation, in: publication))
+        XCTAssertEqual(publication.result(for: region),
+                       .resolved(originalText: curatedNegation,
+                                 translation: curatedAnswer,
+                                 tier: .dictionary),
+                       "tier 0 is reviewed Nepali; the router does not get to overrule it")
+        XCTAssertTrue(harness.brain.calls.isEmpty,
+                      "a curated negation was handed to the local tier: \(harness.brain.calls)")
+        XCTAssertEqual(harness.transport.requestCount, 0)
+        XCTAssertTrue(harness.bus.events(named: "brain_negation_routed").isEmpty,
+                      "nothing was routed: the string never reached the dispatch")
+    }
+
+    /// The switch. Off is the pre-router cascade exactly: the string goes to
+    /// the tier it always went to, and no routing event is emitted because
+    /// nothing was routed.
+    @MainActor
+    func testScenarioTheRouterOffRestoresThePreRouterCascade() async throws {
+        var config = LiveTranslateConfig.default
+        config.negationRouterEnabled = false
+        let probe = "Do not store the medicine in the bathroom"
+        let brain = RecordingBrain()
+        brain.answers = [probe: brainTranslation]
+        let harness = makeHarness(brain: brain, config: config)
+        await harness.pipeline.updateLayout(layout)
+        harness.recogniser.defaultStep = .regions([detected(probe)])
+
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        let asked = probe
+        await waitUntil("the brain's answer to be published") {
+            guard let latest = await harness.recorder.latest,
+                  let region = latest.regions.first(where: { $0.text == asked }) else {
+                return false
+            }
+            return latest.result(for: region).sourceTier == .onDeviceBrain
+        }
+
+        XCTAssertEqual(harness.brain.calls, [[probe]],
+                       "the switch off is the pre-router cascade: the tier is asked first")
+        XCTAssertEqual(harness.transport.requestCount, 0,
+                       "the device answered; the cloud is not asked")
+        XCTAssertTrue(harness.bus.events(named: "brain_negation_routed").isEmpty,
+                      "nothing was routed, so nothing is recorded as routed")
+    }
 }

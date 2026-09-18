@@ -38,6 +38,7 @@ final class LiveTranslateEventsTests: XCTestCase {
         events.translationBatchResolved(resolvedCount: 4, unresolvedCount: 1, durationMs: 812)
         events.brainTranslationBatch(resolvedCount: 3, unresolvedCount: 1, durationMs: 4200)
         events.brainTranslationUnavailable(.modelNotInstalled, stage: .availability)
+        events.brainNegationRouted(routedCount: 2, stringCount: 3)
         events.translationDegraded(reason: .noNetwork, regionCount: 1)
         events.translationResolved(tier: .cloud, origin: "fresh", count: 2)
         events.translationResolved(tier: .dictionary, origin: "cache", count: 1)

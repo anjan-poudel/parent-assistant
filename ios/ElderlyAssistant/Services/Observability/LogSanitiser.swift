@@ -152,6 +152,13 @@ struct LogSanitiser {
         "batchCount",
         "resolvedCount",
         "unresolvedCount",
+        // [NEGATION-ROUTER] (owner decision, 2026-09-19) How many of a
+        // dispatch's strings the source-side negation router kept away from the
+        // local tier (`brain_negation_routed`). An integer count of strings,
+        // never the strings: the emitter takes an `Int`, the event carries
+        // `routedCount` beside `stringCount`, and no parameter exists through
+        // which a recognized string could reach this key.
+        "routedCount",
         "durationMs",
         "keyCount",
         "count",
