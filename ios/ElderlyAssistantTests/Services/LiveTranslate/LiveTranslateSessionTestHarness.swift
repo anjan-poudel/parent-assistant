@@ -373,7 +373,17 @@ func makeLiveTranslateSessionTestParts(
     dictionary: [String: String] = [:],
     transport: TierTranslationTransport = TierTranslationTransport(),
     locale: Locale = Locale(identifier: "ne-NP"),
+    extractMode: Bool = false,
     config: LiveTranslateConfig = .default) -> LiveTranslateSessionTestParts {
+
+    // A session opens showing the *recognized text* — that is the shipped
+    // default (owner verdict, 2026-09-18) and it is pinned as one, by
+    // `LiveTranslateConfigTests` for the value and by the extract-mode tests
+    // for the behaviour. The suites that pre-date the rework are about the
+    // translated view, so they opt out here rather than each carrying a copy of
+    // the same opt-out; a suite that wants the shipped default asks for it.
+    var config = config
+    config.extractModeDefault = extractMode
 
     let suiteName = "livetranslate.tests.\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suiteName)!

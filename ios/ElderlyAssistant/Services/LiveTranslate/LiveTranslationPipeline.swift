@@ -358,6 +358,16 @@ actor LiveTranslationPipeline {
     /// the cycle that used it.
     private var framePixelSize: CGSize = .zero
     private var alwaysShowOriginal: Bool
+    /// Extract mode (owner verdict, 2026-09-18): the overlay shows the
+    /// recognized text, and **no tier runs until a region is asked for**.
+    ///
+    /// It is a gate on the cycle's two resolution steps and on nothing else:
+    /// recognition, stabilisation, grouping, placement and publication are the
+    /// same work in both modes, which is what keeps the boxes still while the
+    /// elder switches between the two views. `false` is the translated view,
+    /// and it is the default the initializer keeps, so every caller before this
+    /// rework is unchanged.
+    private var extractionMode: Bool
 
     private var isPaused = false
     private var isClosed = false
@@ -396,6 +406,10 @@ actor LiveTranslationPipeline {
          cloudNeed: LiveTranslateCloudNeedDeciding,
          backpressure: LiveTranslateBackpressure?,
          alwaysShowOriginal: Bool,
+         /// Extract mode's initial state (owner verdict, 2026-09-18). Defaulted
+         /// so every caller that predates the mode keeps the translated view,
+         /// which is what its tests assert about it.
+         extractionMode: Bool = false,
          config: LiveTranslateConfig = .default,
          observabilityBus: ObservabilityBus,
          brain: LocalBrainTranslating? = nil,
@@ -409,6 +423,7 @@ actor LiveTranslationPipeline {
         self.cloudNeed = cloudNeed
         self.backpressure = backpressure
         self.alwaysShowOriginal = alwaysShowOriginal
+        self.extractionMode = extractionMode
         self.config = config
         let events = LiveTranslateEvents(bus: observabilityBus, config: config)
         self.events = events
@@ -480,6 +495,23 @@ actor LiveTranslationPipeline {
             record(changes)
             noteSceneActivity(changed: !changes.isEmpty)
             reconcile()
+            // The extract-mode gate (owner verdict, 2026-09-18). In extract
+            // mode the cycle publishes and stops: the recognized text is the
+            // content, so there is nothing to resolve and nothing to send —
+            // not the dictionary, not the brain, not the cloud. That is the
+            // owner's "no wrong translations by default" and it is also the
+            // CPU the mode exists to save. The *rest* of the cycle is
+            // untouched: the pass, the stabiliser, the grouper, the placement
+            // and the publication are the same work in both modes, so the
+            // boxes the elder is looking at do not move when they switch.
+            //
+            // A region that *is* asked for — a block the elder tapped — runs
+            // the same sequence through `translateRegion`, which is the one
+            // entry point that resolves in this mode.
+            guard !extractionMode else {
+                await publish()
+                return
+            }
             resolveFromTheDevice()
             await publish()
             dispatchResolutionNeeds()
@@ -628,6 +660,48 @@ actor LiveTranslationPipeline {
         await publish()
     }
 
+    /// The extract-mode toggle, from its one writer (the overlay chrome).
+    ///
+    /// Turning the *translated view* on is a request about everything on
+    /// screen, so it is acted on in the same turn rather than at the next
+    /// tick: the device's own answers are taken (`resolveFromTheDevice`), the
+    /// view is published, and the rest is dispatched exactly as a cycle would
+    /// have dispatched it. Turning *extract mode* on changes nothing that is
+    /// already in flight — an attempt that has been paid for is not thrown
+    /// away, and its answer lands in the same region it was asked about — it
+    /// only stops new ones from being started.
+    func updateExtractMode(_ value: Bool) async {
+        guard !isClosed, extractionMode != value else { return }
+        extractionMode = value
+        guard !value else {
+            await publish()
+            return
+        }
+        resolveFromTheDevice()
+        await publish()
+        dispatchResolutionNeeds()
+    }
+
+    /// Extract mode's one ask: translate **this** region — the block the elder
+    /// tapped — and nothing else on screen.
+    ///
+    /// This is the mode's whole translation path, and it is deliberately the
+    /// ordinary one, scoped: the same device lookup, the same tier cascade
+    /// behind the same consent gate, the same settle-and-publish, narrowed to
+    /// one region's key. Nothing here can be reached for a region that is not
+    /// on screen, is not pending, or is not the one asked for, so a tap cannot
+    /// turn into the continuous background work the mode exists to avoid.
+    func translateRegion(_ regionID: TextRegionStabilizer.RegionIdentity) async {
+        guard !isClosed else { return }
+        guard let region = stabilizer.visible.first(where: { $0.id == regionID }),
+              let existing = outcomes[region.id], case .pending = existing.outcome else { return }
+
+        let key = Self.cacheKey(for: region.text, targetLanguage: targetLanguage)
+        resolveFromTheDevice(only: key)
+        await publish()
+        dispatchResolutionNeeds(only: key)
+    }
+
     // MARK: - The cycle
 
     /// Change events are content-free (a region identity and nothing else), so
@@ -671,8 +745,7 @@ actor LiveTranslationPipeline {
         var next: [TextRegionStabilizer.RegionIdentity: TranslationResult] = [:]
         var visibleKeys: Set<String> = []
         for region in stabilizer.visible {
-            let key = LabelTranslationCache.normalizationKey(text: region.text,
-                                                             targetLanguage: targetLanguage)
+            let key = Self.cacheKey(for: region.text, targetLanguage: targetLanguage)
             visibleKeys.insert(key)
             if let existing = outcomes[region.id], existing.isFinal, existing.originalText == region.text {
                 next[region.id] = existing
@@ -685,6 +758,14 @@ actor LiveTranslationPipeline {
         settledOutcomes = settledOutcomes.filter { visibleKeys.contains($0.key) }
         brainAttemptedKeys = Set(brainAttemptedKeys.filter { visibleKeys.contains($0) })
         outcomes = next
+    }
+
+    /// The key a string is asked about under: the cache's own normalization
+    /// (`LabelTranslationCache.normalizationKey`), stated once so the device
+    /// lookup, the attempt registry, the settled set and extract mode's
+    /// one-region dispatch cannot disagree about what "the same question" is.
+    private static func cacheKey(for text: String, targetLanguage: AppLanguage) -> String {
+        LabelTranslationCache.normalizationKey(text: text, targetLanguage: targetLanguage)
     }
 
     /// The stored answer, restated for the text a region is showing now.
@@ -719,9 +800,15 @@ actor LiveTranslationPipeline {
     /// consent prompt is presented at the point of first cloud need, and asking
     /// a question about a string the device already knows the answer to would
     /// prompt the elder for nothing (FR-LCT-020).
-    private func resolveFromTheDevice() {
+    private func resolveFromTheDevice(only key: String? = nil) {
         for region in stabilizer.visible {
             guard let existing = outcomes[region.id], case .pending = existing.outcome else { continue }
+            // Extract mode asks about one region at a time; `nil` is the
+            // translated view's "every pending region", which is the shipped
+            // behaviour and stays the default.
+            if let key, Self.cacheKey(for: region.text, targetLanguage: targetLanguage) != key {
+                continue
+            }
             guard case .success(let hit) = cache.lookup(text: region.text,
                                                         targetLanguage: targetLanguage),
                   let hit else { continue }
@@ -754,13 +841,17 @@ actor LiveTranslationPipeline {
     /// a string the brain has already been asked about is carried straight to
     /// the gate, so the tick that follows the elder's answer reaches the cloud
     /// without paying for the same generation twice.
-    private func dispatchResolutionNeeds() {
+    /// `only` narrows the hand-over to one string's key — extract mode's
+    /// tap-to-translate, which must not become a dispatch for the whole scene.
+    /// `nil` is every pending region, which is the mode-off behaviour the
+    /// cycle has always had.
+    private func dispatchResolutionNeeds(only onlyKey: String? = nil) {
         var items: [CloudTranslationTier.Item] = []
         var claimed: Set<String> = []
         for region in stabilizer.visible {
             guard let existing = outcomes[region.id], case .pending = existing.outcome else { continue }
-            let key = LabelTranslationCache.normalizationKey(text: region.text,
-                                                             targetLanguage: targetLanguage)
+            let key = Self.cacheKey(for: region.text, targetLanguage: targetLanguage)
+            if let onlyKey, key != onlyKey { continue }
             guard claimed.insert(key).inserted else { continue }
             guard settledOutcomes[key] == nil,
                   !attemptKeys.contains(key) else { continue }
@@ -1056,7 +1147,8 @@ actor LiveTranslationPipeline {
         guard !isClosed else { return }
 
         let policy = LiveTranslateOverlaySurface.policy(config: config,
-                                                        alwaysShowOriginal: alwaysShowOriginal)
+                                                        alwaysShowOriginal: alwaysShowOriginal,
+                                                        extractionMode: extractionMode)
         let regions = stabilizer.visible
 
         // The jitter gate (T-026). Decided before the counter moves, so a

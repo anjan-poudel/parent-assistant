@@ -369,5 +369,64 @@ final class LiveTranslateConfigTests: XCTestCase {
         XCTAssertTrue(ModelBudgetPolicy.roomy
             .availability(of: head, physicalMemoryBytes: 8_000_000_000)
             .isAvailable)
+    // MARK: The OCR-first rework (owner verdict, 2026-09-18)
+
+    /// The recognition settings' defaults, pinned the same way the rest of the
+    /// table is: "forget translation, it's doing very poor OCR" is answered by
+    /// specific values, and a silent drift in any of them is the failure mode
+    /// this test exists for.
+    func testTheRecognitionDefaultsAreTheOnesTheOCRFirstReworkChose() {
+        let config = LiveTranslateConfig.default
+
+        XCTAssertTrue(config.ocrAppliesLanguageCorrection,
+                      "the recognizer's language model is what turns a compound label "
+                      + "read as two words back into the word that is printed")
+        XCTAssertTrue(config.ocrAutomaticallyDetectsLanguage,
+                      "the scene decides the language; the request is not held to English")
+        XCTAssertEqual(config.ocrCorrectionLanguages, ["en-US"],
+                       "read only when detection is unavailable: the fallback language")
+        XCTAssertEqual(config.ocrMinimumTextHeight, 0,
+                       "no floor: a fraction-of-image floor is exactly what makes small print "
+                       + "invisible to the pass, which is the complaint")
+        XCTAssertTrue(config.ocrUsesLabelVocabulary)
+        XCTAssertTrue(config.ocrLargeTextRetryEnabled)
+        XCTAssertTrue(config.extractModeDefault,
+                      "a session opens showing the recognized text (owner verdict, 2026-09-18)")
+    }
+
+    /// The vocabulary is *derived*, from the two sources that own words: the
+    /// curated dictionary's keys and the packaging supplement. It is not a
+    /// second copy of either, so this test reads the same sources the config
+    /// does and fails the moment the list stops tracking them.
+    func testTheLabelVocabularyTracksTheCuratedDictionaryPlusThePackagingSupplement() {
+        let vocabulary = LiveTranslateConfig.labelVocabulary
+
+        XCTAssertFalse(vocabulary.isEmpty)
+        XCTAssertEqual(vocabulary, vocabulary.sorted(), "one canonical order, so two builds agree")
+        XCTAssertEqual(Set(vocabulary).count, vocabulary.count, "no word is listed twice")
+
+        for key in ApplianceLabelLocalizer.dictionary.keys {
+            XCTAssertTrue(vocabulary.contains(key),
+                          "\"\(key)\" is printed on an appliance's face and is in the curated "
+                          + "table; the recognizer's vocabulary must carry it")
+        }
+        for word in LiveTranslateConfig.packagingVocabulary {
+            XCTAssertTrue(vocabulary.contains(word))
+            XCTAssertFalse(ApplianceLabelLocalizer.dictionary.keys.contains(word),
+                           "\"\(word)\" is in the supplement only because the dictionary does "
+                           + "not carry it")
+        }
+
+        // The switch is a real switch: off means the engine is handed no words
+        // rather than the engine deciding what to do with them.
+        var off = LiveTranslateConfig.default
+        off.ocrUsesLabelVocabulary = false
+        XCTAssertTrue(off.ocrVocabulary.isEmpty)
+        XCTAssertEqual(LiveTranslateConfig.default.ocrVocabulary, vocabulary)
+
+        // The dictionary is read, never written: a key added to it flows
+        // through both the vocabulary and the recognizer with no second edit.
+        XCTAssertTrue(LiveTranslateConfig.labelVocabulary.contains("defrost"),
+                      "the owner's own example of a word the pass must get right")
     }
 }
