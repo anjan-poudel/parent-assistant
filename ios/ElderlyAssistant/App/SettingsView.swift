@@ -3493,13 +3493,21 @@ struct AIModelsSettingsView: View {
                     }
                     .pickerStyle(.menu)
                     .tint(DesignTokens.accent)
+                    // `alsoOffered` is the translation card below: its row
+                    // is a `.llamaBase` entry that is NOT in this picker, so
+                    // without it a device that installed the translation
+                    // model would also get the installed-hidden management
+                    // row here — the same artifact, two rows, on one screen.
                     modelRows(managedRows(ModelCatalog.availableBrainEntries,
-                                          kind: .llamaBase))
+                                          kind: .llamaBase,
+                                          alsoOffered: ModelCatalog.availableTranslationEntries))
                 }
                 .padding(16)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(DesignTokens.card)
                 .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+
+                translationCard
 
                 // [ENCODER-RUNTIME-TOGGLE] The internal-testing encoder
                 // switch. [ENCODER-ALWAYS-ON] The `if` is the compilation
@@ -3550,6 +3558,59 @@ struct AIModelsSettingsView: View {
                 }
             }
         }
+    }
+
+    /// [TRANSLATION-MODEL-ROW] (2026-09-18) The live-translate tier's own
+    /// model — the one row on this screen that exists to make a DOWNLOAD
+    /// possible rather than to make a choice possible.
+    ///
+    /// Why it is here at all: `LocalBrainTranslationTier.installedModel()`
+    /// reads what is on disk, and nothing else in the app starts this
+    /// artifact's download (the tier only reads installed models, the
+    /// assistant-brain picker deliberately excludes it, and `managedRows`
+    /// only appends entries that are ALREADY installed). Without this row
+    /// the shipped translation fine-tune could be catalogued, published and
+    /// sha-pinned and still never reach a device. The row is offered through
+    /// `ModelCatalog.availableTranslationEntries` — the catalog's own list
+    /// for exactly this surface, not a view-local literal.
+    ///
+    /// Two deliberate differences from every other row on the screen:
+    ///
+    ///  · **The Download outlives the refusal.** `downloadsWhileUnavailable`
+    ///    keeps the button while the class policy refuses the model, where
+    ///    every other row hides it (a household choosing a brain should not
+    ///    spend data on one this phone cannot hold — that reasoning stands).
+    ///    This row is not a choice: it is how the artifact gets onto a phone
+    ///    that CAN run it, and how a phone that cannot becomes able to when
+    ///    a later policy moves the line. The verdict is still shown, in the
+    ///    same sentence the picker uses (`unavailableNote`), because a row
+    ///    that only said "Download" would be claiming the model works here.
+    ///
+    ///  · **It names the size.** 1.83 GB over a household's connection is a
+    ///    decision worth pricing before the tap, and the status line only
+    ///    shows bytes once a download is already in flight.
+    ///
+    /// The section header and the note carry the two facts a household
+    /// cannot infer from the row: this model answers the camera's
+    /// translation, not the assistant, and a phone may hold it without being
+    /// able to run it.
+    private var translationCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("settings.translation.section")
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .foregroundStyle(DesignTokens.textPrimary)
+            Text("settings.translation.note")
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundStyle(DesignTokens.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            modelRows(ModelCatalog.availableTranslationEntries,
+                      downloadsWhileUnavailable: true,
+                      showsArtifactSize: true)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
     }
 
     /// Picker selection: sets the persisted preference (existing
@@ -4010,9 +4071,19 @@ struct AIModelsSettingsView: View {
     /// one has to keep a row for it, otherwise the owner can never free
     /// the space. Catalog entries are never removed, so the install check
     /// is the only gate here.
+    ///
+    /// `alsoOffered` names entries that another card on this screen has
+    /// already given a row to. They stay out of this section's
+    /// installed-hidden append for the reason the rule above exists: a row
+    /// is how an artifact is managed, and one artifact with two rows can be
+    /// deleted from one card while the other still shows it. The
+    /// translation model is the case ([TRANSLATION-MODEL-ROW]) — it is a
+    /// `.llamaBase` entry that is not in the brain picker, so it would
+    /// otherwise land here the moment it is installed.
     private func managedRows(_ curated: [ModelCatalogEntry],
-                             kind: ModelKind) -> [ModelCatalogEntry] {
-        let offered = Set(curated.map(\.id))
+                             kind: ModelKind,
+                             alsoOffered: [ModelCatalogEntry] = []) -> [ModelCatalogEntry] {
+        let offered = Set((curated + alsoOffered).map(\.id))
         let installedHidden = ModelCatalog.entries(kind: kind)
             .filter { !offered.contains($0.id) && isInstalled($0.id) }
         return curated + installedHidden
@@ -4035,8 +4106,15 @@ struct AIModelsSettingsView: View {
     /// One management row per entry, with the download/delete actions the
     /// screen has always wired (deleting the model the picker currently
     /// points at falls back to the automatic default).
+    ///
+    /// `downloadsWhileUnavailable` is the [TRANSLATION-MODEL-ROW] exception
+    /// (see `translationCard`); `showsArtifactSize` names the artifact's
+    /// size under the row title. Both default to the screen's existing
+    /// behaviour, so the picker's own lists are unchanged by either.
     @ViewBuilder
-    private func modelRows(_ entries: [ModelCatalogEntry]) -> some View {
+    private func modelRows(_ entries: [ModelCatalogEntry],
+                           downloadsWhileUnavailable: Bool = false,
+                           showsArtifactSize: Bool = false) -> some View {
         ForEach(entries, id: \.id) { entry in
             ModelManagementRow(
                 entry: entry,
@@ -4048,6 +4126,8 @@ struct AIModelsSettingsView: View {
                 // that guessed the device would disagree with the ledger on
                 // exactly the phones where the answer matters.
                 unavailableReason: availability(of: entry).reason,
+                downloadsWhileUnavailable: downloadsWhileUnavailable,
+                showsArtifactSize: showsArtifactSize,
                 onStart: { downloads.start(entry.id) },
                 onCancel: { downloads.cancel(entry.id) },
                 onDelete: {
@@ -4143,6 +4223,31 @@ struct AIModelsSettingsView: View {
             ? ModelBudgetPolicy.displayText(for: reason)
             : resolved
     }
+
+    /// Whether a row's primary action is its Download button — the one place
+    /// the [MODEL-WARDEN] refusal and the [TRANSLATION-MODEL-ROW] exception
+    /// meet, so the rule and its single carve-out cannot drift apart.
+    ///
+    /// The rule: a refused model is not downloaded, because an artifact this
+    /// phone cannot hold is not something to spend a household's data on.
+    /// The exception: a row whose artifact must be on disk for a feature to
+    /// work when the phone CAN run it (`downloadsWhileUnavailable`) keeps
+    /// the button, and says the refusal in words instead.
+    ///
+    /// An in-flight download is never re-offered as a fresh one, refused or
+    /// not — the row shows Cancel while it runs, and Delete once it lands.
+    /// Pure, so a test can drive every combination without a view.
+    static func offersDownloadButton(state: ModelDownloadState,
+                                     unavailableReason: ModelUnavailabilityReason?,
+                                     downloadsWhileUnavailable: Bool) -> Bool {
+        guard unavailableReason == nil || downloadsWhileUnavailable else {
+            return false
+        }
+        switch state {
+        case .notStarted, .failed, .cancelled: return true
+        case .queued, .downloading, .verifying, .completed: return false
+        }
+    }
 }
 
 private struct ModelManagementRow: View {
@@ -4155,6 +4260,19 @@ private struct ModelManagementRow: View {
     /// stops offering the download, because an artifact this phone cannot
     /// hold is not something to spend a household's data on.
     var unavailableReason: ModelUnavailabilityReason? = nil
+    /// [TRANSLATION-MODEL-ROW] The one carve-out from the rule above: keep
+    /// the Download while `unavailableReason` is set. For a row whose
+    /// artifact a FEATURE reads off disk (the translation tier's model), the
+    /// download is not the household choosing a model this phone cannot run
+    /// — it is how the artifact is present for the phones that can, and for
+    /// this phone once a policy moves the line. The reason line still
+    /// renders: the row never claims the model works here.
+    var downloadsWhileUnavailable: Bool = false
+    /// Show the artifact's size under the row title. Off by default (the
+    /// picker rows are choices, and their bytes only matter once a download
+    /// starts — the status line carries them then); on for the translation
+    /// row, where a 1.83 GB fetch is the decision being made.
+    var showsArtifactSize: Bool = false
     let onStart: () -> Void
     let onCancel: () -> Void
     let onDelete: () -> Void
@@ -4180,6 +4298,11 @@ private struct ModelManagementRow: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel(Text("model.delete"))
                 }
+            }
+            if showsArtifactSize {
+                Text(L10n.fmt("model.size", locale: locale, bytes(entry.sizeBytes)))
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundStyle(DesignTokens.textSecondary)
             }
             statusLine
             if let reason = unavailableReason {
@@ -4209,7 +4332,10 @@ private struct ModelManagementRow: View {
     private var actionButton: some View {
         switch state {
         case .notStarted, .failed, .cancelled:
-            if unavailableReason == nil {
+            if AIModelsSettingsView.offersDownloadButton(
+                state: state,
+                unavailableReason: unavailableReason,
+                downloadsWhileUnavailable: downloadsWhileUnavailable) {
                 Button(action: onStart) {
                     Text("model.download")
                         .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
@@ -4223,6 +4349,9 @@ private struct ModelManagementRow: View {
             }
             // else: nothing to offer. `unavailableLine` says why, and the
             // picker option for this model is disabled for the same reason.
+            // (The [TRANSLATION-MODEL-ROW] carve-out is inside the helper
+            // above, not here: the verdict and its one exception are one
+            // rule, and a test drives it without a view.)
         case .queued, .downloading, .verifying:
             Button(action: onCancel) {
                 Text("model.cancel")

@@ -78,6 +78,54 @@ final class ModelCatalogLanguageTests: XCTestCase {
                                                                 language: AppLanguage.nepali.rawValue))
     }
 
+    /// [TRANSLATION-MODEL-ROW] (2026-09-18) The AI-models screen's
+    /// translation section offers exactly the tier's head, through the
+    /// catalog's own list — not a literal in the view.
+    ///
+    /// Two things are pinned here, and they are the two ways this row can
+    /// go wrong: an offered id with no catalog entry can never be installed
+    /// (the row would render a Download that cannot exist), and an offered
+    /// id that is not the tier's head leaves the row fetching a model the
+    /// tier does not lead with — the download would land and change nothing.
+    /// The fallbacks behind the head are deliberately NOT offered: they are
+    /// assistant brains with rows of their own in the brain section.
+    func testTheOfferedTranslationRowsAreExactlyTheTiersHead() {
+        let offered = ModelCatalog.availableTranslationEntries.map(\.id)
+        XCTAssertEqual(offered, [ModelCatalog.nmtEnNeQwen17bR2bQ8],
+                       "the section offers the tier's shipped head, alone")
+        XCTAssertEqual(offered.first,
+                       LiveTranslateConfig.default.brainTranslationModelIDs.first,
+                       "the row must offer what the tier leads with")
+        for id in offered {
+            XCTAssertNotNil(ModelCatalog.entry(for: id),
+                            "\(id.rawValue) is offered but not in the catalog")
+        }
+        // One model, one row: nothing offered here may also be offered by
+        // the brain picker (its rows would duplicate in the brain section).
+        let brainIDs = Set(ModelCatalog.availableBrainEntries.map(\.id))
+        XCTAssertTrue(Set(offered).isDisjoint(with: brainIDs),
+                      "the translation row is not an assistant-brain choice")
+    }
+
+    /// The row's title is copy, so it lives in the string table like every
+    /// other row's — in both shipped languages. The English value is the
+    /// catalog's own `displayName` verbatim; a row that drifted from it
+    /// would read differently in Settings than in the catalog's docs.
+    func testTheTranslationRowIsNamedInBothLanguages() {
+        let entry = ModelCatalog.entry(for: ModelCatalog.nmtEnNeQwen17bR2bQ8)!
+        let key = "model.name.\(entry.id.rawValue)"
+        let en = Locale(identifier: "en")
+        let ne = Locale(identifier: "ne-NP")
+        XCTAssertNotEqual(L10n.str(key, locale: en), key,
+                          "\(key) must have an English value")
+        XCTAssertNotEqual(L10n.str(key, locale: ne), key,
+                          "\(key) must have a Nepali value")
+        XCTAssertEqual(entry.displayName(locale: en), entry.displayName,
+                       "the English string IS the catalog displayName")
+        XCTAssertNotEqual(entry.displayName(locale: ne), entry.displayName,
+                          "the Nepali row must not fall back to English")
+    }
+
     func testStockQwenAndLlamaBrainsAreLanguageNeutral() {
         let neutral: [ModelID] = [
             ModelCatalog.qwen3_1_7BInstruct,
