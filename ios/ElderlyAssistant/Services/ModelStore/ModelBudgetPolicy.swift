@@ -25,9 +25,23 @@ import Foundation
 // so the class comes from the probe the admissions use) and it is rendered by
 // the Settings screen: the reason sentence on the model row, a short marker on
 // the picker option, and no download offered for a model the class cannot
-// hold. It does NOT re-point what the app loads when the preference is
-// "Automatic" — see the Step 3 note in `ModelLifecycleManager` for why that
-// one stays the owner's decision.
+// hold.
+//
+// [MODEL-WARDEN, 2026-09-18] It also answers what "Automatic" RESOLVES to.
+// `LanguageModelResolver.resolvedAutomaticPick` takes the catalogue's language
+// default as its first rung, asks this policy the same
+// `availability(of:physicalMemoryBytes:warmSTTLiveBytes:)` question a Settings
+// row asks, and steps down the ladder — largest artifact that fits beside the
+// warm STT — when the class refuses it. So a 6 GB Nepali phone now resolves to
+// the 1.7B instead of the 4B that `soloOverBudget` would admit and then evict
+// the warm ANE STT on every turn for.
+//
+// The escape hatch is untouched: an EXPLICITLY stored pick is never overridden
+// — the gate is on the automatic path only, and a preference already stored
+// keeps today's `soloOverBudget` semantics. (The Step 3 note in
+// `ModelLifecycleManager` predates this and still says the policy re-points
+// nothing: the resolution lives in the resolver and the ledger's own behaviour
+// is unchanged, so read that note as "the ledger does not re-point a load".)
 //
 // ### What the numbers are
 //
