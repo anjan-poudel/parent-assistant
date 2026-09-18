@@ -126,36 +126,6 @@ final class LiveOverlayPlacementGeometryTests: XCTestCase {
                        "the same call twice is the same rect — nothing is cached between frames")
     }
 
-    // MARK: The pill is sized for the lines it carries
-
-    func testThePillIsAtLeastTheMeasuredBlockOfItsLines() {
-        let policy = policy()
-        let lines = [
-            LiveOverlayTextLine(text: "खुल्ने समय", pointSize: policy.minPointSize, weight: .primary),
-            LiveOverlayTextLine(text: "Opening hours", pointSize: policy.secondaryPointSize,
-                                weight: .secondary)
-        ]
-        let size = LiveOverlayPlacement.pillSize(for: lines, policy: policy,
-                                                 measure: LiveOverlayTextMetrics.measure)
-        let primary = LiveOverlayTextMetrics.measure(lines[0].text, pointSize: lines[0].pointSize,
-                                                     weight: .primary)
-        let secondary = LiveOverlayTextMetrics.measure(lines[1].text,
-                                                       pointSize: lines[1].pointSize,
-                                                       weight: .secondary)
-
-        XCTAssertGreaterThanOrEqual(size.width, max(primary.width, secondary.width) + 2 * policy.pillPadding)
-        XCTAssertGreaterThanOrEqual(size.height,
-                                    primary.height + secondary.height + policy.lineSpacing
-                                    + 2 * policy.pillPadding)
-    }
-
-    func testAPillForNoLinesIsStillAPill() {
-        let size = LiveOverlayPlacement.pillSize(for: [], policy: policy(),
-                                                 measure: LiveOverlayTextMetrics.measure)
-        XCTAssertEqual(size, CGSize(width: 2 * policy().pillPadding,
-                                    height: 2 * policy().pillPadding))
-    }
-
     // MARK: Scenario: measurement and rendering share one measurer
     //
     // Measured, not asserted: the bubble is rendered off screen and the ink
@@ -214,53 +184,65 @@ final class LiveOverlayPlacementGeometryTests: XCTestCase {
         }
     }
 
-    /// A callout is the fallback, so the fixture is a sign too small to hold
-    /// its own translation: the pill then has to keep its text inside itself.
+    /// The panel is the fallback, so the fixture is a sign too short to hold
+    /// its own translation: the panel then has to keep its text inside itself.
+    ///
+    /// This is the same claim the deleted callout-pill test made, moved to the
+    /// surface that replaced the pill: the rows are the placement's own lines
+    /// at the sizes it measured, drawn through the feature's one font
+    /// constructor, so a font, a size or a padding that had drifted from the
+    /// measurement would put text pixels outside the box the placement drew
+    /// (R2) — and, on the live overlay, outside the green wash the elder is
+    /// reading.
     @MainActor
-    func testACalloutKeepsItsTextHorizontallyInsideItsPill() throws {
+    func testThePanelKeepsItsTextInsideItsOwnBox() throws {
         let region = TextRegionStabilizer.StableTextRegion(
             id: TextRegionStabilizer.RegionIdentity(rawValue: 0),
             text: "Opening hours",
             normalizedText: "opening hours",
-            box: NormalizedBox(xMin: 0.2, yMin: 0.5, xMax: 0.26, yMax: 0.52),
+            box: NormalizedBox(xMin: 0.3, yMin: 0.4, xMax: 0.6, yMax: 0.5),
             detectedLanguage: "en",
             confidence: 0.9)
-        let result = TranslationResult.resolved(originalText: region.text,
-                                                translation: "खुल्ने समय",
-                                                tier: .cloud)
+        let result = TranslationResult.resolved(
+            originalText: region.text,
+            translation: "Please open the gate by the side of the house before the evening",
+            tier: .cloud)
         let placements = LiveOverlayPlacement.place(
             regions: [region], results: [region.id: result],
             containerSize: portraitContainer, framePixelSize: portraitContainer,
             safeArea: CGRect(origin: .zero, size: portraitContainer),
             policy: policy(), stateCopy: { _ in nil })
-        let pillRect = try XCTUnwrap(calloutRect(in: placements))
-        XCTAssertFalse(pillRect.intersects(
-            LiveOverlayPlacement.screenRect(for: region.box, containerSize: portraitContainer,
-                                            framePixelSize: portraitContainer)))
-        // The anchor is above the region here, so the leader line is vertical
-        // and any ink outside the pill's horizontal band is the bubble's own
-        // text escaping the box it was measured for.
+        let panelRect = try XCTUnwrap(panelRect(in: placements),
+                                      "the premise: this translation cannot be read in the "
+                                      + "sign's own box, so the region is the fallback panel")
+        XCTAssertEqual(placements.count, 1)
+        // The fallback stands on the text it replaces, which is the whole point
+        // of removing the pill: the panel's box covers the sign's own rect.
+        let own = LiveOverlayPlacement.screenRect(for: region.box, containerSize: portraitContainer,
+                                                  framePixelSize: portraitContainer)
+        XCTAssertTrue(panelRect.insetBy(dx: -1e-9, dy: -1e-9).contains(own),
+                      "the panel covers the printed text it stands on")
+
         let surface = LiveTranslateOverlaySurface(placements: placements, policy: policy(),
                                                   locale: Locale(identifier: "ne-NP"))
 
         let image = try XCTUnwrap(OverlayRenderProbe.render(surface, size: portraitContainer))
         // Above the chrome strip only: the strip carries the FR-LCT-017
         // control, whose own ink spans the width by design and would otherwise
-        // be read as the bubble escaping its pill.
+        // be read as the panel's text escaping its box.
         let aboveChrome = CGRect(x: 0, y: 0, width: portraitContainer.width,
                                  height: chromeRects().first?.minY ?? portraitContainer.height)
         let drawn = try OverlayRenderProbe.ink(in: image, within: aboveChrome)
 
-        XCTAssertFalse(drawn.isEmpty, "the callout rendered nothing")
-        // A vertically anchored callout's only horizontal excursion is its
-        // own pill, so an ink bound outside it is the bubble's text escaping
-        // the box it was measured for.
+        XCTAssertFalse(drawn.isEmpty, "the panel rendered nothing")
+        // A panel's text wraps to its box, so an ink bound outside it is the
+        // drawn rows escaping the box the placement measured them for.
         let scale = image.scale
         let tolerance = 1.5 * scale
-        XCTAssertGreaterThanOrEqual(CGFloat(drawn.minX), (pillRect.minX * scale) - tolerance,
-                                    "the callout's ink starts left of its pill")
-        XCTAssertLessThanOrEqual(CGFloat(drawn.maxX), (pillRect.maxX * scale) + tolerance,
-                                 "the callout's ink runs past its pill")
+        XCTAssertGreaterThanOrEqual(CGFloat(drawn.minX), (panelRect.minX * scale) - tolerance,
+                                    "the panel's ink starts left of the box it was measured for")
+        XCTAssertLessThanOrEqual(CGFloat(drawn.maxX), (panelRect.maxX * scale) + tolerance,
+                                 "the panel's ink runs past the box it was measured for")
     }
 
     // MARK: Placement accessors
@@ -274,8 +256,8 @@ final class LiveOverlayPlacementGeometryTests: XCTestCase {
         return rect
     }
 
-    private func calloutRect(in placements: [LiveOverlayPlacement.PlacedOverlay]) -> CGRect? {
-        guard case .callout(_, _, let pillRect) = placements.first?.form else { return nil }
-        return pillRect
+    private func panelRect(in placements: [LiveOverlayPlacement.PlacedOverlay]) -> CGRect? {
+        guard case .scrollablePanel(_, let rect) = placements.first?.form else { return nil }
+        return rect
     }
 }

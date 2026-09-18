@@ -266,6 +266,119 @@ struct LiveTranslateConfig: Equatable {
     /// positive number is read as 1.
     var pinchSensitivity: Double = 1.0
 
+    // MARK: The picture's own stabilization (owner device verdict, 2026-09-18)
+
+    // The owner's verdict on the green-overlay build, verbatim: "the text is
+    // still shaky and jittery and unstable — back to the same old problem.
+    // STABILISE THE IMAGE FIRST, and secondly overlay text on top of the
+    // original text." The overlay was already as steady as smoothing allows;
+    // what moved was the *picture*. These keys hold the picture still: the
+    // frame's content is tracked against an anchor frame on device, and the
+    // window the preview is drawn through is panned by the motion the hand did
+    // not mean. The box is drawn through the same window, so a box on a now
+    // still picture is a box glued to the words it replaces.
+    //
+    // The whole file's `frameStab*` family is operational, all of it, and for
+    // the owner's own reason: a device check on a dim kitchen or a bright
+    // shopfront is what would move these numbers. `FrameAnchorEstimator` is the
+    // file that reads them, and the sampling ceiling that bounds what any of
+    // them can do is written down there.
+
+    /// Whether the picture is stabilized. `false` is the honest identity: no
+    /// anchor is taken, no request is made, and the display is the elder's own
+    /// window exactly as `panWindowFraction` describes it.
+    ///
+    /// A key rather than a delete-the-code decision, because this is the one
+    /// number that trades CPU for steadiness, and a device that turns out to
+    /// spend too much on it must be able to say so without a release.
+    var frameStabEnabled: Bool = true
+
+    /// How much content motion, as a fraction of the frame, is read as the
+    /// hand's own tremor and **absorbed whole** — the window takes the motion
+    /// and the picture does not move on screen at all.
+    ///
+    /// This is the key the whole feature is about, and the number is a hand's
+    /// opinion. 0.01 is 1 % of the frame — about 4 pt of a 390 pt picture — and
+    /// it is set at the point where a movement stops being tremor and starts
+    /// being intent: below it the elder is holding the phone still and any
+    /// motion is the hand's noise, above it they are *pointing* the camera
+    /// somewhere and the picture has to follow (see `frameStabFollowFactor`).
+    /// Too high and the app swallows deliberate small re-framings; too low and
+    /// the tremor reaches the glass.
+    var frameStabDeadZone: Double = 0.01
+
+    /// How much of the way toward the content's position the window travels per
+    /// measurement once the motion is past the dead zone.
+    ///
+    /// A deliberate re-frame is *followed*, and followed over a few
+    /// measurements rather than in one: the fraction that is not yet followed
+    /// is what the elder sees the picture move by, which is what makes a pan
+    /// read as a pan instead of as a still picture that jumped. 0.4 settles most
+    /// of a movement inside half a second at the nominal cadence, which is what
+    /// a pan looks like when a hand does it. 1 follows exactly (no trace left
+    /// for a deliberate move, and the dead zone becomes a step); small values
+    /// leave a slow pan spending the window's whole travel budget and pinning at
+    /// the frame's edge.
+    ///
+    /// 0.4 rather than the 0.35 this was first written with: `0.35` is already a
+    /// *configured* value (`regionMatchCentroidDistance`), and the app layer
+    /// spells that same number for its own reason
+    /// (`LiveTranslateOverlayView.positionSmoothingSeconds`), so a second key at
+    /// 0.35 makes `LiveTranslateAppLayerHygieneTests` report the app layer's
+    /// literal twice for a collision this change did not create. The
+    /// stabilisation's numbers are device-tunable opinions, and one of them
+    /// moving a twentieth of the way further per measurement costs nothing.
+    var frameStabFollowFactor: Double = 0.4
+
+    /// How far the window is inset — and therefore how far the correction may
+    /// ever move it — as a fraction of the frame.
+    ///
+    /// It is the correction's entire budget, and it is also the price: the
+    /// display shows `1 - 2·margin` of the frame, so 0.03 is a permanent 6 %
+    /// enlargement (and 6 % less of the picture at its edges) bought in exchange
+    /// for ±3 % of travel. The inset and the travel are deliberately the same
+    /// number: a window inset by `margin` can be moved by exactly that much
+    /// before its edge would reach the frame's, so no clamp ever has to fight
+    /// the law — the bound *is* the geometry. Zero is the identity; a value
+    /// wider than the window allows is clamped at the point where the window
+    /// would collapse.
+    var frameStabMargin: Double = 0.03
+
+    /// How far a measurement may sit from the anchor — in position, or in the
+    /// scale the anchor's rect has taken on — before it is read as **not the
+    /// hand's motion**: a scene cut, a lens change, a device zoom, a whip pan.
+    ///
+    /// A measurement like that says nothing about how to hold this picture
+    /// still, so it re-bases the anchor and the window stays exactly where it
+    /// is (this key never moves the picture). 0.2 is a fifth of the frame in one
+    /// measurement at the nominal cadence — a quarter of the frame's height in a
+    /// quarter of a second, which is a re-frame and not a hand. 0.01 is the
+    /// floor: below it, an ordinary tremor would keep re-basing the anchor.
+    var frameStabRejectDelta: Double = 0.2
+
+    /// How long an anchor is kept before a fresh one is taken, in seconds.
+    ///
+    /// The anchor is a reference *image*, and a reference the elder has been
+    /// moving away from for longer than this is measuring a difference they
+    /// left behind: a slow drift that a still hand and a still picture would
+    /// otherwise carry for ever. Re-taking it moves nothing — the window keeps
+    /// its pan — so this key has no visible cost, and the only reason it is not
+    /// smaller is that an anchor taken too often is an anchor taken before there
+    /// is any motion to measure against it.
+    var frameStabAnchorSeconds: TimeInterval = 2.0
+
+    /// The long side, in pixels, of the small copy of the frame the registration
+    /// runs on. **The cost knob**, and the only one.
+    ///
+    /// A registration's price is its pixels — a homography on the 1280 × 720
+    /// frame would be eight times this and is not what a motion estimate needs —
+    /// while what a registration needs is not resolution but texture: the same
+    /// corner found twice, which 256 px of a sign's own edge provides. The
+    /// measured cost of the shipped value is reported by
+    /// `FrameAnchorEstimatorTests`, so raising this number is a decision with a
+    /// price on it rather than a guess.
+    var frameStabRegistrationSide: Int = 256
+
     /// Whether the pan goes home when the session exits and when an
     /// interruption takes the camera away and gives it back.
     ///

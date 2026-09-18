@@ -72,6 +72,30 @@ struct CameraFrame {
     /// `.whole` for a session that has neither zoomed nor panned, which is
     /// every frame this feature produced before the window existed.
     let crop: LiveCameraCrop
+
+    /// How far the **picture itself** was moved to hold it still against the
+    /// hand's tremor, measured against the session's anchor frame (owner device
+    /// verdict, 2026-09-18: *"the text is still shaky and jittery and unstable
+    /// … STABILISE THE IMAGE FIRST"*).
+    ///
+    /// This is not a second crop: it is the *same* kind of value as `crop`, and
+    /// the display composes the two — the elder's zoom/pan window inset by
+    /// `margin` and moved by `offset` (`LiveCameraCrop.stabilized(by:)`), which
+    /// is why the preview layer and every overlay rect stay in one map. It is
+    /// carried on the frame rather than published beside it so a frame and the
+    /// correction that was measured for it cannot be read apart: a pass that
+    /// read the buffer of frame *n* and the stabilization of frame *n+1* would
+    /// draw its box at the wrong place on a moving picture.
+    ///
+    /// `crop` is deliberately left as the gesture's own window: recognition
+    /// runs on the **raw** frame, and the correction is a display fact. A frame
+    /// the session never stabilized (every frame before the estimator existed,
+    /// and every frame on a device where registration is unavailable) carries
+    /// `.none` — no inset, no offset, the picture exactly as it was. A frame
+    /// the session *did* stabilize carries the estimator's answer even when the
+    /// window has not moved yet (`margin` with a zero offset): the inset is the
+    /// room the correction is held in, and it is there from the first frame.
+    var stabilization: FrameStabilization = .none
 }
 
 extension CameraFrame {
@@ -848,7 +872,10 @@ extension AVFoundationCaptureLayer: AVCaptureVideoDataOutputSampleBufferDelegate
 /// Isolation. Every session *mutation* (configure, start, stop, pause) runs on
 /// one serial capture queue. The tap's cadence state (the last accepted sample,
 /// the pass-in-flight flag) is guarded by a lock, because it is written by the
-/// consumer and read on the video-output queue. Nothing else is shared.
+/// consumer and read on the video-output queue. The picture stabilizer
+/// (`FrameAnchorEstimator`, owner device verdict 2026-09-18) has a lock of its
+/// own, because its work includes a Vision request and the other lock is the one
+/// the OCR pass waits on. Nothing else is shared.
 ///
 /// Lifetime. A session is single-use: `stop()` tears the capture stack and the
 /// frame stream down for good. Starting a stopped session is reported as a
@@ -913,6 +940,21 @@ final class LiveCameraSession {
     private var focusPoint: CGPoint
     private var focusIsLocked: Bool
 
+    /// The picture's own stabilizer: the anchor, the registration and the
+    /// correction the display is told about (owner device verdict, 2026-09-18:
+    /// *"the text is still shaky and jittery and unstable … STABILISE THE IMAGE
+    /// FIRST"*). It runs on accepted frames only, at the same cadence the
+    /// recognition pass does, which is what keeps the feature's cost where it
+    /// was.
+    ///
+    /// Guarded by `stabilizerLock`, **never** by `lock`, and deliberately: a
+    /// measurement is a Vision request, and `lock` is the one the consumer's
+    /// pass-in-flight flag and every gesture write go through. Holding it across
+    /// a registration would put the OCR pass behind the stabilizer for the
+    /// length of a homography, for no gain — the two share no state.
+    private var stabilizer: FrameAnchorEstimator
+    private let stabilizerLock = NSLock()
+
     private let stream: AsyncStream<CameraFrame>
     private var continuation: AsyncStream<CameraFrame>.Continuation?
 
@@ -922,6 +964,7 @@ final class LiveCameraSession {
          observabilityBus: ObservabilityBus,
          capture: LiveCameraCaptureLayer? = nil,
          notificationCenter: NotificationCenter = .default,
+         registration: FrameRegistration? = nil,
          now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
         self.config = config
         self.events = LiveTranslateEvents(bus: observabilityBus, config: config)
@@ -942,6 +985,14 @@ final class LiveCameraSession {
         self.videoZoomFactor = capture.zoomCapabilities.openingFactor(for: config)
         self.focusPoint = config.focusPointOfInterest
         self.focusIsLocked = config.focusLockDefault
+        // The stabilizer's own numbers come from the config through its policy
+        // (the clamping is the policy's business, not this file's), and the
+        // seam is injectable so a test can drive the whole session with an
+        // exact motion instead of a homography. A supplied registration is used
+        // as it is: it is the caller's, exactly like a supplied capture layer.
+        self.stabilizer = FrameAnchorEstimator(policy: FrameStabilizationPolicy(config: config),
+                                               registration: registration ?? VisionFrameRegistration(),
+                                               clock: now)
 
         var capturedContinuation: AsyncStream<CameraFrame>.Continuation?
         // `bufferingNewest(1)` is the second half of the memory bound: even if a
@@ -1110,6 +1161,16 @@ final class LiveCameraSession {
             videoZoomFactor = applied
             frameDetector.forget()
         }
+        // The device's zoom is a crop of the *sensor*: every pixel the frame
+        // carries has moved and changed size, so the anchor is measuring a
+        // different picture. The stabilizer's own reject rule would catch a
+        // completed zoom, but a pinch is continuous — a run of small scale
+        // changes would each fall inside the reject delta and be read as a hand
+        // moving the content, which would pin the picture while the elder is
+        // zooming. Dropping the anchor here is the honest statement of what
+        // happened: the window is about to change, so the correction starts from
+        // the elder's own framing again.
+        resetStabilizer()
         return applied
     }
 
@@ -1381,6 +1442,12 @@ final class LiveCameraSession {
                 sceneStale = false
                 lastSampledAt = nil
             }
+            // The camera went away and came back: the frame the anchor was taken
+            // from is from another scene, and the picture has been through
+            // whatever the interruption was (a call, a backgrounded app, a
+            // rotation). The next frame takes a fresh anchor and the display
+            // starts from the elder's own window.
+            resetStabilizer()
             setState(.running)
             // Where the window was pointed is the elder's gesture state, and a
             // camera that went away and came back is the case the config's
@@ -1438,6 +1505,14 @@ final class LiveCameraSession {
         }
         guard let teardown else { return }
 
+        // The anchor and the registration buffers go with the capture stack: a
+        // stopped session retains no copy of the picture the elder has left, and
+        // the correction it was applying is not a fact about the next session
+        // (NFR-LCT-005). Outside the lock above, for the same reason the
+        // observation is: `reset` frees two pixel buffers and must not be the
+        // thing a pass-in-flight read waits on.
+        resetStabilizer()
+
         for observer in teardown.observers {
             notificationCenter.removeObserver(observer)
         }
@@ -1487,7 +1562,7 @@ final class LiveCameraSession {
         // own crop of the sensor, and the frame carries both facts so the pass
         // knows what it is looking at.
         let (zoom, crop) = withLock { (videoZoomFactor, self.crop) }
-        guard let frame = CameraFrame(sampleBuffer: sampleBuffer, zoomFactor: zoom, crop: crop) else {
+        guard var frame = CameraFrame(sampleBuffer: sampleBuffer, zoomFactor: zoom, crop: crop) else {
             return
         }
 
@@ -1506,7 +1581,48 @@ final class LiveCameraSession {
             frameDetector.remember(frame, side: config.frameSignatureSide)
             return continuation
         }
-        accepted?.yield(frame)
+        guard let accepted else { return }
+
+        // The picture's own correction, measured on the frame about to be
+        // delivered — the same frame, the same instant, and the same cadence the
+        // recognition pass runs at, so the two cannot disagree about which
+        // picture they are describing.
+        //
+        // The **raw** buffer goes in (the one `CameraFrame.crop` narrows, not
+        // the narrowed copy): the stabilization is the display's correction, and
+        // what the pass reads must stay what the camera saw. The measurement
+        // runs off `lock` (see `stabilizerLock`), and its answer is stamped on
+        // the frame rather than published beside it, so a consumer can never
+        // pair one frame's pixels with another frame's window.
+        let stabilization = withStabilizerLock {
+            stabilizer.observe(pixelBuffer: frame.pixelBuffer,
+                               pixelSize: frame.pixelSize,
+                               timestamp: now())
+        }
+        frame.stabilization = stabilization
+        accepted.yield(frame)
+    }
+
+    /// The stabilizer's own lock, and the two things it guards: one observation
+    /// (`observe`, which performs a Vision request) and one reset. Held in a
+    /// method of its own so no call site can reach the estimator without taking
+    /// it.
+    private func withStabilizerLock<T>(_ body: () -> T) -> T {
+        stabilizerLock.lock(); defer { stabilizerLock.unlock() }
+        return body()
+    }
+
+    /// Forgets the anchor and the correction: a new capture, a new zoom, a new
+    /// picture. Cheap and unconditional — the next accepted frame takes a fresh
+    /// anchor and the display goes back to the elder's own window — and it drops
+    /// the registration's buffers too, so a stopped session holds no copy of the
+    /// picture the elder has left (NFR-LCT-005).
+    ///
+    /// Called with `stabilizerLock` **not** held by the caller: a gesture write
+    /// is what calls this, and the worst it can wait for is the registration
+    /// already in flight on the video queue.
+    private func resetStabilizer() {
+        withStabilizerLock { stabilizer.reset() }
     }
 
     // MARK: Lifecycle observers

@@ -228,20 +228,22 @@ final class LiveTranslateOverlayViewTests: XCTestCase {
 
         let askedForOriginal = makeSurface(regions: [inPlaceRegion], results: results,
                                            alwaysShowOriginal: true)
-        guard let callout = askedForOriginal.presentations.first else {
+        guard let panel = askedForOriginal.presentations.first else {
             XCTFail("the region must still be placed")
             return
         }
-        XCTAssertEqual(callout.lines.map(\.text), ["Opening hours", inPlaceRegion.text],
+        XCTAssertEqual(panel.lines.map(\.text), ["Opening hours", inPlaceRegion.text],
                        "the original is displayed for that region and the translation stays available")
-        XCTAssertEqual(callout.accessibilityLabel, "Opening hours")
-        XCTAssertEqual(callout.accessibilityValue, inPlaceRegion.text)
-        guard case .callout(_, let anchor, _) = callout.form else {
-            XCTFail("asking for the original moves the region to the callout form")
+        XCTAssertEqual(panel.accessibilityLabel, "Opening hours")
+        XCTAssertEqual(panel.accessibilityValue, inPlaceRegion.text)
+        guard case .scrollablePanel(_, let panelRect) = panel.form else {
+            XCTFail("asking for the original moves the region to the panel form — the two texts "
+                    + "side by side on the region's own rect, never a box floating beside it: "
+                    + "\(panel.form)")
             return
         }
-        XCTAssertTrue(screenRect(of: inPlaceRegion).insetBy(dx: -0.5, dy: -0.5).contains(anchor),
-                      "the leader still lands on the region the translation belongs to")
+        XCTAssertTrue(panelRect.insetBy(dx: -1e-9, dy: -1e-9).contains(screenRect(of: inPlaceRegion)),
+                      "the panel still stands on the region the translation belongs to")
     }
 
     // MARK: - Scenario: the empty state tells the truth without being an error
@@ -456,8 +458,8 @@ final class LiveTranslateOverlayViewTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(policy.secondaryPointSize, DesignTokens.minCaptionPointSize,
                                     "the supporting line is still elder-readable")
 
-        // A sign too small for its translation: the two-line callout, where
-        // both floors are visible at once.
+        // A sign too small for its translation: the two-line panel, where both
+        // floors are visible at once.
         let resolved = region(0, "खुल्ने समय बिहान", box: box(0.2, 0.3, 0.24, 0.32))
         let surface = makeSurface(regions: [resolved],
                                   results: [resolved.id: .resolved(originalText: resolved.text,
@@ -467,8 +469,10 @@ final class LiveTranslateOverlayViewTests: XCTestCase {
             XCTFail("the region must be placed")
             return
         }
-        guard case .callout = presentation.form else {
-            XCTFail("the premise is a callout: the translation cannot be read in that box")
+        guard case .scrollablePanel = presentation.form else {
+            XCTFail("the premise is the fallback panel: the translation cannot be read in that "
+                    + "box, and the fallback is not a floating callout any more "
+                    + "(\(presentation.form))")
             return
         }
         XCTAssertEqual(presentation.lines[0].pointSize, policy.minPointSize)
@@ -622,11 +626,13 @@ final class LiveTranslateOverlayViewTests: XCTestCase {
 
     // MARK: - The overlay's own chrome
 
-    func testCalloutsStayClearOfTheOverlaysChrome() {
-        // A small sign near the bottom strip whose translation cannot be read
-        // in place: the callout is the fallback, and it must not land on the
-        // FR-LCT-017 control the strip reserves for.
-        let control = region(0, "प्रवेश निषेध गरिएको छ", box: box(0.15, 0.86, 0.30, 0.88))
+    func testPanelsStayClearOfTheOverlaysChrome() {
+        // A small sign above the bottom strip whose translation cannot be read
+        // in place: the panel is the fallback, and the same growth law that
+        // keeps it off its neighbours' printed text keeps it off the FR-LCT-017
+        // control's strip — the strip is one of the obstacles the placement is
+        // handed.
+        let control = region(0, "प्रवेश निषेध गरिएको छ", box: box(0.15, 0.70, 0.30, 0.74))
         let surface = makeSurface(regions: [control],
                                   results: [control.id: .resolved(
                                     originalText: control.text,
@@ -639,7 +645,7 @@ final class LiveTranslateOverlayViewTests: XCTestCase {
         }
         // The strip is reserved for *every* row the chrome draws, not just the
         // one this test cares about: the OCR-first rework (owner verdict,
-        // 2026-09-18) put the mode toggle above the preference, and a pill
+        // 2026-09-18) put the mode toggle above the preference, and a panel
         // landing on the second control is the same defect as landing on the
         // first. The reservation is read off the surface's own row count so the
         // two cannot drift.
@@ -649,13 +655,15 @@ final class LiveTranslateOverlayViewTests: XCTestCase {
                            + (rows + 1) * DesignTokens.interElementSpacing)
         XCTAssertEqual(strip.maxY, container.height)
         guard let presentation = surface.presentations.first,
-              case .callout(_, let anchor, let pillRect) = presentation.form else {
-            XCTFail("a translation that cannot be read in its box is a callout")
+              case .scrollablePanel(_, let panelRect) = presentation.form else {
+            XCTFail("a translation that cannot be read in its box is the fallback panel, not a "
+                    + "box floating beside it")
             return
         }
-        XCTAssertFalse(pillRect.intersects(strip),
-                       "the FR-LCT-017 control must stay reachable, never covered by a pill")
-        XCTAssertTrue(screenRect(of: control).insetBy(dx: -0.5, dy: -0.5).contains(anchor))
+        XCTAssertFalse(panelRect.intersects(strip),
+                       "the FR-LCT-017 control must stay reachable, never covered by a panel")
+        XCTAssertTrue(panelRect.insetBy(dx: -1e-9, dy: -1e-9).contains(screenRect(of: control)),
+                      "…and the panel still stands on the text it replaces")
     }
 
     func testADegenerateContainerReservesNoChrome() {

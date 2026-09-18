@@ -1084,8 +1084,16 @@ final class LiveCameraZoomModelTests: XCTestCase {
         XCTAssertTrue(view.contains("recognizer.minimumNumberOfTouches = 1"))
         XCTAssertTrue(view.contains("recognizer.maximumNumberOfTouches = 1"),
                       "two fingers are the pinch's: a drag that also ran would fight it for the same gesture")
-        XCTAssertTrue(view.contains("panRecognizer?.isEnabled = !presentation.crop.isWhole"),
+        XCTAssertTrue(view.contains("panRecognizer?.isEnabled = isWindowed"),
                       "the drag exists exactly while a window does — the whole frame has nothing to move")
+        // …and `isWindowed` is the **elder's** window, not the drawing's: since
+        // the frame's stabilization is composed into the presentation's crop
+        // (owner device verdict, 2026-09-18: "STABILISE THE IMAGE FIRST"), that
+        // crop is never whole while a margin is held, so a drag gated on it
+        // would be live at the at-rest zoom — moving a window the elder never
+        // asked for. The gesture's own window stays the zoom model's.
+        XCTAssertTrue(view.contains("isWindowed: !zoom.model.crop.isWhole"),
+                      "the drag's window is the elder's own, and the correction is never part of it")
         XCTAssertTrue(view.contains("presentation.panOffset(ofContainerTranslation: recognizer.translation(in: view))"),
                       "the drag's own translation is converted to the window offset it asks for")
         XCTAssertTrue(view.contains("zoom.pan(to: $0)") && view.contains("zoom.panEnded()"),

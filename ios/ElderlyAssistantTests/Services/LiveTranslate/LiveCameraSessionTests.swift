@@ -33,11 +33,13 @@ final class LiveCameraSessionTests: XCTestCase {
         clock = Clock()
     }
 
-    private func makeSession(config: LiveTranslateConfig = .default) -> LiveCameraSession {
+    private func makeSession(config: LiveTranslateConfig = .default,
+                             registration: FrameRegistration? = nil) -> LiveCameraSession {
         LiveCameraSession(config: config,
                           observabilityBus: bus,
                           capture: layer,
                           notificationCenter: centre,
+                          registration: registration,
                           now: { [clock] in clock?.now ?? 0 })
     }
 
@@ -181,10 +183,15 @@ final class LiveCameraSessionTests: XCTestCase {
         _ = await session.start()
         var frames = session.frames.makeAsyncIterator()
 
+        // Five *different* pictures, one cadence apart, so the frame-change gate
+        // delivers every one of them: an unpainted buffer's contents are
+        // whatever the pool last held, and two of those happening to look alike
+        // would drop a sample at `stableSampleInterval` and leave this test
+        // asserting about a stream with fewer than five frames in it.
         for index in 1...5 {
             clock.advance(by: interval)
-            try layer.deliverFrame(width: 64, height: 48,
-                                   pts: CMTime(value: CMTimeValue(index), timescale: 1))
+            try layer.deliver(paintedFrame(luma: UInt8(index * 40), pts: index,
+                                           width: 64, height: 48))
         }
         // Newest-only: the buffered frame is the last one delivered.
         let awaited4 = await frames.next()
@@ -941,6 +948,114 @@ final class LiveCameraSessionTests: XCTestCase {
 
         XCTAssertTrue(layer.focusRequests.isEmpty,
                       "a device with no focus point of interest is not sent one")
+    }
+
+    // MARK: The picture's own stabilization on the session (C11)
+
+    /// A registration that answers what a test says the picture did: the same
+    /// seam `FrameAnchorEstimatorTests` drives directly, here so that the whole
+    /// session — the cadence gate, the frame the consumer is handed, the zoom
+    /// reset — can be exercised with an exact motion and no camera.
+    private final class ScriptedFrameRegistration: FrameRegistration {
+        private var motions: [FrameMotionMap?]
+        private(set) var calls = 0
+
+        init(_ motions: [FrameMotionMap?]) { self.motions = motions }
+
+        func motion(from anchor: CVPixelBuffer, to current: CVPixelBuffer) -> FrameMotionMap? {
+            defer { calls += 1 }
+            return motions.isEmpty ? nil : motions.removeFirst()
+        }
+    }
+
+    func testAnAcceptedFrameCarriesTheCorrectionAndTheWindowTheRecognitionReads() async throws {
+        let registration = ScriptedFrameRegistration([FrameMotionMap.translation(CGPoint(x: 0.02, y: 0))])
+        let session = makeSession(registration: registration)
+        _ = await session.start()
+        var frames = session.frames.makeAsyncIterator()
+
+        try layer.deliver(paintedFrame(luma: 0, pts: 1))
+        let anchoredFrame = await frames.next()
+        let anchored = try XCTUnwrap(anchoredFrame)
+
+        XCTAssertEqual(anchored.stabilization.offset, .zero,
+                       "the first accepted frame is the anchor: there is nothing to correct against yet")
+        XCTAssertEqual(anchored.stabilization.margin, LiveTranslateConfig.default.frameStabMargin,
+                       "…and it is already inset: that inset is the room the correction is held in")
+        XCTAssertEqual(anchored.crop, .whole,
+                       "what the recognition pass is handed is the elder's own window, never the stabilized one")
+        XCTAssertEqual(registration.calls, 0, "the anchor costs no registration")
+
+        clock.advance(by: interval)
+        try layer.deliver(paintedFrame(luma: 90, pts: 2))
+        let heldFrame = await frames.next()
+        let held = try XCTUnwrap(heldFrame)
+
+        XCTAssertEqual(held.stabilization.offset.x, 0.008, accuracy: 1e-9,
+                       "0.4 of a 2 % move, past the 1 % dead zone: the window took the tremor")
+        XCTAssertEqual(held.stabilization.margin, anchored.stabilization.margin,
+                       "the inset is a property of the feature being on, not of the correction")
+        XCTAssertEqual(held.crop, .whole,
+                       "and the pass still reads the raw frame: what is stabilized is what the elder looks at")
+        XCTAssertEqual(registration.calls, 1, "one measurement, at the cadence the pass runs at")
+    }
+
+    func testWithThePictureStabilizerOffTheFrameIsExactlyWhatTheCameraSaw() async throws {
+        var config = LiveTranslateConfig.default
+        config.frameStabEnabled = false
+        let registration = ScriptedFrameRegistration([FrameMotionMap.translation(CGPoint(x: 0.02, y: 0))])
+        let session = makeSession(config: config, registration: registration)
+        _ = await session.start()
+        var frames = session.frames.makeAsyncIterator()
+
+        try layer.deliver(paintedFrame(luma: 0, pts: 1))
+        _ = await frames.next()
+        clock.advance(by: interval)
+        try layer.deliver(paintedFrame(luma: 90, pts: 2))
+        let awaited = await frames.next()
+        let frame = try XCTUnwrap(awaited)
+
+        XCTAssertEqual(frame.stabilization, .none,
+                       "off is the feature's own off: the display draws the elder's window and nothing else")
+        XCTAssertEqual(frame.crop, .whole)
+        XCTAssertEqual(registration.calls, 0, "and no registration is asked for")
+    }
+
+    func testAZoomPressDropsTheCorrectionAndTakesAFreshAnchor() async throws {
+        // A zoom is a crop of the sensor: every pixel the frame carries has
+        // moved and changed size, so a correction measured against the old
+        // anchor is measuring a different picture. It goes at the gesture, not
+        // after the next stale measurement.
+        let registration = ScriptedFrameRegistration([
+            FrameMotionMap.translation(CGPoint(x: 0.02, y: 0)),
+            FrameMotionMap.translation(CGPoint(x: 0.02, y: 0)),
+        ])
+        let session = makeSession(registration: registration)
+        _ = await session.start()
+        var frames = session.frames.makeAsyncIterator()
+
+        try layer.deliver(paintedFrame(luma: 0, pts: 1))
+        _ = await frames.next()
+        clock.advance(by: interval)
+        try layer.deliver(paintedFrame(luma: 90, pts: 2))
+        let heldFrame = await frames.next()
+        let held = try XCTUnwrap(heldFrame)
+        XCTAssertEqual(held.stabilization.offset.x, 0.008, accuracy: 1e-9,
+                       "the premise: there is a correction, and the zoom has to drop it")
+
+        session.zoomSurface.zoom(.closer)
+
+        clock.advance(by: interval)
+        try layer.deliver(paintedFrame(luma: 180, pts: 3))
+        let reAnchoredFrame = await frames.next()
+        let reAnchored = try XCTUnwrap(reAnchoredFrame)
+
+        XCTAssertEqual(reAnchored.stabilization.offset, .zero,
+                       "the correction goes with the picture it was measured against")
+        XCTAssertEqual(reAnchored.stabilization.margin, LiveTranslateConfig.default.frameStabMargin,
+                       "the inset stays: the window is inset, just not moved")
+        XCTAssertEqual(registration.calls, 1,
+                       "the first frame after a zoom is a new anchor, not a measurement against the old one")
     }
 
     // MARK: Helpers

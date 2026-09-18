@@ -3,14 +3,18 @@ import XCTest
 @testable import ElderlyAssistant
 
 /// T-020 — the overlay placement: replace-in-place as the default render, the
-/// three-condition ineligibility predicate, the anchored callout and its
-/// never-cover rule, the no-two-boxes-stack property, determinism and bounded
-/// cost (FR-LCT-015, FR-LCT-016, NFR-LCT-002, CL-3, D1).
+/// three-condition ineligibility predicate, the panel that takes over when the
+/// in-place box cannot hold the text, the no-two-boxes-stack property,
+/// determinism and bounded cost (FR-LCT-015, FR-LCT-016, NFR-LCT-002, CL-3, D1).
 ///
 /// Reworked 2026-09-17 for the owner's live-device feedback — "the bubbles are
-/// everywhere and shaky and get stacked and clustered depending on text" — so
-/// the claims below are the rework's: a resolved translation is drawn where the
-/// text stood, a callout is the rare exception, and two boxes never stack. The
+/// everywhere and shaky and get stacked and clustered depending on text" — and
+/// again on 2026-09-18 for the verdict that outlived that rework: "there are
+/// still some white-on-blue text boxes floating around". The claims below are
+/// the final rework's: a translation stands where the text stood, a region the
+/// box cannot hold becomes the panel on that same rect, and **no input to this
+/// function is drawn as a callout at all** — every call site in this file
+/// asserts the form's *absence*, and one test asserts it on the type. The
 /// function is pure, so every claim is made against scripted rect sets and
 /// value inputs — no view, no camera, no tier, no clock.
 final class LiveOverlayPlacementTests: XCTestCase {
@@ -83,9 +87,27 @@ final class LiveOverlayPlacementTests: XCTestCase {
                                             policy: policy ?? surfacePolicy(), measure: measure)
     }
 
-    private func calloutRect(_ placement: LiveOverlayPlacement.PlacedOverlay) -> CGRect? {
-        guard case .callout(_, _, let pillRect) = placement.form else { return nil }
-        return pillRect
+    /// **The form that must not come out of `place`.** Every test that used to
+    /// inspect a pill now asserts its absence and reads the surface that took
+    /// its place, because the owner's device verdict on the build that had the
+    /// pill is this file's hardest constraint: "there are still some
+    /// white-on-blue text boxes floating around".
+    ///
+    /// `Form.callout` and the renderer's callout branch still exist — the
+    /// snapshot card and the view's own tests build one by hand — but the
+    /// *placement* has no rung that reaches it, and this helper is how each of
+    /// these tests says so out loud instead of assuming it.
+    @discardableResult
+    private func assertNoCallout(_ placement: LiveOverlayPlacement.PlacedOverlay,
+                                 _ what: String = "a live placement",
+                                 file: StaticString = #filePath,
+                                 line: UInt = #line) -> Bool {
+        guard case .callout = placement.form else { return true }
+        XCTFail("\(what) came back as a floating callout (\(placement.form)): the live overlay "
+                + "has two surfaces and both are green — the in-place box and the panel "
+                + "(FR-LCT-016, owner device verdict 2026-09-18)",
+                file: file, line: line)
+        return false
     }
 
     private func inPlaceRect(_ placement: LiveOverlayPlacement.PlacedOverlay) -> CGRect? {
@@ -93,7 +115,9 @@ final class LiveOverlayPlacementTests: XCTestCase {
         return rect
     }
 
-    /// The bounded panel's box, when the region is drawn as one.
+    /// The panel's box, when the region is drawn as one: the fallback form the
+    /// live overlay has — the panel's own box when the region has the room for
+    /// it, the capped and scrolled box when it does not. Both are this one form.
     private func scrollableRect(_ placement: LiveOverlayPlacement.PlacedOverlay) -> CGRect? {
         guard case .scrollablePanel(_, let rect) = placement.form else { return nil }
         return rect
@@ -141,8 +165,8 @@ final class LiveOverlayPlacementTests: XCTestCase {
             XCTAssertEqual(placements.count, 1)
             XCTAssertNotNil(inPlaceRect(placements[0]),
                             "a resolved \(result.sourceTier!) translation stands where the text stood")
-            XCTAssertNil(calloutRect(placements[0]),
-                         "nothing floats over the picture for a translation that can be read in place")
+            assertNoCallout(placements[0],
+                            "a translation that can be read in place")
             XCTAssertFalse(placements[0].isClampedFallback)
         }
     }
@@ -198,6 +222,84 @@ final class LiveOverlayPlacementTests: XCTestCase {
         XCTAssertNotNil(inPlaceRect(place([sign], results: [sign.id: result])[0]))
     }
 
+    // MARK: The form that cannot be reached
+
+    /// **The type-level law.** Not one input to `place` produces `Form.callout`:
+    /// not the sign whose translation fits, not the translation that cannot be
+    /// read in place, not a pending or a degraded region, not the
+    /// always-show-original preference, not extract mode, not a block of twenty
+    /// lines, not a region that is the whole screen, not a frame where every
+    /// region is one of those.
+    ///
+    /// This is asserted across the input space rather than at the cases somebody
+    /// remembered, because the way the pill came back the first time was a
+    /// branch nobody was looking at — a fit failure falling through to it. The
+    /// form stays in `Form` for the renderer (the snapshot card and the view's
+    /// own tests build one by hand), but the placement has no rung that reaches
+    /// it, and this is the test that says so.
+    func testNoInputToThePlacementProducesACallout() {
+        let sign = region(0, text: "Pharmacy", box: (0.1, 0.4, 0.9, 0.6))
+        let small = region(1, text: "गेट", box: (0.1, 0.4, 0.2, 0.42))
+        let block = blockRegion(2, lines: ["START", "2 MIN"], box: (0.10, 0.30, 0.70, 0.60))
+        let tallBlock = blockRegion(3, lines: (1...12).map { "लाइन \($0)" },
+                                    box: (0.42, 0.44, 0.50, 0.50))
+        let wholeScreen = region(4, text: "Pharmacy", box: (0.0, 0.0, 1.0, 1.0))
+        let long = "Please open the gate by the side of the house before the evening"
+        let degraded = { (region: TextRegionStabilizer.StableTextRegion) -> TranslationResult in
+            .degraded(originalText: region.text, reason: .noNetwork)
+        }
+        let extract = LiveTranslateOverlaySurface.policy(config: .default,
+                                                        alwaysShowOriginal: false,
+                                                        extractionMode: true)
+
+        let scenes: [(String, [LiveOverlayPlacement.PlacedOverlay])] = [
+            ("a translation that fits in place",
+             place([sign], results: [sign.id: translated(sign, "खोल्नुहोस्")])),
+            ("a translation too long for its own box",
+             place([small], results: [small.id: translated(small, long)])),
+            ("a cloud translation",
+             place([sign], results: [sign.id: translated(sign, "खोल्नुहोस्", tier: .cloud)])),
+            ("a region no tier has answered for", place([sign], results: [:])),
+            ("a pending region", place([sign], results: [sign.id: .pending(sign.text)])),
+            ("a pending region with a state sentence",
+             place([sign], results: [sign.id: .pending(sign.text)],
+                   stateCopy: { _ in "पर्खंदै" })),
+            ("a degraded region", place([sign], results: [sign.id: degraded(sign)])),
+            ("a degraded region with a state sentence",
+             place([sign], results: [sign.id: degraded(sign)],
+                   stateCopy: { _ in "अनुवाद उपलब्ध छैन" })),
+            ("the always-show-original preference",
+             place([sign], results: [sign.id: translated(sign, "खोल्नुहोस्")],
+                   policy: surfacePolicy(alwaysShowOriginal: true))),
+            ("extract mode, untranslated", place([sign], results: [:], policy: extract)),
+            ("extract mode, tapped and answered",
+             place([sign], results: [sign.id: translated(sign, "खोल्नुहोस्")], policy: extract)),
+            ("a block that fits its own box",
+             place([block], results: [block.id: translated(block, "सुरु\n२ मिनेट")])),
+            ("a block that cannot stand as a panel",
+             place([tallBlock], results: [tallBlock.id: translated(
+                 tallBlock, (1...12).map { "लाइन \($0)" }.joined(separator: "\n"))])),
+            ("a block no tier has answered for", place([tallBlock], results: [:])),
+            ("a region that is the whole safe area",
+             place([wholeScreen], results: [wholeScreen.id: degraded(wholeScreen)])),
+            ("a container whose safe area is empty",
+             place([sign], results: [sign.id: degraded(sign)], safeArea: .zero)),
+            ("a scene where every region needs the fallback",
+             place([sign, small, block, tallBlock, wholeScreen],
+                   results: [sign.id: degraded(sign), small.id: degraded(small),
+                             block.id: degraded(block), tallBlock.id: degraded(tallBlock),
+                             wholeScreen.id: degraded(wholeScreen)])),
+            ("a scene where nothing has an answer", place([sign, small, block], results: [:]))
+        ]
+
+        for (name, placements) in scenes {
+            XCTAssertFalse(placements.isEmpty, "\(name): a scene must place something")
+            for placement in placements {
+                assertNoCallout(placement, "\(name)")
+            }
+        }
+    }
+
     // MARK: Scenario: the three conditions, named for their violation
 
     func testTheConditionListIsTheClosedSetTheDesignNames() {
@@ -216,7 +318,11 @@ final class LiveOverlayPlacementTests: XCTestCase {
                        .ineligible(.noTranslationToDraw),
                        "drawing the recognized text where it already stands would cover the "
                        + "original with itself and claim the region was translated (FR-LCT-018)")
-        XCTAssertNotNil(calloutRect(place([region], results: [region.id: result])[0]))
+        let placement = place([region], results: [region.id: result])[0]
+        assertNoCallout(placement, "a pending region")
+        XCTAssertNotNil(scrollableRect(placement),
+                        "it is the panel on its own rect — the surface that stands where the "
+                        + "text stood rather than a bubble appearing beside it")
     }
 
     func testADegradedRegionHasNoTranslationToDraw() {
@@ -234,11 +340,17 @@ final class LiveOverlayPlacementTests: XCTestCase {
         let placement = place([region], results: [:])[0]
 
         XCTAssertEqual(placement.result.outcome, .pending(originalText: "Pharmacy"))
-        XCTAssertNotNil(calloutRect(placement))
+        assertNoCallout(placement, "a region whose tier has not answered")
+        XCTAssertNotNil(scrollableRect(placement),
+                        "the region is drawn on its own rect, not beside it")
         XCTAssertEqual(placement.lines.map(\.text), ["Pharmacy"])
     }
 
-    func testATranslationThatCannotBeReadInPlaceFallsBackToACallout() {
+    /// The second rung, and the one the callout used to hold: a translation too
+    /// long to stand at the body floor in this sign's own box is drawn as the
+    /// **panel**, on the sign's own rect — never shrunk into illegibility and
+    /// never floated beside the text.
+    func testATranslationThatCannotBeReadInPlaceFallsBackToThePanel() {
         let (sign, _) = resolvedScene()
         let small = region(1, text: "गेट", box: (0.1, 0.4, 0.2, 0.42))
         let verbose = translated(
@@ -248,24 +360,33 @@ final class LiveOverlayPlacementTests: XCTestCase {
         XCTAssertEqual(outcome(rect(of: small), result: verbose).condition,
                        .translationDoesNotFitRegion,
                        "type too small to read is the honest failure, not a translation nobody can read")
-        XCTAssertNotNil(calloutRect(place([small], results: [small.id: verbose])[0]))
+        let placement = place([small], results: [small.id: verbose])[0]
+        assertNoCallout(placement, "a translation that does not fit its own box")
+        XCTAssertNotNil(scrollableRect(placement),
+                        "the too-long translation is drawn as the panel, in full")
+        XCTAssertEqual(placement.lines.map(\.text), [verbose.text, small.text],
+                       "both lines the surface carries: the translation, and the original it "
+                       + "stands on top of")
         XCTAssertGreaterThan(rect(of: sign).width, 0)
     }
 
-    func testTurningTheToggleOnAloneProducesACallout() {
+    func testTurningTheToggleOnAloneProducesThePanel() {
         let (region, result) = resolvedScene()
         let on = surfacePolicy(alwaysShowOriginal: true)
 
         XCTAssertEqual(outcome(rect(of: region), result: result, policy: on),
                        .ineligible(.alwaysShowOriginalIsOn),
                        "the FR-LCT-017 preference wants the original beside the translation, "
-                       + "which is a callout by definition (T-022)")
-        XCTAssertNotNil(calloutRect(place([region], results: [region.id: result], policy: on)[0]))
+                       + "which the in-place box cannot draw (T-022)")
+        let placement = place([region], results: [region.id: result], policy: on)[0]
+        assertNoCallout(placement, "the always-show-original preference")
+        XCTAssertNotNil(scrollableRect(placement),
+                        "the preference is honoured on the panel, which carries both texts")
     }
 
-    /// The conditions are tested in a fixed order, so *why* a region became a
-    /// callout is a fact rather than an inference: here the fit would fail too,
-    /// and the preference is still the reason reported.
+    /// The conditions are tested in a fixed order, so *why* a region left the
+    /// in-place form is a fact rather than an inference: here the fit would fail
+    /// too, and the preference is still the reason reported.
     func testTheFirstViolationInOrderIsTheOneReported() {
         let (region, _) = resolvedScene()
         let on = surfacePolicy(alwaysShowOriginal: true)
@@ -657,8 +778,9 @@ final class LiveOverlayPlacementTests: XCTestCase {
         XCTAssertEqual(placements.count, regions.count, "no region may vanish")
         for placement in placements {
             XCTAssertNotNil(inPlaceRect(placement),
-                            "\(placement.region.id) fell back to a callout although its translation fits: "
-                            + "callouts are the last resort, not the dense-scene render (owner UX rework)")
+                            "\(placement.region.id) fell back to a panel although its translation fits "
+                            + "in place: the panel is the last resort, not the dense-scene render "
+                            + "(owner UX rework)")
         }
 
         let boxes = placements.compactMap(inPlaceRect)
@@ -716,16 +838,17 @@ final class LiveOverlayPlacementTests: XCTestCase {
         }
     }
 
-    // MARK: Scenario: a callout never covers its own region's text
+    // MARK: Scenario: a panel stands on the text it replaces
 
     /// A frame of unfittable signs **at the density the app can actually
     /// publish**: the stabiliser caps one frame at `declutterMaxRegions`, so
-    /// these are the most callouts a frame can carry. Every one of them obeys
-    /// the never-cover rule absolutely — no pill touches the printed text of
-    /// the region it belongs to — and, at this density, no two pills touch
-    /// either: the owner's "stacked and clustered" complaint answered for the
-    /// fallback form, not only for the boxes.
-    func testCalloutsAtTheAppsOwnDensityNeverCoverTheirRegionOrEachOther() {
+    /// these are the most fallback surfaces a frame can carry. Every one of them
+    /// is a panel standing on its own region's rect — which, unlike the pill it
+    /// replaces, *does* cover that region's printed text: that is the point of
+    /// the form, "overlay text on top of the original text" — and, at this
+    /// density, no two panels stack: the owner's "stacked and clustered"
+    /// complaint answered for the fallback form, not only for the boxes.
+    func testPanelsAtTheAppsOwnDensityStandOnTheirOwnTextAndNeverStack() {
         let cap = LiveTranslateConfig.default.declutterMaxRegions
         var regions: [TextRegionStabilizer.StableTextRegion] = []
         var results: [TextRegionStabilizer.RegionIdentity: TranslationResult] = [:]
@@ -743,37 +866,36 @@ final class LiveOverlayPlacementTests: XCTestCase {
         let placements = place(regions, results: results)
         XCTAssertEqual(placements.count, regions.count, "no region may vanish")
 
-        var pills: [CGRect] = []
+        var panels: [CGRect] = []
         for placement in placements {
-            guard let pillRect = calloutRect(placement) else {
-                XCTFail("a degraded region is always a callout")
+            assertNoCallout(placement, "a degraded region at the published density")
+            guard let panelRect = scrollableRect(placement) else {
+                XCTFail("a degraded region is the panel on its own rect, never a bubble "
+                        + "beside it: \(placement.form)")
                 continue
             }
-            pills.append(pillRect)
+            panels.append(panelRect)
             let own = rect(of: placement.region)
-            XCTAssertFalse(pillRect.intersects(own),
-                           "the callout for \(placement.region.id) covers its own region's printed text")
-            // The anchor is the region rect's closest point to the pill, so it
-            // is on the rect's edge when the pill sits squarely beside it —
-            // hence the hairline inset rather than `contains`' half-open test.
-            XCTAssertTrue(own.insetBy(dx: -0.001, dy: -0.001).contains(anchor(of: placement) ?? .zero),
-                          "the leader line must land on the region it belongs to")
-            XCTAssertTrue(bounds.insetBy(dx: -0.001, dy: -0.001).contains(pillRect),
-                          "and the pill stays inside the safe area")
+            XCTAssertTrue(panelRect.insetBy(dx: -1e-9, dy: -1e-9).contains(own),
+                          "the panel for \(placement.region.id) stands on its own region's "
+                          + "printed text")
+            XCTAssertTrue(bounds.insetBy(dx: -0.001, dy: -0.001).contains(panelRect),
+                          "and it stays inside the safe area")
         }
-        assertNoStacking(pills, "callout pill")
+        XCTAssertEqual(panels.count, regions.count)
+        assertNoStacking(panels, "panel")
     }
 
     /// The same scripted set, deliberately past what a frame can carry
-    /// (twenty-five simultaneous callouts is five times the stabiliser's cap).
-    /// The *hard* constraint is still absolute — a pill never covers the text
-    /// it is about, whoever else it has to cover to avoid it — while the
-    /// preferences degrade honestly: each pill is still the least-covered
-    /// candidate, in bounds, with its leader on its own region. Two pills may
-    /// overlap here, and that is the recorded shape of an over-constrained
-    /// frame rather than a claim that it cannot happen: the cap is what keeps
-    /// the app out of this regime.
-    func testAnOverConstrainedFrameStillNeverCoversItsOwnRegion() {
+    /// (twenty-five simultaneous fallbacks is nearly three times the
+    /// stabiliser's cap). The *totality* claim still holds absolutely — every
+    /// region is placed, every placement is a panel, and every panel has a box
+    /// on the screen that stands on the text it belongs to. What an
+    /// over-constrained frame can lose is the no-stacking property, which is
+    /// why the cap is what keeps the app out of this regime; the pill's old
+    /// hard constraint is not recoverable here at all, because both of the
+    /// surfaces this stage has are drawn *on* the text by design.
+    func testAnOverConstrainedFrameStillPlacesEveryRegionAsAPanelOnItsOwnText() {
         var regions: [TextRegionStabilizer.StableTextRegion] = []
         var results: [TextRegionStabilizer.RegionIdentity: TranslationResult] = [:]
         for row in 0..<5 {
@@ -791,77 +913,39 @@ final class LiveOverlayPlacementTests: XCTestCase {
         let placements = place(regions, results: results)
         XCTAssertEqual(placements.count, regions.count, "no region may vanish")
 
-        var pills: [CGRect] = []
+        var panels: [CGRect] = []
         for placement in placements {
-            guard let pillRect = calloutRect(placement) else {
-                XCTFail("a degraded region is always a callout")
+            assertNoCallout(placement, "a degraded region in an over-constrained frame")
+            guard let panelRect = scrollableRect(placement) else {
+                XCTFail("every region here has a rect, so every region gets a panel: "
+                        + "\(placement.form)")
                 continue
             }
-            pills.append(pillRect)
-            XCTAssertFalse(pillRect.intersects(rect(of: placement.region)),
-                           "the hard constraint holds even here: the callout for "
-                           + "\(placement.region.id) covers its own region's printed text")
-            XCTAssertTrue(bounds.insetBy(dx: -0.001, dy: -0.001).contains(pillRect),
-                          "and it is still inside the screen")
+            panels.append(panelRect)
+            XCTAssertTrue(bounds.insetBy(dx: -0.001, dy: -0.001).contains(panelRect),
+                          "the panel for \(placement.region.id) is still inside the screen")
+            XCTAssertTrue(panelRect.insetBy(dx: -1e-9, dy: -1e-9).contains(rect(of: placement.region)),
+                          "…and still stands on its own region's printed text")
         }
-        XCTAssertEqual(pills.count, regions.count)
+        XCTAssertEqual(panels.count, regions.count)
     }
 
-    func testTheAnchorOrderIsTheDesignsDeterministicOrder() {
-        XCTAssertEqual(LiveOverlayPlacement.Anchor.allCases, [.above, .below, .right, .left],
-                       "the candidates are tried above, below, right, left — in that order (FR-LCT-016)")
-    }
+    // MARK: Scenario: a panel shows both texts
 
-    /// The preference below the hard constraint: among the anchors that do not
-    /// cover the region's own text, the one that covers the fewest others
-    /// wins. Here `above` is blocked by a second region and `below` is clear,
-    /// so the run must not take the first candidate that merely passes.
-    func testThePreferredAnchorIsTheOneOverlappingTheFewestOtherRegions() {
-        let target = region(0, text: "Pharmacy", box: (0.35, 0.45, 0.65, 0.55))
-        // Directly above the target, overlapping the whole band an `above`
-        // pill would occupy.
-        let blocker = region(1, text: "Closed", box: (0.30, 0.30, 0.70, 0.42))
-        let results: [TextRegionStabilizer.RegionIdentity: TranslationResult] = [
-            target.id: .degraded(originalText: target.text, reason: .noNetwork),
-            blocker.id: .degraded(originalText: blocker.text, reason: .noNetwork)
-        ]
-
-        let placements = place([target, blocker], results: results)
-        let placedTarget = placements.first { $0.region.id == target.id }
-        guard let pillRect = placedTarget.flatMap(calloutRect) else {
-            XCTFail("the target region got no callout")
-            return
-        }
-
-        XCTAssertGreaterThanOrEqual(pillRect.minY, rect(of: target).maxY,
-                                    "the pill was placed below the region rather than over its neighbour")
-    }
-
-    func testAFullySymmetricRegionTakesTheFirstAnchorInOrder() {
-        let symmetric = region(0, text: "Open", box: (0.4, 0.45, 0.6, 0.55))
-        let placements = place([symmetric],
-                               results: [symmetric.id: .degraded(originalText: symmetric.text,
-                                                                 reason: .noNetwork)])
-
-        XCTAssertEqual(anchor(of: placements[0])?.y, rect(of: symmetric).minY,
-                       "with every candidate equally good the earliest anchor holds — the same input twice "
-                       + "must never pick two different anchors")
-    }
-
-    // MARK: Scenario: a callout shows both texts
-
-    func testAResolvedCalloutShowsTheTranslationAndTheOriginal() {
+    /// The fallback surface's two lines, at the sizes the elder reads them at.
+    func testAResolvedPanelShowsTheTranslationAndTheOriginal() {
         // A sign far too small for its translation at any allowed size: the two
-        // lines are what the callout exists for.
+        // lines are what the panel exists for.
         let region = region(0, text: "यो सानो चिन्ह हो", box: (0.05, 0.4, 0.15, 0.42))
         let result = translated(region, "This is a small sign with a long translation", tier: .cloud)
         let policy = surfacePolicy()
         let placements = place([region], results: [region.id: result])
 
-        XCTAssertNotNil(calloutRect(placements[0]))
+        assertNoCallout(placements[0], "a translation too long for its own box")
+        XCTAssertNotNil(scrollableRect(placements[0]))
         XCTAssertEqual(placements[0].lines.map(\.text),
                        ["This is a small sign with a long translation", "यो सानो चिन्ह हो"],
-                       "a callout shows the translation and the original — both (T-020)")
+                       "a panel shows the translation and the original — both (T-020)")
         XCTAssertEqual(placements[0].lines[0].weight, .primary)
         XCTAssertEqual(placements[0].lines[0].pointSize, policy.minPointSize)
         XCTAssertEqual(placements[0].lines[1].weight, .secondary)
@@ -870,10 +954,10 @@ final class LiveOverlayPlacementTests: XCTestCase {
                                  "the supporting line is the smaller one")
         XCTAssertGreaterThanOrEqual(placements[0].lines[0].pointSize,
                                     LiveTranslateConfig.default.overlayMinPointSize,
-                                    "Nepali primary text is elder-readable in a callout (FR-LCT-015)")
+                                    "Nepali primary text is elder-readable on a panel (FR-LCT-015)")
     }
 
-    func testAnUnresolvedCalloutShowsTheRecognizedTextAndTheHonestStateLine() {
+    func testAnUnresolvedPanelShowsTheRecognizedTextAndTheHonestStateLine() {
         let region = region(0, text: "Pharmacy", box: (0.05, 0.4, 0.95, 0.5))
         let result = TranslationResult.degraded(originalText: region.text, reason: .noNetwork)
         let stateCopy = { (result: TranslationResult) -> String? in
@@ -882,60 +966,72 @@ final class LiveOverlayPlacementTests: XCTestCase {
 
         let placements = place([region], results: [region.id: result], stateCopy: stateCopy)
 
+        assertNoCallout(placements[0], "a degraded region")
         XCTAssertEqual(placements[0].lines.map(\.text), ["Pharmacy", "अनुवाद उपलब्ध छैन"],
                        "the elder sees what was recognized next to what is true about it — never a "
                        + "translated-looking string (FR-LCT-018)")
         XCTAssertEqual(placements[0].lines.first?.weight, .primary)
     }
 
-    func testTheLeaderLineTargetsTheClosestPointOnTheRegion() {
-        let region = region(0, text: "Pharmacy", box: (0.4, 0.45, 0.6, 0.55))
-        let placements = place([region],
-                               results: [region.id: .degraded(originalText: region.text,
-                                                             reason: .noNetwork)])
-        let own = rect(of: region)
-        let pillRect = calloutRect(placements[0])!
-        let anchor = anchor(of: placements[0])!
+    // MARK: Scenario: the fallback always has a box
 
-        XCTAssertEqual(anchor.x, min(max(pillRect.midX, own.minX), own.maxX), accuracy: 1e-9)
-        XCTAssertEqual(anchor.y, min(max(pillRect.midY, own.minY), own.maxY), accuracy: 1e-9)
-    }
-
-    // MARK: Scenario: the full-screen corner case is recorded, not silently accepted
-
-    func testARoomySceneIsAnchoredAndNotFlagged() {
+    /// A region that fills the safe area is the case the old callout recorded
+    /// as a clamped corner case (`isClampedFallback`). The panel needs no such
+    /// flag: its box *is* the region's own grown box, which this frame has, so
+    /// the placement is an ordinary one and nothing is flagged.
+    func testARoomySceneIsDrawnAsAnOrdinaryPanelAndNotFlagged() {
         let region = region(0, text: "Pharmacy", box: (0.0, 0.25, 1.0, 1.0))
+
         let placements = place([region],
                                results: [region.id: .degraded(originalText: region.text,
                                                              reason: .noNetwork)])
+        let placement = placements[0]
 
-        XCTAssertFalse(placements[0].isClampedFallback,
-                       "a roomy side is an ordinary anchor, not the last resort")
-        let pillRect = calloutRect(placements[0])!
-        XCTAssertFalse(pillRect.intersects(rect(of: region)))
-        XCTAssertGreaterThan(pillRect.minY, 0)
+        assertNoCallout(placement, "a region with room around it")
+        XCTAssertFalse(placement.isClampedFallback,
+                       "the flag is never set: `place` has no clamped fallback any more (OD5)")
+        guard let panelRect = scrollableRect(placement) else {
+            return XCTFail("the fallback is the panel: \(placement.form)")
+        }
+        let own = rect(of: region)
+        XCTAssertTrue(bounds.insetBy(dx: -1e-9, dy: -1e-9).contains(panelRect),
+                      "the panel is inside the screen")
+        // This region is taller than the panel cap, so the panel is the capped
+        // band across the middle of the text it stands on: the whole width it
+        // has, centred on the region, and the cap reached rather than undershot
+        // (the elder's share of the container, spent on the line they are
+        // already looking at).
+        XCTAssertEqual(panelRect.midY, own.midY, accuracy: 1e-9,
+                       "it stands over the middle of the text it replaces")
+        XCTAssertEqual(panelRect.width, bounds.width, accuracy: 1e-9,
+                       "…at the width the region has to give")
+        XCTAssertEqual(panelRect.height, container.height * 0.45, accuracy: 1e-9,
+                       "…and at the configured share of the container")
     }
 
-    /// No candidate can satisfy the never-cover rule here: the region *is* the
-    /// safe area, so every clamped pill still lands on it. The placement must
-    /// still produce a pill inside the safe area, on the side with the most
-    /// free space, and it must *say* that this is the corner case — that flag
-    /// is what T-030's manual device validation targets.
-    func testWhenNoAnchorCanSatisfyTheHardConstraintThePillIsClampedAndRecorded() {
+    /// The region *is* the safe area: its own rect has no room to grow in and
+    /// the panel takes it as it is. The placement still produces a surface the
+    /// elder can read, inside the screen — which is the property the clamped
+    /// pill used to have to be rescued by a flag for.
+    func testAFullScreenRegionStillGetsAPanelInsideTheScreen() {
         let region = region(0, text: "Pharmacy", box: (0.0, 0.0, 1.0, 1.0))
+
         let placements = place([region],
                                results: [region.id: .degraded(originalText: region.text,
                                                              reason: .noNetwork)])
-        let pillRect = calloutRect(placements[0])!
+        let placement = placements[0]
 
-        XCTAssertTrue(placements[0].isClampedFallback,
-                      "the full-screen corner case must be recorded, not absorbed (OD5)")
-        XCTAssertGreaterThanOrEqual(pillRect.minX, bounds.minX)
-        XCTAssertGreaterThanOrEqual(pillRect.minY, bounds.minY)
-        XCTAssertLessThanOrEqual(pillRect.maxX, bounds.maxX)
-        XCTAssertLessThanOrEqual(pillRect.maxY, bounds.maxY)
-        XCTAssertEqual(pillRect.minY, bounds.minY, accuracy: 1e-9,
-                       "the roomiest side here is above the region, so the pill pins to the top edge")
+        assertNoCallout(placement, "a full-screen region")
+        guard let panelRect = scrollableRect(placement) else {
+            return XCTFail("even this region gets a panel — the box is its own rect: "
+                           + "\(placement.form)")
+        }
+        XCTAssertTrue(bounds.insetBy(dx: -1e-9, dy: -1e-9).contains(panelRect),
+                      "the panel is inside the screen even though the region is the whole of it")
+        XCTAssertEqual(panelRect.width, bounds.width, accuracy: 1e-9)
+        XCTAssertEqual(panelRect.midY, rect(of: region).midY, accuracy: 1e-9,
+                       "centred on the text it replaces: the region's own rect is the only "
+                       + "anchor this frame has to give")
     }
 
     // MARK: Scenario: placement is pure, deterministic and bounded
@@ -958,8 +1054,9 @@ final class LiveOverlayPlacementTests: XCTestCase {
 
         XCTAssertEqual(first, second,
                        "the placements are a function of the input set, not of the order it arrived in")
+        for placement in first { assertNoCallout(placement, "a mixed scene") }
         assertNoStacking(first.compactMap(inPlaceRect), "in-place box")
-        assertNoStacking(first.compactMap(calloutRect), "callout pill")
+        assertNoStacking(first.compactMap(scrollableRect), "panel")
     }
 
     func testTheCostPerRegionIsBounded() {
@@ -970,21 +1067,41 @@ final class LiveOverlayPlacementTests: XCTestCase {
             return LiveOverlayTextMetrics.measure(text, pointSize: pointSize,
                                                   weight: weight, width: width)
         }
+        // Forty one-line signs, each with a translation far too long to stand in
+        // its own box: every region takes the full in-place scan and then the
+        // panel.
         let regions = (0..<40).map { index in
             region(index, text: "Sign \(index)",
                    box: (0.05, 0.02 + Double(index) * 0.024, 0.6, 0.035 + Double(index) * 0.024))
         }
+        let results = Dictionary(uniqueKeysWithValues: regions.map {
+            ($0.id, translated($0, "this translation is far too long for a sign this small"))
+        })
 
-        let placements = place(regions, results: [:], measure: measure)
+        let placements = place(regions, results: results, measure: measure)
 
         XCTAssertEqual(placements.count, regions.count)
         // Two in-place candidates at most (the body floor, then the in-place
-        // floor) plus at most two callout lines.
-        XCTAssertLessThanOrEqual(counter.value, 4 * regions.count,
+        // floor) — and nothing at all for the panel rung: the panel's box is a
+        // rect law, not a fit, and its lines are drawn at the one floor the
+        // panel path already fixed. So the cost per region is a constant that
+        // neither the scene nor the string can move (NFR-LCT-002), and it went
+        // *down* when the pill was removed.
+        XCTAssertLessThanOrEqual(counter.value, 2 * regions.count,
                                  "a fixed number of measurements per region — no loop that grows with "
                                  + "the scene (NFR-LCT-002)")
         XCTAssertGreaterThanOrEqual(counter.value, regions.count,
                                     "every region was actually measured; a skip would prove nothing")
+        for placement in placements { assertNoCallout(placement, "an unfittable translation") }
+
+        // The panel rung, on its own: a scene of pending regions draws a surface
+        // for every one of them without asking a single measurement question.
+        counter.value = 0
+        let pending = place(regions, results: [:], measure: measure)
+        XCTAssertEqual(pending.count, regions.count)
+        XCTAssertEqual(counter.value, 0,
+                       "the panel is total without being measured: it has a box for every "
+                       + "region that has a rect, and draws no text it has to size first")
     }
 
     func testThePlacementReadsNoClockPerformsNoIOAndAwaitsNothing() {
@@ -1044,10 +1161,10 @@ final class LiveOverlayPlacementTests: XCTestCase {
             region.id: .degraded(originalText: region.text, reason: .noNetwork)
         ]
         let placements = place([region], results: results, safeArea: .zero)
-        let pillRect = calloutRect(placements[0])!
+        let panelRect = scrollableRect(placements[0])!
 
-        XCTAssertGreaterThanOrEqual(pillRect.minY, 0)
-        XCTAssertLessThanOrEqual(pillRect.maxY, container.height)
+        XCTAssertGreaterThanOrEqual(panelRect.minY, 0)
+        XCTAssertLessThanOrEqual(panelRect.maxY, container.height)
     }
 
     func testTheOutputIsInReadingOrder() {
@@ -1088,7 +1205,7 @@ final class LiveOverlayPlacementTests: XCTestCase {
                        "a block is one surface: no per-line callouts in live mode")
         let panel = placements[0]
         XCTAssertNotNil(inPlaceRect(panel), "a resolved block stands on its own rect")
-        XCTAssertNil(calloutRect(panel), "…and never as a pill beside it")
+        assertNoCallout(panel, "a resolved block")
         XCTAssertEqual(panel.lines.map(\.text), ["सुरु", "२ मिनेट"],
                        "the translated lines in the order they were recognized")
         XCTAssertEqual(panel.lines.map(\.pointSize),
@@ -1176,7 +1293,7 @@ final class LiveOverlayPlacementTests: XCTestCase {
                        .fits(box: box),
                        "the decision's own box is the box that was drawn: the two cannot "
                        + "disagree about where the panel is")
-        XCTAssertNil(calloutRect(panel), "…and not as a pill that shows only its first line")
+        assertNoCallout(panel, "a block too tall for its own box")
         XCTAssertEqual(panel.lines.map(\.text), ["एक", "दुई", "तीन", "चार"],
                        "the block's translated lines, in order — all of them, not the ones that "
                        + "happened to fit the block's own box")
@@ -1330,8 +1447,8 @@ final class LiveOverlayPlacementTests: XCTestCase {
                        "a tier that has not answered must not make a recognized block vanish")
         XCTAssertNotNil(inPlaceRect(placements[0]),
                         "the surface stands where the text stood and fills in, rather than "
-                        + "a pill appearing beside it to be replaced")
-        XCTAssertNil(calloutRect(placements[0]))
+                        + "a box appearing beside it to be replaced")
+        assertNoCallout(placements[0], "a block no tier has answered for")
         XCTAssertEqual(placements[0].lines.map(\.text), ["पर्खंदै"])
     }
 
@@ -1376,10 +1493,4 @@ final class LiveOverlayPlacementTests: XCTestCase {
                       "the grouper's separator is the one deterministic signal of a block")
     }
 
-    // MARK: Helpers
-
-    private func anchor(of placement: LiveOverlayPlacement.PlacedOverlay) -> CGPoint? {
-        guard case .callout(_, let anchor, _) = placement.form else { return nil }
-        return anchor
-    }
 }
