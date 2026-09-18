@@ -16,22 +16,6 @@ import Foundation
 //    proxy for "short dictionary label") is gone: the fit is now decided by
 //    measuring the translation against the box it would be drawn in, which is
 //    what actually matters.
-//  - **A block is one panel, or nothing** (scene-block rework, 2026-09-18;
-//    owner direction: "maximize text regions — bigger but fewer translations —
-//    and use object detection bounding boxes"). A region whose text is several
-//    lines — the grouper's blocks, which is what the detector reports since the
-//    rework — is drawn as **one panel** on the block's own rect, its lines
-//    stacked inside it at the body floor, never as one callout per line. A
-//    block whose translation cannot be drawn at that size gets **no** live
-//    presentation at all: the snapshot card is the reading surface for a dense
-//    scene, and a swarm of small bubbles is exactly what the elder rejected.
-//    A block the tier has not answered for yet is the same panel carrying the
-//    honest state sentence (or, with no state copy to draw, the block's own
-//    recognized lines): the surface appears where the text stood and fills in,
-//    rather than a pill appearing beside it and being replaced by it.
-//    Single-line regions are untouched — in place when the translation fits,
-//    a callout when it does not — so the per-line machinery below is the same
-//    code it always was.
 //  - **A callout is the rare fallback**, not the common case. It exists for
 //    the two honest exceptions: text that cannot be drawn legibly in place at
 //    the in-place floor, and the always-show-original preference, which by
@@ -236,10 +220,9 @@ enum LiveOverlayPlacement {
         let region: TextRegionStabilizer.StableTextRegion
         let result: TranslationResult
         let form: Form
-        /// The lines to draw, in order, exactly as measured: one for a
-        /// single-line in-place form, every line of the block for a panel, one
-        /// or two for a callout. Empty only when a caller constructs a
-        /// placement by hand.
+        /// The lines to draw, in order, exactly as measured: one for the
+        /// in-place form, one or two for a callout. Empty only when a caller
+        /// constructs a placement by hand.
         let lines: [LiveOverlayTextLine]
         /// True when no candidate anchor could satisfy the never-cover
         /// constraint and the pill was clamped instead: the geometric corner
@@ -489,114 +472,6 @@ enum LiveOverlayPlacement {
                       height: regionRect.height + growTop + growBottom)
     }
 
-    // MARK: - Block panels (scene-block rework, 2026-09-18)
-
-    /// Whether a region is a **block**: its text is more than one line.
-    ///
-    /// The grouper joins a block's members with `SceneBlock.lineSeparator`, so
-    /// a separator in a region's text is the one deterministic signal that this
-    /// region is a surface holding several lines rather than one recognized
-    /// line. It is a property of the value, not a flag some caller has to
-    /// remember to set, so a panel and a per-line placement cannot be confused
-    /// at a call site.
-    static func isBlock(_ region: TextRegionStabilizer.StableTextRegion) -> Bool {
-        region.text.contains(SceneBlock.lineSeparator)
-    }
-
-    /// A block's lines, in order, at the one point size a panel is drawn at.
-    ///
-    /// Empty lines are dropped: a blank row is not text the elder reads, and
-    /// drawing it would spend panel height on nothing. The order is the
-    /// translation's own order — it is read top to bottom, the same way the
-    /// block was recognized.
-    static func panelLines(_ text: String, pointSize: CGFloat) -> [LiveOverlayTextLine] {
-        text.components(separatedBy: SceneBlock.lineSeparator)
-            .filter { !LiveTranslateTextNormalization.normalized($0).isEmpty }
-            .map { LiveOverlayTextLine(text: $0, pointSize: pointSize, weight: .primary) }
-    }
-
-    /// The supporting lines a panel draws under its translation when the
-    /// always-show-original preference is on: the block's original lines, in
-    /// the same order, in the secondary weight.
-    static func panelOriginalLines(_ text: String, policy: Policy) -> [LiveOverlayTextLine] {
-        text.components(separatedBy: SceneBlock.lineSeparator)
-            .filter { !LiveTranslateTextNormalization.normalized($0).isEmpty }
-            .map { LiveOverlayTextLine(text: $0,
-                                       pointSize: policy.secondaryPointSize,
-                                       weight: .secondary) }
-    }
-
-    /// The point size a panel is drawn at: the body floor, and nothing else.
-    ///
-    /// The owner's bound is the reason there is no smaller candidate here
-    /// ("translated lines inside at ≥18pt where the block allows"). A panel
-    /// that cannot be drawn at the body floor is not shrunk until it fits —
-    /// that is precisely the illegible small type the rework removes — it is
-    /// left to the snapshot card, which is the reading surface.
-    static func panelPointSize(policy: Policy) -> CGFloat { policy.minPointSize }
-
-    /// The size of a stack of lines: the widest line, the total height, and the
-    /// policy's spacing between them. The one measurement a panel's fit is
-    /// decided on, so the box that is drawn is the box that was measured.
-    ///
-    /// Lines wrap to `maxWidth` — the width of the box they will be drawn in —
-    /// because a tall sign is exactly where wrapping has to be allowed to make
-    /// a translation fit.
-    static func panelTextSize(_ lines: [LiveOverlayTextLine],
-                              lineSpacing: CGFloat,
-                              maxWidth: CGFloat,
-                              measure: Measure) -> CGSize {
-        var width: CGFloat = 0
-        var height: CGFloat = 0
-        for (index, line) in lines.enumerated() {
-            let measured = measure(line.text, line.pointSize, line.weight, maxWidth)
-            width = max(width, measured.width)
-            if index > 0 { height += lineSpacing }
-            height += measured.height
-        }
-        return CGSize(width: width, height: height)
-    }
-
-    /// The panel decision, in the same shape as the in-place one: the box and
-    /// the lines to draw, or the honest "this block gets no live panel".
-    enum PanelOutcome: Equatable {
-        case fits(box: CGRect, lines: [LiveOverlayTextLine])
-        case doesNotFit
-    }
-
-    /// **The** panel decision, for a resolved block.
-    ///
-    /// The box is the region's own rect grown into free space only
-    /// (`inPlaceMaxBox`, so the half-gap law between two blocks holds exactly as
-    /// it does between two lines), and the fit is the stacked block at the body
-    /// floor. Anything that does not fit returns `.doesNotFit` — the caller
-    /// draws nothing for that block rather than a smaller, illegible version of
-    /// it.
-    static func panelOutcome(regionRect: CGRect,
-                             lines: [LiveOverlayTextLine],
-                             obstacles: [CGRect] = [],
-                             bounds: CGRect,
-                             policy: Policy,
-                             measure: Measure = LiveOverlayTextMetrics.measure) -> PanelOutcome {
-        guard !lines.isEmpty, regionRect.width > 0, regionRect.height > 0 else { return .doesNotFit }
-
-        let box = inPlaceMaxBox(regionRect: regionRect,
-                                obstacles: obstacles,
-                                bounds: bounds,
-                                growth: policy.inPlaceMaxGrowth)
-        guard box.width > 0, box.height > 0 else { return .doesNotFit }
-
-        let size = panelTextSize(lines, lineSpacing: policy.lineSpacing,
-                                 maxWidth: box.width, measure: measure)
-        guard size.width <= box.width, size.height <= box.height else { return .doesNotFit }
-
-        return .fits(box: inPlaceTightBox(regionRect: regionRect,
-                                          textSize: size,
-                                          ceiling: box,
-                                          padding: policy.inPlacePadding),
-                     lines: lines)
-    }
-
     // MARK: - Placement
 
     /// Places every region: in place when the translation fits the region's own
@@ -692,42 +567,6 @@ enum LiveOverlayPlacement {
         for region in placementOrder(regions) {
             guard let regionRect = rects[region.id] else { continue }
             let result = results[region.id] ?? .pending(region.text)
-
-            // A **block** is one panel or nothing (scene-block rework): its
-            // lines are stacked inside one box on the block's own rect, and a
-            // block whose text cannot be drawn at the body floor gets no live
-            // presentation at all — the snapshot card is the reading surface,
-            // and per-line callouts are exactly what the elder rejected.
-            //
-            // A block the tier has not answered for yet is drawn the same way,
-            // carrying the honest state sentence instead of a translation: the
-            // surface appears where the text stood and fills in, rather than a
-            // pill appearing beside it and being replaced. With no state copy
-            // to draw (a caller that has none), the block's own recognized
-            // lines stand in — a tier that has not answered must not make a
-            // recognized region vanish (NFR-LCT-010).
-            if Self.isBlock(region) {
-                let resolved = result.sourceTier != nil && !result.text.isEmpty
-                let text = resolved ? result.text : (stateCopy(result) ?? result.originalText)
-                let lines = panelLines(text, pointSize: panelPointSize(policy: policy))
-                    + (resolved && policy.alwaysShowOriginal
-                        ? panelOriginalLines(result.originalText, policy: policy)
-                        : [])
-                if !lines.isEmpty,
-                   case .fits(let box, let panelLines) = panelOutcome(regionRect: regionRect,
-                                                                      lines: lines,
-                                                                      obstacles: occupiedRects + otherRects(region.id),
-                                                                      bounds: bounds,
-                                                                      policy: policy,
-                                                                      measure: measure) {
-                    placed.append(PlacedOverlay(region: region,
-                                                result: result,
-                                                form: .inPlace(regionID: region.id, rect: box),
-                                                lines: panelLines))
-                }
-                continue
-            }
-
             let lines = calloutLines(for: result, policy: policy, stateCopy: stateCopy)
 
             // The same obstacle set the box above was computed from, so the

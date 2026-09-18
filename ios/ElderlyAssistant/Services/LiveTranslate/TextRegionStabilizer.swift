@@ -4,15 +4,6 @@ import Foundation
 // C03 — `TextRegionStabilizer` (T-009: identity, hysteresis, the change-only
 // gate; T-010: the declutter stage, applied before emission).
 //
-// Scene-block rework, 2026-09-18: the regions this stabilises are **blocks**
-// (see `SceneBlockGrouper`), and a region carries the grouper's own identity
-// for its block. That identity is the strongest matching signal — it outranks
-// the string — because it is the claim that a set of lines is one surface,
-// which is precisely the claim OCR wobble inside a panel would otherwise
-// break. Nothing else in this file changed: the hysteresis, the departure
-// grace, the declutter stage and the change-only gate are the same rules over
-// the same kind of value.
-//
 // What this file exists to make true:
 //
 //  - **One gate on translation traffic.** A region's translation is requested
@@ -207,15 +198,6 @@ struct TextRegionStabilizer {
         var box: NormalizedBox
         var detectedLanguage: String?
         var confidence: Double
-        /// The grouper's identity for the block this region is, when the
-        /// detector reported one (scene-block rework, 2026-09-18). It is the
-        /// strongest identity signal there is — the member-string *set* for a
-        /// text block, the object class plus quantised centroid for an object
-        /// block — because it is the same claim the grouper already made when
-        /// it decided which lines are one surface. `nil` for a region that
-        /// arrived by any other path, and updated on every match so it can
-        /// never outlive the block it names.
-        var blockIdentity: String?
         /// The pass number this region was last observed in — recognized or
         /// tracked. The string-identity window is measured from here, so a
         /// region that stops being seen eventually stops being claimable by
@@ -287,7 +269,6 @@ struct TextRegionStabilizer {
                 regions[index].box = observation.normalizedBox
                 regions[index].detectedLanguage = observation.detectedLanguage
                 regions[index].confidence = observation.confidence
-                regions[index].blockIdentity = observation.blockIdentity
                 regions[index].lastSeenPass = passIndex
                 regions[index].lastSeenAt = now
                 regions[index].consecutiveDetections += 1
@@ -301,7 +282,6 @@ struct TextRegionStabilizer {
                     box: observation.normalizedBox,
                     detectedLanguage: observation.detectedLanguage,
                     confidence: observation.confidence,
-                    blockIdentity: observation.blockIdentity,
                     lastSeenPass: passIndex,
                     lastSeenAt: now,
                     consecutiveDetections: 1,
@@ -399,29 +379,6 @@ struct TextRegionStabilizer {
     /// The best existing region for an observation, or nil when nothing
     /// matches it.
     ///
-    /// **A block claim outranks everything.** When the detector reports a
-    /// `blockIdentity` — the grouper's member-string set, or an object's class
-    /// plus quantised centroid — and a region carries the same one, seen within
-    /// `regionStringIdentityPasses`, the two are the same surface whatever
-    /// happened to the string inside it. This is the case the rework exists
-    /// for: an OCR misread of one word of an appliance panel is not a new
-    /// panel, and without this signal the region would be re-keyed and the
-    /// panel repainted.
-    ///
-    /// **A conflicting block claim is a refusal.** When both sides carry a
-    /// block identity of *different scope* — an object where a text block was,
-    /// a microwave where a television was — the observation cannot take that
-    /// region by geometry: the grouper has already said these are two surfaces,
-    /// and only the string can still identify the region. Without this, a scene
-    /// that resolved differently for one frame would hand one surface the
-    /// other's identifier, and with it the other's translation, drawn over the
-    /// wrong thing.
-    ///
-    /// **A *same-scope* block claim with a different key is not.** An object
-    /// key carries a quantised centroid, and a panel sitting near a cell edge
-    /// crosses it for a hundredth of the frame; the surface is the same one and
-    /// the geometry gate below is the honest way to recognise it.
-    ///
     /// **The string is the identity; geometry is the tiebreaker and the
     /// fallback.** A region whose normalized text equals the observation's,
     /// and that was seen within `regionStringIdentityPasses`, is a candidate
@@ -445,37 +402,16 @@ struct TextRegionStabilizer {
     private func bestMatchIndex(for observation: LiveTextDetector.DetectedTextRegion,
                                 normalized: String,
                                 seen: Set<RegionIdentity>) -> Int? {
-        var best: (index: Int, iou: Double, distance: Double,
-                   sameBlock: Bool, sameString: Bool)?
+        var best: (index: Int, iou: Double, distance: Double, sameString: Bool)?
         for (index, region) in regions.enumerated() where !seen.contains(region.id) {
             let iou = Self.intersectionOverUnion(region.box, observation.normalizedBox)
             let distance = Self.centroidDistance(region.box, observation.normalizedBox)
-            let sameBlock = observation.blockIdentity != nil
-                && region.blockIdentity == observation.blockIdentity
-                && passIndex - region.lastSeenPass <= config.regionStringIdentityPasses
             let sameString = region.normalizedText == normalized
                 && passIndex - region.lastSeenPass <= config.regionStringIdentityPasses
-            // Two blocks of *different scope* are two different surfaces, and
-            // geometry cannot make one into the other: an object the runtime
-            // named, and the panel beside it, are not interchangeable however
-            // still the frame was. Only the string can still identify the region
-            // in that case — which is the case that matters, a panel whose line
-            // was misread and whose box therefore moved with it. A `nil` on
-            // either side is not a claim, so a plain OCR region is unaffected.
-            //
-            // Same scope, different key is *not* a refusal: it is the object
-            // quantiser's cell edge, crossed by a panel that did not move, and
-            // the geometry gate below is exactly the right answer for it.
-            if let claimed = observation.blockIdentity, let held = region.blockIdentity,
-               !SceneBlockGrouper.identitiesShareScope(claimed, held), !sameString {
-                continue
-            }
-            guard sameBlock
-                    || sameString
+            guard sameString
                     || iou >= config.regionMatchIoU
                     || distance <= config.regionMatchCentroidDistance else { continue }
-            let candidate = (index: index, iou: iou, distance: distance,
-                             sameBlock: sameBlock, sameString: sameString)
+            let candidate = (index: index, iou: iou, distance: distance, sameString: sameString)
             guard let current = best else { best = candidate; continue }
             if Self.isBetter(candidate, than: current) { best = candidate }
         }
@@ -484,18 +420,8 @@ struct TextRegionStabilizer {
 
     /// Strict improvement only: a full tie keeps the earlier (lower-identity)
     /// candidate, so the outcome cannot depend on iteration order.
-    ///
-    /// The block claim outranks the string claim, which outranks geometry: the
-    /// grouper decided which lines are one surface from the objects and the
-    /// reading geometry, and that decision survives the OCR wobble that changes
-    /// a member line's string — which is exactly the case this ordering exists
-    /// for. A region with no block identity (`nil` on either side) can never
-    /// match by block, so nothing about a plain OCR region changes.
-    private static func isBetter(_ candidate: (index: Int, iou: Double, distance: Double,
-                                               sameBlock: Bool, sameString: Bool),
-                                 than current: (index: Int, iou: Double, distance: Double,
-                                                sameBlock: Bool, sameString: Bool)) -> Bool {
-        if candidate.sameBlock != current.sameBlock { return candidate.sameBlock }
+    private static func isBetter(_ candidate: (index: Int, iou: Double, distance: Double, sameString: Bool),
+                                 than current: (index: Int, iou: Double, distance: Double, sameString: Bool)) -> Bool {
         if candidate.sameString != current.sameString { return candidate.sameString }
         if candidate.iou != current.iou { return candidate.iou > current.iou }
         if candidate.distance != current.distance { return candidate.distance < current.distance }
