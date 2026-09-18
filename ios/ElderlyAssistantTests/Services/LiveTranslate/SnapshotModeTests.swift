@@ -13,9 +13,9 @@ import XCTest
 /// translation engine, and a freeze that is secretly a camera roll — and
 /// against the four claims the directive names:
 ///
-///  1. **Frozen-frame overlay placement.** The callouts are measured against
+///  1. **Frozen-frame overlay placement.** The placements are measured against
 ///     the frozen frame's own geometry, and the capture control sits inside the
-///     reserved chrome so no callout covers it.
+///     reserved chrome so no panel covers it.
 ///  2. **No photo library, no disk.** A source scan (with positive controls)
 ///     plus a behavioural run over a real freeze, which must leave the file
 ///     system exactly as it found it. The frame is held in memory and nowhere
@@ -302,6 +302,25 @@ final class SnapshotModeTests: XCTestCase {
         "VNClassifyImageRequest(": 1,
     ]
 
+    /// The **image stabilizer's** requests (owner device verdict, 2026-09-18:
+    /// "STABILISE THE IMAGE FIRST"): a homography and a translation between the
+    /// frame and an anchor, both of which read the picture rather than its
+    /// contents. They live in exactly one file, and they are the one amendment
+    /// to this law since it was written — a *second Vision user* was added, and
+    /// deliberately not a second detector: the stabilizer constructs none of
+    /// `visionRequests`, hands its frames to no recognizer, and is on the
+    /// capture path only, so the still path neither calls it nor is measured by
+    /// it (asserted below).
+    private static let registrationRequests: [String: Int] = [
+        "VNHomographicImageRegistrationRequest(": 1,
+        "VNTranslationalImageRegistrationRequest(": 1,
+    ]
+
+    /// The one file sanctioned to measure the picture's motion, and the one
+    /// sanctioned to construct a registration request.
+    private static let frameStabilizerFile =
+        "ElderlyAssistant/Services/LiveTranslate/FrameAnchorEstimator.swift"
+
     /// A provider envelope for a request whose items are these texts, keyed by
     /// the wire ids the request carried.
     private static func respondingTransport() -> TierTranslationTransport {
@@ -481,7 +500,7 @@ final class SnapshotModeTests: XCTestCase {
         XCTAssertTrue(CGRect(origin: .zero, size: containerSize).contains(strip),
                       "the reserved strip is on screen")
         XCTAssertEqual(LiveTranslateView.occupiedRects(containerSize: containerSize).count, 2,
-                       "the overlay's strip and this one — the one place a callout's obstacles are composed")
+                       "the overlay's strip and this one — the one place a placement's obstacles are composed")
         XCTAssertTrue(LiveTranslateView.occupiedRects(containerSize: containerSize).contains(strip))
 
         // Before start the strip is already there, and the control in it is
@@ -585,8 +604,8 @@ final class SnapshotModeTests: XCTestCase {
 
     // MARK: - 2. Frozen-frame overlay placement
 
-    /// The directive's first bullet, geometrically: the frozen frame's callouts
-    /// are measured against **the frozen frame's** pixel size.
+    /// The directive's first bullet, geometrically: the frozen frame's
+    /// placements are measured against **the frozen frame's** pixel size.
     ///
     /// The test makes the two geometries differ in *shape*, not just in size —
     /// the live picture is landscape 1280×720 and the frozen one is portrait
@@ -634,7 +653,7 @@ final class SnapshotModeTests: XCTestCase {
         }
 
         XCTAssertEqual(frozen.publication.placements, placed(framePixelSize: frozen.framePixelSize),
-                       "the callouts are the frozen frame's own geometry")
+                       "the placements are the frozen frame's own geometry")
         XCTAssertNotEqual(frozen.publication.placements, placed(framePixelSize: liveFrameSize),
                           "and not the live picture's")
         XCTAssertEqual(frozen.publication.placements.map(\.region.id),
@@ -647,19 +666,21 @@ final class SnapshotModeTests: XCTestCase {
         XCTAssertEqual(harness.model.activePublication?.sequence, frozen.publication.sequence)
     }
 
-    /// No callout may land under the capture control (or the overlay's own
+    /// No panel may land under the capture control (or the overlay's own
     /// control strip): both are the obstacles the view reports, and this
     /// asserts the frozen frame's placements respect them.
     ///
     /// The region is a *tiny* sign carrying a long cloud-translated sentence.
-    /// Replace-in-place is the default render now (owner UX rework,
-    /// 2026-09-17), so a callout is no longer "what a cloud translation gets" —
-    /// it is the fallback for a translation that cannot be read in the region's
-    /// own box. A sign a few points wide cannot hold "Members only beyond this
-    /// point" at any size the floor allows, so this frame gets its callout by
-    /// construction rather than by hoping a fit happens to fail.
+    /// Replace-in-place is the default render (owner UX rework, 2026-09-17), so
+    /// the fallback is no longer "what a cloud translation gets" — it is what a
+    /// translation gets when it cannot be read in the region's own box, and
+    /// since the 2026-09-18 rework that form is the **panel** on the region's
+    /// own rect, never a floating pill. A sign a few points wide cannot hold
+    /// "Members only beyond this point" at any size the floor allows, so this
+    /// frame gets its panel by construction rather than by hoping a fit happens
+    /// to fail.
     @MainActor
-    func testNoCalloutLandsUnderTheCaptureButtonOrTheOverlayChrome() async throws {
+    func testNoPanelLandsUnderTheCaptureButtonOrTheOverlayChrome() async throws {
         let transport = Self.respondingTransport()
         let harness = makeHarness(consent: true, configured: true, transport: transport)
         reportLayout(harness)
@@ -674,27 +695,32 @@ final class SnapshotModeTests: XCTestCase {
         let reserved = LiveTranslateView.occupiedRects(containerSize: containerSize)
         XCTAssertFalse(reserved.isEmpty, "nothing reserved would make this assertion vacuous")
 
-        var callouts: [(rect: CGRect, clamped: Bool)] = []
+        var panels: [CGRect] = []
         for placement in publication.placements {
-            guard case .callout(_, _, let pillRect) = placement.form else { continue }
-            callouts.append((pillRect, placement.isClampedFallback))
+            XCTAssertFalse(placement.isClampedFallback,
+                           "the placement has no clamped fallback any more (OD5)")
+            guard case .scrollablePanel(_, let rect) = placement.form else {
+                return XCTFail("a sentence this long cannot be read in a box this small, so the "
+                               + "region is the fallback panel: \(placement.form)")
+            }
+            panels.append(rect)
         }
-        XCTAssertFalse(callouts.isEmpty,
-                       "a sentence this long cannot be read in a box this small, so it has a callout")
+        XCTAssertFalse(panels.isEmpty,
+                       "a sentence this long cannot be read in a box this small, so it has a panel")
 
         let top = try XCTUnwrap(LiveTranslateView.topChromeRects(containerSize: containerSize).first)
         XCTAssertTrue(reserved.contains(top), "the capture control's strip is an obstacle")
 
-        // The clamped fallback is OD5's documented corner case, where the pill
-        // is placed by rule rather than by preference; everything else must
-        // clear the chrome — including the strip the capture button is in.
-        for callout in callouts where !callout.clamped {
+        // The panel's box is bounded by the obstacles it was placed against —
+        // the same law the in-place box obeys — so it clears the chrome by
+        // construction, including the strip the capture button is in.
+        for panel in panels {
             for obstacle in reserved {
-                XCTAssertFalse(callout.rect.intersects(obstacle),
-                               "the pill \(callout.rect) covers reserved chrome \(obstacle)")
+                XCTAssertFalse(panel.intersects(obstacle),
+                               "the panel \(panel) covers reserved chrome \(obstacle)")
             }
-            XCTAssertFalse(callout.rect.intersects(top),
-                           "no callout is drawn over the capture button's own strip")
+            XCTAssertFalse(panel.intersects(top),
+                           "no panel is drawn over the capture button's own strip")
         }
     }
 
@@ -932,6 +958,22 @@ final class SnapshotModeTests: XCTestCase {
         // A control: the scan sees the request and the handler where they live.
         XCTAssertNotNil(FeatureSourceScan.firstMatch(of: "VNRecognizeTextRequest", in: detector))
 
+        // The stabilizer's own file, pinned the same way: one handler per
+        // registration kind and the two requests, and — the point of the pin —
+        // not one request that could read or label anything.
+        let stabilizer = code(Self.frameStabilizerFile)
+        XCTAssertEqual(occurrences(of: "VNImageRequestHandler(", in: stabilizer), 2,
+                       "the stabilizer constructs one handler per registration, for the buffers "
+                       + "it is handed; measured, not assumed")
+        Self.registrationRequests.forEach { request, expected in
+            XCTAssertEqual(occurrences(of: request, in: stabilizer), expected,
+                           "\(request) measures the picture's motion, once, in the stabilizer")
+        }
+        for (request, _) in Self.visionRequests {
+            XCTAssertEqual(occurrences(of: request, in: stabilizer), 0,
+                           "the stabilizer reads the picture, never its contents: \(request)")
+        }
+
         // No second detector and no second image pipeline anywhere in the
         // feature, and none of the downscaling that would make "full
         // resolution" untrue.
@@ -942,12 +984,22 @@ final class SnapshotModeTests: XCTestCase {
             let handlers = occurrences(of: "VNImageRequestHandler(", in: text)
             if relative.hasSuffix("LiveTextDetector.swift") {
                 XCTAssertEqual(handlers, 3)
+            } else if relative.hasSuffix("FrameAnchorEstimator.swift") {
+                XCTAssertEqual(handlers, 2,
+                               "the stabilizer's two registrations, in the stabilizer's one file")
             } else {
                 XCTAssertEqual(handlers, 0, "\(relative) creates a second Vision handler")
                 for (request, _) in Self.visionRequests {
                     XCTAssertEqual(occurrences(of: request, in: text), 0,
                                    "\(relative) creates a second \(request)")
                 }
+            }
+            // A registration anywhere else would be a second stabilizer, on a
+            // path this change never measured — including the still path.
+            for (request, expected) in Self.registrationRequests {
+                XCTAssertEqual(occurrences(of: request, in: text),
+                               relative.hasSuffix("FrameAnchorEstimator.swift") ? expected : 0,
+                               "\(relative) constructs \(request)")
             }
             if snapshotPathFiles.contains(relative) {
                 for token in ["vImage", "CIImage", "CGImageContext", "resize(", "downscale"] {

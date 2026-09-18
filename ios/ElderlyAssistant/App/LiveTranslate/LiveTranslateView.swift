@@ -135,6 +135,11 @@ struct LiveTranslateView: View {
             // crop is `Equatable`, so a render that did not move anything
             // costs one comparison and no relayout.
             .onChange(of: zoom.model.crop) { _ in reportLayout(proxy) }
+            // The picture's own correction changed, so the boxes' window did
+            // too: same reason, same relayout, and `FrameStabilization` is
+            // `Equatable` so a still hand — the answer frame after frame — costs
+            // one comparison (owner device verdict, 2026-09-18).
+            .onChange(of: model.frameStabilization) { _ in reportLayout(proxy) }
         }
         .ignoresSafeArea()
         .onDisappear {
@@ -169,6 +174,7 @@ struct LiveTranslateView: View {
             // zoom controls are real controls with their own identifiers.
             LiveTranslatePreviewHost(layer: layer,
                                      presentation: presentation(in: proxy),
+                                     isWindowed: !zoom.model.crop.isWhole,
                                      onPinch: { zoom.pinch(to: Double($0), at: $1) },
                                      onPinchEnded: { zoom.pinchEnded() },
                                      onPan: { zoom.pan(to: $0) },
@@ -429,9 +435,28 @@ struct LiveTranslateView: View {
     /// is zero, `isUsable` is false and the transform is the identity — the
     /// layer is simply the full container, which is what it was before any of
     /// this existed.
+    /// The window the picture is *drawn* through: the elder's own window with the
+    /// frame's stabilization composed into it (owner device verdict, 2026-09-18:
+    /// *"STABILISE THE IMAGE FIRST"*).
+    ///
+    /// One composition, in the one place a presentation is built, and that is
+    /// the whole of what makes the picture still *and* the boxes glued to it:
+    /// the layer transform, the gesture conversions and
+    /// `LiveOverlayPlacement.screenRect(for:...)` are all functions of this
+    /// crop, so the displayed image and the rect a box is drawn in cannot
+    /// disagree — the correction moves the picture and the box by the same
+    /// amount, by construction, not by a second transform kept in step. The
+    /// zoom model's own window is untouched: the stabilization is not the
+    /// elder's gesture and never becomes part of the zoom's state (a pinch
+    /// still anchors on the window the elder's fingers are moving).
+    private func displayedCrop() -> LiveCameraCrop {
+        zoom.model.crop.stabilized(by: model.frameStabilization)
+    }
+
     private func presentation(in proxy: GeometryProxy) -> LiveCameraPresentation {
-        zoom.model.presentation(in: ApplianceOverlayMapper.displayedImageRect(
-            containerSize: proxy.size, imageSize: model.framePixelSize))
+        LiveCameraPresentation(crop: displayedCrop(),
+                               pictureRect: ApplianceOverlayMapper.displayedImageRect(
+                                   containerSize: proxy.size, imageSize: model.framePixelSize))
     }
 
     /// Reports the geometry the pipeline cannot derive: the container, the safe
@@ -450,11 +475,17 @@ struct LiveTranslateView: View {
         // inside `occupiedRects`, which names the two strips that are always
         // reserved whatever the session is doing — the zoom strip is composed
         // in because its height depends on the safe area this function has.
+        // The crop reported is the **displayed** one — the elder's window with
+        // the picture's stabilization composed in — because the placement maps
+        // its boxes through it and the boxes must land on the picture as it is
+        // drawn (owner device verdict, 2026-09-18: "overlay text on top of the
+        // original text"). The rects the pipeline measured were measured through
+        // this same window, and the view is the only reader that knows both.
         model.updateLayout(containerSize: proxy.size,
                            safeArea: safeArea,
                            occupiedRects: Self.occupiedRects(containerSize: proxy.size,
                                                             bottomInset: insets.bottom),
-                           crop: zoom.model.crop)
+                           crop: displayedCrop())
     }
 
     /// The strips the overlay must not draw under: the overlay's own reserved
@@ -671,12 +702,31 @@ struct LiveTranslateResultsCardView: View {
 /// than moving a window that is already the frame. Taps are unaffected either
 /// way (a still finger is not a drag), so a bubble above this view still takes
 /// the tap it always took and a tap on the picture still focuses.
+///
+/// **The stabilization is not a gesture.** Every conversion here goes through
+/// the presentation, which carries the frame's stabilization composed into the
+/// elder's window (owner device verdict, 2026-09-18) — so where the finger is on
+/// the *picture* is answered through the picture as drawn, while the drag's
+/// existence is still the elder's own window (`isWindowed`). The correction
+/// moves the picture; it never moves the window the elder is holding.
 struct LiveTranslatePreviewHost: UIViewRepresentable {
 
     let layer: AVCaptureVideoPreviewLayer
     /// The window the picture is drawn and read through, at the frame size the
-    /// camera is delivering.
+    /// camera is delivering — with the frame's stabilization already composed
+    /// into it (see `LiveTranslateView.displayedCrop()`).
     let presentation: LiveCameraPresentation
+    /// Whether the elder's own window is narrower than the frame, which is the
+    /// one thing that decides whether a drag has anything to move.
+    ///
+    /// Stated separately from `presentation.crop.isWhole` because the two
+    /// answer different questions now that the picture is stabilized: the
+    /// presentation's crop is the *drawing's* window and is never whole while a
+    /// margin is held, whereas the drag is the elder's gesture on the *zoom
+    /// model's* window — and at the at-rest zoom there is still nothing to pan
+    /// (a drag would be clamped to zero by the model's own pan limit, so the
+    /// recogniser is switched off rather than left to do nothing).
+    let isWindowed: Bool
     /// A pinch in flight: the recogniser's cumulative scale, 1 at the moment
     /// the fingers landed, and where they landed — a point **inside the visible
     /// window** (0–1 of the crop), which is the anchoring the zoom holds.
@@ -719,8 +769,8 @@ struct LiveTranslatePreviewHost: UIViewRepresentable {
         context.coordinator.presentation = presentation
         // The drag exists only while a window does: with the whole frame on
         // screen there is nothing to move, and a disabled recogniser leaves the
-        // finger to the tap that was already there.
-        context.coordinator.panRecognizer?.isEnabled = !presentation.crop.isWhole
+        // finger to the tap that was already there (see `isWindowed`).
+        context.coordinator.panRecognizer?.isEnabled = isWindowed
         view.presentation = presentation
         view.layoutPreviewLayer()
     }

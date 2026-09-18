@@ -27,26 +27,30 @@ import Foundation
 //    appears where the text stood and fills in, rather than a pill appearing
 //    beside it and being replaced by it.
 //    **A block that cannot stand as a panel falls back to the bounded panel,
-//    and then to the callout — never to nothing** (owner device verdict,
-//    2026-09-18: "the camera says it can't find anything to read"; owner
-//    refinement, 2026-09-18: a block too tall for its own box is drawn as a
-//    *scrollable* panel, not as one pill). The bounded panel is the same
-//    surface as the panel — the block's own lines, in order, at the body
-//    floor, and now with the original stacked under them where the preference
-//    asks for it — inside a box capped at `panelMaxHeightFraction` of the
-//    container and scrolled when the lines overflow it. Still one surface for
-//    the block — not one bubble per line — and still at the body floor; the
-//    snapshot card remains the reading surface for text a pill cannot hold.
-//    The one thing the live overlay may never do is drop a region it
-//    recognized: the empty state is for a scene with no text in it, and
-//    showing it over text is the feature telling the elder something untrue.
-//    Single-line regions are untouched — in place when the translation fits,
-//    a callout when it does not — so the per-line machinery below is the same
-//    code it always was.
-//  - **A callout is the rare fallback**, not the common case. It exists for
-//    the two honest exceptions: text that cannot be drawn legibly in place at
-//    the in-place floor, and the always-show-original preference, which by
-//    definition wants the original kept visible *beside* the translation.
+//    and then to the panel on the block's own rect — never to nothing, and
+//    never to a pill** (owner device verdict, 2026-09-18: "the camera says it
+//    can't find anything to read"; owner refinement, 2026-09-18: a block too
+//    tall for its own box is drawn as a *scrollable* panel, not as one pill).
+//    The bounded panel is the same surface as the panel — the block's own
+//    lines, in order, at the body floor, and now with the original stacked
+//    under them where the preference asks for it — inside a box capped at
+//    `panelMaxHeightFraction` of the container and scrolled when the lines
+//    overflow it. Still one surface for the block — not one bubble per line —
+//    and still at the body floor. The one thing the live overlay may never do
+//    is drop a region it recognized: the empty state is for a scene with no
+//    text in it, and showing it over text is the feature telling the elder
+//    something untrue.
+//  - **The live overlay has exactly two surfaces, and both are green.** Every
+//    placement is an in-place box or a panel (plain, bounded, or — for a region
+//    with no room at all — the panel on its own rect). The anchored callout is
+//    **unreachable from this file**: `place` has no path that returns
+//    `Form.callout`, which is the owner's device verdict made structural —
+//    *"there are still some white-on-blue text boxes floating around"*
+//    (2026-09-18). A translation that cannot be drawn in place is drawn where
+//    the text stood, at the body floor, with a cap and a scroll; it is never
+//    moved beside the text into a second surface the elder has to find, follow
+//    and read. See `panelFallback` for why this is a property of the decision
+//    rather than a configuration.
 //  - **One predicate, three conditions.** `inPlaceOutcome` is the one
 //    implementation, and `place` goes through it — a fourth condition cannot
 //    be introduced at one call site and not the other.
@@ -70,14 +74,16 @@ import Foundation
 //    slab of empty ink (the owner's device verdict, 2026-09-17), and because
 //    the union can only shrink a box that was already proved clear of its
 //    neighbours, the no-stacking property is untouched.
-//  - **A callout never covers its own region's printed text.** That hard
-//    constraint outranks the preferences (fewest other regions covered, then
-//    nearest). A conflict is never resolved by covering the text it is about.
-//  - **The geometric corner case is recorded, not absorbed.** When no
-//    candidate anchor can satisfy the hard constraint (a genuinely full
-//    screen) the pill is clamped on the side with the most free space and the
-//    placement is flagged `isClampedFallback`, which is what T-030's manual
-//    device validation targets (OD5).
+//  - **The geometric corner case is recorded, not absorbed.** When even the
+//    bounded panel has nowhere to go the placement is still a panel — on the
+//    region's own rect, moved inside the bounds and never resized — so the
+//    corner case costs the elder a scroll, not a surface to find. A region
+//    whose box is degenerate is the only thing that yields no placement, and
+//    it is the one input the detector cannot produce (a region with no rect).
+//  - **Nothing floats.** No placement is positioned relative to another, none
+//    is drawn outside the box of the text it belongs to, and none carries a
+//    leader line: the "white-on-blue text boxes floating around" the owner saw
+//    were exactly the placements whose box was *not* the text's own (2026-09-18).
 //  - **Pure, deterministic, total, bounded.** No clock, no I/O, no camera, no
 //    storage, no await. The same inputs produce the same placements whatever
 //    order the regions arrive in — the output is ordered canonically (top to
@@ -126,8 +132,8 @@ enum LiveOverlayPlacement {
         /// The point size floor for in-place text (`inPlaceMinPointSize`),
         /// already reconciled with `minPointSize` by the app layer. In-place
         /// text may go below the app's body floor because it stands where
-        /// type of roughly that size already stood; the callout and card
-        /// floors do not.
+        /// type of roughly that size already stood; the reading card's floor
+        /// does not.
         let inPlaceMinPointSize: CGFloat
         /// The ceiling on how far the in-place box may grow past the region's
         /// own text box, as a factor (`inPlaceMaxGrowth`). A ceiling, not an
@@ -191,15 +197,31 @@ enum LiveOverlayPlacement {
         /// The point size of the supporting line — the original recognized
         /// text, or the honest state line (the app's caption minimum).
         let secondaryPointSize: CGFloat
-        /// Inset between the pill's edge and its text block.
+        /// Inset between a **callout** pill's edge and its text block.
+        ///
+        /// No live placement consumes this any more: since the owner's device
+        /// verdict on the white-on-blue boxes (2026-09-18) `place` produces no
+        /// callout, and every surface it does produce is padded by
+        /// `inPlacePadding` (which is deliberately tighter, because a
+        /// replacement of the sign's own type is tight where a floating pill is
+        /// not). It is carried because the renderer still draws a callout a
+        /// caller built by hand — the reading card's own presentation, and the
+        /// view's tests — and because a policy is built in one place: dropping
+        /// the field would make that renderer the only caller choosing a
+        /// padding token for itself.
         let pillPadding: CGFloat
-        /// Vertical space between the pill's two lines.
+        /// Vertical space between the lines of a surface that stacks them.
         let lineSpacing: CGFloat
-        /// Gap between the region's rect and the pill.
+        /// Gap between the region's rect and a **callout** pill's edge, for the
+        /// same reason `pillPadding` is carried: the renderer still draws a
+        /// hand-built callout, and no live placement reads it.
         let anchorGap: CGFloat
         /// The FR-LCT-017 preference. On ⇒ the in-place form is ineligible, so
-        /// every resolved region shows its original alongside its translation
-        /// (pure callout mode, T-022).
+        /// every resolved region shows its original alongside its translation —
+        /// stacked in its own panel since the callout removal (owner device
+        /// verdict, 2026-09-18; T-022's "pure callout mode" is now pure *panel*
+        /// mode, and the preference's meaning — the original stays visible —
+        /// is unchanged).
         let alwaysShowOriginal: Bool
         /// [BRAINTIER-MERGE-GAP] (2026-09-17) The word ceiling for the
         /// in-place form (D1). PR #33's merge kept the braintier TESTS but
@@ -295,6 +317,16 @@ enum LiveOverlayPlacement {
         /// A pill beside the region, with a leader line to `anchor` — the
         /// closest point on the region's rect to the pill, so the line always
         /// points at the region it belongs to.
+        ///
+        /// **`place` never produces this case.** It is the form the owner's
+        /// device verdict retired from the live overlay ("there are still some
+        /// white-on-blue text boxes floating around", 2026-09-18) and the two
+        /// sites that emitted it are gone; the case survives because the
+        /// renderer still draws one a *caller* built by hand, which is how the
+        /// view's form-geometry tests (and, if a future reading surface wants a
+        /// leader line, that surface) reach it. A test asserts on the type for
+        /// every input `place` takes, so this cannot come back by
+        /// configuration.
         case callout(regionID: TextRegionStabilizer.RegionIdentity,
                      anchor: CGPoint,
                      pillRect: CGRect)
@@ -307,12 +339,18 @@ enum LiveOverlayPlacement {
         let form: Form
         /// The lines to draw, in order, exactly as measured: one for a
         /// single-line in-place form, every line of the block for a panel, one
-        /// or two for a callout. Empty only when a caller constructs a
-        /// placement by hand.
+        /// or two for a callout a caller built by hand. Empty only when a
+        /// caller constructs a placement by hand.
         let lines: [LiveOverlayTextLine]
-        /// True when no candidate anchor could satisfy the never-cover
-        /// constraint and the pill was clamped instead: the geometric corner
-        /// case OD5 records for manual device validation (T-030).
+        /// True when a placement had to be clamped into the container instead
+        /// of being positioned by its own law.
+        ///
+        /// Always false for what `place` returns: the two clamped-fallback
+        /// sites were the callout's, and they went with it. Carried because the
+        /// value is part of what the renderer and the reading card consume (a
+        /// hand-built placement may set it), and because the field is what the
+        /// tests that used to assert the corner case now read to assert its
+        /// *absence* (OD5, T-030).
         let isClampedFallback: Bool
 
         init(region: TextRegionStabilizer.StableTextRegion,
@@ -331,7 +369,7 @@ enum LiveOverlayPlacement {
     // MARK: - The in-place predicate (D1)
 
     /// The conditions, named for their *violation*: `ineligible(_:)` reads as
-    /// the reason the region got a callout instead of standing in place.
+    /// the reason the region's translation does not stand in place.
     enum InPlaceCondition: String, Equatable, CaseIterable {
         /// Nothing has translated the region yet (pending), or nothing could
         /// (degraded). Drawing the recognized text where it already stands
@@ -339,7 +377,7 @@ enum LiveOverlayPlacement {
         /// fine, which is exactly what FR-LCT-018 forbids.
         case noTranslationToDraw
         /// The translation does not fit the region's box even at the in-place
-        /// floor: the honest answer is a callout beside the text rather than
+        /// floor: the honest answer is the panel over the text rather than
         /// type too small to read (D1).
         case translationDoesNotFitRegion
         /// The always-show-original preference is on: originals stay visible
@@ -348,9 +386,9 @@ enum LiveOverlayPlacement {
     }
 
     /// The predicate's answer: the box and the line to draw, or the reason the
-    /// region gets a callout. Carrying the box in the value is what makes "the
-    /// box the fit was decided on is the box that is drawn" a property rather
-    /// than a coincidence of two call sites.
+    /// region does not stand in place. Carrying the box in the value is what
+    /// makes "the box the fit was decided on is the box that is drawn" a
+    /// property rather than a coincidence of two call sites.
     enum InPlaceOutcome: Equatable {
         case fits(box: CGRect, line: LiveOverlayTextLine)
         case ineligible(InPlaceCondition)
@@ -374,7 +412,7 @@ enum LiveOverlayPlacement {
     /// by a caller that only holds a result.
     ///
     /// Conditions are tested in a fixed order and the first violation is
-    /// returned — the reason a region became a callout is then a fact a test
+    /// returned — the reason a region did not stand in place is then a fact a test
     /// (or a debugger) can read, not an inference.
     ///
     /// `obstacles` are the rects the box may not grow into: the app's own
@@ -405,8 +443,8 @@ enum LiveOverlayPlacement {
         // Everything else is the translated view's law, unchanged and for the
         // same reasons: the box grows from free space only (so no two boxes
         // stack), the fit is measured before the box is returned, and text too
-        // large for the region at the floor gets the honest callout rather than
-        // being shrunk until it fits.
+        // large for the region at the floor gets the honest panel over it rather
+        // than being shrunk until it fits.
         //
         // A region that *is* resolved draws its translation here exactly as it
         // does in the translated view — a tapped block that has been answered
@@ -556,7 +594,7 @@ enum LiveOverlayPlacement {
     /// The order is the point: a translation that reads comfortably at the
     /// body floor is drawn at the body floor, and only a region too small for
     /// that gets the smaller in-place size. A region too small for both gets a
-    /// callout, which is the honest failure rather than unreadable type.
+    /// panel over it, which is the honest failure rather than unreadable type.
     static func inPlacePointSizes(policy: Policy) -> [CGFloat] {
         let floor = min(policy.inPlaceMinPointSize, policy.minPointSize)
         return floor < policy.minPointSize ? [policy.minPointSize, floor] : [policy.minPointSize]
@@ -693,8 +731,9 @@ enum LiveOverlayPlacement {
     /// that is precisely the illegible small type the rework removes — so it
     /// stops being a *static* panel: the block is drawn as the bounded panel
     /// (the same lines, the same floor, a capped and scrollable box), or, with
-    /// no box to draw in at all, as the one callout that always has somewhere
-    /// to go. The floor never moves; only the box around it does.
+    /// no box to draw in at all, as the panel on the block's own rect — the one
+    /// surface that always has somewhere to go. The floor never moves; only the
+    /// box around it does.
     static func panelPointSize(policy: Policy) -> CGFloat { policy.minPointSize }
 
     /// The size of a stack of lines: the widest line, the total height, and the
@@ -839,7 +878,11 @@ enum LiveOverlayPlacement {
     // MARK: - Placement
 
     /// Places every region: in place when the translation fits the region's own
-    /// box, an anchored callout otherwise, in reading order.
+    /// box, a scrollable panel on the region's own box otherwise, in reading
+    /// order. **Nothing in the live path is ever a callout** (owner device
+    /// verdict, 2026-09-18: "there are still some white-on-blue text boxes
+    /// floating around") — the two rungs a region that cannot stand in place
+    /// gets are both green surfaces standing where the text stood.
     ///
     /// **The rect a box is anchored to is `region.box`, whatever that box came
     /// from** (owner spec, 2026-09-18: "object-box anchoring where available").
@@ -854,12 +897,12 @@ enum LiveOverlayPlacement {
     ///  - `safeArea` is the container-space rect the placement must stay inside
     ///    (the preview's safe area). An empty rect means "the whole container",
     ///    which is what a caller with no safe-area information has.
-    ///  - `occupiedRects` are the already-placed controls: the pills avoid
-    ///    them, and the in-place boxes do not grow into them.
+    ///  - `occupiedRects` are the already-placed controls: no box grows into
+    ///    them — not an in-place box, not a panel, not the panel fallback.
     ///  - `stateCopy` supplies the honest line for an outcome that has no
     ///    translation (the catalog's pending/unavailable wording, in the active
     ///    language, T-021). It is a closure so this file stays copy-free — and
-    ///    so the string the pill is *sized* around is the very string the view
+    ///    so the string a panel is *sized* around is the very string the view
     ///    draws.
     ///
     /// A region with no result is placed as pending, never dropped: a tier
@@ -911,32 +954,14 @@ enum LiveOverlayPlacement {
             rects.filter { $0.key != id }.sorted { $0.key < $1.key }.map(\.value)
         }
 
-        // The in-place box is pure geometry (the region, its neighbours, the
-        // safe area, the growth ceiling), so it is computed before any outcome
-        // is looked at: the box a region gets does not depend on whether it
-        // was visited first, or on what the meanwhile-placed callouts did. Two
-        // of these boxes never overlap — see `inPlaceMaxBox`.
-        var boxes: [TextRegionStabilizer.RegionIdentity: CGRect] = [:]
-        for (id, rect) in rects {
-            boxes[id] = inPlaceMaxBox(regionRect: rect,
-                                      obstacles: occupiedRects + otherRects(id),
-                                      bounds: bounds,
-                                      growth: policy.inPlaceMaxGrowth)
-        }
-
-        /// Every other region's box, in identity order: what a *callout* must
-        /// stay clear of. A box is used rather than the printed rect because
-        /// the drawn boxes are what the elder sees — a pill that avoided a rect
-        /// but covered the box drawn over it would be covering text.
-        func otherBoxes(_ id: TextRegionStabilizer.RegionIdentity) -> [CGRect] {
-            boxes.filter { $0.key != id }.sorted { $0.key < $1.key }.map(\.value)
-        }
+        // Every box is pure geometry (the region, its neighbours, the safe
+        // area, the growth ceiling), so it is computed inside the decision that
+        // returns it — the box a region gets does not depend on whether it was
+        // visited first, or on what the regions before it were drawn as. Two of
+        // these boxes never overlap — see `inPlaceMaxBox`.
 
         var placed: [PlacedOverlay] = []
         placed.reserveCapacity(regions.count)
-        // The pills already placed in this pass. A pill avoids the region
-        // boxes *and* the pills before it, so two callouts cannot stack either.
-        var pills: [CGRect] = []
 
         for region in placementOrder(regions) {
             guard let regionRect = rects[region.id] else { continue }
@@ -945,12 +970,12 @@ enum LiveOverlayPlacement {
             // A **block** is one panel the snapshot can read in full and one
             // panel the overlay draws (scene-block rework): its lines are
             // stacked inside one box on the block's own rect, at the body
-            // floor, never one callout per line. A block whose whole text
+            // floor, never one surface per line. A block whose whole text
             // cannot be stacked at that size falls through to the **bounded
             // panel** — the same surface, capped to a share of the container
-            // and scrolled — and only a block with no box to draw in at all
-            // falls through to the callout below: one pill for the block,
-            // never nothing for it.
+            // and scrolled — and a block with no box to draw in at all still
+            // gets the panel, on its own rect: never nothing for it, and never
+            // a pill beside it.
             //
             // A block the tier has not answered for yet is drawn the same way,
             // carrying the honest state sentence instead of a translation: the
@@ -1022,10 +1047,10 @@ enum LiveOverlayPlacement {
                 // **A block that cannot stand as a panel still speaks.** The
                 // panel is the form the owner asked for and it is tried first;
                 // the bounded panel is tried second, and covers every block
-                // with a box to draw in. The pill below is the last resort —
-                // the one presentation that always has *somewhere* to go (it
-                // clamps rather than dropping), for a block with no line to
-                // draw at all or one with no box at all.
+                // with a box to draw in. What is left below is the rung for a
+                // block with no line to draw at all, or one whose box cannot
+                // hold a panel of any height — and it is **still the panel**,
+                // on the block's own rect.
                 //
                 // This is the owner's device verdict on the rework, at the line
                 // it is about: "the camera says it can't find anything to
@@ -1034,30 +1059,23 @@ enum LiveOverlayPlacement {
                 // its empty state over a picture full of text the pass had just
                 // read. A block the panel cannot hold is a block the *snapshot
                 // card* reads best, not one the live overlay may silently drop.
-                // The pill carries the block's own panel lines — there is no
-                // reason to re-derive them, and every reason not to: the two
-                // paths would answer differently for a state sentence. The
-                // state copy is consulted only in the degenerate case where the
-                // block has no line to draw at all (an empty recognized string
-                // and no copy), so the pill is never an empty bubble.
-                let pillLines = lines.isEmpty
+                // The panel carries the block's own lines — there is no reason
+                // to re-derive them, and every reason not to: the two paths
+                // would answer differently for a state sentence. The state copy
+                // is consulted only in the degenerate case where the block has
+                // no line to draw at all (an empty recognized string and no
+                // copy), so the panel is never an empty surface.
+                let panelLines = lines.isEmpty
                     ? calloutLines(for: result, policy: policy, stateCopy: stateCopy).all
                     : lines
-                let callout = calloutPlacement(
-                    regionRect: regionRect,
-                    lines: pillLines,
-                    bounds: bounds,
-                    obstacles: occupiedRects + otherBoxes(region.id) + pills,
-                    policy: policy,
-                    measure: measure)
-                pills.append(callout.rect)
-                placed.append(PlacedOverlay(region: region,
+                placed.append(panelFallback(region: region,
                                             result: result,
-                                            form: .callout(regionID: region.id,
-                                                           anchor: callout.anchor,
-                                                           pillRect: callout.rect),
-                                            lines: pillLines,
-                                            isClampedFallback: callout.isClampedFallback))
+                                            lines: panelLines,
+                                            regionRect: regionRect,
+                                            obstacles: occupiedRects + otherRects(region.id),
+                                            bounds: bounds,
+                                            containerSize: containerSize,
+                                            policy: policy))
                 continue
             }
 
@@ -1082,30 +1100,32 @@ enum LiveOverlayPlacement {
                                             // condition measured it at.
                                             lines: [line]))
             case .ineligible:
-                let callout = calloutPlacement(
-                    regionRect: regionRect,
-                    lines: lines.all,
-                    bounds: bounds,
-                    obstacles: occupiedRects + otherBoxes(region.id) + pills,
-                    policy: policy,
-                    measure: measure)
-                pills.append(callout.rect)
-                placed.append(PlacedOverlay(region: region,
+                // A region that cannot be drawn in place — the translation does
+                // not fit its box at the body floor, nothing has translated it
+                // yet, or the elder has asked for the original to stay visible
+                // beside the translation — is drawn as the **bounded panel**:
+                // the same green surface where the text stood, its lines at the
+                // body floor, capped and scrolled. It is not moved beside the
+                // text and it is not a floating pill (owner device verdict,
+                // 2026-09-18: "there are still some white-on-blue text boxes
+                // floating around" — the pill was the last of them).
+                placed.append(panelFallback(region: region,
                                             result: result,
-                                            form: .callout(regionID: region.id,
-                                                           anchor: callout.anchor,
-                                                           pillRect: callout.rect),
                                             lines: lines.all,
-                                            isClampedFallback: callout.isClampedFallback))
+                                            regionRect: regionRect,
+                                            obstacles: occupiedRects + otherRects(region.id),
+                                            bounds: bounds,
+                                            containerSize: containerSize,
+                                            policy: policy))
             }
         }
 
         return readingOrder(placed)
     }
 
-    /// The order regions are *visited* in, which is the order the pills can
+    /// The order regions are *visited* in, which is the order their boxes can
     /// see each other in: the same canonical reading order the output uses, so
-    /// the same scene produces the same pills whatever order the detector
+    /// the same scene produces the same placements whatever order the detector
     /// reported its regions in.
     static func placementOrder(_ regions: [TextRegionStabilizer.StableTextRegion])
         -> [TextRegionStabilizer.StableTextRegion] {
@@ -1148,7 +1168,7 @@ enum LiveOverlayPlacement {
     /// `crop` is the window the elder is looking through (owner follow-up,
     /// 2026-09-18). The mapping is then the *same* affine the preview layer is
     /// drawn with — `LiveCameraPresentation` — rather than a second copy of the
-    /// arithmetic, which is what makes a callout glued to its region stay glued
+    /// arithmetic, which is what makes a box glued to its region stay glued
     /// while the picture is zoomed and panned: both are one function of the
     /// same crop. `.whole` is the identity crop, and it is what every caller
     /// before the window existed passed.
@@ -1165,9 +1185,15 @@ enum LiveOverlayPlacement {
 
     // MARK: - The lines a presentation draws
 
-    /// The pill's two lines: the translation (or, when nothing translated, the
+    /// A surface's two lines: the translation (or, when nothing translated, the
     /// recognized text) as primary text, and either the original recognized
     /// text or the honest state line as the smaller secondary text.
+    ///
+    /// The name is the callout's because the callout was its first consumer;
+    /// every surface the placement now produces reads its lines from here (the
+    /// panel takes `.all`, the in-place box the primary alone), and the
+    /// renderer's hand-built callouts do too, so there is one line rule in the
+    /// feature rather than one per surface.
     ///
     /// A degraded or pending region therefore shows what it *has* — the
     /// recognized text — next to what is true about it, and never a
@@ -1191,11 +1217,11 @@ enum LiveOverlayPlacement {
             // A translation exists: the original stays reachable beside it.
             supporting = result.originalText
         } else if policy.extractionMode, !result.degraded {
-            // Extract mode, nothing translated: the pill's one line is the
+            // Extract mode, nothing translated: the one line is the
             // recognized text, and there is no second line to write. The state
             // sentence a pending region carries in the translated view
             // ("Translating…") would be a claim about work this mode has not
-            // started — the pill is already reading the text it was going to
+            // started — the box is already reading the text it was going to
             // translate, so it has nothing left to say. A **degraded** result,
             // reachable only after a tap asked for a translation, keeps its
             // sentence: that one is true, and it is the honesty FR-LCT-018
@@ -1217,124 +1243,82 @@ enum LiveOverlayPlacement {
         return CalloutLines(primary: primary, secondary: secondary)
     }
 
-    /// The size of the pill that holds `lines`: the measured text block plus
-    /// the policy's padding. Measured with the same closure the view renders
-    /// with, at the sizes and weights the lines themselves carry. Unwrapped:
-    /// a pill is sized to its lines as written, which is what makes it compact.
-    static func pillSize(for lines: [LiveOverlayTextLine],
-                         policy: Policy,
-                         measure: Measure = LiveOverlayTextMetrics.measure) -> CGSize {
-        var width: CGFloat = 0
-        var height: CGFloat = 0
-        for (index, line) in lines.enumerated() {
-            let measured = measure(line.text, line.pointSize, line.weight, .greatestFiniteMagnitude)
-            width = max(width, measured.width)
-            if index > 0 { height += policy.lineSpacing }
-            height += measured.height
-        }
-        return CGSize(width: width + 2 * policy.pillPadding,
-                      height: height + 2 * policy.pillPadding)
-    }
+    // MARK: - The live fallback: the panel, never a pill (owner verdict, 2026-09-18)
 
-    // MARK: - Callout anchors (FR-LCT-016)
-
-    /// The candidate anchors, in the deterministic order the design fixes:
-    /// above, below, right, left. `CaseIterable`'s order *is* that order, and
-    /// a test pins it, so "tried in order" cannot drift into "tried in
-    /// whatever order the code happens to enumerate".
-    enum Anchor: String, CaseIterable, Equatable {
-        case above, below, right, left
-    }
-
-    private struct CalloutResult {
-        let rect: CGRect
-        let anchor: CGPoint
-        let isClampedFallback: Bool
-    }
-
-    /// Chooses the pill's rect and the leader line's target.
+    /// The **one** fallback the live overlay has: the scrollable panel, drawn
+    /// on the region's own box.
     ///
-    /// Each candidate is clamped inside the safe area *before* the hard
-    /// constraint is tested, because the pill that is drawn is the clamped
-    /// one: a candidate that only passes unclamped has not passed. Among the
-    /// candidates that do pass, the fewest other regions/controls covered
-    /// wins, then the nearest to the region, then the earliest anchor.
-    private static func calloutPlacement(regionRect: CGRect,
-                                         lines: [LiveOverlayTextLine],
-                                         bounds: CGRect,
-                                         obstacles: [CGRect],
-                                         policy: Policy,
-                                         measure: Measure) -> CalloutResult {
-        let size = pillSize(for: lines, policy: policy, measure: measure)
-
-        var best: (rect: CGRect, overlaps: Int, distance: CGFloat)?
-        for anchor in Anchor.allCases {
-            let candidate = clamp(anchorRect(anchor, regionRect: regionRect, size: size,
-                                             gap: policy.anchorGap),
-                                  into: bounds)
-            // The hard constraint: never cover the region's own printed text.
-            guard !candidate.intersects(regionRect) else { continue }
-
-            let overlaps = obstacles.reduce(0) { $0 + ($1.intersects(candidate) ? 1 : 0) }
-            let distance = hypot(candidate.midX - regionRect.midX,
-                                 candidate.midY - regionRect.midY)
-            if let current = best {
-                if overlaps > current.overlaps { continue }
-                if overlaps == current.overlaps, distance >= current.distance { continue }
-            }
-            best = (candidate, overlaps, distance)
-        }
-
-        if let best {
-            return CalloutResult(rect: best.rect,
-                                 anchor: leaderTarget(pillRect: best.rect, regionRect: regionRect),
-                                 isClampedFallback: false)
-        }
-
-        // No anchor can satisfy the hard constraint — a genuinely full screen.
-        // Clamp on the side with the most free space and record it: this is
-        // the case OD5 hands to manual device validation (T-030), not
-        // something to absorb silently.
-        let side = sideWithMostFreeSpace(regionRect: regionRect, bounds: bounds)
-        let rect = clamp(anchorRect(side, regionRect: regionRect, size: size,
-                                    gap: policy.anchorGap),
-                         into: bounds)
-        return CalloutResult(rect: rect,
-                             anchor: leaderTarget(pillRect: rect, regionRect: regionRect),
-                             isClampedFallback: true)
+    /// This is the rung that used to be the anchored callout, and the owner's
+    /// device verdict on the build that had it is why it is not any more:
+    /// "there are still some white-on-blue text boxes floating around". A
+    /// floating box beside the text is a second surface to read and a second
+    /// thing to chase while the picture moves; the panel is the same surface as
+    /// the panel above it — the region's lines, in order, at the body floor,
+    /// where the text stood — with the cap and the scroll the bounded panel
+    /// already has. The two rungs differ in what they can promise, not in how
+    /// they look: the bounded panel promises the block's own grown box, and
+    /// this one promises *a box*, because a region recognized in a container
+    /// with no room left still has its own rect.
+    ///
+    /// The removal is structural rather than conditional. There is no input to
+    /// `place` that produces `Form.callout` — a test drives the dense, the
+    /// degraded, the extract-mode, the always-show-original and the degenerate
+    /// cases and asserts on the *type* — so the form cannot come back by
+    /// configuration, and the placement below has no eighth rung to fall to.
+    /// The case stays in `Form` for the renderer, which still draws a callout a
+    /// caller built by hand (the view's tests do, and so may a future reading
+    /// surface); the *placement* has no way to reach it.
+    private static func panelFallback(region: TextRegionStabilizer.StableTextRegion,
+                                      result: TranslationResult,
+                                      lines: [LiveOverlayTextLine],
+                                      regionRect: CGRect,
+                                      obstacles: [CGRect],
+                                      bounds: CGRect,
+                                      containerSize: CGSize,
+                                      policy: Policy) -> PlacedOverlay {
+        let box = panelFallbackBox(regionRect: regionRect,
+                                   obstacles: obstacles,
+                                   bounds: bounds,
+                                   containerSize: containerSize,
+                                   policy: policy)
+        return PlacedOverlay(region: region,
+                             result: result,
+                             form: .scrollablePanel(regionID: region.id, rect: box),
+                             lines: lines)
     }
 
-    /// The pill's rect for one anchor, before clamping: centred on the
-    /// region's cross axis, one gap clear of its edge.
-    private static func anchorRect(_ anchor: Anchor,
-                                   regionRect: CGRect,
-                                   size: CGSize,
-                                   gap: CGFloat) -> CGRect {
-        switch anchor {
-        case .above:
-            return CGRect(x: regionRect.midX - size.width / 2,
-                          y: regionRect.minY - gap - size.height,
-                          width: size.width, height: size.height)
-        case .below:
-            return CGRect(x: regionRect.midX - size.width / 2,
-                          y: regionRect.maxY + gap,
-                          width: size.width, height: size.height)
-        case .right:
-            return CGRect(x: regionRect.maxX + gap,
-                          y: regionRect.midY - size.height / 2,
-                          width: size.width, height: size.height)
-        case .left:
-            return CGRect(x: regionRect.minX - gap - size.width,
-                          y: regionRect.midY - size.height / 2,
-                          width: size.width, height: size.height)
+    /// The box the fallback panel is drawn in: the bounded panel's own box when
+    /// the region has one, and otherwise the region's rect moved inside the
+    /// bounds.
+    ///
+    /// Total for every region that has a rect at all, which is what makes the
+    /// fallback a *form* rather than a hope — the property that lets `place`
+    /// answer with a panel for every input, and therefore never with a pill.
+    /// The second branch is not a policy: it is the arithmetic for a region
+    /// whose own box has no room to give (a container whose safe area is all
+    /// consumed, a rect the growth law cannot grow), and the box it returns is
+    /// the region's own rect moved — never resized — so the panel starts where
+    /// the text does even when it cannot fit on the screen.
+    static func panelFallbackBox(regionRect: CGRect,
+                                 obstacles: [CGRect] = [],
+                                 bounds: CGRect,
+                                 containerSize: CGSize,
+                                 policy: Policy) -> CGRect {
+        if case .fits(let box) = boundedPanelOutcome(regionRect: regionRect,
+                                                     obstacles: obstacles,
+                                                     bounds: bounds,
+                                                     containerSize: containerSize,
+                                                     policy: policy) {
+            return box
         }
+        return clamp(regionRect, into: bounds)
     }
 
-    /// Moves a pill inside `bounds` without ever resizing it: a resized pill
-    /// would clip text that was measured to fit. A pill wider or taller than
-    /// the bounds cannot fit at all, so it is aligned to the bounds' leading
-    /// edge and left to overflow on the trailing side — the only positioning
-    /// that keeps the start of the text inside the screen.
+    /// Moves a rect inside `bounds` without ever resizing it: a resized panel
+    /// would clip text that the panel's own law promised to draw. A rect wider
+    /// or taller than the bounds cannot fit at all, so it is aligned to the
+    /// bounds' leading edge and left to overflow on the trailing side — the
+    /// only positioning that keeps the start of the text inside the screen.
     private static func clamp(_ rect: CGRect, into bounds: CGRect) -> CGRect {
         let x = rect.width >= bounds.width
             ? bounds.minX
@@ -1343,33 +1327,5 @@ enum LiveOverlayPlacement {
             ? bounds.minY
             : min(max(rect.origin.y, bounds.minY), bounds.maxY - rect.height)
         return CGRect(x: x, y: y, width: rect.width, height: rect.height)
-    }
-
-    /// The point on the region's rect the leader line points at: the region
-    /// rect's closest point to the pill's centre. Always on or inside the
-    /// region's rect, so the line always lands on the text it belongs to.
-    private static func leaderTarget(pillRect: CGRect, regionRect: CGRect) -> CGPoint {
-        CGPoint(x: min(max(pillRect.midX, regionRect.minX), regionRect.maxX),
-                y: min(max(pillRect.midY, regionRect.minY), regionRect.maxY))
-    }
-
-    /// The last resort's side: the one with the most free space between the
-    /// region and the safe area's edge, ties going to the earlier anchor. It
-    /// is a measurement, not a preference — with nothing that satisfies the
-    /// hard constraint, the honest choice is the roomiest side.
-    private static func sideWithMostFreeSpace(regionRect: CGRect, bounds: CGRect) -> Anchor {
-        var best: (anchor: Anchor, space: CGFloat)?
-        for anchor in Anchor.allCases {
-            let space: CGFloat
-            switch anchor {
-            case .above: space = max(0, regionRect.minY - bounds.minY)
-            case .below: space = max(0, bounds.maxY - regionRect.maxY)
-            case .left: space = max(0, regionRect.minX - bounds.minX)
-            case .right: space = max(0, bounds.maxX - regionRect.maxX)
-            }
-            if let current = best, space <= current.space { continue }
-            best = (anchor, space)
-        }
-        return best?.anchor ?? .above
     }
 }

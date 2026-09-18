@@ -239,6 +239,80 @@ final class LiveTranslateConfigTests: XCTestCase {
         }
     }
 
+    /// The picture's own stabilization (owner device verdict, 2026-09-18:
+    /// "the text is still shaky and jittery and unstable — STABILISE THE IMAGE
+    /// FIRST"). Pinned, and pinned *coherently*: the four numbers are one
+    /// mechanism, and a household that changes one has to keep the mechanism
+    /// working. The relations below are the ones that make it a stabilizer —
+    /// a dead zone wider than the window's travel cannot be absorbed, a reject
+    /// threshold inside the travel would re-anchor on every deliberate pan, and
+    /// a follow factor of 1 leaves no motion for the elder to see.
+    func testTheFrameStabilizationDefaultsAreTheOwnersNumbers() {
+        var config = LiveTranslateConfig.default
+
+        XCTAssertTrue(config.frameStabEnabled)
+        XCTAssertEqual(config.frameStabDeadZone, 0.01)
+        XCTAssertEqual(config.frameStabFollowFactor, 0.4)
+        XCTAssertEqual(config.frameStabMargin, 0.03)
+        XCTAssertEqual(config.frameStabRejectDelta, 0.2)
+        XCTAssertEqual(config.frameStabAnchorSeconds, 2.0)
+        XCTAssertEqual(config.frameStabRegistrationSide, 256)
+
+        XCTAssertGreaterThan(config.frameStabDeadZone, 0,
+                             "a zero dead zone is a stabilizer with nothing to absorb")
+        XCTAssertLessThanOrEqual(config.frameStabDeadZone, config.frameStabMargin,
+                                 "a tremor wider than the window's travel cannot be absorbed")
+        XCTAssertGreaterThan(config.frameStabFollowFactor, 0)
+        XCTAssertLessThan(config.frameStabFollowFactor, 1,
+                          "1 follows a deliberate movement exactly, which is no motion at all")
+        XCTAssertGreaterThan(config.frameStabMargin, 0)
+        XCTAssertLessThan(config.frameStabMargin, 0.25,
+                          "a window inset this far is a different picture, not the same one held still")
+        XCTAssertGreaterThan(config.frameStabRejectDelta, config.frameStabMargin,
+                             "a threshold inside the travel would re-anchor on every deliberate pan")
+        XCTAssertGreaterThan(config.frameStabAnchorSeconds, 0,
+                             "an anchor taken and replaced in the same instant measures nothing")
+        XCTAssertGreaterThanOrEqual(config.frameStabRegistrationSide, 32,
+                                    "below this there is no texture left to register")
+
+        // The policy is the config's own numbers, read in the estimator's
+        // vocabulary — not a second set of defaults living beside it.
+        let policy = FrameStabilizationPolicy(config: config)
+        XCTAssertEqual(policy.deadZone, config.frameStabDeadZone)
+        XCTAssertEqual(policy.followFactor, config.frameStabFollowFactor)
+        XCTAssertEqual(policy.margin, config.frameStabMargin)
+        XCTAssertEqual(policy.rejectDelta, config.frameStabRejectDelta)
+
+        // A key outside the range the law can honour arrives clamped rather than
+        // trusted: the window is geometry, and a margin of three frames is not.
+        config.frameStabMargin = 3
+        config.frameStabFollowFactor = 4
+        config.frameStabDeadZone = -1
+        let clamped = FrameStabilizationPolicy(config: config)
+        XCTAssertLessThanOrEqual(clamped.margin, 0.25)
+        XCTAssertLessThanOrEqual(clamped.followFactor, 1)
+        XCTAssertEqual(clamped.deadZone, 0)
+    }
+
+    /// The stabilization's knobs are knobs, and they are the *resource* knobs'
+    /// neighbours: a device that cannot afford the extra pass turns the feature
+    /// off or shrinks the buffer, and neither of those needs a code change.
+    func testTheFrameStabilizationKnobsAreConfigurableAndNotLiterals() {
+        var config = LiveTranslateConfig.default
+        config.frameStabEnabled = false
+        config.frameStabDeadZone = 0.02
+        config.frameStabFollowFactor = 0.5
+        config.frameStabMargin = 0.05
+        config.frameStabRejectDelta = 0.3
+        config.frameStabAnchorSeconds = 3
+        config.frameStabRegistrationSide = 128
+
+        XCTAssertNotEqual(config, LiveTranslateConfig.default)
+        XCTAssertFalse(FrameStabilizationPolicy(config: config).enabled)
+        XCTAssertEqual(FrameStabilizationPolicy(config: config).registrationSide, 128)
+        XCTAssertEqual(config.frameStabAnchorSeconds, 3)
+    }
+
     /// The knobs are knobs: a household with a different phone, or an owner who
     /// wants the ultra-wide's field of view, changes one value here and not an
     /// expression in a component.

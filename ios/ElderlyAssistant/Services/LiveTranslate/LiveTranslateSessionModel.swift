@@ -191,6 +191,25 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// Published on change only — see `delivered(_:)`.
     @Published private(set) var framePixelSize: CGSize = .zero
 
+    /// How far the **picture itself** has been panned to hold it still against
+    /// the hand's tremor, as the frame carried it (owner device verdict,
+    /// 2026-09-18: *"the text is still shaky and jittery and unstable …
+    /// STABILISE THE IMAGE FIRST"*).
+    ///
+    /// Published for the same reason `framePixelSize` is, and by the same rule:
+    /// the view composes it into the one crop both the preview layer and the
+    /// overlay map through (`LiveCameraCrop.stabilized(by:)`), so the picture
+    /// that is drawn still and the boxes drawn on it cannot disagree. It is the
+    /// *display's* correction only — the frames the recognition pass reads are
+    /// the raw ones (see `CameraFrame.stabilization`).
+    ///
+    /// Guarded on change, like the size: a still hand answers the *same* value
+    /// frame after frame, and one value per 4 Hz frame must not invalidate the
+    /// view. The value is stamped by the camera on the frame, never recomputed
+    /// here — and it is not `.none` while the session is running, because the
+    /// inset is the room the correction is held in.
+    @Published private(set) var frameStabilization: FrameStabilization = .none
+
     // MARK: Dependencies
 
     let locale: Locale
@@ -562,6 +581,9 @@ final class LiveTranslateSessionModel: ObservableObject {
         snapshotTask = nil
         frozen = nil
         latestFrame = nil
+        // The picture's correction goes with the picture: a closed model draws
+        // no window of a camera that has stopped (see `frameStabilization`).
+        frameStabilization = .none
         // The session is over: a closed model is never mid-capture, and no
         // spinner may outlive the view that drew it.
         freezeInProgress = false
@@ -1022,6 +1044,11 @@ final class LiveTranslateSessionModel: ObservableObject {
         // changes when the format does must not invalidate the view at the
         // frame rate.
         if framePixelSize != frame.pixelSize { framePixelSize = frame.pixelSize }
+        // The frame's own stabilization, on the frame's own terms: one value per
+        // frame, from the camera that measured it, so the window the view draws
+        // and the boxes the placement maps are always the same instant of the
+        // same correction (owner device verdict, 2026-09-18).
+        if frameStabilization != frame.stabilization { frameStabilization = frame.stabilization }
         await pipeline?.ingest(frame)
     }
 
