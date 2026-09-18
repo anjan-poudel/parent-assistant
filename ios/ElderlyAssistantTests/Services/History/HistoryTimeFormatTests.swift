@@ -324,13 +324,19 @@ final class ActivityRowTextTests: XCTestCase {
     }
 
     /// The caption marks a missed row explicitly — "Missed call · Just now"
-    /// — while call and message rows keep their kind label. Fixtures sit
-    /// 30s back on purpose: `displayString`'s "Just now" bucket is strictly
-    /// under a minute, so an even-60s row would already read "Today".
+    /// for a numberless row, and "Missed call · <number> · Just now" when
+    /// the row carries its captured number (missed-calls fix, 2026-09-18:
+    /// every numbered entry shows its number) — while call and message
+    /// rows keep their kind label. Fixtures sit 30s back on purpose:
+    /// `displayString`'s "Just now" bucket is strictly under a minute, so
+    /// an even-60s row would already read "Today".
     func testCaptionMarksMissedRowsAndKeepsKindLabels() {
         let missed = AppActivityEntry(timestamp: now.addingTimeInterval(-30),
                                       kind: .call, channel: .unanswered,
                                       contactName: "बुबा", phone: "9812345678")
+        let anonymous = AppActivityEntry(timestamp: now.addingTimeInterval(-30),
+                                         kind: .call, channel: .unanswered,
+                                         contactName: "", phone: "")
         let call = AppActivityEntry(timestamp: now.addingTimeInterval(-30),
                                     kind: .call, channel: .phone,
                                     contactName: "बुबा", phone: "9812345678")
@@ -340,10 +346,13 @@ final class ActivityRowTextTests: XCTestCase {
 
         XCTAssertEqual(ActivityRowText.caption(for: missed, now: now,
                                                calendar: utcCalendar, locale: en),
-                       "Missed call · Just now")
+                       "Missed call · 9812345678 · Just now")
         XCTAssertEqual(ActivityRowText.caption(for: missed, now: now,
                                                calendar: utcCalendar, locale: ne),
-                       "छुटेको कल · भर्खरै")
+                       "छुटेको कल · 9812345678 · भर्खरै")
+        XCTAssertEqual(ActivityRowText.caption(for: anonymous, now: now,
+                                               calendar: utcCalendar, locale: en),
+                       "Missed call · Just now")
         XCTAssertEqual(ActivityRowText.caption(for: call, now: now,
                                                calendar: utcCalendar, locale: en),
                        "Call · Just now")

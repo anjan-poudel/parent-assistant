@@ -287,10 +287,14 @@ struct HomeView: View {
         let now = Date()
         guard let entry = AppActivityLog.lastMissedCall(in: coordinator.recentActivity,
                                                         now: now) else { return nil }
+        // The correlated name (missed-calls fix, 2026-09-18) rides the
+        // same published map the list rows read, so the tile and the
+        // list name one caller identically.
         return MissedCallPresentation.resolve(entry,
                                               now: now,
                                               calendar: .current,
-                                              locale: coordinator.activeLocale)
+                                              locale: coordinator.activeLocale,
+                                              correlatedName: coordinator.missedCallDisplayNames[entry.id])
     }
 
     /// The talk stage's [P0-2] readiness value plus its two derived labels.

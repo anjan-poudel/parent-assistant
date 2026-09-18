@@ -201,6 +201,7 @@
 		4FE0C343B8173DE0BE6D9BD4 /* CalendarSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C887D37D57DDAEE36D6FC9CD /* CalendarSettingsView.swift */; };
 		50511E8E63780ACAF6206249 /* SecurityEvidenceIndexTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5D8FC3CD29CF0096D3BE954 /* SecurityEvidenceIndexTests.swift */; };
 		50A56F24F6B12052443B5B20 /* ExternalEventLinkStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C9080DC0F9997AFA7050A4E /* ExternalEventLinkStore.swift */; };
+		5100CC26304C8843DF0A947C /* MissedCallDialBackTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15F0074FD67707356D249845 /* MissedCallDialBackTests.swift */; };
 		517F7092B944DA9F449B888F /* FeedService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F43D783E7D83EF2A3FE0B5FB /* FeedService.swift */; };
 		518ADD3B18173AAFB2FF8B95 /* CallMethod.swift in Sources */ = {isa = PBXBuildFile; fileRef = 217C88EEE4C13EB59E70F612 /* CallMethod.swift */; };
 		51A1484398D9895D9F425AA0 /* YouTubePluginTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 634F4CB3294C0340AC9C67B9 /* YouTubePluginTests.swift */; };
@@ -494,6 +495,7 @@
 		C4B1E7A89424C4305D3692A1 /* FreeFormEventServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B23ED5C6DE4D8B5D3F32756C /* FreeFormEventServiceTests.swift */; };
 		C4C7B7ECE3743B9A637DDD38 /* ApplianceHelperSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE1DFF8F9710FE47A345319B /* ApplianceHelperSessionTests.swift */; };
 		C4EA84F4A6F952C380284907 /* ConfirmationChallengeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B90017211C953BC505991B5 /* ConfirmationChallengeTests.swift */; };
+		C509AAB906009726D9005C05 /* MissedCallContactResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B628EC3CD121E8F2DA69ACD4 /* MissedCallContactResolverTests.swift */; };
 		C5203CCF407CA4459A4B01C8 /* AppCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33CA53E96C9EF606F1095843 /* AppCoordinator.swift */; };
 		C56EE736BFF37DF4ED0D4D27 /* FamilyContactStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F73D94989C145147E332AC6 /* FamilyContactStoreTests.swift */; };
 		C6414E412BD964D2A9F889A1 /* FeedModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55896246FC287039698A984D /* FeedModels.swift */; };
@@ -599,6 +601,7 @@
 		E90295A82F5C4F811906B0F4 /* OnDeviceSTTSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = F525688EDA15A66F48E45461 /* OnDeviceSTTSelection.swift */; };
 		E932CCFDE4ABFE21CC9269C9 /* AppointmentStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6605C02C38C35E32766202A8 /* AppointmentStoreTests.swift */; };
 		E9722D2AE8B80D65D2E219D4 /* WakeWordConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 718ABB7DD4D85265A410E8D6 /* WakeWordConfig.swift */; };
+		E99129AFF0E37273EC65E817 /* MissedCallContactResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE481BEDD6751C37669EEC46 /* MissedCallContactResolver.swift */; };
 		E99BB069D3725B48516612F5 /* ApplianceHelperLabelSeamTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BCFE15457FA3C22512615C3A /* ApplianceHelperLabelSeamTests.swift */; };
 		E9D11CFE272978E5149E6EB9 /* NotificationCategoriesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E9561057265F5A51E78A7F0 /* NotificationCategoriesTests.swift */; };
 		EA29EE8D1454A4698EB8BBD3 /* Manuals in Resources */ = {isa = PBXBuildFile; fileRef = 08476E0DD062A20C8A89F674 /* Manuals */; };
@@ -760,6 +763,7 @@
 		1411939748140920CBE9E815 /* SpectralGateCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpectralGateCore.swift; sourceTree = "<group>"; };
 		148E5FBD9E66E5EE4AB49ACD /* AlarmKitAlarmBackendTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlarmKitAlarmBackendTests.swift; sourceTree = "<group>"; };
 		151B13AEC9B0FEF80AC8DD9F /* DialectLexicon.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = DialectLexicon.json; sourceTree = "<group>"; };
+		15F0074FD67707356D249845 /* MissedCallDialBackTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissedCallDialBackTests.swift; sourceTree = "<group>"; };
 		16CD0A9C3136FF1981DFF10B /* CalendarShareMapperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarShareMapperTests.swift; sourceTree = "<group>"; };
 		16DB92F69EF3D8B663C9013C /* AudioSessionPresetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioSessionPresetTests.swift; sourceTree = "<group>"; };
 		17293525E4065C56C776628C /* AppIcons.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = AppIcons.xcassets; sourceTree = "<group>"; };
@@ -1161,6 +1165,7 @@
 		AE0B21C850A52EB23706713A /* AppLauncher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLauncher.swift; sourceTree = "<group>"; };
 		AE14BB231318BB94B12FF212 /* SpeakerBiometricService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerBiometricService.swift; sourceTree = "<group>"; };
 		AE2802C746DB19D22FB0DCB3 /* ChannelPreferenceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelPreferenceStore.swift; sourceTree = "<group>"; };
+		AE481BEDD6751C37669EEC46 /* MissedCallContactResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissedCallContactResolver.swift; sourceTree = "<group>"; };
 		AE5A7A7BF2077907CF177EDF /* LiveTranslationPipelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTranslationPipelineTests.swift; sourceTree = "<group>"; };
 		AEC123B9E266E9C6B1C45131 /* OverlayRenderProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlayRenderProbe.swift; sourceTree = "<group>"; };
 		AF94EF103968B07445324A94 /* CallLinks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallLinks.swift; sourceTree = "<group>"; };
@@ -1177,6 +1182,7 @@
 		B5A00D2F8F62F1792BC2784F /* LocalBrainChainTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalBrainChainTests.swift; sourceTree = "<group>"; };
 		B5B27A5F278473E1FB9ACC2D /* YouTubePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YouTubePlugin.swift; sourceTree = "<group>"; };
 		B61DA98BD99B60ED7AC7F304 /* EventExtrasStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventExtrasStore.swift; sourceTree = "<group>"; };
+		B628EC3CD121E8F2DA69ACD4 /* MissedCallContactResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissedCallContactResolverTests.swift; sourceTree = "<group>"; };
 		B6EDAE4F0F33D9A5A1539AF0 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		B7D8A76CCE745FEED78269EC /* IdHashing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdHashing.swift; sourceTree = "<group>"; };
 		B7DCE4BB312DE6F097E79236 /* IntentRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentRouter.swift; sourceTree = "<group>"; };
@@ -1580,6 +1586,7 @@
 				AE2802C746DB19D22FB0DCB3 /* ChannelPreferenceStore.swift */,
 				60B691FD3630151DC13387EA /* FacebookArchiveParser.swift */,
 				974B0210AEBDBFB82A58401F /* MessengerHandleStore.swift */,
+				AE481BEDD6751C37669EEC46 /* MissedCallContactResolver.swift */,
 				668857180EFC8414708A2AEB /* UnifiedContactSearch.swift */,
 			);
 			path = Contacts;
@@ -1668,6 +1675,7 @@
 				FF8A64B10D6831804634E41B /* ChannelPreferenceStoreTests.swift */,
 				0C756153BE3609C46F69716B /* FacebookArchiveParserTests.swift */,
 				2C1E3FDDC092D291009FA2CF /* MessengerHandleStoreTests.swift */,
+				B628EC3CD121E8F2DA69ACD4 /* MissedCallContactResolverTests.swift */,
 				6427E04AFBC9C2E083254424 /* SystemContactSearchTests.swift */,
 				DB8C99DCB2156C33403F2AAB /* UnifiedContactSearchTests.swift */,
 			);
@@ -1871,6 +1879,7 @@
 				00ABD1B5F8C75588285FC5EC /* DesignTokensTests.swift */,
 				E33F5F28A61EB5B535E69FF6 /* DirectionsScreenListTests.swift */,
 				22577ED90A48390A73B44C47 /* MedicationVisualAidPresentationTests.swift */,
+				15F0074FD67707356D249845 /* MissedCallDialBackTests.swift */,
 				E5838B1DFAF39C6B2D0F37D3 /* OnboardingStateTests.swift */,
 				E4AA8C6EC2F7FE51162BE870 /* OutcomePanelCompositionTests.swift */,
 				57ECC13455DB43643BFD27EE /* SettingsTabMappingTests.swift */,
@@ -2989,6 +2998,7 @@
 				6FA4E93AC3BD2388DAA5DBF0 /* MessengerHandleStore.swift in Sources */,
 				C8D7017F754F65DBB8C7DA8E /* MethodResolver.swift in Sources */,
 				20C58C954BB63A590D97DB44 /* MigratingEncryptedStorage.swift in Sources */,
+				E99129AFF0E37273EC65E817 /* MissedCallContactResolver.swift in Sources */,
 				0339542A03F11A28576476ED /* ModelBudgetPolicy.swift in Sources */,
 				D0793871C836D0C5BA592E8B /* ModelCatalog.swift in Sources */,
 				FFA47B34B6817B5F7243851D /* ModelCostModel.swift in Sources */,
@@ -3301,6 +3311,8 @@
 				1A78AA3AD77DA25AFA4D13DD /* MessengerHandleStoreTests.swift in Sources */,
 				9837A4EC58593F6FACEF05C7 /* MethodResolverTests.swift in Sources */,
 				1B19A8427986D4D8146FB481 /* MigratingEncryptedStorageTests.swift in Sources */,
+				C509AAB906009726D9005C05 /* MissedCallContactResolverTests.swift in Sources */,
+				5100CC26304C8843DF0A947C /* MissedCallDialBackTests.swift in Sources */,
 				B9E6DADB1205CA24E9CA4A11 /* ModelBudgetPolicyTests.swift in Sources */,
 				5D6192F21EDE7E60149820BB /* ModelCatalogLanguageTests.swift in Sources */,
 				AE6778AE48C116BEC75A9C41 /* ModelCatalogSTTNamingTests.swift in Sources */,

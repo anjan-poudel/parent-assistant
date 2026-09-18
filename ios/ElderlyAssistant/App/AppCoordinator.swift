@@ -589,15 +589,43 @@ final class AppCoordinator: ObservableObject {
     /// Encrypted, bounded (100-entry) log of what THIS app itself
     /// called/messaged — the Recent activity leaf's source of truth.
     /// Never the system call log, never other apps' messages (iOS
-    /// platform wall). The ONE exception is the anonymous unanswered-call
-    /// row (missed-calls task, 2026-09-07): a presence-only fact the
+    /// platform wall). The ONE exception is the unanswered-call row
+    /// (missed-calls task, 2026-09-07): a presence-only fact the
     /// live-call observer saw — a call ended without ever connecting —
-    /// recorded with no name and no number, never the identity the
-    /// system call log would carry (iOS does not expose it). Lazy like
-    /// `chatHistoryStore`: `storage` is assigned at the top of `init`,
-    /// long before any call/message path can record. Main-queue confined
-    /// by contract.
+    /// recorded with no name and no number when iOS masked the caller,
+    /// never the identity the system call log would carry (iOS does not
+    /// expose it). Since the call-tracking task (2026-09-13) that row is
+    /// ATTRIBUTED when it can honestly be: if the app itself opened a
+    /// call moments earlier and no call ever connected in between, the
+    /// row carries the contact AND NUMBER the app dialed
+    /// (`openedCallAttributor` below) — the missed-calls fix
+    /// (2026-09-18) wired this seam, so new entries for the app's own
+    /// dials always carry their number. Everything else stays anonymous.
+    /// Lazy like `chatHistoryStore`: `storage` is assigned at the top of
+    /// `init`, long before any call/message path can record. Main-queue
+    /// confined by contract.
     private(set) lazy var activityLog = AppActivityLog(storage: storage)
+
+    /// Matches the app's OWN call opens to the anonymous unanswered events
+    /// the live-call observer reports (call-tracking task, 2026-09-13;
+    /// wired by the missed-calls fix, 2026-09-18 — a merge regression had
+    /// dropped the wiring, so every unanswered row stored an empty number
+    /// even for calls the app dialed itself), so a call the app placed
+    /// that was never picked up is recorded as a missed call WITH its
+    /// contact and number instead of an anonymous row. The decision
+    /// itself — window, connect-clears, consume-once — is the pure
+    /// `OpenedCallAttributor`; this property is only the wiring.
+    /// Main-queue confined, like every other piece of activity recording.
+    private let openedCallAttributor = OpenedCallAttributor()
+
+    /// Missed-call row id → correlated display name (missed-calls fix,
+    /// 2026-09-18) — the read side of `MissedCallContactResolver`: the
+    /// family-correlation is synchronous, the native-address-book half
+    /// lands asynchronously (and only with Contacts access granted).
+    /// Views resolve the name line through this map; a row whose id is
+    /// absent falls back to its stored name, then its raw number, then
+    /// the honest "Unanswered call" label.
+    @Published private(set) var missedCallDisplayNames: [UUID: String] = [:]
 
     /// Published window over `activityLog`, newest first — the leaf's
     /// read side. Mirrors the `conversationHistory` window pattern:
@@ -613,8 +641,10 @@ final class AppCoordinator: ObservableObject {
     /// ever delivered, so this flag says "a call is in progress" and the
     /// app never learns (or claims) whose. The observer's ONLY other
     /// output is the unanswered event (missed-calls task, 2026-09-07),
-    /// recorded by `recordUnansweredCall` — one anonymous "ended without
-    /// connecting" row, still no identity or number.
+    /// recorded by `recordUnansweredCall` — an anonymous "ended without
+    /// connecting" row when iOS masked the caller, or the app's own
+    /// contact and number when the app placed the dial that ended
+    /// unanswered (`OpenedCallAttributor`).
     @Published private(set) var liveCallActive = false
 
     /// Edge-triggered detector; armed (constructed) in `start()`. Lazy
@@ -7268,25 +7298,66 @@ self.noteTalkContractChanged()
                                             phone: phone,
                                             messengerHandle: messengerHandle,
                                             body: storedBody))
+        // Arm the missed-call attribution (call-tracking task,
+        // 2026-09-13; wired by the missed-calls fix, 2026-09-18): a call
+        // the app genuinely OPENED is the one event iOS's anonymous
+        // unanswered report may honestly be matched to — this is the
+        // capture seam where the missed call's NUMBER comes from. Only
+        // the real call channels qualify — a Messenger thread open is
+        // recorded as a call attempt but is not a call, WhatsApp opens a
+        // chat, and an `.unanswered` row is the observer's own event
+        // (never a dial of ours), so none of them can become a candidate.
+        if kind == .call, Self.attributableCallChannels.contains(channel) {
+            openedCallAttributor.recordOpenedCall(name: contactName,
+                                                  phone: phone,
+                                                  at: timestamp)
+        }
         refreshRecentActivity()
     }
 
-    /// Records one ANONYMOUS unanswered call — the coordinator side of
-    /// the live-call detector's `onUnanswered` (missed-calls task,
-    /// 2026-09-07). Fired when CXCallObserver reported a call that ended
-    /// without ever connecting: a missed or declined incoming call, or
-    /// an attempted outgoing call nobody picked up. iOS masks calls that
-    /// involve other apps so completely that these are
-    /// indistinguishable — this row claims only the shared fact, "a call
-    /// ended unanswered". `contactName` and `phone` are EMPTY ON
-    /// PURPOSE: the caller's identity AND number are masked by iOS —
-    /// there is no name to store, no number to look up or dial, and no
-    /// address-book match is possible — and the UI renders the localized
-    /// "Unanswered call" label (`history.unanswered`) instead of a
-    /// stored locale string. The row's action opens the Phone app
-    /// (`PhoneAppOpener`), where the caller's identity genuinely lives
-    /// (its Recents tab, one tap from the dialer).
+    /// The channels whose open IS a placed call (call-tracking task,
+    /// 2026-09-13) — the only ones `OpenedCallAttributor` may match an
+    /// unanswered event to. Messenger is deliberately absent: its "call"
+    /// request resolves to an opened THREAD (no documented scheme starts a
+    /// Messenger call), so no call exists to go unanswered.
+    private static let attributableCallChannels: Set<AppActivityEntry.Channel> = [
+        .phone, .faceTimeVideo, .faceTimeAudio
+    ]
+
+    /// Records one unanswered call — the coordinator side of the
+    /// live-call detector's `onUnanswered` (missed-calls task, 2026-09-07;
+    /// attribution, call-tracking task 2026-09-13, wired by the
+    /// missed-calls fix 2026-09-18). Fired when CXCallObserver reported a
+    /// call that ended without ever connecting: a missed or declined
+    /// incoming call, or an attempted outgoing call nobody picked up. iOS
+    /// masks calls that involve other apps so completely that these are
+    /// indistinguishable, so the row claims only the shared fact, "a call
+    /// ended unanswered".
+    ///
+    /// TWO shapes, and the difference is what the app can prove:
+    ///  - ATTRIBUTED — the app itself opened a call to a contact moments
+    ///    before the event and no call ever connected in between
+    ///    (`OpenedCallAttributor`): the row carries that contact AND the
+    ///    dialed NUMBER — captured at the source (the dial), because the
+    ///    app already knew who and what number it called and the
+    ///    ended-unconnected event is that dial's outcome. New entries
+    ///    from this shape ALWAYS carry a number.
+    ///  - ANONYMOUS — everything else. `contactName` and `phone` are
+    ///    EMPTY ON PURPOSE: the caller's identity AND number are masked
+    ///    by iOS — there is no name to store, no number to look up or
+    ///    dial, and no address-book match is possible — and the UI
+    ///    renders the localized "Unanswered call" label
+    ///    (`history.unanswered`) instead of a stored locale string. Such
+    ///    a row's action opens the Phone app (`PhoneAppOpener`), where
+    ///    the caller's identity genuinely lives (its Recents tab, one
+    ///    tap from the dialer).
     private func recordUnansweredCall(at timestamp: Date) {
+        if let opened = openedCallAttributor.attributedMissedCall(endedAt: timestamp) {
+            recordActivity(kind: .call, channel: .unanswered,
+                           contactName: opened.name, phone: opened.phone,
+                           timestamp: timestamp)
+            return
+        }
         recordActivity(kind: .call, channel: .unanswered,
                        contactName: "", phone: "", timestamp: timestamp)
     }
@@ -7327,6 +7398,12 @@ self.noteTalkContractChanged()
     /// `recentActivity`). Main queue.
     private func refreshRecentActivity() {
         recentActivity = activityLog.entries()
+        // The window changed, so the missed-call correlation is rebuilt
+        // too (missed-calls fix, 2026-09-18): new numbered rows resolve
+        // their family-contact names synchronously; the native-book half
+        // rides the same refresh (no permission prompt here — a call
+        // event is nobody's point of use; the leaves prompt on appear).
+        refreshMissedCallCorrelations()
     }
 
     /// Builds the live-call detector. Instance method (not a closure over
@@ -7339,13 +7416,25 @@ self.noteTalkContractChanged()
         let detector = LiveCallDetector(
             provider: CXCallStateProvider(),
             onChange: { [weak self] active in
-                DispatchQueue.main.async { self?.liveCallActive = active }
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.liveCallActive = active
+                    // A connected call clears the attribution candidate
+                    // (call-tracking task, 2026-09-13; wired by the
+                    // missed-calls fix): something was ANSWERED, so if an
+                    // unanswered event lands later it is not the app's
+                    // dial — better to record it anonymously than to name
+                    // the wrong contact.
+                    if active { self.openedCallAttributor.noteCallConnected() }
+                }
             },
             onUnanswered: { [weak self] timestamp in
-                // Record the anonymous unanswered row (missed-calls task,
-                // 2026-09-07). Same main-hop rule as onChange: the store
-                // is main-queue confined, whatever queue the provider
-                // fired on.
+                // Record the unanswered row (missed-calls task,
+                // 2026-09-07) — attributed with the app's own contact and
+                // number when the attributor can prove it (missed-calls
+                // fix, 2026-09-18), anonymous otherwise. Same main-hop
+                // rule as onChange: the store is main-queue confined,
+                // whatever queue the provider fired on.
                 DispatchQueue.main.async { self?.recordUnansweredCall(at: timestamp) }
             }
         )
@@ -7354,6 +7443,207 @@ self.noteTalkContractChanged()
         // its initial snapshot — that is exactly what this read is for).
         liveCallActive = detector.hasActiveCall
         return detector
+    }
+
+    // MARK: - Missed-call correlation & dial-back (missed-calls fix, 2026-09-18)
+
+    /// Rebuilds `missedCallDisplayNames` for every numbered missed-call
+    /// row in the published window: the FAMILY correlation is synchronous
+    /// (the app's own contacts need no permission), and the NATIVE
+    /// address-book half runs on a background queue and publishes back on
+    /// main — point-of-use permission lives there (see
+    /// `refreshNativeMissedCallNames`). A row with no correlation simply
+    /// has no entry in the map; the views fall back to the stored name,
+    /// then the raw number, then the honest label. Main queue.
+    func refreshMissedCallCorrelations(promptIfNeeded: Bool = false) {
+        let rows = recentActivity.filter {
+            $0.channel == .unanswered && !$0.phone.isEmpty
+        }
+        let family = familyContacts
+        var names: [UUID: String] = [:]
+        for row in rows {
+            if let contact = MissedCallContactResolver.familyMatch(phone: row.phone, in: family) {
+                names[row.id] = contact.name
+            }
+        }
+        missedCallDisplayNames = names
+        let needNative = rows.filter { names[$0.id] == nil }
+        guard !needNative.isEmpty else { return }
+        refreshNativeMissedCallNames(needNative, family: family,
+                                     promptIfNeeded: promptIfNeeded)
+    }
+
+    /// The NATIVE-address-book half of the missed-call correlation:
+    /// second source, after the family contacts (the task's order). The
+    /// CNContact search runs off-main (`AddressBookDirectory` enumerates
+    /// the whole book) and its result publishes back on main. `family`
+    /// is captured BY VALUE here — the published array stays main-queue
+    /// confined and the task reads its own snapshot.
+    ///
+    /// POINT-OF-USE PERMISSION: Contacts access is asked for HERE — when
+    /// a numbered missed-call row needs a name the family list cannot
+    /// give — and only when `promptIfNeeded` is set, which only the
+    /// MISSED-CALLS LIST does on appear (never a background call event,
+    /// never app launch). The system prompt is the explanation (standard
+    /// iOS pattern). HONEST DENIAL: a denied/restricted state stays
+    /// quiet — no entry is published, the raw number remains the display,
+    /// and the app never asks again.
+    private func refreshNativeMissedCallNames(_ rows: [AppActivityEntry],
+                                              family: [FamilyContact],
+                                              promptIfNeeded: Bool) {
+        let phoneRows = rows.map { (id: $0.id, phone: $0.phone) }
+        Task.detached(priority: .utility) { [weak self] in
+            let directory = AddressBookDirectory()
+            var access = AddressBookDirectory.access()
+            if access == .notDetermined, promptIfNeeded {
+                let granted = await directory.requestAccess()
+                access = granted ? .allowed : .denied
+            }
+            guard access == .allowed,
+                  let entries = try? directory.allEntries() else { return }
+            var names: [UUID: String] = [:]
+            for row in phoneRows {
+                let resolution = MissedCallContactResolver.resolve(
+                    phone: row.phone,
+                    family: family,
+                    native: entries,
+                    access: .allowed)
+                if case .name(let name) = resolution {
+                    names[row.id] = name
+                }
+            }
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                for (id, name) in names {
+                    self.missedCallDisplayNames[id] = name
+                }
+            }
+        }
+    }
+
+    /// The family contact whose RAW stored phone is the same dialable
+    /// number as `phone` — the missed-call list's family correlation
+    /// (`MissedCallContactResolver`'s trailing-digit rule; the editor
+    /// stores numbers raw, so "+977-9841…" and "(977) 9841…" are one
+    /// number). Also the dial-back's identity source: a matched contact
+    /// makes the tap resolve EXACTLY like that contact's audio call
+    /// button (`resolvedMissedCallChannel`).
+    func familyContact(matchingPhone phone: String) -> FamilyContact? {
+        MissedCallContactResolver.familyMatch(phone: phone, in: familyContacts)
+    }
+
+    /// The channel a missed-call row's dial-back opens (missed-calls fix,
+    /// 2026-09-18) — resolved the SAME way a family contact's AUDIO call
+    /// button resolves (`FamilyContact.resolvedAudioApp`), because a
+    /// dial-back IS an audio call: the matched family contact's own
+    /// preference wins (that contact's `preferredCallApp`, FaceTime
+    /// excluded — it is video-only in the button vocabulary), else the
+    /// global `defaultCallApp` — with the one hard rule from
+    /// `resolvedCallChannel` on top: never resolve to a channel the row
+    /// cannot open (Messenger needs an on-file handle, else `.phone`).
+    /// The GSM `tel:` path is always in the chain, so dialing always
+    /// works. Pure static so the whole matrix is unit-testable.
+    static func resolvedMissedCallChannel(familyContact: FamilyContact?,
+                                          defaultApp: CallApp,
+                                          messengerHandleAvailable: Bool) -> CallApp {
+        let resolved = familyContact?.resolvedAudioApp ?? defaultApp
+        guard resolved.supportsAudio else { return .phone }
+        return resolvedCallChannel(explicit: resolved,
+                                   defaultApp: defaultApp,
+                                   messengerHandleAvailable: messengerHandleAvailable)
+    }
+
+    /// What a missed-call row's tap resolves to (missed-calls fix,
+    /// 2026-09-18) — the pure decision behind `dialBackMissedCall`,
+    /// static so tests can drive the whole matrix without a coordinator
+    /// (the house seam pattern). `name` is the row's resolved display
+    /// identity (correlated name, stored name, or the raw number).
+    enum MissedCallDialAction: Equatable {
+        /// The row has no number (an anonymous row from before the fix,
+        /// or a caller iOS masked) — open the Phone app, where the call
+        /// genuinely lives in Recents.
+        case openPhoneApp
+        /// A number exists but normalizes to nothing dialable —
+        /// defensive: the honest dead-row line, never a silent tap.
+        case unusableNumber(name: String)
+        /// Plain GSM dial-back via `tel:` — always works.
+        case call(name: String, phone: String)
+        /// FaceTime (the video surface; a dial-back never resolves here
+        /// today — kept so the switch stays exhaustive and future-proof).
+        case faceTime(name: String, phone: String)
+        /// WhatsApp chat to the number (call icon one tap away), the
+        /// same surface the contact call button opens.
+        case whatsApp(name: String, phone: String)
+        /// Messenger thread (call icon one tap away) — only resolved
+        /// when a handle is on file.
+        case messenger(name: String, phone: String, handle: String)
+    }
+
+    /// The pure dial-back decision (missed-calls fix, 2026-09-18): the
+    /// channel `resolvedMissedCallChannel` picks, mapped onto the row's
+    /// action. A numberless row keeps the honest Phone-app open; a number
+    /// that normalizes to nothing speaks the honest dead-row line instead
+    /// of a silent dead tap.
+    static func missedCallDialAction(phone: String,
+                                     familyContact: FamilyContact?,
+                                     defaultApp: CallApp,
+                                     messengerHandle: String?,
+                                     name: String) -> MissedCallDialAction {
+        guard !phone.isEmpty else { return .openPhoneApp }
+        guard !ContactNumberKey.normalized(phone).isEmpty else {
+            return .unusableNumber(name: name)
+        }
+        let channel = resolvedMissedCallChannel(
+            familyContact: familyContact,
+            defaultApp: defaultApp,
+            messengerHandleAvailable: messengerHandle?.isEmpty == false)
+        switch channel {
+        case .phone: return .call(name: name, phone: phone)
+        case .faceTime: return .faceTime(name: name, phone: phone)
+        case .whatsApp: return .whatsApp(name: name, phone: phone)
+        case .messenger: return .messenger(name: name, phone: phone,
+                                           handle: messengerHandle ?? "")
+        }
+    }
+
+    /// Tap-to-dial-back of a missed-call row (missed-calls fix,
+    /// 2026-09-18) — the row's action in HistoryView and CallView's
+    /// recent-activity section. A row WITH a number dials it back through
+    /// the same deep-link resolution a family contact's audio call button
+    /// uses (matched family contact's preference, else the global
+    /// default, Messenger gated on a handle, `tel:` always in the chain —
+    /// `performSystemContactCall` opens `tel://` unconditionally), so the
+    /// tap always opens the resolved app or the dialer. A numberless row
+    /// (an old anonymous entry, or a caller iOS masked) keeps the honest
+    /// Phone-app open — there is no number to dial and the app never
+    /// fakes one. Main queue (every dispatch below is a coordinator
+    /// method confined to it).
+    func dialBackMissedCall(_ entry: AppActivityEntry) {
+        let identity = ActivityRowText.unansweredIdentity(
+            for: entry,
+            correlatedName: missedCallDisplayNames[entry.id]) ?? ""
+        let family = familyContact(matchingPhone: entry.phone)
+        let action = Self.missedCallDialAction(
+            phone: entry.phone,
+            familyContact: family,
+            defaultApp: defaultCallApp,
+            messengerHandle: family?.messengerHandle,
+            name: identity)
+        switch action {
+        case .openPhoneApp:
+            PhoneAppOpener.openDialer()
+        case .unusableNumber:
+            speak(text: L10n.fmt("call.announce.noPhoneNumber",
+                                 locale: activeLocale, identity))
+        case .call(let name, let phone):
+            performSystemContactCall(name: name, phone: phone)
+        case .faceTime(let name, let phone):
+            performFaceTimeCall(name: name, phone: phone, video: true)
+        case .whatsApp(let name, let phone):
+            performSystemContactWhatsApp(name: name, phone: phone)
+        case .messenger(let name, _, let handle):
+            performSystemContactMessenger(name: name, handle: handle)
+        }
     }
 
     /// Normalized-number → last-call-date index for ranking search
