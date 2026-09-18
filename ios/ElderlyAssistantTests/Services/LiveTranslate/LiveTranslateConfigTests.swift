@@ -369,6 +369,8 @@ final class LiveTranslateConfigTests: XCTestCase {
         XCTAssertTrue(ModelBudgetPolicy.roomy
             .availability(of: head, physicalMemoryBytes: 8_000_000_000)
             .isAvailable)
+    }
+
     // MARK: The OCR-first rework (owner verdict, 2026-09-18)
 
     /// The recognition settings' defaults, pinned the same way the rest of the
