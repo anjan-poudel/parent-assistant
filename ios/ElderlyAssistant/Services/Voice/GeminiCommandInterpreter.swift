@@ -19,7 +19,14 @@ import Foundation
 /// failure, and reporting nil would make the router claim "I didn't
 /// understand" — so the cap completes with a deterministic `.none`
 /// command carrying the localized cap message instead (see `interpret`).
-final class GeminiCommandInterpreter: CommandInterpreter {
+///
+/// [GEMINI-SOLIDIFY] (2026-09-18) Every failure is additionally reported
+/// through `CloudFailureReporting`: the failure CLASS is recorded on the
+/// way out, and `CommandRouter` reads it if the whole chain bottoms out,
+/// so the user hears the honest reason (no network / rate limit / bad
+/// answer) instead of the generic "I didn't understand" re-prompt — which
+/// would be a lie about what actually happened.
+final class GeminiCommandInterpreter: CommandInterpreter, CloudFailureReporting {
 
     struct Config {
         let confidenceThreshold: Double
@@ -34,6 +41,19 @@ final class GeminiCommandInterpreter: CommandInterpreter {
     /// the pre-plugin behavior exactly.
     private let pluginRegistry: PluginRegistry?
 
+    // MARK: - CloudFailureReporting
+
+    /// The classified failure of the most recent cloud attempt. Main
+    /// queue by contract (the interpreter's completions land on main;
+    /// `clearCloudFailure` runs at chain entry, also main) — the same
+    /// confinement rule `lastInferenceFailureReason` holds on the local
+    /// interpreters.
+    private(set) var lastCloudFailureClass: GeminiFailureClass?
+
+    func clearCloudFailure() {
+        lastCloudFailureClass = nil
+    }
+
     var isAvailable: Bool { client.isAvailable }
 
     init(client: GeminiClient, observabilityBus: ObservabilityBus,
@@ -47,7 +67,14 @@ final class GeminiCommandInterpreter: CommandInterpreter {
     func interpret(transcript: String,
                    context: InterpreterContext,
                    completion: @escaping (InterpretedCommand?) -> Void) {
+        // A fresh attempt starts clean (same rule as
+        // `lastInferenceFailureReason` on the local interpreters).
+        lastCloudFailureClass = nil
         guard isAvailable else {
+            // Defensive honesty: the ladder never asks an unavailable
+            // interpreter, but if one is asked, the bottom of the chain
+            // must say WHY the cloud did not answer.
+            lastCloudFailureClass = .notConfigured
             DispatchQueue.main.async { completion(nil) }
             return
         }
@@ -109,6 +136,10 @@ final class GeminiCommandInterpreter: CommandInterpreter {
                 // `ErrorCodeMapper`).
                 self.emit("interpret_failed", outcome: "failure",
                           errorCode: ErrorCodeMapper.code(for: error))
+                // [GEMINI-SOLIDIFY] Report the CLASS for the chain's
+                // bottom-out honesty line — recorded whatever the
+                // outcome below, so the report is never a guess.
+                self.lastCloudFailureClass = GeminiFailureClass.classify(error)
                 await MainActor.run {
                     guard let geminiError = error as? GeminiClient.GeminiClientError,
                           case .dailyCapReached = geminiError else {

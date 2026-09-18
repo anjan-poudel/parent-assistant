@@ -1844,7 +1844,24 @@ final class CommandRouter {
             // generic re-prompt, so a capped day sounds exactly as
             // honest as an unanswered one.
             if !fireWebSearchIfDue(raw) {
-                speak(key: "router.reprompt")
+                // [GEMINI-SOLIDIFY] (2026-09-18) Chain honesty: when the
+                // whole ladder bottomed out AND the cloud leg failed for
+                // a real reason, the generic "I didn't understand"
+                // re-prompt would be a lie about what happened — the user
+                // hears the failure CLASS's honest line instead (never
+                // silence, never a false apology). The report is
+                // read-and-cleared here, so it can never leak into a
+                // later turn.
+                if let reporting = interpreter as? CloudFailureReporting,
+                   let failureClass = reporting.lastCloudFailureClass {
+                    reporting.clearCloudFailure()
+                    speakWithVisibleOutcome(
+                        text: failureClass.spokenLine(
+                            locale: coordinator?.activeLocale
+                                ?? Locale(identifier: "ne-NP")))
+                } else {
+                    speak(key: "router.reprompt")
+                }
             }
         case .downloadingBrain:
             speakWithVisibleOutcome(key: "router.brainDownloading")
@@ -2930,7 +2947,13 @@ final class CommandRouter {
     /// otherwise be spoken-only, same rationale as `noteGenericReply`.
     private func speakWithVisibleOutcome(key: String) {
         let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
-        let text = L10n.str(key, locale: locale)
+        speakWithVisibleOutcome(text: L10n.str(key, locale: locale), locale: locale)
+    }
+
+    /// The text variant — for already-resolved dynamic lines (e.g. the
+    /// [GEMINI-SOLIDIFY] cloud-failure-class lines), same visible-outcome
+    /// contract as the key variant.
+    private func speakWithVisibleOutcome(text: String, locale: Locale? = nil) {
         guard !text.isEmpty else { return }
         coordinator?.noteGenericReply(text)
         speak(text: text, locale: locale)
