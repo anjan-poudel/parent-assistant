@@ -228,4 +228,50 @@ final class IntentPromptTests: XCTestCase {
         XCTAssertTrue(prompt.contains("requestedApp"))
         XCTAssertTrue(prompt.contains("video"))
     }
+
+    // MARK: - [GEMINI-SOLIDIFY] Schema-tightening guidance (2026-09-18)
+
+    /// The provenance guard rejects what the model already emitted; this
+    /// rule reduces the invention AT THE SOURCE: the prompt tells the
+    /// model to leave unheard slots null and never invent values.
+    func testTeachesNoInventionOfSlots() {
+        let prompt = build()
+        XCTAssertTrue(prompt.contains("Fill ONLY slots you heard"))
+        XCTAssertTrue(prompt.contains("never invent a name, time, or message"))
+        XCTAssertTrue(prompt.contains("unheard slots stay null"))
+    }
+
+    func testTeachesNepaliReplyPhrasing() {
+        let prompt = build()
+        XCTAssertTrue(prompt.contains("हजुर"),
+                      "the warm Nepali address is taught in the reply-style rule")
+        XCTAssertTrue(prompt.contains("one short idea per sentence"),
+                      "short simple sentences, one idea each — the elder-facing cadence")
+    }
+
+    /// The compact pass must not have silently re-grown the template past
+    /// the on-device budget: the same fixture stays well inside the
+    /// ceiling while carrying the new guidance.
+    func testSolidifyPassKeepsThePromptInsideTheBudget() {
+        let prompt = build(transcript: "भोलिको मौसम कस्तो छ?", meds: [],
+                           languageHint: "ne")
+        XCTAssertLessThanOrEqual(prompt.count, 3_000)
+    }
+
+    // MARK: - Collapse prompt (buildUnderstanding) schema tightening
+
+    func testUnderstandingPromptCarriesTheNoInventionRule() {
+        let prompt = IntentPrompt.buildUnderstanding(
+            context: InterpreterContext(pendingMedications: [], userLanguageHint: "ne"))
+        XCTAssertTrue(prompt.contains("never invent a name, time, message, or app"),
+                      "the audio path teaches the same no-invention rule as the text path")
+        XCTAssertTrue(prompt.contains("every unheard field is null"))
+    }
+
+    func testUnderstandingPromptTeachesNepaliWarmth() {
+        let prompt = IntentPrompt.buildUnderstanding(
+            context: InterpreterContext(pendingMedications: [], userLanguageHint: "ne"))
+        XCTAssertTrue(prompt.contains("हजुर"))
+        XCTAssertTrue(prompt.contains("one short idea per sentence"))
+    }
 }

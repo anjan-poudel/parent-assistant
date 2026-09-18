@@ -3825,3 +3825,154 @@ final class CommandRouterTurnHoldingTests: XCTestCase {
                        "the pre-ack is committed; a wedged interpreter adds nothing after it")
     }
 }
+
+// MARK: - [GEMINI-SOLIDIFY] Cloud-failure bottom-out lines
+
+/// The chain-honesty contract: when the whole ladder bottoms out AND the
+/// cloud leg failed for a real reason, the user hears the failure CLASS's
+/// line instead of the generic "I didn't understand" re-prompt (which
+/// would be a lie about what happened). The report is consumed on read,
+/// so it can never leak into a later turn.
+final class CommandRouterCloudFailureLineTests: XCTestCase {
+
+    private let ne = Locale(identifier: "ne")
+
+    /// A chain stub that abstains (nil) and reports the scripted cloud
+    /// failure class — the shape `IntentRouter` exposes through
+    /// `CloudFailureReporting` in the shipped wiring.
+    private final class ReportingAbstainer: CommandInterpreter, CloudFailureReporting {
+        var isAvailable: Bool { true }
+        var lastCloudFailureClass: GeminiFailureClass?
+        private(set) var clearCount = 0
+
+        func clearCloudFailure() {
+            lastCloudFailureClass = nil
+            clearCount += 1
+        }
+
+        func interpret(transcript: String,
+                       context: InterpreterContext,
+                       completion: @escaping (InterpretedCommand?) -> Void) {
+            DispatchQueue.main.async { completion(nil) }
+        }
+    }
+
+    /// Drives one route to the bottom: the router's reply speech is
+    /// committed synchronously inside the interpreter completion, so the
+    /// main-queue FIFO makes the expectation run strictly after it.
+    private func routeToBottom(_ router: CommandRouter, transcript: String) {
+        let exp = expectation(description: "bottom-out speech committed")
+        _ = router.route(transcript: transcript)
+        DispatchQueue.main.async { exp.fulfill() }
+        wait(for: [exp], timeout: 2.0)
+    }
+
+    private func makeRouter(_ coordinator: MockVoiceCommandCoordinator,
+                            failureClass: GeminiFailureClass?)
+    -> (CommandRouter, ReportingAbstainer) {
+        let abstainer = ReportingAbstainer()
+        abstainer.lastCloudFailureClass = failureClass
+        let router = CommandRouter(coordinator: coordinator,
+                                   observabilityBus: MockObservabilityBus(),
+                                   speaker: MockSpeaker(),
+                                   interpreter: abstainer)
+        return (router, abstainer)
+    }
+
+    func testTransportFailureSpeaksTheTransportLineNotTheGenericReprompt() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, _) = makeRouter(coordinator, failureClass: .transportFailed)
+
+        routeToBottom(router, transcript: "केही राम्रो कथा सुनाउनुस्")
+
+        let expected = GeminiFailureClass.transportFailed.spokenLine(locale: ne)
+        XCTAssertEqual(coordinator.assistantSpoken.last, expected,
+                       "the honest line replaces the generic re-prompt "
+                       + "(after the pre-ack, which leads every LLM turn)")
+        XCTAssertFalse(coordinator.assistantSpoken.contains(L10n.str("router.reprompt", locale: ne)))
+        XCTAssertEqual(coordinator.genericReplies, [expected],
+                       "the line is also VISIBLE — a mobility aid, not just speech")
+    }
+
+    func testRateLimitSpeaksTheRateLimitLine() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, _) = makeRouter(coordinator, failureClass: .rateLimited)
+
+        routeToBottom(router, transcript: "केही राम्रो कथा सुनाउनुस्")
+
+        XCTAssertEqual(coordinator.assistantSpoken.last,
+                       GeminiFailureClass.rateLimited.spokenLine(locale: ne))
+    }
+
+    func testNotConfiguredSpeaksTheNotConfiguredLine() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, _) = makeRouter(coordinator, failureClass: .notConfigured)
+
+        routeToBottom(router, transcript: "केही राम्रो कथा सुनाउनुस्")
+
+        XCTAssertEqual(coordinator.assistantSpoken.last,
+                       GeminiFailureClass.notConfigured.spokenLine(locale: ne))
+    }
+
+    func testInvalidResponseSpeaksTheInvalidResponseLine() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, _) = makeRouter(coordinator, failureClass: .invalidResponse)
+
+        routeToBottom(router, transcript: "केही राम्रो कथा सुनाउनुस्")
+
+        XCTAssertEqual(coordinator.assistantSpoken.last,
+                       GeminiFailureClass.invalidResponse.spokenLine(locale: ne))
+    }
+
+    func testQuotaCappedSpeaksTheCapLine() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, _) = makeRouter(coordinator, failureClass: .quotaCapped)
+
+        routeToBottom(router, transcript: "केही राम्रो कथा सुनाउनुस्")
+
+        XCTAssertEqual(coordinator.assistantSpoken.last,
+                       L10n.str("router.capReached", locale: ne),
+                       "quota speaks the SAME cap line the interpreter's cap command uses")
+    }
+
+    func testNoCloudFailureKeepsTheGenericReprompt() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, _) = makeRouter(coordinator, failureClass: nil)
+
+        routeToBottom(router, transcript: "केही राम्रो कथा सुनाउनुस्")
+
+        XCTAssertEqual(coordinator.assistantSpoken.last,
+                       L10n.str("router.reprompt", locale: ne),
+                       "a plain abstention is still 'I didn't understand' — only a real "
+                       + "cloud failure changes the line")
+    }
+
+    func testReportIsConsumedSoItCannotLeakIntoALaterTurn() {
+        let coordinator = MockVoiceCommandCoordinator()
+        let (router, abstainer) = makeRouter(coordinator, failureClass: .transportFailed)
+
+        routeToBottom(router, transcript: "केही राम्रो कथा सुनाउनुस्")
+        XCTAssertNil(abstainer.lastCloudFailureClass,
+                     "the router clears the report as it speaks it")
+        XCTAssertEqual(abstainer.clearCount, 1)
+
+        // The same abstainer, now reporting nothing, must speak the
+        // generic re-prompt again — no stale reason survives.
+        coordinator.assistantSpoken = []
+        routeToBottom(router, transcript: "केही राम्रो कथा सुनाउनुस्")
+        XCTAssertEqual(coordinator.assistantSpoken.last,
+                       L10n.str("router.reprompt", locale: ne))
+    }
+
+    func testLineFollowsTheActiveLocale() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.localeOverride = Locale(identifier: "en")
+        let (router, _) = makeRouter(coordinator, failureClass: .transportFailed)
+
+        routeToBottom(router, transcript: "tell me a nice story")
+
+        XCTAssertEqual(coordinator.assistantSpoken.last,
+                       GeminiFailureClass.transportFailed.spokenLine(
+                           locale: Locale(identifier: "en")))
+    }
+}

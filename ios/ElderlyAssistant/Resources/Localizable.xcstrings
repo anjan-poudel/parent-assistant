@@ -21452,6 +21452,312 @@
           }
         }
       }
+    },
+    "router.cloud.notConfigured": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The cloud brain isn't connected. A family member can connect it in Settings."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "क्लाउड दिमाग जोडिएको छैन। परिवारको कसैले सेटिङमा जोड्न सक्नुहुन्छ।"
+          }
+        }
+      }
+    },
+    "router.cloud.rateLimited": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The cloud brain is busy right now — too many requests. Please try again in a little while."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "क्लाउड दिमाग अहिले व्यस्त छ — धेरै अनुरोध भयो। अलि पछि फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "router.cloud.transportFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I couldn't reach the cloud brain, so I'm using the on-device brain. Please say that again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "क्लाउड दिमागसम्म पुग्न सकिएन, त्यसैले अहिले डिभाइसकै दिमाग प्रयोग गर्दैछु। कृपया फेरि भन्नुहोस्।"
+          }
+        }
+      }
+    },
+    "router.cloud.invalidResponse": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The cloud brain gave an answer I couldn't use. Please say that again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "क्लाउड दिमागले काम नलाग्ने जवाफ दियो। कृपया फेरि भन्नुहोस्।"
+          }
+        }
+      }
+    },
+    "settings.gemini.status.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Gemini status"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जेमिनी अवस्था"
+          }
+        }
+      }
+    },
+    "settings.gemini.status.configured": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connected — the cloud brain is ready."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जोडिएको छ — क्लाउड दिमाग तयार छ।"
+          }
+        }
+      }
+    },
+    "settings.gemini.status.notConfigured": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not connected — a family member can add the key below."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जोडिएको छैन — परिवारको कसैले तल कि थप्न सक्नुहुन्छ।"
+          }
+        }
+      }
+    },
+    "settings.gemini.status.model": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Active model: %1$@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "सक्रिय मोडेल: %1$@"
+          }
+        }
+      }
+    },
+    "settings.gemini.status.costMode": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Billing: one Gemini call per answer — daily cap %1$@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "बिलिङ: हरेक जवाफमा एउटा जेमिनी कल — दिनको सीमा %1$@।"
+          }
+        }
+      }
+    },
+    "settings.gemini.status.chain.hybrid": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fallback chain: the on-device brain answers first; the cloud brain takes over when it is unsure."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जवाफको सिलसिला: डिभाइसकै दिमागले पहिले जवाफ दिन्छ; ढुक्क नभए क्लाउड दिमागले लिन्छ।"
+          }
+        }
+      }
+    },
+    "settings.gemini.status.chain.onDeviceFallback": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fallback chain: on-device only — the cloud brain is asked only with the family's permission."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जवाफको सिलसिला: डिभाइसको दिमाग मात्र — परिवारको अनुमतिमा मात्र क्लाउड सोधिन्छ।"
+          }
+        }
+      }
+    },
+    "settings.gemini.status.chain.onDevice": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Fallback chain: on-device only — the cloud brain is switched off."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जवाफको सिलसिला: डिभाइसको दिमाग मात्र — क्लाउड दिमाग बन्द छ।"
+          }
+        }
+      }
+    },
+    "settings.gemini.test.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Test connection"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जडान जाँच"
+          }
+        }
+      }
+    },
+    "settings.gemini.test.button": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Test connection now"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिले जडान जाँच्नुहोस्"
+          }
+        }
+      }
+    },
+    "settings.gemini.test.running": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Checking…"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जाँच्दैछु…"
+          }
+        }
+      }
+    },
+    "settings.gemini.test.success": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Connected — the cloud brain answered."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जोडियो — क्लाउड दिमागले जवाफ दियो।"
+          }
+        }
+      }
+    },
+    "settings.gemini.test.failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Test failed: %1$@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "जाँच असफल: %1$@"
+          }
+        }
+      }
+    },
+    "settings.gemini.test.costNote": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The test makes one small Gemini call, which counts toward the daily cap."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो जाँचले एउटा सानो जेमिनी कल गर्छ, जुन दिनको सीमामा गनिन्छ।"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

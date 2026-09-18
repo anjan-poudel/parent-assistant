@@ -342,11 +342,22 @@ struct LanguageSettingsView: View {
 /// the assistant falls all the way back to the deterministic keyword
 /// layer and the English-only SFSpeechRecognizer bootstrap, so it needs
 /// to be easy to find during setup.
+/// [GEMINI-SOLIDIFY] (2026-09-18) The "Test connection" button's UI
+/// state — idle, in-flight, or a completed outcome in the failure
+/// taxonomy's vocabulary (`GeminiFailureClass`), so the card reports
+/// the same classes the spoken degradation lines use.
+private enum ConnectionTestState: Equatable {
+    case idle
+    case running
+    case completed(GeminiClient.ConnectionTestOutcome)
+}
+
 struct GeminiAPISettingsView: View {
     @EnvironmentObject var coordinator: AppCoordinator
     @State private var draftKey: String = ""
     @State private var showClearConfirm = false
     @State private var customModel: String = ""
+    @State private var connectionTest: ConnectionTestState = .idle
 
     private var isCustomModelSelected: Bool {
         !GeminiModelCatalog.entries.contains { $0.id == coordinator.geminiConfigStore.model }
@@ -358,6 +369,8 @@ struct GeminiAPISettingsView: View {
                 Text("settings.gemini.explanation")
                     .font(.system(size: DesignTokens.minBodyPointSize))
                     .foregroundStyle(DesignTokens.textSecondary)
+
+                statusCard
 
                 costGovernorCard
 
@@ -418,6 +431,8 @@ struct GeminiAPISettingsView: View {
                     }
                     .padding(.horizontal, 4)
                 }
+
+                testConnectionCard
             }
         }
         .confirmationDialog("settings.gemini.removeConfirm", isPresented: $showClearConfirm) {
@@ -426,6 +441,142 @@ struct GeminiAPISettingsView: View {
             }
             Button("common.back", role: .cancel) {}
         }
+    }
+
+    // MARK: - Status card ([GEMINI-SOLIDIFY], 2026-09-18)
+
+    /// One plain-language status card: configured ✓ / the active model /
+    /// the cost mode / the fallback chain. All lines are catalog keys —
+    /// the leaf is family-facing and bilingual like every other string.
+    private var statusCard: some View {
+        let locale = coordinator.activeLocale
+        let configured = coordinator.geminiConfigStore.isConfigured
+        let model = coordinator.geminiConfigStore.model
+        return VStack(alignment: .leading, spacing: 8) {
+            Label("settings.gemini.status.title", systemImage: "sparkles")
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .foregroundStyle(DesignTokens.textPrimary)
+            HStack(spacing: 8) {
+                Image(systemName: configured ? "checkmark.circle.fill" : "xmark.circle.fill")
+                    .foregroundStyle(configured ? DesignTokens.accent : DesignTokens.stateError)
+                Text(LocalizedStringKey(configured
+                                        ? "settings.gemini.status.configured"
+                                        : "settings.gemini.status.notConfigured"))
+                    .font(.system(size: DesignTokens.minBodyPointSize))
+                    .foregroundStyle(DesignTokens.textPrimary)
+            }
+            Text(L10n.fmt("settings.gemini.status.model", locale: locale, Self.modelDisplayName(model, locale: locale)))
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundStyle(DesignTokens.textSecondary)
+            Text(L10n.fmt("settings.gemini.status.costMode", locale: locale,
+                          Self.number(coordinator.geminiCostGovernor.softDailyCap, locale: locale)))
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundStyle(DesignTokens.textSecondary)
+            Text(LocalizedStringKey(Self.fallbackChainKey(coordinator)))
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundStyle(DesignTokens.textSecondary)
+                .multilineTextAlignment(.leading)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    /// The active model's plain-language name: the curated catalog label
+    /// when the pick is a catalog entry, the raw id otherwise (a custom
+    /// override is its own identifier — shown as typed by the family).
+    private static func modelDisplayName(_ model: String, locale: Locale) -> String {
+        if let entry = GeminiModelCatalog.entries.first(where: { $0.id == model }) {
+            return L10n.str(entry.labelKey, locale: locale)
+        }
+        return model
+    }
+
+    /// The fallback-chain line's key for the CURRENT stack — the same
+    /// three states the voice-engine card names, in plain language.
+    private static func fallbackChainKey(_ coordinator: AppCoordinator) -> String {
+        switch coordinator.voiceEngineStack {
+        case .gemini:
+            return "settings.gemini.status.chain.hybrid"
+        case .onDevice:
+            return coordinator.cloudFallbackEnabled
+                ? "settings.gemini.status.chain.onDeviceFallback"
+                : "settings.gemini.status.chain.onDevice"
+        }
+    }
+
+    /// Devanagari digits in the Nepali locale (the same elder-facing
+    /// convention as `GeminiCostCard`), Arabic elsewhere.
+    private static func number(_ value: Int, locale: Locale) -> String {
+        if locale.language.languageCode?.identifier == "ne" {
+            return BikramSambat.devanagariDigits(value)
+        }
+        return String(value)
+    }
+
+    // MARK: - Test connection ([GEMINI-SOLIDIFY], 2026-09-18)
+
+    /// One REAL minimal round-trip through the shipped client (auth,
+    /// timeout, cost governor, retry — the exact chokepoint every call
+    /// uses), reporting success or the failure CLASS. The caption states
+    /// the attempt is billable and counted toward the daily cap.
+    private var testConnectionCard: some View {
+        let locale = coordinator.activeLocale
+        return VStack(alignment: .leading, spacing: 10) {
+            Label("settings.gemini.test.title", systemImage: "antenna.radiowaves.left.and.right")
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .foregroundStyle(DesignTokens.textPrimary)
+
+            Button {
+                connectionTest = .running
+                Task { [weak coordinator] in
+                    let outcome = await coordinator?.geminiClient.testConnection() ?? .failure(.notConfigured)
+                    connectionTest = .completed(outcome)
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    if connectionTest == .running {
+                        ProgressView()
+                    }
+                    Text(LocalizedStringKey(connectionTest == .running
+                                            ? "settings.gemini.test.running"
+                                            : "settings.gemini.test.button"))
+                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                }
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
+                .foregroundStyle(coordinator.geminiConfigStore.isConfigured
+                                 ? DesignTokens.accent : DesignTokens.textSecondary)
+                .background(DesignTokens.background)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+            }
+            .buttonStyle(.plain)
+            .disabled(connectionTest == .running || !coordinator.geminiConfigStore.isConfigured)
+
+            if case .completed(let outcome) = connectionTest {
+                switch outcome {
+                case .success:
+                    Label("settings.gemini.test.success", systemImage: "checkmark.circle.fill")
+                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                        .foregroundStyle(DesignTokens.accent)
+                case .failure(let failureClass):
+                    Text(L10n.fmt("settings.gemini.test.failed", locale: locale,
+                                  failureClass.spokenLine(locale: locale)))
+                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                        .foregroundStyle(DesignTokens.stateError)
+                }
+            }
+
+            Text("settings.gemini.test.costNote")
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .foregroundStyle(DesignTokens.textSecondary)
+                .multilineTextAlignment(.leading)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
     }
 
     /// Daily-cost card (open item #5, 2026-09-06): today's Gemini usage
