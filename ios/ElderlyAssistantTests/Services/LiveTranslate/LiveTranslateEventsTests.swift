@@ -152,6 +152,8 @@ final class LiveTranslateEventsTests: XCTestCase {
                 "no_capture_device", "configuration_failed", "resource_in_use",
                 "backgrounded", "system_interruption", "thermal",
                 "curated_dictionary", "persisted",
+                // [CASCADE-PROVENANCE] translation_resolved.origin tokens.
+                "fresh", "cache",
                 "tap", "read_all", "repeat_last",
                 // T-026 added the command handler's re-prompt to the speech
                 // modes; the token joins the closed vocabulary here rather

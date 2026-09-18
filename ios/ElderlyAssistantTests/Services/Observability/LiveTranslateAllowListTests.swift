@@ -67,7 +67,9 @@ final class LiveTranslateAllowListTests: XCTestCase {
             "regionCount", "stringCount", "batchIndex", "batchCount", "resolvedCount",
             "unresolvedCount", "durationMs", "keyCount", "count", "origin", "mode",
             "reason", "disclosureVersion", "cap", "errorCode",
-            "provider", "threshold", "confidence"
+            "provider", "threshold", "confidence",
+            // [CASCADE-PROVENANCE] (2026-09-19) Which tier answered a settle.
+            "tier"
         ], "the extension is exactly the union of the two declared key sets")
         XCTAssertNil(sanitisedMetadata(["somethingNoOneDeclared": "x"])["somethingNoOneDeclared"],
                      "unknown keys are still dropped outright")
