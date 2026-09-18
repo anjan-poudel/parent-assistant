@@ -618,6 +618,26 @@ struct LiveTranslateConfig: Equatable {
     /// of print stood. The callout keeps the token's radius.
     var inPlaceCornerRadius: CGFloat = 6
 
+    /// The largest fraction of the container a **bounded panel** may occupy
+    /// vertically (`0.45` ⇒ never more than 45 % of the container's height).
+    ///
+    /// A block whose lines cannot be stacked as a panel at the body floor inside
+    /// its own grown box is still a block the elder has to be able to read: the
+    /// **bounded panel** draws those very lines at that very floor, inside a box
+    /// capped at this fraction of the container and scrolled when they overflow
+    /// (owner refinement, 2026-09-18). The cap is the whole reason the form can
+    /// exist — without it the last resort for a page of text would be a surface
+    /// the size of the screen, which is the snapshot card's job, not the live
+    /// overlay's.
+    ///
+    /// A *fraction* and not a point size, because the container is what the
+    /// rects were measured in (the same reason `overlayGeometryStickiness` is
+    /// one): a rotation, a small phone and an iPad all get a panel that is the
+    /// same share of what the elder is looking at. The lines inside are drawn at
+    /// `overlayMinPointSize` (floored by the app's body minimum), never
+    /// shrunk to fit — the bounded panel scrolls instead.
+    var panelMaxHeightFraction: Double = 0.45
+
     /// Minimum rendered point size for overlay text: the accessibility floor
     /// for the elder-facing surface.
     var overlayMinPointSize: CGFloat = 18

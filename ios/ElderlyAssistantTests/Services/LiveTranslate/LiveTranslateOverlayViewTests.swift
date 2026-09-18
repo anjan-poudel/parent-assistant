@@ -307,6 +307,139 @@ final class LiveTranslateOverlayViewTests: XCTestCase {
                      "the sentence is the label; there is no second fact to announce")
     }
 
+    // MARK: - Scenario: a block too tall for its box scrolls (owner refinement)
+    // (2026-09-18)
+
+    /// A block of `count` translated lines in a box far too short for them: the
+    /// fixture the bounded panel's tests need — more lines at the body floor
+    /// than the block's own grown box can hold.
+    private func tallBlock(_ count: Int)
+        -> (region: TextRegionStabilizer.StableTextRegion, result: TranslationResult) {
+        let lines = (1...count).map { "लाइन \($0)" }
+        let block = region(1, lines.joined(separator: "\n"), box: box(0.10, 0.10, 0.90, 0.50))
+        return (block, .resolved(originalText: block.text,
+                                 translation: lines.joined(separator: "\n"), tier: .cloud))
+    }
+
+    /// The owner's refinement: a block whose lines cannot be stacked at the body
+    /// floor inside the block's own box is drawn as the **bounded panel** — the
+    /// same surface, every line, the same floor, in a box capped at a fraction
+    /// of the container and scrolled rather than truncated.
+    func testABlockTooTallForItsBoxIsDrawnAsABoundedScrollablePanel() throws {
+        let policy = LiveTranslateOverlaySurface.policy(config: config, alwaysShowOriginal: false)
+        let block = tallBlock(24)
+        let surface = makeSurface(regions: [block.region], results: [identity(1): block.result])
+
+        let presentation = try XCTUnwrap(surface.presentations.first)
+        guard case .scrollablePanel(_, let rect) = presentation.form else {
+            return XCTFail("a block whose lines do not fit its own box is drawn as the bounded "
+                           + "panel — not as a pill showing its first line, and not clipped: "
+                           + "\(presentation.form)")
+        }
+        XCTAssertEqual(presentation.frameRect, rect,
+                       "the drawn rect is the placement's own: the memory holds it, it is not "
+                       + "re-derived")
+        XCTAssertEqual(presentation.state, .resolved)
+        XCTAssertEqual(presentation.lines.map(\.text), (1...24).map { "लाइन \($0)" },
+                       "every line the block has, in the order it was recognized")
+        XCTAssertEqual(Set(presentation.lines.map(\.pointSize)), [policy.minPointSize],
+                       "at the body floor — the cap costs scroll, never type size")
+        XCTAssertGreaterThanOrEqual(policy.minPointSize, DesignTokens.minBodyPointSize,
+                                    "the floor is the app's body minimum")
+
+        let cap = container.height * CGFloat(policy.panelMaxHeightFraction)
+        XCTAssertLessThanOrEqual(rect.height, cap + 1e-9,
+                                 "the bounded panel is capped at the policy's fraction of the "
+                                 + "container: the last-resort surface may not become the screen")
+        XCTAssertGreaterThan(rect.height, 0)
+        XCTAssertTrue(CGRect(origin: .zero, size: container)
+            .insetBy(dx: -1e-9, dy: -1e-9).contains(rect),
+                      "and it is drawn inside the container the rects were measured in")
+        XCTAssertLessThanOrEqual(rect.maxY, chrome[0].minY,
+                                 "…and clear of the overlay's own control")
+
+        XCTAssertTrue(presentation.speaksTranslation,
+                      "tap-to-hear speaks the block's lines in order from the bounded panel too")
+        XCTAssertEqual(presentation.accessibilityLabel,
+                       (1...24).map { "लाइन \($0)" }.joined(separator: " "),
+                       "the elder hears the whole block, not its first row")
+        XCTAssertEqual(presentation.accessibilityValue, block.region.text)
+    }
+
+    /// The form is a value the tests above can read; this is the claim that it
+    /// is also *drawn*. A `ScrollView` is the one element in this view that
+    /// could render nothing at all off-screen, so the ink is measured: the
+    /// bounded panel's rows land inside the panel's own box.
+    @MainActor
+    func testTheBoundedPanelDrawsItsRowsInsideItsOwnBox() throws {
+        let block = tallBlock(24)
+        let surface = makeSurface(regions: [block.region], results: [identity(1): block.result])
+        let presentation = try XCTUnwrap(surface.presentations.first)
+        guard case .scrollablePanel(_, let rect) = presentation.form else {
+            return XCTFail("the premise: this block is drawn as the bounded panel")
+        }
+
+        let image = try XCTUnwrap(OverlayRenderProbe.render(surface, size: container))
+        let drawn = try OverlayRenderProbe.ink(in: image, within: rect)
+        XCTAssertFalse(drawn.isEmpty,
+                       "the bounded panel drew nothing inside its own box: a scroll view that "
+                       + "renders empty is a panel the elder cannot read")
+        try OverlayRenderProbe.assertInkInside(image, rect: rect, allowed: chrome,
+                                               message: "the bounded panel draws inside its box")
+    }
+
+    /// The plain panel keeps its block: nothing scrolls when there is nothing to
+    /// scroll.
+    func testABlockThatFitsIsDrawnAsAPlainPanelAndNotAScrollingOne() throws {
+        let policy = LiveTranslateOverlaySurface.policy(config: config, alwaysShowOriginal: false)
+        let block = region(1, "START\n2 MIN", box: box(0.10, 0.30, 0.70, 0.60))
+        let result = TranslationResult.resolved(originalText: "START\n2 MIN",
+                                                translation: "सुरु\n२ मिनेट", tier: .cloud)
+        let surface = makeSurface(regions: [block], results: [identity(1): result])
+
+        let presentation = try XCTUnwrap(surface.presentations.first)
+        guard case .inPlace(_, let rect) = presentation.form else {
+            return XCTFail("a block whose lines fit the block's own box is the plain panel, "
+                           + "which does not scroll: \(presentation.form)")
+        }
+        XCTAssertEqual(presentation.frameRect, rect)
+        XCTAssertEqual(presentation.lines.map(\.pointSize),
+                       [policy.minPointSize, policy.minPointSize],
+                       "the same rows the bounded panel would carry, all of them fitting")
+    }
+
+    /// Which of the two panel forms a block is drawn in is a decision the
+    /// placement made, not a position that can be stale: a bounded panel's rows
+    /// clipped into a plain box would have no scroll at all, so a change of form
+    /// kind is adopted even when the two rects are identical.
+    func testAChangeBetweenTheTwoPanelFormsIsNeverHeld() {
+        let memory = LiveOverlayGeometryMemory()
+        let sign = "START\n2 MIN"
+        let rect = CGRect(x: 60, y: 120, width: 260, height: 300)
+        let plain = LiveOverlayPlacement.Form.inPlace(regionID: identity(0), rect: rect)
+        let bounded = LiveOverlayPlacement.Form.scrollablePanel(regionID: identity(0), rect: rect)
+
+        XCTAssertEqual(LiveOverlayFormGeometry(bounded).drift(from: LiveOverlayFormGeometry(plain),
+                                                              in: container),
+                       0, "the premise: the two rects are identical, so only the kind differs")
+
+        _ = memory.held([presentation(sign, form: plain)], container: container,
+                        stickiness: config.overlayGeometryStickiness)
+        let becameBounded = memory.held([presentation(sign, form: bounded)], container: container,
+                                        stickiness: config.overlayGeometryStickiness)
+        guard case .scrollablePanel(_, let heldRect) = becameBounded.first?.form else {
+            return XCTFail("a plain box was held where the bounded panel belongs: the block's "
+                           + "lines would be clipped with no scroll to reach them")
+        }
+        XCTAssertEqual(heldRect, rect)
+
+        let becamePlain = memory.held([presentation(sign, form: plain)], container: container,
+                                      stickiness: config.overlayGeometryStickiness)
+        guard case .inPlace = becamePlain.first?.form else {
+            return XCTFail("a bounded panel was held where the plain one belongs")
+        }
+    }
+
     // MARK: - Scenario: text and controls meet the accessibility standards
 
     func testTextRendersAtOrAboveTheMinimumPointSizeInThePrimaryWeight() {

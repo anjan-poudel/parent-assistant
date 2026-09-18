@@ -93,6 +93,12 @@ final class LiveOverlayPlacementTests: XCTestCase {
         return rect
     }
 
+    /// The bounded panel's box, when the region is drawn as one.
+    private func scrollableRect(_ placement: LiveOverlayPlacement.PlacedOverlay) -> CGRect? {
+        guard case .scrollablePanel(_, let rect) = placement.form else { return nil }
+        return rect
+    }
+
     /// No two rects in `rects` share any area. Touching is allowed (a box may
     /// meet its neighbour at the midpoint of the gap between them), so an
     /// overlap of a millionth of a point — double rounding at an exact meeting
@@ -1050,6 +1056,8 @@ final class LiveOverlayPlacementTests: XCTestCase {
                        [policy.secondaryPointSize, policy.secondaryPointSize])
     }
 
+    // MARK: Bounded panels (owner refinement, 2026-09-18)
+
     /// The owner's device verdict, at the line it is about: **a block the panel
     /// cannot hold is still published.**
     ///
@@ -1061,42 +1069,179 @@ final class LiveOverlayPlacementTests: XCTestCase {
     /// (the object grouping merges them), that was most scenes on the owner's
     /// device: "the camera says it can't find anything to read".
     ///
-    /// The policy itself is unchanged — a panel is drawn at the floor or not at
-    /// all — so this pins both halves: the panel decision still refuses to
-    /// shrink, and the refusal degrades to **one callout for the block**, never
-    /// to nothing.
-    func testABlockThatCannotStandAsAPanelStillGetsOneCalloutForTheBlock() {
-        // Type far taller than any box this region can grow into.
-        let block = blockRegion(1, lines: ["one", "two", "three"], box: (0.42, 0.44, 0.50, 0.50))
+    /// The owner's refinement (2026-09-18) then named the form such a block
+    /// gets: not a pill showing its first line, but the **bounded panel** — the
+    /// same surface, every line, the same body floor, in a box capped at
+    /// `panelMaxHeightFraction` of the container and scrolled rather than
+    /// truncated. The policy itself is unchanged — a panel is drawn at the
+    /// floor or not at all, never shrunk — so this pins both halves: the panel
+    /// decision still refuses an illegible fit, and the refusal degrades to a
+    /// surface carrying *all* of the block's lines.
+    func testABlockTooTallForItsOwnBoxIsDrawnAsABoundedScrollablePanel() {
+        // Four translated lines at the body floor need well over 100 pt; this
+        // block's own printed box is 50 pt tall and may grow 40 % — so the
+        // plain panel cannot hold them, and the bounded one is the answer.
+        let block = blockRegion(1, lines: ["one", "two", "three", "four"],
+                                box: (0.42, 0.44, 0.50, 0.50))
         let policy = surfacePolicy()
-        let result = translated(block, "एक\nदुई\nतीन", tier: .cloud)
-        let measure: LiveOverlayPlacement.Measure = { _, pointSize, _, _ in
-            CGSize(width: pointSize * 4, height: pointSize * 10)
-        }
+        let result = translated(block, "एक\nदुई\nतीन\nचार", tier: .cloud)
 
         let outcome = LiveOverlayPlacement.panelOutcome(regionRect: rect(of: block),
                                                         lines: LiveOverlayPlacement.panelLines(
                                                             result.text,
                                                             pointSize: policy.minPointSize),
                                                         bounds: bounds,
-                                                        policy: policy,
-                                                        measure: measure)
+                                                        policy: policy)
         XCTAssertEqual(outcome, .doesNotFit,
-                       "the panel rule is unchanged: a panel nobody can read is the thing "
-                       + "being removed, so a panel below the floor is never drawn")
+                       "the panel rule is unchanged: the lines are drawn at the floor, so a box "
+                       + "too short for them is not a panel — which is this test's premise")
 
-        let placements = place([block], results: [block.id: result], measure: measure)
+        let placements = place([block], results: [block.id: result])
+
         XCTAssertEqual(placements.count, 1,
-                       "a block that cannot be drawn as a panel is still published: an empty "
-                       + "placement list is the overlay's empty state over text the pass read")
-        XCTAssertNil(inPlaceRect(placements[0]), "…and not as a panel: the floor is the floor")
-        XCTAssertNotNil(calloutRect(placements[0]),
-                        "…but as the one pill that carries the block")
-        XCTAssertEqual(placements[0].lines.map(\.text), ["एक", "दुई", "तीन"],
-                       "the block's translated lines, in order, in the one pill — one surface "
-                       + "for the block, not one bubble per line")
-        XCTAssertEqual(Set(placements[0].lines.map(\.pointSize)), [policy.minPointSize],
-                       "the pill is drawn at the body floor, like every live surface")
+                       "a block the panel cannot hold is still published: an empty placement "
+                       + "list is the overlay's empty state over text the pass read")
+        let panel = placements[0]
+        guard let box = scrollableRect(panel) else {
+            return XCTFail("the block is drawn as the bounded panel — every line it has, at the "
+                           + "floor, in a box the elder reads in place: \(panel.form)")
+        }
+        XCTAssertEqual(LiveOverlayPlacement.boundedPanelOutcome(regionRect: rect(of: block),
+                                                                bounds: bounds,
+                                                                containerSize: container,
+                                                                policy: policy),
+                       .fits(box: box),
+                       "the decision's own box is the box that was drawn: the two cannot "
+                       + "disagree about where the panel is")
+        XCTAssertNil(calloutRect(panel), "…and not as a pill that shows only its first line")
+        XCTAssertEqual(panel.lines.map(\.text), ["एक", "दुई", "तीन", "चार"],
+                       "the block's translated lines, in order — all of them, not the ones that "
+                       + "happened to fit the block's own box")
+        XCTAssertEqual(Set(panel.lines.map(\.pointSize)), [policy.minPointSize],
+                       "the bounded panel is drawn at the body floor, like every live surface: "
+                       + "the cap costs scroll, never type size")
+        XCTAssertEqual(Set(panel.lines.map(\.weight)), [.primary])
+
+        // The box: the block's own grown box, cleared and on screen.
+        let own = rect(of: block)
+        XCTAssertLessThanOrEqual(box.height, own.height * CGFloat(policy.inPlaceMaxGrowth) + 1e-9,
+                                 "the panel takes only the room the half-gap law gives this "
+                                 + "block — the same ceiling the plain panel is measured against")
+        XCTAssertLessThanOrEqual(box.width, own.width * CGFloat(policy.inPlaceMaxGrowth) + 1e-9)
+        XCTAssertTrue(bounds.insetBy(dx: -1e-9, dy: -1e-9).contains(box),
+                      "and it stays inside the safe area the rects were measured in")
+        XCTAssertEqual(box.midY, own.midY, accuracy: 1e-6,
+                       "it stands over the text it replaces")
+    }
+
+    /// The cap itself, at the value the owner named: a bounded panel never
+    /// takes more than its fraction of the container, and a block whose own
+    /// grown box is *taller* than the cap is drawn at exactly the cap — the
+    /// bound is reached, not undershot, so the elder gets the most room the
+    /// rule allows.
+    func testTheBoundedPanelIsCappedAtTheConfiguredFractionOfTheContainer() {
+        let lines = (1...24).map { "लाइन \($0)" }
+        let block = blockRegion(1, lines: lines, box: (0.10, 0.10, 0.90, 0.50))
+        let policy = surfacePolicy()
+        let result = translated(block, lines.joined(separator: "\n"), tier: .cloud)
+
+        let placements = place([block], results: [block.id: result])
+        guard let box = scrollableRect(placements[0]) else {
+            return XCTFail("a page of text is the bounded panel's case: \(placements[0].form)")
+        }
+
+        let cap = container.height * CGFloat(policy.panelMaxHeightFraction)
+        XCTAssertLessThanOrEqual(box.height, cap + 1e-9,
+                                 "the last-resort surface is bounded: a block may not become "
+                                 + "the screen")
+        XCTAssertEqual(box.height, cap, accuracy: 1e-6,
+                       "…and the bound is what it is drawn at, not less")
+        XCTAssertLessThan(box.height,
+                          rect(of: block).height * CGFloat(policy.inPlaceMaxGrowth),
+                          "the premise: this block's own grown box is taller than the cap")
+        XCTAssertEqual(placements[0].lines.count, 24,
+                       "the cap costs scroll, never lines")
+        if let chrome = LiveTranslateOverlaySurface.chromeRects(containerSize: container).first {
+            XCTAssertLessThanOrEqual(box.maxY, chrome.minY,
+                                     "and the panel stays clear of the overlay's own control")
+        }
+    }
+
+    /// The cap is the config's value, a fraction of the container — not a point
+    /// size, not a literal in the placement, and never past the safe area.
+    func testTheBoundedPanelsCapIsTheConfigsFractionAndTheSafeAreasRoom() {
+        let policy = surfacePolicy()
+        XCTAssertEqual(policy.panelMaxHeightFraction,
+                       LiveTranslateConfig.default.panelMaxHeightFraction,
+                       "the cap the placement measures against is the config's value")
+        XCTAssertEqual(policy.panelMaxHeightFraction, 0.45)
+        XCTAssertEqual(LiveOverlayPlacement.panelMaxHeight(containerSize: container,
+                                                           bounds: bounds,
+                                                           policy: policy),
+                       container.height * 0.45, accuracy: 1e-6,
+                       "…a fraction of the container the rects were measured in, so a "
+                       + "rotation or another device gets the same share of the view")
+        XCTAssertEqual(LiveOverlayPlacement.panelMaxHeight(
+            containerSize: container,
+            bounds: CGRect(x: 0, y: 0, width: 390, height: 300),
+            policy: policy),
+                       300,
+                       "…and never taller than the safe area it is drawn in")
+    }
+
+    /// The plain panel keeps its block: the bounded form is the fallback for a
+    /// block that does not fit, never a second way to draw one that does.
+    func testABlockThatFitsIsAPlainPanelAndNeverAScrollingOne() {
+        let block = blockRegion(1, lines: ["START", "2 MIN"], box: (0.10, 0.30, 0.70, 0.60))
+
+        let placements = place([block],
+                               results: [block.id: translated(block, "सुरु\n२ मिनेट", tier: .cloud)])
+
+        XCTAssertNotNil(inPlaceRect(placements[0]),
+                        "a block whose lines fit its box is the plain panel it always was")
+        XCTAssertNil(scrollableRect(placements[0]),
+                     "nothing scrolls when there is nothing to scroll")
+    }
+
+    /// The half-gap law is the same law for the new form: two blocks that both
+    /// need the bounded panel still meet at the midpoint of the gap between
+    /// them rather than stacking.
+    func testTwoBoundedPanelsNeverStack() {
+        let lines = (1...24).map { "लाइन \($0)" }
+        let text = lines.joined(separator: "\n")
+        let first = blockRegion(1, lines: lines, box: (0.03, 0.10, 0.45, 0.50))
+        let second = blockRegion(2, lines: lines, box: (0.55, 0.10, 0.97, 0.50))
+
+        let placements = place([first, second],
+                               results: [first.id: translated(first, text, tier: .cloud),
+                                         second.id: translated(second, text, tier: .cloud)])
+
+        XCTAssertEqual(placements.count, 2)
+        let boxes = placements.compactMap(scrollableRect)
+        XCTAssertEqual(boxes.count, 2, "both blocks are bounded panels: \(placements.map(\.form))")
+        assertNoStacking(boxes, "the two bounded panels")
+    }
+
+    /// The FR-LCT-017 preference reaches the bounded panel exactly as it
+    /// reaches the plain one: the translation first, the original under it.
+    func testABoundedPanelCarriesTheOriginalLinesUnderTheTranslation() {
+        let original = ["one", "two", "three", "four"]
+        let block = blockRegion(1, lines: original, box: (0.42, 0.44, 0.50, 0.50))
+        let policy = surfacePolicy(alwaysShowOriginal: true)
+        let result = translated(block, "एक\nदुई\nतीन\nचार", tier: .cloud)
+
+        let placements = place([block], results: [block.id: result], policy: policy)
+        guard let panel = placements.first else {
+            return XCTFail("the block must be placed")
+        }
+
+        XCTAssertNotNil(scrollableRect(panel), "this block's lines do not fit its own box")
+        XCTAssertEqual(panel.lines.map(\.text), ["एक", "दुई", "तीन", "चार"] + original,
+                       "every translated line, then every original one, in the order the "
+                       + "panel draws them")
+        XCTAssertEqual(panel.lines.filter { $0.weight == .secondary }.map(\.pointSize),
+                       Array(repeating: policy.secondaryPointSize, count: original.count),
+                       "the original stays the supporting line, at the supporting size")
     }
 
     func testTwoPanelsNeverStack() {

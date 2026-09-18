@@ -16,6 +16,14 @@ import UIKit
 //    quarantined region still has a bubble with its recognized text; the only
 //    state without bubbles is "no text was detected", and that state says so
 //    in words (NFR-LCT-010).
+//  - **A block too tall for its box scrolls, and does not shrink.** A **block**
+//    is one panel holding every line at the body floor. When those lines are
+//    taller than the box the block could be given, the panel is drawn *bounded*
+//    — capped at the policy's fraction of the container, with the same rows at
+//    the same floor inside a `ScrollView` — so the elder can read all of it
+//    rather than the first line (owner refinement, 2026-09-18). The floor is
+//    never traded away for the fit: small type is the failure the floor exists
+//    to prevent, and a scroll is not.
 //  - **The render path never waits.** The view holds no translation, starts
 //    no task and observes nothing: a frame is a function of the surface and of
 //    the geometry memory — which holds rects and nothing else — so a
@@ -121,10 +129,12 @@ struct RegionPresentation: Equatable, Identifiable {
     }
 
     /// The rect the bubble is drawn in: the region itself for the in-place
-    /// form, the anchored pill otherwise.
+    /// form, the bounded box for a scrollable panel, the anchored pill
+    /// otherwise.
     var frameRect: CGRect {
         switch form {
         case .inPlace(_, let rect): return rect
+        case .scrollablePanel(_, let rect): return rect
         case .callout(_, _, let pillRect): return pillRect
         }
     }
@@ -167,45 +177,63 @@ struct RegionPresentation: Equatable, Identifiable {
 /// (FR-LCT-016).
 enum LiveOverlayFormGeometry: Equatable {
     case inPlace(rect: CGRect)
+    case scrollablePanel(rect: CGRect)
     case callout(anchor: CGPoint, pillRect: CGRect)
 
     init(_ form: LiveOverlayPlacement.Form) {
         switch form {
         case .inPlace(_, let rect):
             self = .inPlace(rect: rect)
+        case .scrollablePanel(_, let rect):
+            self = .scrollablePanel(rect: rect)
         case .callout(_, let anchor, let pillRect):
             self = .callout(anchor: anchor, pillRect: pillRect)
         }
     }
 
-    /// The rect the elder sees: the box for the in-place form, the pill for a
-    /// callout — the same rect `RegionPresentation.frameRect` reports, so the
-    /// two can never disagree about what "the box" is.
+    /// Which surface the geometry belongs to.
+    ///
+    /// A form *kind* is never a thing the memory may hold: which form a region
+    /// is drawn in is a decision the placement made (the translation fits in
+    /// place, the block needed the bounded panel, or the preference wants the
+    /// original kept visible), not a position that can be stale. So the memory
+    /// compares kinds first and adopts on any change of kind, however near the
+    /// two rects happen to be — an in-place box and the pill that would stand
+    /// beside it can be a few points apart on a small region, and the two
+    /// panels can differ by nothing but the scroll they do or do not have.
+    /// Holding one for the other would draw the wrong surface: a scrolled
+    /// panel's rows clipped into a plain box has no scroll at all.
+    enum Kind: Equatable {
+        case box
+        case scrollablePanel
+        case callout
+    }
+
+    /// The rect the elder sees: the box for the in-place form, the bounded box
+    /// for a scrollable panel, the pill for a callout — the same rect
+    /// `RegionPresentation.frameRect` reports, so the two can never disagree
+    /// about what "the box" is.
     var rect: CGRect {
         switch self {
         case .inPlace(let rect): return rect
+        case .scrollablePanel(let rect): return rect
         case .callout(_, let pillRect): return pillRect
         }
     }
 
     /// The anchor, when this is a callout: the point the leader line is drawn
-    /// to. Nil for an in-place box, which has no line.
+    /// to. Nil for a box, which has no line.
     var anchor: CGPoint? {
         guard case .callout(let anchor, _) = self else { return nil }
         return anchor
     }
 
-    /// Whether this is the callout form. The form *kind* is never a thing the
-    /// memory may hold: which form a region is drawn in is a decision the
-    /// placement made (the translation fits in place, or the preference wants
-    /// the original kept visible), not a position that can be stale. So the
-    /// memory compares kinds first and adopts on any change of kind, however
-    /// near the two rects happen to be — an in-place box and the pill that
-    /// would stand beside it can be a few points apart on a small region, and
-    /// holding one for the other would draw the wrong form.
-    var isCallout: Bool {
-        if case .callout = self { return true }
-        return false
+    var kind: Kind {
+        switch self {
+        case .inPlace: return .box
+        case .scrollablePanel: return .scrollablePanel
+        case .callout: return .callout
+        }
     }
 
     /// How far this geometry differs from `other`, as a fraction of the
@@ -238,6 +266,8 @@ enum LiveOverlayFormGeometry: Equatable {
         switch self {
         case .inPlace(let rect):
             return .inPlace(regionID: regionID, rect: rect)
+        case .scrollablePanel(let rect):
+            return .scrollablePanel(regionID: regionID, rect: rect)
         case .callout(let anchor, let pillRect):
             return .callout(regionID: regionID, anchor: anchor, pillRect: pillRect)
         }
@@ -326,7 +356,7 @@ final class LiveOverlayGeometryMemory {
             // against gets the placement's own rects, never a frozen frame.
             // A change of form kind is adopted for the same reason, whatever
             // the rects say.
-            guard held.isCallout == measured.isCallout,
+            guard held.kind == measured.kind,
                   held.drift(from: measured, in: container) <= limit else {
                 next[presentation.id] = measured
                 return presentation
@@ -409,6 +439,7 @@ struct LiveTranslateOverlaySurface: Equatable {
             inPlaceMaxGrowth: config.inPlaceMaxGrowth,
             inPlacePadding: config.inPlacePadding,
             inPlaceCornerRadius: config.inPlaceCornerRadius,
+            panelMaxHeightFraction: config.panelMaxHeightFraction,
             geometryStickiness: config.overlayGeometryStickiness,
             minPointSize: primary,
             secondaryPointSize: supporting,
@@ -691,13 +722,29 @@ struct LiveTranslateOverlayView: View {
             // object or merged text block, never one bubble per line). A
             // single-line region is the same code with one line in it, so the
             // per-line rendering the feature shipped is unchanged.
-            VStack(spacing: surface.policy.lineSpacing) {
-                ForEach(Array(presentation.lines.enumerated()), id: \.offset) { _, textLine in
-                    line(textLine,
-                         colour: textLine.weight == .secondary
-                             ? DesignTokens.brandBlush
-                             : DesignTokens.background)
-                }
+            panelRows(presentation)
+                .padding(surface.policy.inPlacePadding)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(DesignTokens.textPrimary)
+                .clipShape(RoundedRectangle(cornerRadius: surface.policy.inPlaceCornerRadius))
+
+        case .scrollablePanel:
+            // The bounded panel (owner refinement, 2026-09-18): the same rows,
+            // the same padding, the same fill and corner — inside a `ScrollView`
+            // instead of a fixed stack, because the block's lines at the body
+            // floor are taller than the box the placement could give them. The
+            // box is the placement's (it is capped at a fraction of the
+            // container and proved clear of its neighbours), so the scroll is
+            // bounded by a rect the elder is already looking at, and every line
+            // stays reachable instead of being clipped away or shrunk to fit.
+            //
+            // The rows are laid out at their natural height — nothing here may
+            // compress them to the viewport, which is exactly the illegible
+            // small type the floor exists to prevent — and the scroll indicator
+            // is left on: a surface with more text under it has to say so.
+            ScrollView(.vertical, showsIndicators: true) {
+                panelRows(presentation)
+                    .frame(maxWidth: .infinity)
             }
             .padding(surface.policy.inPlacePadding)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -716,6 +763,27 @@ struct LiveTranslateOverlayView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(DesignTokens.textPrimary)
             .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+        }
+    }
+
+    /// The rows a **panel** draws: every line the placement measured, in the
+    /// order it measured them, at the size and weight each one carries — the
+    /// translation first, then the original under it where the preference asked
+    /// for it.
+    ///
+    /// One builder for both panel forms, deliberately: the plain panel and the
+    /// bounded scrollable one are the *same surface* to the elder, and the only
+    /// difference between them is whether the box around these rows scrolls.
+    /// Two copies of this stack could drift into two appearances for one block.
+    @ViewBuilder
+    private func panelRows(_ presentation: RegionPresentation) -> some View {
+        VStack(spacing: surface.policy.lineSpacing) {
+            ForEach(Array(presentation.lines.enumerated()), id: \.offset) { _, textLine in
+                line(textLine,
+                     colour: textLine.weight == .secondary
+                         ? DesignTokens.brandBlush
+                         : DesignTokens.background)
+            }
         }
     }
 
