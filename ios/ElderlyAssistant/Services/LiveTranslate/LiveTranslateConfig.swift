@@ -649,7 +649,7 @@ struct LiveTranslateConfig: Equatable {
     /// The elder asks in two ways, both of which are the *same* machinery: a
     /// tap on a block translates that block, and the chrome's translate-all
     /// control translates the scene. `false` ships the translated view.
-    var extractModeDefault: Bool = true
+    var extractModeDefault: Bool = false
 
     // MARK: Tracking / stabilisation
 
