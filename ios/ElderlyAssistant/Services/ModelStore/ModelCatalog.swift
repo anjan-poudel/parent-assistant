@@ -881,9 +881,17 @@ enum ModelCatalog {
             // not an assistant/intent brain — offering it as one would let
             // a household hot-swap `LlamaCommandInterpreter` onto a model
             // that answers `{"translations":[…]}`, breaking intent parsing.
-            // It is not undeletable: `AIModelsSettingsView.managedRows`
-            // appends installed hidden `.llamaBase` entries, so a device
-            // that installs it gets a management row.
+            //
+            // [TRANSLATION-MODEL-ROW] (2026-09-18) Hidden from the picker is
+            // not hidden from the screen: the AI-models screen offers it
+            // through `availableTranslationEntries`, its own download row.
+            // A download is not a selection — a device can hold the
+            // artifact (which is what the tier reads) without the picker
+            // ever offering it as a brain. It is deletable from that same
+            // row, so the declutter rule ("not offered, but still
+            // deletable") holds without the brain section's
+            // installed-hidden append (which now excludes it, so one model
+            // is one row).
             displayName: "Translate — English to Nepali (Qwen 1.7B)",
             // Round-2b EN→NE translation fine-tune of Qwen3-1.7B
             // (`tools/train-nmt/` on the server, run 20260914-…; the
@@ -1346,6 +1354,39 @@ enum ModelCatalog {
         qwen3_4BInstruct,
         qwen3_1_7BInstruct
     ].compactMap { entry(for: $0) }
+
+    /// [TRANSLATION-MODEL-ROW] (2026-09-18) The models the AI-models screen
+    /// offers as their OWN download row — the live-translate tier's head,
+    /// and nothing else.
+    ///
+    /// A third list rather than a member of either above, because the tier's
+    /// model is a different KIND of row from a picker's:
+    ///   · not in `availableBrainEntries` — the picker hot-swaps
+    ///     `LlamaCommandInterpreter` onto what it offers, and this artifact
+    ///     answers the tier's `{"translations":[…]}` contract (see the
+    ///     entry's docs);
+    ///   · not in `availableSTTEntries` — it is not a recognizer;
+    ///   · not in the tier's own `brainTranslationModelIDs` wholesale — the
+    ///     two fallbacks behind the head are assistant brains with rows of
+    ///     their own in the brain section, and offering them twice would let
+    ///     one artifact be deleted from two places.
+    ///
+    /// What it is FOR: a download. `LocalBrainTranslationTier` reads what is
+    /// installed (`installedModel()` walks `brainTranslationModelIDs`), so
+    /// without a row here the shipped translation fine-tune can be in the
+    /// catalog, published at a release, sha-pinned — and still never reach a
+    /// device, because nothing in the app starts its download. The row is
+    /// also what keeps the promise honest in the other direction: it shows
+    /// the class verdict (`ModelLifecycleManager.availability(of:)`) beside
+    /// a Download that stays offered anyway, so the artifact is present when
+    /// a device can run it and when a later policy moves the line.
+    ///
+    /// The head is the ship decision (`brainTranslationModelIDs.first` is
+    /// what the tier prefers); a test pins the two together, so a list that
+    /// moved cannot leave the row fetching a model the tier no longer leads
+    /// with.
+    static let availableTranslationEntries: [ModelCatalogEntry] =
+        [nmtEnNeQwen17bR2bQ8].compactMap { entry(for: $0) }
 
     /// The reply voices the language-aware default lookup draws from —
     /// curated the same way as the two lists above (the shipped voices,

@@ -9450,6 +9450,23 @@
         }
       }
     },
+    "model.name.nmt-en-ne-qwen17b-r2b-q8_0": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Translate — English to Nepali (Qwen 1.7B)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अनुवाद — अंग्रेजीबाट नेपालीमा (Qwen १.७B)"
+          }
+        }
+      }
+    },
     "model.name.piper-ne-female-v1": {
       "extractionState": "manual",
       "localizations": {
@@ -9837,6 +9854,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "डाउनलोड भयो, रनटाइम जोडिएको छैन (%@)"
+          }
+        }
+      }
+    },
+    "model.size": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Size: %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "आकार: %@"
           }
         }
       }
@@ -15141,6 +15175,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "उपकरण अनुरोधहरू"
+          }
+        }
+      }
+    },
+    "settings.translation.section": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Live translation model"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "लाइभ अनुवाद मोडेल"
+          }
+        }
+      }
+    },
+    "settings.translation.note": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Used only by live translation, never for the assistant's answers. It needs a lot of memory, so it runs on the phones that have enough — you can still download it now and keep it ready."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो लाइभ अनुवादका लागि मात्र प्रयोग हुन्छ, सहायकको जवाफका लागि होइन। यसलाई धेरै मेमोरी चाहिन्छ, त्यसैले पर्याप्त मेमोरी भएका फोनमा मात्र चल्छ — तैपनि तपाईं अहिले डाउनलोड गरेर राख्न सक्नुहुन्छ।"
           }
         }
       }

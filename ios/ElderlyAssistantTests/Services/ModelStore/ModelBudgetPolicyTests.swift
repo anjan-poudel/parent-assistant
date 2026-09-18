@@ -426,6 +426,68 @@ final class ModelBudgetPolicyTests: XCTestCase {
             .lowercased().contains("not downloaded"))
     }
 
+    /// [TRANSLATION-MODEL-ROW] (2026-09-18) The one row on the AI-models
+    /// screen whose Download survives the class verdict — and the rule every
+    /// other row keeps.
+    ///
+    /// The row exists because the tier only READS installed models: if the
+    /// download were gated by the admit verdict, the shipped translation
+    /// fine-tune could never reach even the phones that can run it, and a
+    /// later policy change could never reach one either. So the verdict is
+    /// displayed (the same sentence the picker shows — `unavailableNote`)
+    /// and the download stays offered. Pinned against the standard class
+    /// because that is the phone the owner's reports come from.
+    func testOnlyTheTranslationRowDownloadsThroughItsRefusal() {
+        let standard = availability(translationBrain, on: standardPhone)
+        XCTAssertEqual(standard.reason, .requiresEvictingWarmSTT,
+                       "the refusal this row has to show AND survive")
+
+        // The carve-out: refused, still downloadable.
+        XCTAssertTrue(AIModelsSettingsView.offersDownloadButton(
+            state: .notStarted,
+            unavailableReason: standard.reason,
+            downloadsWhileUnavailable: true),
+                      "the tier's model must stay fetchable on a phone that "
+                      + "may not run it — the artifact is the point")
+        // …and the rule the other rows keep is unchanged by it.
+        XCTAssertFalse(AIModelsSettingsView.offersDownloadButton(
+            state: .notStarted,
+            unavailableReason: standard.reason,
+            downloadsWhileUnavailable: false),
+                       "an ordinary refused row still hides its download")
+        // An admitted model is an ordinary row on either path.
+        let roomy = availability(translationBrain, on: roomyPhone)
+        XCTAssertNil(roomy.reason)
+        XCTAssertTrue(AIModelsSettingsView.offersDownloadButton(
+            state: .notStarted,
+            unavailableReason: roomy.reason,
+            downloadsWhileUnavailable: false))
+        // In flight (or landed) is never re-offered as a fresh download.
+        let inFlight: [ModelDownloadState] = [
+            .queued,
+            .downloading(bytesReceived: 1, totalBytes: 1_834_426_080),
+            .verifying,
+            .completed
+        ]
+        for state in inFlight {
+            XCTAssertFalse(AIModelsSettingsView.offersDownloadButton(
+                state: state,
+                unavailableReason: standard.reason,
+                downloadsWhileUnavailable: true),
+                           "\(state) must not offer a second download")
+        }
+        // A failed or cancelled attempt is retryable, carve-out or not: the
+        // row is how a household recovers from a dropped connection.
+        let retryable: [ModelDownloadState] = [.failed(reason: "transport"),
+                                               .cancelled]
+        for state in retryable {
+            XCTAssertTrue(AIModelsSettingsView.offersDownloadButton(
+                state: state,
+                unavailableReason: standard.reason,
+                downloadsWhileUnavailable: true))
+        }
+    }
+
     func testAnUnavailableReasonIsReadableWithoutUnwrappingTheEnum() {
         XCTAssertNil(ModelAvailability.available.reason)
         XCTAssertTrue(ModelAvailability.available.isAvailable)
