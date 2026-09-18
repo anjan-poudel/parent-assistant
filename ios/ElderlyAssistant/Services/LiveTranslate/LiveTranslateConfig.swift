@@ -937,6 +937,17 @@ struct LiveTranslateConfig: Equatable {
     /// artifact, and installing it is what opts a device into the better
     /// translations; a device holding only a fallback keeps working.
     ///
+    /// [TRANSLATION-MODEL-ROW] (2026-09-18) This list only READS what is
+    /// installed — it never starts a download, and neither does anything
+    /// else in the app (the assistant-brain picker deliberately excludes the
+    /// head, and `AIModelsSettingsView.managedRows` only appends entries
+    /// that are already on disk). The install path is the AI-models screen's
+    /// own row for the head, offered through
+    /// `ModelCatalog.availableTranslationEntries`, whose Download stays
+    /// offered even where the warden refuses the LOAD — so the artifact is
+    /// present on the phones that can run it, and on a phone whose class
+    /// verdict is what changes later.
+    ///
     /// Note the head is `roomy`-class only under `ModelBudgetPolicy`
     /// (1.83 GB takes the 3B weight band → 2.63 GB live, over both the
     /// compact and the standard co-residency budget — see the catalog

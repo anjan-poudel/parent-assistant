@@ -166,8 +166,13 @@ final class ModelCatalogSTTNamingTests: XCTestCase {
 
     func testSettingsSectionHeadersAreLocalizedEnAndNe() {
         // The split surfaces ("Speech recognition" / "Assistant brain")
-        // must read in the household's language like every other row.
-        for key in ["settings.stt.section", "settings.brain.section"] {
+        // must read in the household's language like every other row — and
+        // so must the translation card's header and its note
+        // ([TRANSLATION-MODEL-ROW], 2026-09-18), which are the only copy on
+        // the screen explaining what that model is for and that a phone may
+        // hold it without being able to run it.
+        for key in ["settings.stt.section", "settings.brain.section",
+                    "settings.translation.section", "settings.translation.note"] {
             let en = L10n.str(key, locale: Locale(identifier: "en"))
             let ne = L10n.str(key, locale: Locale(identifier: "ne-NP"))
             XCTAssertNotEqual(en, key, "\(key) must have an English value")
