@@ -19,6 +19,9 @@ final class ModelBudgetPolicyTests: XCTestCase {
     private var brain4B: ModelID { ModelCatalog.intentQwen4BSlotCanon }
     private var brain17B: ModelID { ModelCatalog.qwen3_1_7BInstruct }
     private var intent1B: ModelID { ModelCatalog.intentNepali1B }
+    /// The live-translate tier's head model (round-2b EN→NE, 2026-09-18) —
+    /// a 1.7B **file** that is bigger than the 1.7B ladder rung.
+    private var translationBrain: ModelID { ModelCatalog.nmtEnNeQwen17bR2bQ8 }
     private var sttANE: ModelID { ModelCatalog.whisperKitMediumV6 }
 
     private let compactPhone: UInt64 = 4_000_000_000     // < 5 GB
@@ -79,6 +82,51 @@ final class ModelBudgetPolicyTests: XCTestCase {
         XCTAssertEqual(availability(brain17B, on: standardPhone), .available)
     }
 
+    /// The round-2b EN→NE translation brain (the live-translate tier's head
+    /// model, 2026-09-18) against the same three rungs.
+    ///
+    /// It is the first shipped brain whose *file* is over the 1.5 GB "1.7B"
+    /// rung: 1,834,426,080 B takes the NEXT rung's overhead (800 MB), so
+    /// 2.63 GB live — under the 3.2 GB standard budget alone, over it beside
+    /// the 1.0 GB warm STT. Pinned as a finding, not as an endorsement: the
+    /// 1.7B ladder rung's *class* does not admit every 1.7B file, and a
+    /// standard-class phone therefore does not run this model (its tier
+    /// falls through to the next id or to the cloud). Changing that is a
+    /// policy-numbers decision, not a catalog one.
+    func testTheTranslationBrainIsOverTheStandardClassAndAdmittedOnlyOnRoomy() {
+        let standard = availability(translationBrain, on: standardPhone)
+        XCTAssertEqual(standard.reason, .requiresEvictingWarmSTT,
+                       "2.63 GB live + 1.0 GB warm STT = 3.63 GB > 3.2 GB")
+
+        // The ladder refusal underneath the sentence above: with the warm
+        // STT taken out of the question, the shipped standard policy still
+        // refuses — 1.83 GB is over its 1.5 GB rung. Both are true, and the
+        // co-residency one is what a household would feel.
+        XCTAssertEqual(ModelBudgetPolicy.standard.availability(
+            of: entry(translationBrain),
+            physicalMemoryBytes: standardPhone,
+            warmSTTLiveBytes: 0),
+                       .unavailable(reason: .overBrainCeiling))
+
+        XCTAssertEqual(availability(translationBrain, on: compactPhone).reason,
+                       .overClassBudget,
+                       "2.63 GB live is over the whole 2.0 GB compact budget")
+        XCTAssertEqual(availability(translationBrain, on: roomyPhone), .available,
+                       "the 8 GB class holds it: 2.63 + 1.0 GB ≤ 5.0 GB")
+    }
+
+    /// The arithmetic behind those verdicts, from the inventory the budget
+    /// reads: the 1.83 GB file lands in the 3B band, and the position is
+    /// pageable, so only the overhead is un-reclaimable.
+    func testTheTranslationBrainTakesTheThreeBWeightBand() {
+        let footprint = ModelLifecycleInventory.footprint(for: .translateBrain,
+                                                          modelID: translationBrain)
+        XCTAssertEqual(footprint.weightsBytes, 1_834_426_080)
+        XCTAssertEqual(footprint.runtimeOverheadBytes, 800_000_000)
+        XCTAssertEqual(footprint.liveBytes, 2_634_426_080)
+        XCTAssertEqual(footprint.hardBytes, 800_000_000)
+    }
+
     func testTheCompactClassRefusesEveryShippedBrain() {
         // A finding, pinned so it cannot regress into a surprise: the
         // smallest shipped brain (`intentNepali1B`, 1.81 GB live) plus the
@@ -86,7 +134,7 @@ final class ModelBudgetPolicyTests: XCTestCase {
         // The 4 GB class cannot co-reside a brain with an STT at all —
         // which is why §3.2 pairs it with the small whisper.cpp context and
         // why the refusal is the honest answer rather than a silent admit.
-        for id in [intent1B, brain17B, brain3B, brain4B] {
+        for id in [intent1B, brain17B, translationBrain, brain3B, brain4B] {
             let result = availability(id, on: compactPhone)
             XCTAssertFalse(result.isAvailable, "\(id.rawValue) on the 4 GB class")
             XCTAssertNotNil(result.reason)

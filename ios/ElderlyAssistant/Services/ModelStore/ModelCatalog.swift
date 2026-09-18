@@ -248,6 +248,22 @@ enum ModelCatalog {
     /// ordered parts (GitHub's per-asset cap) reassembled by
     /// `ModelDownloadService`.
     static let intentQwen4BSlotCanon = ModelID("intent-ne-qwen4b-slotcanon-q4km")
+    /// Round-2b EN→NE **translation** brain (Qwen 3 1.7B QLoRA, Q8_0) —
+    /// the live-translate tier's own model, not an intent brain.
+    ///
+    /// It is deliberately NOT in `availableBrainEntries`: that picker
+    /// selects the *assistant* brain (`LlamaCommandInterpreter` hot-swaps
+    /// it under the intent prompt), and this artifact is trained on the
+    /// translation tier's raw prompt header and answers
+    /// `{"translations":[…]}`. It is the head of
+    /// `LiveTranslateConfig.brainTranslationModelIDs`, which is the only
+    /// list that consumes it.
+    ///
+    /// Delivery: 1.83 GB in ONE file — under GitHub's 2 GiB per-asset cap,
+    /// so no `.partaa`/`.partab` split (unlike `intentQwen4BSlotCanon`).
+    /// The Q8_0 build is THE ship quant: the Q5_K_M export of the same
+    /// checkpoint failed 2 of 12 runtime probes and is not published.
+    static let nmtEnNeQwen17bR2bQ8 = ModelID("nmt-en-ne-qwen17b-r2b-q8_0")
     /// The GEMMA leg of the bake-off (2026-09-07): the QLoRA fine-tune
     /// over google/gemma-3-1b-it, merged to fp16 and exported Q4_K_M
     /// (`intent-ne-gemma-q4_k_m.gguf`, release v7). A real, hosted
@@ -855,6 +871,71 @@ enum ModelCatalog {
             minDeviceRAMBytes: 4_000_000_000,
             dependsOn: nil,
             // Language tag: ne-only model.
+            languages: ["ne"]
+        ),
+        ModelCatalogEntry(
+            id: nmtEnNeQwen17bR2bQ8,
+            kind: .llamaBase,
+            // HIDDEN from the Settings brain picker: it is the
+            // live-translate tier's translation brain (see the id's docs),
+            // not an assistant/intent brain — offering it as one would let
+            // a household hot-swap `LlamaCommandInterpreter` onto a model
+            // that answers `{"translations":[…]}`, breaking intent parsing.
+            // It is not undeletable: `AIModelsSettingsView.managedRows`
+            // appends installed hidden `.llamaBase` entries, so a device
+            // that installs it gets a management row.
+            displayName: "Translate — English to Nepali (Qwen 1.7B)",
+            // Round-2b EN→NE translation fine-tune of Qwen3-1.7B
+            // (`tools/train-nmt/` on the server, run 20260914-…; the
+            // artifact is `translate-en-ne-qwen17b-r2b-q8_0.gguf`).
+            //
+            // THE SHIP QUANT IS Q8_0. The Q5_K_M export of the same
+            // checkpoint failed 2 of the 12 runtime probes and is NOT
+            // published; do not "save 500 MB" by pointing this entry at it.
+            //
+            // Runtime contract: the tier's RAW prompt + `json_schema`
+            // grammar (no chat template — the model was trained on the
+            // tier's exact header, `LocalBrainTranslationTier.prompt`).
+            // That is why the tier's prompt/grammar must not be rewritten
+            // around this entry.
+            //
+            // DELIVERY: 1.83 GB in ONE file — under GitHub's 2 GiB
+            // per-asset cap, so there are no part URLs (unlike
+            // `intentQwen4BSlotCanon`) and `ModelDownloadService` takes the
+            // ordinary single-file path.
+            //
+            // Device class ([MODEL-WARDEN], computed from
+            // `ModelLifecycleInventory.brainClasses`): 1_834_426_080 B is
+            // over the 1.5 GB "1.7B" rung, so it takes the 3B rung's
+            // 800 MB overhead → 2_634_426_080 B live. That is over the
+            // compact budget (2.0 GB) and, beside a warm ANE STT
+            // (2_634_426_080 + 1_000_000_000 > 3.2 GB), over the standard
+            // budget too: the policy refuses it on compact
+            // (`over_class_budget`) and on standard
+            // (`requires_evicting_warm_stt`) and admits it on roomy
+            // (`ModelBudgetPolicyTests` pins the three verdicts). A
+            // standard-class phone therefore keeps the intent-brain
+            // fallbacks below it in the tier list rather than this model.
+            filename: "translate-en-ne-qwen17b-r2b-q8_0.gguf",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v18/translate-en-ne-qwen17b-r2b-q8_0.gguf")!,
+            sizeBytes: 1_834_426_080,
+            // The ASSEMBLED file's digest, pinned literally (never
+            // `pendingSHA256`: the placeholder is not a digest, so
+            // `ModelStore.finalize` could only ever answer "mismatch" —
+            // a 1.83 GB download blamed on a checksum over a placeholder).
+            // Verified against the server original AND the uploaded
+            // release asset, which agree byte for byte:
+            //   1_834_426_080 B
+            //   -> cae02965ab261a16fd375de12ecc012a1138d0f589fd74386b14aa058b2690b3
+            sha256: "cae02965ab261a16fd375de12ecc012a1138d0f589fd74386b14aa058b2690b3",
+            // The 4 GB floor the other >1 GB brains carry
+            // (`intentQwen4BSlotCanon`, `intentQwen4BS43`): a ~1.83 GB
+            // file is ~2.6 GB live, and `minDeviceRAMBytes` reads the
+            // device probe, not the class policy — a 6 GB phone must still
+            // be able to download and keep it.
+            minDeviceRAMBytes: 4_000_000_000,
+            dependsOn: nil,
+            // Language tag: ne-only model (it translates INTO Nepali).
             languages: ["ne"]
         ),
         ModelCatalogEntry(
