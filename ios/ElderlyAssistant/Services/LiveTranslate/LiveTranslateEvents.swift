@@ -181,6 +181,25 @@ enum LiveTranslateEventCatalogue {
         "ocr_pass": Entry(outcomes: ["success", "empty"], metadataKeys: ["regionCount"]),
         "ocr_pass_failed": Entry(outcomes: ["failure"], metadataKeys: []),
         "tracking_unsupported": Entry(outcomes: ["degraded"], metadataKeys: []),
+        // The object pass (scene-block rework, 2026-09-18). `object_pass` is
+        // the slow pass's own report: how many objects the frame was grouped
+        // by. Zero is `empty` and not a failure — a scene with nothing
+        // object-like in it is grouped by text geometry, which is exactly what
+        // every pass did before the rework.
+        //
+        // The two ways the pass can be lost are kept apart, because they are
+        // different facts about a device and a probe that conflated them would
+        // report the wrong one. `object_detection_unsupported` is this pass's
+        // `tracking_unsupported`: the runtime has no such capability.
+        // `object_pass_failed` is a request the runtime *has* the capability to
+        // answer and refused — which is what this build meets on a simulator
+        // whose Vision cannot create an Espresso context — and it carries the
+        // taxonomy's code for it. Both leave the feature grouping by text
+        // geometry, and the elder never sees the difference. All three events
+        // carry counts and closed tokens only.
+        "object_pass": Entry(outcomes: ["success", "empty"], metadataKeys: ["count"]),
+        "object_pass_failed": Entry(outcomes: ["failure"], metadataKeys: []),
+        "object_detection_unsupported": Entry(outcomes: ["degraded"], metadataKeys: []),
 
         "region_appeared": Entry(outcomes: ["success"], metadataKeys: []),
         "region_removed": Entry(outcomes: ["success"], metadataKeys: []),
@@ -372,6 +391,31 @@ struct LiveTranslateEvents {
     func trackingUnsupported() {
         emit("tracking_unsupported", outcome: "degraded",
              errorCode: code(.trackingUnsupported))
+    }
+
+    /// One completed object pass, and how many objects the scene resolved
+    /// into. Zero is the `empty` outcome rather than a failure: it is the
+    /// documented "group by text geometry" path, and the text is unaffected.
+    func objectPass(objectCount: Int) {
+        emit("object_pass", outcome: objectCount > 0 ? "success" : "empty",
+             metadata: [.count: String(objectCount)])
+    }
+
+    /// The runtime answered an object request with a refusal. The feature goes
+    /// on without it exactly as it does when the capability is absent, so what
+    /// this event adds is the *reason*: the taxonomy's code, in the same shape
+    /// `ocr_pass_failed` records the OCR request's.
+    func objectPassFailed(_ error: LiveTranslateError) {
+        emit("object_pass_failed", outcome: "failure", errorCode: code(error))
+    }
+
+    /// Object detection is a SHOULD, like tracking: the feature continues
+    /// grouping by text geometry alone, and the degradation is recorded so it
+    /// is visible to the project rather than invisible to everyone. No error
+    /// code: this is a capability the runtime does not have, not a failure of
+    /// one of the taxonomy's operations, and the elder is never shown it.
+    func objectDetectionUnsupported() {
+        emit("object_detection_unsupported", outcome: "degraded")
     }
 
     // MARK: Stabilisation (C03)

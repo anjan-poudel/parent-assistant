@@ -108,6 +108,7 @@ final class SnapshotModeTests: XCTestCase {
         let detector = LiveTextDetector(config: config,
                                         observabilityBus: parts.bus,
                                         engine: recorder,
+                                        objectEngine: StubObjectDetectionEngine(),
                                         now: { parts.clock.now })
         let base = parts.dependencies
         let dependencies = LiveTranslateSessionDependencies(
@@ -285,6 +286,15 @@ final class SnapshotModeTests: XCTestCase {
         }
         XCTFail("timed out waiting for \(description)", file: file, line: line)
     }
+
+    /// Every Vision request kind the feature uses, and how many of each the one
+    /// file that owns Vision may construct. One of each: the OCR request reads
+    /// the scene's text, and the object pass's two requests read its objects.
+    private static let visionRequests: [String: Int] = [
+        "VNRecognizeTextRequest(": 1,
+        "VNGenerateObjectnessBasedSaliencyImageRequest(": 1,
+        "VNClassifyImageRequest(": 1,
+    ]
 
     /// A provider envelope for a request whose items are these texts, keyed by
     /// the wire ids the request carried.
@@ -893,12 +903,22 @@ final class SnapshotModeTests: XCTestCase {
     func testTheStillPathAddsNoSecondDetectorAndNoSecondVisionRequest() throws {
         let detectorFile = "ElderlyAssistant/Services/LiveTranslate/LiveTextDetector.swift"
         let detector = code(detectorFile)
-        XCTAssertEqual(occurrences(of: "VNRecognizeTextRequest(", in: detector), 1,
-                       "one OCR request, created once")
-        XCTAssertEqual(occurrences(of: "VNImageRequestHandler(", in: detector), 1)
-        // The still entry is the shared pass implementation, handed the frame.
+        // One request *of each kind*, each created once. The scene-block rework
+        // added a second and third kind of request — objectness saliency for the
+        // object boxes and image classification for their labels — and did not
+        // add a second detector: they are three requests in the one engine file,
+        // driving the one pass.
+        Self.visionRequests.forEach { request, expected in
+            XCTAssertEqual(occurrences(of: request, in: detector), expected,
+                           "\(request) is created \(expected) time(s), in the file that owns Vision")
+        }
+        XCTAssertEqual(occurrences(of: "VNImageRequestHandler(", in: detector), 3,
+                       "one handler per request kind: each is constructed for the buffer it is "
+                       + "handed, and none is shared across threads")
+        // The still entry is the shared pass implementation, handed the frame —
+        // and handed no cap, because the snapshot card has no overlay to crowd.
         let stillEntry = try XCTUnwrap(block(startingWith: "func recognizeStillFrame(", in: detectorFile))
-        XCTAssertTrue(stillEntry.contains("perform(frame, crop: .whole) { .ocr }"),
+        XCTAssertTrue(stillEntry.contains("perform(frame, crop: .whole, limit: nil) { .ocr }"),
                       "the still entry runs the same pass as the live path — an OCR pass over the "
                       + "frame's own whole buffer, since a held picture was never cropped")
 
@@ -912,14 +932,15 @@ final class SnapshotModeTests: XCTestCase {
         for url in featureFiles {
             let text = FeatureSourceScan.codeText(of: url)
             let relative = FeatureSourceScan.relativePath(of: url)
-            let requests = occurrences(of: "VNRecognizeTextRequest(", in: text)
             let handlers = occurrences(of: "VNImageRequestHandler(", in: text)
             if relative.hasSuffix("LiveTextDetector.swift") {
-                XCTAssertEqual(requests, 1)
-                XCTAssertEqual(handlers, 1)
+                XCTAssertEqual(handlers, 3)
             } else {
-                XCTAssertEqual(requests, 0, "\(relative) creates a second OCR request")
                 XCTAssertEqual(handlers, 0, "\(relative) creates a second Vision handler")
+                for (request, _) in Self.visionRequests {
+                    XCTAssertEqual(occurrences(of: request, in: text), 0,
+                                   "\(relative) creates a second \(request)")
+                }
             }
             if snapshotPathFiles.contains(relative) {
                 for token in ["vImage", "CIImage", "CGImageContext", "resize(", "downscale"] {
