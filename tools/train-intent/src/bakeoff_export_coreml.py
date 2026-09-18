@@ -22,7 +22,6 @@ from __future__ import annotations
 import argparse
 import json
 import statistics
-import subprocess
 import sys
 import time
 import zipfile
@@ -33,6 +32,7 @@ import numpy as np
 import torch
 
 from bakeoff_encoder import load_model
+from pipeline_guards import run_with_timeout
 
 # Export-dtype conformance (T-035 contract vs T-033/T-037 wire), stated here so
 # it is never changed silently: `encoder_contract.yaml runtime.graph.inputs`
@@ -151,8 +151,8 @@ def main() -> None:
         report["packaging"] = {"status": "skipped", "reason": "--skip-fp16-package"}
     else:
         try:
-            r = subprocess.run(["xcrun", "coremlcompiler", "compile", str(pkg), str(out)],
-                               capture_output=True, text=True, timeout=900)
+            r = run_with_timeout(["xcrun", "coremlcompiler", "compile",
+                                  str(pkg), str(out)], timeout=900)
             ok = r.returncode == 0 and compiled.exists()
             report["compile"] = {"status": "ok" if ok else "FAILED",
                                  "returncode": r.returncode,
@@ -195,8 +195,8 @@ def main() -> None:
         # Compile + package the int8 variant too: that mlmodelc is what would
         # actually ship through ModelStore, so its size is the shipping figure.
         qcompiled = out / "t033-encoder-int8.mlmodelc"
-        qr = subprocess.run(["xcrun", "coremlcompiler", "compile", str(qpkg), str(out)],
-                            capture_output=True, text=True, timeout=900)
+        qr = run_with_timeout(["xcrun", "coremlcompiler", "compile",
+                               str(qpkg), str(out)], timeout=900)
         qzip = out / "t033-encoder-int8-mlmodelc.zip"
         if qr.returncode == 0 and qcompiled.exists():
             with zipfile.ZipFile(qzip, "w", zipfile.ZIP_DEFLATED) as z:
