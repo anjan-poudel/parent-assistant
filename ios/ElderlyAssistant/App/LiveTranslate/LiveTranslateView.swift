@@ -105,7 +105,13 @@ struct LiveTranslateView: View {
                     LiveTranslateOverlayView(
                         surface: model.surface,
                         onTapRegion: { model.tapRegion($0) },
-                        onSetAlwaysShowOriginal: { model.setAlwaysShowOriginal($0) })
+                        onSetAlwaysShowOriginal: { model.setAlwaysShowOriginal($0) },
+                        // Extract mode's two touch paths (owner verdict,
+                        // 2026-09-18): a tap on a block asks for that block's
+                        // translation, and the chrome's toggle asks for the
+                        // translated view (or back to extract mode).
+                        onTranslateRegion: { model.translateRegion($0) },
+                        onSetTranslateAll: { model.setExtractMode(!$0) })
                 }
 
                 chrome(in: proxy)

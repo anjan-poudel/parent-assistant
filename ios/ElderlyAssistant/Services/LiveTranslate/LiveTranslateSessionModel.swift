@@ -168,6 +168,17 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// The FR-LCT-017 preference, as the control renders it.
     @Published private(set) var alwaysShowOriginal: Bool
 
+    /// **Extract mode** (owner verdict, 2026-09-18), as the mode control
+    /// renders it: `true` ⇒ the overlay shows the recognized text and no tier
+    /// runs until a block is asked for; `false` ⇒ the translated view.
+    ///
+    /// It opens at the config's own default (`extractModeDefault`), which is
+    /// the mode the feature ships in. It is session state rather than a stored
+    /// preference, deliberately: it is a *view* the elder is in, not an
+    /// accessibility setting that should follow them into every session, and
+    /// the translated view is one tap away whenever they want it.
+    @Published private(set) var isExtracting: Bool
+
     /// The camera preview layer, or nil until the session's capture session
     /// exists. Handed to the view's host, which only lays it out — the gravity
     /// and the aspect the placement maths uses were fixed by T-006.
@@ -276,6 +287,7 @@ final class LiveTranslateSessionModel: ObservableObject {
                                                locale: dependencies.locale)
         self.notifications = dependencies.notifications
         self.alwaysShowOriginal = dependencies.settings.alwaysShowOriginal
+        self.isExtracting = dependencies.config.extractModeDefault
         self.indicator = CloudActivityIndicatorModel(observabilityBus: dependencies.observabilityBus,
                                                      config: dependencies.config)
 
@@ -326,7 +338,8 @@ final class LiveTranslateSessionModel: ObservableObject {
             return LiveTranslateOverlaySurface(
                 placements: [],
                 policy: LiveTranslateOverlaySurface.policy(config: config,
-                                                           alwaysShowOriginal: alwaysShowOriginal),
+                                                           alwaysShowOriginal: alwaysShowOriginal,
+                                                           extractionMode: isExtracting),
                 locale: locale)
         }
         return LiveTranslateOverlaySurface(placements: activePublication.placements,
@@ -422,7 +435,8 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// The placement policy in force, for the view's chrome to reserve against.
     var policy: LiveOverlayPlacement.Policy {
         LiveTranslateOverlaySurface.policy(config: config,
-                                           alwaysShowOriginal: alwaysShowOriginal)
+                                           alwaysShowOriginal: alwaysShowOriginal,
+                                           extractionMode: isExtracting)
     }
 
     /// T-016's surface, read straight off the indicator the tier drives. The
@@ -473,6 +487,7 @@ final class LiveTranslateSessionModel: ObservableObject {
             cloudNeed: consent,
             backpressure: camera,
             alwaysShowOriginal: alwaysShowOriginal,
+            extractionMode: isExtracting,
             config: config,
             observabilityBus: dependencies.observabilityBus,
             publish: { [weak self] publication in
@@ -691,6 +706,51 @@ final class LiveTranslateSessionModel: ObservableObject {
 
     func toggleAlwaysShowOriginal() {
         setAlwaysShowOriginal(!alwaysShowOriginal)
+    }
+
+    /// The extract-mode toggle's single write path (the chrome's control).
+    ///
+    /// `false` is the translated view — the elder has asked for everything on
+    /// screen to be translated — and `true` is extract mode: recognition only,
+    /// until a block is tapped. The mode is published on this object *and*
+    /// pushed into the pipeline in the same call, so the boxes the elder sees
+    /// and the work the pipeline is willing to start cannot disagree: the next
+    /// rendered frame is drawn from a surface whose policy is the mode the
+    /// control just showed.
+    func setExtractMode(_ value: Bool) {
+        guard !isClosed else { return }
+        isExtracting = value
+        let pipeline = self.pipeline
+        Task { await pipeline?.updateExtractMode(value) }
+
+        // A held frame keeps the mode working (T-033), exactly as it keeps the
+        // always-show-original preference working: the callouts are measured
+        // again under the policy now in force — the same placement call the
+        // freeze made, with no pass, no cache read and no request.
+        guard let held = frozen else { return }
+        let layout = pendingLayout
+        let policy = self.policy
+        Task { [weak self] in
+            await self?.rePlaceHeldFrame(held.publication, layout: layout, policy: policy)
+        }
+    }
+
+    /// The mode control's surface, so the chrome and the placements render the
+    /// same value.
+    var translateAllSurface: TranslateAllSurface {
+        TranslateAllSurface(isTranslatingOn: !isExtracting, locale: locale)
+    }
+
+    /// Extract mode's one ask: translate **this** region, and no other.
+    ///
+    /// Tapping a block is the only thing that starts tier work in extract mode,
+    /// so this is the mode's whole translation entry point, and it is the
+    /// session's ordinary path — the pipeline's own device lookup, cascade,
+    /// gate and publication, scoped to the region the elder pointed at.
+    func translateRegion(_ regionID: TextRegionStabilizer.RegionIdentity) {
+        guard !isClosed else { return }
+        let pipeline = self.pipeline
+        Task { await pipeline?.translateRegion(regionID) }
     }
 
     /// The control's surface, so the chrome and the placements render the same

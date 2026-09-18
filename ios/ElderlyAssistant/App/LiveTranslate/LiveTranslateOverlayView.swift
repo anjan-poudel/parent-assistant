@@ -121,6 +121,21 @@ struct RegionPresentation: Equatable, Identifiable {
     /// Whether there is a translation to speak (C12's tap-to-hear). A bubble
     /// with nothing to say is not a button that does nothing.
     let speaksTranslation: Bool
+    /// Whether a tap on this bubble **asks for its translation** (extract mode,
+    /// owner verdict 2026-09-18) rather than speaking one.
+    ///
+    /// Extract mode shows the recognized text and translates nothing until it
+    /// is asked, so the tap that was tap-to-hear in the translated view is
+    /// tap-to-translate here: the region the elder points at is the region the
+    /// tier work runs for, and no other. A *resolved* region offers
+    /// `speaksTranslation` instead — it has already been asked, and the useful
+    /// thing to do with an answer is hear it.
+    ///
+    /// It is a fact of the placement and the policy, not a decision the view
+    /// makes, exactly as `speaksTranslation` is: `false` (the default) is the
+    /// translated view's behaviour, so every caller before this rework is
+    /// unchanged.
+    var translatesOnTap: Bool = false
 
     /// The identity the drawn list is keyed by: the normalized string, with an
     /// ordinal only when a second region on screen carries the same string.
@@ -164,7 +179,8 @@ struct RegionPresentation: Equatable, Identifiable {
                            isClampedFallback: isClampedFallback,
                            accessibilityLabel: accessibilityLabel,
                            accessibilityValue: accessibilityValue,
-                           speaksTranslation: speaksTranslation)
+                           speaksTranslation: speaksTranslation,
+                           translatesOnTap: translatesOnTap)
     }
 }
 
@@ -427,7 +443,8 @@ struct LiveTranslateOverlaySurface: Equatable {
     /// is tight and square-cornered where a pill that floats beside the text
     /// is neither.
     static func policy(config: LiveTranslateConfig,
-                       alwaysShowOriginal: Bool) -> LiveOverlayPlacement.Policy {
+                       alwaysShowOriginal: Bool,
+                       extractionMode: Bool = false) -> LiveOverlayPlacement.Policy {
         let primary = max(config.overlayMinPointSize, DesignTokens.minBodyPointSize)
         let supporting = min(max(config.overlayMinPointSize, DesignTokens.minCaptionPointSize),
                              primary)
@@ -446,7 +463,13 @@ struct LiveTranslateOverlaySurface: Equatable {
             pillPadding: DesignTokens.interElementSpacing,
             lineSpacing: DesignTokens.interElementSpacing / 2,
             anchorGap: DesignTokens.interElementSpacing,
-            alwaysShowOriginal: alwaysShowOriginal)
+            alwaysShowOriginal: alwaysShowOriginal,
+            // Extract mode is a display mode of this overlay, not a second
+            // placement: the boxes, the floors and the never-cover law are the
+            // same, and the flag only tells the placement which of the two
+            // things the elder is looking at (the text, or its translation) is
+            // the normal case.
+            extractionMode: extractionMode)
     }
 
     // MARK: Copy
@@ -551,22 +574,131 @@ struct LiveTranslateOverlaySurface: Equatable {
                                   isClampedFallback: placement.isClampedFallback,
                                   accessibilityLabel: primary,
                                   accessibilityValue: supporting,
-                                  speaksTranslation: placement.result.sourceTier != nil)
+                                  speaksTranslation: placement.result.sourceTier != nil,
+                                  translatesOnTap: translatesOnTap(placement))
+    }
+
+    /// Whether this region's bubble is the extract-mode tap-to-translate
+    /// target: the mode is on, the region carries text, and no tier has
+    /// answered for it yet.
+    ///
+    /// A tapped region leaves the set the moment its tier answers
+    /// (`sourceTier != nil`), so the same bubble that was an invitation to
+    /// translate becomes the bubble that speaks the translation — one control,
+    /// one meaning at a time, and no second tap target appearing beside it.
+    /// A region with no recognized text has nothing to ask about, so it is not
+    /// made a button that would translate nothing.
+    private func translatesOnTap(_ placement: LiveOverlayPlacement.PlacedOverlay) -> Bool {
+        policy.extractionMode
+            && placement.result.sourceTier == nil
+            && !LiveTranslateTextNormalization.normalized(placement.result.originalText).isEmpty
     }
 
     // MARK: Chrome
 
-    /// The strip the overlay's own control lives in, reserved so a callout
-    /// does not land under it: the caller passes this to
+    /// The strip the overlay's own controls live in, reserved so a callout
+    /// does not land under them: the caller passes this to
     /// `LiveOverlayPlacement.place(… occupiedRects: …)`, and the view lays the
-    /// control out inside it. Deliberately full width — the reservation is
+    /// controls out inside it. Deliberately full width — the reservation is
     /// conservative because the label's intrinsic width is a layout fact this
     /// pure value cannot know.
+    ///
+    /// **Two rows, not one** (extract mode, owner verdict 2026-09-18): the
+    /// strip holds the mode toggle (extract ⇄ translated) *and* the
+    /// always-show-original preference, one above the other, and a reservation
+    /// that names the same height the controls are drawn at is what keeps a
+    /// callout from landing under the lower one. Reserved whether or not the
+    /// controls are drawn (a frame can be held, the mode can change), because a
+    /// strip that appeared and disappeared with a mode would be a strip the
+    /// placement was told about at a different moment than the one it drew in.
+    static let chromeControlRows = 2
+
     static func chromeRects(containerSize: CGSize) -> [CGRect] {
-        let height = DesignTokens.minTapTargetSize + 2 * DesignTokens.interElementSpacing
+        let height = CGFloat(chromeControlRows) * DesignTokens.minTapTargetSize
+            + CGFloat(chromeControlRows + 1) * DesignTokens.interElementSpacing
         guard containerSize.width > 0, containerSize.height > height else { return [] }
         return [CGRect(x: 0, y: containerSize.height - height,
                        width: containerSize.width, height: height)]
+    }
+}
+
+/// The extract-mode toggle's pure surface: which of the two views of the scene
+/// is on, and the language its label is resolved in.
+///
+/// One control, two states, and the state is the **mode** — not a second
+/// preference beside the always-show-original one. Off is the extract mode the
+/// feature opens in (the recognized text, standing where the text stood, and
+/// no tier work until a block is tapped); on is the translated view the feature
+/// had before this rework (every visible region translated continuously).
+struct TranslateAllSurface: Equatable {
+
+    /// The glyph. An SF Symbol name is a system identifier, not user-visible
+    /// copy, so it is a constant here; the words are all in the catalog.
+    static let symbolName = "translate"
+
+    /// True when the translated view is on — i.e. the elder has asked for
+    /// everything on screen to be translated, not just the block they tapped.
+    let isTranslatingOn: Bool
+    let locale: Locale
+
+    init(isTranslatingOn: Bool, locale: Locale) {
+        self.isTranslatingOn = isTranslatingOn
+        self.locale = locale
+    }
+
+    /// The control's label, from the catalog, in the active language.
+    ///
+    /// The shipped `feeds.translate` entry ("Translate" / "अनुवाद गर्नुहोस्")
+    /// rather than a second copy of the same word — the same reuse the close
+    /// control already makes of `common.close`, and for the same reason: one
+    /// word for one action, already translated and already reviewed.
+    var label: String {
+        L10n.str("feeds.translate", locale: locale)
+    }
+}
+
+/// The elder-facing mode control: a labelled button that shows which view is on
+/// without relying on colour alone, at an elder-sized target, in the overlay's
+/// own chrome (deliberately away from the consent surface and the cloud
+/// indicator: which view is on screen changes nothing about what leaves the
+/// device).
+struct TranslateAllControl: View {
+
+    let surface: TranslateAllSurface
+    /// The value the elder is asking for — an explicit set, not a flip, so the
+    /// write says what the tap meant even if the surface it was drawn from is
+    /// a frame old.
+    let onSet: (Bool) -> Void
+
+    var body: some View {
+        Button {
+            onSet(!surface.isTranslatingOn)
+        } label: {
+            HStack(spacing: DesignTokens.interElementSpacing / 2) {
+                Image(systemName: TranslateAllSurface.symbolName)
+                    .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize,
+                                                weight: .semibold))
+                Text(surface.label)
+                    .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize,
+                                                weight: .semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            // Both states are token colours, exactly as the preference
+            // control's are: the on-state's label is the app background (the
+            // token, not a bare `.white`), so nothing here introduces a second
+            // place a colour is spelled.
+            .foregroundColor(surface.isTranslatingOn ? DesignTokens.background : DesignTokens.textPrimary)
+            .padding(.horizontal, DesignTokens.interElementSpacing * 2)
+            .frame(minHeight: DesignTokens.minTapTargetSize)
+            .frame(maxWidth: .infinity)
+            .background(surface.isTranslatingOn ? DesignTokens.accent : DesignTokens.card)
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        // The state reaches a screen reader as a trait, not as colour.
+        .accessibilityAddTraits(surface.isTranslatingOn ? [.isSelected] : [])
+        .accessibilityIdentifier("livetranslate.toggle.translateAll")
     }
 }
 
@@ -587,6 +719,14 @@ struct LiveTranslateOverlayView: View {
     /// elder asked for. It writes through `AlwaysShowOriginalBinding` →
     /// `LiveTranslateSettings`, the same setting the voice command writes.
     let onSetAlwaysShowOriginal: (Bool) -> Void
+    /// Extract mode's per-region request: the elder tapped a block and asked
+    /// for *that* block's translation, and for no other region's. The session
+    /// runs the tiers for the one region and publishes its answer into the same
+    /// placement the bubble is already drawn from.
+    let onTranslateRegion: (TextRegionStabilizer.RegionIdentity) -> Void
+    /// The mode toggle's touch path: true ⇒ the translated view (every visible
+    /// region translated continuously), false ⇒ extract mode.
+    let onSetTranslateAll: (Bool) -> Void
 
     /// The rects this view is currently drawing, per region identity — the one
     /// piece of state the render path owns, and the reason a box whose text has
@@ -597,10 +737,14 @@ struct LiveTranslateOverlayView: View {
 
     init(surface: LiveTranslateOverlaySurface,
          onTapRegion: @escaping (TextRegionStabilizer.RegionIdentity) -> Void,
-         onSetAlwaysShowOriginal: @escaping (Bool) -> Void) {
+         onSetAlwaysShowOriginal: @escaping (Bool) -> Void,
+         onTranslateRegion: @escaping (TextRegionStabilizer.RegionIdentity) -> Void = { _ in },
+         onSetTranslateAll: @escaping (Bool) -> Void = { _ in }) {
         self.surface = surface
         self.onTapRegion = onTapRegion
         self.onSetAlwaysShowOriginal = onSetAlwaysShowOriginal
+        self.onTranslateRegion = onTranslateRegion
+        self.onSetTranslateAll = onSetTranslateAll
     }
 
     var body: some View {
@@ -650,12 +794,22 @@ struct LiveTranslateOverlayView: View {
                     emptyState
                 }
 
-                AlwaysShowOriginalControl(
-                    surface: AlwaysShowOriginalSurface(isOn: surface.policy.alwaysShowOriginal,
-                                                       locale: surface.locale),
-                    onSet: onSetAlwaysShowOriginal)
-                    .padding(DesignTokens.interElementSpacing)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                // The chrome strip: the mode toggle over the preference, both
+                // full width, both elder-sized — the two-storey layout the
+                // strip's own reservation names (`chromeRects`).
+                VStack(spacing: DesignTokens.interElementSpacing) {
+                    TranslateAllControl(
+                        surface: TranslateAllSurface(
+                            isTranslatingOn: !surface.policy.extractionMode,
+                            locale: surface.locale),
+                        onSet: onSetTranslateAll)
+                    AlwaysShowOriginalControl(
+                        surface: AlwaysShowOriginalSurface(isOn: surface.policy.alwaysShowOriginal,
+                                                           locale: surface.locale),
+                        onSet: onSetAlwaysShowOriginal)
+                }
+                .padding(DesignTokens.interElementSpacing)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             }
             .frame(width: proxy.size.width, height: proxy.size.height)
             .accessibilityIdentifier("livetranslate.overlay")
@@ -669,7 +823,22 @@ struct LiveTranslateOverlayView: View {
     /// elder-sized target never moves the thing it targets.
     @ViewBuilder
     private func bubble(_ presentation: RegionPresentation) -> some View {
-        if presentation.speaksTranslation {
+        if presentation.translatesOnTap {
+            // Extract mode: the bubble is the invitation to translate *this*
+            // region. One tap is one region's tier work — the session is told
+            // which region, and translates that one.
+            Button {
+                onTranslateRegion(presentation.regionID)
+            } label: {
+                drawn(presentation)
+                    .frame(minWidth: DesignTokens.minTapTargetSize,
+                           minHeight: DesignTokens.minTapTargetSize)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(presentation.accessibilityLabel))
+            .accessibilityValue(Text(presentation.accessibilityValue ?? ""))
+        } else if presentation.speaksTranslation {
             Button {
                 onTapRegion(presentation.regionID)
             } label: {

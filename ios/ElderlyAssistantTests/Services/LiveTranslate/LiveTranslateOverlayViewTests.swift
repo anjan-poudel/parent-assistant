@@ -634,8 +634,16 @@ final class LiveTranslateOverlayViewTests: XCTestCase {
             XCTFail("a normal container reserves a strip for the overlay's control")
             return
         }
+        // The strip is reserved for *every* row the chrome draws, not just the
+        // one this test cares about: the OCR-first rework (owner verdict,
+        // 2026-09-18) put the mode toggle above the preference, and a pill
+        // landing on the second control is the same defect as landing on the
+        // first. The reservation is read off the surface's own row count so the
+        // two cannot drift.
+        let rows = CGFloat(LiveTranslateOverlaySurface.chromeControlRows)
         XCTAssertEqual(strip.height,
-                       DesignTokens.minTapTargetSize + 2 * DesignTokens.interElementSpacing)
+                       rows * DesignTokens.minTapTargetSize
+                           + (rows + 1) * DesignTokens.interElementSpacing)
         XCTAssertEqual(strip.maxY, container.height)
         guard let presentation = surface.presentations.first,
               case .callout(_, let anchor, let pillRect) = presentation.form else {

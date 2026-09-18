@@ -353,6 +353,191 @@ struct LiveTranslateConfig: Equatable {
     /// picture changing — this is the first key to turn off.
     var automaticVideoHDR: Bool = true
 
+    // MARK: Recognition quality (OCR-first rework, 2026-09-18)
+
+    // The owner's verdict on the shipped feature — "the text still looks shit
+    // — forget translation, it's doing very poor OCR. Focus on OCR first;
+    // extract and overlay text in realtime better, like Google's camera text
+    // extraction" — moves the recognition pass from something the translation
+    // tiers feed on to the feature's own product. These keys are that pass's
+    // whole configuration, and the measurements they ship at are recorded in
+    // `OCRRecognitionSettingsTests` (fixture frames, line counts and mean
+    // confidence) rather than asserted into existence.
+
+    /// Whether the recognition request applies the recognizer's language model
+    /// to what it read, correcting a word against the language it is in.
+    ///
+    /// **On, and this is the rework's single largest quality change.** Vision's
+    /// `.accurate` recognizer reads glyphs; the language model is what turns a
+    /// near-miss on a worn or glossy label into the word that is actually
+    /// printed ("Detrost" → "Defrost"). The recognizer's own default for this
+    /// property is `false`, so the shipped pass was reading every label without
+    /// it — which is much of why the owner saw "very poor OCR" on packaging
+    /// whose type is small, curved and low-contrast.
+    ///
+    /// It is not free: correction costs time and can rewrite a word onto a
+    /// different one the model prefers. Both costs are bounded here — the
+    /// vocabulary below biases the model toward the words this feature
+    /// actually reads, and the fixture probe records the trade on a rendered
+    /// packaging label rather than assuming it.
+    var ocrAppliesLanguageCorrection: Bool = true
+
+    /// Whether the recognizer works out the language itself
+    /// (`VNRecognizeTextRequest.automaticallyDetectsLanguage`, iOS 16 and
+    /// later), instead of being held to `ocrCorrectionLanguages`.
+    ///
+    /// True, and load-bearing for this market: the labels this feature is
+    /// pointed at are English more often than not, but a Nepali sign, a
+    /// Devanagari packet and a mixed shopfront are all in scope, and pinning
+    /// the request to `en-US` would make every one of them a Latin guess. When
+    /// this is on, `ocrCorrectionLanguages` is not applied — Vision picks the
+    /// language first and corrects *within* it, which is the behaviour the
+    /// correction above wants: correction follows the detected language rather
+    /// than forcing every string through English.
+    var ocrAutomaticallyDetectsLanguage: Bool = true
+
+    /// The languages the request is restricted to when
+    /// `ocrAutomaticallyDetectsLanguage` is off — a household whose labels are
+    /// only ever English sets that flag to `false` and gets an English-only
+    /// pass, which is both faster and less likely to correct an English word
+    /// into a Devanagari one.
+    var ocrCorrectionLanguages: [String] = ["en-US"]
+
+    /// The smallest share of the recognized image's height a line of text may
+    /// occupy and still be reported — `VNRecognizeTextRequest.minimumTextHeight`.
+    ///
+    /// **0.0: no floor**, and for the owner's complaint that *is* the tuning.
+    /// This is a *rejection* threshold: a value above zero drops every line
+    /// shorter than that share of the picture, which on a packet held at arm's
+    /// length is exactly the line the elder is trying to read. Vision's own
+    /// default is 0.0, so the shipped value is not a change — it is stated
+    /// here, and configurable, because a raised floor is the first thing
+    /// someone reaches for when a scene is noisy, and the probe in
+    /// `OCRRecognitionSettingsTests` is where the cost of doing so on small
+    /// print is measured rather than argued about.
+    ///
+    /// The zoom does the work a floor cannot: the pass reads a *crop* of the
+    /// frame at the sensor's full resolution, so a line of print occupies a
+    /// much larger share of the image Vision is handed than it does of the
+    /// phone's screen.
+    var ocrMinimumTextHeight: Float = 0.0
+
+    /// Whether the appliance and packaging vocabulary is handed to the
+    /// recognizer as `customWords`.
+    ///
+    /// The recognizer's language model is trained on prose. A control panel is
+    /// not prose: "Prewash", "Eco", "Defrost", "Rinse" and "Turbo" are either
+    /// rare in general text or spelled like nothing else, which is why a
+    /// perfectly legible panel can come back as "Prewash" → "Prew as h". The
+    /// vocabulary is the feature's own `labelVocabulary` below — the tier-0
+    /// dictionary's English keys, which are exactly the words printed on
+    /// appliance faces, plus the packaging supplement.
+    ///
+    /// Configurable because biasing a recognizer is a trade: a word list this
+    /// specific can pull an unusual ordinary word toward one of its entries.
+    /// The fixture probe records the trade on a panel fixture, and a household
+    /// that reads signs rather than appliances turns it off.
+    var ocrUsesLabelVocabulary: Bool = true
+
+    /// Whether a pass that recognized **nothing** over the elder's window is
+    /// retried once over the whole frame at the fast recognition level.
+    ///
+    /// The owner's most visible failure is not a misread word, it is a pass
+    /// that returns nothing at all over a picture full of text — and the
+    /// overlay's answer to that is its empty state, which reads as "it can't
+    /// find anything to read". A blank result is the one case where a second
+    /// pass is unambiguously worth its cost, and this is deliberately the
+    /// *only* case that pays it:
+    ///
+    ///  - it runs only when the accurate pass over the window found nothing,
+    ///    so the nominal pass is unchanged and the resource work (the
+    ///    frame-change gate, the reduced cadence) is untouched;
+    ///  - it reads the **whole frame**, not the window, because the reason a
+    ///    window can come back empty is that the elder is pointing at the
+    ///    wrong part of what they can see;
+    ///  - it runs at `VNRequestTextRecognitionLevel.fast`, the level the
+    ///    platform documents for large, well-lit text: it will not read a
+    ///    packet's small print, and it does not need to — the case it exists
+    ///    for is a sign, a screen or a heading the accurate pass missed.
+    var ocrLargeTextRetryEnabled: Bool = true
+
+    /// The word list handed to the recognizer as `customWords`, derived from
+    /// the two sources that own it and never spelled at a call site.
+    ///
+    /// Empty when `ocrUsesLabelVocabulary` is off, so the engine has one
+    /// question to ask ("what is the vocabulary?") rather than two ("is the
+    /// vocabulary on?" *and* "what is it?").
+    var ocrVocabulary: [String] {
+        ocrUsesLabelVocabulary ? Self.labelVocabulary : []
+    }
+
+    /// The feature's own vocabulary: the tier-0 curated dictionary's **English
+    /// keys** — the words that were chosen, one by one, as what is printed on
+    /// an appliance's face or a packet — plus a small supplement of packaging
+    /// words that dictionary does not carry.
+    ///
+    /// The dictionary is read, never written: it is the translation tier's,
+    /// additive-only and pinned by its own tests, and a second copy of it here
+    /// would be a second thing to keep in step. `LiveTranslateConfigTests`
+    /// fails if the list stops tracking it.
+    static let labelVocabulary: [String] = {
+        var words = Set(ApplianceLabelLocalizer.dictionary.keys)
+        words.formUnion(packagingVocabulary)
+        return words.sorted()
+    }()
+
+    /// The packaging supplement: words that appear on packets, cartons and
+    /// care labels and are **not** in the curated dictionary.
+    ///
+    /// Deliberately short and deliberately lower-case. `customWords` biases
+    /// recognition as a whole, and a long list of marginal words buys noise:
+    /// every entry here is one the owner's own scenes contain, and a household
+    /// with different packaging extends it here rather than editing the
+    /// recognizer.
+    static let packagingVocabulary: [String] = [
+        "prewash",
+        "ecowash",
+        "quick wash",
+        "rinse aid",
+        "no spin",
+        "extra rinse",
+        "hand wash",
+        "dry clean",
+        "do not bleach",
+        "no bleach",
+        "tumble dry",
+        "line dry",
+        "wash separately",
+        "machine wash",
+        "keep refrigerated",
+        "best before",
+        "use by",
+        "batch no",
+        "net weight",
+        "nutrition",
+        "energy rating"
+    ]
+
+    // MARK: Browsing versus translating (owner verdict, 2026-09-18)
+
+    /// Whether a session opens in **extract mode** — the overlay drawing the
+    /// recognized text itself, with no translation work running in the
+    /// background — rather than in the translated view.
+    ///
+    /// True: extract mode is the owner's verdict's own default ("forget
+    /// translation … extract and overlay text in realtime better"). A session
+    /// that opens this way costs the device one recognition pass per tick and
+    /// **no** brain, gate or cloud work at all until the elder asks for it —
+    /// which is both the CPU the feature just spent a rework reclaiming and,
+    /// more importantly, the correctness the owner is complaining about: with
+    /// nothing translating in the background, there is no wrong translation on
+    /// screen to look at.
+    ///
+    /// The elder asks in two ways, both of which are the *same* machinery: a
+    /// tap on a block translates that block, and the chrome's translate-all
+    /// control translates the scene. `false` ships the translated view.
+    var extractModeDefault: Bool = true
+
     // MARK: Tracking / stabilisation
 
     /// Whether region tracking is requested at all. Tracking is a SHOULD

@@ -266,7 +266,12 @@ final class LiveTranslationPipelineTests: XCTestCase {
                              handsInABrain: Bool = true,
                              cacheChannel: EncryptedLocalStorage? = nil,
                              now: @escaping () -> Date = Date.init,
-                             config: LiveTranslateConfig = .default) -> Harness {
+                             config: LiveTranslateConfig = .default,
+                             /// Extract mode's initial state (owner verdict,
+                             /// 2026-09-18). Defaulted so every scenario that
+                             /// predates the mode keeps the translated view it
+                             /// asserts about.
+                             extractionMode: Bool = false) -> Harness {
         let bus = LiveTranslateSanitisingBus()
         // The brain is behind its own seam, so these tests never build a
         // `ModelStore` or touch a model file: the cascade is what is under
@@ -319,6 +324,7 @@ final class LiveTranslationPipelineTests: XCTestCase {
                                                cloudNeed: controller,
                                                backpressure: backpressure,
                                                alwaysShowOriginal: false,
+                                               extractionMode: extractionMode,
                                                config: config,
                                                observabilityBus: bus,
                                                brain: handedInBrain,
@@ -2215,5 +2221,224 @@ final class LiveTranslationPipelineTests: XCTestCase {
         let publication = try await latest(harness)
         let region = try XCTUnwrap(region(cloudText, in: publication))
         XCTAssertEqual(publication.result(for: region).sourceTier, .cloud)
+    }
+
+    // MARK: - Extract mode (owner verdict, 2026-09-18)
+    //
+    // The three scenarios below are the mode's whole contract, and they are
+    // deliberately written against the **published** values like every other
+    // scenario here: what the elder can observe is a publication, so a claim
+    // about the mode is a claim about one. The other half of each claim is
+    // what the tier machinery was *asked* — `brain.calls` and the transport's
+    // `requestCount` are the evidence that "no translation runs by default"
+    // is a fact about the work not done, not a fact about what happened to be
+    // drawn.
+
+    /// Extract mode is the default and it publishes the recognized text
+    /// itself — with **no** tier work of any kind behind it.
+    ///
+    /// The dictionary is the sharpest probe available for the "no work" half:
+    /// `curatedText` is a string the injected curated table answers, so a
+    /// translated view would have shown `curatedTranslation` on the first
+    /// cycle with no network and no brain at all. Extract mode publishes it
+    /// still pending *and* draws the recognized string in its place, which is
+    /// the whole of the mode: the text the camera found, standing where it
+    /// found it, and nothing claiming to be a translation of it.
+    @MainActor
+    func testScenarioExtractModePublishesTheRecognizedTextAndRunsNoTierWork() async throws {
+        let transport = TierTranslationTransport()
+        let brain = RecordingBrain()
+        let harness = makeHarness(transport: transport, brain: brain, extractionMode: true)
+        await harness.pipeline.updateLayout(layout)
+
+        let frame = try makeFrame()
+        harness.recogniser.defaultStep = .regions([detected(curatedText)])
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        let publication = try await latest(harness)
+        XCTAssertTrue(publication.policy.extractionMode,
+                      "the published policy is the one the placements were measured under, "
+                      + "so it is where the mode is observable")
+        XCTAssertEqual(publication.regions.count, 1)
+        XCTAssertEqual(publication.regions.first?.text, curatedText)
+
+        // The recognized text is what is drawn, at the panel floor, in place.
+        let placement = try XCTUnwrap(publication.placements.first)
+        XCTAssertEqual(placement.lines.map(\.text), [curatedText],
+                       "extract mode draws the recognized string where the text stood")
+        XCTAssertEqual(placement.lines.first?.pointSize, publication.policy.minPointSize,
+                       "the extracted text renders at the body floor, not at the "
+                       + "in-place-only floor a translation may drop to")
+        XCTAssertFalse(placement.isClampedFallback)
+
+        // Nothing claims to be a translation, and nothing was asked to make
+        // one — not the curated table, not the brain, not the cloud.
+        let region = try XCTUnwrap(region(curatedText, in: publication))
+        XCTAssertEqual(publication.result(for: region), .pending(curatedText),
+                       "a region the curated table could answer is still pending: extract "
+                       + "mode does not translate what nobody asked about")
+        XCTAssertTrue(brain.calls.isEmpty, "extract mode ran a generation: \(brain.calls)")
+        XCTAssertEqual(transport.requestCount, 0,
+                       "extract mode reached the network: \(transport.requests.count) request(s)")
+
+        // The never-empty rule holds in this mode too: the region is drawn,
+        // not dropped, and every drawn box is a real placement.
+        XCTAssertTrue(publication.hasVisibleText)
+        assertEveryRegionIsRendered(publication)
+    }
+
+    /// A **block** (a region whose text is several grouped lines) draws its
+    /// own recognized lines in extract mode, in the grouper's order.
+    @MainActor
+    func testScenarioExtractModeDrawsABlockAsItsOwnRecognizedLines() async throws {
+        let block = ["PREWASH 40", "RINSE AID"].joined(separator: SceneBlock.lineSeparator)
+        let harness = makeHarness(extractionMode: true)
+        await harness.pipeline.updateLayout(layout)
+
+        let frame = try makeFrame()
+        harness.recogniser.defaultStep = .regions([
+            detected(block, box: box(0.2, 0.3, 0.75, 0.55))
+        ])
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        let publication = try await latest(harness)
+        let placement = try XCTUnwrap(publication.placements.first)
+        XCTAssertEqual(placement.lines.map(\.text), ["PREWASH 40", "RINSE AID"],
+                       "a block is one panel carrying its own recognized lines, never "
+                       + "the translated view's state sentence")
+        XCTAssertEqual(Set(placement.lines.map(\.pointSize)),
+                       [publication.policy.minPointSize],
+                       "every line of the panel is drawn at the one body floor")
+        let region = try XCTUnwrap(publication.regions.first)
+        XCTAssertEqual(publication.result(for: region), .pending(block))
+    }
+
+    /// The tap: one block is asked about, and **exactly** one.
+    ///
+    /// Two regions, one the curated table can answer and one it cannot. The
+    /// tap on the first resolves it from the device with nothing asked of the
+    /// brain or the cloud; the tap on the second asks the brain for that one
+    /// string — not for the scene — and the first stays resolved. A scene-wide
+    /// dispatch would show up here as a batch carrying both strings, which is
+    /// the failure this pins.
+    @MainActor
+    func testScenarioATapTranslatesExactlyTheTappedBlock() async throws {
+        let transport = TierTranslationTransport()
+        let brain = RecordingBrain()
+        brain.answers = [cloudText: "ने:the far sign"]
+        let harness = makeHarness(transport: transport, brain: brain, extractionMode: true)
+        await harness.pipeline.updateLayout(layout)
+
+        let frame = try makeFrame()
+        harness.recogniser.defaultStep = .regions([
+            detected(curatedText, box: box(0.2, 0.15, 0.6, 0.25)),
+            detected(cloudText, box: box(0.2, 0.6, 0.7, 0.7)),
+        ])
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        let before = try await latest(harness)
+        let curated = try XCTUnwrap(region(curatedText, in: before))
+        let uncurated = try XCTUnwrap(region(cloudText, in: before))
+        XCTAssertEqual(before.result(for: curated), .pending(curatedText))
+        XCTAssertEqual(before.result(for: uncurated), .pending(cloudText))
+
+        // The tap on the device-answerable block: the curated table answers,
+        // and nothing else is asked about anything.
+        await harness.pipeline.translateRegion(curated.id)
+        let afterFirstTap = try await latest(harness)
+        let curatedAfter = try XCTUnwrap(region(curatedText, in: afterFirstTap))
+        let uncuratedAfter = try XCTUnwrap(region(cloudText, in: afterFirstTap))
+        XCTAssertEqual(afterFirstTap.result(for: curatedAfter),
+                       .resolved(originalText: curatedText,
+                                 translation: curatedTranslation,
+                                 tier: .dictionary))
+        XCTAssertEqual(afterFirstTap.result(for: uncuratedAfter), .pending(cloudText),
+                       "the other block was translated by a tap that was not about it")
+        XCTAssertTrue(brain.calls.isEmpty,
+                      "the device answered, so the brain should not have been asked: \(brain.calls)")
+        XCTAssertEqual(transport.requestCount, 0)
+
+        // A resolved block draws its translation — the text it was tapped to
+        // replace must not stay on screen under a claim that it was answered.
+        XCTAssertEqual(afterFirstTap.placements.first { $0.region.id == curatedAfter.id }?
+            .lines.first?.text, curatedTranslation)
+
+        // The tap on the one the device cannot answer: the brain is asked for
+        // that string and no other.
+        await harness.pipeline.translateRegion(uncurated.id)
+        let asked = cloudText
+        await waitUntil("the tapped block's answer to be published") {
+            guard let latest = await harness.recorder.latest,
+                  let sign = latest.regions.first(where: { $0.text == asked }) else {
+                return false
+            }
+            return latest.result(for: sign).sourceTier == .onDeviceBrain
+        }
+
+        let afterSecondTap = try await latest(harness)
+        XCTAssertEqual(brain.calls, [[cloudText]],
+                       "a tap dispatched \(brain.calls) — the batch must carry the tapped "
+                       + "block's string and nothing else")
+        XCTAssertEqual(transport.requestCount, 0,
+                       "the on-device brain answered; nothing should have left the device")
+        let curatedStill = try XCTUnwrap(region(curatedText, in: afterSecondTap))
+        XCTAssertEqual(afterSecondTap.result(for: curatedStill).sourceTier, .dictionary,
+                       "a tap on one block must not disturb another's answer")
+    }
+
+    /// Translate-all, and back again.
+    ///
+    /// Leaving extract mode is the translated view's cycle, run in the same
+    /// turn: everything the device can answer is answered and the view is
+    /// published. Entering it again republishes under the extract policy —
+    /// and the answers stay: the mode decides what is *drawn* and what may be
+    /// *started*, never what has already been paid for.
+    @MainActor
+    func testScenarioTranslateAllRestoresTheTranslatedViewAndKeepsItsAnswers() async throws {
+        let transport = TierTranslationTransport()
+        let brain = RecordingBrain()
+        let harness = makeHarness(transport: transport, brain: brain, extractionMode: true)
+        await harness.pipeline.updateLayout(layout)
+
+        let frame = try makeFrame()
+        harness.recogniser.defaultStep = .regions([detected(curatedText)])
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        let extracting = try await latest(harness)
+        XCTAssertTrue(extracting.policy.extractionMode)
+        XCTAssertEqual(extracting.placements.first?.lines.map(\.text), [curatedText])
+
+        // Translate-all: the translated view, resolved in the same turn.
+        await harness.pipeline.updateExtractMode(false)
+        let translated = try await latest(harness)
+        XCTAssertFalse(translated.policy.extractionMode)
+        let sign = try XCTUnwrap(region(curatedText, in: translated))
+        XCTAssertEqual(translated.result(for: sign),
+                       .resolved(originalText: curatedText,
+                                 translation: curatedTranslation,
+                                 tier: .dictionary),
+                       "leaving extract mode resolves what the device can answer, in the "
+                       + "turn the elder asked for it")
+        XCTAssertEqual(translated.placements.first?.lines.first?.text, curatedTranslation,
+                       "the translated view draws the translation in place")
+        XCTAssertTrue(brain.calls.isEmpty)
+        XCTAssertEqual(transport.requestCount, 0)
+
+        // And back: the recognized text is the default view again, and the
+        // answer the elder already has is not thrown away with it.
+        await harness.pipeline.updateExtractMode(true)
+        let extractingAgain = try await latest(harness)
+        XCTAssertTrue(extractingAgain.policy.extractionMode)
+        let regionAgain = try XCTUnwrap(region(curatedText, in: extractingAgain))
+        XCTAssertEqual(extractingAgain.result(for: regionAgain).sourceTier, .dictionary,
+                       "entering extract mode dropped an answer that had already been paid for")
+        XCTAssertEqual(extractingAgain.placements.first?.lines.first?.text, curatedTranslation,
+                       "a block that has been translated keeps its translation: the mode "
+                       + "changes what an *unanswered* block draws, never what an answered "
+                       + "one does")
     }
 }
