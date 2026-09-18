@@ -235,6 +235,10 @@ enum LiveTranslateEventCatalogue {
         "translation_batch_resolved": Entry(outcomes: ["success", "partial"],
                                            metadataKeys: ["resolvedCount", "unresolvedCount", "durationMs"]),
         "translation_degraded": Entry(outcomes: ["degraded"], metadataKeys: ["reason", "regionCount"]),
+        // The cascade's provenance (owner ask, 2026-09-19: "log what source
+        // the translation is coming from"): one event per settle call per
+        // tier present, counts only — no string ever rides in it.
+        "translation_resolved": Entry(outcomes: ["success"], metadataKeys: ["tier", "origin", "count"]),
         "translation_dedupe_hit": Entry(outcomes: ["deduped"], metadataKeys: ["keyCount"]),
         "text_quarantined": Entry(outcomes: ["quarantined"], metadataKeys: ["count"]),
 
@@ -297,6 +301,7 @@ struct LiveTranslateEvents {
         case keyCount
         case count
         case origin
+        case tier
         case mode
         case reason
         /// Where an on-device brain attempt stopped (`BrainFailureStage`).
@@ -512,6 +517,17 @@ struct LiveTranslateEvents {
         emit("translation_degraded", outcome: "degraded",
              metadata: [.reason: reason.rawValue,
                         .regionCount: String(regionCount)])
+    }
+
+    /// Where a translation came from, logged at the moment it settles: the
+    /// tier that answered (`dictionary` / `onDeviceBrain` / `cloud`) and the
+    /// origin (`cache` for a persisted answer, `fresh` for a new one). One
+    /// event per tier per settle, so a mixed batch reads as a tier histogram.
+    func translationResolved(tier: TranslationTier, origin: String, count: Int) {
+        emit("translation_resolved", outcome: "success",
+             metadata: [.tier: tier.rawValue,
+                        .origin: origin,
+                        .count: String(count)])
     }
 
     func translationDedupeHit(keyCount: Int) {
