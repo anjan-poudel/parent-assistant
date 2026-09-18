@@ -262,7 +262,46 @@ final class VisionObjectDetectionEngine: LiveObjectDetectionEngine {
 /// The shipped engine: Vision, on device, one request kind per entry point.
 final class VisionTextRecognitionEngine: LiveTextRecognitionEngine {
 
+    // MARK: - What one pass asks Vision for
+
+    /// The OCR pass's settings, **read back off the requests themselves**
+    /// rather than kept as a copy of what the engine meant to set.
+    ///
+    /// The distinction matters because this type exists to make a claim that
+    /// can be checked: "the pass that ran was configured this way". A stored
+    /// copy of the intent would assert that the initializer ran and nothing
+    /// more; a read-back says what Vision was actually handed. Every field
+    /// here is a property of a `VNRequest` this engine owns, and the values
+    /// come from `LiveTranslateConfig` and nowhere else.
+    struct Settings: Equatable {
+        /// The level the accurate pass runs at. `.accurate` and not `.fast`:
+        /// the whole point of the OCR-first rework is reading small print.
+        var recognitionLevel: VNRequestTextRecognitionLevel
+        /// Whether the recognizer's language model corrects what it read
+        /// (`ocrAppliesLanguageCorrection`).
+        var appliesLanguageCorrection: Bool
+        /// Whether the request picks the language itself
+        /// (`ocrAutomaticallyDetectsLanguage`, iOS 16 and later).
+        var automaticallyDetectsLanguage: Bool
+        /// The languages the request is held to when it is *not* detecting
+        /// (`ocrCorrectionLanguages`).
+        var recognitionLanguages: [String]
+        /// The smallest share of the image a line may occupy
+        /// (`ocrMinimumTextHeight`).
+        var minimumTextHeight: Float
+        /// The words the recognizer is biased toward (`ocrVocabulary`).
+        var vocabulary: [String]
+    }
+
+    /// The accurate pass: the feature's recognition, once per OCR tick.
     private let textRequest = VNRecognizeTextRequest()
+    /// The whole-frame retry, at the fast recognition level.
+    ///
+    /// A second *request object* rather than a reconfigured first one: the two
+    /// passes differ in level, in correction and in vocabulary, and toggling
+    /// those on one object would make the nominal pass's configuration depend
+    /// on whether the previous pass happened to come back blank.
+    private let retryRequest = VNRecognizeTextRequest()
     private let sequenceHandler = VNSequenceRequestHandler()
 
     /// The last OCR pass's rectangles, keyed by the recognized string they
@@ -283,19 +322,69 @@ final class VisionTextRecognitionEngine: LiveTextRecognitionEngine {
     /// Vision found in it.
     private let maximumRectanglesPerPass: Int
 
+    /// Whether the blank-pass retry is allowed (`ocrLargeTextRetryEnabled`).
+    private let retriesBlankPasses: Bool
+
     /// The bound defaults to the shipped config's, so a parameterless
     /// construction is the same engine the detector builds — the cap is a
-    /// policy of the feature and not a property of one call site.
-    init(maximumRectanglesPerPass: Int = LiveTranslateConfig.default.trackingMaxRectanglesPerPass) {
+    /// policy of the feature and not a property of one call site. The config
+    /// defaults to the shipped one for the same reason: an engine built with
+    /// no arguments is the engine the feature ships.
+    init(maximumRectanglesPerPass: Int = LiveTranslateConfig.default.trackingMaxRectanglesPerPass,
+         config: LiveTranslateConfig = .default) {
         self.maximumRectanglesPerPass = maximumRectanglesPerPass
-        textRequest.recognitionLevel = .accurate
+        self.retriesBlankPasses = config.ocrLargeTextRetryEnabled
+        Self.configure(textRequest, level: .accurate, config: config, corrected: true)
+        // The retry is a *different* recognition: the fast level the platform
+        // documents for large, well-lit text, with correction and the custom
+        // vocabulary left off — both are accurate-level features, and a retry
+        // that inherited them would be the same pass over a bigger frame at a
+        // worse level.
+        Self.configure(retryRequest, level: .fast, config: config, corrected: false)
+    }
+
+    /// Applies the config's recognition settings to one request.
+    ///
+    /// The one place a `VNRequest` is configured, so the two passes cannot
+    /// drift: both go through here, and `corrected` is the only difference
+    /// between them.
+    static func configure(_ request: VNRecognizeTextRequest,
+                          level: VNRequestTextRecognitionLevel,
+                          config: LiveTranslateConfig,
+                          corrected: Bool) {
+        request.recognitionLevel = level
+        request.usesLanguageCorrection = corrected && config.ocrAppliesLanguageCorrection
+        request.minimumTextHeight = config.ocrMinimumTextHeight
+        if corrected, !config.ocrVocabulary.isEmpty {
+            request.customWords = config.ocrVocabulary
+        }
         // The capability check the design asks for (C02): automatic language
         // detection is an iOS 16-and-later property, and the deployment target
-        // supports it. When it is not applied, `detectedLanguage` stays `nil`
-        // — a missing report, never a substituted value.
-        if #available(iOS 16.0, *) {
-            textRequest.automaticallyDetectsLanguage = true
+        // supports it. When it is not applied, the request is held to the
+        // configured languages instead — and when it *is* applied, Vision
+        // ignores the language list, so it is deliberately not also set: a
+        // request that both detected and was restricted could come back as an
+        // English-only pass over a Devanagari sign. When detection is not
+        // available, `detectedLanguage` stays `nil` — a missing report, never a
+        // substituted value.
+        if #available(iOS 16.0, *), config.ocrAutomaticallyDetectsLanguage {
+            request.automaticallyDetectsLanguage = true
+        } else {
+            request.recognitionLanguages = config.ocrCorrectionLanguages
         }
+    }
+
+    /// What the accurate pass actually carries. Read off the request, so this
+    /// cannot describe a configuration the engine failed to apply.
+    var settings: Settings {
+        var detects = false
+        if #available(iOS 16.0, *) { detects = textRequest.automaticallyDetectsLanguage }
+        return Settings(recognitionLevel: textRequest.recognitionLevel,
+                        appliesLanguageCorrection: textRequest.usesLanguageCorrection,
+                        automaticallyDetectsLanguage: detects,
+                        recognitionLanguages: textRequest.recognitionLanguages,
+                        minimumTextHeight: textRequest.minimumTextHeight,
+                        vocabulary: textRequest.customWords)
     }
 
     /// Rectangle tracking has been part of Vision since iOS 11 and the
@@ -305,17 +394,35 @@ final class VisionTextRecognitionEngine: LiveTextRecognitionEngine {
     /// and the detector degrades with the same honest event.
     var supportsTracking: Bool { true }
 
+    /// One OCR pass over the frame, with the blank-pass retry behind it.
+    ///
+    /// The retry's condition is deliberately the narrowest one there is: the
+    /// accurate pass over the elder's window returned **nothing at all**. Any
+    /// recognized line, however poor, is a scene the retry has nothing to add
+    /// to, so the nominal pass costs exactly what it did before this rework and
+    /// the second pass is paid for only where its absence is visible as an
+    /// empty overlay over a picture full of text.
     func recognizeText(in pixelBuffer: CVPixelBuffer) throws -> [LiveTextDetector.DetectedTextRegion] {
+        let regions = try recognize(pixelBuffer, with: textRequest)
+        guard regions.isEmpty, retriesBlankPasses else { return regions }
+        return try recognize(pixelBuffer, with: retryRequest)
+    }
+
+    /// One pass with one request, mapped into the feature's vocabulary and
+    /// remembered for tracking.
+    private func recognize(_ pixelBuffer: CVPixelBuffer,
+                           with request: VNRecognizeTextRequest)
+        throws -> [LiveTextDetector.DetectedTextRegion] {
         let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, options: [:])
         do {
-            try handler.perform([textRequest])
+            try handler.perform([request])
         } catch {
             throw LiveTranslateError.ocrPassFailed(.requestFailed)
         }
 
         var regions: [LiveTextDetector.DetectedTextRegion] = []
         var remembered: [String: VNRectangleObservation] = [:]
-        for observation in textRequest.results ?? [] {
+        for observation in request.results ?? [] {
             guard let candidate = observation.topCandidates(1).first,
                   let box = Self.normalizedBox(from: observation.boundingBox) else { continue }
             let text = candidate.string
@@ -604,12 +711,13 @@ final class LiveTextDetector {
          now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
         self.config = config
         self.events = LiveTranslateEvents(bus: observabilityBus, config: config)
-        // The shipped engine takes its per-pass rectangle bound from the same
-        // config as everything else; an injected engine (a test fake) is used
-        // exactly as handed in.
+        // The shipped engine takes its per-pass rectangle bound **and its
+        // recognition settings** from the same config as everything else; an
+        // injected engine (a test fake) is used exactly as handed in.
         self.engine = engine
             ?? VisionTextRecognitionEngine(
-                maximumRectanglesPerPass: config.trackingMaxRectanglesPerPass)
+                maximumRectanglesPerPass: config.trackingMaxRectanglesPerPass,
+                config: config)
         // Same rule for the object engine: the shipped one unless a caller
         // hands in its own, and the shipped one takes the block bound from the
         // config like everything else.

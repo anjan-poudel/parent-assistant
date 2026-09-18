@@ -181,6 +181,19 @@ enum LiveOverlayPlacement {
         /// kept compiling — the config-driven plumbing is the braintier
         /// session's follow-up.
         let maxSourceWordCount: Int = 4
+        /// **Extract mode** (owner verdict, 2026-09-18): the overlay shows the
+        /// recognized text rather than a translation, so a region with nothing
+        /// translated is not an ineligible region — it is the normal case, and
+        /// its own text is what stands where it stood.
+        ///
+        /// Defaulted, against this struct's usual no-defaults rule, for the
+        /// same reason `maxSourceWordCount` is: every existing constructor and
+        /// every existing placement test keeps its meaning. `false` is the
+        /// translated view, which is what every caller before this rework
+        /// asked for. `var` rather than `let` because a `let` with a default
+        /// is dropped from the synthesized memberwise initializer, which would
+        /// make the flag impossible to set to `true`.
+        var extractionMode: Bool = false
     }
 
     // MARK: - Braintier eligibility seam (merge-gap patch, 2026-09-17)
@@ -347,6 +360,65 @@ enum LiveOverlayPlacement {
                                bounds: CGRect,
                                policy: Policy,
                                measure: Measure = LiveOverlayTextMetrics.measure) -> InPlaceOutcome {
+        // Extract mode (owner verdict, 2026-09-18). The line drawn where the
+        // text stood is the text itself — the recognized string re-rendered at
+        // the body floor, not the raw pixels the camera caught — so two of the
+        // translated view's eligibility rules have nothing to say here:
+        //
+        //  * `noTranslationToDraw` is not a violation when no translation was
+        //    asked for: an untranslated region is the normal case, and its own
+        //    recognized text standing exactly where it stood is the whole
+        //    point of the mode (NFR-LCT-010's never-empty rule, inverted into
+        //    the default). A region whose recognized text is empty still has
+        //    nothing to draw and is still ineligible.
+        //  * `alwaysShowOriginalIsOn` is trivially satisfied: extract mode has
+        //    no translation to sit beside, so the preference is not a conflict.
+        //
+        // Everything else is the translated view's law, unchanged and for the
+        // same reasons: the box grows from free space only (so no two boxes
+        // stack), the fit is measured before the box is returned, and text too
+        // large for the region at the floor gets the honest callout rather than
+        // being shrunk until it fits.
+        //
+        // A region that *is* resolved draws its translation here exactly as it
+        // does in the translated view — a tapped block that has been answered
+        // must not keep showing the text it was tapped to replace.
+        if policy.extractionMode {
+            let drawn = result.sourceTier != nil ? result.text : result.originalText
+            guard !LiveTranslateTextNormalization.normalized(drawn).isEmpty else {
+                return .ineligible(.noTranslationToDraw)
+            }
+            // The FR-LCT-017 preference outlives the mode change, and it is
+            // consulted exactly where it still has something to say: a region
+            // that *has* been translated (by a tap) would have its original
+            // covered by the in-place box, and an elder who asked for originals
+            // to stay visible asked about every translation on screen, not only
+            // the continuously translated ones. For a region nothing has
+            // translated there is no conflict to resolve — the original is what
+            // this branch draws anyway — so the preference is not consulted
+            // there.
+            if result.sourceTier != nil, policy.alwaysShowOriginal {
+                return .ineligible(.alwaysShowOriginalIsOn)
+            }
+
+            let box = inPlaceMaxBox(regionRect: regionRect,
+                                    obstacles: obstacles,
+                                    bounds: bounds,
+                                    growth: policy.inPlaceMaxGrowth)
+            let pointSize = panelPointSize(policy: policy)
+            let measured = measure(drawn, pointSize, .primary, box.width)
+            guard measured.width <= box.width, measured.height <= box.height else {
+                return .ineligible(.translationDoesNotFitRegion)
+            }
+            return .fits(box: inPlaceTightBox(regionRect: regionRect,
+                                              textSize: measured,
+                                              ceiling: box,
+                                              padding: policy.inPlacePadding),
+                         line: LiveOverlayTextLine(text: drawn,
+                                                   pointSize: pointSize,
+                                                   weight: .primary))
+        }
+
         guard result.sourceTier != nil, !result.text.isEmpty else {
             return .ineligible(.noTranslationToDraw)
         }
@@ -819,7 +891,22 @@ enum LiveOverlayPlacement {
             // recognized region vanish (NFR-LCT-010).
             if Self.isBlock(region) {
                 let resolved = result.sourceTier != nil && !result.text.isEmpty
-                let text = resolved ? result.text : (stateCopy(result) ?? result.originalText)
+                // Extract mode draws the block's own recognized lines while
+                // nothing has translated it — not the state sentence. The
+                // sentence this branch would otherwise use ("Translating…")
+                // describes work extract mode is deliberately not doing: no
+                // tier runs until a block is tapped, so every block on screen
+                // would carry the same untrue line. A **degraded** result is
+                // still said, because that one can only follow a tap that
+                // asked for a translation and did not get one (FR-LCT-018).
+                let text: String
+                if resolved {
+                    text = result.text
+                } else if policy.extractionMode, !result.degraded {
+                    text = result.originalText
+                } else {
+                    text = stateCopy(result) ?? result.originalText
+                }
                 let lines = panelLines(text, pointSize: panelPointSize(policy: policy))
                     + (resolved && policy.alwaysShowOriginal
                         ? panelOriginalLines(result.originalText, policy: policy)
@@ -1033,6 +1120,17 @@ enum LiveOverlayPlacement {
         if result.sourceTier != nil {
             // A translation exists: the original stays reachable beside it.
             supporting = result.originalText
+        } else if policy.extractionMode, !result.degraded {
+            // Extract mode, nothing translated: the pill's one line is the
+            // recognized text, and there is no second line to write. The state
+            // sentence a pending region carries in the translated view
+            // ("Translating…") would be a claim about work this mode has not
+            // started — the pill is already reading the text it was going to
+            // translate, so it has nothing left to say. A **degraded** result,
+            // reachable only after a tap asked for a translation, keeps its
+            // sentence: that one is true, and it is the honesty FR-LCT-018
+            // requires.
+            supporting = nil
         } else {
             supporting = stateCopy(result)
         }

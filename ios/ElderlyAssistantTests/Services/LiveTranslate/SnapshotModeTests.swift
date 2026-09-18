@@ -288,10 +288,16 @@ final class SnapshotModeTests: XCTestCase {
     }
 
     /// Every Vision request kind the feature uses, and how many of each the one
-    /// file that owns Vision may construct. One of each: the OCR request reads
-    /// the scene's text, and the object pass's two requests read its objects.
+    /// file that owns Vision may construct. The object pass constructs two, one
+    /// per kind, and so does the OCR pass: the accurate, language-corrected
+    /// request that reads the scene and — since the OCR-first rework (owner
+    /// verdict, 2026-09-18) — a fast, uncorrected second one that answers only
+    /// when the accurate pass returns nothing, both of them inside the one
+    /// engine and over the frame that engine was handed. The counts are pins
+    /// against a *second* detector's worth of requests appearing elsewhere; what
+    /// they are not is a claim about how many passes a scene may cost.
     private static let visionRequests: [String: Int] = [
-        "VNRecognizeTextRequest(": 1,
+        "VNRecognizeTextRequest(": 2,
         "VNGenerateObjectnessBasedSaliencyImageRequest(": 1,
         "VNClassifyImageRequest(": 1,
     ]
@@ -896,18 +902,19 @@ final class SnapshotModeTests: XCTestCase {
         XCTAssertEqual(harness.model.frozen?.image.width, 640)
     }
 
-    /// The snapshot path adds no detector and no Vision request: the feature
-    /// still constructs exactly one `VNRecognizeTextRequest`, in the one file
-    /// that owns Vision, and the snapshot files contain no image processing of
-    /// their own.
+    /// The snapshot path adds no detector and no Vision request of its own: the
+    /// requests the feature owns are constructed in the one file that owns
+    /// Vision, in the numbers that file declares, and the snapshot files contain
+    /// no image processing of their own.
     func testTheStillPathAddsNoSecondDetectorAndNoSecondVisionRequest() throws {
         let detectorFile = "ElderlyAssistant/Services/LiveTranslate/LiveTextDetector.swift"
         let detector = code(detectorFile)
-        // One request *of each kind*, each created once. The scene-block rework
-        // added a second and third kind of request — objectness saliency for the
-        // object boxes and image classification for their labels — and did not
-        // add a second detector: they are three requests in the one engine file,
-        // driving the one pass.
+        // The declared number *of each kind*. The scene-block rework added a
+        // second and third kind of request — objectness saliency for the object
+        // boxes and image classification for their labels — and did not add a
+        // second detector; the OCR-first rework added a second *text* request,
+        // the blank-pass retry, inside the same engine. Still one engine, one
+        // handler per kind, one pass driven by each.
         Self.visionRequests.forEach { request, expected in
             XCTAssertEqual(occurrences(of: request, in: detector), expected,
                            "\(request) is created \(expected) time(s), in the file that owns Vision")

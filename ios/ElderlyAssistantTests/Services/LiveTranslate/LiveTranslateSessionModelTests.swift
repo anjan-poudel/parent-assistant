@@ -71,7 +71,8 @@ final class LiveTranslateSessionModelTests: XCTestCase {
                              configured: Bool = false,
                              configurationError: LiveTranslateError? = nil,
                              dictionary: [String: String]? = nil,
-                             transport: TierTranslationTransport = TierTranslationTransport()) -> Harness {
+                             transport: TierTranslationTransport = TierTranslationTransport(),
+                             extractMode: Bool = false) -> Harness {
         let parts = makeLiveTranslateSessionTestParts(authorization: authorization,
                                                       consent: consent,
                                                       configured: configured,
@@ -79,6 +80,7 @@ final class LiveTranslateSessionModelTests: XCTestCase {
                                                       dictionary: dictionary ?? [:],
                                                       transport: transport,
                                                       locale: nepali,
+                                                      extractMode: extractMode,
                                                       config: config)
         suiteNames.append(parts.suiteName)
         return Harness(parts: parts,
@@ -696,5 +698,79 @@ final class LiveTranslateSessionModelTests: XCTestCase {
         try? await Task<Never, Never>.sleep(for: .milliseconds(40))
         XCTAssertEqual(harness.model.publication?.sequence, sequenceBefore,
                        "a layout pass that changed nothing publishes nothing")
+    }
+
+    // MARK: - The OCR-first extract mode (owner verdict, 2026-09-18)
+
+    /// The mode as the session says it, which is the only place the view learns
+    /// it: a session opens showing the recognized text (the shipped default),
+    /// nothing is translated until the elder taps a block, the tap translates
+    /// **that** block, and the toggle puts the translated view back on screen.
+    ///
+    /// The pipeline suite pins the work; this pins the session's own three
+    /// statements about it — `isExtracting`, `translateAllSurface` and
+    /// `translateRegion` — because the mode is only real if what the control
+    /// shows, what the surface renders and what the pipeline is willing to
+    /// start are the same value.
+    @MainActor
+    func testTheSessionOpensShowingTheRecognizedTextAndTranslatesOnlyWhatIsTapped() async throws {
+        let harness = makeHarness(dictionary: [curatedText.lowercased(): curatedTranslation],
+                                  extractMode: true)
+        reportLayout(harness)
+        harness.engine.regions = [detected(curatedText)]
+        await harness.model.start()
+        try await deliverPasses(3, in: harness)
+
+        XCTAssertTrue(harness.model.isExtracting,
+                      "a session opens in extract mode (owner verdict, 2026-09-18)")
+        XCTAssertFalse(harness.model.translateAllSurface.isTranslatingOn,
+                       "the control shows the mode that is on, not the one it would switch to")
+        let extracting = try XCTUnwrap(harness.model.publication)
+        XCTAssertTrue(extracting.policy.extractionMode,
+                      "the published policy is the mode the placements were measured under")
+        XCTAssertEqual(harness.model.surface.policy, extracting.policy)
+        XCTAssertEqual(harness.model.surface.placements.first?.lines.map(\.text), [curatedText],
+                       "what the view renders is the recognized text, in place")
+
+        // The curated table could answer this string, and does not: in this
+        // mode nothing is translated that nobody asked about.
+        let sign = try XCTUnwrap(extracting.regions.first { $0.text == curatedText })
+        guard case .pending = extracting.result(for: sign).outcome else {
+            return XCTFail("extract mode resolved a region the elder did not tap")
+        }
+        XCTAssertEqual(harness.transport.requestCount, 0)
+
+        // The tap — one block, the device's own answer.
+        harness.model.translateRegion(sign.id)
+        await waitUntil("the tapped block to be translated") {
+            guard let publication = harness.model.publication,
+                  let region = publication.regions.first(where: { $0.text == self.curatedText }),
+                  case .resolved = publication.result(for: region).outcome else { return false }
+            return true
+        }
+        let answered = try XCTUnwrap(harness.model.publication)
+        let tapped = try XCTUnwrap(answered.regions.first { $0.text == curatedText })
+        XCTAssertEqual(answered.result(for: tapped),
+                       .resolved(originalText: curatedText,
+                                 translation: curatedTranslation,
+                                 tier: .dictionary))
+        XCTAssertEqual(answered.placements.first?.lines.first?.text, curatedTranslation,
+                       "an answered block draws its translation where it stood")
+        XCTAssertEqual(harness.transport.requestCount, 0,
+                       "the device answered, so nothing was asked of the network")
+
+        // The toggle: the translated view, and the answer already paid for is
+        // not thrown away with it.
+        harness.model.setExtractMode(false)
+        await waitUntil("the translated view") {
+            harness.model.publication?.policy.extractionMode == false
+        }
+        let translated = try XCTUnwrap(harness.model.publication)
+        XCTAssertFalse(harness.model.isExtracting)
+        XCTAssertTrue(harness.model.translateAllSurface.isTranslatingOn,
+                      "the control now shows the translated view is on")
+        let answeredInTranslatedView = try XCTUnwrap(translated.regions.first { $0.text == curatedText })
+        XCTAssertEqual(translated.result(for: answeredInTranslatedView).sourceTier, .dictionary,
+                       "leaving extract mode discarded an answer the elder already had")
     }
 }
