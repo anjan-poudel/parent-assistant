@@ -558,8 +558,8 @@ final class LiveTextDetector {
         let detectedLanguage: String?
         let confidence: Double
         /// The grouper's identity for the block this region is, when the region
-        /// came from the grouper — the member-string set, or the object class
-        /// plus its quantised centroid. `nil` for a region from any other path
+        /// came from the grouper — the member-string set of the block, for
+        /// every block, object or not. `nil` for a region from any other path
         /// (a test fake, a plain OCR pass): the stabiliser then identifies the
         /// region by its string, exactly as it always has.
         let blockIdentity: String?
@@ -1070,6 +1070,20 @@ final class LiveTextDetector {
     /// The cached set is what the pass reports. A detection that has not landed
     /// yet is not an object set this pass saw, and reporting it as one would be
     /// claiming a scene description the pass did not have.
+    ///
+    /// **The ledger is monotone in what it knows.** A detection that finds
+    /// nothing, or that is refused, adds nothing and removes nothing
+    /// (`scheduleObjectPass`); only a detection with objects to report replaces
+    /// what the session already knows. An object pass is a *cadenced* claim
+    /// about a kitchen, and a scene does not stop containing a microwave
+    /// because one saliency request came back empty — while acting as if it
+    /// does re-groups the very text the previous pass had grouped, which is the
+    /// churn the owner's device log shows (`object_pass success=1` followed by
+    /// `object_pass empty count=0`, over an unchanged scene).
+    ///
+    /// The one thing that does clear it is a genuine change of picture: the
+    /// window the display is showing (`noteCropChange`), because those boxes
+    /// are geometry of a buffer this session is no longer reading.
     private func objectsForPass(in frame: CameraFrame, crop: LiveCameraCrop) -> [DetectedSceneObject] {
         let due = withLock { () -> Bool in
             // One at a time: a detection that outlives its cadence must not
@@ -1119,17 +1133,28 @@ final class LiveTextDetector {
 
             switch landed {
             case .success(let mapped):
-                withLock { objects = mapped }
+                // An object pass that found nothing **adds nothing**: the
+                // objects this session already knows are not un-found by a
+                // saliency request that returned an empty set, and clearing the
+                // ledger here is what re-keyed the owner's scene from one pass
+                // to the next (`object_pass outcome=empty`, on the device log,
+                // over the very text the previous pass had grouped). The
+                // ledger is a claim about the scene, so only a detection with
+                // something to say replaces it.
+                withLock { if !mapped.isEmpty { objects = mapped } }
                 events.objectPass(objectCount: mapped.count)
             case .failure(let error):
-                withLock { objects = [] }
-                // A refusal, not an absent capability: recorded with its
-                // taxonomy code, and the pass stops asking rather than retrying
-                // every frame (the cadence is stamped, so a broken runtime is
-                // one event and one request, not a loop).
-                // `object_detection_unsupported` is for the runtime that never
-                // had the capability, and `begin` is where that one is
-                // announced.
+                // The same rule for a refused pass: the refusal is a fact about
+                // the runtime, not about the kitchen. What the last successful
+                // detection described is still the best answer the session has,
+                // so the ledger is left as it stands.
+                //
+                // The refusal is recorded with its taxonomy code, and the pass
+                // stops asking rather than retrying every frame (the cadence is
+                // stamped, so a broken runtime is one event and one request, not
+                // a loop). `object_detection_unsupported` is for the runtime
+                // that never had the capability, and `begin` is where that one
+                // is announced.
                 events.objectPassFailed((error as? LiveTranslateError)
                                         ?? .ocrPassFailed(.requestFailed))
                 stopAskingForObjects()

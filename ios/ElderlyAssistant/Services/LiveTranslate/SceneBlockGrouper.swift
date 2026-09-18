@@ -32,14 +32,15 @@ import Foundation
 //    array order produces the same blocks, in the same order, with the same
 //    rects and the same identities. That is what makes a scripted scene a unit
 //    test rather than a screenshot.
-//  - **Identity is a property of what the block *is*.** A text block's
-//    identity is the **set of its member strings** (order-independent, so a
-//    line reordering is not a new block); an object block's is the **object
-//    class plus its quantised centroid**, so OCR wobble inside a panel — the
-//    common case, and the one that used to re-key a region per frame — keeps
-//    the block and its translation. Quantisation is at `blockMergeDistance`,
-//    the same distance the merge rule uses, so "the same block" means the same
-//    thing in both places.
+//  - **Identity is a property of what the block *is*, and what a block is is
+//    its text.** Every block's identity is the **set of its member strings**
+//    (order-independent, so a line reordering is not a new block), the per-line
+//    fallback included. The object decides *which* lines are one block and the
+//    rect the panel is drawn on; it never decides what the block is called. So
+//    the object pass coming and going — the device's own `object_pass
+//    outcome=empty` over the very text it grouped a moment earlier — changes
+//    the grouping and never the identity, and the panel the elder is reading is
+//    not re-keyed into nothing by a runtime that changed its mind.
 //  - **The budget is the sanitisation budget.** Merging stops before a block's
 //    text would exceed `sceneTextMaxLength`, the per-string bound
 //    `SceneTextSanitiser` truncates at: a block that was allowed to grow past
@@ -106,9 +107,12 @@ struct SceneBlock: Equatable {
     /// The member lines, in reading order (top to bottom, then left to right).
     /// Never empty: a block with nothing to translate is not a block.
     let lines: [SceneTextLine]
-    /// The block's stable identity — the member-string *set* for a text block,
-    /// the object class plus quantised centroid for an object block. Survives
-    /// line reordering, OCR wobble inside an object, and box jitter.
+    /// The block's stable identity: the **set of its member strings**, for
+    /// every block, object or not (`SceneBlockGrouper.textIdentity`).
+    ///
+    /// Survives line reordering, box jitter, and — the property the overlay
+    /// depends on — the object pass coming and going, since neither the object
+    /// nor its class is part of the key. A block is the text it carries.
     let identityKey: String
 
     /// The block's text as the one string the translation request carries: the
@@ -211,6 +215,10 @@ enum SceneBlockGrouper {
         // 3. One block per object that owns text. An object with no recognized
         //    text is not a surface: there is nothing to translate for it, and
         //    drawing a panel over it would be a bubble with no words in it.
+        //
+        //    The object decides the grouping and the box; the block's identity
+        //    is its member lines (see `textIdentity`), so the same lines are the
+        //    same surface whether a pass found this object or not.
         var blocks: [SceneBlock] = []
         for (index, members) in ownedByObject.sorted(by: { $0.key < $1.key }) {
             let object = usableObjects[index]
@@ -218,9 +226,7 @@ enum SceneBlockGrouper {
                 kind: .object(classLabel: object.classLabel),
                 normalizedBox: objectBox(object.normalizedBox, holding: members),
                 lines: members,
-                identityKey: objectIdentity(classLabel: object.classLabel,
-                                            box: object.normalizedBox,
-                                            mergeDistance: config.blockMergeDistance)))
+                identityKey: textIdentity(of: members)))
         }
 
         // 4. Everything else: line-cluster grouping by proximity and column.
@@ -447,77 +453,93 @@ enum SceneBlockGrouper {
 
     // MARK: - Identity
 
-    /// A text block's identity: the **set** of its member strings, normalized
-    /// and sorted. Order-independent on purpose — a reordered pair of lines is
-    /// the same sign, and re-keying it would repaint the panel and re-ask a
+    /// A block's identity: the **set** of its member strings, normalized and
+    /// sorted. Order-independent on purpose — a reordered pair of lines is the
+    /// same sign, and re-keying it would repaint the panel and re-ask a
     /// question the session has already answered.
+    ///
+    /// **This is the identity of every block, object or not** (owner device
+    /// report, 2026-09-18). The object pass is a cadenced, cached, best-effort
+    /// signal — `objectPassCadenceSeconds`, and the owner's own trace shows it
+    /// alternating `success` and `empty` — so an identity that carried the
+    /// runtime's class label or the object's quantised centroid changed
+    /// whenever that pass changed its mind. The stabiliser then saw a new
+    /// surface on every pass, `regionAppearPasses` was never reached, and the
+    /// overlay stayed empty over text it was holding.
+    ///
+    /// The fix is the rule, not a patch to the key: a block's identity is the
+    /// text it carries. The object decides *which* lines are one block (the
+    /// grouping, and the box the panel is drawn on) and never what the block is
+    /// called. The per-line publication — the never-empty fallback — is
+    /// therefore the identity floor: what a block is called without any object
+    /// at all.
     static func textIdentity(of lines: [SceneTextLine]) -> String {
         let members = lines.map { LiveTranslateTextNormalization.normalized($0.text) }.sorted()
         return "text" + identitySeparator + members.joined(separator: identitySeparator)
     }
 
-    /// An object block's identity: the class plus the **quantised** centroid.
+    /// Whether two identity keys describe the same **surface of text**: the
+    /// same member lines, or one's member lines contained in the other's.
     ///
-    /// Quantised at `blockMergeDistance`, so a panel that jitters *inside* a
-    /// cell keeps its identity — and with it its panel, its translation and its
-    /// place in the overlay. An unnamed object keeps the same identity under a
-    /// placeholder rather than falling out of the scheme.
+    /// This is the relation the stabiliser matches on, and it is what makes a
+    /// grouping change a non-event:
     ///
-    /// A grid has edges, and an object whose centroid sits on one crosses it
-    /// with the smallest jitter. That is not a failure of the scheme but a
-    /// division of labour: the key says *which* surface, and
-    /// `identitiesShareScope` plus the stabiliser's geometry say whether a
-    /// changed key is the same surface seen again or a different one. See
-    /// `identitiesShareScope`.
-    static func objectIdentity(classLabel: String?,
-                               box: NormalizedBox,
-                               mergeDistance: Double) -> String {
-        let step = mergeDistance > 0 ? mergeDistance : 1
-        let centre = box.center
-        let qx = Int((centre.x / step).rounded())
-        let qy = Int((centre.y / step).rounded())
-        return objectPrefix + identitySeparator + (classLabel ?? "?")
-            + identitySeparator + "\(qx),\(qy)"
+    ///  - *equal member sets* — the same lines, so the same surface, whether the
+    ///    two passes agreed about the objects or not;
+    ///  - *contained* — a panel is the same surface as the pieces it was built
+    ///    from. The object arriving merges three lines into one block; the
+    ///    object pass coming back empty leaves the lines as three blocks. Those
+    ///    are two *groupings* of one surface, and neither may re-key the region
+    ///    the other is drawing — the elder would watch a panel they are reading
+    ///    flicker out and back in, and the session would re-ask what it has
+    ///    already answered.
+    ///
+    /// *Unrelated sets are unrelated surfaces*, which is the protection this
+    /// relation must not trade away: a panel is never the sign beside it,
+    /// however still the frame was, and geometry may not overrule the text.
+    static func identitiesDescribeTheSameSurface(_ left: String, _ right: String) -> Bool {
+        if left == right { return true }
+        guard let leftMembers = members(of: left), let rightMembers = members(of: right) else {
+            return false
+        }
+        return leftMembers.isSubset(of: rightMembers) || rightMembers.isSubset(of: leftMembers)
     }
 
-    /// Whether two identity keys name the same **scope**: the same kind of
-    /// surface with the quantised geometry left out.
+    /// Whether two identity keys are **known to be different surfaces**: both
+    /// are this type's keys, and they share not one member line.
     ///
-    /// This is the distinction the stabiliser needs, and it is not the same
-    /// question as "are these the same block".
+    /// This is the only case in which a block key may take a match *away* — the
+    /// two texts have nothing in common, so no amount of stillness will make one
+    /// into the other. Everything else is left to the ordinary string-and-box
+    /// rule, which keeps the key purely additive:
     ///
-    /// *Different scope, different surface.* An object the runtime named and
-    /// the text panel beside it are not interchangeable however still the frame
-    /// was, and neither are a microwave and a television at one address: the
-    /// runtime said they are two things, and geometry must not overrule it.
-    ///
-    /// *Same scope, same surface seen again.* One microwave panel whose
-    /// quantised centroid crossed a cell edge between two passes is still the
-    /// one microwave panel — the key changed and the surface did not — so the
-    /// stabiliser is free to match it by geometry and hand it back its
-    /// identifier and its translation. Without this, every object sitting near
-    /// a grid line would be re-keyed (and re-asked, and briefly drawn twice)
-    /// for moving a hundredth of the frame.
-    ///
-    /// A text key has no geometry in it at all: its member set *is* its
-    /// identity, so its scope is the whole key, and two different sets of lines
-    /// are two different signs rather than one sign that jittered.
-    static func identitiesShareScope(_ left: String, _ right: String) -> Bool {
-        scope(of: left) == scope(of: right)
+    ///  - a member line misread shares its remaining members with what the
+    ///    region holds ({start, 2 min} against {start, 2 m1n}), so that claim is
+    ///    matched exactly as a region carrying no key at all would be — by its
+    ///    box — and a panel the OCR stumbled on is not re-keyed mid-read;
+    ///  - an unparsable key (a test's own, or a pass that carried none) is not a
+    ///    claim either way, and the plain rule decides.
+    static func identitiesAreKnownToBeDifferentSurfaces(_ left: String, _ right: String) -> Bool {
+        guard let leftMembers = members(of: left), let rightMembers = members(of: right) else {
+            return false
+        }
+        return leftMembers.isDisjoint(with: rightMembers)
     }
 
-    private static func scope(of key: String) -> String {
+    /// The member strings an identity key was built from, or nil for a key that
+    /// is not one of this type's (a caller's own key, a plain OCR region's).
+    private static func members(of key: String) -> Set<String>? {
         let parts = key.components(separatedBy: identitySeparator)
-        guard parts.count >= 3, parts[0] == objectPrefix else { return key }
-        return parts.prefix(2).joined(separator: identitySeparator)
+        guard parts.first == textPrefix, parts.count >= 2 else { return nil }
+        return Set(parts.dropFirst())
     }
 
     /// The separator inside an identity key. A control character, so it cannot
     /// collide with a recognized string.
     private static let identitySeparator = "\u{1}"
 
-    /// The kind of a key whose scope is coarser than the key: an object block's.
-    private static let objectPrefix = "object"
+    /// The kind of every block's key: a surface of text.
+    private static let textPrefix = "text"
 
     // MARK: - Order
 
