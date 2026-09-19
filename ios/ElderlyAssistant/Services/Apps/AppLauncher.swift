@@ -169,7 +169,18 @@ final class AppLauncher {
     /// 2026-09 — each must be declared in LSApplicationQueriesSchemes for
     /// `canOpenURL` to answer honestly).
     static let catalog: [App] = [
-        App(id: "phone", nameKey: "app.name.phone", systemImage: "phone.fill", scheme: "tel"),
+        App(id: "phone", nameKey: "app.name.phone", systemImage: "phone.fill",
+            // [PHONE-DEEPLINKS-REVERT] (2026-09-19) Back on the
+            // slashes-less `tel:` dialer — DEVICE-VERIFIED that
+            // `mobilephone-recents://` (and the sibling mobilephone-*
+            // schemes) are NOT registered by the Phone app on stock iOS:
+            // canOpenURL fails with OSStatus -10814 (application not
+            // found). Apple exposes no public deep link for the Phone
+            // app's Recents/Contacts/Favorites/Voicemail tabs; the bare
+            // `tel:` dialer is the only honest surface. The dead schemes
+            // were removed from LSApplicationQueriesSchemes with this
+            // revert (see docs/deeplink-schemes.md).
+            scheme: "tel"),
         App(id: "messages", nameKey: "app.name.messages", systemImage: "message.fill", scheme: "sms"),
         App(id: "facetime", nameKey: "app.name.facetime", systemImage: "video.fill", scheme: "facetime"),
         App(id: "mail", nameKey: "app.name.mail", systemImage: "envelope.fill", scheme: "message"),

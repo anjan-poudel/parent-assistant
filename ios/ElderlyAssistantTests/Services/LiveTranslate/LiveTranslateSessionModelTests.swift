@@ -30,6 +30,9 @@ final class LiveTranslateSessionModelTests: XCTestCase {
     private let curatedTranslation = "बत्ती"
     /// A string no device layer can answer, so it reaches the cloud path.
     private let cloudText = "Members only beyond this point"
+    /// A second uncurated string, so a question can be asked *after* the cloud
+    /// switch is turned on — the one the switch's scenario resolves.
+    private let secondCloudText = "Push the green button"
 
     private var suiteNames: [String] = []
 
@@ -74,7 +77,14 @@ final class LiveTranslateSessionModelTests: XCTestCase {
                              transport: TierTranslationTransport = TierTranslationTransport(),
                              extractMode: Bool = false,
                              locale: Locale = Locale(identifier: "ne-NP"),
-                             config: LiveTranslateConfig = .default) -> Harness {
+                             config: LiveTranslateConfig = .default,
+                             /// The cloud tier's master switch (owner
+                             /// directive, 2026-09-19) in the session's own
+                             /// settings. `nil` leaves the key absent — the
+                             /// household that has never chosen — which is the
+                             /// state the switch's own scenarios read the
+                             /// config default from.
+                             geminiCloudEnabled: Bool? = true) -> Harness {
         let parts = makeLiveTranslateSessionTestParts(authorization: authorization,
                                                       consent: consent,
                                                       configured: configured,
@@ -83,7 +93,8 @@ final class LiveTranslateSessionModelTests: XCTestCase {
                                                       transport: transport,
                                                       locale: locale,
                                                       extractMode: extractMode,
-                                                      config: config)
+                                                      config: config,
+                                                      geminiCloudEnabled: geminiCloudEnabled)
         suiteNames.append(parts.suiteName)
         return Harness(parts: parts,
                        model: LiveTranslateSessionModel(dependencies: parts.dependencies))
@@ -537,6 +548,125 @@ final class LiveTranslateSessionModelTests: XCTestCase {
         XCTAssertEqual(harness.gate.currentDecision(), .denied)
         XCTAssertFalse(harness.gate.currentDecision().allowsEgress)
         XCTAssertFalse(harness.model.consent.isPromptPresented)
+    }
+
+    // MARK: - The cloud tier's master switch (owner directive, 2026-09-19)
+
+    /// A household that has never touched the switch opens with it off, and
+    /// what the model shows is what the store holds — the directive's "does
+    /// not cascade" at the session boundary.
+    @MainActor
+    func testTheModelOpensWithTheCloudSwitchOffUntilTheStoreSaysOtherwise() async {
+        let untouched = makeHarness(geminiCloudEnabled: nil)
+        XCTAssertFalse(untouched.model.geminiCloudEnabled,
+                       "the cloud tier must not cascade for a household that never opted in")
+        XCTAssertFalse(LiveTranslateConfig.default.geminiCloudEnabledDefault,
+                       "the value comes from the config's nominal default, pinned there")
+
+        let turnedOn = makeHarness(geminiCloudEnabled: true)
+        XCTAssertTrue(turnedOn.model.geminiCloudEnabled,
+                      "a session opens with the stored opt-in, not with the shipped default")
+    }
+
+    /// The write path: one setter, one key, and the model mirrors what was
+    /// stored rather than keeping a copy of its own — the same shape the
+    /// display preference has.
+    @MainActor
+    func testTheCloudSwitchWritesThroughTheOneSetterAndLeavesTheDisplayPreferenceAlone() async {
+        let harness = makeHarness(geminiCloudEnabled: nil)
+        XCTAssertFalse(harness.model.geminiCloudEnabled)
+
+        harness.model.setGeminiCloudEnabled(true)
+        XCTAssertTrue(harness.model.geminiCloudEnabled)
+        XCTAssertTrue(harness.defaults.bool(forKey: LiveTranslateSettings.geminiCloudEnabledKey),
+                      "the model wrote the declared key, not a private copy")
+        XCTAssertFalse(harness.model.alwaysShowOriginal,
+                       "the two settings are independent: one does not move the other")
+
+        harness.model.setGeminiCloudEnabled(false)
+        XCTAssertFalse(harness.model.geminiCloudEnabled)
+        XCTAssertFalse(harness.defaults.bool(forKey: LiveTranslateSettings.geminiCloudEnabledKey),
+                       "opting back out persists too")
+    }
+
+    /// The row's copy, from the same surface the Settings leaf draws: both
+    /// languages resolve, and the switch's own value is what the row shows.
+    @MainActor
+    func testTheCloudSwitchSurfaceDrawsTheStoredValueInBothLanguages() async {
+        let harness = makeHarness(geminiCloudEnabled: true)
+        let surface = harness.model.geminiCloudToggleSurface
+        XCTAssertTrue(surface.isOn, "the row shows the stored value")
+        XCTAssertFalse(surface.title.isEmpty)
+        XCTAssertFalse(surface.note.isEmpty)
+        XCTAssertTrue(surface.title.unicodeScalars.contains { (0x0900...0x097F).contains($0.value) },
+                      "Nepali first (T-005)")
+
+        // The same surface type the row and the Settings leaf build, in the
+        // other language: one vocabulary, two languages.
+        let english = GeminiCloudToggleSurface(isOn: true, locale: Locale(identifier: "en"))
+        XCTAssertNotEqual(english.title, surface.title, "the title follows the active language")
+        XCTAssertNotEqual(english.note, surface.note, "so does the line under it")
+
+        // A value, re-derived from the model's own state on every read: the
+        // row cannot show a frame-old copy of the switch.
+        XCTAssertEqual(surface, harness.model.geminiCloudToggleSurface)
+    }
+
+    /// The wiring, end to end through the interface the Settings leaf uses:
+    /// with the switch off nothing is sent and nobody is prompted; turning it
+    /// on in a running session opens the pre-existing consent-gated path for
+    /// the next question, with no restart.
+    @MainActor
+    func testTheSwitchReachesTheRunningPipelineWithoutARestart() async throws {
+        let harness = makeHarness(consent: true, configured: true,
+                                  transport: Self.respondingTransport(),
+                                  geminiCloudEnabled: false)
+        reportLayout(harness)
+        harness.engine.regions = [detected(cloudText)]
+        await harness.model.start()
+        try await deliverPasses(2, in: harness)
+        await waitUntil("the closed switch to settle the region") {
+            guard let publication = harness.model.publication,
+                  let region = publication.regions.first(where: { $0.text == self.cloudText }) else {
+                return false
+            }
+            if case .degraded = publication.result(for: region).outcome { return true }
+            return false
+        }
+
+        XCTAssertEqual(harness.transport.requestCount, 0,
+                       "the switch off means the tier is never asked")
+        XCTAssertFalse(harness.model.consent.isPromptPresented,
+                       "and the household is not prompted about a tier it did not turn on")
+
+        // The Settings leaf's write, through the model's own entry point.
+        harness.model.setGeminiCloudEnabled(true)
+        // The push into the pipeline is a task of its own (the same shape the
+        // display preference uses), so the next frames are delivered after that
+        // hop has had its window.
+        try? await Task<Never, Never>.sleep(for: .milliseconds(60))
+
+        harness.engine.regions = [detected(cloudText),
+                                  detected(secondCloudText, box: (0.1, 0.5, 0.5, 0.6))]
+        try await deliverPasses(2, in: harness)
+        await waitUntil("the new question to be answered through the cloud") {
+            guard let publication = harness.model.publication,
+                  let region = publication.regions.first(where: { $0.text == self.secondCloudText }) else {
+                return false
+            }
+            if case .resolved = publication.result(for: region).outcome { return true }
+            return false
+        }
+
+        let publication = try XCTUnwrap(harness.model.publication)
+        let region = try XCTUnwrap(publication.regions.first { $0.text == secondCloudText })
+        guard case .resolved(_, _, let tier) = publication.result(for: region).outcome else {
+            return XCTFail("a question asked with the switch on resolves through the gate")
+        }
+        XCTAssertEqual(tier, .cloud)
+        XCTAssertEqual(harness.transport.requestCount, 1,
+                       "the switch opening is one question, and the string that degraded while "
+                       + "it was closed is not re-sent")
     }
 
     // MARK: - Commands and speech (C12's seams)

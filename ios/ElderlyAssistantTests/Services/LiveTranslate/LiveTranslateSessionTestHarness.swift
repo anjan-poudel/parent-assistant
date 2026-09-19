@@ -374,7 +374,18 @@ func makeLiveTranslateSessionTestParts(
     transport: TierTranslationTransport = TierTranslationTransport(),
     locale: Locale = Locale(identifier: "ne-NP"),
     extractMode: Bool = false,
-    config: LiveTranslateConfig = .default) -> LiveTranslateSessionTestParts {
+    config: LiveTranslateConfig = .default,
+    /// The cloud tier's master switch (owner directive, 2026-09-19), written
+    /// into the session's own settings suite before the session is built.
+    ///
+    /// **On by default, and deliberately so.** A real household starts with
+    /// the key absent — the switch off — but the suites that come through here
+    /// were written about the consent gate, the snapshot path and the
+    /// cascade, and each needs the tier reachable for what it asserts to be
+    /// the thing under test. `nil` leaves the key absent, which is how a test
+    /// exercises the household that has never chosen (the shipped default);
+    /// `false` is how a test says the household turned the cloud off.
+    geminiCloudEnabled: Bool? = true) -> LiveTranslateSessionTestParts {
 
     // A session opens showing the *recognized text* — that is the shipped
     // default (owner verdict, 2026-09-18) and it is pinned as one, by
@@ -388,6 +399,12 @@ func makeLiveTranslateSessionTestParts(
     let suiteName = "livetranslate.tests.\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suiteName)!
     defaults.removePersistentDomain(forName: suiteName)
+    // The switch, written through its declared key before the session reads
+    // it — so the value the model opens with is the value the store holds,
+    // exactly as the Settings leaf's write reaches a session.
+    if let geminiCloudEnabled {
+        defaults.set(geminiCloudEnabled, forKey: LiveTranslateSettings.geminiCloudEnabledKey)
+    }
 
     let log = SessionLog()
     let clock = SessionClock()

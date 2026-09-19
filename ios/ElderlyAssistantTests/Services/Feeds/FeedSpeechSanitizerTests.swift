@@ -112,4 +112,108 @@ final class FeedSpeechSanitizerTests: XCTestCase {
         let text = FeedSpeechSanitizer.speechText(title: "Short", summary: "summary")
         XCTAssertLessThan(text.count, FeedSpeechSanitizer.maxSpeechLength)
     }
+
+    // MARK: - Full article (feeds readaloud task, 2026-09-19)
+
+    func testBlockTagsBecomeSpacesSoParagraphsDoNotGlueTogether() {
+        // `stripHTMLTags` removes a tag WITHOUT leaving a boundary, which
+        // would turn "<p>one</p><p>two</p>" into "onetwo". Block-level
+        // markup becomes a SPACE — whitespace only, never invented
+        // punctuation.
+        XCTAssertEqual(
+            FeedSpeechSanitizer.articleBody("<p>one</p><p>two</p>"),
+            "one two")
+        XCTAssertEqual(
+            FeedSpeechSanitizer.articleBody("first<br>second"),
+            "first second")
+        XCTAssertEqual(
+            FeedSpeechSanitizer.articleBody("<ul><li>a</li><li>b</li></ul>"),
+            "a b")
+    }
+
+    func testInlineTagsAreRemovedWithoutABoundary() {
+        XCTAssertEqual(
+            FeedSpeechSanitizer.articleBody("Full <b>bold</b> text"),
+            "Full bold text")
+    }
+
+    func testArticleBodyStripsMarkupAndURLs() {
+        let body = "<p>Read <a href=\"https://x.example.com/a\">this</a> now.</p>"
+        let spoken = FeedSpeechSanitizer.articleBody(body)
+        XCTAssertEqual(spoken, "Read this now.")
+        XCTAssertFalse(spoken.contains("<"))
+        XCTAssertFalse(spoken.contains("https://"))
+    }
+
+    func testArticleBodyLeavesDevanagariIntact() {
+        let body = "<p>काठमाडौँ मा आज</p><p>मौसम राम्रो छ।</p>"
+        XCTAssertEqual(FeedSpeechSanitizer.articleBody(body),
+                       "काठमाडौँ मा आज मौसम राम्रो छ।")
+    }
+
+    func testArticleSpeechTextUsesTheBodyNotTheSummary() {
+        let text = FeedSpeechSanitizer.articleSpeechText(
+            title: "Headline", summary: "Short blurb",
+            fullText: "<p>The whole story body.</p>")
+        XCTAssertEqual(text, "Headline. The whole story body.")
+        XCTAssertFalse(text.contains("Short blurb"),
+                       "the full-article path must not read the summary")
+    }
+
+    func testArticleSpeechTextFallsBackToTheSummaryWhenNoDistinctBody() {
+        // No body stored: the option reads what the source published —
+        // never silence, never a fabricated article.
+        XCTAssertEqual(
+            FeedSpeechSanitizer.articleSpeechText(title: "Headline",
+                                                  summary: "Short blurb",
+                                                  fullText: ""),
+            "Headline. Short blurb")
+        // Body identical to the summary: the same fallback (there is
+        // nothing MORE to read).
+        XCTAssertEqual(
+            FeedSpeechSanitizer.articleSpeechText(title: "Headline",
+                                                  summary: "Short blurb",
+                                                  fullText: "<p>Short blurb</p>"),
+            "Headline. Short blurb")
+    }
+
+    func testArticleSpeechTextIsCappedAtTheArticleLimit() {
+        let longBody = String(repeating: "<p>word</p>", count: 1000)
+        let text = FeedSpeechSanitizer.articleSpeechText(title: "T",
+                                                         summary: "",
+                                                         fullText: longBody)
+        XCTAssertEqual(text.count, FeedSpeechSanitizer.maxArticleSpeechLength)
+        XCTAssertGreaterThan(FeedSpeechSanitizer.maxArticleSpeechLength,
+                             FeedSpeechSanitizer.maxSpeechLength,
+                             "the article cap is the longer, deliberate one")
+    }
+
+    func testArticleCapIsCharacterSafeForDevanagari() {
+        let longBody = String(repeating: "काठमाडौँ ", count: 2000)
+        let text = FeedSpeechSanitizer.articleSpeechText(title: "",
+                                                         summary: "",
+                                                         fullText: longBody)
+        XCTAssertEqual(text.count, FeedSpeechSanitizer.maxArticleSpeechLength)
+        let expected = String(
+            FeedSpeechSanitizer.articleBody(longBody)
+                .prefix(FeedSpeechSanitizer.maxArticleSpeechLength))
+        XCTAssertEqual(text, expected,
+                       "the cap must equal the grapheme-cluster-safe prefix")
+    }
+
+    // MARK: - hasFullArticle
+
+    func testHasFullArticleIsFalseWithoutADistinctBody() {
+        XCTAssertFalse(FeedSpeechSanitizer.hasFullArticle(summary: "S", fullText: ""))
+        XCTAssertFalse(FeedSpeechSanitizer.hasFullArticle(summary: "S",
+                                                          fullText: "   "))
+        XCTAssertFalse(FeedSpeechSanitizer.hasFullArticle(summary: "Same text",
+                                                          fullText: "<p>Same text</p>"),
+                       "a body the summary already says is nothing MORE to read")
+    }
+
+    func testHasFullArticleIsTrueForARealBody() {
+        XCTAssertTrue(FeedSpeechSanitizer.hasFullArticle(
+            summary: "Short blurb", fullText: "<p>A much longer body.</p>"))
+    }
 }

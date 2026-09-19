@@ -168,6 +168,15 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// The FR-LCT-017 preference, as the control renders it.
     @Published private(set) var alwaysShowOriginal: Bool
 
+    /// The cloud tier's master switch, as the Settings leaf renders it and as
+    /// the pipeline is gated by (owner directive, 2026-09-19).
+    ///
+    /// Read from `LiveTranslateSettings` when the session is built and
+    /// mirrored on every write, so the value the elder sees in Settings, the
+    /// value the session model publishes and the value the gate reads are one
+    /// value rather than three that have to be kept in step.
+    @Published private(set) var geminiCloudEnabled: Bool
+
     /// **Extract mode** (owner verdict, 2026-09-18), as the mode control
     /// renders it: `true` ⇒ the overlay shows the recognized text and no tier
     /// runs until a block is asked for; `false` ⇒ the translated view.
@@ -334,6 +343,11 @@ final class LiveTranslateSessionModel: ObservableObject {
                                                locale: dependencies.locale)
         self.notifications = dependencies.notifications
         self.alwaysShowOriginal = dependencies.settings.alwaysShowOriginal
+        // The cloud switch is read from the same store, for the same reason:
+        // the elder's choice in Settings is the session's opening state, with
+        // the config's nominal default (off) standing in for a household that
+        // has never chosen.
+        self.geminiCloudEnabled = dependencies.settings.geminiCloudEnabled
         self.isExtracting = dependencies.config.extractModeDefault
         self.indicator = CloudActivityIndicatorModel(observabilityBus: dependencies.observabilityBus,
                                                      config: dependencies.config)
@@ -547,6 +561,11 @@ final class LiveTranslateSessionModel: ObservableObject {
             cloudNeed: consent,
             backpressure: camera,
             alwaysShowOriginal: alwaysShowOriginal,
+            // The gate the whole session is built behind (owner directive,
+            // 2026-09-19): handed in explicitly rather than left to the
+            // config's default, so the switch the elder set in Settings is the
+            // switch this session runs under — from its very first cloud need.
+            geminiCloudEnabled: geminiCloudEnabled,
             extractionMode: isExtracting,
             config: config,
             observabilityBus: dependencies.observabilityBus,
@@ -781,6 +800,45 @@ final class LiveTranslateSessionModel: ObservableObject {
 
     func toggleAlwaysShowOriginal() {
         setAlwaysShowOriginal(!alwaysShowOriginal)
+    }
+
+    /// The cloud tier's master switch, as the Settings leaf writes it (owner
+    /// directive, 2026-09-19).
+    ///
+    /// The same write path shape as the display preference above, and for the
+    /// same reason: the value is written to the store, then read back from it,
+    /// so the surface the elder touched and the gate the session runs behind
+    /// cannot hold two different answers. That matters more here than there —
+    /// this is the setting that decides whether anything leaves the phone —
+    /// and it is why the switch is not a `@Published` the view writes
+    /// directly.
+    func setGeminiCloudEnabled(_ value: Bool) {
+        guard !isClosed else { return }
+        settings.setGeminiCloudEnabled(value)
+        refreshGeminiCloudEnabled()
+    }
+
+    /// Mirrors the switch into the model and the pipeline.
+    ///
+    /// Nothing is re-placed and nothing is re-attempted: this setting is not
+    /// part of any placement policy, and strings the session already settled
+    /// stay settled (the pipeline's `updateGeminiCloudEnabled` says why). What
+    /// it *does* affect is the next attempt — and it reaches the gate through
+    /// the pipeline's own flag, which is the one the gate reads, rather than
+    /// through a copy held here.
+    private func refreshGeminiCloudEnabled() {
+        geminiCloudEnabled = settings.geminiCloudEnabled
+        let pipeline = self.pipeline
+        let resolved = geminiCloudEnabled
+        Task { await pipeline?.updateGeminiCloudEnabled(resolved) }
+    }
+
+    /// The switch as its row renders it, in the active language — the same
+    /// shape every other surface this model owns has (`alwaysShowOriginalSurface`,
+    /// `translateAllSurface`, `cloudIndicator`), so the session's chrome and
+    /// the Settings leaf draw the same words from the same catalog keys.
+    var geminiCloudToggleSurface: GeminiCloudToggleSurface {
+        GeminiCloudToggleSurface(isOn: geminiCloudEnabled, locale: locale)
     }
 
     /// The extract-mode toggle's single write path (the chrome's control).

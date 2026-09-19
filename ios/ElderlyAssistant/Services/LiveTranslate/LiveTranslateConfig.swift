@@ -1180,6 +1180,37 @@ struct LiveTranslateConfig: Equatable {
     /// brain unavailability.
     var brainTranslationHeadroomFactor: Double = 1.0
 
+    /// [PRESSURE-SAFE LOAD] (2026-09-19) How recently the kernel must have
+    /// reported `.critical` for the tier to still refuse a load, in seconds.
+    ///
+    /// The headroom factor above is blind to the device: it compares the
+    /// brain's declared non-pageable bytes against
+    /// `os_proc_available_memory()`, which is the APP's own ceiling under its
+    /// jetsam limit. A phone can be down to a few megabytes of *system-wide*
+    /// free pages — the kernel jetsamming daemons in the background — while
+    /// the app's own headroom still reads as generous, because nothing has
+    /// been charged to the app yet. The 2026-09-19 device death is exactly
+    /// that shape: the headroom check passed, a 1.03 GB Metal-offloaded load
+    /// began, an encoder eviction followed, and the process was gone about
+    /// five seconds later. This window is the second opinion, and it is the
+    /// kernel's own.
+    ///
+    /// The window rather than the bare level because a `.critical` is a
+    /// *moment*, not a state the app is told about afterwards: the kernel
+    /// sends the next level when it sends it, and the minutes in between are
+    /// exactly when the last `.critical` is still the most honest thing known
+    /// about the device. It is sized against the cost of the thing it guards —
+    /// a synchronous multi-GB page-in that takes seconds and cannot be
+    /// stopped once started — so a load beginning inside this window would
+    /// still be allocating while the kernel was reclaiming.
+    ///
+    /// The cost of being wrong in this direction is one batch answered by the
+    /// next tier; the cost in the other direction is the whole app, which
+    /// translates nothing at all. Deliberately not zero, and deliberately not
+    /// minutes: 30 s is longer than the load it forbids and shorter than the
+    /// gap between the elder's glances at a sign.
+    var brainTranslationCriticalPressureWindowSeconds: TimeInterval = 30
+
     /// Whether the tier defers to a brain that is already resident for another
     /// owner — the voice pipeline's `.brain` or `.intentBrain` slot — rather
     /// than running a second multi-GB generation alongside it.
@@ -1200,6 +1231,7 @@ struct LiveTranslateConfig: Equatable {
     /// Testing-only — reverts to false when the round-3 quant ships.
     var wardenBypassForTesting: Bool = true
 
+<<<<<<< HEAD
     /// How long the warden's notice stays on screen before it takes itself
     /// down, in seconds (owner directive, 2026-09-19: "keep the user in the
     /// loop so they don't wonder about the silences").
@@ -1217,6 +1249,49 @@ struct LiveTranslateConfig: Equatable {
     var wardenNoticeDismissSeconds: TimeInterval = 4.0
 
     // MARK: Tier 2
+=======
+    // MARK: Tier 2 — the master switch (owner directive, 2026-09-19)
+
+    /// Whether the Gemini (cloud) tier may run **at all**, before anything
+    /// else about it is asked.
+    ///
+    /// **False, and that is the owner's directive** (2026-09-19): the cloud
+    /// tier does not cascade by default. An elder who has never touched this
+    /// setting gets the on-device cascade — the curated dictionary, the
+    /// persisted cache and the app's own installed Nepali brain — and nothing
+    /// leaves the phone; the switch is what opts in, and it is the elder's
+    /// (or the household's) to throw, deliberately, from the feature's
+    /// Settings leaf.
+    ///
+    /// Three things this key is not:
+    ///
+    ///  - **It is not consent.** OD-13's consent record is still asked for and
+    ///    still enforced on every attempt when this is on (AM-1): the switch
+    ///    is a *policy* the household sets once, the record is the elder's
+    ///    answer at the point of first cloud need, and either one alone never
+    ///    sends anything. Turning the switch off does not withdraw a recorded
+    ///    grant; turning it on does not create one.
+    ///  - **It is not a budget.** The shipped `GeminiCostGovernor` soft daily
+    ///    cap is unchanged and still applies (OD7) — this key is a gate,
+    ///    never a second cap.
+    ///  - **It is not a display preference.** It is the one user-facing
+    ///    setting in this feature that *does* change what leaves the device,
+    ///    so it is deliberately kept away from the FR-LCT-017 toggle's
+    ///    display-only chrome (`AlwaysShowOriginalControl`) and drawn beside
+    ///    the consent surface, where the elder is already thinking about
+    ///    egress.
+    ///
+    /// A *default*, not the persisted state: `LiveTranslateSettings` owns the
+    /// value the elder chose, and this is the nominal value an absent key
+    /// reads as — exactly the split `alwaysShowOriginalDefault` uses.
+    ///
+    /// Cost is the second half of the reason. The cloud tier is the only part
+    /// of this feature that spends money per scene, so a household that never
+    /// opted in never pays for one: the failure mode this key removes is a
+    /// feature that quietly bills a stranger's key because a sign had one
+    /// word the dictionary did not.
+    var geminiCloudEnabledDefault: Bool = false
+>>>>>>> origin/master
 
     /// Base timeout for one tier-2 request. **Derived, never stored (CL-8):**
     /// the shipped `GeminiClient.Config.default.timeoutSeconds` (25 s, sized

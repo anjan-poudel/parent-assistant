@@ -84,6 +84,16 @@ enum TranslationUnavailableReason: String, Equatable, CaseIterable {
     /// is the honest statement for failures that do not themselves terminate
     /// a region (tracking off, cache miss after a self-heal, speech failure).
     case noTierResolved = "no_tier_resolved"
+    /// The household's own master switch for the cloud tier is **off**, so
+    /// the tier was never asked (owner directive, 2026-09-19). Distinct from
+    /// `consentNotGranted` by contract: that is the elder answering *no* to a
+    /// question they were asked, and this is a question the feature did not
+    /// ask because the household already answered it in Settings. Collapsing
+    /// the two would tell an elder who turned the switch off that they had
+    /// refused something — and would make it impossible to see, in the
+    /// evidence, how often the cloud was declined by policy rather than by a
+    /// person.
+    case cloudDisabled = "cloud_disabled"
 }
 
 // MARK: - Outcome
@@ -310,6 +320,11 @@ enum LiveTranslateError: Error, Equatable {
     case costBudgetExhausted
 
     // Cloud translation
+    /// The household's master switch for the cloud tier is off (owner
+    /// directive, 2026-09-19): the tier was not asked, nothing was sent and
+    /// nothing was prompted for. Its own case rather than a borrowed
+    /// `consentDenied` — the elder refused nothing, the policy did.
+    case cloudDisabled
     case providerNotConfigured
     case cloudTransient(TransportFailure)
     case cloudRejected(status: Int)
@@ -359,6 +374,8 @@ extension LiveTranslateError: LogSafeErrorCode {
             return "consent_record_unreadable"
         case .costBudgetExhausted:
             return "cost_budget_exhausted"
+        case .cloudDisabled:
+            return "cloud_disabled"
         case .providerNotConfigured:
             return "provider_not_configured"
         case .cloudTransient:
@@ -420,6 +437,9 @@ extension LiveTranslateError {
 
         case .costBudgetExhausted:
             return .costBudgetExhausted
+
+        case .cloudDisabled:
+            return .cloudDisabled
 
         case .providerNotConfigured:
             return .providerNotConfigured

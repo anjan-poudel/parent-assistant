@@ -249,4 +249,74 @@ final class FeedRSSParserTests: XCTestCase {
         let items = parse(rssItem(children: ""), sourceName: "BBC World")
         XCTAssertEqual(items[0].sourceName, "BBC World")
     }
+
+    // MARK: - Article body retention (feeds readaloud task, 2026-09-19)
+
+    func testContentEncodedIsRetainedAsFullTextAlongsideTheSummary() {
+        // Before this task the body was folded INTO the summary. The card
+        // still shows the summary; the body is what the full-article
+        // reading speaks.
+        let items = parse(rssItem(children: """
+            <description>Short summary</description>
+            <content:encoded>Much longer full body</content:encoded>
+            """))
+        XCTAssertEqual(items[0].summary, "Short summary")
+        XCTAssertEqual(items[0].fullText, "Much longer full body")
+    }
+
+    func testBodyOnlyFeedBacksBothSummaryAndFullText() {
+        // A body-only feed renders exactly as it did before (the summary
+        // falls back to the body) — and because the two fields are then
+        // identical, the full-article affordance correctly reports there
+        // is nothing MORE to read.
+        let items = parse(rssItem(children:
+            "<content:encoded>Full body text</content:encoded>"))
+        XCTAssertEqual(items[0].summary, "Full body text")
+        XCTAssertEqual(items[0].fullText, "Full body text")
+        XCTAssertFalse(FeedSpeechSanitizer.hasFullArticle(
+            summary: items[0].summary, fullText: items[0].fullText))
+    }
+
+    func testDescriptionOnlyItemHasNoFullText() {
+        let items = parse(rssItem(children: "<description>Just a summary</description>"))
+        XCTAssertEqual(items[0].summary, "Just a summary")
+        XCTAssertTrue(items[0].fullText.isEmpty,
+                      "no body was published — none is fabricated")
+    }
+
+    func testAtomContentIsRetainedAsFullText() {
+        let atom = """
+        <?xml version="1.0"?>
+        <feed xmlns="http://www.w3.org/2005/Atom">
+          <title>Example</title>
+          <entry>
+            <title>Atom story</title>
+            <id>tag:example.com,2026:b</id>
+            <summary>Atom summary</summary>
+            <content>The whole atom body</content>
+          </entry>
+        </feed>
+        """
+        let items = parse(atom)
+        XCTAssertEqual(items[0].summary, "Atom summary")
+        XCTAssertEqual(items[0].fullText, "The whole atom body")
+    }
+
+    func testFullTextIsBoundedByTheStorageCap() {
+        // One source can publish a whole article per item — the body must
+        // be bounded (grapheme-safe: the cap is a Character count, so a
+        // Devanagari body is bounded by what it says, not its byte width).
+        let longBody = String(repeating: "काठमाडौँ word ", count: 4000)
+        XCTAssertGreaterThan(longBody.count, FeedRSSParser.maxFullTextLength)
+        let items = parse(rssItem(children:
+            "<content:encoded>\(longBody)</content:encoded>"))
+        let retained = items[0].fullText
+        XCTAssertLessThanOrEqual(retained.count, FeedRSSParser.maxFullTextLength,
+                                 "the retained body is capped, never unbounded")
+        XCTAssertGreaterThan(retained.count, FeedRSSParser.maxFullTextLength - 14,
+                             "the cap is a length bound, not a small slice")
+        XCTAssertEqual(retained, String(longBody.prefix(retained.count)),
+                       "the cap is the grapheme-safe prefix of the body — "
+                       + "no cluster is cut and no text is rewritten")
+    }
 }

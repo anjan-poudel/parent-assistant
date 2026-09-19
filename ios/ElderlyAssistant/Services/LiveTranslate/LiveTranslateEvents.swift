@@ -74,6 +74,41 @@ enum LiveTranslateBrainUnavailableReason: String, Equatable, CaseIterable {
     case inferenceTimeout = "inference_timeout"
 }
 
+/// [PRESSURE-SAFE LOAD] (2026-09-19) Closed vocabulary for the `reason` key on
+/// `brain_translation_batch`: **why** the tier declined to attempt a batch it
+/// was handed.
+///
+/// Until this existed the deferral was carried only in the tier's return value
+/// (`LocalBrainDeferral`), so the one fact a device capture most needed — "the
+/// brain was never asked, and here is what stopped it" — was visible on screen
+/// and nowhere else. A capture of the 2026-09-19 death showed a batch event
+/// with `resolvedCount: 0` and no way to tell a resident voice brain from a
+/// mis-set memory floor from a starved device.
+///
+/// A closed set, like every other token in this file, and for the same reason:
+/// the value travels in event metadata, so it can be no free-form string
+/// (`LiveTranslateSourceHygieneTests.testNoEmitterAcceptsFreeText` pins that no
+/// emitter takes a `String`).
+enum LiveTranslateBrainDeferralReason: String, Equatable, CaseIterable {
+    /// Another owner's brain is live (the voice pipeline's `.brain` /
+    /// `.intentBrain` slot).
+    case residentBrain = "resident_brain"
+    /// The app's own headroom under its jetsam ceiling is below the brain's
+    /// declared non-pageable footprint.
+    case insufficientHeadroom = "insufficient_headroom"
+    /// [PRESSURE-SAFE LOAD] The kernel's own memory-pressure level is
+    /// `.warning` or `.critical` right now.
+    case memoryPressure = "memory_pressure"
+    /// [PRESSURE-SAFE LOAD] `.critical` fired inside the tier's recency window
+    /// (`brainTranslationCriticalPressureWindowSeconds`) — the device is still
+    /// the device that was about to be killed, whatever the level says now.
+    case recentCriticalPressure = "recent_critical_pressure"
+    /// [PRESSURE-SAFE LOAD] The load had already been admitted and declared in
+    /// flight when a warden asked for the position, so it stood down rather
+    /// than re-filling the row the warden had just cleared.
+    case releaseRequestedDuringLoad = "release_requested_during_load"
+}
+
 /// Closed vocabulary for the `failureStage` metadata key: **where** an
 /// on-device brain attempt stopped.
 ///
@@ -100,6 +135,17 @@ enum BrainFailureStage: String, Equatable, CaseIterable {
     /// The handle could not be constructed from the installed file — a corrupt
     /// or mismatched artifact, or a context the device could not create.
     case load
+    /// [PRESSURE-SAFE LOAD] (2026-09-19) The load was stood down **before the
+    /// runtime was asked to construct anything**, because the kernel's
+    /// memory-pressure state — or a warden's ask that arrived while the load
+    /// was in flight — made it a spike the device must not create.
+    ///
+    /// Its own case rather than a second spelling of `load`, because the two
+    /// are opposite facts about the artifact: `load` means somebody tried and
+    /// the file or the context would not construct, this means the device
+    /// declined and nothing was ever at risk. Collapsing them is what would
+    /// make the next device capture read a starved phone as a corrupt model.
+    case loadAbandoned = "load_abandoned"
     /// The composed prompt would have left less than the output headroom
     /// inside the shared 1,024-token context, so the guard refused it before
     /// the first token rather than discovering the wall as a truncated answer.
@@ -175,6 +221,27 @@ enum LiveTranslateEventCatalogue {
         let metadataKeys: Set<String>
     }
 
+    /// The declared keys an event may **omit**, per event type.
+    ///
+    /// Every other declared key is unconditional and asserted so by test: an
+    /// event that declares a key carries it, always. This map exists for the
+    /// one shape that is genuinely conditional —
+    /// `brain_translation_batch`'s `reason`, which a batch that ran has
+    /// nothing to say about — and it is declared here, once, rather than left
+    /// to an emitter's discretion, so that "this key may be absent" is a
+    /// decision the schema records. `Entry`'s own doc already reads "every
+    /// metadata key this event *may* carry"; this is where that becomes
+    /// checkable.
+    ///
+    /// A key that is not listed here and not emitted fails the completeness
+    /// test, which is the point: a new conditional key must be declared
+    /// conditional rather than quietly weakening the check.
+    static let optionalMetadataKeys: [String: Set<String>] = [
+        // Present exactly when the tier declined to attempt the batch
+        // ([PRESSURE-SAFE LOAD], 2026-09-19).
+        "brain_translation_batch": ["reason"],
+    ]
+
     /// Event type → schema. One entry per emitter in `LiveTranslateEvents`.
     static let entries: [String: Entry] = [
         "session_started": Entry(outcomes: ["success"], metadataKeys: []),
@@ -231,8 +298,12 @@ enum LiveTranslateEventCatalogue {
         //    the same shape as `tracking_unsupported`: a degradation the
         //    project must be able to see and the elder never sees, because
         //    the cloud tier is still there to answer.
+        // `reason` joined this schema 2026-09-19 ([PRESSURE-SAFE LOAD]) and is
+        // present only when the tier declined to attempt the batch — see
+        // `LiveTranslateBrainDeferralReason`. A batch that ran carries no
+        // reason; one that did not carries exactly one closed token.
         "brain_translation_batch": Entry(outcomes: ["success", "partial", "degraded"],
-                                         metadataKeys: ["resolvedCount", "unresolvedCount", "durationMs"]),
+                                         metadataKeys: ["resolvedCount", "unresolvedCount", "durationMs", "reason"]),
         // `failureStage` joined the schema 2026-09-17 with the tier's device
         // report (see `BrainFailureStage`): the reason token says the attempt
         // could not answer, the stage says where it stopped. Both are closed
@@ -566,7 +637,18 @@ struct LiveTranslateEvents {
     /// handed came back translated, `partial` when some did, `degraded` when
     /// none did — the same three-way honesty the cloud's batch event uses,
     /// and never a claim of success for a batch that answered nothing.
-    func brainTranslationBatch(resolvedCount: Int, unresolvedCount: Int, durationMs: Int) {
+    ///
+    /// [PRESSURE-SAFE LOAD] (2026-09-19) `deferral` is present exactly when
+    /// the tier declined to attempt the batch, and it is the *only* thing that
+    /// distinguishes "the brain was asked and answered nothing" from "the
+    /// brain was never asked". Both are `degraded` with `resolvedCount: 0`,
+    /// which is correct — the caller's next move is the same — but a capture
+    /// that cannot tell them apart cannot say whether a phone is short of
+    /// memory or the model is bad. It is a closed token, never free text.
+    func brainTranslationBatch(resolvedCount: Int,
+                               unresolvedCount: Int,
+                               durationMs: Int,
+                               deferral: LiveTranslateBrainDeferralReason? = nil) {
         let outcome: String
         if unresolvedCount == 0 {
             outcome = "success"
@@ -575,14 +657,19 @@ struct LiveTranslateEvents {
         } else {
             outcome = "degraded"
         }
+        var metadata: [MetadataKey: String] = [.resolvedCount: String(resolvedCount),
+                                               .unresolvedCount: String(unresolvedCount),
+                                               // The catalogue declares
+                                               // `durationMs` as metadata and
+                                               // the shipped event also has a
+                                               // top-level duration field;
+                                               // both are written from this one
+                                               // parameter, so they cannot
+                                               // disagree.
+                                               .durationMs: String(durationMs)]
+        if let deferral { metadata[.reason] = deferral.rawValue }
         emit("brain_translation_batch", outcome: outcome,
-             metadata: [.resolvedCount: String(resolvedCount),
-                        .unresolvedCount: String(unresolvedCount),
-                        // The catalogue declares `durationMs` as metadata and
-                        // the shipped event also has a top-level duration
-                        // field; both are written from this one parameter, so
-                        // they cannot disagree.
-                        .durationMs: String(durationMs)],
+             metadata: metadata,
              durationMs: durationMs)
     }
 

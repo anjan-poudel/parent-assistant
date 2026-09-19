@@ -109,10 +109,20 @@ final class AlwaysShowOriginalToggleTests: XCTestCase {
                        "a system identifier, not user-visible copy")
     }
 
-    func testThePreferenceIsTheOnlySettingThisFeatureOwns() {
+    /// The display preference owns one key, and since the owner directive of
+    /// 2026-09-19 the feature owns exactly one more: the cloud tier's master
+    /// switch. It gets the identical treatment — one declared key, one setter,
+    /// no second spelling at any call site — and this assertion is what makes
+    /// a third one a deliberate change rather than a drift. (The switch is not
+    /// a second *display* preference and cannot disagree with the voice
+    /// command: the command writes only `alwaysShowOriginalKey`.)
+    func testTheFeatureOwnsExactlyTwoSettingsEachWithOneDeclaredKey() {
         XCTAssertEqual(LiveTranslateSettings.featureKeys,
-                       [LiveTranslateSettings.alwaysShowOriginalKey],
-                       "a second setting would be a second thing that can disagree with the voice command")
+                       [LiveTranslateSettings.alwaysShowOriginalKey,
+                        LiveTranslateSettings.geminiCloudEnabledKey],
+                       "each setting is one key, and the feature owns no others")
+        XCTAssertEqual(LiveTranslateSettings.geminiCloudEnabledKey,
+                       "livetranslate.geminiCloudEnabled")
     }
 
     // MARK: - Scenario: enabling keeps originals visible alongside translations

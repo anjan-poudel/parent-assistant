@@ -32,6 +32,12 @@ final class LiveTranslationPipelineTests: XCTestCase {
     /// cloud questions.
     private let secondCloudText = "Push the green button"
 
+    /// A third uncurated string, for the switch's scenario: a question asked
+    /// while the switch is closed has to be one the session has never asked
+    /// before, or "nothing was sent" could be the settled-set rule rather than
+    /// the switch.
+    private let thirdCloudText = "Beware of the dog"
+
     // MARK: - Doubles
 
     /// The frame tick, scripted: what one pass returns, and what was asked.
@@ -277,7 +283,21 @@ final class LiveTranslationPipelineTests: XCTestCase {
                              /// harness pins it, so a scenario can assert the
                              /// *value* the digest events carry instead of
                              /// only its shape.
-                             regionDigestSalt: UInt = 0x51_7a2f_1b3c_4d5e) -> Harness {
+                             regionDigestSalt: UInt = 0x51_7a2f_1b3c_4d5e,
+                             /// The cloud tier's master switch (owner
+                             /// directive, 2026-09-19), as the session model
+                             /// would hand it over from the household's
+                             /// settings.
+                             ///
+                             /// **On by default here, and deliberately so.**
+                             /// The pipeline's own default is the config's —
+                             /// off — but these scenarios were written about
+                             /// the cascade, the consent gate and the cache,
+                             /// and each of them needs the tier to be
+                             /// reachable for what it asserts to be the thing
+                             /// under test. A scenario about the *switch*
+                             /// passes `false` and says so.
+                             geminiCloudEnabled: Bool = true) -> Harness {
         let bus = LiveTranslateSanitisingBus()
         // The brain is behind its own seam, so these tests never build a
         // `ModelStore` or touch a model file: the cascade is what is under
@@ -330,6 +350,7 @@ final class LiveTranslationPipelineTests: XCTestCase {
                                                cloudNeed: controller,
                                                backpressure: backpressure,
                                                alwaysShowOriginal: false,
+                                               geminiCloudEnabled: geminiCloudEnabled,
                                                extractionMode: extractionMode,
                                                config: config,
                                                observabilityBus: bus,
@@ -667,6 +688,170 @@ final class LiveTranslationPipelineTests: XCTestCase {
         XCTAssertEqual(harness.transport.requestCount, 0, "a losing decision is not a request")
         XCTAssertFalse(harness.controller.isPromptPresented,
                        "a recorded decline is not re-prompted automatically")
+    }
+
+    // MARK: - Scenario: the cloud tier's master switch (owner directive, 2026-09-19)
+    //
+    // The directive: the cloud tier does not cascade. A household that has
+    // never turned it on gets no request, no prompt and an honest degraded
+    // region; a household that turns it on gets exactly the consent-gated
+    // path that existed before. The first two tests below are the same scene
+    // with one value changed — the switch — which is what makes the switch the
+    // cause of the difference rather than a coincidence of the fixtures.
+
+    @MainActor
+    func testScenarioWithTheSwitchOffTheTierIsNeverAskedAndNeverPrompts() async throws {
+        // Consent granted, provider key present, transport answering: every
+        // reason a request could be made is in place except the switch.
+        //
+        // The prompt must not appear either. The switch is checked **before**
+        // the household is asked (the owner's requirement in one line), which
+        // is the whole difference between a switch that is off and a decision
+        // that was declined: nobody is nagged about a tier they never turned
+        // on.
+        let harness = makeHarness(consent: true, configured: true,
+                                  transport: Self.respondingTransport(),
+                                  geminiCloudEnabled: false)
+        await harness.pipeline.updateLayout(layout)
+        harness.recogniser.defaultStep = .regions([detected(cloudText)])
+
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+        await waitUntil("the closed switch to settle the region") {
+            guard let latest = await harness.recorder.latest, let region = latest.regions.first else { return false }
+            if case .degraded = latest.result(for: region).outcome { return true }
+            return false
+        }
+        await settleTheCycle()
+
+        let publication = try await latest(harness)
+        let region = try XCTUnwrap(region(cloudText, in: publication))
+        XCTAssertEqual(publication.result(for: region).outcome,
+                       .degraded(originalText: cloudText, reason: .cloudDisabled),
+                       "the honest reason is its own — not consent, not the network")
+        XCTAssertEqual(publication.result(for: region).text, cloudText,
+                       "a degraded region still shows what was recognized")
+
+        XCTAssertEqual(harness.transport.requestCount, 0,
+                       "the switch off means no request, not a late one")
+        XCTAssertEqual(requests(carrying: cloudText, in: harness), 0)
+        XCTAssertFalse(harness.controller.isPromptPresented,
+                       "a household that has not turned the cloud on is not prompted about it")
+        XCTAssertEqual(harness.bus.events(named: "consent_prompt_shown").count, 0,
+                       "no prompt event was emitted either")
+        XCTAssertEqual(harness.governor.callsToday, 0, "a tier that was never asked spends nothing")
+        XCTAssertEqual(harness.gate.inFlightRegistrationCount, 0,
+                       "no attempt proof was minted for a tier that was never asked")
+    }
+
+    @MainActor
+    func testScenarioWithTheSwitchOnTheSameSceneTakesTheConsentGatedPath() async throws {
+        // The other half of the same scene: the same grant, the same provider
+        // key, the same transport, the switch on. Nothing else differs from
+        // the test above it.
+        let harness = makeHarness(consent: true, configured: true,
+                                  transport: Self.respondingTransport(),
+                                  geminiCloudEnabled: true)
+        await harness.pipeline.updateLayout(layout)
+        harness.recogniser.defaultStep = .regions([detected(cloudText)])
+
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+        await waitUntil("the consented attempt to land") {
+            guard let latest = await harness.recorder.latest, let region = latest.regions.first else { return false }
+            if case .resolved = latest.result(for: region).outcome { return true }
+            return false
+        }
+
+        let publication = try await latest(harness)
+        let region = try XCTUnwrap(region(cloudText, in: publication))
+        guard case .resolved(_, let translation, let tier) = publication.result(for: region).outcome else {
+            return XCTFail("with the switch on, a consented string resolves through the cloud")
+        }
+        XCTAssertEqual(tier, .cloud)
+        XCTAssertEqual(translation, "ने:" + cloudText)
+        XCTAssertEqual(harness.transport.requestCount, 1, "one question, one request")
+        XCTAssertEqual(harness.gate.inFlightRegistrationCount, 0, "the attempt was proven and released")
+    }
+
+    @MainActor
+    func testScenarioTheSwitchTakesEffectInTheRunningSessionWithoutARestart() async throws {
+        // The Settings leaf writes the store; the session model pushes the
+        // value into the running pipeline. Both directions have to take effect
+        // on the next question, with no restart and no new session.
+        let harness = makeHarness(consent: true, configured: true,
+                                  transport: Self.respondingTransport(),
+                                  geminiCloudEnabled: false)
+        await harness.pipeline.updateLayout(layout)
+        harness.recogniser.defaultStep = .regions([detected(cloudText)])
+
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+        await waitUntil("the first question to degrade under the closed switch") {
+            guard let latest = await harness.recorder.latest, let region = latest.regions.first else { return false }
+            if case .degraded = latest.result(for: region).outcome { return true }
+            return false
+        }
+        XCTAssertEqual(harness.transport.requestCount, 0)
+
+        // The household turns it on. The string that already degraded stays
+        // settled: turning a switch on is not a reason to re-send everything,
+        // and the design's re-ask is a *resume* (which the pipeline's own doc
+        // states). What changes is the next question.
+        await harness.pipeline.updateGeminiCloudEnabled(true)
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+        await settleTheCycle()
+        XCTAssertEqual(harness.transport.requestCount, 0,
+                       "a settled region is not re-opened by the switch alone")
+
+        harness.recogniser.defaultStep = .regions([detected(cloudText),
+                                                   detected(secondCloudText, box: box(0.1, 0.1, 0.4, 0.2))])
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+        await waitUntil("the new question to be answered") {
+            self.requests(carrying: self.secondCloudText, in: harness) == 1
+        }
+        let answered = try await latest(harness)
+        let second = try XCTUnwrap(region(secondCloudText, in: answered))
+        guard case .resolved(_, _, let tier) = answered.result(for: second).outcome else {
+            return XCTFail("a question asked with the switch on must reach the gate")
+        }
+        XCTAssertEqual(tier, .cloud)
+        XCTAssertEqual(requests(carrying: cloudText, in: harness), 0,
+                       "the string that degraded while the switch was off is still not sent")
+
+        // Off again. The next question — one this session has never asked —
+        // degrades without a request, which is the switch closing rather than
+        // the settled set doing the work.
+        await harness.pipeline.updateGeminiCloudEnabled(false)
+        harness.recogniser.defaultStep = .regions([detected(cloudText),
+                                                   detected(secondCloudText, box: box(0.1, 0.1, 0.4, 0.2)),
+                                                   detected(thirdCloudText, box: box(0.1, 0.6, 0.5, 0.7))])
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+        await waitUntil("the third question to degrade") {
+            guard let latest = await harness.recorder.latest,
+                  let region = latest.regions.first(where: { $0.text == self.thirdCloudText }) else {
+                return false
+            }
+            if case .degraded = latest.result(for: region).outcome { return true }
+            return false
+        }
+        await settleTheCycle()
+
+        let closed = try await latest(harness)
+        let third = try XCTUnwrap(region(thirdCloudText, in: closed))
+        XCTAssertEqual(closed.result(for: third).outcome,
+                       .degraded(originalText: thirdCloudText, reason: .cloudDisabled))
+        XCTAssertEqual(requests(carrying: thirdCloudText, in: harness), 0,
+                       "the switch was closed again before the question was asked")
+        XCTAssertEqual(requests(carrying: secondCloudText, in: harness), 1,
+                       "the string answered while it was on is not re-sent")
+        XCTAssertFalse(harness.controller.isPromptPresented)
     }
 
     // MARK: - Scenario: Publication ordering is monotone and never wall-clock derived
@@ -2108,6 +2293,7 @@ final class LiveTranslationPipelineTests: XCTestCase {
                                                cloudNeed: controller,
                                                backpressure: nil,
                                                alwaysShowOriginal: false,
+                                               geminiCloudEnabled: true,
                                                config: config,
                                                observabilityBus: bus,
                                                publish: { await recorder.record($0) })

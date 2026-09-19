@@ -105,6 +105,37 @@ enum MemoryPressureLevel: String, Equatable {
     case critical
 }
 
+/// [PRESSURE-SAFE LOAD] (2026-09-19) The kernel's memory-pressure state, as
+/// this manager last observed it — the reading a *load gate* is built on.
+///
+/// The level alone answers "what did the kernel last say", which is not quite
+/// the question a load has to ask: a `.critical` that fired three seconds ago
+/// on a device that has been quiet since is indistinguishable from one that
+/// fired an hour ago, because the next dispatch event may not arrive for
+/// minutes while the device's jetsam accounting is still catching up. The age
+/// is the second half of the fact, so the two travel together and the
+/// **caller's own** recency window decides what to do with them.
+///
+/// Deliberately raw facts and no policy. The window is a feature's number
+/// (`LiveTranslateConfig.brainTranslationCriticalPressureWindowSeconds`) and
+/// this type has no opinion about it — which is what lets one ledger serve a
+/// tier that must be cautious and a prefetch that need not be.
+struct MemoryPressureReading: Equatable {
+    /// The most recent level the kernel reported — `.normal` until a source
+    /// has been installed or a level routed by hand.
+    let level: MemoryPressureLevel
+    /// How long ago `.critical` last fired, measured against the manager's own
+    /// clock. `nil` when it never has, which is not the same as "long ago":
+    /// a device that has never been critical is one this rule has nothing to
+    /// say about, and reporting `0` there would make every device look
+    /// momentarily critical.
+    let secondsSinceCritical: TimeInterval?
+
+    /// What a manager reports before any signal has arrived: the kernel has
+    /// not said anything, so nothing is forbidden.
+    static let unknown = MemoryPressureReading(level: .normal, secondsSinceCritical: nil)
+}
+
 /// Everything the manager did, in order. The coordinator can bridge these to
 /// the observability bus; tests assert on them directly.
 enum ModelLifecycleEvent: Equatable {
@@ -378,6 +409,17 @@ final class ModelLifecycleManager {
     /// the proposal records as "the closer-to-the-kernel signal" and which
     /// the tree did not use anywhere before Step 0.
     private var pressureSource: DispatchSourceMemoryPressure?
+
+    /// [PRESSURE-SAFE LOAD] (2026-09-19) The most recent level the kernel
+    /// reported, and when `.critical` last fired.
+    ///
+    /// Kept here rather than re-derived from `pressureSource.data` because the
+    /// dispatch source's `data` is only meaningful *inside* its event handler
+    /// — it is the event being delivered, not a stored level, and reading it
+    /// later returns the last mask rather than the current state. A load gate
+    /// asks at an arbitrary moment, so the ledger has to remember.
+    private var pressureLevel: MemoryPressureLevel = .normal
+    private var lastCriticalAt: Date?
 
     /// Bridged to the observability bus by the coordinator. Called outside
     /// the lock, on the caller's queue.
@@ -1622,8 +1664,15 @@ final class ModelLifecycleManager {
     /// LRU heavy models until the resident total is under it. Light models
     /// are left alone — the encoder has its own level-2 handler and the
     /// corrector cannot be unloaded at all.
+    ///
+    /// [PRESSURE-SAFE LOAD] (2026-09-19) Routing here records `.warning` as
+    /// the current level. This is the UIKit path (`didReceiveMemoryWarning`),
+    /// which the app already treats as equivalent to the kernel's `.warning` —
+    /// and a load gate that only heard the dispatch source would miss every
+    /// warning on a device where that source failed to install.
     @discardableResult
     func handleMemoryPressure() -> [ModelSlot] {
+        recordPressureLevel(.warning)
         lock.lock()
         pruneDeadOwnersLocked()
         let fullBudget = budgetOverrideBytes
@@ -1711,8 +1760,16 @@ final class ModelLifecycleManager {
     /// the one instant where the honest answer is to withdraw it. A caller
     /// that has already been granted one sees `reservationAbandoned` and
     /// takes its degraded path; nothing is silently re-queued.
+    /// [PRESSURE-SAFE LOAD] (2026-09-19) The level is recorded on the way in,
+    /// before anything is evicted, so a load gate that runs *while* this is
+    /// still working through its victims already sees the new state. That
+    /// ordering is the point: the eviction sweep runs release closures
+    /// (`llama_model_free` is not instant), and a load that starts during that
+    /// window must be refused by the level that caused the sweep, not by the
+    /// level that preceded it.
     @discardableResult
     func handleMemoryPressure(level: MemoryPressureLevel) -> [ModelSlot] {
+        recordPressureLevel(level)
         switch level {
         case .normal:
             return []
@@ -1721,6 +1778,38 @@ final class ModelLifecycleManager {
         case .critical:
             return handleCriticalMemoryPressure()
         }
+    }
+
+    // MARK: [PRESSURE-SAFE LOAD] — the load gate's reading
+
+    /// Records a level the kernel — or UIKit, on the `handleMemoryPressure()`
+    /// path — has reported. Under the lock, because a load gate reads the pair
+    /// together and must never see a new level beside a stale timestamp.
+    ///
+    /// `.normal` clears the *level* and deliberately leaves `lastCriticalAt`
+    /// alone: "the kernel is happy now" and "the kernel was about to kill us
+    /// four seconds ago" are both true at once, and a load that started in
+    /// that instant is exactly the load the recency window exists to refuse.
+    /// Nothing clears the timestamp; it ages out through the caller's window.
+    private func recordPressureLevel(_ level: MemoryPressureLevel) {
+        lock.lock()
+        defer { lock.unlock() }
+        pressureLevel = level
+        if level == .critical { lastCriticalAt = clock() }
+    }
+
+    /// The kernel's memory-pressure state as this manager last observed it.
+    ///
+    /// A snapshot, not a subscription: a caller asks before it allocates and
+    /// gets the pair (level, age of the last `.critical`). The **window** that
+    /// turns that pair into a decision belongs to the caller — see
+    /// `MemoryPressureReading` for why it is not here.
+    func memoryPressureReading() -> MemoryPressureReading {
+        lock.lock()
+        defer { lock.unlock() }
+        return MemoryPressureReading(
+            level: pressureLevel,
+            secondsSinceCritical: lastCriticalAt.map { clock().timeIntervalSince($0) })
     }
 
     @discardableResult

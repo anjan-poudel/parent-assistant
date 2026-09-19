@@ -45,6 +45,10 @@ final class LiveTranslateConfigTests: XCTestCase {
         XCTAssertEqual(config.overlayMinPointSize, 18)
         XCTAssertFalse(config.alwaysShowOriginalDefault)
 
+        // Tier 2 — the master switch (owner directive, 2026-09-19)
+        XCTAssertFalse(config.geminiCloudEnabledDefault,
+                       "the cloud tier does not cascade: a household opting in is the only way it runs")
+
         // Tier 2
         XCTAssertEqual(config.cloudDeadlineGraceSeconds, 5)
         XCTAssertEqual(config.cloudMaxRetries, 1)
@@ -126,10 +130,32 @@ final class LiveTranslateConfigTests: XCTestCase {
         config.brainTranslationIdleUnloadSeconds = 1
         config.brainTranslationHeadroomFactor = 1.5
         config.brainTranslationDefersToResidentBrain = false
+        config.brainTranslationCriticalPressureWindowSeconds = 5
 
         XCTAssertNotEqual(config, LiveTranslateConfig.default)
         XCTAssertEqual(config.stableSampleInterval, 1.5)
         XCTAssertEqual(config.trackingMaxRectanglesPerPass, 2)
+    }
+
+    /// [PRESSURE-SAFE LOAD] The window a `.critical` keeps refusing loads in,
+    /// after the kernel has gone quiet — the third case the pressure level
+    /// cannot express on its own.
+    ///
+    /// The number is deliberately between two facts: the forensic capture of
+    /// 2026-09-19 died about five seconds after its first critical, so the
+    /// window has to cover "the kill is being decided" rather than only "the
+    /// level is critical"; and a device that has recovered must not be
+    /// refusing loads for the rest of the session, which is why it is not
+    /// minutes. It lives in the config because it is a resource bound like the
+    /// others (`testTheResourceBoundsAreConfigurableAndNotLiterals`), not a
+    /// literal at the comparison site.
+    func testTheCriticalPressureWindowIsThirtySeconds() {
+        XCTAssertEqual(LiveTranslateConfig.default.brainTranslationCriticalPressureWindowSeconds, 30)
+        XCTAssertGreaterThan(
+            LiveTranslateConfig.default.brainTranslationCriticalPressureWindowSeconds,
+            LiveTranslateConfig.default.brainTranslationIdleUnloadSeconds,
+            "the window outlives the idle unload: a handle released on idle is not a device "
+            + "that stopped being starved")
     }
 
     /// The brain stage's deadline is derived from the two values that own it,
@@ -157,6 +183,27 @@ final class LiveTranslateConfigTests: XCTestCase {
 
     func testDefaultIsTheDocumentedNominalValueBundle() {
         XCTAssertEqual(LiveTranslateConfig.default, LiveTranslateConfig())
+    }
+
+    // MARK: The cloud tier's master switch (owner directive, 2026-09-19)
+
+    /// The directive's first requirement, at the one place every operational
+    /// default lives (NFR-LCT-011): the Gemini tier is off until a household
+    /// turns it on. This is the value the store's absent key falls back to and
+    /// the value a pipeline built without an explicit switch opens with, so it
+    /// is the single word "off" for the whole feature.
+    func testTheCloudTierDoesNotCascadeUnlessAHouseholdTurnsItOn() {
+        XCTAssertFalse(LiveTranslateConfig.default.geminiCloudEnabledDefault)
+        XCTAssertFalse(LiveTranslateConfig().geminiCloudEnabledDefault,
+                       "the nominal bundle and the default are the same value")
+
+        // A default and not a constant — a knob like every other operational
+        // value here, so a household's stored choice (or a test's injected
+        // config) can move it without editing a component.
+        var config = LiveTranslateConfig.default
+        config.geminiCloudEnabledDefault = true
+        XCTAssertTrue(config.geminiCloudEnabledDefault)
+        XCTAssertNotEqual(config, LiveTranslateConfig.default)
     }
 
     // MARK: Scenario: the cloud base timeout has exactly one source of truth

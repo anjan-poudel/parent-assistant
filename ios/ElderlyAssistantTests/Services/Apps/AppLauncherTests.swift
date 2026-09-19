@@ -213,11 +213,12 @@ final class AppLauncherTests: XCTestCase {
     }
 
     func testPhoneRootURLIsSlashesLessTel() {
-        // tel-scheme fix, 2026-09-07: `tel://` with an EMPTY number is
-        // not handled by iOS — it raises a confirmation sheet that opens
-        // nothing. The Phone tile must probe and open the slashes-less
-        // `tel:`, which lands in the Phone app's dialer. Pinned exactly
-        // so the slashed form can never regress.
+        // [PHONE-DEEPLINKS-REVERT] (2026-09-19) Device-verified: the
+        // mobilephone-* schemes are NOT registered by the Phone app on
+        // stock iOS (canOpenURL fails with OSStatus -10814). The Phone
+        // tile returns to the slashes-less `tel:` dialer — the only
+        // honest public surface Apple exposes. Pinned so neither the
+        // slashed tel form nor the dead mobilephone schemes can regress.
         XCTAssertEqual(AppLauncher.app(for: "phone")?.rootURL?.absoluteString, "tel:")
     }
 

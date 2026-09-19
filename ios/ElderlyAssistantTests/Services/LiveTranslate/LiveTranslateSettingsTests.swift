@@ -98,18 +98,86 @@ final class LiveTranslateSettingsTests: XCTestCase {
     /// UI preference.
     func testThePersistedStoreCarriesOnlyTheBooleanPreference() {
         settings().setAlwaysShowOriginal(true)
+        settings().setGeminiCloudEnabled(true)
 
         let featureKeys = featureScopedEntries().map(\.key)
         XCTAssertEqual(Set(featureKeys), LiveTranslateSettings.featureKeys,
                        "an extra feature key in UserDefaults is a new persisted surface")
 
-        let stored = defaults.object(forKey: LiveTranslateSettings.alwaysShowOriginalKey)
-        XCTAssertTrue(stored is Bool, "the only feature value is the boolean preference")
+        for key in LiveTranslateSettings.featureKeys {
+            XCTAssertTrue(defaults.object(forKey: key) is Bool,
+                          "\(key)'s value is the boolean preference")
+        }
 
         for entry in featureScopedEntries() {
             XCTAssertFalse(entry.value is String,
                            "\(entry.key) holds a string — no user content belongs in this store")
         }
+    }
+
+    // MARK: The cloud tier's master switch (owner directive, 2026-09-19)
+
+    /// The directive's requirement, at the store: a household that has never
+    /// touched the switch has **not** opted in. The absent key reads the
+    /// config's nominal default — `false` — rather than `false` by accident,
+    /// which is the assertion immediately below it.
+    func testTheCloudSwitchIsOffUntilSomeoneTurnsItOn() {
+        XCTAssertFalse(settings().geminiCloudEnabled,
+                       "the cloud tier must not cascade unless a household opts in")
+        XCTAssertEqual(settings().geminiCloudEnabled,
+                       LiveTranslateConfig.default.geminiCloudEnabledDefault,
+                       "an unset switch reads the config, not a second literal")
+        XCTAssertFalse(LiveTranslateConfig.default.geminiCloudEnabledDefault,
+                       "the nominal default is off — the owner's directive, 2026-09-19")
+    }
+
+    func testTheCloudSwitchesDefaultComesFromTheConfigNotASecondLiteral() {
+        var config = LiveTranslateConfig.default
+        config.geminiCloudEnabledDefault = true
+        XCTAssertTrue(settings(config: config).geminiCloudEnabled,
+                      "an unset switch must follow the injected config's nominal default")
+    }
+
+    func testTheCloudSwitchRoundTripsAcrossASimulatedRelaunch() {
+        settings().setGeminiCloudEnabled(true)
+        XCTAssertTrue(settings().geminiCloudEnabled, "the opt-in survives a relaunch")
+
+        settings().setGeminiCloudEnabled(false)
+        XCTAssertFalse(settings().geminiCloudEnabled,
+                       "opting back out persists too — the directive is that off is the resting state")
+    }
+
+    /// Same no-cache property the display preference has: the next read — the
+    /// next session, the next frame of the Settings leaf — sees the write, so
+    /// no surface can hold a switch value that disagrees with the store.
+    func testTheCloudSwitchChangeIsVisibleOnTheNextReadWithNoRestart() {
+        let live = settings()
+        XCTAssertFalse(live.geminiCloudEnabled)
+        live.geminiCloudEnabled = true
+        XCTAssertTrue(live.geminiCloudEnabled,
+                      "a cached value here would make the switch need a restart")
+    }
+
+    func testTheCloudSwitchIsReachableThroughTheDeclaredKeyAlone() {
+        defaults.set(true, forKey: LiveTranslateSettings.geminiCloudEnabledKey)
+        XCTAssertTrue(settings().geminiCloudEnabled,
+                      "the switch is reachable by its declared key, not only through the setter")
+        XCTAssertEqual(LiveTranslateSettings.geminiCloudEnabledKey,
+                       "livetranslate.geminiCloudEnabled")
+    }
+
+    /// The switch and the display preference are two independent settings:
+    /// writing one must not move the other, or the Settings leaf and the
+    /// overlay would disagree about which of them was changed.
+    func testTheCloudSwitchAndTheDisplayPreferenceDoNotMoveEachOther() {
+        let live = settings()
+        live.setGeminiCloudEnabled(true)
+        XCTAssertFalse(live.alwaysShowOriginal)
+        live.setAlwaysShowOriginal(true)
+        XCTAssertTrue(live.geminiCloudEnabled)
+
+        live.setGeminiCloudEnabled(false)
+        XCTAssertTrue(live.alwaysShowOriginal, "opting out of the cloud leaves the display preference alone")
     }
 
     /// Every entry in the store under the feature's prefix. `dictionaryRepresentation`
