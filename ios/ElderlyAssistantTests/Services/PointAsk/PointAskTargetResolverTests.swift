@@ -406,10 +406,13 @@ final class PointAskTargetResolverTests: XCTestCase {
         XCTAssertEqual(target.detectedLabel, "bottle")
     }
 
-    func testWhenNoYOLOBoxContainsTheTapTheHighestConfidenceBoxWins() {
-        // A tap that misses every box (the cap's edge): the scene's most
-        // confident object still anchors — a real object box, any size,
-        // never a pad.
+    /// [YOLO-ABSTAIN] (2026-09-20) A tap that misses every box is the
+    /// detector abstaining, not the scene's most confident object winning:
+    /// the elder pointed at something the detector cannot see (the owner's
+    /// green tub — not a COCO class), and the nearest or strongest
+    /// *detectable* thing is not what the finger is on. The ladder
+    /// continues to the pad at the tap.
+    func testWhenNoYOLOBoxContainsTheTapTheDetectorAbstains() {
         let strongest = YOLODetection(
             normalizedBox: NormalizedBox(xMin: 0.3, yMin: 0.3, xMax: 0.7, yMax: 0.7),
             label: "bottle", confidence: 0.9)
@@ -422,8 +425,9 @@ final class PointAskTargetResolverTests: XCTestCase {
 
         let target = resolver.resolve(tap: CGPoint(x: 0.95, y: 0.95), in: frame())
 
-        XCTAssertEqual(target.source, .yolo)
-        XCTAssertEqual(target.normalizedBox, strongest.normalizedBox)
+        XCTAssertEqual(target.source, .pad,
+                       "no box contains the tap: the detector abstains and the "
+                       + "anchor is the pad at the finger, not the strongest box elsewhere")
     }
 
     func testAnEmptyYOLOSceneFallsToTheMaskAndSaliencyLadder() {
