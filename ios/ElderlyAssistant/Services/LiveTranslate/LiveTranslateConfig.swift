@@ -1231,7 +1231,6 @@ struct LiveTranslateConfig: Equatable {
     /// Testing-only — reverts to false when the round-3 quant ships.
     var wardenBypassForTesting: Bool = true
 
-<<<<<<< HEAD
     /// How long the warden's notice stays on screen before it takes itself
     /// down, in seconds (owner directive, 2026-09-19: "keep the user in the
     /// loop so they don't wonder about the silences").
