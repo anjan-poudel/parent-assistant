@@ -97,6 +97,9 @@ final class SpeakQueue: SpeakQueueProtocol, ObservableObject {
         /// 1 = plain announcement; ≥ 2 = summary of `mergedCount`
         /// coalesced `.notification` announcements.
         var mergedCount: Int
+        /// Optional "this utterance was heard" callback — see
+        /// `enqueue(_:onSpoken:)`.
+        var onSpoken: (() -> Void)?
     }
 
     /// All mutable state below is guarded by `lock`. Side effects (event
@@ -106,6 +109,11 @@ final class SpeakQueue: SpeakQueueProtocol, ObservableObject {
     private let lock = NSLock()
     private var pending: [PendingItem] = []
     private var active: Announcement?
+    /// Completion of the ACTIVE utterance and whether it was cancelled
+    /// for preemption — both reset when the worker claims the next item,
+    /// both read (under `lock`) after the utterance ends.
+    private var activeOnSpoken: (() -> Void)?
+    private var activeCancelled = false
     private var workerParked = false
     private var workerWake: CheckedContinuation<Announcement?, Never>?
     private var workerTask: Task<Void, Never>?
@@ -121,6 +129,28 @@ final class SpeakQueue: SpeakQueueProtocol, ObservableObject {
     // MARK: - SpeakQueueProtocol
 
     func enqueue(_ announcement: Announcement) {
+        enqueue(announcement, onSpoken: nil)
+    }
+
+    /// Enqueues with a completion: `onSpoken` runs once the utterance was
+    /// actually HEARD — the speaker reported it finished and it was not
+    /// cancelled for preemption. It never runs when the speaker reported
+    /// a failure (nothing was heard) and never when a higher lane (or a
+    /// source-scoped `drain`) cut the utterance short (its remainder was
+    /// never heard). Callers record a real consequence of hearing the
+    /// content here — the feeds read-aloud marks its item read on this
+    /// seam (feeds readaloud task, 2026-09-19) — and the queue refuses to
+    /// fire it on anything weaker than "spoken to the end".
+    ///
+    /// Threading: `onSpoken` runs on the queue's worker thread, NOT on
+    /// the main thread; a caller touching UI or `@Published` state hops
+    /// itself.
+    ///
+    /// A `.notification` announcement folded into a coalesced summary
+    /// carries no completion: what the elder hears is the merged summary,
+    /// not this announcement's text, so "it was heard" cannot be claimed
+    /// for it.
+    func enqueue(_ announcement: Announcement, onSpoken: (() -> Void)?) {
         let now = nowProvider()
         var events: [AdmissionEvent] = []
         var preemptedLane: AnnouncementPriority?
@@ -129,11 +159,13 @@ final class SpeakQueue: SpeakQueueProtocol, ObservableObject {
         lock.lock()
 
         if announcement.priority == .notification {
-            enqueueNotificationLocked(announcement, now: now, events: &events)
+            enqueueNotificationLocked(announcement, now: now,
+                                      onSpoken: onSpoken, events: &events)
         } else {
             pending.append(PendingItem(announcement: announcement,
                                        arrivedAt: now,
-                                       mergedCount: 1))
+                                       mergedCount: 1,
+                                       onSpoken: onSpoken))
             events.append(.enqueued(announcement.priority))
         }
 
@@ -141,10 +173,13 @@ final class SpeakQueue: SpeakQueueProtocol, ObservableObject {
         // utterance that is already being spoken (spec §3). The Speaker
         // API permits this — every shipped speaker's `cancel()` resumes
         // its pending `speak()`, so the worker re-picks and the incoming
-        // higher lane speaks next.
+        // higher lane speaks next. The interrupted utterance is flagged
+        // HERE, before the cancel below: its completion must not fire,
+        // because the elder never heard its end.
         if let current = active,
            Self.mayInterrupt(announcement.priority, current: current.priority) {
             preemptedLane = current.priority
+            activeCancelled = true
         }
 
         // Wake a parked worker. Safe under the lock: the worker parks only
@@ -199,6 +234,9 @@ final class SpeakQueue: SpeakQueueProtocol, ObservableObject {
         pending.removeAll { $0.announcement.sourceID == sourceID }
         if let current = active, current.sourceID == sourceID {
             cancelActive = true
+            // Drained, not finished: the utterance's completion must not
+            // fire (nothing of its remainder was heard).
+            activeCancelled = true
         }
         lock.unlock()
         if cancelActive { speaker.cancel() }
@@ -240,6 +278,7 @@ final class SpeakQueue: SpeakQueueProtocol, ObservableObject {
 
     private func enqueueNotificationLocked(_ announcement: Announcement,
                                            now: Date,
+                                           onSpoken: (() -> Void)?,
                                            events: inout [AdmissionEvent]) {
         // Coalescing (spec §4.1): merge into the most recent pending
         // .notification item when it arrived within the window. The
@@ -256,13 +295,18 @@ final class SpeakQueue: SpeakQueueProtocol, ObservableObject {
                     count: count
                 ),
                 arrivedAt: now,
-                mergedCount: count
+                mergedCount: count,
+                // Neither the bucket's text nor this announcement's was
+                // spoken verbatim — the merged summary was — so no
+                // completion can claim either was heard.
+                onSpoken: nil
             )
             events.append(.coalesced(count: count))
         } else {
             pending.append(PendingItem(announcement: announcement,
                                        arrivedAt: now,
-                                       mergedCount: 1))
+                                       mergedCount: 1,
+                                       onSpoken: onSpoken))
             events.append(.enqueued(.notification))
         }
         // Depth cap: drop oldest while the lane is over its limit. Only
@@ -340,6 +384,8 @@ final class SpeakQueue: SpeakQueueProtocol, ObservableObject {
         // Strictly-greater replacement keeps the earliest item on ties,
         // so equal priorities speak in enqueue order (FIFO).
         active = pending[best].announcement
+        activeOnSpoken = pending[best].onSpoken
+        activeCancelled = false
         return pending.remove(at: best).announcement
     }
 
@@ -347,6 +393,18 @@ final class SpeakQueue: SpeakQueueProtocol, ObservableObject {
         setCard(announcement.card)
         let locale = AppLanguage.persisted().locale
         let result = await performSpeak(announcement.text, locale: locale)
+        // Read the utterance's completion state BEFORE anything else can
+        // claim the next item (the worker clears `active` right after
+        // this returns). The flags are set under the same lock by the
+        // preemption/drain paths, and those paths flip the flag BEFORE
+        // cancelling the speaker — so a cancel that resumed this `await`
+        // can never be observed as a finished utterance.
+        lock.lock()
+        let completion = activeOnSpoken
+        let wasCancelled = activeCancelled
+        activeOnSpoken = nil
+        activeCancelled = false
+        lock.unlock()
         if result == .failed {
             // Card-only fallback (spec §6): the content was NOT spoken —
             // keep the card up so it stays readable; the observability
@@ -354,6 +412,9 @@ final class SpeakQueue: SpeakQueueProtocol, ObservableObject {
             emitSpeakFailed(lane: announcement.priority)
         } else {
             setCard(nil)   // cleared after speech (or after preemption)
+            // Heard to the end: the one outcome that fires the
+            // announcement's completion (see `enqueue(_:onSpoken:)`).
+            if !wasCancelled { completion?() }
         }
     }
 

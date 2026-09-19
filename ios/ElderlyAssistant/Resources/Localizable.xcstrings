@@ -5996,6 +5996,23 @@
         }
       }
     },
+    "feeds.readFullArticle": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Read full article"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पूरा लेख पढेर सुनाउनुहोस्"
+          }
+        }
+      }
+    },
     "feeds.refresh": {
       "extractionState": "manual",
       "localizations": {
@@ -6043,6 +6060,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "मूल देखाउनुहोस्"
+          }
+        }
+      }
+    },
+    "feeds.summaryOnly": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Only a summary is available for this item."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो सामग्रीको सारांश मात्र उपलब्ध छ।"
           }
         }
       }
@@ -6128,6 +6162,57 @@
           "stringUnit": {
             "state": "translated",
             "value": "अनुवाद उपलब्ध छैन"
+          }
+        }
+      }
+    },
+    "feeds.unread": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "New"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नयाँ"
+          }
+        }
+      }
+    },
+    "feeds.voice.noItems": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "There is nothing in your feed to read yet."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "पढ्नको लागि तपाईंको फिडमा अहिले केही छैन।"
+          }
+        }
+      }
+    },
+    "feeds.voice.summaryOnly": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This source shares only a summary. I will read that."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो स्रोतले सारांश मात्र दिन्छ। म त्यही पढ्छु।"
           }
         }
       }

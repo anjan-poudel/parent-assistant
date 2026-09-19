@@ -357,6 +357,16 @@ protocol VoiceCommandCoordinating: AnyObject {
     /// the briefing stage. On-demand: no once-per-wake-window budget.
     func fireNewsReader()
 
+    /// [FEEDS-FULL-ARTICLE] (2026-09-19) "read the full article" — the
+    /// feeds feature's full-article reading (the item the feed is on, the
+    /// source's own body). The COORDINATOR owns every spoken line: the
+    /// article itself, the honest "this source shares only a summary"
+    /// line, and the honest "there's nothing in your feed" line — the
+    /// router adds no speech and no card of its own, exactly like the
+    /// news and briefing stages. The reading marks the item read through
+    /// the same completion seam the card's button uses.
+    func readFullFeedArticle()
+
     /// [MED-PHOTO] (2026-09-17) The live medication schedule as the voice
     /// photo query sees it: the entries the `.medicationPhoto` keyword rule
     /// builds its vocabulary from (through
@@ -467,6 +477,13 @@ extension VoiceCommandCoordinating {
     // fires a news digest, so the deterministic ladder stage falls
     // through to the interpreter/keyword remainder exactly as before.
     func fireNewsReader() {}
+    // [FEEDS-FULL-ARTICLE] (2026-09-19) Inert default — a conformer that
+    // does not opt in (every mock/double across app and test target)
+    // reads nothing, exactly like `fireNewsReader()` above. The stage
+    // still consumes the utterance (the phrasing is unambiguous), so a
+    // non-opted-in coordinator answers with silence rather than letting
+    // the request fall into the interpreter as small talk.
+    func readFullFeedArticle() {}
     // [MED-PHOTO] (2026-09-17) Inert defaults — a conformer that does not
     // opt in has no medications to ask about (`[]` leaves the rule's
     // group empty, so the rule can never fire) and presents nothing. Only
@@ -990,6 +1007,36 @@ final class CommandRouter {
             speakPreAck()
             coordinator?.fireMorningBriefing()
             emit(eventType: "morning_briefing_command", outcome: "success")
+            return .unrecognised(transcript: raw)
+        }
+
+        // [FEEDS-FULL-ARTICLE] (2026-09-19) Deterministic voice stage for
+        // the feeds feature's full-article reading: "read the full
+        // article", "पूरा समाचार पढ", "पूरा लेख पढ्नुहोस्" — the elder
+        // heard a summary (or saw a card) and wants the whole story.
+        //
+        // Placement is LOAD-BEARING: this stage must run BEFORE the news
+        // digest stage, because the Nepali phrasing of a full-article
+        // request CONTAINS a news phrase ("समाचार पढ" ⊂ "पूरा समाचार
+        // पढ"). Without this stage first, the digest stage would swallow
+        // the utterance and the elder would hear headlines instead of the
+        // article. After the briefing stage (a briefing request can never
+        // be read as a full-article request) and before every model —
+        // no interpreter involvement, no IntentPrompt tokens.
+        //
+        // Vetoes, the same discipline as the news list: full-phrase
+        // containment only (the bare word "article" never matches), so an
+        // utterance that merely mentions an article cannot hijack the
+        // stage. The stage DECIDES and hands off — the coordinator owns
+        // every spoken line (the article, the honest "only a summary"
+        // line, the honest "nothing in your feed" line), so this ends the
+        // turn with the same `.unrecognised(transcript:)` the neighbouring
+        // stages return once they have already spoken.
+        if Self.fullArticlePhrases.contains(where: { Self.containsPhrase($0, in: preText) }) {
+            // [VOICE-ACK] The reading is composed then spoken — ack first.
+            speakPreAck()
+            coordinator?.readFullFeedArticle()
+            emit(eventType: "feed_full_article_command", outcome: "success")
             return .unrecognised(transcript: raw)
         }
 
@@ -1658,6 +1705,29 @@ final class CommandRouter {
         "समाचार सुनाऊ", "समाचार सुनाउनुहोस्", "समाचार पढ",
         "खबर सुनाऊ", "खबर सुनाउनुहोस्", "खबर पढ",
         "samachar sunau", "samachar sunaunuhos", "khabar sunau"
+    ]
+
+    /// [FEEDS-FULL-ARTICLE] (2026-09-19) Full-phrase forms for the feeds
+    /// feature's "read the FULL article" command. Both shipped languages
+    /// plus the romanized Nepali STT output, exactly like the news and
+    /// briefing tables. Every entry names the WHOLE story ("full",
+    /// "whole", "entire", "पूरा") — a bare "read the article" is
+    /// deliberately absent, because that is a request the summary read
+    /// already satisfies and the stage must not claim more than the
+    /// elder asked for.
+    ///
+    /// The Nepali entries OVERLAP the news table by construction
+    /// ("समाचार पढ" is inside "पूरा समाचार पढ") — the stage order in
+    /// `routeKeyword` is what resolves the overlap, and it is pinned by
+    /// `FullArticleStageRoutingTests`.
+    private static let fullArticlePhrases = [
+        "read the full article", "read the full story",
+        "read the whole article", "read the entire article",
+        "read full article", "read me the full article",
+        "पूरा समाचार पढ", "पूरा समाचार पढ्नुहोस्", "पूरा समाचार सुनाऊ",
+        "पूरा खबर पढ", "पूरा खबर सुनाऊ", "पूरा लेख पढ",
+        "पूरा लेख पढ्नुहोस्", "पूरा समाचार सुनाउनुहोस्",
+        "pura samachar pad", "pura samachar sunau", "pura lekh pad"
     ]
 
     // MARK: - Keyword fallback

@@ -188,15 +188,31 @@ struct FeedsView: View {
     }
 
     /// Text card: title, a few lines of summary, source + time caption,
-    /// and two actions — "Translate" (feed translation task) and
-    /// "Read aloud" (SpeakQueue via the coordinator's canonical path,
-    /// the BriefingView precedent — no AVSpeech). The AI-translated
-    /// marker shows only while the translation is displayed.
+    /// and the card's actions — "Translate" (feed translation task),
+    /// "Read aloud" (SpeakQueue via the coordinator's canonical path, the
+    /// BriefingView precedent — no AVSpeech), and "Read full article"
+    /// (feeds readaloud task, 2026-09-19) when the source published a
+    /// body beyond the summary. The AI-translated marker shows only while
+    /// the translation is displayed; the "New" marker (feeds readaloud
+    /// task) shows until the item has been read aloud to the end.
+    ///
+    /// The unread marker lives on TEXT cards only: reading aloud is the
+    /// one thing that marks an item read, and text cards are the only
+    /// cards that offer it (the voice command can read any item, which is
+    /// exactly why a badge on an image card could never be cleared by the
+    /// card's own affordances and would lie).
     private func textCard(_ item: FeedItem) -> some View {
         let display = display(for: item)
         return VStack(alignment: .leading, spacing: 10) {
-            if display.isShowingTranslation {
-                translatedMarker
+            if display.isShowingTranslation || !coordinator.isFeedItemRead(item) {
+                HStack(spacing: 8) {
+                    if !coordinator.isFeedItemRead(item) {
+                        unreadMarker
+                    }
+                    if display.isShowingTranslation {
+                        translatedMarker
+                    }
+                }
             }
             Text(display.title)
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
@@ -218,6 +234,12 @@ struct FeedsView: View {
             HStack(spacing: 10) {
                 translateButton(item)
                 readAloudButton(item)
+            }
+            if FeedSpeechSanitizer.hasFullArticle(summary: item.summary,
+                                                  fullText: item.fullText) {
+                fullArticleButton(item)
+            } else {
+                summaryOnlyCaption
             }
         }
         .padding(18)
@@ -486,7 +508,9 @@ struct FeedsView: View {
     /// displays: the translation when it is showing, the original
     /// otherwise (feed translation task). Sanitized through the shared
     /// TTS-friendly path either way; an item with nothing speakable is
-    /// never enqueued.
+    /// never enqueued. The item is marked read when the reading finishes
+    /// (feeds readaloud task, 2026-09-19) — see
+    /// `coordinator.readFeedItemSummaryAloud`.
     private func readAloudButton(_ item: FeedItem) -> some View {
         Button {
             readAloud(item)
@@ -503,12 +527,76 @@ struct FeedsView: View {
         .buttonStyle(.plain)
     }
 
+    /// "Read full article" (feeds readaloud task, 2026-09-19) — a
+    /// full-width row of its own rather than a third button squeezed into
+    /// the Translate/Read-aloud row: the target stays large (≥44pt) and
+    /// the label keeps the body point size, which is the whole point for
+    /// this audience. Shown only when the source published a body beyond
+    /// the summary (`hasFullArticle`); otherwise the honest caption
+    /// below takes its place.
+    private func fullArticleButton(_ item: FeedItem) -> some View {
+        Button {
+            coordinator.readFeedItemArticleAloud(item)
+        } label: {
+            Label("feeds.readFullArticle", systemImage: "doc.text.fill")
+                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .foregroundStyle(DesignTokens.accent)
+                .padding(.horizontal, 18)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
+                .background(DesignTokens.background)
+                .clipShape(Capsule())
+                .overlay(Capsule().stroke(DesignTokens.accent.opacity(0.4), lineWidth: 1.5))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Unread marker — the item has not been read aloud yet. Same
+    /// house-chip shape as the AI-translated marker, with a filled dot so
+    /// "new" reads at a glance as well as in words (the word is the
+    /// accessible label).
+    private var unreadMarker: some View {
+        HStack(spacing: 4) {
+            Circle()
+                .fill(DesignTokens.accent)
+                .frame(width: 8, height: 8)
+            Text("feeds.unread")
+                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+        }
+        .foregroundStyle(DesignTokens.accent)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .background(DesignTokens.accent.opacity(0.12))
+        .clipShape(Capsule())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text("feeds.unread"))
+    }
+
+    /// Honest caption in place of the full-article button: this source
+    /// published only a summary, so there is no longer read to offer.
+    /// Stated rather than implied by a missing button — the elder should
+    /// never wonder whether the app forgot it.
+    private var summaryOnlyCaption: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "text.alignleft")
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+            Text("feeds.summaryOnly")
+                .font(.system(size: DesignTokens.minCaptionPointSize))
+        }
+        .foregroundStyle(DesignTokens.textSecondary)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// The summary read. The text is resolved from what the card is
+    /// DISPLAYING (translation or original) and handed to the coordinator,
+    /// which speaks it and marks the item read on completion.
     private func readAloud(_ item: FeedItem) {
         let display = display(for: item)
         let text = FeedSpeechSanitizer.speechText(title: display.title,
                                                   summary: display.summary)
         guard !text.isEmpty else { return }
-        coordinator.speak(text: text)
+        coordinator.readFeedItemSummaryAloud(item, text: text)
     }
 }
 
