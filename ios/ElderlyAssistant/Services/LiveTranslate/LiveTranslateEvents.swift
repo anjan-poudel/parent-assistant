@@ -239,6 +239,24 @@ enum LiveTranslateEventCatalogue {
         // vocabularies, so neither can carry content.
         "brain_translation_unavailable": Entry(outcomes: ["degraded"],
                                                metadataKeys: ["reason", "failureStage"]),
+        // The two moments the warden's hand-off owes the elder an
+        // explanation (owner directive, 2026-09-19: "keep the user in the
+        // loop so they don't wonder about the silences"). Counts only, like
+        // every other event on this vocabulary:
+        //  - `brain_translation_load_announced` is the "hold on a sec" a
+        //    camera session shows while a 2.6 GB handle pages in. The count
+        //    is the batch riding on that load, so a capture can tell one
+        //    string's wait from a whole screen's.
+        //  - `brain_translation_preempted` is the translation model being
+        //    handed to the voice stack. The count is what the hand-off cost:
+        //    the strings of the decode that was interrupted, 0 when the
+        //    handle was idle and nothing was lost.
+        // Neither carries a string, a path, a model id or a sentence — the
+        // sentence the elder reads is catalog copy, not a log value.
+        "brain_translation_load_announced": Entry(outcomes: ["pending"],
+                                                  metadataKeys: ["count"]),
+        "brain_translation_preempted": Entry(outcomes: ["preempted"],
+                                             metadataKeys: ["count"]),
         "translation_batch_resolved": Entry(outcomes: ["success", "partial"],
                                            metadataKeys: ["resolvedCount", "unresolvedCount", "durationMs"]),
         "translation_degraded": Entry(outcomes: ["degraded"], metadataKeys: ["reason", "regionCount"]),
@@ -581,6 +599,24 @@ struct LiveTranslateEvents {
                                      stage: BrainFailureStage) {
         emit("brain_translation_unavailable", outcome: "degraded",
              metadata: [.reason: reason.rawValue, .failureStage: stage.rawValue])
+    }
+
+    /// The elder is about to wait for a handle to page in: the "hold on a
+    /// sec" moment, recorded the moment it starts rather than after it ends
+    /// (owner directive, 2026-09-19). `count` is the batch riding on the load.
+    func brainTranslationLoadAnnounced(count: Int) {
+        emit("brain_translation_load_announced", outcome: "pending",
+             metadata: [.count: String(count)])
+    }
+
+    /// The warden took the translation model for the voice stack. `count` is
+    /// what the hand-off cost: the strings of the decode it interrupted, 0
+    /// when the handle was idle. The companion sentence the elder reads
+    /// ("Switched for your voice request") is catalog copy keyed off
+    /// `LocalBrainWardenNotice.offloadedForVoiceTurn`, never a log value.
+    func brainTranslationPreempted(count: Int) {
+        emit("brain_translation_preempted", outcome: "preempted",
+             metadata: [.count: String(count)])
     }
 
     // MARK: Sanitisation (C07)

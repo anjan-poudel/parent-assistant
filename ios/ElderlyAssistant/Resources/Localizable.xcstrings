@@ -8141,6 +8141,40 @@
         }
       }
     },
+    "livetranslate.warden.loading": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Hold on a sec — getting the translation ready."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "एक छिन पर्खनुहोस् — अनुवाद तयार हुँदैछ।"
+          }
+        }
+      }
+    },
+    "livetranslate.warden.offloaded": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Switched for your voice request."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंको आवाज अनुरोधका लागि फेरिएको छ।"
+          }
+        }
+      }
+    },
     "locale.region.india": {
       "extractionState": "manual",
       "localizations": {

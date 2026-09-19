@@ -171,6 +171,7 @@ final class LocalBrainTranslationTierTests: XCTestCase {
                              targetLanguage: AppLanguage = .nepali,
                              memory: MemoryProbing? = nil,
                              ledger: ModelLifecycleManager? = nil,
+                             onWardenNotice: (@Sendable (LocalBrainWardenNotice) -> Void)? = nil,
                              run: (LocalBrainTranslationTier, ScriptedGenerator, LiveTranslateSanitisingBus) async throws -> T) async rethrows -> T {
         let root = makeRoot()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -184,7 +185,8 @@ final class LocalBrainTranslationTierTests: XCTestCase {
                                              generator: generator,
                                              targetLanguage: targetLanguage,
                                              memory: memory ?? ScriptedProbe(),
-                                             ledger: ledger ?? ModelLifecycleManager(probe: ScriptedProbe()))
+                                             ledger: ledger ?? ModelLifecycleManager(probe: ScriptedProbe()),
+                                             onWardenNotice: onWardenNotice)
         return try await run(tier, generator, bus)
     }
 
@@ -1097,5 +1099,173 @@ final class LocalBrainTranslationTierTests: XCTestCase {
                            + "by calling it the camera's brain")
         }
         XCTAssertEqual(denial.token, "over_budget_alone")
+    }
+
+    // MARK: - The warden's two moments (owner directive, 2026-09-19)
+    //
+    // "Keep the user in the loop so they don't wonder about the silences": one
+    // sentence for a model that is loading, one for a model the voice stack
+    // has taken. Each moment is a notice pushed at the surface *and* an event
+    // on the feature's own vocabulary, and the two are asserted together so a
+    // notice cannot reach an elder without a line in the capture.
+
+    /// Collects the notices a tier pushes, in order. A class rather than a
+    /// captured `var`, because the sink is `@Sendable` and the test reads it
+    /// after the pushes.
+    private final class NoticeBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var storage: [LocalBrainWardenNotice] = []
+
+        func record(_ notice: LocalBrainWardenNotice) {
+            lock.lock()
+            storage.append(notice)
+            lock.unlock()
+        }
+
+        var notices: [LocalBrainWardenNotice] {
+            lock.lock()
+            defer { lock.unlock() }
+            return storage
+        }
+    }
+
+    /// The tier over a **real** generator, for the one path that needs the
+    /// warden's box to be the real one: the preemption notice. Nothing here
+    /// generates — no model is ever loaded, and the handle is a string.
+    private func withRealGeneratorTier<T>(
+        ledger: ModelLifecycleManager,
+        notices: NoticeBox,
+        run: (LocalBrainTranslationTier, LlamaBrainTextGenerator, LiveTranslateSanitisingBus) async throws -> T
+    ) async rethrows -> T {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let bus = LiveTranslateSanitisingBus()
+        let store = try! makeStore(installed: true, root: root)
+        let generator = LlamaBrainTextGenerator(config: config, lifecycle: ledger)
+        let tier = LocalBrainTranslationTier(config: config,
+                                             modelStore: store,
+                                             events: LiveTranslateEvents(bus: bus, config: config),
+                                             generator: generator,
+                                             targetLanguage: .nepali,
+                                             memory: ScriptedProbe(),
+                                             ledger: ledger,
+                                             onWardenNotice: { notices.record($0) })
+        return try await run(tier, generator, bus)
+    }
+
+    /// The "hold on a sec" moment: a batch that has to pay a load says so —
+    /// on the surface and on the event vocabulary, with the count of strings
+    /// riding on it.
+    func testALoadThatIsDueIsAnnouncedWithTheBatchItIsHoldingUp() async throws {
+        let notices = NoticeBox()
+        try await withTier(onWardenNotice: { notices.record($0) }) { tier, generator, bus in
+            generator.holdingHandle = false
+            generator.output = answer([brainAnswer, secondBrainAnswer])
+
+            let outcome = await tier.translate([brainText, secondBrainText])
+
+            XCTAssertEqual(outcome.translations.count, 2)
+            XCTAssertEqual(notices.notices, [.loadingModel])
+            let announced = bus.events(named: "brain_translation_load_announced").first
+            XCTAssertEqual(announced?.outcome, "pending")
+            XCTAssertEqual(announced?.metadata["count"], "2",
+                           "the count is the batch the wait is holding up")
+        }
+    }
+
+    /// …and a batch whose handle is already resident announces nothing: the
+    /// elder is not waiting for a load that is not happening.
+    func testAResidentHandleIsNotAnnouncedAsAWait() async throws {
+        let notices = NoticeBox()
+        try await withTier(onWardenNotice: { notices.record($0) }) { tier, generator, bus in
+            generator.holdingHandle = true
+            generator.output = answer([brainAnswer])
+
+            _ = await tier.translate([brainText])
+
+            XCTAssertTrue(notices.notices.isEmpty)
+            XCTAssertTrue(bus.events(named: "brain_translation_load_announced").isEmpty)
+        }
+    }
+
+    /// The hand-off: the warden takes the handle the tier did not offer, and
+    /// the sentence the elder is owed goes out. Nothing was decoding, so the
+    /// count is an honest zero.
+    func testAnOffloadByTheWardenIsAnnouncedWithWhatItCost() async throws {
+        let notices = NoticeBox()
+        let ledger = ModelLifecycleManager(
+            probe: ScriptedProbe(),
+            budgetOverrideBytes: ModelLifecycleBudget.standardModelsBudgetBytes)
+
+        try await withRealGeneratorTier(ledger: ledger, notices: notices) { _, generator, bus in
+            // The wiring under test is the tier's own: the generator was
+            // built by `withRealGeneratorTier`, the tier's init installed its
+            // handler on the box, and the notice has to come back through
+            // both the event vocabulary and the surface sink.
+            generator.slot.store("a handle", url: URL(fileURLWithPath: "/tmp/not-a-real-model.gguf"))
+
+            // What happens on the warden's thread when a voice turn needs the
+            // bytes: the ask, answered by handing the handle over.
+            XCTAssertEqual(generator.slot.releaseForWarden(), .released)
+
+            // The tier hears it on a `Task` hop, so the assertions wait for it
+            // rather than assuming a scheduling order.
+            for _ in 0..<200 where bus.events(named: "brain_translation_preempted").isEmpty {
+                try await Task.sleep(nanoseconds: 5_000_000)
+            }
+
+            let preempted = bus.events(named: "brain_translation_preempted").first
+            XCTAssertEqual(preempted?.outcome, "preempted")
+            XCTAssertEqual(preempted?.metadata["count"], "0",
+                           "an idle handle costs no answer")
+            XCTAssertEqual(preempted?.metadata.count, 1,
+                           "counts only — no model id, no path, no sentence")
+            XCTAssertEqual(notices.notices, [.offloadedForVoiceTurn])
+            XCTAssertFalse(generator.slot.isHoldingHandle)
+        }
+    }
+
+    /// The generator's handler lands on the box the warden asks — the one
+    /// line the whole notice path hangs on.
+    func testTheWardenHandlerIsInstalledOnTheBoxTheWardenAsks() {
+        let notices = NoticeBox()
+        let generator = LlamaBrainTextGenerator(config: config)
+        generator.setWardenOffloadHandler { notices.record(.offloadedForVoiceTurn) }
+        generator.slot.store("a handle", url: URL(fileURLWithPath: "/tmp/not-a-real-model.gguf"))
+
+        XCTAssertEqual(generator.slot.releaseForWarden(), .released)
+        XCTAssertEqual(notices.notices, [.offloadedForVoiceTurn])
+    }
+
+    /// The forced half of the ask — a refusal overruled, or a budget eviction
+    /// of this position — says the same sentence, and says it after the
+    /// handle is gone.
+    func testTheForcedDropSaysTheSameSentence() {
+        let notices = NoticeBox()
+        let box = TranslateBrainHandleSlot()
+        box.setOffloadHandler { notices.record(.offloadedForVoiceTurn) }
+        box.store("a handle", url: URL(fileURLWithPath: "/tmp/not-a-real-model.gguf"))
+        box.beginDecode()
+
+        XCTAssertEqual(box.releaseForWarden(), .refused(.inUse))
+        XCTAssertTrue(notices.notices.isEmpty,
+                      "a refusal that kept the handle is not a hand-off")
+
+        box.dropForWarden()
+        XCTAssertFalse(box.isHoldingHandle)
+        XCTAssertEqual(notices.notices, [.offloadedForVoiceTurn])
+    }
+
+    /// Every notice has a sentence, in both languages, keyed off the notice
+    /// itself — this is the seam a surface renders, so a notice the catalog
+    /// cannot answer is a silence with extra steps.
+    func testEveryNoticeKeyIsACatalogEntry() {
+        let notices = LocalBrainWardenNotice.allCases
+        XCTAssertEqual(Set(notices.map(\.copyKey)).count, notices.count,
+                       "two notices sharing one sentence cannot be told apart")
+        for notice in notices {
+            XCTAssertTrue(notice.copyKey.hasPrefix("livetranslate."),
+                          "\(notice.rawValue) must stay on the feature's copy surface")
+        }
     }
 }
