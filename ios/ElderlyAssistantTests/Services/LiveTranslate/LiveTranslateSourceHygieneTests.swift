@@ -54,7 +54,10 @@ final class LiveTranslateSourceHygieneTests: XCTestCase {
     /// `120` does not fire inside `1200` or `12000`.
     private func pattern(for literal: String) -> String {
         let escaped = NSRegularExpression.escapedPattern(for: literal)
-        return "(?<![0-9.])\(escaped)(?![0-9])"
+        // The leading guard also excludes identifier characters, so `64`
+        // inside `UInt64(` (a type name, not a re-declared parameter) cannot
+        // fire the scan (2026-09-19, the warden-notice sleep's capture).
+        return "(?<![0-9A-Za-z_.])\(escaped)(?![0-9])"
     }
 
     private func violations(in file: URL) -> [String] {

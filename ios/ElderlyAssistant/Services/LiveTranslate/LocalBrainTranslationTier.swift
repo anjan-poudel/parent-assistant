@@ -556,17 +556,25 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
                                                       jsonSchema: Self.jsonSchema,
                                                       modelURL: modelURL,
                                                       timeout: config.brainTranslationTimeoutSeconds)
-            let translations = Self.parse(output,
-                                          sources: batch,
-                                          targetLanguage: targetLanguage,
-                                          config: config)
+            let report = Self.report(output,
+                                     sources: batch,
+                                     targetLanguage: targetLanguage,
+                                     config: config)
+            // [EMPTY-DECODE] The generation's own self-portrait rides with the
+            // counts: the raw length, the shape, and which rule refused what.
+            // Without it a capture cannot tell a decode that emitted nothing
+            // from one whose every answer a rule refused — the two fixes are
+            // opposite, and the owner's answered-nothing batches were exactly
+            // this ambiguity.
+            let translations = report.translations
             let durationMs = Self.milliseconds(since: started)
             // The counts are about the BATCH THE CALLER HANDED OVER, not about
             // the part that fitted: a bounded batch reports its surplus as
             // unresolved, which is what the caller then sends onward.
             events.brainTranslationBatch(resolvedCount: translations.count,
                                          unresolvedCount: strings.count - translations.count,
-                                         durationMs: durationMs)
+                                         durationMs: durationMs,
+                                         generation: report.reading)
             return LocalBrainTranslationOutcome(translations: translations,
                                                 durationMs: durationMs)
         } catch let failure as BrainGenerationFailure {
@@ -673,18 +681,44 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
     /// how a load ends up refused at the door and then taken anyway through a
     /// window the second copy forgot.
     ///
-    /// `.warning` and `.critical` both refuse. A warning is the OS asking for
-    /// memory back and the only honest answer to "may I spend another 1 GB" is
-    /// no; a critical is it about to act, where a load begun now would still be
-    /// allocating while the kernel reclaims. The window covers the third case
-    /// the level cannot: a device that was critical seconds ago and has been
-    /// quiet since.
+    /// A fresh `.warning` and any `.critical` both refuse. A warning is the OS
+    /// asking for memory back and the only honest answer to "may I spend
+    /// another 1 GB" is no; a critical is it about to act, where a load begun
+    /// now would still be allocating while the kernel reclaims. The window
+    /// covers the third case the level cannot: a device that was critical
+    /// seconds ago and has been quiet since.
+    ///
+    /// [PRESSURE-LATCH] (2026-09-19) **The two levels are not read the same
+    /// way, and the asymmetry is the fix.** A `.critical` is paired: the
+    /// dispatch source that sends it also sends `.normal` when the pressure
+    /// eases, and that second event is what clears the level — so a level that
+    /// still reads `.critical` is a device that is still critical, and refusing
+    /// on it needs no age. A `.warning` has a route with no counterpart:
+    /// `UIApplication.didReceiveMemoryWarningNotification` arrives, the
+    /// manager records `.warning`, and nothing on that path ever takes it
+    /// back. On a device where only that route has fired — no dispatch source,
+    /// or a warning between source updates — the level latches for the life of
+    /// the process and this gate would refuse **every** subsequent load with a
+    /// `durationMs=0` deferral, long after the pressure that caused it had
+    /// passed. So a warning is only refused while it is *recent*: the same
+    /// recency window the critical timestamp uses, on the warning timestamp
+    /// (`MemoryPressureReading.secondsSinceWarning`), and past that the level
+    /// is stale evidence and the only thing left worth checking is the
+    /// critical age below.
+    ///
+    /// A reading that carries the level but no age at all (`nil`) is treated
+    /// as fresh, deliberately: every caller that builds a reading by hand is a
+    /// test, and "no timestamp" must not become a way to smuggle a refused
+    /// warning past the gate.
     static func pressureDeferral(_ reading: MemoryPressureReading,
                                  windowSeconds: TimeInterval) -> LocalBrainDeferral? {
         switch reading.level {
         case .critical:
             return .memoryPressure(level: .critical)
         case .warning:
+            if let age = reading.secondsSinceWarning, age >= windowSeconds {
+                break // stale warning — the level latched, the pressure did not
+            }
             return .memoryPressure(level: .warning)
         case .normal:
             break
@@ -796,12 +830,17 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
 
     // MARK: Reading the answer
 
-    /// Maps a positional answer back onto the sources it was asked about.
+    /// One generation, classified: what shape it came back in, which rule
+    /// refused each answer, and the translations that survived.
     ///
-    /// A position the answer did not reach, a non-string, and anything
-    /// `accepts` refuses are each *unresolved*: the region keeps its original
-    /// text and the string goes on to the next tier, which is the same rule
-    /// `TranslationResponseParser` applies to a cloud response.
+    /// Maps a positional answer back onto the sources it was asked about — the
+    /// shape the cloud's parser uses, one answer per source in order, so a
+    /// short answer is detected instead of silently shifting every later
+    /// translation onto the wrong sign. A position the answer did not reach, a
+    /// non-string, and anything `accepts` refuses are each *unresolved*: the
+    /// region keeps its original text and the string goes on to the next tier,
+    /// which is the same rule `TranslationResponseParser` applies to a cloud
+    /// response.
     ///
     /// **Unresolved, never terminal.** This is the difference the owner's
     /// device report turned on. The tier's answers used to settle a region by
@@ -813,26 +852,109 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
     /// answer that is not a translation. A tier can only *end* a string's
     /// journey by producing something the elder can use; anything else is a
     /// statement that the next tier should try.
-    static func parse(_ raw: String,
-                      sources: [String],
-                      targetLanguage: AppLanguage,
-                      config: LiveTranslateConfig) -> [String: String] {
+    ///
+    /// [EMPTY-DECODE] (2026-09-19) `translations` is the half the caller uses;
+    /// the rest of the type is what the owner's answered-nothing device report
+    /// could not see. Three batches ran 7–20 seconds each and resolved zero
+    /// strings; the counts said "the tier failed" and could not say whether the
+    /// decode had emitted anything at all. The shape and the histogram are that
+    /// missing half, and they are content-free: a closed token and counts keyed
+    /// by a closed enum. No part of this type holds the answer, the source or
+    /// any substring of either.
+    ///
+    /// The classification is the **same** code path that decides the
+    /// translations (`rejection(of:for:targetLanguage:config:)`), so a capture
+    /// cannot name a rule the tier does not actually apply.
+    struct AnswerReport: Equatable {
+        /// The raw answer's length in characters — never the characters.
+        let length: Int
+        let shape: BrainGenerationShape
+        /// Rule → how many answers it refused. Empty when nothing was refused.
+        let rejections: [BrainAnswerRejection: Int]
+        let translations: [String: String]
+
+        /// The content-free form the event carries.
+        var reading: BrainGenerationReading {
+            BrainGenerationReading(length: length, shape: shape, rejections: rejections)
+        }
+    }
+
+    static func report(_ raw: String,
+                       sources: [String],
+                       targetLanguage: AppLanguage,
+                       config: LiveTranslateConfig) -> AnswerReport {
+        let length = raw.count
+        // The structural half. `empty` is exactly "the decode returned no
+        // characters"; anything non-empty that will not parse is `unparsable`,
+        // which is the shape a wrapped or truncated answer takes.
         guard let data = raw.data(using: .utf8),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let list = object["translations"] as? [Any] else { return [:] }
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return AnswerReport(length: length,
+                                shape: raw.isEmpty ? .empty : .unparsable,
+                                rejections: [:],
+                                translations: [:])
+        }
+        guard let list = object["translations"] as? [Any] else {
+            return AnswerReport(length: length, shape: .noArray, rejections: [:], translations: [:])
+        }
 
         var translations: [String: String] = [:]
+        var rejections: [BrainAnswerRejection: Int] = [:]
         for (position, source) in sources.enumerated() {
-            guard position < list.count, let value = list[position] as? String else { continue }
+            // The positional rules first, because they are about the ANSWER
+            // SLOT rather than about what the model said in it: a short array
+            // is a decode that stopped, and a non-string is the grammar's
+            // array holding something else.
+            guard position < list.count else {
+                rejections[.missing, default: 0] += 1
+                continue
+            }
+            guard let value = list[position] as? String else {
+                rejections[.nonString, default: 0] += 1
+                continue
+            }
             let text = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard let accepted = accepts(text,
-                                         for: source,
-                                         targetLanguage: targetLanguage,
-                                         config: config)
-            else { continue }
-            translations[source] = accepted
+            if let refusal = rejection(of: text,
+                                       for: source,
+                                       targetLanguage: targetLanguage,
+                                       config: config) {
+                rejections[refusal, default: 0] += 1
+                continue
+            }
+            translations[source] = text
         }
-        return translations
+        return AnswerReport(length: length, shape: .array,
+                            rejections: rejections, translations: translations)
+    }
+
+    /// Why an answer is not a translation of `source`, in the tier's own
+    /// closed vocabulary — or `nil` when it is one.
+    ///
+    /// **The one classification path.** `accepts` is this function's `nil`
+    /// case and nothing else: a rule that decides an answer must be the rule
+    /// that reports why it was refused, or a device capture ends up naming a
+    /// rule the tier does not apply — which is exactly the confusion
+    /// [EMPTY-DECODE] exists to end.
+    static func rejection(of text: String,
+                          for source: String,
+                          targetLanguage: AppLanguage,
+                          config: LiveTranslateConfig) -> BrainAnswerRejection? {
+        guard !text.isEmpty else { return .empty }
+        guard text.count <= TranslationResponseParser.maxLength(forSource: source,
+                                                               config: config) else { return .tooLong }
+        guard comparisonForm(text) != comparisonForm(source) else { return .echo }
+        if containsLetters(source), !usesTheTargetScript(text, targetLanguage: targetLanguage) {
+            return .wrongScript
+        }
+        // The gate is asked for its verdict rather than its boolean, so the
+        // three reasons it already distinguishes reach the histogram as
+        // themselves instead of collapsing into one token.
+        switch NepaliOutputGate.verdict(for: text, targetLanguage: targetLanguage) {
+        case .accept: return nil
+        case .reject(.instructionEcho): return .instructionEcho
+        case .reject(.hindiEvidence): return .hindiEvidence
+        case .reject(.noNepaliEvidence): return .noNepaliEvidence
+        }
     }
 
     /// Whether an answer counts as a translation of `source`, and the answer
@@ -873,18 +995,16 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
     /// 4, a non-echo in Devanagari that is not Nepali fails 5, and an answer
     /// that fails none of them is the only thing that may settle a region on
     /// the device.
+    ///
+    /// The rules themselves live in `rejection(of:for:targetLanguage:config:)`
+    /// — one path, so the tier cannot decide by one rule and report by another
+    /// — and this is that path's `nil` case: the answer, or nothing.
     static func accepts(_ text: String,
                         for source: String,
                         targetLanguage: AppLanguage,
                         config: LiveTranslateConfig) -> String? {
-        guard !text.isEmpty else { return nil }
-        guard text.count <= TranslationResponseParser.maxLength(forSource: source,
-                                                               config: config) else { return nil }
-        guard comparisonForm(text) != comparisonForm(source) else { return nil }
-        if containsLetters(source), !usesTheTargetScript(text, targetLanguage: targetLanguage) {
-            return nil
-        }
-        guard NepaliOutputGate.accepts(text, targetLanguage: targetLanguage) else { return nil }
+        guard rejection(of: text, for: source,
+                        targetLanguage: targetLanguage, config: config) == nil else { return nil }
         return text
     }
 

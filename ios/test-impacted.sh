@@ -19,7 +19,9 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
-APP_NAME="ElderlyAssistant"
+# The generated project is named seniOS (project.yml `name:`); the scheme is
+# still ElderlyAssistant. Build.sh uses the same pairing.
+APP_NAME="seniOS"
 SCHEME="${APP_NAME}"
 BUILD_DIR="${PROJECT_DIR}/../build"
 TEST_DERIVED_DATA="${IOS_TEST_DERIVED_DATA:-${BUILD_DIR}/DerivedDataTests}"
@@ -113,10 +115,13 @@ fi
 
 ONLY=()
 if ! $RUN_FULL; then
-    for c in "${UNIT_CLASSES[@]}"; do
+    # Guarded expansion: bash 3.2 (macOS default) treats an empty declared
+    # array under `set -u` as an unbound variable — the +alt form keeps
+    # a no-UI-class selection from aborting the script.
+    for c in "${UNIT_CLASSES[@]+"${UNIT_CLASSES[@]}"}"; do
         ONLY+=("-only-testing:ElderlyAssistantTests/${c}")
     done
-    for c in "${UI_CLASSES[@]}"; do
+    for c in "${UI_CLASSES[@]+"${UI_CLASSES[@]}"}"; do
         ONLY+=("-only-testing:ElderlyAssistantUITests/${c}")
     done
 fi
