@@ -902,6 +902,13 @@ final class LiveCameraSession {
     private let capture: LiveCameraCaptureLayer
     private let notificationCenter: NotificationCenter
     private let now: () -> TimeInterval
+    /// [CAMERA-BUDGET] (2026-09-20) Fired with `true` when the session's
+    /// capture goes live and `false` when it ends — the signal the warden's
+    /// session-profile budget rides on: the measured 1.4 GB camera working
+    /// set lowers the model budget for exactly the interval the camera is
+    /// drawing it. Wired by the coordinator to
+    /// `ModelLifecycleManager.setSessionProfile`.
+    var onSessionActiveChanged: ((Bool) -> Void)?
 
     private let captureQueue = DispatchQueue(label: "com.elderlyassistant.livetranslate.capture")
     private let videoOutputQueue = DispatchQueue(label: "com.elderlyassistant.livetranslate.video")
@@ -1375,6 +1382,7 @@ final class LiveCameraSession {
         withLock { startHasRun = true }
         setState(.running)
         events.sessionStarted()
+        onSessionActiveChanged?(true)
 
         // An interruption that arrived while the session was starting is
         // applied now: the session must not begin running in the background.
@@ -1528,6 +1536,7 @@ final class LiveCameraSession {
         if teardown.announced {
             onCaptureQueue { capture.stopRunning() }
             events.sessionEnded()
+            onSessionActiveChanged?(false)
         }
     }
 
