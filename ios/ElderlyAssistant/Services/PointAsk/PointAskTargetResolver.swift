@@ -86,6 +86,19 @@ final class PointAskMaskEngine: PointAskMaskProbing {
 
     private let lock = NSLock()
     private var probeFailed = false
+    /// [MASK-OBSERVABILITY] (2026-09-20) The evidence trail this pass was
+    /// missing: the owner's device report ("bounding boxes are just
+    /// squares") is the pad fallback, and the mask is the one class-free
+    /// pass that would hug the pointed object — but a failed probe flips
+    /// it off silently and permanently, and a "not on an instance" answer
+    /// looks identical in the capture. The same per-pass shape the YOLO
+    /// engine emits (`yolo_pass`), so the next capture can tell the three
+    /// pad producers apart.
+    private let observabilityBus: ObservabilityBus?
+
+    init(observabilityBus: ObservabilityBus? = nil) {
+        self.observabilityBus = observabilityBus
+    }
 
     var supportsMasks: Bool {
         lock.lock(); defer { lock.unlock() }
@@ -93,8 +106,31 @@ final class PointAskMaskEngine: PointAskMaskProbing {
         return !probeFailed
     }
 
+    /// One pass's content-free self-portrait, on the same vocabulary the
+    /// resolver's `origin` token already uses: how many instances, and
+    /// whether the tapped point sat on one. Never the image, never text.
+    private func emitPass(outcome: String,
+                          errorCode: String?,
+                          count: Int,
+                          pointOnInstance: Bool? = nil) {
+        guard let observabilityBus else { return }
+        var metadata: [String: String] = ["count": "\(count)"]
+        if let pointOnInstance { metadata["point_on_instance"] = pointOnInstance ? "true" : "false" }
+        observabilityBus.emit(ObservabilityEvent(
+            component: "pointask",
+            eventType: "mask_pass",
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: errorCode,
+            metadata: metadata
+        ))
+    }
+
     func maskBox(at point: CGPoint, in pixelBuffer: CVPixelBuffer) throws -> NormalizedBox? {
-        guard #available(iOS 17, *) else { throw PointAskError.maskPassFailed }
+        guard #available(iOS 17, *) else {
+            emitPass(outcome: "failed", errorCode: "os_too_old", count: 0)
+            throw PointAskError.maskPassFailed
+        }
         let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, options: [:])
         let mask: CVPixelBuffer
         do {
@@ -104,12 +140,14 @@ final class PointAskMaskEngine: PointAskMaskProbing {
             // pixels carry the index (0), the background the other label.
             guard let observation = request.results?.first else {
                 lock.lock(); probeFailed = true; lock.unlock()
+                emitPass(outcome: "failed", errorCode: "no_observation", count: 0)
                 throw PointAskError.maskPassFailed
             }
             mask = try observation.generateScaledMaskForImage(forInstances: [0],
                                                               from: handler)
         } catch {
             lock.lock(); probeFailed = true; lock.unlock()
+            emitPass(outcome: "failed", errorCode: "request_failed", count: 0)
             throw PointAskError.maskPassFailed
         }
         let width = CVPixelBufferGetWidth(mask)
@@ -117,8 +155,18 @@ final class PointAskMaskEngine: PointAskMaskProbing {
         guard width > 0, height > 0 else { return nil }
         let x = min(max(Int(CGFloat(width) * point.x), 0), width - 1)
         let y = min(max(Int(CGFloat(height) * point.y), 0), height - 1)
-        guard Self.pixelValue(atX: x, y: y, in: mask) == 0 else { return nil }
-        return Self.instanceExtent(in: mask)
+        guard Self.pixelValue(atX: x, y: y, in: mask) == 0 else {
+            // The pass ran and the point is background — an honest "no",
+            // distinct from a failed request: the resolver falls to the
+            // saliency/pad ladder, and the event says which it was.
+            emitPass(outcome: "success", errorCode: nil,
+                     count: 0, pointOnInstance: false)
+            return nil
+        }
+        let extent = Self.instanceExtent(in: mask)
+        emitPass(outcome: "success", errorCode: nil,
+                 count: extent == nil ? 0 : 1, pointOnInstance: true)
+        return extent
     }
 
     /// The tight bounding box of the instance's pixels — min/max of every
