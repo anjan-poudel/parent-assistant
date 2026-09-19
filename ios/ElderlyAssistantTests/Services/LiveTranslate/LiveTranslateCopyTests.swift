@@ -57,6 +57,12 @@ final class LiveTranslateCopyTests: XCTestCase {
         "livetranslate.snapshot.capture",
         "livetranslate.snapshot.holding",
         "livetranslate.snapshot.live",
+        // Owner directive, 2026-09-19: the cloud tier's master switch, drawn
+        // on the Settings consent leaf. Two keys — the row's title and the
+        // line under it that says what "off" means. Drafts awaiting the same
+        // OD3 copy review as the consent wording around them.
+        "livetranslate.settings.cloud.title",
+        "livetranslate.settings.cloud.note",
         // 2026-09-19: the warden's two moments. The owner's directive is
         // explicit that the elder is not left wondering about the silences —
         // one sentence for a model that is loading ("hold on a sec"), one for
@@ -143,6 +149,45 @@ final class LiveTranslateCopyTests: XCTestCase {
         let ne = L10n.str("common.close", locale: nepali)
         XCTAssertNotEqual(ne, "common.close")
         XCTAssertTrue(hasDevanagari(ne))
+    }
+
+    // MARK: Scenario: the cloud switch says what "off" means, in both languages
+
+    /// Owner directive, 2026-09-19. The generic resolver test above already
+    /// covers "resolves in en + ne" for these keys; this pins the part of the
+    /// copy a reword could quietly drop — that off means *the phone
+    /// translates by itself and nothing is sent anywhere*, which is the state
+    /// a household that never touches the switch stays in, and that the title
+    /// names the service being asked for rather than "online" in the abstract.
+    func testTheCloudSwitchCopySaysWhatOffMeansInBothLanguages() {
+        let title = GeminiCloudToggleSurface.titleKey
+        let note = GeminiCloudToggleSurface.noteKey
+
+        XCTAssertEqual(title, "livetranslate.settings.cloud.title")
+        XCTAssertEqual(note, "livetranslate.settings.cloud.note")
+
+        let enNote = L10n.str(note, locale: english).lowercased()
+        XCTAssertTrue(enNote.contains("off"),
+                      "the note must name the state it explains: \(enNote)")
+        XCTAssertTrue(enNote.contains("by itself") || enNote.contains("on its own")
+                        || enNote.contains("on the phone"),
+                      "the note must say the phone translates on its own: \(enNote)")
+        XCTAssertTrue(enNote.contains("nothing is sent") || enNote.contains("nothing leaves"),
+                      "the note must say nothing leaves the phone: \(enNote)")
+
+        let neNote = L10n.str(note, locale: nepali)
+        XCTAssertTrue(hasDevanagari(neNote))
+        XCTAssertTrue(neNote.contains("बन्द"),
+                      "the Nepali note must name the off state: \(neNote)")
+        XCTAssertTrue(neNote.contains("फोन"),
+                      "the Nepali note must name the phone: \(neNote)")
+        XCTAssertTrue(neNote.contains("पठाइँदैन"),
+                      "the Nepali note must say nothing is sent: \(neNote)")
+
+        // The provider is named in the title in both languages: the household
+        // is being asked to let one particular service do the work.
+        XCTAssertTrue(L10n.str(title, locale: english).contains("Gemini"))
+        XCTAssertTrue(L10n.str(title, locale: nepali).contains("Gemini"))
     }
 
     // MARK: Scenario: every warden notice has a sentence (2026-09-19)

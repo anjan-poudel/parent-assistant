@@ -1231,7 +1231,47 @@ struct LiveTranslateConfig: Equatable {
     /// Testing-only — reverts to false when the round-3 quant ships.
     var wardenBypassForTesting: Bool = true
 
-    // MARK: Tier 2
+    // MARK: Tier 2 — the master switch (owner directive, 2026-09-19)
+
+    /// Whether the Gemini (cloud) tier may run **at all**, before anything
+    /// else about it is asked.
+    ///
+    /// **False, and that is the owner's directive** (2026-09-19): the cloud
+    /// tier does not cascade by default. An elder who has never touched this
+    /// setting gets the on-device cascade — the curated dictionary, the
+    /// persisted cache and the app's own installed Nepali brain — and nothing
+    /// leaves the phone; the switch is what opts in, and it is the elder's
+    /// (or the household's) to throw, deliberately, from the feature's
+    /// Settings leaf.
+    ///
+    /// Three things this key is not:
+    ///
+    ///  - **It is not consent.** OD-13's consent record is still asked for and
+    ///    still enforced on every attempt when this is on (AM-1): the switch
+    ///    is a *policy* the household sets once, the record is the elder's
+    ///    answer at the point of first cloud need, and either one alone never
+    ///    sends anything. Turning the switch off does not withdraw a recorded
+    ///    grant; turning it on does not create one.
+    ///  - **It is not a budget.** The shipped `GeminiCostGovernor` soft daily
+    ///    cap is unchanged and still applies (OD7) — this key is a gate,
+    ///    never a second cap.
+    ///  - **It is not a display preference.** It is the one user-facing
+    ///    setting in this feature that *does* change what leaves the device,
+    ///    so it is deliberately kept away from the FR-LCT-017 toggle's
+    ///    display-only chrome (`AlwaysShowOriginalControl`) and drawn beside
+    ///    the consent surface, where the elder is already thinking about
+    ///    egress.
+    ///
+    /// A *default*, not the persisted state: `LiveTranslateSettings` owns the
+    /// value the elder chose, and this is the nominal value an absent key
+    /// reads as — exactly the split `alwaysShowOriginalDefault` uses.
+    ///
+    /// Cost is the second half of the reason. The cloud tier is the only part
+    /// of this feature that spends money per scene, so a household that never
+    /// opted in never pays for one: the failure mode this key removes is a
+    /// feature that quietly bills a stranger's key because a sign had one
+    /// word the dictionary did not.
+    var geminiCloudEnabledDefault: Bool = false
 
     /// Base timeout for one tier-2 request. **Derived, never stored (CL-8):**
     /// the shipped `GeminiClient.Config.default.timeoutSeconds` (25 s, sized
