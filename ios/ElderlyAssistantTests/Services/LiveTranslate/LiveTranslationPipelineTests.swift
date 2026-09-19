@@ -283,6 +283,28 @@ final class LiveTranslationPipelineTests: XCTestCase {
         let config: LiveTranslateConfig
     }
 
+    /// [RELIABILITY-ROUTER] The network's answer, scripted. A scenario that
+    /// wants the cloud to be ABLE to lead says so; everything else gets the
+    /// conservative no-path answer and the order the cascade shipped with.
+    final class ScriptedReachability: NetworkReachability, @unchecked Sendable {
+        private let lock = NSLock()
+        private var reachable: Bool
+
+        init(reachable: Bool) {
+            self.reachable = reachable
+        }
+
+        var isReachable: Bool {
+            lock.lock(); defer { lock.unlock() }
+            return reachable
+        }
+
+        func set(reachable: Bool) {
+            lock.lock(); defer { lock.unlock() }
+            self.reachable = reachable
+        }
+    }
+
     /// The production composition, with only the platform seams doubled: the
     /// real cache (over an in-memory encrypted store), the real gate, the
     /// real prompt controller, the real tier and the real client over a
@@ -322,7 +344,17 @@ final class LiveTranslationPipelineTests: XCTestCase {
                              /// reachable for what it asserts to be the thing
                              /// under test. A scenario about the *switch*
                              /// passes `false` and says so.
-                             geminiCloudEnabled: Bool = true) -> Harness {
+                             geminiCloudEnabled: Bool = true,
+                             /// [RELIABILITY-ROUTER] The network's answer.
+                             ///
+                             /// **No path by default, and deliberately so.**
+                             /// The pipeline's own default is the same, and
+                             /// with it the router keeps the device in front
+                             /// for every class — which is what these
+                             /// scenarios were written against. A scenario
+                             /// about the router passes a scripted answer and
+                             /// says which one it means.
+                             reachability: NetworkReachability = UnavailableReachability()) -> Harness {
         let bus = LiveTranslateSanitisingBus()
         // The brain is behind its own seam, so these tests never build a
         // `ModelStore` or touch a model file: the cascade is what is under
@@ -376,6 +408,7 @@ final class LiveTranslationPipelineTests: XCTestCase {
                                                backpressure: backpressure,
                                                alwaysShowOriginal: false,
                                                geminiCloudEnabled: geminiCloudEnabled,
+                                               reachability: reachability,
                                                extractionMode: extractionMode,
                                                config: config,
                                                observabilityBus: bus,
@@ -2709,6 +2742,121 @@ final class LiveTranslationPipelineTests: XCTestCase {
         let remainder = try XCTUnwrap(region(secondCloudText, in: publication))
         XCTAssertEqual(publication.result(for: answered).sourceTier, .onDeviceBrain)
         XCTAssertEqual(publication.result(for: remainder).sourceTier, .cloud)
+    }
+
+    // MARK: - Scenario: the reliability router (round-3 ship, 2026-09-19)
+    //
+    // The approved direction: an on-device answer SETTLES only for the classes
+    // the model is proven on — short labels, menus and pharma lines, the shapes
+    // every passing probe row has — and the sentence class goes to the cloud
+    // when there is a path, falling back to the device when there is not.
+    //
+    // `cloudText` is five words, so it is the sentence class; `secondCloudText`
+    // and `thirdCloudText` are four, so they are the proven one. The
+    // discriminator's own suite is `TranslationReliabilityRouterTests`; what is
+    // here is the WIRING — which tier actually leads a live cycle, and what
+    // becomes of a string the gate cannot pass on.
+
+    /// The cloud leads, even though the device could have answered: the class
+    /// decides, not availability, so the on-device generation is never paid
+    /// for at all.
+    @MainActor
+    func testScenarioASentenceLeadsWithTheCloudWhenThereIsAPath() async throws {
+        let harness = makeHarness(consent: true,
+                                  transport: Self.respondingTransport(),
+                                  reachability: ScriptedReachability(reachable: true))
+        await harness.pipeline.updateLayout(layout)
+        harness.recogniser.defaultStep = .regions([detected(cloudText)])
+        // Armed and willing: if the device is asked, it answers.
+        harness.brain.answers = [cloudText: brainTranslation]
+
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        let asked = cloudText
+        await waitUntil("the cloud answer to be published") {
+            guard let latest = await harness.recorder.latest,
+                  let region = latest.regions.first(where: { $0.text == asked }) else {
+                return false
+            }
+            return latest.result(for: region).sourceTier == .cloud
+        }
+
+        XCTAssertEqual(harness.brain.calls.count, 0,
+                       "the sentence class does not pay for an on-device "
+                       + "generation when the cloud can take it")
+        XCTAssertEqual(requests(carrying: asked, in: harness), 1)
+        let publication = try await latest(harness)
+        let region = try XCTUnwrap(region(asked, in: publication))
+        XCTAssertEqual(publication.result(for: region).sourceTier, .cloud)
+    }
+
+    /// The same sentence, one value changed — there is no path — and the device
+    /// leads it. Nothing is sent, and the region is not left to degrade on a
+    /// cloud that cannot answer: this is the route the offline phone takes.
+    @MainActor
+    func testScenarioWithNoPathTheSameSentenceStaysOnTheDevice() async throws {
+        let harness = makeHarness(consent: true,
+                                  transport: Self.respondingTransport(),
+                                  reachability: ScriptedReachability(reachable: false))
+        await harness.pipeline.updateLayout(layout)
+        harness.recogniser.defaultStep = .regions([detected(cloudText)])
+        harness.brain.answers = [cloudText: brainTranslation]
+
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        await waitUntil("the on-device answer to be published") {
+            guard let latest = await harness.recorder.latest,
+                  let region = latest.regions.first(where: { $0.text == self.cloudText }) else {
+                return false
+            }
+            return latest.result(for: region).sourceTier == .onDeviceBrain
+        }
+
+        XCTAssertEqual(requests(carrying: cloudText, in: harness), 0,
+                       "with no path nothing is sent at all")
+        let publication = try await latest(harness)
+        let region = try XCTUnwrap(region(cloudText, in: publication))
+        XCTAssertEqual(publication.result(for: region).sourceTier, .onDeviceBrain)
+    }
+
+    /// The cloud may lead — there is a path and the switch is on — but the gate
+    /// will not pass the batch on, because the household has already declined.
+    /// The reservation is what keeps the sentence translatable on the device
+    /// instead of degrading it with the gate's reason.
+    @MainActor
+    func testScenarioASentenceTheGateCannotPassOnFallsBackToTheDevice() async throws {
+        let harness = makeHarness(consent: false,
+                                  transport: Self.respondingTransport(),
+                                  reachability: ScriptedReachability(reachable: true))
+        _ = harness.gate.record(granted: false)
+        await harness.pipeline.updateLayout(layout)
+        harness.recogniser.defaultStep = .regions([detected(cloudText)])
+        harness.brain.answers = [cloudText: brainTranslation]
+
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        await waitUntil("the on-device fallback to be published") {
+            guard let latest = await harness.recorder.latest,
+                  let region = latest.regions.first(where: { $0.text == self.cloudText }) else {
+                return false
+            }
+            return latest.result(for: region).sourceTier == .onDeviceBrain
+        }
+
+        XCTAssertEqual(harness.transport.requestCount, 0, "a denial is not a request")
+        let publication = try await latest(harness)
+        let region = try XCTUnwrap(region(cloudText, in: publication))
+        XCTAssertEqual(publication.result(for: region).outcome,
+                       .resolved(originalText: cloudText,
+                                 translation: brainTranslation,
+                                 tier: .onDeviceBrain),
+                       "the fallback is the device, not a degraded region")
     }
 
     @MainActor

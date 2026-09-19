@@ -566,6 +566,13 @@ final class LiveTranslateSessionModel: ObservableObject {
             // config's default, so the switch the elder set in Settings is the
             // switch this session runs under — from its very first cloud need.
             geminiCloudEnabled: geminiCloudEnabled,
+            // The router's "can the cloud lead?" half that the switch cannot
+            // answer (owner directive, 2026-09-19): the path question. Handed
+            // in here rather than defaulted, because the default is the
+            // no-path answer — correct for every construction site that
+            // predates the router, and wrong for the one that runs on the
+            // device.
+            reachability: PathMonitorReachability(),
             extractionMode: isExtracting,
             config: config,
             observabilityBus: dependencies.observabilityBus,

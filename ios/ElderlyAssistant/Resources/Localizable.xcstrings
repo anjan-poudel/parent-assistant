@@ -9609,6 +9609,23 @@
         "en": {
           "stringUnit": {
             "state": "translated",
+            "value": "Translate — English to Nepali (Qwen 1.7B, superseded)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अनुवाद — अंग्रेजीबाट नेपालीमा (Qwen १.७B, पुरानो)"
+          }
+        }
+      }
+    },
+    "model.name.nmt-en-ne-qwen17b-r3-q4_k_m": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
             "value": "Translate — English to Nepali (Qwen 1.7B)"
           }
         },

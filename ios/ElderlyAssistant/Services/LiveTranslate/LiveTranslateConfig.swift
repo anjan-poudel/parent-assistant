@@ -1139,11 +1139,16 @@ struct LiveTranslateConfig: Equatable {
     /// would make the tier's availability change under a running session for
     /// reasons unrelated to translation.
     ///
-    /// Why more than one entry. `nmtEnNeQwen17bR2bQ8` (round-2b, 2026-09-18)
-    /// is the artifact the tier was built for: a real EN→NE translation
-    /// fine-tune that passes the tier's own raw-prompt + `json_schema`
-    /// contract (88.2% usable, 0/34 polarity, 0/12 probes). The two entries
-    /// after it are the pre-translation-model fallbacks — `intentQwen4BSlotCanon`
+    /// Why more than one entry. `nmtEnNeQwen17bR3Q4` (round-3, 2026-09-19)
+    /// is the head: a real EN→NE translation fine-tune that passes the
+    /// tier's own raw-prompt + `json_schema` contract AND is the first
+    /// checkpoint whose every quant cleared all 12 runtime safety-probe rows
+    /// with 0 polarity failures. `nmtEnNeQwen17bR3Q5` is the alternate quant
+    /// of the SAME checkpoint (sideload-only — nothing offers its download,
+    /// so the household never picks a quant), then the round-2b artifacts
+    /// (`...R2bQ4`, `...R2bQ8`) for devices that installed them before this
+    /// upgrade and keep working on them. The two entries
+    /// after them are the pre-translation-model fallbacks — `intentQwen4BSlotCanon`
     /// is the app's current assistant brain (`AppCoordinator.defaultBrainModelID`),
     /// the artifact a device that has used the assistant at all will have,
     /// and `intentQwen4BS43` is the seed-43 fine-tune the owner named when
@@ -1173,16 +1178,23 @@ struct LiveTranslateConfig: Equatable {
     /// present on the phones that can run it, and on a phone whose class
     /// verdict is what changes later.
     ///
-    /// Note the head is `roomy`-class only under `ModelBudgetPolicy`
-    /// (1.83 GB takes the 3B weight band → 2.63 GB live, over both the
-    /// compact and the standard co-residency budget — see the catalog
-    /// entry). On a 6 GB phone the warden refuses its load and the strings
-    /// fall to the cloud tier; that is the policy's call, not this list's.
+    /// Note the head is STANDARD-class under `ModelBudgetPolicy`, where the
+    /// round-2b Q8 was not: 1.1 GB takes the 1.7B weight band (700 MB
+    /// overhead) → 1.81 GB live, which beside the class's 1.0 GB warm STT is
+    /// inside the standard 3.2 GB budget, while the 1.83 GB Q8 took the 3B
+    /// band (2.63 GB live) and was refused `requires_evicting_warm_stt` (see
+    /// the catalog entries and `ModelBudgetPolicyTests`). That budget
+    /// difference is half of why round 3 ships the small quant — the other
+    /// half is that it no longer needs to gate anything. A device the warden
+    /// still refuses falls to the cloud tier; that is the policy's call, not
+    /// this list's.
     ///
     /// A follow-up may want this to follow the elder's brain selection
     /// (`AppCoordinator.resolvedBrainModelID`); that is a product decision,
     /// not a lookup to hide in here.
-    var brainTranslationModelIDs: [ModelID] = [ModelCatalog.nmtEnNeQwen17bR2bQ4,
+    var brainTranslationModelIDs: [ModelID] = [ModelCatalog.nmtEnNeQwen17bR3Q4,
+                                              ModelCatalog.nmtEnNeQwen17bR3Q5,
+                                              ModelCatalog.nmtEnNeQwen17bR2bQ4,
                                               ModelCatalog.nmtEnNeQwen17bR2bQ8,
                                               ModelCatalog.intentQwen4BSlotCanon,
                                               ModelCatalog.intentQwen4BS43]

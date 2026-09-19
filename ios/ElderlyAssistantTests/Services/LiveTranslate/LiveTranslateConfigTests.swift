@@ -463,13 +463,17 @@ final class LiveTranslateConfigTests: XCTestCase {
     /// fallbacks a device that has one but not the head keeps working on.
     func testTheTranslationListLeadsWithTheShippedTranslationModel() {
         let ids = LiveTranslateConfig.default.brainTranslationModelIDs
-        XCTAssertEqual(ids, [ModelCatalog.nmtEnNeQwen17bR2bQ4,
+        XCTAssertEqual(ids, [ModelCatalog.nmtEnNeQwen17bR3Q4,
+                             ModelCatalog.nmtEnNeQwen17bR3Q5,
+                             ModelCatalog.nmtEnNeQwen17bR2bQ4,
                              ModelCatalog.nmtEnNeQwen17bR2bQ8,
                              ModelCatalog.intentQwen4BSlotCanon,
                              ModelCatalog.intentQwen4BS43],
-                       "the Q5 test quant leads (owner device test, 2026-09-19), "
-                       + "then the Q8 ship quant; the intent brains stay behind "
-                       + "as fallbacks")
+                       "the round-3 Q4 ship quant leads (12/12 probes, 0 "
+                       + "polarity, standard-class fit); its Q5 alternate sits "
+                       + "behind it for a device that sideloaded it, then the "
+                       + "round-2b artifacts for devices that already hold "
+                       + "them; the intent brains stay behind as fallbacks")
         // A list is only a list if every entry can be resolved — an id with
         // no catalog entry can never be installed and would silently be a
         // hole in the order.
@@ -482,76 +486,128 @@ final class LiveTranslateConfigTests: XCTestCase {
         // never be offered to `LlamaCommandInterpreter`'s picker, whose
         // prompt this artifact was not trained on.
         XCTAssertFalse(ModelCatalog.availableBrainEntries.contains {
-            $0.id == ModelCatalog.nmtEnNeQwen17bR2bQ8
+            $0.id == ModelCatalog.nmtEnNeQwen17bR3Q4
         }, "the translation model is not an assistant-brain choice")
     }
 
-    /// The shipped artifact itself: the digest the 1.83 GB download is
+    /// The shipped artifact itself: the digest the 1.1 GB download is
     /// verified against (`ModelStore.finalize` fails on any other bytes), the
     /// exact release asset, and the single-file delivery. A drift in any of
     /// these ships a model nobody can install (2026-09-14's 18-byte
     /// "reassembly" is the precedent for pinning the URL, not just the id).
+    ///
+    /// Round 3 (2026-09-19) moved the ship pin from the 1.83 GB round-2b Q8 to
+    /// this Q4_K_M: the first checkpoint whose every quant passed all 12 probe
+    /// rows with 0 polarity failures, and the first ship quant inside the
+    /// standard class's brain ceiling. The round-2b entry keeps its own pin
+    /// below — it is still in the tier ladder for devices that hold it.
     func testTheShippedTranslationArtifactIsPinned() throws {
         let entry = try XCTUnwrap(
-            ModelCatalog.entry(for: ModelCatalog.nmtEnNeQwen17bR2bQ8),
+            ModelCatalog.entry(for: ModelCatalog.nmtEnNeQwen17bR3Q4),
             "the tier's head model must exist in the catalog")
-        XCTAssertEqual(ModelCatalog.nmtEnNeQwen17bR2bQ8.rawValue,
-                       "nmt-en-ne-qwen17b-r2b-q8_0")
+        XCTAssertEqual(ModelCatalog.nmtEnNeQwen17bR3Q4.rawValue,
+                       "nmt-en-ne-qwen17b-r3-q4_k_m")
         XCTAssertEqual(entry.kind, .llamaBase)
-        XCTAssertEqual(entry.filename, "translate-en-ne-qwen17b-r2b-q8_0.gguf")
-        XCTAssertEqual(entry.sizeBytes, 1_834_426_080,
-                       "the shipped round-2b Q8_0 artifact's size on disk")
+        XCTAssertEqual(entry.filename, "translate-en-ne-qwen17b-r3-q4_k_m.gguf")
+        XCTAssertEqual(entry.sizeBytes, 1_107_408_608,
+                       "the shipped round-3 Q4_K_M artifact's size on disk")
         XCTAssertEqual(entry.sha256,
-                       "cae02965ab261a16fd375de12ecc012a1138d0f589fd74386b14aa058b2690b3",
-                       "the server original and the release asset agree on "
-                       + "this digest — the downloader verifies it")
+                       "f0bde6a4946cc74504a6b705c067240c6a30733b11e44a47c297e89ea0206987",
+                       "the digest of the server original's `.sha256` sidecar "
+                       + "— the downloader verifies it, so an upload that does "
+                       + "not match installs nothing")
         XCTAssertEqual(entry.sha256.count, 64)
         XCTAssertNotEqual(entry.sha256, ModelCatalogEntry.pendingSHA256,
                           "a placeholder can only ever fail `finalize`")
-        XCTAssertEqual(entry.minDeviceRAMBytes, 4_000_000_000,
-                       "the same 4 GB floor the other >1 GB brains carry")
+        XCTAssertEqual(entry.minDeviceRAMBytes, 3_000_000_000,
+                       "the standard-class floor the round-2b Q4 carried at "
+                       + "the same artifact size")
         XCTAssertEqual(entry.languages, ["ne"])
         XCTAssertNil(entry.dependsOn)
 
-        // The asset is ONE file: 1.83 GB is under GitHub's 2 GiB per-asset
+        // The asset is ONE file: 1.1 GB is under GitHub's 2 GiB per-asset
         // cap, so there is nothing for the multipart path to reassemble.
         XCTAssertLessThan(Int64(entry.sizeBytes), 2_147_483_648,
                           "over the cap the release would need part assets")
         XCTAssertNil(entry.downloadPartURLs,
                      "a single-asset delivery must not carry part URLs")
+        // [HOSTING] The release this points at does not exist until the owner
+        // uploads the file to it; the pin is what makes the upload provable.
         XCTAssertEqual(entry.downloadURL.absoluteString,
                        "https://github.com/anjan-poudel/elderly-ai-assistant-models"
-                       + "/releases/download/v18/translate-en-ne-qwen17b-r2b-q8_0.gguf",
-                       "the release the artifact was published to (v18)")
+                       + "/releases/download/v19/translate-en-ne-qwen17b-r3-q4_k_m.gguf",
+                       "the release the artifact must be published to (v19)")
         XCTAssertEqual(entry.downloadURL.lastPathComponent, entry.filename,
                        "the asset name is the on-disk name, so "
                        + "`LlamaBrainTextGenerator.modelID(forURL:)` resolves "
                        + "the id from the installed file")
     }
 
+    /// The alternate quant and the superseded ship quant: neither is offered
+    /// for download, but both are resolvable tier entries (and the round-2b one
+    /// is deletable), so their bytes must not drift either.
+    func testTheAlternateAndSupersededTranslationArtifactsArePinned() throws {
+        let superseded = try XCTUnwrap(
+            ModelCatalog.entry(for: ModelCatalog.nmtEnNeQwen17bR2bQ8))
+        XCTAssertEqual(superseded.filename, "translate-en-ne-qwen17b-r2b-q8_0.gguf")
+        XCTAssertEqual(superseded.sizeBytes, 1_834_426_080)
+        XCTAssertEqual(superseded.sha256,
+                       "cae02965ab261a16fd375de12ecc012a1138d0f589fd74386b14aa058b2690b3",
+                       "the server original and the release asset agree on "
+                       + "this digest")
+        XCTAssertEqual(superseded.downloadURL.absoluteString,
+                       "https://github.com/anjan-poudel/elderly-ai-assistant-models"
+                       + "/releases/download/v18/translate-en-ne-qwen17b-r2b-q8_0.gguf")
+
+        let alternate = try XCTUnwrap(
+            ModelCatalog.entry(for: ModelCatalog.nmtEnNeQwen17bR3Q5))
+        XCTAssertEqual(alternate.filename, "translate-en-ne-qwen17b-r3-q5_k_m.gguf")
+        XCTAssertEqual(alternate.sizeBytes, 1_257_879_264)
+        XCTAssertEqual(alternate.sha256,
+                       "c8557b9ab5704273079a32a502a5f282477755467d8b90719a8a989bb16dd5bf",
+                       "the round-3 Q5_K_M export's own sidecar digest")
+        XCTAssertEqual(alternate.downloadURL.absoluteString,
+                       "https://github.com/anjan-poudel/elderly-ai-assistant-models"
+                       + "/releases/download/v19/translate-en-ne-qwen17b-r3-q5_k_m.gguf",
+                       "the same release as the ship quant (optional upload)")
+        XCTAssertEqual(alternate.minDeviceRAMBytes, 3_500_000_000,
+                       "the floor qwen3_1_7BInstruct carries at this size class")
+    }
+
     /// The head's admission — which phones can run the model this list
     /// leads with — is a policy verdict, and it is pinned where the policy
-    /// lives: `ModelBudgetPolicyTests`
-    /// (`testTheTranslationBrainIsOverTheStandardClassAndAdmittedOnlyOnRoomy`).
-    /// The short version, because it is the reason this list has fallbacks
-    /// at all: the 1.83 GB file takes the 3B weight band's 800 MB overhead
-    /// (2.63 GB live), which is over the compact budget and over the
-    /// standard budget beside a warm STT — so on a 6 GB phone the warden
-    /// refuses the head's load and the strings go to the cloud tier.
+    /// lives: `ModelBudgetPolicyTests`. The short version: the round-3 Q4
+    /// takes the 1.7B weight band's 700 MB overhead (1.81 GB live), which is
+    /// inside the standard budget even beside a warm ANE STT — that is why
+    /// this quant could become the head at all, and the round-2b Q8 it
+    /// replaced (3B band, 2.63 GB live) was refused there.
     func testTheTranslationHeadsClassVerdictIsOutOfThisSuitesHands() {
-        let head = ModelCatalog.entry(for: ModelCatalog.nmtEnNeQwen17bR2bQ8)!
+        let head = ModelCatalog.entry(for: ModelCatalog.nmtEnNeQwen17bR3Q4)!
         XCTAssertEqual(ModelLifecycleInventory
             .footprint(for: .translateBrain, modelID: head.id).liveBytes,
-                       2_634_426_080,
+                       1_807_408_608,
                        "the arithmetic the policy verdicts are derived from")
-        XCTAssertFalse(ModelBudgetPolicy.standard
+        XCTAssertTrue(ModelBudgetPolicy.standard
             .availability(of: head, physicalMemoryBytes: 6_000_000_000)
             .isAvailable,
-                       "a 6 GB phone does not run the head — see "
-                       + "ModelBudgetPolicyTests for the reason")
+                       "a 6 GB phone runs the ship quant — the round-2b Q8 was "
+                       + "the artifact it could not run")
         XCTAssertTrue(ModelBudgetPolicy.roomy
             .availability(of: head, physicalMemoryBytes: 8_000_000_000)
             .isAvailable)
+        // The superseded Q8 keeps the verdict that made it the wrong ship
+        // quant for the standard class; it is still in the tier ladder for a
+        // device that installed it, and still refused on a 6 GB phone.
+        let superseded = ModelCatalog.entry(for: ModelCatalog.nmtEnNeQwen17bR2bQ8)!
+        XCTAssertEqual(ModelLifecycleInventory
+            .footprint(for: .translateBrain, modelID: superseded.id).liveBytes,
+                       2_634_426_080,
+                       "the arithmetic the policy verdicts are derived from")
+        XCTAssertFalse(ModelBudgetPolicy.standard
+            .availability(of: superseded, physicalMemoryBytes: 6_000_000_000)
+            .isAvailable,
+                       "a 6 GB phone does not run the superseded Q8 — see "
+                       + "ModelBudgetPolicyTests for the reason")
     }
 
     // MARK: The OCR-first rework (owner verdict, 2026-09-18)
