@@ -389,6 +389,17 @@ enum ReservationAbandonReason: String, Equatable {
     case memoryPressure
     /// The app went to the background with this load in flight.
     case backgrounded
+    /// [PRESSURE-SAFE LOAD] (2026-09-19) A warden asked for the position while
+    /// this load was in flight, and its owner answered `cannotReleaseNow` —
+    /// there was no handle to drop yet — so the load stood down rather than
+    /// re-filling, microseconds later, the row the warden had just cleared.
+    ///
+    /// Distinct from its two nearest neighbours on purpose, because a capture
+    /// reading the wrong one gets the opposite story: `cancelled` means nobody
+    /// is waiting any more, and `superseded` means the same caller re-issued.
+    /// This attempt was wanted and correctly admitted; the device took its
+    /// place in the queue away.
+    case preempted
 }
 
 /// The bounds. Every one of them is a default the owner may revise; none is

@@ -1300,4 +1300,74 @@ final class ModelLifecycleManagerTests: XCTestCase {
                        "a failed probe must not fabricate a footprint")
         XCTAssertEqual(manager.snapshot().physFootprintBytes, 0)
     }
+
+    // MARK: - 14. [PRESSURE-SAFE LOAD] the kernel's reading
+
+    /// The ledger is the only object in the app that hears the kernel's
+    /// memory-pressure level, and until this it only ever *acted* on it —
+    /// evicting, cancelling reservations — without saying what it heard. A
+    /// load gate that has to decide whether to allocate 1 GB cannot ask the
+    /// eviction history; it has to be able to ask the level (and how long ago
+    /// the last critical was), which is what this reading is.
+
+    func testThePressureReadingStartsUnknownAndRecordsWhatTheKernelSaid() {
+        XCTAssertEqual(manager.memoryPressureReading(), .unknown)
+
+        manager.handleMemoryPressure(level: .warning)
+        XCTAssertEqual(manager.memoryPressureReading().level, .warning)
+        XCTAssertNil(manager.memoryPressureReading().secondsSinceCritical,
+                     "a warning is not a critical: nothing has nearly killed us yet")
+
+        now = now.addingTimeInterval(12)
+        manager.handleMemoryPressure(level: .critical)
+        XCTAssertEqual(manager.memoryPressureReading(),
+                       MemoryPressureReading(level: .critical, secondsSinceCritical: 0))
+
+        now = now.addingTimeInterval(4)
+        XCTAssertEqual(manager.memoryPressureReading(),
+                       MemoryPressureReading(level: .critical, secondsSinceCritical: 4))
+
+        // The level eases; the fact that it was critical four seconds ago
+        // does not. Both are in the reading because they are different
+        // questions: "is the device asking now" and "was it nearly over".
+        manager.handleMemoryPressure(level: .normal)
+        let eased = manager.memoryPressureReading()
+        XCTAssertEqual(eased.level, .normal, "the level is what the kernel last said")
+        XCTAssertEqual(eased.secondsSinceCritical, 4,
+                       "the age of the last critical survives it — that is the reading a "
+                       + "load gate needs in the window after the kernel goes quiet")
+    }
+
+    /// The UIKit path records the level too. `didReceiveMemoryWarning` is
+    /// UIKit relaying the kernel's `.warning`, and a gate that only heard the
+    /// dispatch source would miss every warning on a device where that source
+    /// failed to install.
+    func testTheUIKitWarningPathRecordsTheLevelAsWell() {
+        manager.handleMemoryPressure()
+
+        XCTAssertEqual(manager.memoryPressureReading().level, .warning)
+        XCTAssertNil(manager.memoryPressureReading().secondsSinceCritical)
+    }
+
+    /// The level is recorded **before** the sweep runs, and that ordering is
+    /// the whole reason a load gate racing the sweep sees the new state rather
+    /// than the one before it. The seam is the eviction callback itself: it
+    /// runs outside the lock, mid-sweep, exactly as a concurrent gate would —
+    /// and a gate that asked here would otherwise be told `.normal` while the
+    /// device is being squeezed.
+    func testTheLevelIsRecordedBeforeAnythingIsEvicted() {
+        let owner = FakeOwner()
+        var readingDuringEviction: MemoryPressureReading?
+        owner.onUnload = { [weak manager] in
+            readingDuringEviction = manager?.memoryPressureReading()
+        }
+        XCTAssertTrue(load(.brain, modelID: brain17B, owner: owner).isAllowed)
+
+        manager.handleMemoryPressure(level: .critical)
+
+        XCTAssertEqual(owner.unloadCount, 1, "the sweep must actually have run")
+        XCTAssertEqual(readingDuringEviction,
+                       MemoryPressureReading(level: .critical, secondsSinceCritical: 0),
+                       "a load that asks mid-sweep must see the critical, not the level before it")
+    }
 }

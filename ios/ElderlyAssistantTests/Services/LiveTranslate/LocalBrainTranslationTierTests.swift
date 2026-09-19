@@ -1064,6 +1064,408 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         }
     }
 
+    // MARK: [PRESSURE-SAFE LOAD] — the kernel's own view of the device
+    //
+    // The 2026-09-19 device death, as four rules. The owner's phone was
+    // already starved when the session started — the system was jetsamming
+    // daemons minutes before it — and the tier loaded anyway, because the
+    // headroom gate it had is blind to the device: `os_proc_available_memory`
+    // is the APP's account under its own ceiling, and a phone whose system is
+    // out of free pages can still read as roomy by it. A 1.03 GB Metal
+    // offloaded load began, memory-pressure events fired, and the process was
+    // gone about five seconds later.
+    //
+    // The rule these tests pin is the second opinion, and it is the kernel's.
+
+    /// A clock this file owns, so "critical fired five seconds ago" is an
+    /// assertion rather than a sleep. The ledger takes it as its `clock:`.
+    private final class PressureClock {
+        var now = Date(timeIntervalSince1970: 1_700_000_000)
+        func advance(_ seconds: TimeInterval) { now = now.addingTimeInterval(seconds) }
+    }
+
+    /// A ledger on the scripted probe and a clock this file drives — the same
+    /// shape `ModelLifecycleManagerTests` uses, so the pressure arithmetic is
+    /// a fact about this file and not about the machine running it. The budget
+    /// is pinned for the same reason.
+    private func makePressureLedger(_ clock: PressureClock) -> ModelLifecycleManager {
+        ModelLifecycleManager(probe: ScriptedProbe(),
+                              clock: { clock.now },
+                              budgetOverrideBytes: ModelLifecycleBudget.standardModelsBudgetBytes)
+    }
+
+    /// A generator on the **gated** path. The checkpoints the load-in-flight
+    /// tests are about live in the reserve's neighbourhood, and the testing
+    /// bypass is precisely what removes the reserve — so these tests are about
+    /// the shipped arithmetic-off-but-device-on configuration only in the
+    /// sense that they run the warden's own machinery.
+    private func makeGenerator(on ledger: ModelLifecycleManager) -> LlamaBrainTextGenerator {
+        var config = LiveTranslateConfig.default
+        config.wardenBypassForTesting = false
+        return LlamaBrainTextGenerator(config: config, lifecycle: ledger)
+    }
+
+    /// A URL that names a real catalog artifact — which is what the load path
+    /// resolves the model (and therefore the footprint the reservation is made
+    /// against) from: `loadHandle` maps a URL back to a ModelID by matching the
+    /// last path component against `ModelCatalog.all`. Nothing exists at the
+    /// path, which is the point: the tests below are about the decisions taken
+    /// before any file is opened.
+    private func catalogURL(_ id: ModelID) throws -> URL {
+        let filename = try XCTUnwrap(ModelCatalog.all.first { $0.id == id }?.filename,
+                                     "\(id) must be a catalog artifact")
+        return URL(fileURLWithPath: "/tmp/\(filename)")
+    }
+
+    /// A sink for the ledger's event stream, so a test can make a claim about
+    /// what the ledger was *told* and not only about what the load returned.
+    /// The callbacks run synchronously on the calling task.
+    private final class EventSink {
+        var events: [ModelLifecycleEvent] = []
+
+        func abandonReasons(for slot: ModelSlot) -> [ReservationAbandonReason] {
+            events.compactMap { event in
+                guard case .reservationAbandoned(slot: let reported, reason: let reason) = event,
+                      reported == slot else { return nil }
+                return reason
+            }
+        }
+    }
+
+    /// The rule the owner's phone died for, and the one the testing bypass
+    /// must **not** be able to turn off.
+    ///
+    /// The probe is deliberately generous — four times the brain's hard
+    /// footprint — because the refusal has to come from the kernel's signal
+    /// and not from the arithmetic. A test that let the headroom rule fire
+    /// first would pass on the exact bug it exists to catch: the arithmetic is
+    /// the half that was already happy on the device that died.
+    func testTheTestingBypassDoesNotSkipThePressureRule() async throws {
+        let clock = PressureClock()
+        let ledger = makePressureLedger(clock)
+        let probe = ScriptedProbe(headroom: 32_000_000_000)
+        ledger.handleMemoryPressure(level: .critical)
+
+        try await withTier(memory: probe, ledger: ledger) { tier, generator, bus in
+            XCTAssertTrue(LiveTranslateConfig.default.wardenBypassForTesting,
+                          "the bypass is the shipped default — the state this rule has to hold in")
+            let outcome = await tier.translate([self.brainText])
+
+            XCTAssertTrue(generator.prompts.isEmpty,
+                          "no generation: the load was never attempted")
+            XCTAssertEqual(outcome.deferral, .memoryPressure(level: .critical))
+            XCTAssertEqual(probe.headroomReads, 0,
+                           "the kernel's reading is asked before the arithmetic — the stronger "
+                           + "signal decides, and the arithmetic is not even consulted")
+            let event = batchEvent(bus)
+            XCTAssertEqual(event?.metadata["reason"], "memory_pressure",
+                           "the event says why the brain was never asked")
+            XCTAssertEqual(event?.metadata["resolvedCount"], "0")
+            XCTAssertEqual(event?.metadata["unresolvedCount"], "1")
+            XCTAssertEqual(event?.outcome, "degraded")
+            XCTAssertTrue(bus.events(named: "brain_translation_unavailable").isEmpty,
+                          "nothing was unavailable — the device declined to be loaded")
+        }
+    }
+
+    /// The UIKit path — the level-2 warning the app has always handled — is
+    /// the same rule. A gate that only listened to the dispatch source would
+    /// miss every warning on a device where that source failed to install.
+    func testAWarningPressureLevelDefersTheLoadAsWell() async throws {
+        let clock = PressureClock()
+        let ledger = makePressureLedger(clock)
+        ledger.handleMemoryPressure()
+
+        try await withTier(ledger: ledger) { tier, generator, bus in
+            let outcome = await tier.translate([self.brainText])
+
+            XCTAssertTrue(generator.prompts.isEmpty)
+            XCTAssertEqual(outcome.deferral, .memoryPressure(level: .warning))
+            XCTAssertEqual(batchEvent(bus)?.metadata["reason"], "memory_pressure")
+        }
+    }
+
+    /// A `.critical` is an *instant*, not a state, and the window is what
+    /// carries it past the moment: the kernel says nothing more until it says
+    /// something, so the quiet seconds afterwards are exactly when "we were
+    /// nearly killed" is still the most honest thing known about the device.
+    /// The level having eased back to `.normal` does not reopen the gate.
+    func testARecentCriticalPressureDefersAfterTheLevelHasEased() async throws {
+        let clock = PressureClock()
+        let ledger = makePressureLedger(clock)
+        ledger.handleMemoryPressure(level: .critical)
+        ledger.handleMemoryPressure(level: .normal)
+        clock.advance(5)
+
+        try await withTier(ledger: ledger) { tier, generator, bus in
+            let outcome = await tier.translate([self.brainText])
+
+            XCTAssertTrue(generator.prompts.isEmpty,
+                          "the level is normal and the device is still the one that was about to "
+                          + "be killed four seconds ago")
+            XCTAssertEqual(outcome.deferral,
+                           .recentCriticalPressure(secondsSince: 5, windowSeconds: 30))
+            XCTAssertEqual(batchEvent(bus)?.metadata["reason"], "recent_critical_pressure")
+        }
+    }
+
+    /// The window is a window and not a latch. Without this the rule would be
+    /// a device that never loads again after one bad minute, which is a worse
+    /// product than the crash it prevents — the tier would defer every batch
+    /// for the rest of the session.
+    func testACriticalPressureOlderThanTheWindowNoLongerDefersTheLoad() async throws {
+        let clock = PressureClock()
+        let ledger = makePressureLedger(clock)
+        ledger.handleMemoryPressure(level: .critical)
+        ledger.handleMemoryPressure(level: .normal)
+        clock.advance(LiveTranslateConfig.default.brainTranslationCriticalPressureWindowSeconds + 1)
+
+        try await withTier(ledger: ledger) { tier, generator, _ in
+            generator.output = answer([self.brainAnswer])
+            let outcome = await tier.translate([self.brainText])
+
+            XCTAssertEqual(generator.prompts.count, 1,
+                           "the window has passed: the load is allowed again")
+            XCTAssertNil(outcome.deferral)
+        }
+    }
+
+    /// The other side of the same gate, so it is a gate and not a refusal:
+    /// `.normal` is what the source reports when it is first activated, and it
+    /// is the shipped state on a healthy device.
+    func testANormalPressureReadingLetsTheLoadProceed() async throws {
+        let clock = PressureClock()
+        let ledger = makePressureLedger(clock)
+        ledger.handleMemoryPressure(level: .normal)
+
+        try await withTier(ledger: ledger) { tier, generator, _ in
+            generator.output = answer([self.brainAnswer])
+            let outcome = await tier.translate([self.brainText])
+
+            XCTAssertEqual(generator.prompts.count, 1)
+            XCTAssertEqual(outcome.translations, [self.brainText: self.brainAnswer])
+            XCTAssertNil(outcome.deferral)
+        }
+    }
+
+    /// The pressure rule is a gate on a **load**, and this is where that
+    /// boundary is drawn: a handle that is already open has already paid, so
+    /// refusing the batch that reuses it would cost an answer and return no
+    /// byte.
+    ///
+    /// Pinned rather than left implicit because it is a real trade — decoding
+    /// on a resident handle still touches the mmap'd weights, so it is not
+    /// free — and the decision is that a multi-second decode of bytes already
+    /// in memory is not the spike the load was. It is also very nearly
+    /// unreachable in the field: a `.critical` evicts every evictable
+    /// resident, so a handle still resident through one is one the warden
+    /// could not take.
+    func testAResidentHandleIsNotRefusedForPressure() async throws {
+        let clock = PressureClock()
+        let ledger = makePressureLedger(clock)
+        ledger.handleMemoryPressure(level: .critical)
+
+        try await withTier(memory: ScriptedProbe(headroom: 0), ledger: ledger) { tier, generator, _ in
+            generator.holdingHandle = true
+            generator.output = answer([self.brainAnswer])
+            let outcome = await tier.translate([self.brainText])
+
+            XCTAssertEqual(generator.prompts.count, 1,
+                           "the bytes are spent: this batch pays no load")
+            XCTAssertEqual(outcome.translations, [self.brainText: self.brainAnswer])
+        }
+    }
+
+    /// The pressure rule with a `.warning` and no headroom to speak of is
+    /// still the pressure rule: the kernel's level is the first of the two
+    /// that refuses, so the numbers a capture sees are the level's and not the
+    /// arithmetic's.
+    func testThePressureRuleOutranksTheHeadroomArithmetic() async throws {
+        let clock = PressureClock()
+        let ledger = makePressureLedger(clock)
+        let footprint = ModelLifecycleInventory.footprint(for: .brain, modelID: Self.modelID)
+        let probe = ScriptedProbe(headroom: footprint.hardBytes / 2)
+        ledger.handleMemoryPressure()
+
+        try await withTier(memory: probe, ledger: ledger) { tier, _, _ in
+            let outcome = await tier.translate([self.brainText])
+
+            XCTAssertEqual(outcome.deferral, .memoryPressure(level: .warning),
+                           "the kernel's level is the stronger signal, so it is the reason recorded")
+        }
+    }
+
+    // MARK: [PRESSURE-SAFE LOAD] — the load in flight
+    //
+    // The half of the fix that is about the *window* rather than about the
+    // gate. `LLM.init` is synchronous and cannot be interrupted; the reserve
+    // before it evicts, and evictions run release closures (`llama_model_free`
+    // is not instant); and the slot holds nothing throughout, so a warden
+    // asking during any of it used to be told `.notHolding` — "nothing was
+    // there to drop". It was true and it was the defect: the warden believed
+    // the bytes were back, and the load filled the row it had just cleared.
+
+    /// The distinct third answer, and the abandon signal that goes with it.
+    func testASlotWithALoadInFlightRefusesTheWardenAndRecordsTheAsk() {
+        let box = TranslateBrainHandleSlot()
+
+        box.beginLoad()
+        XCTAssertTrue(box.isLoading)
+        XCTAssertFalse(box.isHoldingHandle,
+                       "…and it still holds nothing: the handle does not exist until the load returns")
+        XCTAssertEqual(box.releaseForWarden(), .refused(.cannotReleaseNow),
+                       "a load is in flight — not 'nothing to drop', which is what shipped")
+        XCTAssertTrue(box.consumeLoadAbandonRequest(),
+                      "the ask is what stands the load down; without it the warden acks a drop "
+                      + "the load re-fills microseconds later")
+        XCTAssertFalse(box.consumeLoadAbandonRequest(),
+                       "taken once per ask, or a warden's ask outlives the load it was about")
+
+        box.endLoad()
+        XCTAssertFalse(box.isLoading)
+        XCTAssertEqual(box.releaseForWarden(), .notHolding,
+                       "with the load over and nothing ever stored, an empty slot is honestly empty")
+    }
+
+    /// The fallback half of the same signal: when the release contract permits
+    /// forcing, the warden's registered closure runs `drop()` directly, and a
+    /// drop during a load is the position being taken just as surely as an
+    /// ask is.
+    func testADropDuringALoadAlsoStandsItDown() {
+        let box = TranslateBrainHandleSlot()
+
+        box.beginLoad()
+        box.drop()
+        XCTAssertTrue(box.consumeLoadAbandonRequest(),
+                      "the force fallback is the same message: this position is no longer yours")
+        box.endLoad()
+
+        // …and a drop while nothing is loading is just the idle release, which
+        // must not leave a signal behind for the next load to find.
+        box.drop()
+        XCTAssertFalse(box.consumeLoadAbandonRequest())
+    }
+
+    /// A load that opens while an older ask is still outstanding does not
+    /// inherit it: the flag is cleared on the way in, so a warden that has
+    /// stopped asking cannot stand down a load it was never asking about.
+    func testAnAbandonAskDoesNotSurviveIntoTheNextLoad() {
+        let box = TranslateBrainHandleSlot()
+
+        box.beginLoad()
+        XCTAssertEqual(box.releaseForWarden(), .refused(.cannotReleaseNow))
+        box.endLoad()
+
+        box.beginLoad()
+        XCTAssertFalse(box.consumeLoadAbandonRequest(),
+                       "the ask was about the load that is over, not the one starting now")
+        box.endLoad()
+
+        XCTAssertEqual(box.releaseForWarden(), .notHolding)
+        XCTAssertFalse(box.isLoading)
+    }
+
+    /// **The window the reserve opens.** The warden is asked first and its
+    /// evictions are real unloads, so seconds can pass between the permission
+    /// and the allocation; a `.critical` landing anywhere in that interval is
+    /// the device withdrawing a permission the warden had already granted. The
+    /// load must stand down, and it must say so in its own words rather than
+    /// as a load failure — nothing was wrong with the artifact.
+    ///
+    /// The seam is the ledger's own event stream: `reserved` is emitted the
+    /// instant the permit is granted, so firing the level from its handler
+    /// puts the event *between* the reserve and the construction, which is
+    /// precisely where the check has to be.
+    func testAPressureFiredBetweenTheReserveAndTheConstructionAbandonsTheLoad() async throws {
+        let clock = PressureClock()
+        let ledger = makePressureLedger(clock)
+        ledger.onEvent = { event in
+            if case .reserved = event { ledger.handleMemoryPressure(level: .critical) }
+        }
+
+        // The gated path, because that is the one with a reserve in it to be
+        // interrupted — and a URL that names a real catalogue artifact, so the
+        // footprint the reservation is made against is the shipped one.
+        let generator = makeGenerator(on: ledger)
+        let modelURL = try catalogURL(Self.modelID)
+
+        do {
+            _ = try await generator.generate(prompt: "1. \(brainText)",
+                                             jsonSchema: LocalBrainTranslationTier.jsonSchema,
+                                             modelURL: modelURL,
+                                             timeout: 5)
+            XCTFail("the load must not have been attempted: the device withdrew the permission")
+        } catch let failure as BrainGenerationFailure {
+            XCTAssertEqual(failure, .loadAbandoned(.memoryPressure(level: .critical)),
+                           "an abandoned load is its own fact, never a load failure")
+        }
+    }
+
+    /// …and before the warden was asked at all, which is the other half of the
+    /// same rule: a device that is already critical never opens a reservation,
+    /// so there is no permit to withdraw and no eviction to undo. The load
+    /// path is reached here directly, so the only checkpoint that can catch it
+    /// is the one before the reserve.
+    func testAPressureAlreadyCriticalBeforeTheLoadAbandonsItBeforeTheWardenIsAsked() async throws {
+        let clock = PressureClock()
+        let ledger = makePressureLedger(clock)
+        ledger.handleMemoryPressure(level: .critical)
+
+        let generator = makeGenerator(on: ledger)
+        let modelURL = try catalogURL(Self.modelID)
+
+        do {
+            _ = try await generator.generate(prompt: "1. \(brainText)",
+                                             jsonSchema: LocalBrainTranslationTier.jsonSchema,
+                                             modelURL: modelURL,
+                                             timeout: 5)
+            XCTFail("the load must not have been attempted at all")
+        } catch let failure as BrainGenerationFailure {
+            XCTAssertEqual(failure, .loadAbandoned(.memoryPressure(level: .critical)))
+        }
+        XCTAssertTrue(ledger.inFlightReservations().isEmpty,
+                      "checkpoint 1 runs before the reserve: no permit was ever taken")
+    }
+
+    /// The same window, ended the other way. A warden that wants *this*
+    /// position back while the load is filling it must be able to stand the
+    /// load down — and it reaches the slot through the one call the protocol
+    /// has, `releaseForWarden()`. That call is made here directly rather than
+    /// through an eviction because a slot with a load in flight holds nothing
+    /// and is not resident: no sweep will choose it, which is exactly why the
+    /// old `.notHolding` answer went unnoticed.
+    func testAWardenAskBetweenTheReserveAndTheConstructionAbandonsTheLoad() async throws {
+        let clock = PressureClock()
+        let ledger = makePressureLedger(clock)
+        let sink = EventSink()
+
+        let generator = makeGenerator(on: ledger)
+        ledger.onEvent = { event in
+            sink.events.append(event)
+            // The instant the permit is granted — and the slot registered,
+            // which `loadHandle` does before it asks — the warden asks for the
+            // position back.
+            if case .reserved = event { _ = generator.slot.releaseForWarden() }
+        }
+        let modelURL = try catalogURL(Self.modelID)
+
+        do {
+            _ = try await generator.generate(prompt: "1. \(brainText)",
+                                             jsonSchema: LocalBrainTranslationTier.jsonSchema,
+                                             modelURL: modelURL,
+                                             timeout: 5)
+            XCTFail("the position was taken: the load must stand down, not fill it anyway")
+        } catch let failure as BrainGenerationFailure {
+            XCTAssertEqual(failure, .loadAbandoned(.releaseRequestedDuringLoad),
+                           "the ask is the reason, not the pressure the ask is not")
+        }
+
+        // The permit went back with the reason the ask implies. Without the
+        // slot's in-flight answer the warden would have been told `.notHolding`
+        // and the load would have filled the row it had just cleared.
+        XCTAssertEqual(sink.abandonReasons(for: .translateBrain), [.preempted])
+    }
+
     /// `.translateBrain` does not admit itself over budget alone.
     ///
     /// Before Step 2 the tier reserved as a PEER on `.brain`, so an artifact

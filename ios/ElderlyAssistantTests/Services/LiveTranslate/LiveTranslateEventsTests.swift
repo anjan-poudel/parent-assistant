@@ -37,6 +37,11 @@ final class LiveTranslateEventsTests: XCTestCase {
         events.translationBatchRequested(stringCount: 5, batchIndex: 0, batchCount: 1)
         events.translationBatchResolved(resolvedCount: 4, unresolvedCount: 1, durationMs: 812)
         events.brainTranslationBatch(resolvedCount: 3, unresolvedCount: 1, durationMs: 4200)
+        // …and once with the reason the tier declined a batch, so the sparse
+        // `reason` key is produced by an emitter and the union below still
+        // equals the pinned set ([PRESSURE-SAFE LOAD], 2026-09-19).
+        events.brainTranslationBatch(resolvedCount: 0, unresolvedCount: 2, durationMs: 0,
+                                     deferral: .memoryPressure)
         events.brainTranslationUnavailable(.modelNotInstalled, stage: .availability)
         events.translationDegraded(reason: .noNetwork, regionCount: 1)
         events.translationResolved(tier: .cloud, origin: .fresh, count: 2)
@@ -72,16 +77,70 @@ final class LiveTranslateEventsTests: XCTestCase {
             XCTAssertTrue(bus.events.contains { $0.metadata[key] != nil },
                           "no emitter produced the declared key \(key)")
         }
-        // …and every declared key survived with a value.
+        // …and every key an instance carried survived with a value.
+        //
+        // The subset half is the sanitising half: a declared key the sanitiser
+        // dropped would be missing from the event that produced it.
+        //
+        // The strict half — every instance carries *every* declared key — held
+        // for every event until `brain_translation_batch.reason`, the file's
+        // first declared-but-conditional key: a batch that ran has no reason
+        // to give, so the key is present exactly when the tier declined (see
+        // `LiveTranslateBrainDeferralReason` and the sparse-key test below).
+        // What survives the sparse key is the guarantee the catalogue actually
+        // makes — an event carries no undeclared key, no declared key is lost
+        // in transit, and every declared key is produced by *some* instance
+        // (the loop above) — and the keys that may be absent are the ones the
+        // schema names as such.
         for event in bus.events {
             let declared = LiveTranslateEventCatalogue.entries[event.eventType]?.metadataKeys ?? []
-            for key in declared {
+            XCTAssertTrue(Set(event.metadata.keys).isSubset(of: declared),
+                          "\(event.eventType) carries an undeclared key: \(event.metadata.keys)")
+            let optional = LiveTranslateEventCatalogue.optionalMetadataKeys[event.eventType] ?? []
+            for key in declared.subtracting(optional) {
                 XCTAssertNotNil(event.metadata[key],
                                 "\(event.eventType): key \(key) was dropped by the sanitiser")
-                XCTAssertNotEqual(event.metadata[key], "[redacted]",
+            }
+            for (key, value) in event.metadata {
+                XCTAssertNotEqual(value, "[redacted]",
                                   "\(event.eventType): value of \(key) was redacted")
             }
         }
+    }
+
+    /// The declared-but-conditional keys are a deliberate decision, not a
+    /// loophole: each one must be a real key of a real event (or the mapping
+    /// has gone stale and silently relaxed the completeness loop above).
+    func testEveryOptionalMetadataKeyIsDeclaredOnItsEvent() {
+        for (eventType, keys) in LiveTranslateEventCatalogue.optionalMetadataKeys {
+            guard let entry = LiveTranslateEventCatalogue.entries[eventType] else {
+                XCTFail("\(eventType) has optional keys but is not a catalogued event")
+                continue
+            }
+            XCTAssertTrue(keys.isSubset(of: entry.metadataKeys),
+                          "\(eventType): optional keys \(keys) are not declared on the entry")
+        }
+    }
+
+    /// `reason` on the batch event is sparse in both directions, and this is
+    /// where that is pinned: the completeness loop above can only say that a
+    /// declared key is produced somewhere, not that an emitter leaves it out
+    /// when there is nothing to say.
+    func testTheBatchReasonKeyAppearsExactlyWhenTheTierDeclined() {
+        let bus = LiveTranslateSanitisingBus()
+        let events = LiveTranslateEvents(bus: bus)
+
+        events.brainTranslationBatch(resolvedCount: 3, unresolvedCount: 0, durationMs: 120)
+        events.brainTranslationBatch(resolvedCount: 0, unresolvedCount: 2, durationMs: 0,
+                                     deferral: .memoryPressure)
+
+        let batch = bus.events(named: "brain_translation_batch")
+        XCTAssertEqual(batch.count, 2)
+        XCTAssertNil(batch.first?.metadata[LiveTranslateEvents.MetadataKey.reason.rawValue],
+                     "a batch that ran has no reason to give, and no placeholder either")
+        XCTAssertEqual(batch.last?.metadata[LiveTranslateEvents.MetadataKey.reason.rawValue],
+                       "memory_pressure",
+                       "a batch the tier declined says why, in the tier's own closed token")
     }
 
     func testObservedMetadataKeysMatchThePinnedCatalogueExactly() {
@@ -148,6 +207,11 @@ final class LiveTranslateEventsTests: XCTestCase {
             // …and the stage that says where the attempt stopped — the second
             // closed token on the same event (2026-09-17).
             .union(Set(BrainFailureStage.allCases.map(\.rawValue)))
+            // [PRESSURE-SAFE LOAD] …and why the tier declined to attempt a
+            // batch at all (`brain_translation_batch.reason`, 2026-09-19):
+            // another owner's brain, the app's own headroom, the kernel's
+            // pressure level, or a warden's ask during the load.
+            .union(Set(LiveTranslateBrainDeferralReason.allCases.map(\.rawValue)))
             .union([
                 "no_capture_device", "configuration_failed", "resource_in_use",
                 "backgrounded", "system_interruption", "thermal",
