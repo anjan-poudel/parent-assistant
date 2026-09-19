@@ -276,9 +276,8 @@ final class PointAskTargetResolverTests: XCTestCase {
                                          xMax: 0.85, yMax: 0.75),
             label: "remote", confidence: 0.94)
 
-        // A tap the person box contains but the remote box does not:
-        // the filtered selection must take the NEAREST selectable box
-        // (the remote), never the full-frame person.
+        // A tap both boxes contain: the selection is the containing
+        // selectable box (the remote), never the full-frame person.
         let selected = PointAskTargetResolver.yoloBox(
             [fullFramePerson, remote], containing: CGPoint(x: 0.5, y: 0.5))
         XCTAssertEqual(selected?.label, "remote")
@@ -492,6 +491,15 @@ final class PointAskTargetResolverTests: XCTestCase {
                        box)
         XCTAssertNil(PointAskTargetResolver.yoloBox([], containing: .zero),
                      "an empty scene is the ladder's cue, not a guess")
+
+        // [YOLO-ABSTAIN] (2026-09-20) The removed nearest-center fallback,
+        // as the owner's green-tub report pins it: a detection the finger
+        // is OUTSIDE of is not the pointed-at object, however near its
+        // center is. The ladder continues to mask/saliency/pad at the tap.
+        XCTAssertNil(PointAskTargetResolver.yoloBox(
+            [box], containing: CGPoint(x: 0.05, y: 0.05)),
+            "no box contains the tap: the detector abstains instead of "
+            + "pointing at the nearest thing it can see")
     }
 
     // MARK: - Scenario: geometry helpers
