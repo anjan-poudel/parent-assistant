@@ -1248,8 +1248,6 @@ struct LiveTranslateConfig: Equatable {
     /// the tier or the view knows how long a notice lasts.
     var wardenNoticeDismissSeconds: TimeInterval = 4.0
 
-    // MARK: Tier 2
-=======
     // MARK: Tier 2 — the master switch (owner directive, 2026-09-19)
 
     /// Whether the Gemini (cloud) tier may run **at all**, before anything
@@ -1291,7 +1289,6 @@ struct LiveTranslateConfig: Equatable {
     /// feature that quietly bills a stranger's key because a sign had one
     /// word the dictionary did not.
     var geminiCloudEnabledDefault: Bool = false
->>>>>>> origin/master
 
     /// Base timeout for one tier-2 request. **Derived, never stored (CL-8):**
     /// the shipped `GeminiClient.Config.default.timeoutSeconds` (25 s, sized
