@@ -69,12 +69,6 @@
 		<string>instagram</string>
 		<string>maps</string>
 		<string>message</string>
-		<!-- [PHONE-DEEPLINKS] Apple's Phone-app surfaces; the tile opens
-		     recents, the siblings are reserved for per-surface tiles. -->
-		<string>mobilephone-contacts</string>
-		<string>mobilephone-favorites</string>
-		<string>mobilephone-recents</string>
-		<string>mobilephone-voicemail</string>
 		<string>photos-redirect</string>
 		<string>sms</string>
 		<string>x-apple-health</string>
