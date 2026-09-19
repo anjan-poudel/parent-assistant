@@ -276,9 +276,8 @@ final class PointAskTargetResolverTests: XCTestCase {
                                          xMax: 0.85, yMax: 0.75),
             label: "remote", confidence: 0.94)
 
-        // A tap the person box contains but the remote box does not:
-        // the filtered selection must take the NEAREST selectable box
-        // (the remote), never the full-frame person.
+        // A tap both boxes contain: the selection is the containing
+        // selectable box (the remote), never the full-frame person.
         let selected = PointAskTargetResolver.yoloBox(
             [fullFramePerson, remote], containing: CGPoint(x: 0.5, y: 0.5))
         XCTAssertEqual(selected?.label, "remote")
@@ -407,10 +406,13 @@ final class PointAskTargetResolverTests: XCTestCase {
         XCTAssertEqual(target.detectedLabel, "bottle")
     }
 
-    func testWhenNoYOLOBoxContainsTheTapTheHighestConfidenceBoxWins() {
-        // A tap that misses every box (the cap's edge): the scene's most
-        // confident object still anchors — a real object box, any size,
-        // never a pad.
+    /// [YOLO-ABSTAIN] (2026-09-20) A tap that misses every box is the
+    /// detector abstaining, not the scene's most confident object winning:
+    /// the elder pointed at something the detector cannot see (the owner's
+    /// green tub — not a COCO class), and the nearest or strongest
+    /// *detectable* thing is not what the finger is on. The ladder
+    /// continues to the pad at the tap.
+    func testWhenNoYOLOBoxContainsTheTapTheDetectorAbstains() {
         let strongest = YOLODetection(
             normalizedBox: NormalizedBox(xMin: 0.3, yMin: 0.3, xMax: 0.7, yMax: 0.7),
             label: "bottle", confidence: 0.9)
@@ -423,8 +425,9 @@ final class PointAskTargetResolverTests: XCTestCase {
 
         let target = resolver.resolve(tap: CGPoint(x: 0.95, y: 0.95), in: frame())
 
-        XCTAssertEqual(target.source, .yolo)
-        XCTAssertEqual(target.normalizedBox, strongest.normalizedBox)
+        XCTAssertEqual(target.source, .pad,
+                       "no box contains the tap: the detector abstains and the "
+                       + "anchor is the pad at the finger, not the strongest box elsewhere")
     }
 
     func testAnEmptyYOLOSceneFallsToTheMaskAndSaliencyLadder() {
@@ -492,6 +495,15 @@ final class PointAskTargetResolverTests: XCTestCase {
                        box)
         XCTAssertNil(PointAskTargetResolver.yoloBox([], containing: .zero),
                      "an empty scene is the ladder's cue, not a guess")
+
+        // [YOLO-ABSTAIN] (2026-09-20) The removed nearest-center fallback,
+        // as the owner's green-tub report pins it: a detection the finger
+        // is OUTSIDE of is not the pointed-at object, however near its
+        // center is. The ladder continues to mask/saliency/pad at the tap.
+        XCTAssertNil(PointAskTargetResolver.yoloBox(
+            [box], containing: CGPoint(x: 0.05, y: 0.05)),
+            "no box contains the tap: the detector abstains instead of "
+            + "pointing at the nearest thing it can see")
     }
 
     // MARK: - Scenario: geometry helpers

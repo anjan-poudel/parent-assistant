@@ -277,13 +277,19 @@ final class PointAskTargetResolver {
     }
 
     /// The pure selection: the highest-confidence detection whose box
-    /// CONTAINS the tap wins; when no box contains the tap, the
-    /// detection whose box CENTER is nearest the tap — the object under
-    /// the finger — instead of the global confidence maximum (which
-    /// grabbed the most confident thing anywhere in the scene, e.g. the
-    /// elder's own hand, and was the "wrong object" device report).
-    /// Nil only for an empty scene, which is the ladder's cue to
-    /// continue.
+    /// CONTAINS the tap wins, and that is the ONLY way a detection wins.
+    /// Nil otherwise — and nil is the ladder's cue to continue, so a tap
+    /// on something the detector cannot see (its class is not in the
+    /// COCO-80 vocabulary, or no detection contains the finger) anchors
+    /// through the mask/saliency/pad paths instead of a wrong object.
+    ///
+    /// The nearest-center fallback was removed (2026-09-20) because the
+    /// owner's device report showed exactly its failure mode: a green
+    /// Vaseline tub — not a COCO class, visually unmissable — anchored a
+    /// box over the nearest *detectable* thing beside it, so the pointer
+    /// pointed at the wrong object. The detector abstaining is the
+    /// honest answer; "nearest thing it can see" is not the thing the
+    /// elder pointed at.
     ///
     /// [FULL-FRAME-FILTER] (2026-09-20) A detection whose box covers
     /// more than `maxSelectableFrameCoverage` of the frame is never
@@ -297,14 +303,9 @@ final class PointAskTargetResolver {
             Self.frameCoverage($0.normalizedBox) <= Self.maxSelectableFrameCoverage
         }
         guard !selectable.isEmpty else { return nil }
-        let containing = selectable
+        return selectable
             .filter { $0.normalizedBox.contains(point) }
             .max { $0.confidence < $1.confidence }
-        if let containing { return containing }
-        return selectable.min { lhs, rhs in
-            Self.centerDistance(lhs.normalizedBox, to: point)
-                < Self.centerDistance(rhs.normalizedBox, to: point)
-        }
     }
 
     /// A normalized box's share of the frame's area.
@@ -315,16 +316,6 @@ final class PointAskTargetResolver {
     /// Boxes covering more of the frame than this are never selected as
     /// the elder's pointer target (logged, not pointed at).
     static let maxSelectableFrameCoverage: Double = 0.85
-
-    /// The box center's distance to the tap — the "what is under the
-    /// finger" metric for the no-containment fallback.
-    static func centerDistance(_ box: NormalizedBox, to point: CGPoint) -> Double {
-        let centerX = (box.xMin + box.xMax) / 2
-        let centerY = (box.yMin + box.yMax) / 2
-        let dx = centerX - Double(point.x)
-        let dy = centerY - Double(point.y)
-        return (dx * dx + dy * dy).squareRoot()
-    }
 
     // MARK: The pass and the cache
 

@@ -33,9 +33,11 @@ final class LocalBrainTranslationTierTests: XCTestCase {
     /// Every answer is a Nepali *sentence* rather than a bare noun, and since
     /// 2026-09-18 that is load-bearing rather than stylistic: the tier's
     /// language rule (`NepaliOutputGate`) settles a region only on an answer
-    /// with Nepali evidence, and a lone shared noun like "फार्मेसी" is spelled
-    /// identically in Hindi. The fixtures moved to what the gate can vouch for;
-    /// the cost of that rule is measured in `NepaliOutputGateTests`.
+    /// with Nepali evidence — with the short-answer exemption (2026-09-20)
+    /// now accepting markerless answers of two words or fewer, which is why
+    /// the fixtures stay sentences: they are what the gate can still be
+    /// asked to vouch for. The cost of the long-answer rule is measured in
+    /// `NepaliOutputGateTests`.
     private let brainAnswer = "यो औषधि पसल हो"
     private let secondBrainAnswer = "खुला छ"
     private let thirdBrainAnswer = "भित्र पस्न मनाही छ"
@@ -616,18 +618,30 @@ final class LocalBrainTranslationTierTests: XCTestCase {
                                                          config: config))
     }
 
-    /// The stated cost of the rule, at the tier's own gate: a correct
-    /// translation that is a single shared noun is *unresolved*, not wrong.
-    /// The region keeps its original text and the string goes to the next tier
-    /// — which is what "conservative" means here, and the price is a cloud call
-    /// (or, offline, the original text with the offline badge) for signs whose
-    /// translation is one word long.
-    func testAMarkerFreeAnswerIsLeftForTheNextTierRatherThanSettled() {
-        XCTAssertNil(LocalBrainTranslationTier.accepts("फार्मेसी",
-                                                      for: brainText,
-                                                      targetLanguage: .nepali,
-                                                      config: config),
-                     "a lone shared noun is not established as Nepali — it must not settle the sign")
+    /// [SHORT-ANSWER-EXEMPTION] (2026-09-20) The trade-off flipped: a
+    /// correct translation that is a single shared noun now SETTLES. The
+    /// old conservative rule left it for the next tier, and the owner's
+    /// 02:35 capture showed what that bought the elder: every real short
+    /// answer refused, and nothing ever shown. The bounded risk is stated
+    /// in `NepaliOutputGate`.
+    func testAShortMarkerFreeAnswerNowSettles() {
+        XCTAssertEqual(LocalBrainTranslationTier.accepts("फार्मेसी",
+                                                         for: brainText,
+                                                         targetLanguage: .nepali,
+                                                         config: config),
+                       "फार्मेसी",
+                       "a lone shared noun settles the sign: the short-answer exemption")
+    }
+
+    /// The exemption's other half: a markerless answer long enough to carry
+    /// grammar but not carrying it is still refused — a sentence has room
+    /// for evidence, and its absence still means what it always did.
+    func testALongMarkerFreeAnswerIsStillLeftForTheNextTier() {
+        XCTAssertNil(LocalBrainTranslationTier.accepts("पाणी जवळ विजेची उपकरणे ठेवू नका।",
+                                                       for: brainText,
+                                                       targetLanguage: .nepali,
+                                                       config: config),
+                     "a long markerless answer is not established as Nepali — it must not settle the sign")
     }
 
     /// A source with no letters has no script to be translated into, so the
@@ -712,11 +726,13 @@ final class LocalBrainTranslationTierTests: XCTestCase {
 
     /// The end-to-end histogram: an answer that is Devanagari, is not the
     /// source, and carries no Nepali-exclusive evidence — the rejection the
-    /// owner's short sign text is most exposed to, and the one that looks
-    /// exactly like success in every count the batch event used to carry.
+    /// owner's short sign text was most exposed to before the short-answer
+    /// exemption, and the one that looks exactly like success in every
+    /// count the batch event used to carry. The fixture is long so the
+    /// exemption does not apply to it.
     func testARefusedAnswerIsNamedInTheHistogramOnTheEvent() async throws {
         try await withTier { tier, generator, bus in
-            generator.output = answer(["फार्मेसी"])
+            generator.output = answer(["पाणी जवळ विजेची उपकरणे ठेवू नका।"])
 
             let outcome = await tier.translate([brainText])
 
@@ -729,13 +745,32 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         }
     }
 
+    /// [SHORT-ANSWER-EXEMPTION] The 02:35 capture's fix, end to end: a
+    /// short markerless Devanagari answer is a translation now, not a
+    /// rejection — the histogram says `none`, and the region settles.
+    func testAShortMarkerlessAnswerResolvesEndToEnd() async throws {
+        try await withTier { tier, generator, bus in
+            generator.output = answer(["फार्मेसी"])
+
+            let outcome = await tier.translate([brainText])
+
+            XCTAssertEqual(outcome.translations, [brainText: "फार्मेसी"],
+                           "the short-answer exemption settles the sign")
+            XCTAssertEqual(batchEvent(bus)?.metadata["rejections"], "none",
+                           "and nothing was refused")
+        }
+    }
+
     /// Every rule, named. The pure classification, so the fixture can cover
     /// rules one scripted generation cannot reach in a single call: a short
     /// array, a non-string, and each of the six answer rules.
     func testTheRejectionHistogramNamesEveryRuleThatRefusedAnAnswer() {
-        // One call, four sources, four different rules.
+        // One call, four sources, four different rules. The marker-free
+        // fixture is LONG — the short-answer exemption (2026-09-20) accepts
+        // short markerless answers now, and the rule's refusal needs a
+        // sentence with room for grammar.
         let mixed = LocalBrainTranslationTier.report(
-            answer(["", "फार्मेसी", "खुला है।", "Pharmacy"]),
+            answer(["", "पाणी जवळ विजेची उपकरणे ठेवू नका।", "खुला है।", "Pharmacy"]),
             sources: ["Pharmacy", "Open", "24", "No entry"],
             targetLanguage: .nepali,
             config: config)
