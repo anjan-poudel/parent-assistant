@@ -9603,7 +9603,41 @@
         }
       }
     },
+    "model.name.nmt-en-ne-qwen17b-r2b-q4_k_m": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Translate — English to Nepali (Qwen 1.7B, Q4 test)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अनुवाद — अंग्रेजीबाट नेपालीमा (Qwen १.७B, Q4 परीक्षण)"
+          }
+        }
+      }
+    },
     "model.name.nmt-en-ne-qwen17b-r2b-q8_0": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Translate — English to Nepali (Qwen 1.7B, superseded)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अनुवाद — अंग्रेजीबाट नेपालीमा (Qwen १.७B, पुरानो)"
+          }
+        }
+      }
+    },
+    "model.name.nmt-en-ne-qwen17b-r3-q4_k_m": {
       "extractionState": "manual",
       "localizations": {
         "en": {
@@ -9616,6 +9650,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "अनुवाद — अंग्रेजीबाट नेपालीमा (Qwen १.७B)"
+          }
+        }
+      }
+    },
+    "model.name.nmt-en-ne-qwen17b-r3-q5_k_m": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Translate — English to Nepali (Qwen 1.7B, Q5 test)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अनुवाद — अंग्रेजीबाट नेपालीमा (Qwen १.७B, Q5 परीक्षण)"
           }
         }
       }

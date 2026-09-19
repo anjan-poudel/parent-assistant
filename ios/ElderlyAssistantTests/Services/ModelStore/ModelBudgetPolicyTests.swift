@@ -19,9 +19,14 @@ final class ModelBudgetPolicyTests: XCTestCase {
     private var brain4B: ModelID { ModelCatalog.intentQwen4BSlotCanon }
     private var brain17B: ModelID { ModelCatalog.qwen3_1_7BInstruct }
     private var intent1B: ModelID { ModelCatalog.intentNepali1B }
-    /// The live-translate tier's head model (round-2b EN→NE, 2026-09-18) —
-    /// a 1.7B **file** that is bigger than the 1.7B ladder rung.
+    /// The SUPERSEDED round-2b EN→NE translation brain (2026-09-18) — a 1.7B
+    /// **file** that is bigger than the 1.7B ladder rung, which is exactly why
+    /// it could not be the standard class's head. Kept as the pinned finding
+    /// it always was; the ship quant is `translationShipQuant` below.
     private var translationBrain: ModelID { ModelCatalog.nmtEnNeQwen17bR2bQ8 }
+    /// The round-3 EN→NE translation brain (2026-09-19) — the tier's head, and
+    /// the first ship quant that fits the standard class's brain-file ceiling.
+    private var translationShipQuant: ModelID { ModelCatalog.nmtEnNeQwen17bR3Q4 }
     private var sttANE: ModelID { ModelCatalog.whisperKitMediumV6 }
 
     private let compactPhone: UInt64 = 4_000_000_000     // < 5 GB
@@ -127,6 +132,48 @@ final class ModelBudgetPolicyTests: XCTestCase {
         XCTAssertEqual(footprint.hardBytes, 800_000_000)
     }
 
+    /// The round-3 Q4 ship quant (the live-translate tier's head model,
+    /// 2026-09-19) — the first translation brain a standard-class phone can
+    /// actually run.
+    ///
+    /// The whole point of the round-3 quant line: 1,107,408,608 B is inside
+    /// the 1.7B rung's 1.5 GB file ceiling, so it takes that rung's 700 MB
+    /// overhead and lands at 1.81 GB live — under the 3.2 GB standard budget
+    /// alone, and 2.81 GB beside the 1.0 GB warm STT, which is also inside.
+    /// No eviction, no cloud round trip, no `.overBrainCeiling`.
+    func testTheTranslationShipQuantFitsTheStandardClass() {
+        // The 4 GB class refuses it too, but for the LIGHTER reason: 1.81 GB
+        // live fits the 2.0 GB budget on its own (the superseded Q8's 2.63 GB
+        // did not — that got `.overClassBudget`), so the refusal is now only
+        // about the 0.65 GB STT that class runs beside it.
+        XCTAssertEqual(availability(translationShipQuant, on: compactPhone).reason,
+                       .requiresEvictingWarmSTT,
+                       "1.81 GB live fits the 2.0 GB budget alone; + 0.65 GB STT does not")
+
+        XCTAssertEqual(availability(translationShipQuant, on: standardPhone), .available,
+                       "1.81 GB live + 1.0 GB warm STT = 2.81 GB ≤ 3.2 GB")
+        XCTAssertEqual(ModelBudgetPolicy.standard.availability(
+            of: entry(translationShipQuant),
+            physicalMemoryBytes: standardPhone,
+            warmSTTLiveBytes: 0),
+                       .available,
+                       "1.11 GB is inside the 1.7B rung's 1.5 GB file ceiling")
+
+        XCTAssertEqual(availability(translationShipQuant, on: roomyPhone), .available)
+    }
+
+    /// The arithmetic behind that verdict: the 1.11 GB file stays in the 1.7B
+    /// band, so the 700 MB overhead — not the 800 MB one the superseded Q8
+    /// takes — is the un-reclaimable part.
+    func testTheTranslationShipQuantTakesTheOnePointSevenBWeightBand() {
+        let footprint = ModelLifecycleInventory.footprint(for: .translateBrain,
+                                                          modelID: translationShipQuant)
+        XCTAssertEqual(footprint.weightsBytes, 1_107_408_608)
+        XCTAssertEqual(footprint.runtimeOverheadBytes, 700_000_000)
+        XCTAssertEqual(footprint.liveBytes, 1_807_408_608)
+        XCTAssertEqual(footprint.hardBytes, 700_000_000)
+    }
+
     func testTheCompactClassRefusesEveryShippedBrain() {
         // A finding, pinned so it cannot regress into a surprise: the
         // smallest shipped brain (`intentNepali1B`, 1.81 GB live) plus the
@@ -134,7 +181,12 @@ final class ModelBudgetPolicyTests: XCTestCase {
         // The 4 GB class cannot co-reside a brain with an STT at all —
         // which is why §3.2 pairs it with the small whisper.cpp context and
         // why the refusal is the honest answer rather than a silent admit.
-        for id in [intent1B, brain17B, translationBrain, brain3B, brain4B] {
+        // The round-3 Q4 quant is in this list on purpose: it clears the
+        // *standard* class, and the fact that it still cannot share a 4 GB
+        // phone with an STT is the arithmetic that keeps the compact class
+        // on the small whisper context.
+        for id in [intent1B, brain17B, translationBrain, translationShipQuant,
+                   brain3B, brain4B] {
             let result = availability(id, on: compactPhone)
             XCTAssertFalse(result.isAvailable, "\(id.rawValue) on the 4 GB class")
             XCTAssertNotNil(result.reason)

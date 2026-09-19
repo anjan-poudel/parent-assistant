@@ -27,12 +27,14 @@ import Foundation
 //     frame's own pixel buffer on the detector's one serial queue through the
 //     one Vision request. No crop, no downscale, no second detector.
 //
-//  4. **The same cache, the same gate, the same tier.** Device layers first
-//     (`LabelTranslationCache.lookup`), then the *live cycle's own*
-//     gate-then-tier sequence (`LiveTranslateLiveCycle.attemptResolution`), so
-//     a snapshot cannot send something the live path would not have sent, and
-//     cannot prompt for something the live path would have answered. Ordering
-//     is shared rather than copied.
+//  4. **The same cache, the same gate, the same tiers, the same order.**
+//     Device layers first (`LabelTranslationCache.lookup`), then the *live
+//     cycle's own* plan (`LiveTranslateLiveCycle.resolveFrozen`): the same
+//     reliability router, the same device tier, the same gate-then-tier
+//     sequence, so a snapshot cannot send something the live path would not
+//     have sent, cannot answer on the cloud something the live path would have
+//     answered on the device, and cannot prompt for something the live path
+//     would have answered. The plan is shared rather than copied.
 //
 //  5. **The frozen frame never leaves memory, and never reaches the network.**
 //     The raster is built once, in memory, from the frame's pixel buffer and
@@ -391,9 +393,17 @@ struct LiveTranslateSnapshotPath {
 
     // MARK: The cloud, for what the device could not answer
 
-    /// The cloud's answers for `publication`'s still-pending strings, merged
+    /// The plan's answers for `publication`'s still-pending strings, merged
     /// onto its outcomes — or `nil` when there is nothing to ask, the elder has
     /// not answered the prompt yet, or the session is gone.
+    ///
+    /// Not "the cloud's answers": the frozen frame is planned by the same
+    /// reliability router the live cycle plans by, so a short-form string the
+    /// device is proven on is answered **by the device** here too, the sentence
+    /// class leads with the cloud when the cloud can lead, and whatever the
+    /// cloud cannot answer comes back to the device instead of degrading. The
+    /// rule is `LiveTranslateLiveCycle.resolveFrozen`'s, in one place, for both
+    /// paths.
     ///
     /// What travels is `CloudTranslationTier.Item`: an id, the sanitised text
     /// and Vision's language report. The frozen picture is not a parameter of
@@ -418,31 +428,19 @@ struct LiveTranslateSnapshotPath {
                                                    detectedSourceLanguage: region.detectedLanguage)
         }
         guard !items.isEmpty else { return nil }
-        guard let attempt = await cycle.attemptResolution(Array(items.values)) else { return nil }
+        // One call, the whole plan: the device for its class, the cloud for the
+        // class the device is not proven on, and the device again for whatever
+        // the cloud could not answer. `nil` is the open consent question and
+        // the closed session — the two cases in which nothing may be applied.
+        guard let answers = await cycle.resolveFrozen(Array(items.values)) else { return nil }
 
         var outcomes = publication.outcomes
-        switch attempt {
-        case .awaitingDecision:
-            // The prompt is on screen. The regions stay pending — nothing has
-            // failed and the elder has not answered — and the next capture, or
-            // the live path's own next cycle, is where the answer applies.
-            return nil
-
-        case .unavailable(let error):
-            for item in items.values {
-                for id in keyedRegions[item.id] ?? [] {
-                    outcomes[id] = (outcomes[id] ?? .pending(item.text))
-                        .applying(.degraded(originalText: item.text,
-                                            reason: error.unavailableReason))
-                }
-            }
-
-        case .answered(let batch):
-            for item in items.values {
-                for id in keyedRegions[item.id] ?? [] {
-                    outcomes[id] = (outcomes[id] ?? .pending(item.text))
-                        .applying(batch.result(for: item).outcome)
-                }
+        for item in items.values {
+            // A key the plan made no claim about is not an answer: the region
+            // stays pending, exactly as it would live.
+            guard let answer = answers[item.id] else { continue }
+            for id in keyedRegions[item.id] ?? [] {
+                outcomes[id] = (outcomes[id] ?? .pending(item.text)).applying(answer.outcome)
             }
         }
         return outcomes

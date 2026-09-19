@@ -91,17 +91,15 @@ final class ModelCatalogLanguageTests: XCTestCase {
     /// assistant brains with rows of their own in the brain section.
     func testTheOfferedTranslationRowsAreExactlyTheTiersHead() {
         let offered = ModelCatalog.availableTranslationEntries.map(\.id)
-        XCTAssertEqual(offered, [ModelCatalog.nmtEnNeQwen17bR2bQ8],
+        XCTAssertEqual(offered, [ModelCatalog.nmtEnNeQwen17bR3Q4],
                        "the section offers the tier's shipped head, alone")
-        // The tier list leads with the Q5 TESTING quant (owner device test,
-        // 2026-09-19, sideloaded — deliberately not offered for download);
-        // the row still offers the shipped head it can actually download.
+        // Round 3 (2026-09-19) ended the round-2b split in which the tier
+        // led with a sideload-only test quant the row did not offer: the
+        // ship quant and the offered row are now the same artifact, so the
+        // row's Download lands on exactly what the tier reads.
         XCTAssertEqual(LiveTranslateConfig.default.brainTranslationModelIDs.first,
-                       ModelCatalog.nmtEnNeQwen17bR2bQ4,
-                       "the tier leads with the testing quant")
-        XCTAssertEqual(LiveTranslateConfig.default.brainTranslationModelIDs.dropFirst().first,
                        offered.first,
-                       "the offered row is the tier's shipped head")
+                       "the tier leads with the quant the row offers")
         for id in offered {
             XCTAssertNotNil(ModelCatalog.entry(for: id),
                             "\(id.rawValue) is offered but not in the catalog")
@@ -118,18 +116,31 @@ final class ModelCatalogLanguageTests: XCTestCase {
     /// catalog's own `displayName` verbatim; a row that drifted from it
     /// would read differently in Settings than in the catalog's docs.
     func testTheTranslationRowIsNamedInBothLanguages() {
-        let entry = ModelCatalog.entry(for: ModelCatalog.nmtEnNeQwen17bR2bQ8)!
-        let key = "model.name.\(entry.id.rawValue)"
+        // Two entries need copy, not one: the offered row (round-3 head) and
+        // the superseded round-2b artifact it replaced — a device that
+        // installed the old one before the upgrade holds both, and the
+        // installed-hidden row renders beside the new one.
+        let entries = [ModelCatalog.nmtEnNeQwen17bR3Q4, ModelCatalog.nmtEnNeQwen17bR2bQ8]
+            .compactMap { ModelCatalog.entry(for: $0) }
+        XCTAssertEqual(entries.count, 2, "both translation entries resolve")
         let en = Locale(identifier: "en")
         let ne = Locale(identifier: "ne-NP")
-        XCTAssertNotEqual(L10n.str(key, locale: en), key,
-                          "\(key) must have an English value")
-        XCTAssertNotEqual(L10n.str(key, locale: ne), key,
-                          "\(key) must have a Nepali value")
-        XCTAssertEqual(entry.displayName(locale: en), entry.displayName,
-                       "the English string IS the catalog displayName")
-        XCTAssertNotEqual(entry.displayName(locale: ne), entry.displayName,
-                          "the Nepali row must not fall back to English")
+        for entry in entries {
+            let key = "model.name.\(entry.id.rawValue)"
+            XCTAssertNotEqual(L10n.str(key, locale: en), key,
+                              "\(key) must have an English value")
+            XCTAssertNotEqual(L10n.str(key, locale: ne), key,
+                              "\(key) must have a Nepali value")
+            XCTAssertEqual(entry.displayName(locale: en), entry.displayName,
+                           "the English string IS the catalog displayName")
+            XCTAssertNotEqual(entry.displayName(locale: ne), entry.displayName,
+                              "the Nepali row must not fall back to English")
+        }
+        // The names must DIFFER: identical copy on two rows is exactly the
+        // "which one do I delete?" the superseded rename exists to prevent.
+        XCTAssertNotEqual(entries[0].displayName, entries[1].displayName,
+                          "the ship quant and the superseded artifact must not "
+                          + "read as the same row")
     }
 
     func testStockQwenAndLlamaBrainsAreLanguageNeutral() {
