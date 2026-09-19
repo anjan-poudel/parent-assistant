@@ -646,11 +646,47 @@ final class ModelLifecycleManager {
                 : residentLiveBytesLocked()
             transientLive = transientLiveBytesLocked()
             excluding = request.replacesSlotContents ? request.slot : nil
-            let budget = budgetOverrideBytes
+            // Two budgets, and the difference between them is the owner's
+            // directive of 2026-09-19: "ModelWarden should UNLOAD other
+            // models and load the translation model."
+            //
+            //  - `sessionBudget` is what `effectiveBudgetBytes` says *right
+            //    now*: the class cap lowered by a tight probe reading. It is
+            //    the right bound for a load whose bytes are purely additive
+            //    to everyone else's, and it is what this manager has always
+            //    judged.
+            //  - `classBudget` is the promise the device class itself makes
+            //    — 3.2 GB on the 6 GB phones. It is the bound a foreground
+            //    translation load is judged against, because that load's own
+            //    victims are exactly the room it needs.
+            //
+            // The Q8 translation head is 2.63 GB live against a 3.2 GB class
+            // budget. A probe reading that put the session budget below it
+            // made the tier's own load `over_budget_alone`, and the refusal
+            // is what turned on-device translation into cloud-only. The
+            // escape is bounded twice over, and neither bound is a hope:
+            //
+            //  - `incoming.liveBytes <= classBudget` — a model over the CLASS
+            //    budget is over it whatever is evicted, so the 4B on a
+            //    standard phone still meets `.overBudgetAlone` below.
+            //  - phase 3, which re-probes after the eviction and refuses on
+            //    `insufficientHeadroom` if the hard bytes are not really
+            //    there. That check is what decides whether an allocation
+            //    lands; the budget only decides whose bytes are spent first.
+            //
+            // `budgetOverrideBytes` pins both, so every test that fixes the
+            // budget keeps the arithmetic it was written against.
+            let sessionBudget = budgetOverrideBytes
                 ?? ModelLifecycleBudget.effectiveBudgetBytes(
                     deviceClass: deviceClass,
                     availableBytes: probe.availableProcessMemoryBytes,
                     residentLiveBytes: residentLive)
+            let classBudget = budgetOverrideBytes
+                ?? ModelLifecycleBudget.modelsBudgetBytes(for: deviceClass)
+            let budget = request.purpose.mayEvictPastTheSessionBudget
+                && incoming.liveBytes <= classBudget
+                ? classBudget
+                : sessionBudget
             budgetUsed = budget
 
             let plan = planVictimsLocked(excluding: excluding,
@@ -680,6 +716,16 @@ final class ModelLifecycleManager {
 
             if !plan.fits {
                 if incoming.liveBytes > budget {
+                    // Over budget **on its own**: nothing eviction can do,
+                    // because the walk above has already taken every victim
+                    // it is allowed to. For a purpose that may evict past the
+                    // session budget this branch is now reachable only when
+                    // the model is over the CLASS budget — `budget` above is
+                    // the class cap for such a request — which is the pinned
+                    // half of the owner's directive: the 4B on a standard
+                    // phone stays refused. A foreground translation load
+                    // inside its class budget does not arrive here; it evicts
+                    // and admits.
                     if request.replacesSlotContents && request.slot.admitsSoloOverBudget {
                         // Over budget on its own. Nothing we can evict
                         // changes that, and refusing would make the app's
