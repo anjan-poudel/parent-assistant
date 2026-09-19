@@ -74,6 +74,12 @@ struct LiveTranslateSessionDependencies {
     let notifications: NotificationCenter
     let observabilityBus: ObservabilityBus
     let config: LiveTranslateConfig
+    /// The point, tap & ask session's dependencies, when the host is
+    /// wired for it. Nil — the honest default for every pre-existing
+    /// construction site, including the test harness — means the session
+    /// runs without the point-ask box and chip. The app layer always
+    /// passes it (see `AppCoordinator.makeLiveTranslateDependencies`).
+    let pointAsk: PointAskSessionDependencies?
 
     init(locale: Locale,
          camera: LiveCameraSession,
@@ -88,7 +94,8 @@ struct LiveTranslateSessionDependencies {
          settings: LiveTranslateSettings,
          notifications: NotificationCenter = .default,
          observabilityBus: ObservabilityBus,
-         config: LiveTranslateConfig = .default) {
+         config: LiveTranslateConfig = .default,
+         pointAsk: PointAskSessionDependencies? = nil) {
         self.locale = locale
         self.camera = camera
         self.detector = detector
@@ -103,6 +110,7 @@ struct LiveTranslateSessionDependencies {
         self.notifications = notifications
         self.observabilityBus = observabilityBus
         self.config = config
+        self.pointAsk = pointAsk
     }
 }
 
@@ -270,6 +278,14 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// counter. The tier is handed this instance and never makes its own.
     private let indicator: CloudActivityIndicatorModel
 
+    /// [POINT-ASK] The point, tap & ask session this live session hosts
+    /// (design: docs/superpowers/specs/2026-09-19-point-tap-ask-design.md).
+    /// Built here from the app layer's dependencies, so the host forwards
+    /// frames and close to it and the view reads its single observation
+    /// surface. Nil when the host was built without the wiring (the test
+    /// harness's shape) — the session then simply has no tap box.
+    let pointAsk: PointAskSessionModel?
+
     /// Built in `start()`, never in `init`: registering the plugin must not
     /// create a pipeline, a tier or a session (NFR-LCT-012).
     private var pipeline: LiveTranslationPipeline?
@@ -364,6 +380,14 @@ final class LiveTranslateSessionModel: ObservableObject {
                                                    locale: dependencies.locale,
                                                    notifications: dependencies.notifications,
                                                    isFeatureSpeaking: { speech.isSpeaking })
+
+        // [POINT-ASK] The hosted session, built over the app layer's
+        // dependencies — one per live session, sharing the process's own
+        // gate, cache and client (which the dependencies carry). Assigned
+        // before the forwarding sinks below: an escaping closure that
+        // captures `self` may not be created while a `let` stored property
+        // is still uninitialized.
+        self.pointAsk = dependencies.pointAsk.map(PointAskSessionModel.init)
 
         // The model is the single observation surface: the consent
         // controller's changes are forwarded, so the view observes one object
@@ -667,6 +691,11 @@ final class LiveTranslateSessionModel: ObservableObject {
         // "nothing renders after close" is the surface being empty, not the
         // view being trusted to have gone.
         publication = nil
+
+        // [POINT-ASK] The hosted session closes with the camera: its tasks
+        // are cancelled and its surface returns to waiting, so a torn-down
+        // view cannot paint a tap box for a session that ended.
+        pointAsk?.close()
 
         // 2. In-flight work is cancelled and recognition is released.
         await pipeline?.close()
@@ -1143,6 +1172,9 @@ final class LiveTranslateSessionModel: ObservableObject {
     private func delivered(_ frame: CameraFrame) async {
         guard !isClosed, frozen == nil else { return }
         latestFrame = frame
+        // [POINT-ASK] The hosted session reads the same frame: the
+        // picture the elder taps on is the picture the analysis crops.
+        pointAsk?.receiveFrame(frame)
         // The picture's own size, published for the view's geometry and not
         // for anything else (owner follow-up, 2026-09-18): the container tells
         // the view *where* the picture is on screen, and this tells it the

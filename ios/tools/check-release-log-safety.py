@@ -143,6 +143,11 @@ FEATURE_ROOTS = [
     "App/LiveTranslate",
     "Services/Plugins/LiveTranslatePlugin.swift",
     "Services/Gemini/GeminiClient+Translate.swift",
+    # [POINT-ASK] The point, tap & ask feature's own roots: same rules —
+    # the OCR text, translations, class labels and the VLM's words are
+    # user content and may never reach a console or an event field.
+    "Services/PointAsk",
+    "Services/Gemini/GeminiClient+PointAsk.swift",
 ]
 
 # The shipped allow-list the feature's metadata keys must be declared in.

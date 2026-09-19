@@ -871,6 +871,19 @@ struct LiveTranslateOverlayView: View {
     /// The mode toggle's touch path: true ⇒ the translated view (every visible
     /// region translated continuously), false ⇒ extract mode.
     let onSetTranslateAll: (Bool) -> Void
+    /// [POINT-ASK] The tap box + "What is this?" chip (design:
+    /// docs/superpowers/specs/2026-09-19-point-tap-ask-design.md). Nil when
+    /// the host session has no point-ask wiring — the overlay then draws
+    /// exactly what it always drew.
+    let pointAsk: PointAskOverlaySurface?
+    /// [POINT-ASK] The window the picture is drawn through — the same
+    /// presentation the host computes, so the tap box's normalized frame
+    /// box lands on the picture where the elder tapped it, under the same
+    /// zoom, pan and stabilization as every other box on screen.
+    let presentation: LiveCameraPresentation
+    /// [POINT-ASK] The chip's tap: the elder's "what is this?". Only the
+    /// anchored chip offers it.
+    let onPointAskChipTap: () -> Void
 
     /// The rects this view is currently drawing, per region identity — the one
     /// piece of state the render path owns, and the reason a box whose text has
@@ -883,12 +896,19 @@ struct LiveTranslateOverlayView: View {
          onTapRegion: @escaping (TextRegionStabilizer.RegionIdentity) -> Void,
          onSetAlwaysShowOriginal: @escaping (Bool) -> Void,
          onTranslateRegion: @escaping (TextRegionStabilizer.RegionIdentity) -> Void = { _ in },
-         onSetTranslateAll: @escaping (Bool) -> Void = { _ in }) {
+         onSetTranslateAll: @escaping (Bool) -> Void = { _ in },
+         pointAsk: PointAskOverlaySurface? = nil,
+         presentation: LiveCameraPresentation =
+            LiveCameraPresentation(crop: .whole, pictureRect: .zero),
+         onPointAskChipTap: @escaping () -> Void = {}) {
         self.surface = surface
         self.onTapRegion = onTapRegion
         self.onSetAlwaysShowOriginal = onSetAlwaysShowOriginal
         self.onTranslateRegion = onTranslateRegion
         self.onSetTranslateAll = onSetTranslateAll
+        self.pointAsk = pointAsk
+        self.presentation = presentation
+        self.onPointAskChipTap = onPointAskChipTap
     }
 
     var body: some View {
@@ -937,6 +957,16 @@ struct LiveTranslateOverlayView: View {
                         .animation(.easeOut(duration: LiveTranslateOverlaySurface.positionSmoothingSeconds),
                                    value: presentation.frameRect)
                         .accessibilityIdentifier("livetranslate.overlay.region.\(presentation.regionID.rawValue)")
+                }
+
+                // [POINT-ASK] The tap box + chip, drawn above the region
+                // bubbles: it is the elder's *pointer* — the thing they
+                // tapped — and the regions are the scene's text. One box
+                // at a time (the surface carries at most one).
+                if let pointAsk {
+                    PointAskOverlayBoxView(surface: pointAsk,
+                                           presentation: self.presentation,
+                                           onChipTap: onPointAskChipTap)
                 }
 
                 if presentations.isEmpty {
@@ -1208,4 +1238,143 @@ struct LiveTranslateOverlayView: View {
     }
 
     private static var leaderLineWidth: CGFloat { LiveTranslateOverlaySurface.leaderLineWidth }
+}
+
+// MARK: - Point, tap & ask (the tap box + chip)
+
+/// The point-ask overlay's drawn half: the anchored box, the "What is
+/// this?" chip under it, and the answer card once the analysis has
+/// answered (design: docs/superpowers/specs/2026-09-19-point-tap-ask-design.md
+/// §4 — box + chip <100 ms after the tap, one box at a time).
+///
+/// A pure function of its surface, like everything else the overlay draws:
+/// the box's normalized frame rect is mapped through the same camera
+/// presentation as every region bubble, so the box sits on the thing the
+/// elder tapped under the same zoom, pan and stabilization; the chip's
+/// words come from the catalog in the active language (`pointask.chip.label`).
+/// No state, no task, no decision — the surface's `state` is the whole of
+/// what changes.
+struct PointAskOverlayBoxView: View {
+
+    let surface: PointAskOverlaySurface
+    let presentation: LiveCameraPresentation
+    let onChipTap: () -> Void
+
+    /// The pending-state glyph. An SF Symbol name is a system identifier,
+    /// not user-visible copy, so it is a constant here — the same rule the
+    /// region bubbles' `pendingSymbolName` states.
+    static let pendingSymbolName = "ellipsis.circle"
+
+    var body: some View {
+        guard let box = surface.box, presentation.isUsable else { return AnyView(EmptyView()) }
+        let boxRect = presentation.containerRect(ofFrameBox: box)
+        let chipRect = chipRect(below: boxRect)
+        return AnyView(
+            ZStack(alignment: .topLeading) {
+                // The box: the elder's pointer. A stroke, not a fill — the
+                // picture under it is the thing they tapped, and a wash
+                // over it would hide it (the green overlay's own lesson:
+                // an opaque cover is the failure, not the style).
+                RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius)
+                    .stroke(DesignTokens.accent,
+                            style: StrokeStyle(lineWidth: Self.boxLineWidth))
+                    .frame(width: boxRect.width, height: boxRect.height)
+                    .offset(x: boxRect.minX, y: boxRect.minY)
+                    .animation(.easeOut(duration: LiveTranslateOverlaySurface.positionSmoothingSeconds),
+                               value: boxRect)
+                    .accessibilityIdentifier("pointask.box")
+
+                switch surface.state {
+                case .box:
+                    chip(chipRect: chipRect)
+                case .analyzing:
+                    pendingChip(chipRect: chipRect)
+                case .answered:
+                    answerCard(below: boxRect)
+                case .idle:
+                    EmptyView()
+                }
+            }
+        )
+    }
+
+    /// The "What is this?" chip — a real button at the app's minimum tap
+    /// target, in the active language.
+    private func chip(chipRect: CGRect) -> some View {
+        Button {
+            onChipTap()
+        } label: {
+            Text(surface.chipLabel)
+                .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize,
+                                            weight: .semibold))
+                .foregroundColor(DesignTokens.textPrimary)
+                .padding(.horizontal, DesignTokens.interElementSpacing * 2)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
+        }
+        .buttonStyle(.plain)
+        .background(DesignTokens.card)
+        .clipShape(Capsule())
+        .frame(width: chipRect.width, height: chipRect.height)
+        .offset(x: chipRect.minX, y: chipRect.minY)
+        .accessibilityIdentifier("pointask.chip")
+    }
+
+    /// The chip while the analysis runs: the same surface, with the
+    /// pending glyph instead of the words — the analysis is in flight,
+    /// not awaiting an answer the chip could ask for.
+    private func pendingChip(chipRect: CGRect) -> some View {
+        Image(systemName: Self.pendingSymbolName)
+            .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize,
+                                        weight: .semibold))
+            .foregroundColor(DesignTokens.textPrimary)
+            .padding(.horizontal, DesignTokens.interElementSpacing * 2)
+            .frame(minHeight: DesignTokens.minTapTargetSize)
+            .background(DesignTokens.card)
+            .clipShape(Capsule())
+            .frame(width: chipRect.width, height: chipRect.height)
+            .offset(x: chipRect.minX, y: chipRect.minY)
+            .accessibilityIdentifier("pointask.chip.pending")
+    }
+
+    /// The answer card: the composed lines, in the active language, under
+    /// the box they answer for. Fills as soon as the analysis lands — the
+    /// spoken answer is first, the card is the reading surface.
+    private func answerCard(below anchorRect: CGRect) -> some View {
+        VStack(alignment: .leading, spacing: DesignTokens.interElementSpacing / 2) {
+            ForEach(Array(surface.cardLines.enumerated()), id: \.offset) { _, line in
+                Text(line)
+                    .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize))
+                    .foregroundColor(DesignTokens.textPrimary)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(DesignTokens.interElementSpacing * 2)
+        .frame(maxWidth: DesignTokens.minTapTargetSize * 6, alignment: .leading)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .offset(x: min(max(anchorRect.minX, DesignTokens.interElementSpacing),
+                       anchorRect.minX),
+                y: anchorRect.maxY + DesignTokens.interElementSpacing)
+        .accessibilityIdentifier("pointask.answer.card")
+    }
+
+    /// Where the chip sits: under the box, at the box's own leading edge,
+    /// clamped into the container so a box near the bottom cannot push
+    /// the chip off the glass. Wide enough for the elder's tap target in
+    /// either language.
+    private func chipRect(below boxRect: CGRect) -> CGRect {
+        let chipWidth = boxRect.width + 2 * DesignTokens.interElementSpacing
+        let chipHeight = DesignTokens.minTapTargetSize + 2 * DesignTokens.interElementSpacing
+        return CGRect(x: min(max(boxRect.minX, DesignTokens.interElementSpacing),
+                             boxRect.minX),
+                      y: min(boxRect.maxY + DesignTokens.interElementSpacing,
+                             boxRect.maxY),
+                      width: chipWidth,
+                      height: chipHeight)
+    }
+
+    /// The box's stroke. A visual constant with no token of its own; it
+    /// lives here so it is stated once (the leader line's precedent).
+    static let boxLineWidth: CGFloat = 3
 }
