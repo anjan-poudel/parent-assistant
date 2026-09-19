@@ -169,10 +169,7 @@ final class AppLauncherTests: XCTestCase {
             "instagram": "instagram://",
             "youtube": "youtube://",
             "whatsapp": "whatsapp://",
-            "calendar": "calshow://",
-            // [PHONE-DEEPLINKS] The Phone tile lands on Recents — the
-            // dialer's real surface — not the empty tel: dialer.
-            "phone": "mobilephone-recents://"
+            "calendar": "calshow://"
         ]
         for (id, url) in expected {
             XCTAssertEqual(AppLauncher.app(for: id)?.rootURL?.absoluteString, url,
@@ -215,15 +212,14 @@ final class AppLauncherTests: XCTestCase {
                       "an in-app entry must not probe a URL")
     }
 
-    func testPhoneRootURLLandsOnRecents() {
-        // [PHONE-DEEPLINKS] (2026-09-19) The Phone tile opens Recents —
-        // the dialer's real landing surface — through Apple's
-        // `mobilephone-recents://` scheme. The old slashes-less `tel:`
-        // dialer (tel-scheme fix, 2026-09-07) stayed in the catalog for
-        // the CALL path (with a number); the bare tile now goes where the
-        // elder expects. Pinned exactly so neither form can regress.
-        XCTAssertEqual(AppLauncher.app(for: "phone")?.rootURL?.absoluteString,
-                       "mobilephone-recents://")
+    func testPhoneRootURLIsSlashesLessTel() {
+        // [PHONE-DEEPLINKS-REVERT] (2026-09-19) Device-verified: the
+        // mobilephone-* schemes are NOT registered by the Phone app on
+        // stock iOS (canOpenURL fails with OSStatus -10814). The Phone
+        // tile returns to the slashes-less `tel:` dialer — the only
+        // honest public surface Apple exposes. Pinned so neither the
+        // slashed tel form nor the dead mobilephone schemes can regress.
+        XCTAssertEqual(AppLauncher.app(for: "phone")?.rootURL?.absoluteString, "tel:")
     }
 
     func testMessagesRootURLIsSlashesLessSMS() {

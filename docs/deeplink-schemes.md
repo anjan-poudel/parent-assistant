@@ -9,11 +9,8 @@ human-readable map of every supported scheme, its surface, and its caveats.
 
 | Surface | Scheme | Notes |
 |---|---|---|
-| Phone — Recents | `mobilephone-recents://` | The Phone tile's landing (2026-09-19). |
-| Phone — Contacts | `mobilephone-contacts://` | Reserved for a future Contacts tile. |
-| Phone — Favorites | `mobilephone-favorites://` | Reserved for a future Favorites tile. |
-| Phone — Voicemail | `mobilephone-voicemail://` | Reserved for a future Voicemail tile. |
-| Phone — dialer (empty) | `tel:` | Slashes-less on purpose (`tel://` with no number opens a dead confirmation sheet). Still used by the call path with a real number (`tel:<number>`). |
+| Phone — dialer (empty) | `tel:` | The ONLY stock-supported Phone surface. Slashes-less on purpose (`tel://` with no number opens a dead confirmation sheet). The call path uses `tel:<number>`. |
+| Phone — Recents / Contacts / Favorites / Voicemail | **none** | DEVICE-VERIFIED 2026-09-19: `mobilephone-recents://` and siblings fail `canOpenURL` with OSStatus -10814 (application not found) on stock iOS — Apple registers no public deep link for these tabs. Do not reintroduce them. |
 | Messages | `sms:` | Same slashes-less rule. |
 | Calendar | `calshow://` | |
 | Maps | `maps://` / `maps.apple.com` | Directions auto-start via `daddr` (house `MapsLinks` builder). |
