@@ -1023,12 +1023,12 @@ enum ModelCatalog {
             // failed 1. Nothing has to be gated downstream, which is why
             // the ship quant can finally be a small one.
             //
-            // [HOSTING — ACTION REQUIRED] The URL below does not exist yet:
-            // the owner must upload `translate-en-ne-qwen17b-r3-q4_k_m.gguf`
-            // to tag `v19` of `anjan-poudel/elderly-ai-assistant-models`.
-            // Until then GitHub answers 404, `ModelDownloadService` refuses
-            // the error body, and the row's Download fails. The `sha256`
-            // here is the SERVER ORIGINAL's, read from its `.sha256` sidecar
+            // [HOSTING — LIVE] `translate-en-ne-qwen17b-r3-q4_k_m.gguf` is
+            // uploaded to tag `v19` of
+            // `anjan-poudel/elderly-ai-assistant-models` and the asset was
+            // verified against the digest below, so the row's Download
+            // resolves. The `sha256` here is the SERVER ORIGINAL's, read from
+            // its `.sha256` sidecar
             // on the training box (2026-09-19), so a correct upload — one
             // byte-identical to
             // /mnt/nvme2/workspace/live-translate-nmt/finetune/round3/models/
@@ -1062,10 +1062,17 @@ enum ModelCatalog {
             // digest, so `finalize` could only answer "mismatch" — a 1.1 GB
             // download blamed on a checksum over a placeholder.
             sha256: "f0bde6a4946cc74504a6b705c067240c6a30733b11e44a47c297e89ea0206987",
-            // 3 GB: the floor the round-2b Q4 carried — same artifact size
-            // (1.1 GB file, ~1.9 GB live), and the standard-class rung this
-            // quant exists to reach.
-            minDeviceRAMBytes: 3_000_000_000,
+            // 4 GB: the floor the other >1 GB brains carry
+            // (`nmtEnNeQwen17bR2bQ8`, `intentQwen4BSlotCanon`). The claim is
+            // about the DEVICE's physical RAM (`MemoryProbe.canFit`), not the
+            // app's current ceiling, and 1.1 GB of file is ~1.8 GB live
+            // beside the standard class's 1.0 GB warm STT: a 3 GB phone
+            // cannot hold that with iOS on top, so a 3 GB floor would have
+            // offered a download the budget warden then refuses
+            // (`requiresEvictingWarmSTT`) — a 1.1 GB download that never
+            // runs. The floor is the smallest device that can actually use
+            // it, which is what makes the row honest.
+            minDeviceRAMBytes: 4_000_000_000,
             dependsOn: nil,
             // Language tag: ne-only model (it translates INTO Nepali).
             languages: ["ne"]
@@ -1081,11 +1088,11 @@ enum ModelCatalog {
             // the Q4 in `brainTranslationModelIDs` so a device that carries
             // it uses it. Kept in `all` so it is resolvable and deletable.
             //
-            // [HOSTING] Same v19 release as the Q4; uploading it is
-            // OPTIONAL (nothing in the app offers a download for it, so a
-            // missing asset breaks no row). Upload only if the Q4's quality
-            // is disappointing on device and this quant is wanted as the
-            // fallback — the bytes must match the digest below.
+            // [HOSTING — LIVE] Same v19 release as the Q4, uploaded and
+            // verified against the digest below. Nothing in the app offers a
+            // download for it (it is sideload-only), so the asset is a
+            // convenience for the device that wants the size/quality knob —
+            // the pin is what makes a future re-upload provable.
             displayName: "Translate — English to Nepali (Qwen 1.7B, Q5 test)",
             filename: "translate-en-ne-qwen17b-r3-q5_k_m.gguf",
             downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v19/translate-en-ne-qwen17b-r3-q5_k_m.gguf")!,
@@ -1093,10 +1100,12 @@ enum ModelCatalog {
             // Server-original digest (round-3 Q5_K_M export), `.sha256`
             // sidecar on the training box, 2026-09-19.
             sha256: "c8557b9ab5704273079a32a502a5f282477755467d8b90719a8a989bb16dd5bf",
-            // 3.5 GB: the floor `qwen3_1_7BInstruct` carries at this size
-            // class (Qwen3-1.7B, 1.26 GB) — one rung above the Q4 because
-            // the file is 150 MB larger.
-            minDeviceRAMBytes: 3_500_000_000,
+            // 4 GB: the same floor as the Q4 above and for the same reason —
+            // the artifact is 150 MB larger (1.26 GB, ~1.96 GB live), which
+            // does not move the *device* rung the way a whole size class
+            // does, and the Q5 is sideload-only besides: no row offers it, so
+            // the floor only says what a device keeping it can run.
+            minDeviceRAMBytes: 4_000_000_000,
             dependsOn: nil,
             languages: ["ne"]
         ),
@@ -1549,6 +1558,34 @@ enum ModelCatalog {
     /// from `all`, which is where a leftover installation surfaces.
     static let availableTranslationEntries: [ModelCatalogEntry] =
         [nmtEnNeQwen17bR3Q4].compactMap { entry(for: $0) }
+
+    /// **Every** translation artifact in the catalog, offered or not: the ship
+    /// quant the translation section offers, the alternate quant behind it in
+    /// the tier's preference list, and the two superseded round-2b exports.
+    ///
+    /// One list, because two screens have to agree about which artifacts are
+    /// translation artifacts: the translation section appends its *installed*
+    /// leftovers from here (a device that sideloaded an alternate, or carried
+    /// the round-2b model, must still be able to delete it), and the brain
+    /// section must never append one of them — the same artifact with a row on
+    /// two cards is deletable from one while the other still shows it installed.
+    /// Derived from the ids rather than kept as a parallel hand-list, so a
+    /// future quant cannot be added to the catalog and forgotten here.
+    static let allTranslationEntries: [ModelCatalogEntry] = [
+        nmtEnNeQwen17bR3Q4,
+        nmtEnNeQwen17bR3Q5,
+        nmtEnNeQwen17bR2bQ8,
+        nmtEnNeQwen17bR2bQ4
+    ].compactMap { entry(for: $0) }
+
+    /// The brain artifacts proper: every `.llamaBase` entry that is not a
+    /// translation model. This is the pool the brain section's
+    /// installed-hidden append draws from — a translation artifact belongs to
+    /// the translation card, whether it is offered there or only installed.
+    static let brainEntries: [ModelCatalogEntry] = {
+        let translationIDs = Set(allTranslationEntries.map(\.id))
+        return entries(kind: .llamaBase).filter { !translationIDs.contains($0.id) }
+    }()
 
     /// The reply voices the language-aware default lookup draws from —
     /// curated the same way as the two lists above (the shipped voices,

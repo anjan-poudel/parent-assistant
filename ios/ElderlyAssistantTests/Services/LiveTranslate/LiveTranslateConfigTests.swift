@@ -193,6 +193,27 @@ final class LiveTranslateConfigTests: XCTestCase {
                              + "timeout's report would never be the one that lands")
     }
 
+    /// [RELIABILITY-ROUTER] A scene the cloud refuses is handed to the brain in
+    /// one batch, and the brain takes a *prefix* of what it is given: a scene
+    /// bigger than its bound would silently lose the strings past it.
+    ///
+    /// It cannot, and these two inequalities are why. The visible scene is at
+    /// most `declutterMaxRegions` strings, each at most `sceneTextMaxLength`
+    /// long, so the worst case a live cycle can hand the brain is the product
+    /// below — and the product has to fit the bound the brain cuts with, both
+    /// in count and in characters. This is not a style preference: it is the
+    /// premise the router's fallback is sound on, and a household-sized edit to
+    /// any of the four numbers that breaks it would turn a cloud outage into
+    /// dropped translations rather than device ones.
+    func testTheReservedFallbackBatchCannotBeCutByTheBrainsBound() {
+        let config = LiveTranslateConfig.default
+        XCTAssertLessThanOrEqual(config.declutterMaxRegions, config.brainTranslationMaxStrings,
+                                 "a full visible scene must fit the brain's string bound")
+        XCTAssertLessThanOrEqual(config.declutterMaxRegions * config.sceneTextMaxLength,
+                                 config.brainTranslationMaxCharacters,
+                                 "a full visible scene must fit the brain's character bound")
+    }
+
     /// The reduced cadence is a bound on idling: a value at or under the
     /// nominal cadence would make it a no-op, and a value at or over the
     /// snapshot's refresh would make the still scene stop being refreshed.
@@ -519,9 +540,10 @@ final class LiveTranslateConfigTests: XCTestCase {
         XCTAssertEqual(entry.sha256.count, 64)
         XCTAssertNotEqual(entry.sha256, ModelCatalogEntry.pendingSHA256,
                           "a placeholder can only ever fail `finalize`")
-        XCTAssertEqual(entry.minDeviceRAMBytes, 3_000_000_000,
-                       "the standard-class floor the round-2b Q4 carried at "
-                       + "the same artifact size")
+        XCTAssertEqual(entry.minDeviceRAMBytes, 4_000_000_000,
+                       "the floor the other >1 GB brains carry: this artifact is "
+                       + "~1.8 GB live beside a warm STT, so a 3 GB phone is a "
+                       + "download the budget warden would then refuse")
         XCTAssertEqual(entry.languages, ["ne"])
         XCTAssertNil(entry.dependsOn)
 
@@ -570,8 +592,10 @@ final class LiveTranslateConfigTests: XCTestCase {
                        "https://github.com/anjan-poudel/elderly-ai-assistant-models"
                        + "/releases/download/v19/translate-en-ne-qwen17b-r3-q5_k_m.gguf",
                        "the same release as the ship quant (optional upload)")
-        XCTAssertEqual(alternate.minDeviceRAMBytes, 3_500_000_000,
-                       "the floor qwen3_1_7BInstruct carries at this size class")
+        XCTAssertEqual(alternate.minDeviceRAMBytes, 4_000_000_000,
+                       "the same floor as the ship quant: 150 MB more file does not "
+                       + "move the device rung, and the Q5 is sideload-only, so the "
+                       + "floor only says what a device keeping it can run")
     }
 
     /// The head's admission — which phones can run the model this list

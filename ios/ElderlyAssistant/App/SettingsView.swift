@@ -3644,14 +3644,17 @@ struct AIModelsSettingsView: View {
                     }
                     .pickerStyle(.menu)
                     .tint(DesignTokens.accent)
-                    // `alsoOffered` is the translation card below: its row
-                    // is a `.llamaBase` entry that is NOT in this picker, so
-                    // without it a device that installed the translation
-                    // model would also get the installed-hidden management
-                    // row here — the same artifact, two rows, on one screen.
+                    // `candidates` is the brains-only pool: the translation
+                    // artifacts are `.llamaBase` entries that are NOT in this
+                    // picker, and every one of them belongs to the translation
+                    // card below (offered there, or appended there as an
+                    // installed leftover). Drawn from the whole kind, a device
+                    // that installed one would get the installed-hidden
+                    // management row here as well — the same artifact, two
+                    // rows, two Delete buttons, on one screen.
                     modelRows(managedRows(ModelCatalog.availableBrainEntries,
                                           kind: .llamaBase,
-                                          alsoOffered: ModelCatalog.availableTranslationEntries))
+                                          candidates: ModelCatalog.brainEntries))
                 }
                 .padding(16)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -3737,8 +3740,8 @@ struct AIModelsSettingsView: View {
     ///    same sentence the picker uses (`unavailableNote`), because a row
     ///    that only said "Download" would be claiming the model works here.
     ///
-    ///  · **It names the size.** 1.83 GB over a household's connection is a
-    ///    decision worth pricing before the tap, and the status line only
+    ///  · **It names the size.** A gigabyte over a household's connection is
+    ///    a decision worth pricing before the tap, and the status line only
     ///    shows bytes once a download is already in flight.
     ///
     /// The section header and the note carry the two facts a household
@@ -3754,7 +3757,16 @@ struct AIModelsSettingsView: View {
                 .font(.system(size: DesignTokens.minCaptionPointSize))
                 .foregroundStyle(DesignTokens.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
-            modelRows(ModelCatalog.availableTranslationEntries,
+            // The offered row, plus any translation artifact this device is
+            // actually carrying: an alternate quant that was sideloaded, or
+            // the superseded round-2b export from before the ship quant. The
+            // catalog answers "which artifacts are translation artifacts"
+            // (`allTranslationEntries`), so an installed one can never surface
+            // on the brain card instead — and the owner can still free its
+            // 1.1 GB from the card that owns it.
+            modelRows(managedRows(ModelCatalog.availableTranslationEntries,
+                                  kind: .llamaBase,
+                                  candidates: ModelCatalog.allTranslationEntries),
                       downloadsWhileUnavailable: true,
                       showsArtifactSize: true)
         }
@@ -4223,20 +4235,22 @@ struct AIModelsSettingsView: View {
     /// the space. Catalog entries are never removed, so the install check
     /// is the only gate here.
     ///
-    /// `alsoOffered` names entries that another card on this screen has
-    /// already given a row to. They stay out of this section's
-    /// installed-hidden append for the reason the rule above exists: a row
-    /// is how an artifact is managed, and one artifact with two rows can be
-    /// deleted from one card while the other still shows it. The
-    /// translation model is the case ([TRANSLATION-MODEL-ROW]) — it is a
-    /// `.llamaBase` entry that is not in the brain picker, so it would
-    /// otherwise land here the moment it is installed.
+    /// `candidates` is the pool the append draws from, defaulting to the
+    /// whole of `kind`. A section whose card is one *family* of artifacts
+    /// passes its own pool so a sibling family cannot land here:
+    /// [TRANSLATION-MODEL-ROW] the brain card passes the brains-only pool
+    /// (`ModelCatalog.brainEntries`), because the translation artifacts are
+    /// `.llamaBase` entries it never offers and the translation card gives
+    /// each of them a row — offered, or appended as an installed leftover.
+    /// Drawn from the whole kind, an installed translation model would get a
+    /// management row on both cards, and one artifact with two rows can be
+    /// deleted from one while the other still shows it installed.
     private func managedRows(_ curated: [ModelCatalogEntry],
                              kind: ModelKind,
-                             alsoOffered: [ModelCatalogEntry] = []) -> [ModelCatalogEntry] {
-        let offered = Set((curated + alsoOffered).map(\.id))
-        let installedHidden = ModelCatalog.entries(kind: kind)
-            .filter { !offered.contains($0.id) && isInstalled($0.id) }
+                             candidates: [ModelCatalogEntry]? = nil) -> [ModelCatalogEntry] {
+        let offered = Set(curated.map(\.id))
+        let pool = candidates ?? ModelCatalog.entries(kind: kind)
+        let installedHidden = pool.filter { !offered.contains($0.id) && isInstalled($0.id) }
         return curated + installedHidden
     }
 
