@@ -284,18 +284,37 @@ final class PointAskTargetResolver {
     /// elder's own hand, and was the "wrong object" device report).
     /// Nil only for an empty scene, which is the ladder's cue to
     /// continue.
+    ///
+    /// [FULL-FRAME-FILTER] (2026-09-20) A detection whose box covers
+    /// more than `maxSelectableFrameCoverage` of the frame is never
+    /// SELECTED — the classic is `person` filling the camera when the
+    /// elder's body is in the picture (device report: the tap anchored
+    /// a box over the whole frame). The pass still logs it; the pointer
+    /// just refuses to point at the room.
     static func yoloBox(_ detections: [YOLODetection],
                         containing point: CGPoint) -> YOLODetection? {
-        guard !detections.isEmpty else { return nil }
-        let containing = detections
+        let selectable = detections.filter {
+            Self.frameCoverage($0.normalizedBox) <= Self.maxSelectableFrameCoverage
+        }
+        guard !selectable.isEmpty else { return nil }
+        let containing = selectable
             .filter { $0.normalizedBox.contains(point) }
             .max { $0.confidence < $1.confidence }
         if let containing { return containing }
-        return detections.min { lhs, rhs in
+        return selectable.min { lhs, rhs in
             Self.centerDistance(lhs.normalizedBox, to: point)
                 < Self.centerDistance(rhs.normalizedBox, to: point)
         }
     }
+
+    /// A normalized box's share of the frame's area.
+    static func frameCoverage(_ box: NormalizedBox) -> Double {
+        (box.xMax - box.xMin) * (box.yMax - box.yMin)
+    }
+
+    /// Boxes covering more of the frame than this are never selected as
+    /// the elder's pointer target (logged, not pointed at).
+    static let maxSelectableFrameCoverage: Double = 0.85
 
     /// The box center's distance to the tap — the "what is under the
     /// finger" metric for the no-containment fallback.
