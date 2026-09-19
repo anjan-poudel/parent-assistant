@@ -46,9 +46,13 @@ extension GeminiClient {
             generationConfig: .init(responseMimeType: "application/json"),
             tools: allowSearchGrounding ? [.init(googleSearch: .init())] : nil
         )
-        return try await sendVision(request, eventType: "gemini_vision_identify",
-                                    imageByteCount: imageData.count,
-                                    grounded: allowSearchGrounding)
+        var guidance = try await sendVisionDecoded(request,
+                                                   eventType: "gemini_vision_identify",
+                                                   imageByteCount: imageData.count,
+                                                   grounded: allowSearchGrounding,
+                                                   decode: Self.decodeGuidance)
+        guidance.knowledgeSource = allowSearchGrounding ? .webSearchGrounded : .onDeviceModelKnowledge
+        return guidance
     }
 
     /// Follow-up call once an appliance is already identified this session
@@ -77,31 +81,48 @@ extension GeminiClient {
             generationConfig: .init(responseMimeType: "application/json"),
             tools: allowSearchGrounding ? [.init(googleSearch: .init())] : nil
         )
-        return try await sendVision(request, eventType: "gemini_vision_followup",
-                                    imageByteCount: imageData?.count,
-                                    grounded: allowSearchGrounding)
+        var guidance = try await sendVisionDecoded(request,
+                                                   eventType: "gemini_vision_followup",
+                                                   imageByteCount: imageData?.count,
+                                                   grounded: allowSearchGrounding,
+                                                   decode: Self.decodeGuidance)
+        guidance.knowledgeSource = allowSearchGrounding ? .webSearchGrounded : .onDeviceModelKnowledge
+        return guidance
     }
 
     // MARK: - Shared vision decode
 
-    /// Transport + JSON-mode decode shared by both vision methods. Mirrors
-    /// `GeminiCommandInterpreter`'s `parsed == nil` path on decode failure:
-    /// log `outcome: "parse_failed"` and throw — not a crash, not a silent
-    /// empty result.
-    private func sendVision(_ request: GeminiRequest, eventType: String,
-                            imageByteCount: Int?, grounded: Bool) async throws -> ApplianceGuidance {
+    /// Transport + JSON-mode decode shared by every vision method — the
+    /// appliance helper's `identifyAppliance`/`getApplianceInstructions`
+    /// and the point-ask feature's `identifyPointAsk` (`GeminiClient+
+    /// PointAsk.swift`) all funnel through this one chokepoint, so there
+    /// is exactly one place a vision call handles timeout, parse failure
+    /// and event emission.
+    ///
+    /// Mirrors `GeminiCommandInterpreter`'s `parsed == nil` path on decode
+    /// failure: log `outcome: "parse_failed"` and throw — not a crash, not
+    /// a silent empty result. The caller supplies its own decoder, so each
+    /// payload shape keeps its own tolerant rules; this method guarantees
+    /// the shared discipline around them.
+    ///
+    /// Module-internal so sibling extensions reach it (the same reason
+    /// `send(_:)` is): it never leaves the client.
+    func sendVisionDecoded<T: Decodable>(_ request: GeminiRequest,
+                                         eventType: String,
+                                         imageByteCount: Int?,
+                                         grounded: Bool,
+                                         decode: (String) -> T?) async throws -> T {
         let start = Date()
         var emittedFailure = false
         do {
             let raw = try await send(request)
             let durationMs = Int(Date().timeIntervalSince(start) * 1000)
-            guard var guidance = Self.decodeGuidance(raw) else {
+            guard let guidance = decode(raw) else {
                 emit(eventType, outcome: "failure", durationMs: durationMs,
                      errorCode: "parse_failed")
                 emittedFailure = true
                 throw GeminiClientError.emptyResponse
             }
-            guidance.knowledgeSource = grounded ? .webSearchGrounded : .onDeviceModelKnowledge
             var metadata: [String: String] = [:]
             if let imageByteCount {
                 // Size bucket only — never the photo, never brand/model
