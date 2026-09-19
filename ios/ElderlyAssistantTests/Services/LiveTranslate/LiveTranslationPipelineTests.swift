@@ -186,27 +186,10 @@ final class LiveTranslationPipelineTests: XCTestCase {
         let config: LiveTranslateConfig
     }
 
-    /// [RELIABILITY-ROUTER] The network's answer, scripted. A scenario that
-    /// wants the cloud to be ABLE to lead says so; everything else gets the
-    /// conservative no-path answer and the order the cascade shipped with.
-    final class ScriptedReachability: NetworkReachability, @unchecked Sendable {
-        private let lock = NSLock()
-        private var reachable: Bool
-
-        init(reachable: Bool) {
-            self.reachable = reachable
-        }
-
-        var isReachable: Bool {
-            lock.lock(); defer { lock.unlock() }
-            return reachable
-        }
-
-        func set(reachable: Bool) {
-            lock.lock(); defer { lock.unlock() }
-            self.reachable = reachable
-        }
-    }
+    // `ScriptedReachability` lives in the shared harness
+    // (`LiveTranslateSessionTestHarness.swift`), top-level: the session model
+    // takes one at its own `reachability:` seam, so a session-level suite and
+    // this one script the same network the same way.
 
     /// The production composition, with only the platform seams doubled: the
     /// real cache (over an in-memory encrypted store), the real gate, the
@@ -3046,36 +3029,73 @@ final class LiveTranslationPipelineTests: XCTestCase {
     /// with the prompt's own path: the tap raises the question, the grant is
     /// what carries the ask to the cloud, and nothing is sent before it.
     @MainActor
-    func testScenarioAGrantCarriesAnInterruptedAskOnwardWithoutATick() async throws {
+    func testScenarioAPromptAnswerReDispatchesTheInterruptedBatchAsOneAsk() async throws {
+        // The other half of the retry contract (the granted tap itself is
+        // driven through the shipping seam by
+        // `LiveTranslateSessionModelTests`): one prompt interrupted N strings,
+        // so the answer releases N strings — as **one** dispatch and one
+        // request. Retrying per key turns the batch the question was about
+        // into one request per string, and because an explicit ask skips both
+        // pacing clocks (`explicit`), nothing would space them out again.
         let harness = makeHarness(consent: false,
                                   transport: Self.respondingTransport(),
                                   extractionMode: true,
                                   reachability: ScriptedReachability(reachable: true))
         await harness.pipeline.updateLayout(layout)
-        harness.recogniser.defaultStep = .regions([detected(cloudText)])
+        // Three strings of ONE class, and the class is the point. The router
+        // leads cloud-first for sentences and device-first for short forms, so
+        // a mixed batch reaches the network as two asks however it was
+        // dispatched — the sentences now, the short forms once the brain has
+        // missed them — and the request count would stop being evidence about
+        // the dispatch. These three are past `maxProvenWords` by construction,
+        // so one dispatch is observably one request.
+        let texts = [cloudText,
+                     "Push the green button before the alarm sounds",
+                     "Beware of the dog behind this gate"]
+        let boxes = [box(0.1, 0.2, 0.8, 0.3),
+                     box(0.1, 0.4, 0.8, 0.5),
+                     box(0.1, 0.6, 0.8, 0.7)]
+        harness.recogniser.defaultStep = .regions(zip(texts, boxes).map { detected($0.0, box: $0.1) })
         let frame = try makeFrame()
         await harness.pipeline.ingest(frame)
         await harness.pipeline.ingest(frame)
 
-        var publication = try await latest(harness)
-        var region = try XCTUnwrap(self.region(cloudText, in: publication))
-        await harness.pipeline.translateRegion(region.id)
+        let publication = try await latest(harness)
+        var tapped: [TextRegionStabilizer.RegionIdentity] = []
+        for text in texts {
+            tapped.append(try XCTUnwrap(region(text, in: publication)).id)
+        }
+        for id in tapped { await harness.pipeline.translateRegion(id) }
         await waitUntil("the prompt to be presented") { harness.controller.isPromptPresented }
         XCTAssertEqual(harness.transport.requestCount, 0, "an unanswered prompt sends nothing")
 
-        // The elder says yes. Nothing ticks in extract mode, so the retry the
-        // session model fires on the answer is the only thing that can carry
-        // the ask onward — and it does, to the cloud the class leads with.
+        // The elder answers: every string the prompt interrupted goes back as
+        // one ask.
         if case .failure(let error) = harness.controller.grant() {
             return XCTFail("a grant must be recorded: \(error)")
         }
         await harness.pipeline.retryAwaitingResolution()
-        await waitUntil("the granted ask to reach the cloud") { harness.transport.requestCount == 1 }
+        await waitUntil("the interrupted batch to reach the cloud") {
+            harness.transport.requestCount == 1
+        }
+        try? await Task<Never, Never>.sleep(for: .milliseconds(80))
+        XCTAssertEqual(harness.transport.requestCount, 1,
+                       "three interrupted strings are one ask, not three")
+        // And the one ask carried the whole batch: three strings the elder
+        // answered for in one breath reach the tier together, rather than as
+        // three requests the clocks are skipped for and can no longer space.
+        let request = try XCTUnwrap(harness.transport.requests.first)
+        let carried = Set(TranslationRecordingTransport.items(in: request).values)
+        for text in texts {
+            XCTAssertTrue(carried.contains(text), "\(text) is missing from the one ask")
+        }
 
-        publication = try await latest(harness)
-        region = try XCTUnwrap(self.region(cloudText, in: publication))
-        XCTAssertEqual(publication.result(for: region).sourceTier, .cloud,
-                       "the granted ask is answered, not left pending on a tick that never comes")
+        let answered = try await latest(harness)
+        for text in texts {
+            let region = try XCTUnwrap(region(text, in: answered))
+            XCTAssertEqual(answered.result(for: region).sourceTier, .cloud,
+                           "\(text) is answered, not left pending on a tick that never comes")
+        }
     }
 
     @MainActor

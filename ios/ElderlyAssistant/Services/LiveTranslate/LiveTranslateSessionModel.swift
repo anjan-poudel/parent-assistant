@@ -74,6 +74,18 @@ struct LiveTranslateSessionDependencies {
     /// assistant brains the device happens to hold, and a suite that asserts a
     /// cascade should not have its timing decided by that.
     let brain: LocalBrainTranslating?
+    /// The network-path monitor the session's reliability router reads, or
+    /// `nil` for the shipped one.
+    ///
+    /// `nil` is what production passes: the pipeline builds the real
+    /// `PathMonitorReachability` over the process's own path monitor, so a
+    /// session's "can the cloud lead?" is answered by the device's actual
+    /// network. A test hands one in for the same reason it hands in a brain —
+    /// the answer a suite runs under must be the answer it asserted, not
+    /// whatever network the host running it happens to have. A suite that
+    /// asserts cloud-first ordering on a laptop with Wi-Fi and on a build
+    /// machine without is two different tests.
+    let reachability: NetworkReachability?
     let consentGate: LiveTranslateConsentGate
     let costGovernor: GeminiCostGovernor
     let client: GeminiClient
@@ -90,6 +102,7 @@ struct LiveTranslateSessionDependencies {
          detector: LiveTextDetector,
          cache: LabelTranslationCache,
          brain: LocalBrainTranslating? = nil,
+         reachability: NetworkReachability? = nil,
          consentGate: LiveTranslateConsentGate,
          costGovernor: GeminiCostGovernor,
          client: GeminiClient,
@@ -105,6 +118,7 @@ struct LiveTranslateSessionDependencies {
         self.detector = detector
         self.cache = cache
         self.brain = brain
+        self.reachability = reachability
         self.consentGate = consentGate
         self.costGovernor = costGovernor
         self.client = client
@@ -549,14 +563,39 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// the device rather than an unavailable region.
     func grantCloudConsent() {
         guard !isClosed else { return }
-        _ = consent.grant()
+        // The record is the consent (AM-4): a write that did not take effect is
+        // not a grant, and resuming behind it would walk the strings into a
+        // gate that refuses them and re-raise the very prompt the elder just
+        // tried to answer. The failure is surfaced where the elder is looking:
+        // `ConsentPromptController.grant` keeps the prompt presented and puts
+        // the failure line on it (`promptSurface`), and the model republishes
+        // the controller's own changes, so the retry is one tap away.
+        guard case .success = consent.grant() else { return }
         resumeInterruptedAsks()
     }
 
     func declineCloudConsent() {
         guard !isClosed else { return }
-        _ = consent.decline()
-        resumeInterruptedAsks()
+        // Unlike a grant, the "no" is in force either way. `decline()` mirrors
+        // the decision in memory *before* it writes, and reports a failed write
+        // on the control so the elder knows it may not survive a restart; the
+        // gate the retry reaches therefore reads `denied` on both outcomes. So
+        // the asks resume on both, and that is the point of resuming at all:
+        // the plan's device fallback is what turns "no to the cloud" into a
+        // translation on the device, and extract mode has no next tick — a
+        // decline that withheld the retry would strand the block the elder just
+        // answered for.
+        switch consent.decline() {
+        case .success:
+            resumeInterruptedAsks()
+        case .failure:
+            // Written down and not written off: `decline()` reports the failure
+            // on the control and the gate puts `consent_write_failed` on the
+            // evidence bus, so nothing is hidden from the elder or from the
+            // log. The block is still rescued, because the denial it was
+            // rescued under is the one in memory.
+            resumeInterruptedAsks()
+        }
     }
 
     /// Hands the interrupted asks back to the pipeline, off the main actor.
@@ -606,7 +645,11 @@ final class LiveTranslateSessionModel: ObservableObject {
             // no-path answer — correct for every construction site that
             // predates the router, and wrong for the one that runs on the
             // device.
-            reachability: PathMonitorReachability(),
+            // `nil` in production: the pipeline builds the shipped path
+            // monitor over the process's own network. A test hands one in so
+            // the router's "can the cloud lead?" is the answer the test set,
+            // not the one the host machine has.
+            reachability: dependencies.reachability ?? PathMonitorReachability(),
             extractionMode: isExtracting,
             config: config,
             observabilityBus: dependencies.observabilityBus,

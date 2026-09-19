@@ -1062,17 +1062,19 @@ enum ModelCatalog {
             // digest, so `finalize` could only answer "mismatch" — a 1.1 GB
             // download blamed on a checksum over a placeholder.
             sha256: "f0bde6a4946cc74504a6b705c067240c6a30733b11e44a47c297e89ea0206987",
-            // 4 GB: the floor the other >1 GB brains carry
-            // (`nmtEnNeQwen17bR2bQ8`, `intentQwen4BSlotCanon`). The claim is
-            // about the DEVICE's physical RAM (`MemoryProbe.canFit`), not the
-            // app's current ceiling, and 1.1 GB of file is ~1.8 GB live
-            // beside the standard class's 1.0 GB warm STT: a 3 GB phone
-            // cannot hold that with iOS on top, so a 3 GB floor would have
-            // offered a download the budget warden then refuses
-            // (`requiresEvictingWarmSTT`) — a 1.1 GB download that never
-            // runs. The floor is the smallest device that can actually use
-            // it, which is what makes the row honest.
-            minDeviceRAMBytes: 4_000_000_000,
+            // **5 GB**, and the number is the warden's own line, not a
+            // preference. The claim is about the DEVICE's physical RAM:
+            // `MemoryProbe.canFit` is `physicalMemoryBytes >= requiredBytes`,
+            // and `ModelLifecycleBudget.deviceClass` calls anything under
+            // 5 GB `.compact`, whose whole-model budget is 2 GB. 1.1 GB of
+            // file is ~1.8 GB live beside the standard class's 1.0 GB warm
+            // STT, so a 4 GB floor offered this download to a 4 GB phone that
+            // the warden then refuses it on (`requiresEvictingWarmSTT`) — a
+            // 1.1 GB download that never runs. A floor inside `.compact` is a
+            // floor that promises what the budget cannot deliver; 5 GB is the
+            // smallest device that can actually use it, which is what makes
+            // the row honest.
+            minDeviceRAMBytes: 5_000_000_000,
             dependsOn: nil,
             // Language tag: ne-only model (it translates INTO Nepali).
             languages: ["ne"]
@@ -1100,12 +1102,14 @@ enum ModelCatalog {
             // Server-original digest (round-3 Q5_K_M export), `.sha256`
             // sidecar on the training box, 2026-09-19.
             sha256: "c8557b9ab5704273079a32a502a5f282477755467d8b90719a8a989bb16dd5bf",
-            // 4 GB: the same floor as the Q4 above and for the same reason —
-            // the artifact is 150 MB larger (1.26 GB, ~1.96 GB live), which
-            // does not move the *device* rung the way a whole size class
-            // does, and the Q5 is sideload-only besides: no row offers it, so
-            // the floor only says what a device keeping it can run.
-            minDeviceRAMBytes: 4_000_000_000,
+            // 5 GB: the same floor as the Q4 above and for the same reason
+            // (`ModelLifecycleBudget.deviceClass` draws `.compact` below
+            // 5 GB, and a 1.96 GB-live model does not fit that class's 2 GB
+            // budget). The artifact is 150 MB larger than the Q4, so its
+            // floor can never be the lower of the two; the Q5 is
+            // sideload-only besides, so the floor only says what a device
+            // keeping it can actually run.
+            minDeviceRAMBytes: 5_000_000_000,
             dependsOn: nil,
             languages: ["ne"]
         ),

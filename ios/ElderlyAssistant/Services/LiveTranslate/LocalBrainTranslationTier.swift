@@ -703,16 +703,28 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
     /// "the first N that fit", so the same scene always produces the same
     /// batch), and everything past it is left to the next tier.
     private func boundedBatch(_ strings: [String]) -> [String] {
-        var batch: [String] = []
+        Array(strings.prefix(Self.batchPrefixLength(of: strings, config: config)))
+    }
+
+    /// How many strings from the head of `strings` `boundedBatch` would keep.
+    ///
+    /// Static and shared rather than re-derived at the call site: a caller
+    /// that hands this tier a batch has to know exactly which strings the tier
+    /// will be *asked* about — the pipeline records the generation against the
+    /// ones it was handed, not the ones the tier silently dropped — and two
+    /// copies of a bound this fine-grained drift apart the first time one of
+    /// them is tuned.
+    static func batchPrefixLength(of strings: [String], config: LiveTranslateConfig) -> Int {
+        var count = 0
         var characters = 0
         for text in strings {
-            guard batch.count < config.brainTranslationMaxStrings,
+            guard count < config.brainTranslationMaxStrings,
                   characters + text.count <= config.brainTranslationMaxCharacters
             else { break }
-            batch.append(text)
+            count += 1
             characters += text.count
         }
-        return batch
+        return count
     }
 
     // MARK: The request

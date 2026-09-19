@@ -40,6 +40,19 @@
 # re-derived; FR-LCT-008 is the only one that changed, and the aggregate
 # snapshot specs/define-requirements.md is unchanged, so the other 35
 # requirement files are untouched by this re-lock.
+#
+# Re-lock 2026-09-20T00:00:00Z (owner date 2026-09-20). No new owner decision:
+# the AGGREGATE was brought back into agreement with the two FR-LCT-008
+# amendments recorded above. specs/define-requirements.md still published the
+# retired clause ("the on-device NMT tier (tier 1) must be absent from v1") and
+# its retired acceptance scenario, plus the pre-amendment D2 divergence row, the
+# open-decision row and the out-of-scope row that carried the same wording — so
+# a downstream reader of the aggregate would have believed a tier was out of
+# scope that the lock (and the FR file) already records as in v1. Only
+# specs/define-requirements.md changed: its snapshot_sha256 below is re-derived
+# (d284a0bb… -> d6003ba5…), FR-LCT-008's own file is byte-identical to the
+# previous re-lock and keeps its sha256 and its 7 acceptance scenarios, and all
+# 35 other requirement files are untouched.
 
 version: "1"
 task: define-requirements
@@ -48,7 +61,7 @@ agent: ba
 contract: requirements_lock
 locked_at: "2026-09-16T06:37:01Z"
 snapshot_of: "specs/define-requirements.md"
-snapshot_sha256: d284a0bb2e85f19908b79b2e52c72e66dd5c145a53871ce37db0cf991bf45a22
+snapshot_sha256: d6003ba587f56528a7ce1b62f063b6a9c2b8d8211802120f23f7a6f727bc3ccc
 index: "specs/define-requirements/index.md"
 counts:
   functional_requirements: 23
@@ -415,7 +428,7 @@ open_decisions:
     resolves_at: "before final-sign-off"
     owner: "Anjan Poudel"
   - id: OD4
-    statement: "Tier-1 on-device NMT (v1.1 candidate, NLLB-200 distilled 600M): requires revisiting addendum §13.5's non-goal before any model work."
+    statement: "A dedicated on-device NMT model (v1.1 candidate, NLLB-200 distilled 600M): requires revisiting addendum §13.5's non-goal before any model work. The tier itself is no longer deferred — owner directive 2026-09-17 landed tier 1 as the on-device brain (the app's installed Nepali language model), so what is left open is the dedicated model, not the tier."
     resolves_at: "v1.1 planning (not this workflow)"
   - id: OD5
     statement: "Menu-mode declutter thresholds (IoU >= 0.3, centroid distance 0.06, 8-region cap, longest-string merge): nominal, validate on device; may become per-scene settings."
@@ -436,7 +449,7 @@ out_of_scope:
   - "ARKit world-anchored 3D rendering (screen-space overlay only)"
   - "Auto-speak of every new translation (tap-to-hear and \"read this to me\" only)"
   - "Live full-scene explanation (remains the appliance helper's one-shot identifyAppliance call)"
-  - "The on-device NMT tier (tier 1) - v1.1 candidate, blocked until addendum §13.5's non-goal is revisited"
+  - "A dedicated on-device NMT model (NLLB-200 distilled 600M) - v1.1 candidate, blocked until addendum §13.5's non-goal is revisited. The tier it was once the only shape of is in v1 as the on-device brain (FR-LCT-008, amended 2026-09-17)."
   - "Family/caregiver configuration surface for this feature"
   - "Changes to the existing feed translation path"
   - "Devanagari source text (Nepali source -> any target, and Nepali/Devanagari OCR). Explicit v1 non-goal, owner-signed at the security-test gate. The pipeline stays language-agnostic by design (FR-LCT-003), but v1 makes no recognition claim for Devanagari. Reason is measured, not assumed: on iOS 26.5 Vision resolves to revision 3 with 30 supported languages and no Devanagari-capable code, a rendered Nepali frame yields zero observations under both the platform default and an explicit hi-IN request, and the API reports no error for an unsupported language. Record: specs/hi-in-probe-notes.md."
@@ -448,8 +461,8 @@ divergences:
     status: "owner-approved 2026-09-16"
   - id: D2
     prior: "Addendum §13.5: no on-device translation model"
-    now: "v1 identical (no model); tier 1 absent from v1, recorded as a v1.1 candidate (FR-LCT-008)"
-    status: "owner-approved 2026-09-16; revisit before v1.1"
+    now: "Diverged by owner directive, 2026-09-17: tier 1 is in v1 as the on-device brain — the app's own installed Nepali language model, running entirely on the device with no egress and no consent (FR-LCT-008, amended; the 'must be absent' clause is retired). A dedicated on-device NMT model (NLLB-200 distilled 600M) remains a v1.1 candidate against the addendum's non-goal"
+    status: "owner-approved 2026-09-17; revisit the dedicated model before v1.1"
   - id: D3
     prior: "Addendum §13.2: LabelTranslationCache in-memory, no LRU"
     now: "Persistent encrypted cache with LRU for general text (~200 entries); labels effectively non-evicting (FR-LCT-019)"
