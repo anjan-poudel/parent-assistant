@@ -120,10 +120,32 @@ final class LiveTranslateConfigTests: XCTestCase {
         config.brainTranslationIdleUnloadSeconds = 1
         config.brainTranslationHeadroomFactor = 1.5
         config.brainTranslationDefersToResidentBrain = false
+        config.brainTranslationCriticalPressureWindowSeconds = 5
 
         XCTAssertNotEqual(config, LiveTranslateConfig.default)
         XCTAssertEqual(config.stableSampleInterval, 1.5)
         XCTAssertEqual(config.trackingMaxRectanglesPerPass, 2)
+    }
+
+    /// [PRESSURE-SAFE LOAD] The window a `.critical` keeps refusing loads in,
+    /// after the kernel has gone quiet — the third case the pressure level
+    /// cannot express on its own.
+    ///
+    /// The number is deliberately between two facts: the forensic capture of
+    /// 2026-09-19 died about five seconds after its first critical, so the
+    /// window has to cover "the kill is being decided" rather than only "the
+    /// level is critical"; and a device that has recovered must not be
+    /// refusing loads for the rest of the session, which is why it is not
+    /// minutes. It lives in the config because it is a resource bound like the
+    /// others (`testTheResourceBoundsAreConfigurableAndNotLiterals`), not a
+    /// literal at the comparison site.
+    func testTheCriticalPressureWindowIsThirtySeconds() {
+        XCTAssertEqual(LiveTranslateConfig.default.brainTranslationCriticalPressureWindowSeconds, 30)
+        XCTAssertGreaterThan(
+            LiveTranslateConfig.default.brainTranslationCriticalPressureWindowSeconds,
+            LiveTranslateConfig.default.brainTranslationIdleUnloadSeconds,
+            "the window outlives the idle unload: a handle released on idle is not a device "
+            + "that stopped being starved")
     }
 
     /// The brain stage's deadline is derived from the two values that own it,

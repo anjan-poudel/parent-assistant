@@ -62,7 +62,15 @@ final class LiveTranslateCopyTests: XCTestCase {
         // line under it that says what "off" means. Drafts awaiting the same
         // OD3 copy review as the consent wording around them.
         "livetranslate.settings.cloud.title",
-        "livetranslate.settings.cloud.note"
+        "livetranslate.settings.cloud.note",
+        // 2026-09-19: the warden's two moments. The owner's directive is
+        // explicit that the elder is not left wondering about the silences —
+        // one sentence for a model that is loading ("hold on a sec"), one for
+        // a model the voice stack has taken. Both are drafts awaiting the
+        // same OD3 review as the rest of this list; the tests below assert
+        // that a notice cannot exist without a sentence in both languages.
+        "livetranslate.warden.loading",
+        "livetranslate.warden.offloaded"
     ]
 
     private let commandPhrases: [(key: String, english: String, nepali: String)] = [
@@ -180,6 +188,48 @@ final class LiveTranslateCopyTests: XCTestCase {
         // is being asked to let one particular service do the work.
         XCTAssertTrue(L10n.str(title, locale: english).contains("Gemini"))
         XCTAssertTrue(L10n.str(title, locale: nepali).contains("Gemini"))
+    }
+
+    // MARK: Scenario: every warden notice has a sentence (2026-09-19)
+
+    /// The indicator path is `LocalBrainWardenNotice`; this is the test that
+    /// keeps it renderable. A case with no catalog entry — or an entry in the
+    /// catalog that no notice points at — is a drift, in the same way the
+    /// pinned inventory above is.
+    func testEveryWardenNoticeResolvesToCopyInBothLanguages() {
+        for notice in LocalBrainWardenNotice.allCases {
+            XCTAssertTrue(featureKeys.contains(notice.copyKey),
+                          "\(notice.rawValue) renders \(notice.copyKey), which "
+                          + "the pinned inventory does not list")
+            let ne = L10n.str(notice.copyKey, locale: nepali)
+            let en = L10n.str(notice.copyKey, locale: english)
+            XCTAssertNotEqual(en, notice.copyKey, "\(notice.copyKey) has no English value")
+            XCTAssertTrue(hasDevanagari(ne), "\(notice.copyKey) has no Devanagari value: \(ne)")
+            XCTAssertNotEqual(ne, en)
+        }
+        XCTAssertEqual(LocalBrainWardenNotice.allCases.count, 2,
+                       "a load and a hand-off: the two moments the elder is "
+                       + "owed a sentence for")
+    }
+
+    /// The owner's own words for the hand-off, kept where a reword has to be
+    /// deliberate: this sentence is what replaces a session that silently
+    /// stops translating.
+    func testTheOffloadCopySaysTheVoiceRequestTookTheModel() {
+        let en = L10n.str(LocalBrainWardenNotice.offloadedForVoiceTurn.copyKey,
+                          locale: english).lowercased()
+        XCTAssertTrue(en.contains("voice"),
+                      "the sentence must name what took the model: \(en)")
+        XCTAssertTrue(en.contains("switch"),
+                      "and say that the model was swapped, not lost: \(en)")
+
+        let loading = L10n.str(LocalBrainWardenNotice.loadingModel.copyKey,
+                              locale: english).lowercased()
+        XCTAssertTrue(loading.contains("hold on"),
+                      "the owner asked for 'hold on a sec' verbatim: \(loading)")
+        XCTAssertTrue(L10n.str(LocalBrainWardenNotice.loadingModel.copyKey, locale: nepali)
+                        .contains("पर्खनुहोस्"),
+                      "the Nepali sentence must ask for the same wait")
     }
 
     // MARK: Scenario: the command phrases exist in both languages

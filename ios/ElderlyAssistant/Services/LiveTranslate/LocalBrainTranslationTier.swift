@@ -181,6 +181,98 @@ enum LocalBrainDeferral: Equatable {
     /// that can (the hygiene scan also reads a `…64` type name as a
     /// re-declared default, which is a false positive this spelling avoids).
     case insufficientHeadroom(requiredBytes: Double, availableBytes: Double)
+    /// [PRESSURE-SAFE LOAD] (2026-09-19) The kernel's own memory-pressure
+    /// level is `.warning` or `.critical` right now.
+    ///
+    /// The rule the 2026-09-19 device death was missing. The headroom case
+    /// above is arithmetic on `os_proc_available_memory()`, which is the
+    /// app's ceiling under its own jetsam limit — and a phone whose *system* is
+    /// out of free pages, with the kernel already killing daemons, can still
+    /// read as roomy by that measure, because the app has not been charged for
+    /// anything yet. The kernel's level is the second opinion, and it is the
+    /// one that describes the device rather than the app's account on it.
+    case memoryPressure(level: MemoryPressureLevel)
+    /// [PRESSURE-SAFE LOAD] `.critical` fired inside
+    /// `brainTranslationCriticalPressureWindowSeconds`, so a load is refused
+    /// even though the level has since eased.
+    ///
+    /// A `.critical` is an instant, not a state: the kernel says nothing more
+    /// until it says something, and the quiet minute after it is exactly when
+    /// the "we were nearly killed" fact is still the most honest thing known
+    /// about the device. The numbers travel with the reason, the same way the
+    /// headroom case's do, so a capture can tell a window that is too wide
+    /// from a device that is genuinely under water.
+    case recentCriticalPressure(secondsSince: Double, windowSeconds: Double)
+    /// [PRESSURE-SAFE LOAD] The load had already been admitted and declared in
+    /// flight when a warden asked for this tier's position. The ask cannot be
+    /// honoured — there is no handle to drop yet — so the load stands down
+    /// instead of re-filling, microseconds later, the row the warden just
+    /// cleared.
+    ///
+    /// Only ever produced by the load path and never by the pre-attempt gate:
+    /// it is the *late* half of the same vocabulary, and the tier's own
+    /// `deferralForLoad` cannot see it because before the load is declared in
+    /// flight there is nothing for a warden to ask for.
+    case releaseRequestedDuringLoad
+}
+
+extension LocalBrainDeferral {
+    /// The closed token this deferral travels as on `brain_translation_batch`.
+    ///
+    /// One mapping, here, so the vocabulary a capture reads cannot drift from
+    /// the vocabulary the tier decides in: every case has exactly one token
+    /// and the switch has no `default`, which makes a new deferral a compile
+    /// error until it is named.
+    var eventReason: LiveTranslateBrainDeferralReason {
+        switch self {
+        case .residentBrain: return .residentBrain
+        case .insufficientHeadroom: return .insufficientHeadroom
+        case .memoryPressure: return .memoryPressure
+        case .recentCriticalPressure: return .recentCriticalPressure
+        case .releaseRequestedDuringLoad: return .releaseRequestedDuringLoad
+        }
+    }
+}
+
+/// The two moments the warden's hand-off owes the elder an explanation.
+///
+/// Owner directive, 2026-09-19: "keep the user in the loop so they don't
+/// wonder about the silences." Both are moments where the camera feature is
+/// doing something the elder did not ask for and cannot see: paying a model
+/// load, or handing its model to the voice stack.
+///
+/// **This is the indicator path a surface renders.** The tier pushes these
+/// through `LocalBrainTranslationTier.setWardenNoticeSink`; the sentence is
+/// `copyKey`'s catalog entry, resolved in the active language — never a
+/// literal at a call site, and never a value on the event vocabulary (see
+/// `LiveTranslateEvents.brainTranslationLoadAnnounced` / `…Preempted`, which
+/// record the same two moments as counts).
+enum LocalBrainWardenNotice: String, Equatable, CaseIterable, Sendable {
+    /// A handle has to page in before this batch can run. The elder is
+    /// looking at untranslated text with nothing on screen to explain the
+    /// wait, which is the whole reason this moment has copy.
+    case loadingModel
+    /// The warden took the translation model for the voice stack. The
+    /// alternative to saying so is a session that silently stops
+    /// translating, which reads as the feature being broken.
+    ///
+    /// The one caveat, stated because the copy is the owner's own words: the
+    /// warden's hand-off does not say *who* asked for the bytes, so a load
+    /// that is not a voice turn (a Settings picker picking a brain, say)
+    /// produces the same sentence. In this app the only thing that takes a
+    /// 2.6 GB handle mid-session is the voice stack, and the owner's
+    /// directive names exactly that case.
+    case offloadedForVoiceTurn
+
+    /// The catalog entry this notice renders. Pinned by
+    /// `LiveTranslateCopyTests`, which resolves every case in en and ne, so a
+    /// notice cannot exist without a sentence an elder can read.
+    var copyKey: String {
+        switch self {
+        case .loadingModel: return "livetranslate.warden.loading"
+        case .offloadedForVoiceTurn: return "livetranslate.warden.offloaded"
+        }
+    }
 }
 
 /// The generation half, behind a seam so the tier's own tests drive a
@@ -208,11 +300,24 @@ protocol BrainTextGenerating: Sendable {
     /// would happen), so the default is the conservative half for a fake and
     /// the honest one for a runtime that has not been asked.
     func isHoldingHandle() async -> Bool
+
+    /// Told when the warden takes the resident handle away on a path the tier
+    /// did not ask for — the preemption ask, or the registered release path
+    /// when that ask was refused and overruled.
+    ///
+    /// Not `async` and deliberately not awaited: the warden calls it from its
+    /// own reservation path, outside its lock, and nothing about admitting a
+    /// voice turn's model may wait on a camera feature's bookkeeping. A
+    /// generator that holds nothing (every fake) keeps the default no-op,
+    /// which is why this is a requirement with a default rather than a new
+    /// parameter on `generate`.
+    func setWardenOffloadHandler(_ handler: (@Sendable () -> Void)?)
 }
 
 extension BrainTextGenerating {
     func release() async {}
     func isHoldingHandle() async -> Bool { false }
+    func setWardenOffloadHandler(_ handler: (@Sendable () -> Void)?) {}
 }
 
 /// Why a generation did not produce an answer. Mapped 1:1 onto
@@ -249,6 +354,21 @@ enum BrainGenerationFailure: Error, Equatable {
     /// fall through to the next tier — but the capture must not confuse
     /// "the device cannot hold this" with "this artifact is broken".
     case loadDenied(ReservationDenial)
+    /// [PRESSURE-SAFE LOAD] (2026-09-19) The load was stood down *after* it
+    /// had been admitted, before the runtime was asked to construct anything.
+    ///
+    /// The fourth thing that can happen to an admitted load, and the one the
+    /// 2026-09-19 device death was made of. `loadDenied` is the warden saying
+    /// no at the door; this is the device changing while the load walked
+    /// through it — the reserve's own eviction sweep takes seconds (release
+    /// closures run `llama_model_free`), and a `.critical` that lands inside
+    /// that window is a refusal the caller never got to see. The load is a
+    /// *future* spike, and this is the last instant at which declining to
+    /// create it is still free.
+    ///
+    /// It carries the deferral it found, so the reason and the numbers are the
+    /// tier's own vocabulary rather than a second one invented here.
+    case loadAbandoned(LocalBrainDeferral)
 }
 
 // MARK: - The tier
@@ -287,20 +407,66 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
     /// without this tier claiming anything.
     private let ledger: ModelLifecycleManager
 
+    /// Where the two warden notices go, if anything is listening. A sink
+    /// rather than a return value because both moments happen *during* an
+    /// attempt — a load that is running, a handle that was just taken — and
+    /// an outcome can only be read after it.
+    ///
+    /// Nil is the honest default: the events still record both moments, and
+    /// a caller that has nothing to render loses nothing. Set at init or
+    /// later via `setWardenNoticeSink`.
+    private var noticeSink: (@Sendable (LocalBrainWardenNotice) -> Void)?
+
+    /// How many strings are riding on the attempt in flight, so an offload
+    /// that lands mid-decode can say what it cost. 0 between attempts — and a
+    /// preemption that lands while the handle is idle is honestly a
+    /// zero-cost hand-off.
+    ///
+    /// Actor-isolated and read from `noteWardenTookTheHandle`, which runs on
+    /// this actor: the decode is an `await`, so the actor is free to answer
+    /// while it is running.
+    private var inFlightStrings = 0
+
     init(config: LiveTranslateConfig = .default,
          modelStore: ModelStore?,
          events: LiveTranslateEvents,
          generator: (any BrainTextGenerating)? = nil,
          targetLanguage: AppLanguage = LiveTranslationPipeline.defaultTargetLanguage,
          memory: MemoryProbing = SystemMemoryProbe(),
-         ledger: ModelLifecycleManager = .shared) {
+         ledger: ModelLifecycleManager = .shared,
+         onWardenNotice: (@Sendable (LocalBrainWardenNotice) -> Void)? = nil) {
         self.config = config
         self.modelStore = modelStore
         self.events = events
-        self.generator = generator ?? LlamaBrainTextGenerator(config: config)
+        let generator = generator ?? LlamaBrainTextGenerator(config: config)
+        self.generator = generator
         self.targetLanguage = targetLanguage
         self.memory = memory
         self.ledger = ledger
+        self.noticeSink = onWardenNotice
+        // The warden can take the handle at any moment, so the wiring is
+        // done here rather than at the first load: an offload that beats the
+        // first batch would otherwise be the one nobody hears about.
+        generator.setWardenOffloadHandler { [weak self] in
+            Task { await self?.noteWardenTookTheHandle() }
+        }
+    }
+
+    /// Attaches (or detaches) the surface that renders the warden's two
+    /// notices. A method rather than only an init parameter, because the
+    /// surface is built after the session is: a camera that attaches late
+    /// still gets every notice after it attaches, and nothing before it is
+    /// owed to a surface that did not exist.
+    func setWardenNoticeSink(_ sink: (@Sendable (LocalBrainWardenNotice) -> Void)?) {
+        noticeSink = sink
+    }
+
+    /// A hand-off the tier did not ask for: the warden took the handle for
+    /// another reservation. Called from the warden's thread via a `Task`, so
+    /// it reads the in-flight count on this actor.
+    private func noteWardenTookTheHandle() {
+        events.brainTranslationPreempted(count: inFlightStrings)
+        noticeSink?(.offloadedForVoiceTurn)
     }
 
     // MARK: Availability
@@ -345,7 +511,8 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
             // strings are untouched for the tier behind this one.
             events.brainTranslationBatch(resolvedCount: 0,
                                          unresolvedCount: strings.count,
-                                         durationMs: 0)
+                                         durationMs: 0,
+                                         deferral: deferral.eventReason)
             return LocalBrainTranslationOutcome(translations: [:],
                                                 durationMs: 0,
                                                 deferral: deferral)
@@ -362,7 +529,27 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
             return .none
         }
 
+        // [WARDEN-NOTICE] The "hold on a sec" moment (owner directive,
+        // 2026-09-19). A batch that has to page in a 2.6 GB handle takes
+        // seconds, and the elder is looking at text that has not changed with
+        // nothing on screen to explain why. Asked of the generator rather
+        // than assumed: a handle already resident costs no load, and
+        // announcing one would be a wait the elder is not having.
+        //
+        // Announced when the load is *due*, not when it succeeds — a load
+        // that then fails reports its own reason through
+        // `brainTranslationUnavailable`, and the notice was still true.
+        if await generator.isHoldingHandle() == false {
+            events.brainTranslationLoadAnnounced(count: batch.count)
+            noticeSink?(.loadingModel)
+        }
+
         let started = Date()
+        // The attempt in flight, for a warden preemption that lands during
+        // it. Cleared on every exit — a hand-off between attempts is a
+        // zero-cost one, and stale counts would say otherwise.
+        inFlightStrings = batch.count
+        defer { inFlightStrings = 0 }
         do {
             let output = try await generator.generate(prompt: Self.prompt(for: batch,
                                                                           targetLanguage: targetLanguage),
@@ -411,8 +598,8 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
 
     /// Why the brain may not be loaded for this batch, if it may not.
     ///
-    /// Two rules, in order, and both are about the device rather than about
-    /// the translation:
+    /// Three rules, in order, and all of them are about the device rather than
+    /// about the translation:
     ///
     ///  1. **Another owner's brain is live.** The voice pipeline holds `.brain`
     ///     or `.intentBrain` while the household is talking to it; a second 4B
@@ -426,14 +613,35 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
     ///     that is a different question from whether this tier's own handle
     ///     is resident (which is the very next line).
     ///
-    ///  2. **There is not enough headroom for the load.** The comparison is
+    ///  2. **The kernel says the device is out of memory.** [PRESSURE-SAFE
+    ///     LOAD] The rule the 2026-09-19 device death was missing, and it sits
+    ///     here — after the resident-handle check and before the arithmetic —
+    ///     for a reason that is itself part of the fix. It is a gate on a
+    ///     *load*, so it is asked only where a load would happen; and it is
+    ///     asked before the headroom comparison because it is the *stronger*
+    ///     signal. `os_proc_available_memory()` describes the app's account
+    ///     under its own ceiling, and a phone whose system is out of free
+    ///     pages can still read as roomy by it: nothing has been charged to
+    ///     this app yet, while the kernel is already killing other processes.
+    ///     When the two disagree, the kernel is the one describing the device.
+    ///
+    ///     This is the half the testing bypass may **not** skip. See
+    ///     `pressureDeferral(_:windowSeconds:)` and `loadHandle`.
+    ///
+    ///  3. **There is not enough headroom for the load.** The comparison is
     ///     `ModelFootprint.hardBytes` against the app's own reading of its
     ///     ceiling — the ledger's own rule, and the reason the pageable
     ///     weights are not charged twice: what must fit is the KV and runtime
     ///     cost, because the weights page in and out under the kernel.
     ///
-    /// Neither rule applies when a handle is already resident: the bytes are
-    /// already spent, and deferring then would buy nothing.
+    /// The first two rules apply only when a load would actually happen: the
+    /// bytes of a resident handle are already spent, and deferring the batch
+    /// that is reusing them would buy the device nothing at all. That is why
+    /// the handle check comes first — and it is also why the pressure rule is
+    /// not asked before it. A handle that survived a `.critical` (the warden's
+    /// ask was refused mid-decode, or the slot was spared a force) means the
+    /// load has already happened; refusing the *decode* then would cost an
+    /// answer without returning a byte.
     private func deferralForLoad(of modelID: ModelID) async -> LocalBrainDeferral? {
         if config.brainTranslationDefersToResidentBrain,
            ledger.isResident(.brain) || ledger.isResident(.intentBrain) {
@@ -441,11 +649,50 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
         }
         if await generator.isHoldingHandle() { return nil }
 
+        if let pressure = Self.pressureDeferral(
+            ledger.memoryPressureReading(),
+            windowSeconds: config.brainTranslationCriticalPressureWindowSeconds) {
+            return pressure
+        }
+
         let footprint = ModelLifecycleInventory.footprint(for: .brain, modelID: modelID)
         let required = Double(footprint.hardBytes) * config.brainTranslationHeadroomFactor
         let available = Double(memory.availableProcessMemoryBytes)
         guard available < required else { return nil }
         return .insufficientHeadroom(requiredBytes: required, availableBytes: available)
+    }
+
+    /// [PRESSURE-SAFE LOAD] The kernel's half of the gate, as a pure function
+    /// of the reading and the tier's window.
+    ///
+    /// **One rule, two callers, and this is the reason it is a static
+    /// function.** The pre-attempt gate above and the load path's
+    /// before-you-allocate check (`LlamaBrainTextGenerator.loadHandle`) ask the
+    /// same question at two different moments, and they must not be able to
+    /// disagree about the answer — a second copy of this comparison is exactly
+    /// how a load ends up refused at the door and then taken anyway through a
+    /// window the second copy forgot.
+    ///
+    /// `.warning` and `.critical` both refuse. A warning is the OS asking for
+    /// memory back and the only honest answer to "may I spend another 1 GB" is
+    /// no; a critical is it about to act, where a load begun now would still be
+    /// allocating while the kernel reclaims. The window covers the third case
+    /// the level cannot: a device that was critical seconds ago and has been
+    /// quiet since.
+    static func pressureDeferral(_ reading: MemoryPressureReading,
+                                 windowSeconds: TimeInterval) -> LocalBrainDeferral? {
+        switch reading.level {
+        case .critical:
+            return .memoryPressure(level: .critical)
+        case .warning:
+            return .memoryPressure(level: .warning)
+        case .normal:
+            break
+        }
+        if let age = reading.secondsSinceCritical, age < windowSeconds {
+            return .recentCriticalPressure(secondsSince: age, windowSeconds: windowSeconds)
+        }
+        return nil
     }
 
     // MARK: Bounding
@@ -700,6 +947,14 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
         // ledger's own `reservation_denied` event, which is emitted at the
         // moment of refusal and is the record a capture is read for.
         case .loadFailed, .loadDenied: return .modelLoadFailed
+        // [PRESSURE-SAFE LOAD] An abandoned load reads as `model_load_failed`
+        // for the same reason a warden refusal does: this token is four wide
+        // by design and says what the CALLER must do, which for both is "hand
+        // these strings to the next tier". The precise cause — the level, the
+        // age of the last critical, the warden's ask — is on the stage token
+        // and on `brain_translation_batch`'s `reason`, which is where a
+        // capture reads it.
+        case .loadAbandoned: return .modelLoadFailed
         case .promptOverflow, .generationFailed: return .inferenceFailed
         case .timedOut, .cancelled: return .inferenceTimeout
         }
@@ -718,6 +973,10 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
         // "no handle exists and none was decoded from", which is exactly
         // what a refusal produces. The ledger names the refusal precisely.
         case .loadFailed, .loadDenied: return .load
+        // [PRESSURE-SAFE LOAD] Its own stage: nothing was constructed and
+        // nothing failed — the device declined, and that is a different fact
+        // from a corrupt artifact (see `BrainFailureStage.loadAbandoned`).
+        case .loadAbandoned: return .loadAbandoned
         case .promptOverflow: return .promptBudget
         case .timedOut: return .deadline
         case .cancelled: return .cancelled
@@ -772,6 +1031,23 @@ final class TranslateBrainHandleSlot: ModelResident, @unchecked Sendable {
     /// `defer`, and a depth that leaks upward would make the box refuse a
     /// preemption for the rest of the session.
     private var decodeDepth = 0
+    /// [PRESSURE-SAFE LOAD] (2026-09-19) The same shape for a load: non-zero
+    /// from just before the warden is asked to reserve, through the
+    /// synchronous runtime construction, to the moment the handle is stored.
+    ///
+    /// **Why it spans more than the construction.** The interval that killed
+    /// the owner's phone was the whole of this window, not just `LLM.init`.
+    /// `lifecycle.reserve` evicts before it admits, and an eviction runs
+    /// release closures (`llama_model_free` is not instant), so seconds can
+    /// pass between the decision to load and the allocation — with the slot
+    /// holding no handle and therefore answering `.notHolding` to every ask.
+    private var loadDepth = 0
+    /// [PRESSURE-SAFE LOAD] Set when an ask arrives while a load is in
+    /// flight, and read by the load path at each of its checkpoints. This is
+    /// the "abandon" half of the fix: the ask itself cannot free a handle that
+    /// does not exist yet, so without it the warden would be told the bytes
+    /// were back and the load would re-fill the row microseconds later.
+    private var loadAbandonRequested = false
 
     /// The runtime, if one is resident. `Any?` because this type is compiled
     /// in builds that do not link the llama runtime at all — the cast to
@@ -810,6 +1086,52 @@ final class TranslateBrainHandleSlot: ModelResident, @unchecked Sendable {
         defer { lock.unlock() }
         handle = nil
         handleModelURL = nil
+        // [PRESSURE-SAFE LOAD] A drop that lands while a load is in flight is
+        // the warden taking the position, whether it asked first or came
+        // through the registered closure directly. There is no handle here to
+        // give back, so the only way the drop can mean anything is if the load
+        // stands down — which is what the flag is for.
+        if loadDepth > 0 { loadAbandonRequested = true }
+    }
+
+    /// Whether a load is in flight — no handle exists yet, but one is coming.
+    ///
+    /// Distinct from `isHoldingHandle`, which is `false` for the whole of this
+    /// window: the difference between them is the difference between "there
+    /// are no bytes here" and "there are no bytes here *yet*".
+    var isLoading: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return loadDepth > 0
+    }
+
+    /// Opens the in-flight window. Any abandon request left over from an
+    /// earlier load is cleared here, so a stale one cannot stand a later load
+    /// down for a warden that is no longer asking.
+    func beginLoad() {
+        lock.lock()
+        defer { lock.unlock() }
+        loadDepth += 1
+        loadAbandonRequested = false
+    }
+
+    func endLoad() {
+        lock.lock()
+        defer { lock.unlock() }
+        loadDepth = max(0, loadDepth - 1)
+    }
+
+    /// The abandon signal, taken. `true` exactly once per ask.
+    ///
+    /// Consumed rather than merely read because the load path asks at more
+    /// than one checkpoint: a flag that stayed set would stand down the *next*
+    /// load too, which is a warden's ask outliving the load it was about.
+    func consumeLoadAbandonRequest() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard loadAbandonRequested else { return false }
+        loadAbandonRequested = false
+        return true
     }
 
     func beginDecode() {
@@ -833,14 +1155,65 @@ final class TranslateBrainHandleSlot: ModelResident, @unchecked Sendable {
     /// the *next* use pays a full reload, and the warden is the one that gets
     /// to decide whether that trade is worth it (`PreemptionOutcome.forced`).
     /// An idle handle is simply handed over.
+    ///
+    /// [PRESSURE-SAFE LOAD] (2026-09-19) A **load in flight** is a third
+    /// answer, and it is the one this whole path was missing. It used to be
+    /// reported as `.notHolding` — "nothing was there to drop" — which is
+    /// literally true (the handle does not exist until `LLM.init` returns) and
+    /// completely misleading: the warden was told the bytes were back, and the
+    /// load it could not see went on to fill the row it had just cleared. The
+    /// owner's phone died in exactly that gap. `.cannotReleaseNow` says what is
+    /// actually true, and it is the token the released-ask's refusal grace is
+    /// already built for. The flag it sets is what makes the load *stand down*
+    /// rather than merely be described as un-droppable.
     func releaseForWarden() -> UnloadAck {
         lock.lock()
         defer { lock.unlock() }
+        if loadDepth > 0 {
+            loadAbandonRequested = true
+            return .refused(.cannotReleaseNow)
+        }
         guard handle != nil else { return .notHolding }
         guard decodeDepth == 0 else { return .refused(.inUse) }
         handle = nil
         handleModelURL = nil
+        let notify = onOffloadedByWarden
+        lock.unlock()
+        // Outside the lock, and after the bytes are already given back: the
+        // handler is a `Task` hop into the tier (see
+        // `setWardenOffloadHandler`), so nothing here can wait on it.
+        notify?()
         return .released
+    }
+
+    /// The warden's **registered release path** — what runs when the ask was
+    /// refused and `ModelReleaseContract.actorDeferredFree` allowed the
+    /// refusal to be overruled, and what a `.budget` eviction of this slot
+    /// runs.
+    ///
+    /// `drop()` plus the notice, because the elder is owed the sentence: the
+    /// tier did not ask for this, and from the camera's side the translation
+    /// simply stopped. The handle reference goes first (the notice must not
+    /// be able to outlive the drop it describes), and the handler is invoked
+    /// with no lock held.
+    func dropForWarden() {
+        drop()
+        lock.lock()
+        let notify = onOffloadedByWarden
+        lock.unlock()
+        notify?()
+    }
+
+    /// Called by the generator when the warden takes the handle on a path the
+    /// tier did not ask for. Invoked outside this box's lock, synchronously,
+    /// on the warden's thread.
+    private var onOffloadedByWarden: (@Sendable () -> Void)?
+
+    /// Wired once, before the first load; read under the lock at the ask.
+    func setOffloadHandler(_ handler: (@Sendable () -> Void)?) {
+        lock.lock()
+        defer { lock.unlock() }
+        onOffloadedByWarden = handler
     }
 }
 
@@ -868,7 +1241,23 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
     private let config: LiveTranslateConfig
     /// The handle, and the ledger's view of it. Not an actor-stored property
     /// any more — see `TranslateBrainHandleSlot`.
-    private let slot = TranslateBrainHandleSlot()
+    ///
+    /// Internal rather than private for exactly one reader:
+    /// `LocalBrainTranslationTierTests` drives the warden's ask against the
+    /// in-flight window (`releaseForWarden` while `isLoading`). The ledger
+    /// cannot produce that state itself — a slot with a load in flight holds
+    /// nothing and is *not* resident, so no eviction path can reach it and the
+    /// sweep that would ask skips it — and the ask is nevertheless the fact
+    /// the fix is about.
+    ///
+    /// `nonisolated` because the warden does not go through this actor to
+    /// reach it (`setWardenOffloadHandler` is `nonisolated` for the same
+    /// reason: a reservation path may not have to await a decode). The box
+    /// carries its own lock and is `@unchecked Sendable`, and the load window
+    /// it describes is exactly the interval in which an `await` would be too
+    /// late. It is the same object this actor would have asked; tests drive
+    /// the real box without a model on disk or a llama runtime.
+    nonisolated let slot = TranslateBrainHandleSlot()
     private var lastUse: Date?
     /// The armed idle release, if one is. Cancelled and re-armed by every use,
     /// so the handle's lifetime is measured from the last batch and not from
@@ -908,6 +1297,14 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
     }
 
     func isHoldingHandle() async -> Bool { slot.isHoldingHandle }
+
+    /// `nonisolated` so it can satisfy `BrainTextGenerating`'s synchronous
+    /// requirement: the warden asks from its own reservation path and must
+    /// not have to await this actor (which may be mid-decode) to install a
+    /// handler. The box guards its own copy of the reference.
+    nonisolated func setWardenOffloadHandler(_ handler: (@Sendable () -> Void)?) {
+        slot.setOffloadHandler(handler)
+    }
 
     func release() async {
         idleRelease?.cancel()
@@ -974,11 +1371,59 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
     /// rule, one mechanism — the check this method used to carry was the only
     /// place the rule was ever consulted, and a session that stopped asking
     /// never got there.
+    /// **[PRESSURE-SAFE LOAD] (2026-09-19) — the container that decided whether
+    /// this load may start, and how it stands down once it has.**
+    ///
+    /// The owner's phone died in this method. The sequence, from the forensic
+    /// capture: the device was already starved, the tier's headroom gate passed
+    /// anyway (it reads the app's own ceiling, not the system's free pages), a
+    /// 1.03 GB Metal-offloaded load began, memory-pressure events fired, and
+    /// the process was gone about five seconds later. Three properties of this
+    /// method are what made that unrecoverable, and each one has a checkpoint
+    /// below:
+    ///
+    ///  1. **The load is synchronous.** `LLM.init` cannot be interrupted once
+    ///     it starts, and moving it off-thread is a change to the runtime's
+    ///     contract rather than to this file. So the checks go *around* it:
+    ///     one before the warden is asked, one after the reserve returns, and
+    ///     one after the construction returns. The last is the one that closes
+    ///     the hole the capture shows — the load cannot be stopped, but it can
+    ///     be **declined the slot** it was going to fill.
+    ///
+    ///  2. **The reserve can take seconds.** It evicts before it admits, and
+    ///     the evictions are real unloads (`llama_model_free` is not instant).
+    ///     A `.critical` that lands inside that window is the device saying
+    ///     "not now" *after* the warden said yes, and only a second check can
+    ///     hear it.
+    ///
+    ///  3. **The slot had no way to say "a load is coming".** It held nothing,
+    ///     so `releaseForWarden` answered `.notHolding` and the warden
+    ///     believed the bytes were back. `slot.beginLoad()` is the fix: for
+    ///     the whole of this method the slot answers `.refused(.cannotReleaseNow)`
+    ///     and records the ask, which is what turns "silently acked" into
+    ///     "abandoned".
+    ///
+    /// The window is opened *before* the registration and the reserve — not
+    /// merely around the construction — because that is the interval a warden
+    /// could previously mis-read. It is closed by a `defer`, so no exit leaks
+    /// it.
     private func loadHandle(modelURL: URL) throws -> LLM {
         if let existing = slot.currentHandle as? LLM,
            slot.heldModelURL == modelURL { return existing }
 
         let modelID = Self.modelID(forURL: modelURL)
+
+        slot.beginLoad()
+        defer { slot.endLoad() }
+
+        // Checkpoint 1 — before the warden is asked, and before anything it
+        // might evict. The tier already asked this question a moment ago
+        // (`deferralForLoad`); it is asked again because the answer is a fact
+        // about the device, and a fact about a starving device goes stale in
+        // milliseconds.
+        if let abandoned = loadAbandonReason() {
+            throw BrainGenerationFailure.loadAbandoned(abandoned)
+        }
 
         // [MODEL-WARDEN] Step 2 — declare the position before asking for the
         // bytes. `resident:` is what makes this handle *preemptible* rather
@@ -994,7 +1439,12 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
                            evictable: true,
                            priority: ReservationPurpose.liveTranslate.priority,
                            resident: slot) { [weak slot] in
-            slot?.drop()
+            // `dropForWarden`, not `drop`: this closure is the warden's
+            // forced half of the ask (and a budget eviction of this slot),
+            // and both are moments the elder is owed the sentence for. The
+            // tier's own releases go through `dropHandle`, which says
+            // nothing — nobody needs telling about a release they made.
+            slot?.dropForWarden()
         }
 
         // [MODEL-WARDEN] Step 1 — ask the warden BEFORE allocating.
@@ -1023,8 +1473,34 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
         // while `wardenBypassForTesting` is on, the load skips the
         // reserve/admit gate entirely — no permit, no eviction, no denial.
         // Residency is still recorded (didLoad below), so the ledger stays
-        // honest about what is in memory. Testing-only; reverts to the gated
-        // path when the round-3 quant ships.
+        // honest about what is in memory. Testing-only.
+        //
+        // [PRESSURE-SAFE LOAD] **The bypass skips the arithmetic. It does not
+        // skip the device.** Every checkpoint in this method runs whatever
+        // this flag says, because the arithmetic the flag turns off is the
+        // part that is *wrong* on a starved phone — `os_proc_available_memory`
+        // reads the app's own account, and a device the kernel is already
+        // killing daemons on can still look roomy by it. The kernel's pressure
+        // level is not arithmetic and is not optional: it is the reading that
+        // would have refused the load the owner's phone died starting, and a
+        // testing switch that could re-open that path would be a switch that
+        // can kill the phone again.
+        //
+        // **The flip is one line, and it is the owner's to make after the
+        // device pass** (2026-09-19 directive: "the bypass stays until
+        // proven on device, then flips off"). In
+        // `LiveTranslateConfig.wardenBypassForTesting`, change `= true` to
+        // `= false`. Nothing else moves: the gated path below is the one the
+        // round-2b work built, and the four behaviours it rests on are the
+        // ones to watch for on the device —
+        //   1. the load is ADMITTED after evicting a background/warm
+        //      resident, not refused (`over_budget_alone` in the console is
+        //      the failure this task exists to remove);
+        //   2. a voice turn takes the handle back (`brain_translation_preempted`
+        //      on component `livetranslate`);
+        //   3. the elder sees "hold on a sec" copy while a load runs;
+        //   4. the elder sees "switched for your voice request" when it is
+        //      taken, and translation resumes on the next batch.
         let reservation: ModelReservation?
         if config.wardenBypassForTesting {
             reservation = nil
@@ -1043,12 +1519,29 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
         }
         // Every exit that is not a committed load hands the permit back —
         // a throw from the construction, and (though this method has no
-        // suspension point today) anything the runtime adds later.
+        // suspension point today) anything the runtime adds later. The reason
+        // is the abandon's own where there was one, because a permit handed
+        // back under `memory_pressure` is a different fact in the ledger than
+        // one handed back because the artifact would not construct.
         var committed = false
+        var abandonReason: ReservationAbandonReason = .loadFailed
         defer {
             if let reservation, !committed {
-                lifecycle.abandon(reservation, reason: .loadFailed)
+                lifecycle.abandon(reservation, reason: abandonReason)
             }
+        }
+
+        // Checkpoint 2 — the one the reserve makes necessary. Between the ask
+        // above and this line the warden may have evicted a voice brain, a
+        // recognizer, or the encoder, and each of those is a real unload that
+        // takes time. A `.critical` arriving anywhere in that interval is the
+        // device withdrawing the permission the warden just granted, and the
+        // ledger has already abandoned the reservation on its own account (see
+        // `handleCriticalMemoryPressure`) — the point of asking here is that
+        // this path must not go on to allocate anyway.
+        if let abandoned = loadAbandonReason() {
+            abandonReason = Self.abandonReason(for: abandoned)
+            throw BrainGenerationFailure.loadAbandoned(abandoned)
         }
 
         // Passthrough template: generation calls `generateWithConstraints`
@@ -1067,6 +1560,24 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
                                 maxTokenCount: Int32(LocalIntentInterpreter.contextTokenBudget)) else {
             throw BrainGenerationFailure.loadFailed
         }
+
+        // Checkpoint 3 — the only one that can speak for the seconds spent
+        // *inside* `LLM.init`. The construction is synchronous and cannot be
+        // interrupted, so a pressure event or a warden's ask that landed while
+        // it ran has, until this line, had no way to stop it from filling the
+        // slot. Here the handle is simply not stored: `created` is released on
+        // the way out of this scope, the ledger is told the load was abandoned
+        // rather than committed, and the row the warden cleared stays cleared.
+        //
+        // The bytes were briefly resident — there is no way to avoid that with
+        // a synchronous load — but the spike is not *kept*, which is the
+        // difference between a device that thrashes once and one that is
+        // killed for holding on.
+        if let abandoned = loadAbandonReason() {
+            abandonReason = Self.abandonReason(for: abandoned)
+            throw BrainGenerationFailure.loadAbandoned(abandoned)
+        }
+
         slot.store(created, url: modelURL)
         // The bytes are in memory: the transient term retires into the
         // ledger's resident total, and the row is marked resident under the
@@ -1084,6 +1595,48 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
         }
         committed = true
         return created
+    }
+
+    /// [PRESSURE-SAFE LOAD] The two signals a load must stand down for, taken.
+    ///
+    /// **One question, asked at each checkpoint.** They are the same two facts
+    /// every time — the kernel's state, and whether a warden has asked for
+    /// this position since the load was declared in flight — and each is read
+    /// fresh, because the answer is a fact about a device that changes while
+    /// the load is being prepared.
+    ///
+    /// The warden's ask is checked **first** and consumed: it is the more
+    /// specific fact (this position, this load, this instant), and if it and a
+    /// pressure reading are both outstanding, the ask is what explains why the
+    /// slot is empty.
+    ///
+    /// The pressure half is `LocalBrainTranslationTier.pressureDeferral`, not
+    /// a second comparison against the reading — the load path and the tier's
+    /// pre-attempt gate must not be able to disagree about what the kernel
+    /// said, or a load refused at the door would be taken again through the
+    /// window of a copy that forgot one of the three levels.
+    private func loadAbandonReason() -> LocalBrainDeferral? {
+        if slot.consumeLoadAbandonRequest() { return .releaseRequestedDuringLoad }
+        return LocalBrainTranslationTier.pressureDeferral(
+            lifecycle.memoryPressureReading(),
+            windowSeconds: config.brainTranslationCriticalPressureWindowSeconds)
+    }
+
+    /// The ledger's own token for a permit an abandon consumed.
+    ///
+    /// The deferral vocabulary is the tier's; this is the ledger's, and the
+    /// two are not the same list — so the mapping is explicit and exhaustive
+    /// rather than a rawValue bridge that would silently pair two enums by
+    /// spelling. The first two cases are the pre-attempt gate's and cannot
+    /// reach the load path (the gate runs before it); they are mapped rather
+    /// than trapped so that adding one is a compile error here and not a
+    /// runtime surprise on a device.
+    private static func abandonReason(for deferral: LocalBrainDeferral) -> ReservationAbandonReason {
+        switch deferral {
+        case .memoryPressure, .recentCriticalPressure: return .memoryPressure
+        case .releaseRequestedDuringLoad: return .preempted
+        case .residentBrain, .insufficientHeadroom: return .loadFailed
+        }
     }
 
     /// The catalog id behind a resolved model URL.

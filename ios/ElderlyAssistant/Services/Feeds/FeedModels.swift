@@ -38,6 +38,32 @@ struct FeedItem: Identifiable, Equatable, Codable {
     /// The configured source name this item came from (rendered on the
     /// card caption, exactly as the user named the source).
     let sourceName: String
+    /// The article BODY the source published (`<content:encoded>` /
+    /// Atom `<content>`), raw like `summary` — markup and all — and
+    /// sanitized only at render/speech time (feeds readaloud task,
+    /// 2026-09-19). Empty when the source published no separate body:
+    /// an item whose feed shares only a summary is never given a
+    /// fabricated one, and the full-article affordance says so honestly
+    /// (`FeedSpeechSanitizer.hasFullArticle`). Bounded by the parser
+    /// (`FeedRSSParser.maxFullTextLength`).
+    let fullText: String
+
+    /// Explicit memberwise init (a defaulted `fullText` keeps every
+    /// pre-existing call site — parser and tests — compiling unchanged).
+    init(id: String, title: String, summary: String, kind: FeedItemKind,
+         publishedAt: Date?, linkURL: String, imageURL: String?,
+         mediaURL: String?, sourceName: String, fullText: String = "") {
+        self.id = id
+        self.title = title
+        self.summary = summary
+        self.kind = kind
+        self.publishedAt = publishedAt
+        self.linkURL = linkURL
+        self.imageURL = imageURL
+        self.mediaURL = mediaURL
+        self.sourceName = sourceName
+        self.fullText = fullText
+    }
 }
 
 /// One configured feed source (RSS/Atom URL). Curated defaults ship
