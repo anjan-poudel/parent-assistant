@@ -1292,6 +1292,37 @@ struct LiveTranslateConfig: Equatable {
     /// brain unavailability.
     var brainTranslationHeadroomFactor: Double = 1.0
 
+    /// [PRESSURE-SAFE LOAD] (2026-09-19) How recently the kernel must have
+    /// reported `.critical` for the tier to still refuse a load, in seconds.
+    ///
+    /// The headroom factor above is blind to the device: it compares the
+    /// brain's declared non-pageable bytes against
+    /// `os_proc_available_memory()`, which is the APP's own ceiling under its
+    /// jetsam limit. A phone can be down to a few megabytes of *system-wide*
+    /// free pages — the kernel jetsamming daemons in the background — while
+    /// the app's own headroom still reads as generous, because nothing has
+    /// been charged to the app yet. The 2026-09-19 device death is exactly
+    /// that shape: the headroom check passed, a 1.03 GB Metal-offloaded load
+    /// began, an encoder eviction followed, and the process was gone about
+    /// five seconds later. This window is the second opinion, and it is the
+    /// kernel's own.
+    ///
+    /// The window rather than the bare level because a `.critical` is a
+    /// *moment*, not a state the app is told about afterwards: the kernel
+    /// sends the next level when it sends it, and the minutes in between are
+    /// exactly when the last `.critical` is still the most honest thing known
+    /// about the device. It is sized against the cost of the thing it guards —
+    /// a synchronous multi-GB page-in that takes seconds and cannot be
+    /// stopped once started — so a load beginning inside this window would
+    /// still be allocating while the kernel was reclaiming.
+    ///
+    /// The cost of being wrong in this direction is one batch answered by the
+    /// next tier; the cost in the other direction is the whole app, which
+    /// translates nothing at all. Deliberately not zero, and deliberately not
+    /// minutes: 30 s is longer than the load it forbids and shorter than the
+    /// gap between the elder's glances at a sign.
+    var brainTranslationCriticalPressureWindowSeconds: TimeInterval = 30
+
     /// Whether the tier defers to a brain that is already resident for another
     /// owner — the voice pipeline's `.brain` or `.intentBrain` slot — rather
     /// than running a second multi-GB generation alongside it.

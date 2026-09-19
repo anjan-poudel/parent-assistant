@@ -1077,7 +1077,27 @@ final class AppCoordinator: ObservableObject {
     @Published private(set) var feedTranslatingIDs: Set<String> = []
     @Published private(set) var feedTranslationFailedIDs: Set<String> = []
 
-
+    // Feeds read-aloud (feeds readaloud task, 2026-09-19): which items
+    // the elder has HEARD, and which item the reading path is on (the
+    // full-article voice command's subject). The store is built on first
+    // use like the two above — nothing on the first frame renders it.
+    private lazy var feedReadStateStore = FeedReadStateStore(storage: storage)
+    /// Item ids that have been read aloud to completion — the card's
+    /// unread badge is the absence of an id here, so this must be
+    /// published.
+    @Published private(set) var feedReadIDs: Set<String> = []
+    /// The item a read-aloud last touched (UI button or voice command) —
+    /// "read the full article" continues from here rather than guessing
+    /// from the whole feed. Cleared implicitly when the item leaves the
+    /// feed (the id no longer resolves).
+    private var feedActiveItemID: String?
+    /// True once the read state has been loaded for this launch (the
+    /// store read is once-per-launch, not per card).
+    private var feedReadStateLoaded = false
+    /// The speak-queue source id for feed readings — a feature-owned id
+    /// (not the generic `coordinator_reply`) so the feed's utterances are
+    /// addressable as a group, exactly as live-translate's are.
+    private static let feedReadingSourceID = "feeds_readaloud"
 
     /// Voice-session derivation state (spec §3.3): the last pipeline state
     /// plus how many `speak()` calls are currently in flight. `speaking`
@@ -10291,6 +10311,10 @@ extension AppCoordinator {
     private func performFeedRefresh() async {
         let result = await feedService.refresh()
         await MainActor.run { [self] in
+            // The read state is what the unread badges render, so it must
+            // be loaded before the first card paints (main-thread: it
+            // publishes).
+            ensureFeedReadStateLoaded()
             feedItems = FeedLanguageSorter.sort(result.items, app: appLanguage)
             feedFailedSourceNames = result.failedSourceNames
             // Honest state mapping: empty + failures = the failed card
@@ -10432,6 +10456,136 @@ extension AppCoordinator {
                 feedTranslationFailedIDs.insert(item.id)
                 feedTranslatingIDs.remove(item.id)
             }
+        }
+    }
+
+    // MARK: Read aloud + read state (feeds readaloud task, 2026-09-19)
+
+    /// Loads the persisted read state once per launch. Idempotent, and
+    /// safe to call from every reading entry point and from the leaf's
+    /// refresh — the store read is cheap but pointless per card.
+    /// MAIN-thread only (it publishes).
+    func ensureFeedReadStateLoaded() {
+        guard !feedReadStateLoaded else { return }
+        feedReadStateLoaded = true
+        feedReadIDs = Set(feedReadStateStore.load().readIDs)
+    }
+
+    /// True when the item has been read aloud to completion — the card's
+    /// unread badge is exactly the negation of this.
+    func isFeedItemRead(_ item: FeedItem) -> Bool {
+        feedReadIDs.contains(item.id)
+    }
+
+    /// Marks the item read and persists it. Called ONLY from the
+    /// speech-completion seam (see `speakFeedItemReading`) — never from a
+    /// scroll, a render, or an opening sheet.
+    func markFeedItemRead(_ item: FeedItem) {
+        ensureFeedReadStateLoaded()
+        feedActiveItemID = item.id
+        feedReadIDs = Set(feedReadStateStore.markRead(id: item.id).readIDs)
+    }
+
+    /// Reads the item's SUMMARY aloud — the card's "Read aloud" button.
+    /// The caller passes the text it is DISPLAYING (the translation when
+    /// one is showing), preserving the feed translation task's
+    /// single-resolution rule: the voice can never read different words
+    /// than the card shows.
+    func readFeedItemSummaryAloud(_ item: FeedItem, text: String) {
+        speakFeedItemReading(item: item, text: text)
+    }
+
+    /// Reads the item's FULL article aloud — the source's own body,
+    /// sanitized here (tags and URLs stripped before anything reaches the
+    /// speaker). Translations cover the card's title + summary and never
+    /// the article body, so this reads the ORIGINAL words rather than
+    /// inventing a translation that does not exist.
+    func readFeedItemArticleAloud(_ item: FeedItem) {
+        speakFeedItemReading(
+            item: item,
+            text: FeedSpeechSanitizer.articleSpeechText(title: item.title,
+                                                        summary: item.summary,
+                                                        fullText: item.fullText))
+    }
+
+    /// The one reading path both entry points share: speak, then mark the
+    /// item read when the reading COMPLETES.
+    ///
+    /// Completion is the honest moment: the queue's completion seam runs
+    /// only for an utterance the elder heard to the end — a TTS failure
+    /// (nothing was heard) or a preemption by a safety lane (the
+    /// remainder was never heard) leaves the item unread.
+    private func speakFeedItemReading(item: FeedItem, text: String) {
+        ensureFeedReadStateLoaded()
+        guard !text.isEmpty else { return }
+        feedActiveItemID = item.id
+        speakFeedText(text) { [weak self] in
+            // The seam fires on the queue's worker thread.
+            Task { @MainActor in self?.markFeedItemRead(item) }
+        }
+    }
+
+    /// [FEEDS-FULL-ARTICLE] (2026-09-19) The voice command's hand-off
+    /// ("read the full article" / "पूरा समाचार पढ") — the deterministic
+    /// router stage calls this instead of speaking anything itself.
+    ///
+    /// Subject: the item the reading path is on (the last one read
+    /// aloud), else the newest item in the feed — never a guess at a
+    /// story the elder did not just hear. Honest when there is nothing
+    /// to read, and honest when the source shares only a summary: that
+    /// line is SPOKEN here because a voice command has no card to carry
+    /// the caption the UI shows.
+    func readFullFeedArticle() {
+        ensureFeedReadStateLoaded()
+        guard let item = feedItemForFullArticle() else {
+            speak(text: L10n.str("feeds.voice.noItems", locale: activeLocale))
+            return
+        }
+        if !FeedSpeechSanitizer.hasFullArticle(summary: item.summary,
+                                               fullText: item.fullText) {
+            speak(text: L10n.str("feeds.voice.summaryOnly", locale: activeLocale))
+        }
+        readFeedItemArticleAloud(item)
+    }
+
+    /// The full-article voice command's subject — see `readFullFeedArticle`.
+    private func feedItemForFullArticle() -> FeedItem? {
+        if let id = feedActiveItemID,
+           let active = feedItems.first(where: { $0.id == id }) {
+            return active
+        }
+        return feedItems.first
+    }
+
+    /// Speaks feed text through the shared queue and runs `onSpoken` when
+    /// the utterance was HEARD to the end (`SpeakQueue`'s completion seam
+    /// — never on a TTS failure, never on preemption). Bookkeeping is
+    /// identical to `speak(text:)`: the reading is still recorded as an
+    /// assistant utterance, so the transcript and turn tracking behave
+    /// exactly as they did before this task. The only difference is the
+    /// `sourceID`, which names the feature that owns the utterance.
+    private func speakFeedText(_ text: String, onSpoken: (() -> Void)?) {
+        guard !text.isEmpty else { return }
+        if let queue = speakQueue {
+            noteAssistantSpoke(text)
+            queue.enqueue(Announcement(id: UUID(),
+                                       text: text,
+                                       priority: .interactive,
+                                       sourceID: Self.feedReadingSourceID,
+                                       card: nil),
+                          onSpoken: onSpoken)
+            return
+        }
+        // Pre-`start()` fallback — the `speak(text:)` shape: no queue
+        // exists to observe, and the awaited call IS the completion.
+        guard let speaker else { return }
+        noteAssistantSpoke(text)
+        noteSpeakingStarted()
+        let locale = activeLocale
+        Task { [weak self] in
+            await speaker.speak(text, locale: locale)
+            self?.noteSpeakingEnded()
+            onSpoken?()
         }
     }
 }
