@@ -111,8 +111,22 @@ struct ModelLoadRequest {
 enum ReservationPurpose: String, Sendable {
     /// A live voice turn — the household is waiting on an answer.
     case voiceTurn
-    /// The camera session's translation brain. Preemptible by design in
-    /// Step 2; in Step 1 it is simply a purpose the queue can name.
+    /// The camera session's translation brain.
+    ///
+    /// **The top of the ladder is the voice stack, and this sits below it.**
+    /// `.safetyCritical` outranks this purpose's `.foreground`, so a
+    /// `.voiceTurn` reservation that cannot fit is entitled to *ask* the
+    /// translation model to stand down — `ModelResident.releaseForWarden`,
+    /// which the tier's handle box conforms to — and may force the drop when
+    /// the owner refuses, because a brain's contract is `actorDeferredFree`
+    /// (`allowsForcedUnload`). The reverse is not true: a translation load
+    /// can never ask the voice stack for anything, because
+    /// `askableVictims(victims:above:)` only asks residents *strictly below*
+    /// the request's rung, and `guardSparedLocked` never spares a resident
+    /// from a `.safetyCritical` request. That asymmetry is the owner's
+    /// directive of 2026-09-19 made structural: "if a voice command is
+    /// activated, translation has LOWER priority and can be offloaded to
+    /// make room for the voice stack."
     case liveTranslate
     /// A boot warm or a post-turn re-warm: nothing is waiting on it.
     case warm
@@ -127,6 +141,34 @@ enum ReservationPurpose: String, Sendable {
         case .warm, .maintenance: return .background
         }
     }
+
+    /// Whether a load on this purpose may evict its way past the **session**
+    /// budget, or must stay inside it.
+    ///
+    /// Owner directive, 2026-09-19: "ModelWarden should UNLOAD other models
+    /// and load the translation model." The session budget
+    /// (`ModelLifecycleBudget.effectiveBudgetBytes`) tracks the probe, and a
+    /// momentary tight reading can put it below a model the device class
+    /// plainly supports — the Q8 translation head is 2.63 GB live against a
+    /// 3.2 GB standard-class budget. Refusing there
+    /// (`ReservationDenial.overBudgetAlone`) is what made the on-device tier
+    /// unable to load its own model, and a camera session that has stopped
+    /// translating is a silence the elder cannot explain.
+    ///
+    /// A foreground translation load is the one purpose this applies to,
+    /// because it is the one whose own victims are the room it needs: the
+    /// camera has no turn boundary, so there is nothing to wait for. The
+    /// bound is the **class** budget, not consent to exceed the device — a
+    /// model over the class budget is over it whatever is evicted and stays
+    /// refused (`ModelLifecycleManager.reserveInternal`) — and phase 3's hard
+    /// headroom check against the live probe is what still decides whether an
+    /// allocation actually lands.
+    ///
+    /// Deliberately not shared with the voice stack's purposes: a `.voiceTurn`
+    /// already outranks everything on the ladder and takes what it needs, and
+    /// `.warm` / `.maintenance` loads are the churn the budget exists to
+    /// damp.
+    var mayEvictPastTheSessionBudget: Bool { self == .liveTranslate }
 }
 
 // MARK: - [MODEL-WARDEN] Step 2 — the priority ladder

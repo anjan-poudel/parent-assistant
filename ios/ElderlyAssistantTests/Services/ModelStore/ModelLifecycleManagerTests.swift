@@ -1300,4 +1300,216 @@ final class ModelLifecycleManagerTests: XCTestCase {
                        "a failed probe must not fabricate a footprint")
         XCTAssertEqual(manager.snapshot().physFootprintBytes, 0)
     }
+
+    // MARK: - The translation preemption policy (owner directive, 2026-09-19)
+    //
+    // "ModelWarden should UNLOAD other models and load the translation model
+    // … If a voice command is activated, translation has LOWER priority and
+    // can be offloaded to make room for the voice stack."
+    //
+    // The cases below are that policy in full, and the first two need a
+    // manager with **no** budget override: everything else in this file pins
+    // one budget with `budgetOverrideBytes`, while this policy is precisely
+    // about the difference between the two budgets a real device produces.
+
+    /// The Q8 translation head: 1.83 GB of weights in the 3B row, 2.63 GB
+    /// live. It is the artifact the owner is testing on device, and the one
+    /// whose refusal turned the tier cloud-only.
+    private var translateQ8: ModelID { ModelCatalog.nmtEnNeQwen17bR2bQ8 }
+
+    /// A manager on the scripted probe with no budget override, so the class
+    /// budget comes from the scripted physical memory and the session budget
+    /// from the scripted headroom.
+    private func makeUnpinnedManager() -> ModelLifecycleManager {
+        ModelLifecycleManager(
+            probe: probe,
+            clock: { [unowned self] in self.now },
+            idleEvictionSeconds: ModelLifecycleManager.defaultIdleEvictionSeconds)
+    }
+
+    /// Registers and drives a slot resident on a manager other than the one
+    /// `setUp` built.
+    @discardableResult
+    private func load(_ slot: ModelSlot,
+                      modelID: ModelID?,
+                      owner: FakeOwner,
+                      on manager: ModelLifecycleManager,
+                      priority: ModelPriority = .foreground,
+                      resident: ModelResident? = nil) -> FakeOwner {
+        manager.register(slot: slot, modelID: modelID, owner: owner,
+                         evictable: true, priority: priority,
+                         resident: resident) { [weak owner] in
+            owner?.unload()
+        }
+        manager.didLoad(slot, owner: owner)
+        return owner
+    }
+
+    /// A foreground translation load that cannot fit the SESSION budget
+    /// evicts what it may and is admitted against the CLASS budget.
+    ///
+    /// This is the device failure the policy exists for: the probe reading
+    /// collapses `effectiveBudgetBytes` below the 2.63 GB the Q8 needs, the
+    /// old branch answered `over_budget_alone` because
+    /// `.translateBrain` does not `admitSoloOverBudget`, and a refused load
+    /// is a camera session that stopped translating.
+    func testAForegroundTranslationLoadEvictsAWarmResidentAndIsAdmitted() {
+        // 6 GB physical → `.standard` → a 3.2 GB class budget; 1.5 GB of
+        // headroom with a warm 1 GB STT resident beside it.
+        probe.availableProcessMemoryBytes = 1_500_000_000
+        let manager = makeUnpinnedManager()
+        var events: [ModelLifecycleEvent] = []
+        manager.onEvent = { events.append($0) }
+
+        let warmOwner = FakeOwner()
+        load(.speechToText, modelID: sttQ8, owner: warmOwner, on: manager,
+             priority: .background)
+
+        let incoming = footprint(.translateBrain, translateQ8)
+        let warm = footprint(.speechToText, sttQ8)
+        let sessionBudget = ModelLifecycleBudget.effectiveBudgetBytes(
+            deviceClass: .standard,
+            availableBytes: probe.availableProcessMemoryBytes,
+            residentLiveBytes: warm)
+        // The setup, asserted rather than assumed — if these two ever stop
+        // holding, the case is no longer testing the refusal it was written
+        // for and should fail loudly rather than pass vacuously.
+        XCTAssertLessThan(sessionBudget, incoming,
+                          "the session budget must be below the model, or the "
+                          + "old branch would never have refused it")
+        XCTAssertLessThanOrEqual(incoming,
+                                 ModelLifecycleBudget.standardModelsBudgetBytes,
+                                 "…and the model must be INSIDE the class "
+                                 + "budget, which is the other half of the rule")
+
+        let translateOwner = FakeOwner()
+        // Registered as the generator registers it before its own load.
+        manager.register(slot: .translateBrain, modelID: translateQ8,
+                         owner: translateOwner, evictable: true,
+                         priority: ReservationPurpose.liveTranslate.priority) { [weak translateOwner] in
+            translateOwner?.unload()
+        }
+
+        guard let reservation = reserveOrFail(
+            manager, request(.translateBrain, modelID: translateQ8,
+                             owner: translateOwner, purpose: .liveTranslate))
+        else { return }
+
+        XCTAssertEqual(reservation.budgetBytes,
+                       ModelLifecycleBudget.standardModelsBudgetBytes,
+                       "a foreground translation load is judged against the "
+                       + "class budget, not the collapsed session one")
+        XCTAssertFalse(reservation.soloOverBudget,
+                       "it is not over the budget it was judged against")
+        XCTAssertEqual(reservation.evicted, [.speechToText],
+                       "the warm background resident is what makes the room")
+        XCTAssertEqual(warmOwner.unloadCount, 1)
+        XCTAssertFalse(manager.isResident(.speechToText))
+        XCTAssertFalse(events.contains(.reservationDenied(
+            slot: .translateBrain, reason: .overBudgetAlone(
+                liveBytes: incoming,
+                budgetBytes: sessionBudget), purpose: .liveTranslate)),
+            "`over_budget_alone` is the refusal this directive removes")
+    }
+
+    /// The bound the policy keeps: a model over the **class** budget is over
+    /// it whatever is evicted, and stays refused.
+    func testATranslationModelOverTheClassBudgetIsStillRefused() {
+        let manager = makeUnpinnedManager()   // default probe: 3.4 GB free
+        let incoming = footprint(.translateBrain, brain4B)
+        XCTAssertGreaterThan(incoming,
+                             ModelLifecycleBudget.standardModelsBudgetBytes,
+                             "the 4B must be over the 3.2 GB class budget for "
+                             + "this case to mean anything")
+
+        guard case .failure(let denial) = manager.reserve(
+            request(.translateBrain, modelID: brain4B, owner: nil,
+                    purpose: .liveTranslate)) else {
+            return XCTFail("eviction cannot shrink a model below its own "
+                           + "bytes: a 4B on a standard phone stays refused")
+        }
+        XCTAssertEqual(denial, .overBudgetAlone(liveBytes: incoming,
+                                                budgetBytes: ModelLifecycleBudget.standardModelsBudgetBytes))
+        XCTAssertEqual(denial.token, "over_budget_alone")
+    }
+
+    /// A voice turn takes the translation model back — asked, then handed
+    /// over, and never also unloaded by the unconditional path.
+    func testAVoiceTurnReservationPreemptsTheTranslationResident() {
+        var events: [ModelLifecycleEvent] = []
+        // The pinned budget is the standard class's own, which is what makes
+        // the translation head and the 1.7B brain over it together.
+        let tight = makeManager(budget: ModelLifecycleBudget.standardModelsBudgetBytes)
+        tight.onEvent = { events.append($0) }
+
+        let translateOwner = FakeOwner()
+        let resident = FakeResident()   // .released
+        tight.register(slot: .translateBrain, modelID: translateQ8,
+                       owner: translateOwner, evictable: true,
+                       priority: ReservationPurpose.liveTranslate.priority,
+                       resident: resident) { [weak translateOwner] in
+            translateOwner?.unload()
+        }
+        tight.didLoad(.translateBrain, owner: translateOwner)
+
+        // The household is talking: a live voice turn's brain load cannot fit
+        // beside the translation head.
+        guard let reservation = reserveOrFail(
+            tight, request(.brain, modelID: brain17B, owner: translateOwner,
+                           purpose: .voiceTurn)) else { return }
+
+        XCTAssertEqual(resident.askCount, 1,
+                       "the warden asks a resident below the request — a voice "
+                       + "turn is the only thing above it")
+        XCTAssertEqual(translateOwner.unloadCount, 0,
+                       "the owner gave the bytes back on the ask; invoking the "
+                       + "registered release path as well would drop a handle "
+                       + "that is already gone")
+        XCTAssertEqual(reservation.preempted,
+                       [PreemptionRecord(slot: .translateBrain, outcome: .released)])
+        XCTAssertEqual(preemptedEvents(events), [.released])
+        XCTAssertFalse(tight.isResident(.translateBrain))
+        XCTAssertEqual(reservation.evicted, [.translateBrain],
+                       "the victim is the translation model and nothing else")
+    }
+
+    /// The other direction does not cross: a translation load cannot take the
+    /// bytes of the brain a live turn is decoding on.
+    ///
+    /// Structural rather than special-cased — the victim order drops any
+    /// resident with a pin (`loadEvictionOrderLocked`), which is what
+    /// `beginUse`/`endUse` set around an inference — and it is the bound the
+    /// owner named ("never the active voice turn's brain/STT"). The load is
+    /// then refused as a budget shortfall, not admitted over it.
+    func testATranslationLoadCannotTakeTheVoiceTurnsPinnedBrain() {
+        probe.availableProcessMemoryBytes = 1_500_000_000
+        let manager = makeUnpinnedManager()
+
+        let brainOwner = FakeOwner()
+        load(.brain, modelID: brain17B, owner: brainOwner, on: manager)
+        manager.beginUse(of: .brain)   // an inference is in flight
+
+        guard case .failure(let denial) = manager.reserve(
+            request(.translateBrain, modelID: translateQ8, owner: nil,
+                    purpose: .liveTranslate)) else {
+            return XCTFail("the pinned brain is exactly what may not be taken")
+        }
+
+        XCTAssertEqual(denial, .budgetExhausted(by: .brain))
+        XCTAssertEqual(brainOwner.unloadCount, 0)
+        XCTAssertTrue(manager.isResident(.brain))
+        manager.endUse(of: .brain)
+    }
+
+    /// The ladder the two directions ride on, pinned as one assertion so a
+    /// future purpose cannot quietly move either side of it.
+    func testTranslationRanksBelowTheVoiceStackAndMayOnlyEvictItsWayIn() {
+        XCTAssertLessThan(ReservationPurpose.liveTranslate.priority,
+                          ReservationPurpose.voiceTurn.priority)
+        XCTAssertTrue(ReservationPurpose.liveTranslate.mayEvictPastTheSessionBudget)
+        for other in [ReservationPurpose.voiceTurn, .warm, .maintenance] {
+            XCTAssertFalse(other.mayEvictPastTheSessionBudget,
+                           "\(other) must stay inside the session budget")
+        }
+    }
 }
