@@ -469,6 +469,62 @@ extension LiveTranslateError {
             return .textQuarantined
         }
     }
+
+    /// Whether this failure leaves the string **translatable on the device** —
+    /// what a caller has to know before it treats a failure as the end of the
+    /// road.
+    ///
+    /// True for everything the cloud can fail with, and for the gate and cost
+    /// failures that stand in for it: an offline transport, a refused status, a
+    /// policy block, an unusable response, a missed deadline, a spent budget, a
+    /// consent record, the household's switch. In every one of those the string
+    /// was **not translated by anyone** and nothing about it was consumed, so
+    /// the app's own model can still answer it with no egress — which is
+    /// exactly what the reliability router's fallback is for (FR-LCT-008's
+    /// device tier).
+    ///
+    /// **False only for quarantine.** A quarantined string is not a provider
+    /// failure: the sanitiser withdrew the text itself — a marker shape that
+    /// survived sanitisation, or nothing usable left of it — and that is a
+    /// judgement about the *text*, not about the destination. The same reason
+    /// already stops the string from being spoken, and sending it to the
+    /// device's own model would hand a string shaped to steer a model to a
+    /// model running inside the app's process, which is the one place the
+    /// sanitisation exists to protect.
+    ///
+    /// Exhaustive on purpose, like `unavailableReason`: a new case must be
+    /// placed here deliberately rather than inheriting an answer. Every case
+    /// that can appear in a `BatchResult.failures` is one of the cloud,
+    /// consent, cost or sanitisation families.
+    var leavesTheStringTranslatableOnTheDevice: Bool {
+        switch self {
+        case .cameraPermissionNotDetermined,
+             .cameraPermissionDenied,
+             .cameraUnavailable,
+             .cameraSessionInterrupted,
+             .ocrUnavailable,
+             .ocrPassFailed,
+             .trackingUnsupported,
+             .consentNotRecorded,
+             .consentDenied,
+             .consentRecordUnreadable,
+             .costBudgetExhausted,
+             .cloudDisabled,
+             .providerNotConfigured,
+             .cloudTransient,
+             .cloudRejected,
+             .cloudPolicyBlocked,
+             .cloudResponseUnusable,
+             .cloudDeadlineExceeded,
+             .cacheReadFailed,
+             .cacheWriteFailed,
+             .speechFailed:
+            return true
+
+        case .textQuarantined:
+            return false
+        }
+    }
 }
 
 // MARK: - Conversion from the shipped client (CL-4)

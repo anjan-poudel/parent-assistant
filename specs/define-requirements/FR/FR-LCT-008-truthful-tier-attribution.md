@@ -6,6 +6,10 @@
 - **Source:** Feature constitution "v1 non-goals" (deferred work must be absent, not a silent stub); Design §4.4, §11 (D2).
   **Amended 2026-09-17** by owner directive (see "Amendment" below): the deferred-tier clause is
   superseded by the on-device brain tier.
+  **Amended 2026-09-20** by owner-approved reliability routing (see "Amendment" below): the tier
+  order above is narrowed **by string class** — the device leads for the short forms the gate data
+  shows it is exact on, the cloud leads for the sentence class when it can lead, and anything the
+  cloud does not answer falls back to the device.
 
 ## Description
 Every translated string **must** carry the tier that actually produced it
@@ -69,6 +73,21 @@ Feature: Truthful tier attribution
     When the resolution completes
     Then the reason is recorded with a closed-vocabulary outcome
     And the string is left unresolved for the next tier rather than answered with a fabricated, empty or echoed string
+
+  Scenario: The sentence class leads with the cloud when the cloud can lead
+    Given a recognized sentence-class string is unresolved by the dictionary
+    And the household's cloud switch is on and a network path exists
+    And the cloud tier is consent-gated and consent is recorded
+    When the cloud returns a translation
+    Then sourceTier reports cloud
+    And the device brain tier was not asked for this string
+
+  Scenario: A string the cloud cannot answer falls back to the device
+    Given a recognized sentence-class string led with the cloud
+    And the cloud produced no translation for it
+    When the resolution completes
+    Then the string is translated on the device rather than degraded
+    And sourceTier reports the on-device brain tier
 ```
 
 ## Amendment
@@ -83,6 +102,26 @@ What the original requirement existed to protect is unchanged and is what the am
 criteria still pin: **no success without translation**, and **no result attributed to a tier that
 did not translate it**. The prohibition was never on the tier existing; it was on the tier lying.
 The narrow "must be absent" clause is what this amendment retires.
+
+**2026-09-20, owner-approved reliability routing (narrows the order in the description by string
+class).** The order in the description — tier 1 then tier 2, for every string — is the order the
+pipeline runs for the class the round-1/2/3 gate data shows the device model is **exact** on:
+short labels, menu items and pharmaceutical names (at most four words, at most forty characters,
+no clause punctuation). For the **sentence class** — instructions, sentences, anything longer —
+the same gate data does not show that, and the owner approved leading with the cloud for that
+class **when and only when the cloud can lead**: the household's switch on and a live network
+path. Whatever the cloud does not answer for those strings comes back to the device, so the
+routing trades a *tier order* for reliability and never trades a translation away.
+
+What this narrowing keeps is the whole of what the requirement protects: **no success without
+translation** (a string the cloud fails is translated on the device rather than degraded) and **no
+result attributed to a tier that did not translate it** (the router decides only the *order*; the
+tier that answers is always the tier named). The cloud stays consent-gated at the point of need
+(FR-LCT-011, FR-LCT-020), and a string the device answers still costs no request and no egress.
+
+The rule lives in one place, `TranslationReliabilityRouter`, and it is keyed on **measured
+reliability** — the class the gate data separates — deliberately not on negation, keywords or any
+other shape a translator could game.
 
 ## Related
 - NFR: NFR-LCT-010 (offline degradation integrity)

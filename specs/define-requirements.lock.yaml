@@ -26,6 +26,20 @@
 # attribution it always required. All 36 hashes were re-derived; FR-LCT-008 is
 # the only one that changed, so the other 35 requirement files are unchanged by
 # this re-lock.
+#
+# Re-lock 2026-09-19T20:06:46Z (owner date 2026-09-20, the owner's local
+# calendar). One owner-approved amendment: FR-LCT-008's tier ORDER is narrowed
+# by string class. The device leads for the class the round-1/2/3 gate data
+# shows it is exact on (short labels, menus, pharmaceutical names — at most
+# four words, at most forty characters, no clause punctuation); the sentence
+# class leads with the cloud when the cloud can lead (the household's switch on
+# AND a live network path), and anything the cloud does not answer falls back to
+# the device rather than degrading. What the requirement protects is unchanged:
+# no success without translation, no attribution to a tier that did not
+# translate, consent still read at the point of need. All 36 hashes were
+# re-derived; FR-LCT-008 is the only one that changed, and the aggregate
+# snapshot specs/define-requirements.md is unchanged, so the other 35
+# requirement files are untouched by this re-lock.
 
 version: "1"
 task: define-requirements
@@ -109,19 +123,27 @@ requirements:
     area: "Translation"
     priority: MUST
     file: specs/define-requirements/FR/FR-LCT-008-truthful-tier-attribution.md
-    sha256: b2b9c6fd8a7102e5294160cad5a31ae31edf9a14fd799b858f4f24d801e2b949
-    acceptance_scenarios: 5
-    amended: "2026-09-17T08:59:34Z"
+    sha256: e107fd252e3809d2990884808f84940551fec8e6516a35095899c96b1d33120e
+    acceptance_scenarios: 7
+    amended: "2026-09-19T20:06:46Z"
     amendment: >-
-      Owner directive 2026-09-17: the deferred-tier clause (the on-device tier "must be absent
+      Owner-approved 2026-09-20 (owner's local date), superseding nothing: the tier ORDER above is
+      narrowed by string class. The device leads for the class the round-1/2/3 gate data shows it is
+      exact on — short labels, menus, pharmaceutical names (at most four words, at most forty
+      characters, no clause punctuation) — and the sentence class leads with the cloud when, and
+      only when, the cloud can lead: the household's switch on AND a live network path. Whatever the
+      cloud does not answer for that class is translated on the device rather than degraded, which is
+      why the narrow order is allowed at all. What the requirement protects is unchanged and still
+      pinned: no success without translation, no result attributed to a tier that did not translate
+      it, consent read immediately before each attempt. The rule is one class discriminator keyed on
+      measured reliability (TranslationReliabilityRouter), not on negation or keywords.
+      Earlier amendment, 2026-09-17: the deferred-tier clause (the on-device tier "must be absent
       from v1") is retired, and the tier lands as tier 1 — the app's own installed Nepali brain,
       between the curated dictionary and the consent-gated cloud. The reason is the owner's
       complaint, not a preference: with only a ~120-label dictionary and a consent-gated cloud in
       the cascade, every string the dictionary misses degrades to "can't translate" offline or
-      after a declined prompt, and the model that fixes it is already on the device. What the
-      requirement protected is unchanged and still pinned — no success without translation, and no
-      result attributed to a tier that did not translate. No consent and no egress on this tier, so
-      Open Decision 13 is untouched.
+      after a declined prompt, and the model that fixes it is already on the device. No consent and
+      no egress on that tier, so Open Decision 13 is untouched.
   - id: FR-LCT-009
     title: "Tier 2 text-only cloud translation"
     kind: FR

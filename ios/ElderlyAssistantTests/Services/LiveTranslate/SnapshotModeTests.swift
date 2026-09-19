@@ -45,6 +45,9 @@ final class SnapshotModeTests: XCTestCase {
     private let curatedTranslation = "बत्ती"
     /// A string no device layer can answer, so it reaches the cloud path.
     private let cloudText = "Members only beyond this point"
+    /// What a scripted device answers `cloudText` with, for the tests whose
+    /// subject is *which tier* answered rather than whether one could.
+    private let deviceTranslation = "यहाँ सदस्यहरू मात्र"
 
     /// The container the session view reports, and the strips it reserves —
     /// the same numbers `LiveTranslateView` computes on a 390×844 phone.
@@ -69,6 +72,10 @@ final class SnapshotModeTests: XCTestCase {
         let parts: LiveTranslateSessionTestParts
         let model: LiveTranslateSessionModel
         let recorder: SnapshotPassRecorder?
+        /// The scripted on-device brain the composition was handed, when a
+        /// test handed one in — so "the device was asked, and for exactly
+        /// these strings" is readable back.
+        let brain: RecordingBrain?
 
         var camera: LiveCameraSession { parts.camera }
         var capture: SessionCaptureLayer { parts.capture }
@@ -87,6 +94,14 @@ final class SnapshotModeTests: XCTestCase {
                              dictionary: [String: String] = [:],
                              transport: TierTranslationTransport = TierTranslationTransport(),
                              recording: Bool = false,
+                             /// The on-device brain the session runs on.
+                             /// `nil` is production's composition (the
+                             /// pipeline builds the shipped tier); a test
+                             /// whose subject is the order of the cascade
+                             /// hands in a scripted one, so the device's
+                             /// answer is the fixture's rather than whatever
+                             /// assistant brain the simulator holds.
+                             brain: RecordingBrain? = nil,
                              /// The cloud tier's master switch (owner
                              /// directive, 2026-09-19) in the session's own
                              /// settings. The factory's default keeps the
@@ -103,13 +118,15 @@ final class SnapshotModeTests: XCTestCase {
                                                       transport: transport,
                                                       locale: nepali,
                                                       config: config,
+                                                      brain: brain,
                                                       geminiCloudEnabled: geminiCloudEnabled)
         suiteNames.append(parts.suiteName)
 
         guard recording else {
             return Harness(parts: parts,
                            model: LiveTranslateSessionModel(dependencies: parts.dependencies),
-                           recorder: nil)
+                           recorder: nil,
+                           brain: brain)
         }
 
         // The detector's *engine* is the seam at which a pass can be watched:
@@ -127,6 +144,7 @@ final class SnapshotModeTests: XCTestCase {
             camera: base.camera,
             detector: detector,
             cache: base.cache,
+            brain: base.brain,
             consentGate: base.consentGate,
             costGovernor: base.costGovernor,
             client: base.client,
@@ -139,7 +157,8 @@ final class SnapshotModeTests: XCTestCase {
             config: base.config)
         return Harness(parts: parts,
                        model: LiveTranslateSessionModel(dependencies: dependencies),
-                       recorder: recorder)
+                       recorder: recorder,
+                       brain: brain)
     }
 
     // MARK: - Driving the session
@@ -1138,8 +1157,17 @@ final class SnapshotModeTests: XCTestCase {
     @MainActor
     func testTheCloudSwitchOffDegradesTheFrozenAnswerWithoutSendingOrPrompting() async throws {
         let transport = Self.respondingTransport()
+        // The device is scripted rather than shipped: with the switch off the
+        // frozen plan asks the device first, and the shipped tier's ladder ends
+        // at whatever assistant brains the *host* holds — on a simulator with
+        // one installed, that is a 4B generation that outlives the stage and
+        // answers nothing, which is a fact about the machine and not about the
+        // frozen path. Scripted, the device's turn is the fixture's: it was
+        // asked, and it had nothing to give.
+        let brain = RecordingBrain()
         let harness = makeHarness(consent: true, configured: true,
                                   transport: transport,
+                                  brain: brain,
                                   geminiCloudEnabled: false)
         reportLayout(harness)
         harness.parts.engine.regions = [detected(cloudText)]
@@ -1162,6 +1190,60 @@ final class SnapshotModeTests: XCTestCase {
         XCTAssertEqual(harness.bus.events(named: "consent_prompt_shown").count, 0,
                        "freezing a frame must not prompt a household that has not opted in")
         XCTAssertEqual(harness.parts.governor.callsToday, 0)
+        XCTAssertFalse(brain.calls.isEmpty,
+                       "the device was the tier the string owed, and it was asked")
+        XCTAssertTrue(brain.calls.allSatisfy { $0.contains(cloudText) },
+                      "the device was asked for the unresolved string and nothing else: \(brain.calls)")
+    }
+
+    /// The other half of the same law, from the other side: the cloud is
+    /// reachable and *refuses* the string, and the frame the elder froze shows
+    /// the **device's** answer rather than a degradation.
+    ///
+    /// This is the frozen path of the requirement's second added scenario
+    /// ("a string the cloud cannot answer falls back to the device",
+    /// FR-LCT-008) — the one the source scan above can only say is *shared*
+    /// rather than correct. What the held frame must show is the device's
+    /// answer with the device's attribution, never `.degraded`.
+    ///
+    /// How many HTTP requests the *tier* spends getting there is deliberately
+    /// not asserted here, because it is not a fact about this path: one plan
+    /// ask is up to two requests (the tier retries a retryable status once),
+    /// and whether the frozen plan makes its own ask or inherits the live
+    /// cycle's refusal is a race with that refusal landing — `cloudFailedKeys`
+    /// is what it plans on. The count is pinned where it *is* deterministic:
+    /// one request per refusal, in `LiveTranslationPipelineTests`' reservation
+    /// scenarios, which drive the plan directly instead of through a camera
+    /// and a freeze.
+    @MainActor
+    func testASentenceTheCloudRefusesIsAnsweredOnTheDeviceOnTheFrozenFrame() async throws {
+        let brain = RecordingBrain()
+        brain.answers = [cloudText: deviceTranslation]
+        // Refusals for every ask the two plans can make, so a plan that asked
+        // again would get a refusal the assertions below can see rather than a
+        // script that ran dry into a different failure shape.
+        let transport = TierTranslationTransport()
+        transport.answers = [.http(503), .http(503), .http(503), .http(503)]
+        let harness = makeHarness(consent: true, configured: true,
+                                  transport: transport,
+                                  brain: brain)
+        reportLayout(harness)
+        harness.parts.engine.regions = [detected(cloudText)]
+        await harness.model.start()
+        try await deliverPass(harness)
+        try await deliverPass(harness)
+        await freeze(harness)
+        await waitForFrozenAnswer(harness, text: cloudText)
+
+        let publication = try XCTUnwrap(harness.model.frozen?.publication)
+        let region = try XCTUnwrap(publication.regions.first { $0.text == cloudText })
+        XCTAssertEqual(publication.result(for: region).outcome,
+                       .resolved(originalText: cloudText,
+                                 translation: deviceTranslation,
+                                 tier: .onDeviceBrain),
+                       "the cloud refused the sentence, so the held frame carries the device's answer")
+        XCTAssertTrue(brain.calls.contains { $0.contains(cloudText) },
+                      "the device was asked for the string the cloud refused: \(brain.calls)")
     }
 
     // MARK: - 6. The stabiliser is not involved
@@ -1349,6 +1431,16 @@ final class SnapshotModeTests: XCTestCase {
                       "it calls the feature's one still entry")
         XCTAssertTrue(snapshot.contains("cache.lookup("),
                       "it reads the session's cache")
+        // …and the cloud answers of the frozen frame go through the live
+        // cycle's own plan (`LiveTranslateLiveCycle.resolveFrozen`) rather
+        // than a second cascade of the snapshot path's own: the same gate, the
+        // same reservation, and therefore the same fallback — a cloud that
+        // cannot answer a string hands it to the device instead of degrading
+        // it, on the held frame exactly as it does live.
+        XCTAssertTrue(snapshot.contains("cycle.resolveFrozen("),
+                      "the frozen path resolves through the live cycle's plan")
+        XCTAssertFalse(snapshot.contains("attemptResolution"),
+                       "the frozen path does not carry a second copy of the cascade")
     }
 
     /// Tap-to-hear behaves identically on a held frame: the same speech object,

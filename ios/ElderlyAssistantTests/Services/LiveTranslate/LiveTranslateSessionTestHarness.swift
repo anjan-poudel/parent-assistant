@@ -2,16 +2,20 @@ import AVFoundation
 import Foundation
 @testable import ElderlyAssistant
 
-// The session-level doubles and the one composition both TG-09 suites build
-// on: `LiveTranslateSessionModelTests` (the session's life over the real
-// components) and `LiveTranslatePluginTests` (the plugin's entry, which hands
+// The session-level doubles and the one composition every live-translate
+// suite that needs a whole session builds on: `LiveTranslateSessionModelTests`
+// (the session's life over the real components), `SnapshotModeTests` (the
+// frozen path) and `LiveTranslatePluginTests` (the plugin's entry, which hands
 // a real `LiveTranslateSessionDependencies` to the view).
 //
 // They live in one file for the reason the feature's own seams do: a second
-// copy of a double is a second thing to keep honest. Everything here is a
-// *platform* seam — the camera layer, the recognition engine, the microphone,
+// copy of a double is a second thing to keep honest. Almost everything here is
+// a *platform* seam — the camera layer, the recognition engine, the microphone,
 // the audio session and the speech queue — because those are the four things a
-// unit-test host cannot provide. Everything else in the composition is the
+// unit-test host cannot provide. The brain is the one exception, and it is here
+// for the same reason as the rest: a suite that asserts the *order* of the
+// cascade must not have that order's timing decided by whatever assistant
+// brains the host happens to hold. Everything else in the composition is the
 // shipped type.
 
 /// One ordered log shared by the doubles that take part in an ordering
@@ -375,6 +379,17 @@ func makeLiveTranslateSessionTestParts(
     locale: Locale = Locale(identifier: "ne-NP"),
     extractMode: Bool = false,
     config: LiveTranslateConfig = .default,
+    /// The session's on-device brain.
+    ///
+    /// **`nil` by default, deliberately.** Production passes nothing and the
+    /// pipeline builds the shipped tier, so a suite that says nothing about
+    /// the brain keeps the composition production has. A suite whose subject is
+    /// the *order* of the cascade hands one in: the shipped tier's ladder ends
+    /// at whatever assistant brains the machine holds, and a simulator that has
+    /// one installed turns "the device was asked" into a tens-of-seconds 4B
+    /// generation that answers nothing — a fact about the simulator, not about
+    /// the code under test.
+    brain: LocalBrainTranslating? = nil,
     /// The cloud tier's master switch (owner directive, 2026-09-19), written
     /// into the session's own settings suite before the session is built.
     ///
@@ -449,6 +464,7 @@ func makeLiveTranslateSessionTestParts(
         camera: camera,
         detector: detector,
         cache: cache,
+        brain: brain,
         consentGate: gate,
         costGovernor: governor,
         client: client,
@@ -483,3 +499,110 @@ func makeLiveTranslateSessionTestParts(
                                          defaults: defaults,
                                          suiteName: suiteName)
 }
+
+/// Tier 1, scripted — the on-device brain the pipeline asks before the
+/// cloud. It stands in for `LocalBrainTranslationTier` at the same seam
+/// the pipeline actually takes (`LocalBrainTranslating`), so what a suite
+/// that hands one in pins is the *cascade*: which tier answers, in what
+/// order, and what reaches the gate.
+///
+/// It lives here rather than beside one of its callers because two suites
+/// take it at that seam — `LiveTranslationPipelineTests` (the cascade as a
+/// whole) and `SnapshotModeTests` (the frozen path through the same plan).
+/// It is also what keeps those suites honest about *time*: the shipped tier
+/// ends at whatever assistant brains the host holds, and a host that holds a
+/// 4B one answers "the device was asked" with a tens-of-seconds generation
+/// that returns nothing. A scripted brain says what the device is, so the
+/// assertion is about the code and not about the machine the test runs on.
+///
+/// It emits through the shipped event API when it reports itself
+/// unavailable, exactly as the real tier does, so the pipeline-level
+/// claim "no brain, event, and on to the cloud" is made against the real
+/// vocabulary rather than against a fake's own invention.
+///
+/// A class with a lock rather than an actor, so the harness can wire it up
+/// and the tests can read what it was asked without an `await` at every
+/// call site: the pipeline is the only writer that matters, and it awaits
+/// one attempt at a time.
+final class RecordingBrain: LocalBrainTranslating, @unchecked Sendable {
+
+    private let lock = NSLock()
+    private var storedAnswers: [String: String] = [:]
+    private var storedUnavailable = false
+    private var storedHangs = false
+    private var storedCalls: [[String]] = []
+    private var storedReleaseCount = 0
+    private var events: LiveTranslateEvents?
+
+    /// The strings this brain answers, and what it answers with.
+    var answers: [String: String] {
+        get { lock.lock(); defer { lock.unlock() }; return storedAnswers }
+        set { lock.lock(); defer { lock.unlock() }; storedAnswers = newValue }
+    }
+
+    /// When true, every attempt reports itself unusable, the way the real
+    /// tier does on a device with no model installed.
+    var unavailable: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return storedUnavailable }
+        set { lock.lock(); defer { lock.unlock() }; storedUnavailable = newValue }
+    }
+
+    /// When true, the generation never comes back on its own: it sleeps
+    /// until it is cancelled. The shape of a 4B decode that is still
+    /// thinking — or stuck — when the stage deadline passes.
+    var hangs: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return storedHangs }
+        set { lock.lock(); defer { lock.unlock() }; storedHangs = newValue }
+    }
+
+    /// Every batch this brain was handed, in order.
+    var calls: [[String]] {
+        lock.lock(); defer { lock.unlock() }; return storedCalls
+    }
+
+    var releaseCount: Int {
+        lock.lock(); defer { lock.unlock() }; return storedReleaseCount
+    }
+
+    /// The harness wires this to the bus it built, so an unavailable
+    /// brain is reported on the pipeline's own channel with the shipped
+    /// emitter rather than a vocabulary of the fake's own.
+    func attach(events: LiveTranslateEvents) {
+        lock.lock(); defer { lock.unlock() }
+        self.events = events
+    }
+
+    func translate(_ strings: [String]) async -> LocalBrainTranslationOutcome {
+        lock.lock()
+        storedCalls.append(strings)
+        let answers = storedAnswers
+        let unavailable = storedUnavailable
+        let hangs = storedHangs
+        let events = self.events
+        lock.unlock()
+
+        if hangs {
+            // Cancellation-aware, like a real generation: the pipeline
+            // cancels the stage when its deadline passes, so this returns
+            // into nothing rather than blocking the test.
+            try? await Task<Never, Never>.sleep(for: .seconds(30))
+            return .none
+        }
+
+        guard !unavailable else {
+            events?.brainTranslationUnavailable(.modelNotInstalled, stage: .availability)
+            return .none
+        }
+        var translations: [String: String] = [:]
+        for text in strings {
+            if let answer = answers[text] { translations[text] = answer }
+        }
+        return LocalBrainTranslationOutcome(translations: translations, durationMs: 1)
+    }
+
+    func release() async {
+        lock.lock(); defer { lock.unlock() }
+        storedReleaseCount += 1
+    }
+}
+
