@@ -42,6 +42,17 @@ final class LiveTranslateEventsTests: XCTestCase {
         // equals the pinned set ([PRESSURE-SAFE LOAD], 2026-09-19).
         events.brainTranslationBatch(resolvedCount: 0, unresolvedCount: 2, durationMs: 0,
                                      deferral: .memoryPressure)
+        // …and once with the generation's own self-portrait ([EMPTY-DECODE],
+        // 2026-09-19), which is the other sparse group on this event: the
+        // three keys a batch that ran carries. The fixture has a non-empty
+        // histogram and a shape, so every value the vocabulary can produce —
+        // including a multi-entry `token:count,…` rendering — is exercised.
+        events.brainTranslationBatch(
+            resolvedCount: 0, unresolvedCount: 3, durationMs: 4120,
+            generation: BrainGenerationReading(
+                length: 96,
+                shape: .array,
+                rejections: [.noNepaliEvidence: 2, .wrongScript: 1]))
         events.brainTranslationUnavailable(.modelNotInstalled, stage: .availability)
         // The warden's two user-visible moments (2026-09-19).
         events.brainTranslationLoadAnnounced(count: 3)
@@ -215,6 +226,12 @@ final class LiveTranslateEventsTests: XCTestCase {
             // another owner's brain, the app's own headroom, the kernel's
             // pressure level, or a warden's ask during the load.
             .union(Set(LiveTranslateBrainDeferralReason.allCases.map(\.rawValue)))
+            // [EMPTY-DECODE] …and the generation's own two closed vocabularies
+            // (`brain_translation_batch`'s shape and rejection histogram,
+            // 2026-09-19): what a decode structurally returned, and which rule
+            // refused each answer it did return.
+            .union(Set(BrainGenerationShape.allCases.map(\.rawValue)))
+            .union(Set(BrainAnswerRejection.allCases.map(\.rawValue)))
             .union([
                 "no_capture_device", "configuration_failed", "resource_in_use",
                 "backgrounded", "system_interruption", "thermal",
@@ -243,6 +260,28 @@ final class LiveTranslateEventsTests: XCTestCase {
                 if key == LiveTranslateEvents.MetadataKey.regionSetHash.rawValue,
                    value.range(of: "^[0-9a-f]{4}:[0-9a-f]{4}$",
                                options: .regularExpression) != nil { continue }
+                // The other shape-bounded value: the rejection histogram
+                // ([EMPTY-DECODE], 2026-09-19), which is a comma-joined list of
+                // `token:count` pairs — or `none` when nothing was refused. It
+                // cannot be a single closed token (it is a histogram) and it
+                // must not be waved through, so it is pinned to a shape: every
+                // element is a lower_snake token from the vocabulary above
+                // followed by a count, and the rendering is built from a
+                // dictionary keyed by a closed enum, so prose, a path, a
+                // sentence or a recognized string cannot satisfy this pattern.
+                if key == LiveTranslateEvents.MetadataKey.rejections.rawValue {
+                    let histogram = "^none$|^[a-z_]+:[0-9]+(,[a-z_]+:[0-9]+)*$"
+                    XCTAssertNotNil(value.range(of: histogram, options: .regularExpression),
+                                    "the rejection histogram left its shape: \(value)")
+                    let names = value == "none"
+                        ? []
+                        : value.split(separator: ",").compactMap { $0.split(separator: ":").first }
+                    for name in names {
+                        XCTAssertTrue(allowedTokens.contains(String(name)),
+                                      "the histogram names a rule outside the closed vocabulary: \(name)")
+                    }
+                    continue
+                }
                 XCTAssertTrue(allowedTokens.contains(value),
                               "\(event.eventType).\(key) carries a value outside the closed vocabulary: \(value)")
                 XCTAssertFalse(value.contains(" "),

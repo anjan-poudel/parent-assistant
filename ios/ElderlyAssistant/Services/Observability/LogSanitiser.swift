@@ -169,6 +169,25 @@ struct LogSanitiser {
         // `brain_translation_unavailable` and the `reason` token could not
         // say which of four different failures it was.
         "failureStage",
+        // [EMPTY-DECODE] (2026-09-19) The three keys the owner's
+        // answered-nothing capture needed. Every brain batch ran 7–20 seconds
+        // and resolved nothing, and `resolvedCount`/`unresolvedCount`/
+        // `durationMs` could not say whether the decode emitted anything at
+        // all or emitted a well-formed answer that every rule refused — two
+        // different bugs with two different fixes.
+        //
+        //  - `generationLength` is a character COUNT of the raw answer. The
+        //    characters themselves are never passed to the emitter, which
+        //    takes a `BrainGenerationReading` and renders only its integer.
+        //  - `generationShape` is `BrainGenerationShape`, a closed token set
+        //    (empty / unparsable / no_array / array).
+        //  - `rejections` is a histogram keyed by `BrainAnswerRejection`,
+        //    another closed set, rendered `token:count,…` (or `none`). A
+        //    closed enum is the only key type, so a recognized string has no
+        //    way to be expressed in this value.
+        "generationLength",
+        "generationShape",
+        "rejections",
         "disclosureVersion",
         // [LIVE-CAMERA-TRANSLATION] AM-2 decision, recorded rather than
         // widened silently: `cap`. The shipped `GeminiCostGovernor` emits
