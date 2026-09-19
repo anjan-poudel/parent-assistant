@@ -86,6 +86,19 @@ final class PointAskMaskEngine: PointAskMaskProbing {
 
     private let lock = NSLock()
     private var probeFailed = false
+    /// [MASK-OBSERVABILITY] (2026-09-20) The evidence trail this pass was
+    /// missing: the owner's device report ("bounding boxes are just
+    /// squares") is the pad fallback, and the mask is the one class-free
+    /// pass that would hug the pointed object — but a failed probe flips
+    /// it off silently and permanently, and a "not on an instance" answer
+    /// looks identical in the capture. The same per-pass shape the YOLO
+    /// engine emits (`yolo_pass`), so the next capture can tell the three
+    /// pad producers apart.
+    private let observabilityBus: ObservabilityBus?
+
+    init(observabilityBus: ObservabilityBus? = nil) {
+        self.observabilityBus = observabilityBus
+    }
 
     var supportsMasks: Bool {
         lock.lock(); defer { lock.unlock() }
@@ -93,8 +106,31 @@ final class PointAskMaskEngine: PointAskMaskProbing {
         return !probeFailed
     }
 
+    /// One pass's content-free self-portrait, on the same vocabulary the
+    /// resolver's `origin` token already uses: how many instances, and
+    /// whether the tapped point sat on one. Never the image, never text.
+    private func emitPass(outcome: String,
+                          errorCode: String?,
+                          count: Int,
+                          pointOnInstance: Bool? = nil) {
+        guard let observabilityBus else { return }
+        var metadata: [String: String] = ["count": "\(count)"]
+        if let pointOnInstance { metadata["point_on_instance"] = pointOnInstance ? "true" : "false" }
+        observabilityBus.emit(ObservabilityEvent(
+            component: "pointask",
+            eventType: "mask_pass",
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: errorCode,
+            metadata: metadata
+        ))
+    }
+
     func maskBox(at point: CGPoint, in pixelBuffer: CVPixelBuffer) throws -> NormalizedBox? {
-        guard #available(iOS 17, *) else { throw PointAskError.maskPassFailed }
+        guard #available(iOS 17, *) else {
+            emitPass(outcome: "failed", errorCode: "os_too_old", count: 0)
+            throw PointAskError.maskPassFailed
+        }
         let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, options: [:])
         let mask: CVPixelBuffer
         do {
@@ -104,12 +140,14 @@ final class PointAskMaskEngine: PointAskMaskProbing {
             // pixels carry the index (0), the background the other label.
             guard let observation = request.results?.first else {
                 lock.lock(); probeFailed = true; lock.unlock()
+                emitPass(outcome: "failed", errorCode: "no_observation", count: 0)
                 throw PointAskError.maskPassFailed
             }
             mask = try observation.generateScaledMaskForImage(forInstances: [0],
                                                               from: handler)
         } catch {
             lock.lock(); probeFailed = true; lock.unlock()
+            emitPass(outcome: "failed", errorCode: "request_failed", count: 0)
             throw PointAskError.maskPassFailed
         }
         let width = CVPixelBufferGetWidth(mask)
@@ -117,8 +155,18 @@ final class PointAskMaskEngine: PointAskMaskProbing {
         guard width > 0, height > 0 else { return nil }
         let x = min(max(Int(CGFloat(width) * point.x), 0), width - 1)
         let y = min(max(Int(CGFloat(height) * point.y), 0), height - 1)
-        guard Self.pixelValue(atX: x, y: y, in: mask) == 0 else { return nil }
-        return Self.instanceExtent(in: mask)
+        guard Self.pixelValue(atX: x, y: y, in: mask) == 0 else {
+            // The pass ran and the point is background — an honest "no",
+            // distinct from a failed request: the resolver falls to the
+            // saliency/pad ladder, and the event says which it was.
+            emitPass(outcome: "success", errorCode: nil,
+                     count: 0, pointOnInstance: false)
+            return nil
+        }
+        let extent = Self.instanceExtent(in: mask)
+        emitPass(outcome: "success", errorCode: nil,
+                 count: extent == nil ? 0 : 1, pointOnInstance: true)
+        return extent
     }
 
     /// The tight bounding box of the instance's pixels — min/max of every
@@ -189,10 +237,18 @@ final class PointAskTargetResolver {
     private let yoloEngine: PointAskObjectDetecting?
     private let config: PointAskConfig
     private let events: PointAskEvents
+    private let observabilityBus: ObservabilityBus
     private let now: () -> Date
 
     private var cachedBoxes: [NormalizedBox] = []
     private var cachedAt: Date?
+    /// [MASK-OBSERVABILITY] Whether this session has already reported the
+    /// mask engine's state once. The report exists so a mask that is
+    /// unavailable — a failed probe, an unwired engine, an OS below 17 —
+    /// can never degrade every tap to a pad *silently* again (the owner's
+    /// "bounding boxes are just squares" session produced zero mask_pass
+    /// events, which could not tell a stale build from a dead probe).
+    private var maskStateReported = false
 
     init(objectEngine: LiveObjectDetectionEngine,
          maskEngine: PointAskMaskProbing? = nil,
@@ -205,29 +261,33 @@ final class PointAskTargetResolver {
         self.yoloEngine = yoloEngine
         self.config = config
         self.events = PointAskEvents(bus: observabilityBus, config: config)
+        self.observabilityBus = observabilityBus
         self.now = now
     }
 
     /// The box the tap anchors. `point` is normalized against the frame
     /// (top-left origin, 0…1); the frame is the one the elder tapped on.
     ///
-    /// Order of evidence, most specific first:
-    ///  1. [YOLO] the real object-detector pass, while the engine is
-    ///     available — the box that WRAPS the object (the owner's
-    ///     device-test verdict: the tap box must be a real detection box,
-    ///     "any size"), carrying the detector's class label;
-    ///  2. the opt-in mask pass, while `supportsMasks` holds — the
-    ///     silhouette answer, and the spike path;
-    ///  3. the saliency boxes, refreshed only when the cached pass is
-    ///     stale or absent;
+    /// Order of evidence, class-free first ([CLASS-FREE-FIRST],
+    /// 2026-09-20 — the owner's 06:03 capture showed YOLO11n hallucinating
+    /// books on a scene with none, and the false boxes contained the
+    /// taps, so a classed detector must never speak first):
+    ///  1. the opt-in mask pass, while `supportsMasks` holds — the
+    ///     silhouette answer: pixel-precise, class-free, the one pass
+    ///     that hugs an arbitrary object;
+    ///  2. the saliency boxes, refreshed only when the cached pass is
+    ///     stale or absent — class-free objectness;
+    ///  3. [YOLO] the classed object-detector pass, while the engine is
+    ///     available — trusted only when both class-free passes missed
+    ///     and its box CONTAINS the tap, carrying the detector's label;
     ///  4. the pad box around the tap — the honest fallback that keeps
-    ///     "tap outside re-anchors" true even when the pass fails or finds
-    ///     nothing.
+    ///     "tap outside re-anchors" true even when every pass fails or
+    ///     finds nothing.
     ///
-    /// A failing detector pass degrades to the mask path, a failing mask
-    /// pass to the saliency path (the probe flips and the resolver never
-    /// asks again), and a failing saliency pass to the pad box. Never an
-    /// error to the elder — the box is a pointer, not an answer
+    /// A failing mask pass degrades to the saliency path (the probe flips
+    /// and the resolver never asks again), a failing saliency pass to the
+    /// YOLO pass, and a failing YOLO pass to the pad box. Never an error
+    /// to the elder — the box is a pointer, not an answer
     /// (FR-LCT-004's degradation shape).
     func resolve(tap point: CGPoint, in pixelBuffer: CVPixelBuffer) -> ResolvedPointAskTarget {
         let size = CGSize(width: CVPixelBufferGetWidth(pixelBuffer),
@@ -235,12 +295,37 @@ final class PointAskTargetResolver {
         let clamped = CGPoint(x: min(max(point.x, 0), 1),
                               y: min(max(point.y, 0), 1))
 
-        if let yoloEngine, yoloEngine.isAvailable,
-           let yolo = yoloDetection(using: yoloEngine, in: pixelBuffer, containing: clamped) {
-            return anchor(yolo.normalizedBox, size: size, source: .yolo,
-                          detectedLabel: yolo.label)
+        // [MASK-OBSERVABILITY] One report per session, before the ladder:
+        // whether the mask engine exists and whether it will be consulted.
+        // A session of pad-only anchors with `mask_probe state=unavailable`
+        // is a dead probe, not a missing build — the distinction the
+        // owner's "bounding boxes are just squares" session could not make.
+        if !maskStateReported {
+            maskStateReported = true
+            let state: String
+            if let maskEngine {
+                state = maskEngine.supportsMasks ? "available" : "unavailable"
+            } else {
+                state = "unwired"
+            }
+            observabilityBus.emit(ObservabilityEvent(
+                component: "pointask",
+                eventType: "mask_probe",
+                durationMs: nil,
+                outcome: state == "available" ? "success" : "degraded",
+                errorCode: nil,
+                metadata: ["state": state]
+            ))
         }
 
+        // [CLASS-FREE-FIRST] (2026-09-20) The ladder runs the class-free
+        // passes first: the owner's 06:03 capture showed YOLO11n
+        // hallucinating books (0.27–0.69) on a scene with none — a tub of
+        // moisturiser — and the false boxes CONTAINED the taps, so the
+        // classed detector anchored ghosts. The mask is pixel-precise and
+        // class-free; the saliency pass is class-free; only when both miss
+        // is a classed YOLO box trusted, and then only when it contains
+        // the tap. The pad remains the final honest fallback.
         if let maskEngine, maskEngine.supportsMasks,
            let maskBox = try? maskEngine.maskBox(at: clamped, in: pixelBuffer) {
             return anchor(maskBox, size: size, source: .mask, detectedLabel: nil)
@@ -248,6 +333,12 @@ final class PointAskTargetResolver {
 
         if let saliencyBox = saliencyBox(containing: clamped, in: pixelBuffer) {
             return anchor(saliencyBox, size: size, source: .saliency, detectedLabel: nil)
+        }
+
+        if let yoloEngine, yoloEngine.isAvailable,
+           let yolo = yoloDetection(using: yoloEngine, in: pixelBuffer, containing: clamped) {
+            return anchor(yolo.normalizedBox, size: size, source: .yolo,
+                          detectedLabel: yolo.label)
         }
         return anchor(Self.padBox(around: clamped), size: size, source: .pad,
                       detectedLabel: nil)

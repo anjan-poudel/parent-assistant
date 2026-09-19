@@ -100,7 +100,7 @@ fi
 
 UNIT_CLASSES=()
 UI_CLASSES=()
-for c in $(printf '%s\n' "${SELECTED_CLASSES[@]}" | sort -u); do
+for c in $(printf '%s\n' "${SELECTED_CLASSES[@]+"${SELECTED_CLASSES[@]}"}" | sort -u); do
     [[ "$c" == UI:* ]] && UI_CLASSES+=("${c#UI:}") || UNIT_CLASSES+=("$c")
 done
 
@@ -156,5 +156,5 @@ xcodebuild test \
     -scheme "${SCHEME}" \
     -destination "${DESTINATION}" \
     -derivedDataPath "${TEST_DERIVED_DATA}" \
-    "${ONLY[@]}" \
+    "${ONLY[@]+"${ONLY[@]}"}" \
     | tail -30

@@ -2067,9 +2067,10 @@ final class AppCoordinator: ObservableObject {
         // engines — the saliency engine the tap hit-test reads boxes from
         // (the shipped `VisionObjectDetectionEngine`, bounded to the
         // resolver's object limit) and the OCR engine the analysis reads.
-        // The mask engine is wired only behind the config's opt-in
-        // (`maskEngineEnabled`, default off — the spike stays behind the
-        // probe), so a default session never constructs it.
+        // The mask engine is wired behind the config's opt-in
+        // (`maskEngineEnabled`) and, since [MASK-OBSERVABILITY], carries
+        // the bus so a pass that fails or answers "background" is visible
+        // in the capture instead of silently degrading every tap to a pad.
         let pointAskConfig = PointAskConfig.default
         let pointAsk = PointAskSessionDependencies(
             locale: locale,
@@ -2078,7 +2079,9 @@ final class AppCoordinator: ObservableObject {
             cache: labelTranslationCache,
             client: geminiClient,
             objectEngine: VisionObjectDetectionEngine(maximumObjects: pointAskConfig.resolverObjectLimit),
-            maskEngine: pointAskConfig.maskEngineEnabled ? PointAskMaskEngine() : nil,
+            maskEngine: pointAskConfig.maskEngineEnabled
+                ? PointAskMaskEngine(observabilityBus: observabilityBus)
+                : nil,
             // [YOLO] The real object detector behind the tap box: YOLO11n
             // on the Neural Engine, auto-installed on first point-ask use
             // (the engine's availability probe kicks the catalog download
