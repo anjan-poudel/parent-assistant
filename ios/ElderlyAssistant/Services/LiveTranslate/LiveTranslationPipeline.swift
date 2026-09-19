@@ -909,7 +909,7 @@ actor LiveTranslationPipeline {
             outcomes[region.id] = .resolved(originalText: region.text,
                                             translation: hit.translation,
                                             tier: hit.tier)
-            events.translationResolved(tier: hit.tier, origin: "cache", count: 1)
+            events.translationResolved(tier: hit.tier, origin: .cache, count: 1)
         }
     }
 
@@ -1221,7 +1221,7 @@ actor LiveTranslationPipeline {
         // The cascade's provenance (owner ask, 2026-09-19): which tier
         // answered, per tier, counts only.
         for (tier, count) in answeredTierCounts(answered) {
-            events.translationResolved(tier: tier, origin: "fresh", count: count)
+            events.translationResolved(tier: tier, origin: .fresh, count: count)
         }
     }
 
