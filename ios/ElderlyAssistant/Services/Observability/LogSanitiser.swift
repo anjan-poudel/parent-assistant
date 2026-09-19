@@ -89,6 +89,12 @@ struct LogSanitiser {
         // The analysis launch's cloud switch state — "on"/"off", a closed
         // two-token vocabulary.
         "cloud",
+        // [YOLO-OBSERVABILITY] (2026-09-19) The detector pass's evidence —
+        // COCO class names with confidences ("bottle:0.87,person:0.45")
+        // and normalized boxes ("0.1,0.2,0.5,0.6;…"). Closed vocabulary
+        // and coordinates; never pixels, never scene text.
+        "labels",
+        "boxes",
         // [TURN-TIMING] The serialized per-turn stage list
         // (`[{stage, ms}, …]`) — stage names and integer durations only,
         // never transcript or reply text (see VoiceTurnLatencyTracer).
