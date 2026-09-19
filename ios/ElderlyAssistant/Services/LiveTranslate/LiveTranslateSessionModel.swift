@@ -188,6 +188,22 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// the translated view is one tap away whenever they want it.
     @Published private(set) var isExtracting: Bool
 
+    /// The warden's current notice, or nil when there is nothing to say
+    /// (owner directive, 2026-09-19: "keep the user in the loop so they don't
+    /// wonder about the silences").
+    ///
+    /// A *status*, not a prompt: the tier pushes one of
+    /// `LocalBrainWardenNotice`'s two moments when it pays a model load or
+    /// hands its handle to the voice stack, this property carries it to the
+    /// screen, and the dismissal below takes it down again. Nothing waits on
+    /// the elder to acknowledge it, and nothing here can outlive the wait it
+    /// explains — see `noteWardenNotice(_:)`.
+    ///
+    /// The sentence is never stored: the view resolves `copyKey` through
+    /// `L10n` in the active language (`wardenNoticeSurface`), so a notice
+    /// cannot exist with a stale or literal wording.
+    @Published private(set) var wardenNotice: LocalBrainWardenNotice?
+
     /// The camera preview layer, or nil until the session's capture session
     /// exists. Handed to the view's host, which only lays it out — the gravity
     /// and the aspect the placement maths uses were fixed by T-006.
@@ -285,6 +301,18 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// when the elder returns to live or the session closes, so a slow pass
     /// cannot land a frozen frame nobody asked for any more.
     private var snapshotTask: Task<Void, Never>?
+
+    /// The notice's own dismissal timer — the only task this object owns
+    /// besides the frame loop, and the reason a notice needs no tap to go
+    /// away. Replaced (and the previous one cancelled) on every new notice,
+    /// and cancelled outright on close.
+    private var wardenNoticeTask: Task<Void, Never>?
+    /// Which notice the pending timer belongs to. A timer that fires after a
+    /// newer notice replaced its own must take nothing down, and this is what
+    /// says so — the count is the whole guard, so a notice that is already on
+    /// screen when a second one arrives still gets its full window.
+    private var wardenNoticeGeneration = 0
+
     private var lifecycleObservers: [NSObjectProtocol] = []
     private var consentForwarding: AnyCancellable?
     private var indicatorForwarding: AnyCancellable?
@@ -434,6 +462,19 @@ final class LiveTranslateSessionModel: ObservableObject {
                                      locale: locale)
     }
 
+    /// The warden's notice as the banner renders it, or nil when there is
+    /// nothing to say (which is every moment but two).
+    ///
+    /// The sentence is resolved here, from `copyKey` and the active locale,
+    /// for the reason `repromptText` is: a surface value answers in the
+    /// language the session is running in, and the view is handed a sentence
+    /// rather than a key it would have to know how to read. Nothing is
+    /// duplicated — `LocalBrainWardenNotice.copyKey` is the one place a notice
+    /// names its catalog entry, and this is the one place it is resolved.
+    var wardenNoticeSurface: WardenNoticeSurface? {
+        wardenNotice.map { WardenNoticeSurface(notice: $0, locale: locale) }
+    }
+
     /// Whether the session is in a phase that has (or is about to have) a
     /// camera picture on screen.
     private var isCameraPhase: Bool {
@@ -528,6 +569,11 @@ final class LiveTranslateSessionModel: ObservableObject {
             extractionMode: isExtracting,
             config: config,
             observabilityBus: dependencies.observabilityBus,
+            // The warden's two moments land on the model's own surface. The
+            // hop itself is the named factory below rather than an inline
+            // closure, so the wiring a test exercises is the wiring that
+            // ships.
+            onWardenNotice: Self.wardenNoticeSink(for: self),
             publish: { [weak self] publication in
                 await self?.receive(publication)
             })
@@ -606,6 +652,13 @@ final class LiveTranslateSessionModel: ObservableObject {
         // The session is over: a closed model is never mid-capture, and no
         // spinner may outlive the view that drew it.
         freezeInProgress = false
+        // And no sentence may either: the warden's notice is about work this
+        // session is doing, the timer that would have taken it down is
+        // cancelled with it, and a view torn down a moment later must not
+        // paint a status for a session that has ended.
+        wardenNoticeTask?.cancel()
+        wardenNoticeTask = nil
+        wardenNotice = nil
 
         // The observation surface returns to the state it had before the first
         // cycle. The last scene is not a claim about a session that has
@@ -1108,6 +1161,74 @@ final class LiveTranslateSessionModel: ObservableObject {
         // same correction (owner device verdict, 2026-09-18).
         if frameStabilization != frame.stabilization { frameStabilization = frame.stabilization }
         await pipeline?.ingest(frame)
+    }
+
+    // MARK: - The warden's notices (owner directive, 2026-09-19)
+
+    /// The sink the tier pushes its two notices into: the one place a
+    /// `@Sendable` call from the tier's actor (or from the warden's thread, on
+    /// a hand-off) meets this object's main-confined surface.
+    ///
+    /// A named factory rather than an inline closure at the one call site,
+    /// because the hop is the whole of the wiring and a test cannot exercise a
+    /// closure it has to re-write to reach: `LiveTranslateSessionModelTests`
+    /// hands a real model this sink, pushes through it exactly as the tier
+    /// does, and asserts what the screen would show. The weak capture is the
+    /// pipeline's own rule — a session that has gone away is not kept alive by
+    /// the tier that used to feed it.
+    static func wardenNoticeSink(
+        for model: LiveTranslateSessionModel
+    ) -> @Sendable (LocalBrainWardenNotice) -> Void {
+        { [weak model] notice in
+            Task { @MainActor in model?.noteWardenNotice(notice) }
+        }
+    }
+
+    /// The tier's notice sink, on this side of the actor boundary. The tier
+    /// pushes both moments from its own actor (and, for a hand-off, from the
+    /// warden's thread via a `Task`), so this is where they join the model's
+    /// main-confined surface — the same shape `receive(_:)` has for
+    /// publications, and the same shape the view reads.
+    ///
+    /// Auto-dismiss is here rather than in the view, deliberately: a view that
+    /// owned the timer would be a view that starts a task and holds state, and
+    /// this feature's render path is a pure function of its surface. The
+    /// window is `config.wardenNoticeDismissSeconds`.
+    ///
+    /// A second notice replaces the first *and* restarts the window: the two
+    /// moments can land close together (a load announced, then the handle
+    /// taken), and the sentence on screen must be the newer one for its own
+    /// full time rather than for the remainder of the older one's.
+    func noteWardenNotice(_ notice: LocalBrainWardenNotice) {
+        guard !isClosed else { return }
+        wardenNotice = notice
+        wardenNoticeGeneration += 1
+        let generation = wardenNoticeGeneration
+        wardenNoticeTask?.cancel()
+        // The sleep is the one wait in this file that is not a tier's: it is
+        // how long a *sentence* stays up, which is the unit the elder
+        // experiences it in (the same reasoning as the pipeline's departure
+        // grace). It is bounded below at zero so a config that was handed a
+        // negative value dismisses at once instead of trapping on the
+        // conversion.
+        let nanoseconds = UInt64(max(0, config.wardenNoticeDismissSeconds) * 1_000_000_000)
+        wardenNoticeTask = Task { [weak self] in
+            try? await Task<Never, Never>.sleep(nanoseconds: nanoseconds)
+            guard !Task.isCancelled else { return }
+            self?.dismissWardenNotice(generation: generation)
+        }
+    }
+
+    /// Takes the notice down, if it is still the one the caller was shown for.
+    ///
+    /// The generation check is what makes a replaced notice's timer harmless:
+    /// a timer that fires after a newer notice arrived finds a count that has
+    /// moved and does nothing, so a slow dismissal can never blank a sentence
+    /// the elder has only just been given.
+    private func dismissWardenNotice(generation: Int) {
+        guard !isClosed, wardenNoticeGeneration == generation else { return }
+        wardenNotice = nil
+        wardenNoticeTask = nil
     }
 
     // MARK: - Publications

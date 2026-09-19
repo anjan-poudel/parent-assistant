@@ -202,6 +202,22 @@ struct LiveTranslateView: View {
                 // edge or the indicator on the trailing one.
                 snapshotControl
             }
+            // The warden's notice, when there is one: a brief status under the
+            // strip the elder's eye is already on. Absent for every moment but
+            // two, and for at most `wardenNoticeDismissSeconds` when it is
+            // there — the model owns that window, so this is a read and
+            // nothing else.
+            //
+            // Deliberately *not* folded into the layout the placement is told
+            // to avoid (`occupiedRects`): that reservation is measured once
+            // per container size, precisely so the boxes never re-place for a
+            // reason the elder did not cause, and a band that appeared and
+            // disappeared every time a model loaded would move every callout
+            // near the top twice per notice. A callout may therefore sit under
+            // a notice for those few seconds, which is the smaller of the two
+            // evils by a wide margin (the owner's standing device complaint is
+            // that boxes jump).
+            wardenNotice
             // While a frame is held, the card is the surface — there are no
             // bubbles over the picture in this mode at all (see `preview`'s
             // frozen branch and `resultsCard`) — and the control in the strip
@@ -230,6 +246,17 @@ struct LiveTranslateView: View {
         .padding(.bottom, proxy.safeAreaInsets.bottom)
         .padding(.leading, proxy.safeAreaInsets.leading)
         .padding(.trailing, proxy.safeAreaInsets.trailing)
+    }
+
+    /// The warden's notice (owner directive, 2026-09-19). Nil for every
+    /// moment but two, and read straight off the model's surface: the view
+    /// has no notice state of its own, no timer for one and no way to dismiss
+    /// one, because the session owns all three.
+    @ViewBuilder
+    private var wardenNotice: some View {
+        if let surface = model.wardenNoticeSurface {
+            LiveTranslateWardenNoticeBanner(surface: surface)
+        }
     }
 
     // MARK: - Zoom and focus (owner report, 2026-09-17)
@@ -551,6 +578,74 @@ struct LiveTranslateView: View {
         let height = DesignTokens.minTapTargetSize + 2 * DesignTokens.interElementSpacing
         guard containerSize.width > 0, containerSize.height > height else { return [] }
         return [CGRect(x: 0, y: 0, width: containerSize.width, height: height)]
+    }
+}
+
+/// The warden's two moments as the banner renders them (owner directive,
+/// 2026-09-19: "keep the user in the loop so they don't wonder about the
+/// silences").
+///
+/// One notice, one sentence, resolved from the catalog in the active language
+/// — the same shape every other surface in this feature has
+/// (`TranslateAllSurface`, `AlwaysShowOriginalSurface`). The sentence itself
+/// is never spelled here or anywhere else in the render path:
+/// `LocalBrainWardenNotice.copyKey` is the one place a moment names its
+/// catalog entry, and `LiveTranslateCopyTests` fails if a notice exists
+/// without a sentence in both languages.
+struct WardenNoticeSurface: Equatable {
+
+    /// Which of the two moments this is. The reason the surface carries the
+    /// notice rather than only its words: a test can assert *which* moment a
+    /// session is showing without parsing a sentence, and a later surface
+    /// that wants to treat the two differently has the case to switch on.
+    let notice: LocalBrainWardenNotice
+    let locale: Locale
+
+    init(notice: LocalBrainWardenNotice, locale: Locale) {
+        self.notice = notice
+        self.locale = locale
+    }
+
+    /// The sentence the elder reads — "Hold on a sec — getting the translation
+    /// ready." while a load is announced, "Switched for your voice request."
+    /// when the model is handed to a voice turn — in the active language.
+    var copy: String {
+        L10n.str(notice.copyKey, locale: locale)
+    }
+}
+
+/// The warden's notice, drawn as a brief status over the picture.
+///
+/// **A status, not a modal.** There is nothing to tap, nothing to dismiss and
+/// nothing to answer: both moments it describes end on their own, so the
+/// banner's whole life is the model's (`wardenNoticeDismissSeconds`), and it
+/// exists on screen exactly while `wardenNotice` does. The view holds no
+/// state about it and starts no task for it, which is what keeps the render
+/// path a pure function of the surface it was handed.
+///
+/// It is drawn in the session's chrome rather than in the overlay because it
+/// is a fact about the *session* — work the tier is doing — and not about a
+/// region, and it sits directly under the top strip because that is the band
+/// the elder is already looking at when the screen changes under them. Full
+/// width and on the app's card token, so it stays readable over whatever the
+/// camera happens to be pointing at; at the body floor, so it is legible at
+/// arm's length.
+struct LiveTranslateWardenNoticeBanner: View {
+
+    let surface: WardenNoticeSurface
+
+    var body: some View {
+        Text(surface.copy)
+            .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .semibold))
+            .foregroundColor(DesignTokens.textPrimary)
+            .multilineTextAlignment(.leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, DesignTokens.interElementSpacing * 2)
+            .padding(.vertical, DesignTokens.interElementSpacing)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(DesignTokens.card)
+            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+            .accessibilityIdentifier("livetranslate.warden.notice")
     }
 }
 
