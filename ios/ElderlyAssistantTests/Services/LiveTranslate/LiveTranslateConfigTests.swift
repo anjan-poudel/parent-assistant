@@ -463,11 +463,11 @@ final class LiveTranslateConfigTests: XCTestCase {
     /// fallbacks a device that has one but not the head keeps working on.
     func testTheTranslationListLeadsWithTheShippedTranslationModel() {
         let ids = LiveTranslateConfig.default.brainTranslationModelIDs
-        XCTAssertEqual(ids, [ModelCatalog.nmtEnNeQwen17bR2bQ4,
+        XCTAssertEqual(ids, [ModelCatalog.nmtEnNeQwen17bR3Q5,
                              ModelCatalog.nmtEnNeQwen17bR2bQ8,
                              ModelCatalog.intentQwen4BSlotCanon,
                              ModelCatalog.intentQwen4BS43],
-                       "the Q5 test quant leads (owner device test, 2026-09-19), "
+                       "the round-3 q5 quant leads (the ship decision, 2026-09-20), "
                        + "then the Q8 ship quant; the intent brains stay behind "
                        + "as fallbacks")
         // A list is only a list if every entry can be resolved — an id with

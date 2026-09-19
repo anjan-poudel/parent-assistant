@@ -91,17 +91,18 @@ final class ModelCatalogLanguageTests: XCTestCase {
     /// assistant brains with rows of their own in the brain section.
     func testTheOfferedTranslationRowsAreExactlyTheTiersHead() {
         let offered = ModelCatalog.availableTranslationEntries.map(\.id)
-        XCTAssertEqual(offered, [ModelCatalog.nmtEnNeQwen17bR2bQ8],
-                       "the section offers the tier's shipped head, alone")
-        // The tier list leads with the Q5 TESTING quant (owner device test,
-        // 2026-09-19, sideloaded — deliberately not offered for download);
-        // the row still offers the shipped head it can actually download.
+        XCTAssertEqual(offered, [ModelCatalog.nmtEnNeQwen17bR3Q5,
+                                 ModelCatalog.nmtEnNeQwen17bR2bQ8],
+                       "the section offers the tier's shipped heads, in order")
+        // The tier list leads with the round-3 quant (the ship decision,
+        // 2026-09-20: the round-2b TESTING sideload is superseded), and the
+        // row offers it — a download that landed would change nothing.
         XCTAssertEqual(LiveTranslateConfig.default.brainTranslationModelIDs.first,
-                       ModelCatalog.nmtEnNeQwen17bR2bQ4,
-                       "the tier leads with the testing quant")
+                       ModelCatalog.nmtEnNeQwen17bR3Q5,
+                       "the tier leads with the round-3 quant")
         XCTAssertEqual(LiveTranslateConfig.default.brainTranslationModelIDs.dropFirst().first,
-                       offered.first,
-                       "the offered row is the tier's shipped head")
+                       offered.dropFirst().first,
+                       "the offered row's second entry is the tier's fallback")
         for id in offered {
             XCTAssertNotNil(ModelCatalog.entry(for: id),
                             "\(id.rawValue) is offered but not in the catalog")
