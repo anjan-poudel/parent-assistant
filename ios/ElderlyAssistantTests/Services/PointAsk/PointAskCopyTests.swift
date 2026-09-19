@@ -55,6 +55,33 @@ final class PointAskCopyTests: XCTestCase {
                 .appendingPathComponent("ElderlyAssistant/Services/Gemini/GeminiClient+PointAsk.swift")]
     }
 
+    /// The same scan as `matchingLines(of:)` but over an explicit URL
+    /// set — the sanctioned-webDetection exclusion uses it.
+    private func matchingLines(in urls: [URL], of patterns: [String]) -> [String: [String]] {
+        var result: [String: [String]] = [:]
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else {
+                XCTFail("bad scan pattern: \(pattern)")
+                continue
+            }
+            var hits: [String] = []
+            for url in urls {
+                let code = FeatureSourceScan.codeText(of: url)
+                for (offset, line) in code.split(separator: "\n",
+                                                 omittingEmptySubsequences: false).enumerated() {
+                    let text = String(line)
+                    let range = NSRange(text.startIndex..<text.endIndex, in: text)
+                    if regex.firstMatch(in: text, options: [], range: range) != nil {
+                        hits.append("\(FeatureSourceScan.relativePath(of: url)):\(offset + 1) "
+                            + text.trimmingCharacters(in: .whitespaces))
+                    }
+                }
+            }
+            result[pattern] = hits
+        }
+        return result
+    }
+
     private func matchingLines(of pattern: String) -> [String] {
         guard let regex = try? NSRegularExpression(pattern: pattern) else {
             XCTFail("bad scan pattern: \(pattern)")
@@ -302,15 +329,31 @@ final class PointAskCopyTests: XCTestCase {
     func testNoOtherSendPathExistsInTheFeature() {
         // `sendVisionDecoded` appears once in the feature — inside
         // `identifyPointAsk` — and no PointAsk source opens a transport,
-        // a session or a file upload of its own.
+        // a session or a file upload of its own. The ONE sanctioned
+        // exception is Phase 2's `PointAskWebDetectionClient` — the
+        // approved Vision webDetection egress client with its own
+        // request-building and transport seam; its lines are excluded
+        // from the forbidden scan.
         let visionCalls = matchingLines(of: "sendVisionDecoded\\(")
         XCTAssertEqual(visionCalls.count, 1, "one vision chokepoint: \(visionCalls)")
         XCTAssertTrue(visionCalls[0].hasPrefix("ElderlyAssistant/Services/Gemini/"
                                                + "GeminiClient+PointAsk.swift"))
 
-        for forbidden in ["URLSession", "URLRequest", "Data\\(contentsOf"] {
-            XCTAssertTrue(matchingLines(of: forbidden).isEmpty,
-                          "a second egress path ('\(forbidden)') in the feature's sources")
+        // The Phase-2 sanctioned egress clients — the approved Vision
+        // webDetection client and the Open Food Facts lookup tool, each
+        // with its own transport seam behind the consent/quota gates.
+        let sanctionedEgressFiles: Set<String> = [
+            "PointAskWebDetectionClient.swift",
+            "ProductLookupTool.swift",
+        ]
+        let webDetectionSource = FeatureSourceScan.swiftFiles(
+            in: "ElderlyAssistant/Services/PointAsk")
+            .filter { sanctionedEgressFiles.contains($0.lastPathComponent) }
+        let forbiddenHits = matchingLines(in: pointAskSourceURLs
+            .filter { !webDetectionSource.contains($0) },
+            of: ["URLSession", "URLRequest", "Data\\(contentsOf"])
+        for (pattern, hits) in forbiddenHits where !hits.isEmpty {
+            XCTFail("a second egress path ('\(pattern)') in the feature's sources: \(hits)")
         }
     }
 
