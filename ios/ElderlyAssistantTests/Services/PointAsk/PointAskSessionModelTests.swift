@@ -28,4 +28,57 @@ final class PointAskSessionModelTests: XCTestCase {
         XCTAssertGreaterThan(point.x, 0.1)
         XCTAssertGreaterThan(point.y, 0.1)
     }
+
+    // MARK: - [YOLO] The detector label leads the ladder-1 answer
+
+    /// The answer composition is the session model's static seam, so the
+    /// label priority is pinned here rather than through a full session.
+    @MainActor
+    func testTheDetectorLabelLeadsTheLadderOneLineOverTheClassifier() {
+        var findings = PointAskFindings()
+        findings.detectedLabel = "bottle"
+        findings.classLabel = "perfume"
+        findings.ocrText = "FLORAL"
+        let locale = Locale(identifier: "en-US")
+
+        let composed = PointAskSessionModel.compose(findings,
+                                                    locale: locale,
+                                                    targetLanguage: .english)
+
+        XCTAssertTrue(composed.spokenLine.contains("bottle"),
+                      "the detector names the WHOLE object the elder tapped — "
+                      + "its label leads the 'It looks like …' line")
+        XCTAssertFalse(composed.spokenLine.contains("perfume"),
+                       "the classifier's crop answer never overrides the detector's box label")
+        XCTAssertTrue(composed.spokenLine.contains("FLORAL"),
+                      "the label-says half still follows: 'It looks like a bottle. The label says: …'")
+    }
+
+    @MainActor
+    func testTheDetectorLabelAloneIsACompleteLadderOneAnswer() {
+        var findings = PointAskFindings()
+        findings.detectedLabel = "cup"
+
+        let composed = PointAskSessionModel.compose(findings,
+                                                    locale: Locale(identifier: "en-US"),
+                                                    targetLanguage: .english)
+
+        XCTAssertFalse(composed.isFailure,
+                       "the detector's name alone answers — never the honest-failure line")
+        XCTAssertTrue(composed.spokenLine.contains("cup"))
+    }
+
+    @MainActor
+    func testTheClassifierStillNamesAnObjectWhenThereIsNoDetectorLabel() {
+        var findings = PointAskFindings()
+        findings.classLabel = "bottle"
+
+        let composed = PointAskSessionModel.compose(findings,
+                                                    locale: Locale(identifier: "en-US"),
+                                                    targetLanguage: .english)
+
+        XCTAssertTrue(composed.spokenLine.contains("bottle"),
+                      "the pre-YOLO ladder is intact: the classifier names the crop")
+        XCTAssertFalse(composed.isFailure)
+    }
 }

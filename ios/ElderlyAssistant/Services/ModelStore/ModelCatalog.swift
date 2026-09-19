@@ -26,16 +26,24 @@ enum ModelKind: String, Codable {
                        // (see `ModelStore.coreMLBundleFinalURL(for:)`).
                        // The catalog sha256 for this kind is the ZIP's own
                        // hash, verified at install time.
+    case yoloDetector  // [YOLO] The point-ask object detector — YOLO11n
+                       // CoreML (DIRECTORY artifact: a compiled
+                       // `yolo11n.mlmodelc` unpacked from a zip). The same
+                       // shape as `.intentEncoder`: CoreML-only, no ggml
+                       // sibling, install destination is the entry's own
+                       // final URL, and the catalog sha256 is the ZIP's
+                       // own hash, verified before unpacking.
     /// True when the entry's `filename` names a DIRECTORY artifact. Only
-    /// `.intentEncoder` reports true today: `.tts` / `.kws` keep their own
-    /// `ttsVoiceDirectory` / `kwsModelDirectory` helpers, and changing
-    /// their `finalURL` shape would be churn with no reader (T-037-a).
+    /// `.intentEncoder` and `.yoloDetector` report true today: `.tts` /
+    /// `.kws` keep their own `ttsVoiceDirectory` / `kwsModelDirectory`
+    /// helpers, and changing their `finalURL` shape would be churn with no
+    /// reader (T-037-a).
     /// Used by `ModelStore.finalURL(for:)` to make the URL the SAME value
     /// before and after an install — `appendingPathComponent(_:)` infers
     /// the trailing slash from the filesystem otherwise.
     var isDirectoryArtifact: Bool {
         switch self {
-        case .intentEncoder: return true
+        case .intentEncoder, .yoloDetector: return true
         default: return false
         }
     }
@@ -307,6 +315,16 @@ enum ModelCatalog {
     /// downloader would need a real HTTP URL, which is deliberately not
     /// invented here.
     static let intentEncoderSpike = ModelID("intent-encoder-t033-c3-minilm-int8")
+
+    /// [YOLO] The point-ask object detector: ultralytics YOLO11n, imgsz
+    /// 640, exported WITHOUT baked NMS — raw outputs (single `var_1223`
+    /// [1, 84, 8400] tensor: channels 0-3 are the DFL-decoded cx/cy/w/h in
+    /// 640-pixel space, channels 4-83 the sigmoid class scores of the
+    /// standard 80 COCO classes — verified from the compiled spec on the
+    /// training server, 2026-09-19; the Swift decode lives in
+    /// `YOLODecoder`). The artifact is a compiled `.mlmodelc` directory
+    /// delivered as a zip (release v4 of the models repo).
+    static let yolo11n = ModelID("yolo11n")
 
     /// The filename the internal-testing install reads from the app's
     /// `Documents/` directory when no environment override is set.
@@ -1290,6 +1308,31 @@ enum ModelCatalog {
             // headroom for the 100–120M-param student.
             minDeviceRAMBytes: 2_000_000_000,
             dependsOn: nil
+        ),
+        // [YOLO] The point-ask object detector (see the `yolo11n` ID
+        // docs). The zip contains exactly one top-level
+        // `yolo11n.mlmodelc` directory — the entry's `filename` IS the
+        // installed directory name (the `.intentEncoder` shape).
+        // `sha256`/`sizeBytes` are the ZIP's own values (strict checksum),
+        // verified by `ModelStore.installCoreMLEncoder(fromZip:for:)`
+        // before unpacking — a corrupted or substituted artifact surfaces
+        // as an install failure, never as a silent install. Artifact
+        // provisioned 2026-09-19 at the models repo release v4.
+        ModelCatalogEntry(
+            id: yolo11n,
+            kind: .yoloDetector,
+            displayName: "Object detector — YOLO11n (point-ask)",
+            filename: "yolo11n.mlmodelc",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v4/yolo11n.mlmodelc.zip")!,
+            sizeBytes: 9_321_136,
+            sha256: "8c56bfca65691bb0a3c20241e454171c16af5a80192874e7bb3f74414845b8e1",
+            // YOLO11n is a ~2.6M-param / ~5 MB-weight detector whose ANE
+            // pass holds a 640×640 working set — the VAD-sized floor.
+            minDeviceRAMBytes: 500_000_000,
+            dependsOn: nil,
+            // Language-neutral: the COCO label set is object names, not
+            // speech — usable in every app language.
+            languages: []
         )
     ]
 
@@ -1435,7 +1478,8 @@ enum ModelCatalog {
         case .whisperBase: return availableSTTEntries
         case .llamaBase:   return availableBrainEntries
         case .tts:         return availableTTSEntries
-        case .whisperLoRA, .llamaLoRA, .kws, .vad, .intentEncoder: return entries(kind: kind)
+        case .whisperLoRA, .llamaLoRA, .kws, .vad, .intentEncoder, .yoloDetector:
+            return entries(kind: kind)
         }
     }
 

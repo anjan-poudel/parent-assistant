@@ -358,6 +358,22 @@ final class ModelDownloadService: NSObject, ObservableObject {
                 tasks[id] = nil
                 return
             }
+            // [YOLO] The point-ask detector is a CoreML-only DIRECTORY
+            // artifact (a zip of the compiled `.mlmodelc`): the
+            // single-file staging/finalize below would leave the ZIP
+            // sitting where a directory is expected and `isCached` would
+            // still answer no, so the download must never "complete" that
+            // way. Verify the zip's strict sha256 and unpack it into the
+            // kind's final directory — the `.intentEncoder` install shape
+            // (`ModelStore.installCoreMLEncoder(fromZip:for:)`).
+            if ModelCatalog.entry(for: id)?.kind == .yoloDetector {
+                update(id, .verifying)
+                _ = try store.installCoreMLEncoder(fromZip: tempURL, for: id)
+                update(id, .completed)
+                emit("download_completed", outcome: "success", modelId: id, errorCode: nil)
+                tasks[id] = nil
+                return
+            }
             let staging = try store.stagingURL(for: id)
             let fm = FileManager.default
             if fm.fileExists(atPath: staging.path) {

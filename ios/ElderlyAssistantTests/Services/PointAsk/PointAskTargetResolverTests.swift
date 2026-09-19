@@ -33,9 +33,11 @@ final class PointAskTargetResolverTests: XCTestCase {
 
     private func makeResolver(object: StubPointAskObjectEngine,
                               mask: StubPointAskMaskEngine? = nil,
+                              yolo: StubPointAskYOLOEngine? = nil,
                               config: PointAskConfig = .default) -> PointAskTargetResolver {
         PointAskTargetResolver(objectEngine: object,
                                maskEngine: mask,
+                               yoloEngine: yolo,
                                config: config,
                                observabilityBus: bus,
                                now: { self.now })
@@ -317,6 +319,143 @@ final class PointAskTargetResolverTests: XCTestCase {
         XCTAssertEqual(target.source, .saliency,
                        "the spike stays behind the probe; the shipped path is saliency")
         XCTAssertEqual(object.passCount, 1)
+    }
+
+    // MARK: - Scenario: the YOLO detector answers first (the real object box)
+
+    func testTheYOLOBoxWinsOverMaskAndSaliencyAndCarriesItsLabel() {
+        // The owner's device-test verdict: the tap box is a REAL
+        // detection box — the detector's, not a mask extent or a
+        // saliency blob.
+        let yoloBox = NormalizedBox(xMin: 0.3, yMin: 0.3, xMax: 0.7, yMax: 0.7)
+        let yolo = StubPointAskYOLOEngine()
+        yolo.detections = [YOLODetection(normalizedBox: yoloBox,
+                                         label: "bottle", confidence: 0.9)]
+        let mask = StubPointAskMaskEngine()
+        mask.box = NormalizedBox(xMin: 0.2, yMin: 0.2, xMax: 0.8, yMax: 0.8)
+        let object = StubPointAskObjectEngine()
+        object.boxes = [PointAskBoxes.leftHalf]
+        let resolver = makeResolver(object: object, mask: mask, yolo: yolo)
+        let tap = CGPoint(x: 0.5, y: 0.5)
+
+        let target = resolver.resolve(tap: tap, in: frame())
+
+        XCTAssertEqual(target.source, .yolo)
+        XCTAssertEqual(target.normalizedBox, yoloBox)
+        XCTAssertEqual(target.detectedLabel, "bottle",
+                       "the winning box's label rides the target into the analysis")
+        XCTAssertEqual(yolo.passCount, 1)
+        XCTAssertEqual(mask.passCount, 0, "the detector came first; no mask pass was paid")
+        XCTAssertEqual(object.passCount, 0, "… and no saliency pass")
+        XCTAssertEqual(bus.events(named: "tap_anchored").last?.metadata["origin"], "yolo")
+    }
+
+    func testTheContainingYOLOBoxIsPreferredOverAHigherConfidenceOne() {
+        // A tap on the cap: the lower-confidence bottle box CONTAINS the
+        // tap, the higher-confidence person box does not — the box that
+        // wraps what the finger points at wins ("prefer the one
+        // CONTAINING the tap").
+        let containing = YOLODetection(
+            normalizedBox: NormalizedBox(xMin: 0.4, yMin: 0.4, xMax: 0.6, yMax: 0.6),
+            label: "bottle", confidence: 0.6)
+        let elsewhere = YOLODetection(
+            normalizedBox: NormalizedBox(xMin: 0.05, yMin: 0.05, xMax: 0.2, yMax: 0.2),
+            label: "cup", confidence: 0.9)
+        let yolo = StubPointAskYOLOEngine()
+        yolo.detections = [elsewhere, containing]
+        let resolver = makeResolver(object: StubPointAskObjectEngine(), mask: nil, yolo: yolo)
+
+        let target = resolver.resolve(tap: CGPoint(x: 0.5, y: 0.5), in: frame())
+
+        XCTAssertEqual(target.normalizedBox, containing.normalizedBox)
+        XCTAssertEqual(target.detectedLabel, "bottle")
+    }
+
+    func testWhenNoYOLOBoxContainsTheTapTheHighestConfidenceBoxWins() {
+        // A tap that misses every box (the cap's edge): the scene's most
+        // confident object still anchors — a real object box, any size,
+        // never a pad.
+        let strongest = YOLODetection(
+            normalizedBox: NormalizedBox(xMin: 0.3, yMin: 0.3, xMax: 0.7, yMax: 0.7),
+            label: "bottle", confidence: 0.9)
+        let weaker = YOLODetection(
+            normalizedBox: NormalizedBox(xMin: 0.1, yMin: 0.1, xMax: 0.2, yMax: 0.2),
+            label: "cup", confidence: 0.7)
+        let yolo = StubPointAskYOLOEngine()
+        yolo.detections = [weaker, strongest]
+        let resolver = makeResolver(object: StubPointAskObjectEngine(), mask: nil, yolo: yolo)
+
+        let target = resolver.resolve(tap: CGPoint(x: 0.95, y: 0.95), in: frame())
+
+        XCTAssertEqual(target.source, .yolo)
+        XCTAssertEqual(target.normalizedBox, strongest.normalizedBox)
+    }
+
+    func testAnEmptyYOLOSceneFallsToTheMaskAndSaliencyLadder() {
+        let yolo = StubPointAskYOLOEngine()
+        yolo.detections = []
+        let mask = StubPointAskMaskEngine()
+        mask.box = nil
+        let object = StubPointAskObjectEngine()
+        object.boxes = [PointAskBoxes.leftHalf]
+        let resolver = makeResolver(object: object, mask: mask, yolo: yolo)
+
+        let target = resolver.resolve(tap: CGPoint(x: 0.25, y: 0.5), in: frame())
+
+        XCTAssertEqual(target.source, .saliency,
+                       "no detector boxes: the ladder continues, never an empty anchor")
+        XCTAssertNil(target.detectedLabel,
+                     "a non-YOLO anchor carries no detector label")
+    }
+
+    func testAFailingYOLOPassFallsToTheLadderAndNeverErrors() {
+        struct DetectorDown: Error {}
+        let yolo = StubPointAskYOLOEngine()
+        yolo.error = DetectorDown()
+        let object = StubPointAskObjectEngine()
+        object.boxes = [PointAskBoxes.leftHalf]
+        let resolver = makeResolver(object: object, mask: nil, yolo: yolo)
+
+        let target = resolver.resolve(tap: CGPoint(x: 0.25, y: 0.5), in: frame())
+
+        XCTAssertEqual(target.source, .saliency,
+                       "a failing detector pass degrades, exactly like a failing mask pass")
+    }
+
+    func testAnUnavailableYOLOEngineIsNeverAskedToRun() {
+        let yolo = StubPointAskYOLOEngine()
+        yolo.isAvailable = false
+        let object = StubPointAskObjectEngine()
+        object.boxes = [PointAskBoxes.leftHalf]
+        let resolver = makeResolver(object: object, mask: nil, yolo: yolo)
+
+        let target = resolver.resolve(tap: CGPoint(x: 0.25, y: 0.5), in: frame())
+
+        XCTAssertEqual(target.source, .saliency,
+                       "the artifact absent: the shipped ladder answers exactly as before")
+        XCTAssertEqual(yolo.passCount, 0, "a probe that reports unavailable is never asked to run")
+    }
+
+    func testWithoutAYOLOEngineTheLadderIsIntact() {
+        let object = StubPointAskObjectEngine()
+        object.boxes = [PointAskBoxes.leftHalf]
+        let resolver = makeResolver(object: object, mask: nil, yolo: nil)
+
+        let target = resolver.resolve(tap: CGPoint(x: 0.25, y: 0.5), in: frame())
+
+        XCTAssertEqual(target.source, .saliency,
+                       "no detector wired: the resolver behaves exactly as it shipped")
+        XCTAssertNil(target.detectedLabel)
+    }
+
+    func testThePureYOLOBoxSelection() {
+        let box = YOLODetection(
+            normalizedBox: NormalizedBox(xMin: 0.2, yMin: 0.2, xMax: 0.8, yMax: 0.8),
+            label: "bottle", confidence: 0.5)
+        XCTAssertEqual(PointAskTargetResolver.yoloBox([box], containing: CGPoint(x: 0.5, y: 0.5)),
+                       box)
+        XCTAssertNil(PointAskTargetResolver.yoloBox([], containing: .zero),
+                     "an empty scene is the ladder's cue, not a guess")
     }
 
     // MARK: - Scenario: geometry helpers

@@ -54,6 +54,11 @@ enum PointAskError: Error, Equatable, LogSafeErrorCode {
     case cropFailed
     /// The mask pass could not be performed at all (opt-in path).
     case maskPassFailed
+    /// [YOLO] The object-detector pass could not be performed at all —
+    /// the model missing, unloadable, or the Vision request refused. The
+    /// resolver degrades to the mask/saliency/pad ladder, never an error
+    /// to the elder.
+    case yoloPassFailed
     /// The VLM stage failed after its retries — never presented as "no
     /// such object", which is what a successful low-confidence answer
     /// means instead.
@@ -68,6 +73,7 @@ enum PointAskError: Error, Equatable, LogSafeErrorCode {
         case .classifyPassFailed: return "pointask_classify_failed"
         case .cropFailed: return "pointask_crop_failed"
         case .maskPassFailed: return "pointask_mask_failed"
+        case .yoloPassFailed: return "pointask_yolo_failed"
         case .vlmFailed: return "pointask_vlm_failed"
         }
     }
@@ -89,6 +95,12 @@ struct PointAskFindings: Equatable {
     /// substituted.
     var classLabel: String?
     var classConfidence: Double = 0
+    /// [YOLO] The winning detector box's COCO label, carried from the
+    /// resolver's anchored target through the analysis request. When
+    /// present it leads the ladder-1 "It looks like …" line ahead of the
+    /// crop classifier's name (the detector names the WHOLE object the
+    /// elder tapped, the classifier names the crop it boxed).
+    var detectedLabel: String?
     /// The VLM answer, when the stage ran and succeeded.
     var vlm: PointAskGuidance?
     /// Whether the VLM stage was reached at all (the switch was on, the
@@ -106,11 +118,12 @@ struct PointAskFindings: Equatable {
     /// ladder-1 answer.
     var quotaCapped: Bool = false
 
-    /// Whether anything local is known — OCR text or a class name. The
-    /// session's honest-failure decision turns on this: no local content
-    /// *and* no VLM is the one case that speaks the failure line.
+    /// Whether anything local is known — OCR text or a class name (the
+    /// detector's or the classifier's). The session's honest-failure
+    /// decision turns on this: no local content *and* no VLM is the one
+    /// case that speaks the failure line.
     var hasLocalContent: Bool {
-        !ocrText.isEmpty || classLabel != nil
+        !ocrText.isEmpty || classLabel != nil || detectedLabel != nil
     }
 }
 
@@ -120,6 +133,10 @@ struct PointAskFindings: Equatable {
 struct PointAskAnalysisRequest {
     let crop: CVPixelBuffer
     let uploadJPEG: Data
+    /// [YOLO] The anchored target's detector label, when the tap box was
+    /// a real YOLO detection. Carried into the findings so the session's
+    /// ladder-1 composition can name the object.
+    var detectedLabel: String? = nil
 }
 
 // MARK: - Classification seam
@@ -226,6 +243,10 @@ actor PointAskAnalysisPipeline {
     func analyze(_ request: PointAskAnalysisRequest,
                  cloudEnabled: Bool) async -> PointAskFindings {
         var findings = PointAskFindings()
+        // [YOLO] The resolver's winning label rides the request into the
+        // findings — the pipeline is the single place the answer's raw
+        // materials are assembled, and content stays out of events.
+        findings.detectedLabel = request.detectedLabel
 
         // Stages 3 + 5 run in parallel; stage 4 (translation) follows
         // because its input is the OCR stage's output. The engines are
