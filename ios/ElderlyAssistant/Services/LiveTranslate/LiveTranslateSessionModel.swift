@@ -64,6 +64,16 @@ struct LiveTranslateSessionDependencies {
     let camera: LiveCameraSession
     let detector: LiveTextDetector
     let cache: LabelTranslationCache
+    /// The on-device brain the session's pipeline runs on, or `nil` for the
+    /// shipped one.
+    ///
+    /// `nil` is what production passes: the pipeline builds the real
+    /// `LocalBrainTranslationTier` over the process's own `ModelStore`, so the
+    /// app has one construction site for it. A test hands one in for the same
+    /// reason the other seams exist — the real tier's ladder ends at whatever
+    /// assistant brains the device happens to hold, and a suite that asserts a
+    /// cascade should not have its timing decided by that.
+    let brain: LocalBrainTranslating?
     let consentGate: LiveTranslateConsentGate
     let costGovernor: GeminiCostGovernor
     let client: GeminiClient
@@ -85,6 +95,7 @@ struct LiveTranslateSessionDependencies {
          camera: LiveCameraSession,
          detector: LiveTextDetector,
          cache: LabelTranslationCache,
+         brain: LocalBrainTranslating? = nil,
          consentGate: LiveTranslateConsentGate,
          costGovernor: GeminiCostGovernor,
          client: GeminiClient,
@@ -100,6 +111,7 @@ struct LiveTranslateSessionDependencies {
         self.camera = camera
         self.detector = detector
         self.cache = cache
+        self.brain = brain
         self.consentGate = consentGate
         self.costGovernor = costGovernor
         self.client = client
@@ -548,14 +560,36 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// The consent prompt's two answers, routed through the controller that
     /// owns the decision. The view calls these rather than the controller
     /// directly so there is one call path from the feature's UI to consent.
+    ///
+    /// **Either answer resumes the asks the prompt interrupted.** The live
+    /// cycle finds them again by itself — a tick follows every frame, and the
+    /// strings the prompt released are pending — but extract mode translates
+    /// on the elder's tap alone and has no tick to find them with. Without
+    /// this, the answer they just gave would never reach a tier, and the block
+    /// they tapped would sit untranslated for the rest of the session.
+    ///
+    /// A refusal resumes them too, and that is not a courtesy: the plan's
+    /// device fallback is what turns "no to the cloud" into a translation on
+    /// the device rather than an unavailable region.
     func grantCloudConsent() {
         guard !isClosed else { return }
         _ = consent.grant()
+        resumeInterruptedAsks()
     }
 
     func declineCloudConsent() {
         guard !isClosed else { return }
         _ = consent.decline()
+        resumeInterruptedAsks()
+    }
+
+    /// Hands the interrupted asks back to the pipeline, off the main actor.
+    /// The decision is recorded by the time this runs (`consent.grant()` /
+    /// `decline()` above), so the gate the retry reaches reads the elder's
+    /// answer rather than asking for it again.
+    private func resumeInterruptedAsks() {
+        guard let pipeline else { return }
+        Task { await pipeline.retryAwaitingResolution() }
     }
 
     // MARK: - Life
@@ -590,9 +624,20 @@ final class LiveTranslateSessionModel: ObservableObject {
             // config's default, so the switch the elder set in Settings is the
             // switch this session runs under — from its very first cloud need.
             geminiCloudEnabled: geminiCloudEnabled,
+            // The router's "can the cloud lead?" half that the switch cannot
+            // answer (owner directive, 2026-09-19): the path question. Handed
+            // in here rather than defaulted, because the default is the
+            // no-path answer — correct for every construction site that
+            // predates the router, and wrong for the one that runs on the
+            // device.
+            reachability: PathMonitorReachability(),
             extractionMode: isExtracting,
             config: config,
             observabilityBus: dependencies.observabilityBus,
+            // `nil` in production: the pipeline builds the shipped tier over
+            // the process's own store. A test hands one in so what it asserts
+            // is the cascade rather than whatever is installed on the machine.
+            brain: dependencies.brain,
             // The warden's two moments land on the model's own surface. The
             // hop itself is the named factory below rather than an inline
             // closure, so the wiring a test exercises is the wiring that

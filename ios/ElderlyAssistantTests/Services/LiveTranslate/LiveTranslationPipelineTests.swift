@@ -99,103 +99,6 @@ final class LiveTranslationPipelineTests: XCTestCase {
         }
     }
 
-    /// Tier 1, scripted — the on-device brain the pipeline asks before the
-    /// cloud. It stands in for `LocalBrainTranslationTier` at the same seam
-    /// the pipeline actually takes (`LocalBrainTranslating`), so what these
-    /// tests pin is the *cascade*: which tier answers, in what order, and what
-    /// reaches the gate.
-    ///
-    /// It emits through the shipped event API when it reports itself
-    /// unavailable, exactly as the real tier does, so the pipeline-level
-    /// claim "no brain, event, and on to the cloud" is made against the real
-    /// vocabulary rather than against a fake's own invention.
-    ///
-    /// A class with a lock rather than an actor, so the harness can wire it up
-    /// and the tests can read what it was asked without an `await` at every
-    /// call site: the pipeline is the only writer that matters, and it awaits
-    /// one attempt at a time.
-    final class RecordingBrain: LocalBrainTranslating, @unchecked Sendable {
-
-        private let lock = NSLock()
-        private var storedAnswers: [String: String] = [:]
-        private var storedUnavailable = false
-        private var storedHangs = false
-        private var storedCalls: [[String]] = []
-        private var storedReleaseCount = 0
-        private var events: LiveTranslateEvents?
-
-        /// The strings this brain answers, and what it answers with.
-        var answers: [String: String] {
-            get { lock.lock(); defer { lock.unlock() }; return storedAnswers }
-            set { lock.lock(); defer { lock.unlock() }; storedAnswers = newValue }
-        }
-
-        /// When true, every attempt reports itself unusable, the way the real
-        /// tier does on a device with no model installed.
-        var unavailable: Bool {
-            get { lock.lock(); defer { lock.unlock() }; return storedUnavailable }
-            set { lock.lock(); defer { lock.unlock() }; storedUnavailable = newValue }
-        }
-
-        /// When true, the generation never comes back on its own: it sleeps
-        /// until it is cancelled. The shape of a 4B decode that is still
-        /// thinking — or stuck — when the stage deadline passes.
-        var hangs: Bool {
-            get { lock.lock(); defer { lock.unlock() }; return storedHangs }
-            set { lock.lock(); defer { lock.unlock() }; storedHangs = newValue }
-        }
-
-        /// Every batch this brain was handed, in order.
-        var calls: [[String]] {
-            lock.lock(); defer { lock.unlock() }; return storedCalls
-        }
-
-        var releaseCount: Int {
-            lock.lock(); defer { lock.unlock() }; return storedReleaseCount
-        }
-
-        /// The harness wires this to the bus it built, so an unavailable
-        /// brain is reported on the pipeline's own channel with the shipped
-        /// emitter rather than a vocabulary of the fake's own.
-        func attach(events: LiveTranslateEvents) {
-            lock.lock(); defer { lock.unlock() }
-            self.events = events
-        }
-
-        func translate(_ strings: [String]) async -> LocalBrainTranslationOutcome {
-            lock.lock()
-            storedCalls.append(strings)
-            let answers = storedAnswers
-            let unavailable = storedUnavailable
-            let hangs = storedHangs
-            let events = self.events
-            lock.unlock()
-
-            if hangs {
-                // Cancellation-aware, like a real generation: the pipeline
-                // cancels the stage when its deadline passes, so this returns
-                // into nothing rather than blocking the test.
-                try? await Task<Never, Never>.sleep(for: .seconds(30))
-                return .none
-            }
-
-            guard !unavailable else {
-                events?.brainTranslationUnavailable(.modelNotInstalled, stage: .availability)
-                return .none
-            }
-            var translations: [String: String] = [:]
-            for text in strings {
-                if let answer = answers[text] { translations[text] = answer }
-            }
-            return LocalBrainTranslationOutcome(translations: translations, durationMs: 1)
-        }
-
-        func release() async {
-            lock.lock(); defer { lock.unlock() }
-            storedReleaseCount += 1
-        }
-    }
-
     /// A scripted clock.
     ///
     /// The departure grace (`overlayDepartureGraceSeconds`) is the one rule in
@@ -283,6 +186,28 @@ final class LiveTranslationPipelineTests: XCTestCase {
         let config: LiveTranslateConfig
     }
 
+    /// [RELIABILITY-ROUTER] The network's answer, scripted. A scenario that
+    /// wants the cloud to be ABLE to lead says so; everything else gets the
+    /// conservative no-path answer and the order the cascade shipped with.
+    final class ScriptedReachability: NetworkReachability, @unchecked Sendable {
+        private let lock = NSLock()
+        private var reachable: Bool
+
+        init(reachable: Bool) {
+            self.reachable = reachable
+        }
+
+        var isReachable: Bool {
+            lock.lock(); defer { lock.unlock() }
+            return reachable
+        }
+
+        func set(reachable: Bool) {
+            lock.lock(); defer { lock.unlock() }
+            self.reachable = reachable
+        }
+    }
+
     /// The production composition, with only the platform seams doubled: the
     /// real cache (over an in-memory encrypted store), the real gate, the
     /// real prompt controller, the real tier and the real client over a
@@ -322,7 +247,17 @@ final class LiveTranslationPipelineTests: XCTestCase {
                              /// reachable for what it asserts to be the thing
                              /// under test. A scenario about the *switch*
                              /// passes `false` and says so.
-                             geminiCloudEnabled: Bool = true) -> Harness {
+                             geminiCloudEnabled: Bool = true,
+                             /// [RELIABILITY-ROUTER] The network's answer.
+                             ///
+                             /// **No path by default, and deliberately so.**
+                             /// The pipeline's own default is the same, and
+                             /// with it the router keeps the device in front
+                             /// for every class — which is what these
+                             /// scenarios were written against. A scenario
+                             /// about the router passes a scripted answer and
+                             /// says which one it means.
+                             reachability: NetworkReachability = UnavailableReachability()) -> Harness {
         let bus = LiveTranslateSanitisingBus()
         // The brain is behind its own seam, so these tests never build a
         // `ModelStore` or touch a model file: the cascade is what is under
@@ -376,6 +311,7 @@ final class LiveTranslationPipelineTests: XCTestCase {
                                                backpressure: backpressure,
                                                alwaysShowOriginal: false,
                                                geminiCloudEnabled: geminiCloudEnabled,
+                                               reachability: reachability,
                                                extractionMode: extractionMode,
                                                config: config,
                                                observabilityBus: bus,
@@ -2709,6 +2645,437 @@ final class LiveTranslationPipelineTests: XCTestCase {
         let remainder = try XCTUnwrap(region(secondCloudText, in: publication))
         XCTAssertEqual(publication.result(for: answered).sourceTier, .onDeviceBrain)
         XCTAssertEqual(publication.result(for: remainder).sourceTier, .cloud)
+    }
+
+    // MARK: - Scenario: the reliability router (round-3 ship, 2026-09-19)
+    //
+    // The approved direction: an on-device answer SETTLES only for the classes
+    // the model is proven on — short labels, menus and pharma lines, the shapes
+    // every passing probe row has — and the sentence class goes to the cloud
+    // when there is a path, falling back to the device when there is not.
+    //
+    // `cloudText` is five words, so it is the sentence class; `secondCloudText`
+    // and `thirdCloudText` are four, so they are the proven one. The
+    // discriminator's own suite is `TranslationReliabilityRouterTests`; what is
+    // here is the WIRING — which tier actually leads a live cycle, and what
+    // becomes of a string the gate cannot pass on.
+
+    /// The cloud leads, even though the device could have answered: the class
+    /// decides, not availability, so the on-device generation is never paid
+    /// for at all.
+    @MainActor
+    func testScenarioASentenceLeadsWithTheCloudWhenThereIsAPath() async throws {
+        let harness = makeHarness(consent: true,
+                                  transport: Self.respondingTransport(),
+                                  reachability: ScriptedReachability(reachable: true))
+        await harness.pipeline.updateLayout(layout)
+        harness.recogniser.defaultStep = .regions([detected(cloudText)])
+        // Armed and willing: if the device is asked, it answers.
+        harness.brain.answers = [cloudText: brainTranslation]
+
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        let asked = cloudText
+        await waitUntil("the cloud answer to be published") {
+            guard let latest = await harness.recorder.latest,
+                  let region = latest.regions.first(where: { $0.text == asked }) else {
+                return false
+            }
+            return latest.result(for: region).sourceTier == .cloud
+        }
+
+        XCTAssertEqual(harness.brain.calls.count, 0,
+                       "the sentence class does not pay for an on-device "
+                       + "generation when the cloud can take it")
+        XCTAssertEqual(requests(carrying: asked, in: harness), 1)
+        let publication = try await latest(harness)
+        let region = try XCTUnwrap(region(asked, in: publication))
+        XCTAssertEqual(publication.result(for: region).sourceTier, .cloud)
+    }
+
+    /// The same sentence, one value changed — there is no path — and the device
+    /// leads it. Nothing is sent, and the region is not left to degrade on a
+    /// cloud that cannot answer: this is the route the offline phone takes.
+    @MainActor
+    func testScenarioWithNoPathTheSameSentenceStaysOnTheDevice() async throws {
+        let harness = makeHarness(consent: true,
+                                  transport: Self.respondingTransport(),
+                                  reachability: ScriptedReachability(reachable: false))
+        await harness.pipeline.updateLayout(layout)
+        harness.recogniser.defaultStep = .regions([detected(cloudText)])
+        harness.brain.answers = [cloudText: brainTranslation]
+
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        await waitUntil("the on-device answer to be published") {
+            guard let latest = await harness.recorder.latest,
+                  let region = latest.regions.first(where: { $0.text == self.cloudText }) else {
+                return false
+            }
+            return latest.result(for: region).sourceTier == .onDeviceBrain
+        }
+
+        XCTAssertEqual(requests(carrying: cloudText, in: harness), 0,
+                       "with no path nothing is sent at all")
+        let publication = try await latest(harness)
+        let region = try XCTUnwrap(region(cloudText, in: publication))
+        XCTAssertEqual(publication.result(for: region).sourceTier, .onDeviceBrain)
+    }
+
+    /// The cloud may lead — there is a path and the switch is on — but the gate
+    /// will not pass the batch on, because the household has already declined.
+    /// The reservation is what keeps the sentence translatable on the device
+    /// instead of degrading it with the gate's reason.
+    @MainActor
+    func testScenarioASentenceTheGateCannotPassOnFallsBackToTheDevice() async throws {
+        let harness = makeHarness(consent: false,
+                                  transport: Self.respondingTransport(),
+                                  reachability: ScriptedReachability(reachable: true))
+        _ = harness.gate.record(granted: false)
+        await harness.pipeline.updateLayout(layout)
+        harness.recogniser.defaultStep = .regions([detected(cloudText)])
+        harness.brain.answers = [cloudText: brainTranslation]
+
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        await waitUntil("the on-device fallback to be published") {
+            guard let latest = await harness.recorder.latest,
+                  let region = latest.regions.first(where: { $0.text == self.cloudText }) else {
+                return false
+            }
+            return latest.result(for: region).sourceTier == .onDeviceBrain
+        }
+
+        XCTAssertEqual(harness.transport.requestCount, 0, "a denial is not a request")
+        let publication = try await latest(harness)
+        let region = try XCTUnwrap(region(cloudText, in: publication))
+        XCTAssertEqual(publication.result(for: region).outcome,
+                       .resolved(originalText: cloudText,
+                                 translation: brainTranslation,
+                                 tier: .onDeviceBrain),
+                       "the fallback is the device, not a degraded region")
+    }
+
+    // MARK: - Scenario: the cloud that cannot answer (the reservation's shapes)
+    //
+    // Leading with the cloud is only safe because a cloud that does not answer
+    // gives the string back. There are three shapes of "does not answer", and
+    // the reservation is keyed on a property they share — the string is still
+    // translatable — not on the reason each one names:
+    //
+    //   * a rejection at the wire (5xx), which the tier retries once and then
+    //     reports as `cloudRejected`;
+    //   * a transport that never delivers (`cloudTransient`);
+    //   * a budget the household has already spent, which the tier reports
+    //     without touching the wire at all (`costBudgetExhausted`).
+    //
+    // What each must NOT become is a degraded region: the region was never
+    // published as failed, because the device answered it in the same cycle.
+
+    /// The failure shapes end to end: one sentence, one cycle, and the device
+    /// answers what the cloud could not.
+    ///
+    /// `expectsARequest` separates the failures that happened at the wire from
+    /// the one the tier refuses before it — both are failures that leave the
+    /// string translatable, which is the property the reservation names.
+    @MainActor
+    private func assertACloudFailureFallsBackToTheDevice(_ transport: TierTranslationTransport,
+                                                         shape: String,
+                                                         expectsARequest: Bool = true,
+                                                         file: StaticString = #filePath,
+                                                         line: UInt = #line) async throws {
+        let harness = makeHarness(consent: true,
+                                  transport: transport,
+                                  reachability: ScriptedReachability(reachable: true))
+        await harness.pipeline.updateLayout(layout)
+        harness.recogniser.defaultStep = .regions([detected(cloudText)])
+        // Armed and willing: if the device is asked, it answers.
+        harness.brain.answers = [cloudText: brainTranslation]
+
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        let asked = cloudText
+        await waitUntil("the on-device fallback after \(shape)", file: file, line: line) {
+            guard let latest = await harness.recorder.latest,
+                  let region = latest.regions.first(where: { $0.text == asked }) else {
+                return false
+            }
+            return latest.result(for: region).sourceTier == .onDeviceBrain
+        }
+
+        XCTAssertEqual(harness.transport.requestCount == 0, !expectsARequest,
+                       "\(shape): the wire was \(expectsARequest ? "the way the failure happened" : "not touched")",
+                       file: file, line: line)
+        XCTAssertEqual(harness.brain.calls.count, 1,
+                       "\(shape): the reservation is one device batch",
+                       file: file, line: line)
+        let publication = try await latest(harness, file: file, line: line)
+        let region = try XCTUnwrap(region(asked, in: publication), file: file, line: line)
+        XCTAssertEqual(publication.result(for: region).outcome,
+                       .resolved(originalText: asked, translation: brainTranslation, tier: .onDeviceBrain),
+                       "\(shape): the string is translated on the device rather than degraded",
+                       file: file, line: line)
+        await assertNeverDegraded(asked, in: harness, file: file, line: line)
+    }
+
+    /// No publication this session made ever showed the string as a failure:
+    /// the fallback replaced the cloud's answer without a degraded frame in
+    /// between — the flash the reservation exists to prevent.
+    @MainActor
+    private func assertNeverDegraded(_ text: String,
+                                     in harness: Harness,
+                                     file: StaticString = #filePath,
+                                     line: UInt = #line) async {
+        let publications = await harness.recorder.publications
+        let degraded = publications.filter { publication in
+            guard let region = publication.regions.first(where: { $0.text == text }) else { return false }
+            return publication.result(for: region).degraded
+        }
+        XCTAssertTrue(degraded.isEmpty,
+                      "\(text) was shown as failed on \(degraded.count) publication(s) before the device answered it",
+                      file: file, line: line)
+    }
+
+    /// A 5xx: the provider is up and refusing. The tier retries once and then
+    /// gives the string back, and the device answers it.
+    @MainActor
+    func testScenarioARejectedCloudAnswerIsAnsweredOnTheDevice() async throws {
+        let transport = TierTranslationTransport()
+        // Two, because a 5xx is retryable once: the script stands in for a
+        // provider that is refusing, not for one that was asked twice by
+        // accident.
+        transport.answers = [.http(503), .http(503)]
+        try await assertACloudFailureFallsBackToTheDevice(transport, shape: "a 503")
+    }
+
+    /// A transport that never delivers — the shape of a phone that lost its
+    /// path between the dispatch and the answer.
+    @MainActor
+    func testScenarioATimedOutCloudAnswerIsAnsweredOnTheDevice() async throws {
+        let transport = TierTranslationTransport()
+        transport.answers = [.failure(URLError(.timedOut)), .failure(URLError(.timedOut))]
+        try await assertACloudFailureFallsBackToTheDevice(transport, shape: "a transport timeout")
+    }
+
+    /// The budget the household has already spent. The tier refuses before any
+    /// request, and the refusal is the same kind of event as a rejection: the
+    /// string belongs to the device.
+    @MainActor
+    func testScenarioASpentBudgetIsAnsweredOnTheDevice() async throws {
+        let transport = TierTranslationTransport()
+        let harness = makeHarness(consent: true,
+                                  transport: transport,
+                                  reachability: ScriptedReachability(reachable: true))
+        harness.governor.setSoftDailyCap(GeminiCostGovernor.minimumSoftDailyCap)
+        for _ in 0..<GeminiCostGovernor.minimumSoftDailyCap { harness.governor.recordCall() }
+        await harness.pipeline.updateLayout(layout)
+        harness.recogniser.defaultStep = .regions([detected(cloudText)])
+        harness.brain.answers = [cloudText: brainTranslation]
+
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        let asked = cloudText
+        await waitUntil("the on-device fallback after a spent budget") {
+            guard let latest = await harness.recorder.latest,
+                  let region = latest.regions.first(where: { $0.text == asked }) else {
+                return false
+            }
+            return latest.result(for: region).sourceTier == .onDeviceBrain
+        }
+
+        XCTAssertEqual(harness.transport.requestCount, 0, "a spent budget is refused without a request")
+        let publication = try await latest(harness)
+        let region = try XCTUnwrap(region(asked, in: publication))
+        XCTAssertEqual(publication.result(for: region).sourceTier, .onDeviceBrain,
+                       "the string is not spent with the budget")
+        await assertNeverDegraded(asked, in: harness)
+    }
+
+    /// A whole scene of sentences the cloud refuses is one reservation and one
+    /// device batch — not six generations, and not one string dropped on the
+    /// way. The batch is the bound's to cut, so the assertion that every
+    /// reserved string is in it is also the assertion that the bound does not
+    /// reach this size.
+    @MainActor
+    func testScenarioEverySentenceTheCloudRefusesIsAnsweredInOneDeviceBatch() async throws {
+        let sentences = ["Please close the door behind you",
+                         "Mind the step at the entrance",
+                         "Keep your belongings with you",
+                         "Do not block the walkway",
+                         "Please wait to be seated",
+                         "Wash your hands before eating"]
+        let boxes = [box(0.05, 0.05, 0.45, 0.15), box(0.55, 0.05, 0.95, 0.15),
+                     box(0.05, 0.25, 0.45, 0.35), box(0.55, 0.25, 0.95, 0.35),
+                     box(0.05, 0.45, 0.45, 0.55), box(0.55, 0.45, 0.95, 0.55)]
+        let transport = TierTranslationTransport()
+        transport.answers = [.http(500), .http(500)]
+        let brain = RecordingBrain()
+        brain.answers = Dictionary(uniqueKeysWithValues: sentences.map { ($0, brainTranslation) })
+
+        let harness = makeHarness(consent: true,
+                                  transport: transport,
+                                  brain: brain,
+                                  reachability: ScriptedReachability(reachable: true))
+        await harness.pipeline.updateLayout(layout)
+        harness.recogniser.defaultStep = .regions(zip(sentences, boxes).map { detected($0, box: $1) })
+
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        await waitUntil("all six fallbacks to be published") {
+            guard let latest = await harness.recorder.latest else { return false }
+            return sentences.allSatisfy { text in
+                guard let region = latest.regions.first(where: { $0.text == text }) else { return false }
+                return latest.result(for: region).sourceTier == .onDeviceBrain
+            }
+        }
+
+        XCTAssertEqual(brain.calls.count, 1, "the reservation is one batch, not one generation per string")
+        XCTAssertEqual(Set(brain.calls.first ?? []), Set(sentences),
+                       "every reserved string is in the batch the bound let through")
+        for text in sentences { await assertNeverDegraded(text, in: harness) }
+    }
+
+    // MARK: - Scenario: the brain's clock paces generations, not asks
+    //
+    // `brainAttemptMinInterval` exists because a generation is expensive: it
+    // paces how often the session pays for one. It is not a pace on dispatches,
+    // and a string that owes the brain nothing — the cloud class — must not be
+    // held behind it. The two scenarios below are the two halves of that rule,
+    // and they run the shipped intervals against a scripted clock.
+
+    /// A sentence that arrives inside the brain's window is dispatched anyway:
+    /// it leads with the cloud, and no generation is owed for the clock to
+    /// hold it back.
+    @MainActor
+    func testScenarioTheBrainClockDoesNotHoldTheCloudClass() async throws {
+        let clock = ScriptedClock()
+        let brain = RecordingBrain()
+        let config = LiveTranslateConfig.default
+        let harness = makeHarness(consent: true,
+                                  transport: Self.respondingTransport(),
+                                  brain: brain,
+                                  now: { clock.now },
+                                  config: config,
+                                  reachability: ScriptedReachability(reachable: true))
+        await harness.pipeline.updateLayout(layout)
+        let frame = try makeFrame()
+
+        // A device-class string pays the session's first generation, which is
+        // what sets the brain's clock at this instant.
+        brain.answers = [secondCloudText: brainTranslation]
+        harness.recogniser.defaultStep = .regions([detected(secondCloudText, box: box(0.1, 0.1, 0.5, 0.25))])
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+        await waitUntil("the first generation") { brain.calls.count == 1 }
+        let generationAt = clock.now
+
+        // The scene becomes a sentence, inside the brain's window but past the
+        // dispatch window.
+        let lateSentence = "Please keep this door closed at all times"
+        harness.recogniser.defaultStep = .regions([detected(lateSentence, box: box(0.1, 0.5, 0.9, 0.65))])
+        clock.advance(by: config.translationDispatchMinInterval + 0.1)
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+        await waitUntil("the sentence to reach the cloud inside the brain's window") {
+            self.requests(carrying: lateSentence, in: harness) == 1
+        }
+
+        XCTAssertLessThan(clock.now.timeIntervalSince(generationAt), config.brainAttemptMinInterval,
+                          "the claim is about a dispatch made while the brain's window is still shut")
+        XCTAssertEqual(brain.calls.count, 1, "the cloud class owed no generation to be held back by")
+        let publication = try await latest(harness)
+        let served = try XCTUnwrap(region(lateSentence, in: publication))
+        XCTAssertEqual(publication.result(for: served).sourceTier, .cloud)
+    }
+
+    /// The other half: a device-class string arriving in the same window IS
+    /// held — the clock that is shut is the one its generation belongs to —
+    /// and it is not quietly sent to the cloud instead.
+    @MainActor
+    func testScenarioTheBrainClockStillHoldsTheDeviceClass() async throws {
+        let clock = ScriptedClock()
+        let brain = RecordingBrain()
+        let config = LiveTranslateConfig.default
+        // No path at all, so the cloud is not an alternative route for the
+        // held string: what this scenario watches is the brain's clock alone.
+        let harness = makeHarness(consent: true,
+                                  transport: Self.respondingTransport(),
+                                  brain: brain,
+                                  now: { clock.now },
+                                  config: config,
+                                  reachability: ScriptedReachability(reachable: false))
+        await harness.pipeline.updateLayout(layout)
+        let frame = try makeFrame()
+
+        brain.answers = [secondCloudText: brainTranslation]
+        harness.recogniser.defaultStep = .regions([detected(secondCloudText, box: box(0.1, 0.1, 0.5, 0.25))])
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+        await waitUntil("the first generation") { brain.calls.count == 1 }
+
+        // A second device-class string arrives in the same window: the dispatch
+        // clock is open, the brain's is not.
+        harness.recogniser.defaultStep = .regions([detected(thirdCloudText, box: box(0.1, 0.5, 0.6, 0.65))])
+        clock.advance(by: config.translationDispatchMinInterval + 0.1)
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        XCTAssertEqual(brain.calls.count, 1, "a generation the clock refused was not paid for")
+        XCTAssertEqual(requests(carrying: thirdCloudText, in: harness), 0, "and the string was not sent instead")
+        let publication = try await latest(harness)
+        let held = try XCTUnwrap(region(thirdCloudText, in: publication))
+        guard case .pending = publication.result(for: held).outcome else {
+            return XCTFail("a held string stays pending: it is neither answered nor failed")
+        }
+    }
+
+    /// The ask a prompt interrupted has no next tick in extract mode, so the
+    /// session model retries it when the answer arrives. This is that retry,
+    /// with the prompt's own path: the tap raises the question, the grant is
+    /// what carries the ask to the cloud, and nothing is sent before it.
+    @MainActor
+    func testScenarioAGrantCarriesAnInterruptedAskOnwardWithoutATick() async throws {
+        let harness = makeHarness(consent: false,
+                                  transport: Self.respondingTransport(),
+                                  extractionMode: true,
+                                  reachability: ScriptedReachability(reachable: true))
+        await harness.pipeline.updateLayout(layout)
+        harness.recogniser.defaultStep = .regions([detected(cloudText)])
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        var publication = try await latest(harness)
+        var region = try XCTUnwrap(self.region(cloudText, in: publication))
+        await harness.pipeline.translateRegion(region.id)
+        await waitUntil("the prompt to be presented") { harness.controller.isPromptPresented }
+        XCTAssertEqual(harness.transport.requestCount, 0, "an unanswered prompt sends nothing")
+
+        // The elder says yes. Nothing ticks in extract mode, so the retry the
+        // session model fires on the answer is the only thing that can carry
+        // the ask onward — and it does, to the cloud the class leads with.
+        if case .failure(let error) = harness.controller.grant() {
+            return XCTFail("a grant must be recorded: \(error)")
+        }
+        await harness.pipeline.retryAwaitingResolution()
+        await waitUntil("the granted ask to reach the cloud") { harness.transport.requestCount == 1 }
+
+        publication = try await latest(harness)
+        region = try XCTUnwrap(self.region(cloudText, in: publication))
+        XCTAssertEqual(publication.result(for: region).sourceTier, .cloud,
+                       "the granted ask is answered, not left pending on a tick that never comes")
     }
 
     @MainActor
