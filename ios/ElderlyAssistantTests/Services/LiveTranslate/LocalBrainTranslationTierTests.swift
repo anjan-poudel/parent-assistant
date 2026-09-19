@@ -647,13 +647,168 @@ final class LocalBrainTranslationTierTests: XCTestCase {
     }
 
     func testAnAnswerThatIsNotTheGrammarIsUnresolvedRatherThanRendered() async throws {
+        let prose = "I am sorry, I cannot help with that."
         try await withTier { tier, generator, bus in
-            generator.output = "I am sorry, I cannot help with that."
+            generator.output = prose
 
             let outcome = await tier.translate([brainText])
 
             XCTAssertEqual(outcome, .none)
-            XCTAssertEqual(bus.events(named: "brain_translation_batch").first?.outcome, "degraded")
+            let event = batchEvent(bus)
+            XCTAssertEqual(event?.outcome, "degraded")
+            // [EMPTY-DECODE] The report's discriminating case: something WAS
+            // emitted, so this is not the empty decode — and it never parsed,
+            // so no per-string rule ran and none may be blamed. The length
+            // separates "the decode stopped mid-stream" from "the decode ran
+            // to the end in the wrong shape".
+            XCTAssertEqual(event?.metadata["generationShape"], "unparsable")
+            XCTAssertEqual(event?.metadata["generationLength"], String(prose.count))
+            XCTAssertEqual(event?.metadata["rejections"], "none",
+                           "no string rule ran, because no string was ever reached")
+        }
+    }
+
+    // MARK: The generation's own report ([EMPTY-DECODE], 2026-09-19)
+    //
+    // The owner's device capture: the Q4_K_M head loaded, every batch ran
+    // 7–20 seconds, and every batch resolved nothing — with `resolvedCount`,
+    // `unresolvedCount` and `durationMs` as the only evidence. Those three
+    // cannot tell a decode that emitted nothing from one whose every answer a
+    // rule refused, and the two need opposite fixes. These tests pin the half
+    // that tells them apart: the raw character count, the structural shape,
+    // and which rule refused what.
+
+    /// The decisive case, and the one the owner's phone is suspected of:
+    /// nothing came back at all. No answer rule can be blamed — the shape
+    /// says the failure is upstream of every one of them.
+    func testAGenerationThatEmittedNothingReportsItsLengthAndTheEmptyShape() async throws {
+        try await withTier { tier, generator, bus in
+            generator.output = ""
+
+            let outcome = await tier.translate([brainText])
+
+            XCTAssertEqual(outcome.translations, [:])
+            let event = batchEvent(bus)
+            XCTAssertEqual(event?.metadata["generationLength"], "0",
+                           "zero characters is the fact the whole diagnostic turns on")
+            XCTAssertEqual(event?.metadata["generationShape"], "empty")
+            XCTAssertEqual(event?.metadata["rejections"], "none")
+        }
+    }
+
+    /// JSON, but not the grammar's object: a decode that stopped after the
+    /// opening brace, or an answer shaped by something other than the schema.
+    func testAnAnswerWithoutTheTranslationsArrayReportsThatShape() async throws {
+        try await withTier { tier, generator, bus in
+            generator.output = #"{"translation": "यो औषधि पसल हो"}"#
+
+            let outcome = await tier.translate([brainText])
+
+            XCTAssertEqual(outcome.translations, [:],
+                           "a plausible answer under the wrong key is still not an answer")
+            XCTAssertEqual(batchEvent(bus)?.metadata["generationShape"], "no_array")
+        }
+    }
+
+    /// The end-to-end histogram: an answer that is Devanagari, is not the
+    /// source, and carries no Nepali-exclusive evidence — the rejection the
+    /// owner's short sign text is most exposed to, and the one that looks
+    /// exactly like success in every count the batch event used to carry.
+    func testARefusedAnswerIsNamedInTheHistogramOnTheEvent() async throws {
+        try await withTier { tier, generator, bus in
+            generator.output = answer(["फार्मेसी"])
+
+            let outcome = await tier.translate([brainText])
+
+            XCTAssertEqual(outcome.translations, [:])
+            let event = batchEvent(bus)
+            XCTAssertEqual(event?.metadata["generationShape"], "array",
+                           "the answer WAS the grammar's object — the failure is in a rule")
+            XCTAssertEqual(event?.metadata["rejections"], "no_nepali_evidence:1",
+                           "and the histogram names which one")
+        }
+    }
+
+    /// Every rule, named. The pure classification, so the fixture can cover
+    /// rules one scripted generation cannot reach in a single call: a short
+    /// array, a non-string, and each of the six answer rules.
+    func testTheRejectionHistogramNamesEveryRuleThatRefusedAnAnswer() {
+        // One call, four sources, four different rules.
+        let mixed = LocalBrainTranslationTier.report(
+            answer(["", "फार्मेसी", "खुला है।", "Pharmacy"]),
+            sources: ["Pharmacy", "Open", "24", "No entry"],
+            targetLanguage: .nepali,
+            config: config)
+        XCTAssertEqual(mixed.shape, .array)
+        XCTAssertEqual(mixed.translations, [:])
+        XCTAssertEqual(mixed.rejections, [.empty: 1,
+                                          .noNepaliEvidence: 1,
+                                          .hindiEvidence: 1,
+                                          .wrongScript: 1],
+                       "an empty answer, a marker-free one, a Hindi one and an English one "
+                       + "are four different facts, and the histogram keeps them apart")
+
+        // The positional half: a short array, a value that is not a string,
+        // and the source echoed back.
+        let ragged = LocalBrainTranslationTier.report(
+            #"{"translations": ["Pharmacy", 42]}"#,
+            sources: ["Pharmacy", "Open", "24"],
+            targetLanguage: .nepali,
+            config: config)
+        XCTAssertEqual(ragged.length, #"{"translations": ["Pharmacy", 42]}"#.count)
+        XCTAssertEqual(ragged.rejections, [.echo: 1, .nonString: 1, .missing: 1],
+                       "an echo, a non-string and a position the array never reached")
+
+        // The size bound and the instruction echo, which the rules above would
+        // otherwise mask: both are Devanagari and neither is the source.
+        let overBound = String(repeating: "नेपालीमा ", count: 20)
+        let instruction = "यो अंग्रेजी वाक्य नेपालीमा अनुवाद गर्नुहोस्।"
+        let refused = LocalBrainTranslationTier.report(
+            answer([overBound, instruction]),
+            sources: ["Pharmacy", "Open"],
+            targetLanguage: .nepali,
+            config: config)
+        XCTAssertEqual(refused.rejections, [.tooLong: 1, .instructionEcho: 1],
+                       "over the cloud's own length bound, and the instruction read back")
+        XCTAssertGreaterThan(overBound.count,
+                             TranslationResponseParser.maxLength(forSource: "Pharmacy", config: config),
+                             "the fixture must actually be over the bound")
+    }
+
+    /// The other end: an accepted generation reports its own length, the array
+    /// shape, and no rejection at all — the histogram's `none` is a statement
+    /// that every rule was reached and passed.
+    func testAnAcceptedGenerationReportsTheArrayShapeWithNoRejections() async throws {
+        try await withTier { tier, generator, bus in
+            generator.output = answer([brainAnswer])
+
+            let outcome = await tier.translate([brainText])
+
+            XCTAssertEqual(outcome.translations, [brainText: brainAnswer])
+            let event = batchEvent(bus)
+            XCTAssertEqual(event?.metadata["generationShape"], "array")
+            XCTAssertEqual(event?.metadata["generationLength"], String(answer([brainAnswer]).count))
+            XCTAssertEqual(event?.metadata["rejections"], "none")
+        }
+    }
+
+    /// The two sparse groups on one event are disjoint, which is what makes
+    /// the absence of a reading readable: a declined batch never ran, so it
+    /// carries no shape to misread as a decode result.
+    func testADeclinedBatchCarriesNoGenerationReading() async throws {
+        let clock = PressureClock()
+        let ledger = makePressureLedger(clock)
+        ledger.handleMemoryPressure()
+
+        try await withTier(ledger: ledger) { tier, _, bus in
+            _ = await tier.translate([self.brainText])
+
+            let event = batchEvent(bus)
+            XCTAssertEqual(event?.metadata["reason"], "memory_pressure")
+            for key in ["generationLength", "generationShape", "rejections"] {
+                XCTAssertNil(event?.metadata[key],
+                             "a batch that was never attempted must not report a \(key)")
+            }
         }
     }
 
@@ -1230,6 +1385,78 @@ final class LocalBrainTranslationTierTests: XCTestCase {
                            "the window has passed: the load is allowed again")
             XCTAssertNil(outcome.deferral)
         }
+    }
+
+    /// [PRESSURE-LATCH] The same window, applied to the level that can *latch*.
+    ///
+    /// `.critical` is paired: the dispatch source that sends it sends
+    /// `.normal` when the squeeze ends, and that second event is what clears
+    /// the level. A `.warning` routed from
+    /// `UIApplication.didReceiveMemoryWarningNotification` has no counterpart —
+    /// the app records the level and nothing on that route ever takes it back —
+    /// so a gate that refused on the bare level would refuse every load for the
+    /// rest of the process's life after one transient warning, reporting
+    /// `durationMs=0` and `reason=memory_pressure` on every batch with no
+    /// device state that could ever change the answer.
+    ///
+    /// The age is what makes that recoverable, and this is the owner-visible
+    /// half of it: a warning 40 seconds old — past the 30-second window, and
+    /// with no `.normal` following it, exactly as the UIKit route leaves it —
+    /// must not stand between the tier and a translation.
+    func testAWarningOlderThanTheWindowNoLongerDefersTheLoad() async throws {
+        let clock = PressureClock()
+        let ledger = makePressureLedger(clock)
+        ledger.handleMemoryPressure()
+        clock.advance(40)
+
+        try await withTier(ledger: ledger) { tier, generator, bus in
+            generator.output = answer([self.brainAnswer])
+            let outcome = await tier.translate([self.brainText])
+
+            XCTAssertEqual(generator.prompts.count, 1,
+                           "40s past the window the warning is history, not a device state: "
+                           + "nothing has ever cleared the level, and the load must still happen")
+            XCTAssertNil(outcome.deferral)
+            XCTAssertEqual(outcome.translations, [self.brainText: self.brainAnswer])
+            XCTAssertNotEqual(batchEvent(bus)?.metadata["reason"], "memory_pressure",
+                              "and the batch does not carry the pressure reason")
+        }
+    }
+
+    /// The two edges of that window, on the pure function the pre-attempt gate
+    /// and the load path share — so neither caller can drift from the other on
+    /// the one level whose level alone cannot be trusted.
+    func testTheWarningWindowRefusesWhileFreshAndReleasesOnceStale() {
+        let window = LiveTranslateConfig.default.brainTranslationCriticalPressureWindowSeconds
+        func reading(_ warningAge: TimeInterval?, criticalAge: TimeInterval? = nil)
+            -> MemoryPressureReading {
+            MemoryPressureReading(level: .warning,
+                                  secondsSinceCritical: criticalAge,
+                                  secondsSinceWarning: warningAge)
+        }
+
+        XCTAssertEqual(LocalBrainTranslationTier.pressureDeferral(reading(0), windowSeconds: window),
+                       .memoryPressure(level: .warning),
+                       "a warning happening now is refused, as it always was")
+        XCTAssertEqual(LocalBrainTranslationTier.pressureDeferral(reading(window - 1),
+                                                                  windowSeconds: window),
+                       .memoryPressure(level: .warning),
+                       "one second inside the window is inside it")
+        XCTAssertNil(LocalBrainTranslationTier.pressureDeferral(reading(window), windowSeconds: window),
+                     "at the window the warning is stale — the same boundary the critical rule "
+                     + "uses — and the latched level stops refusing anything on its own")
+        XCTAssertEqual(LocalBrainTranslationTier.pressureDeferral(reading(window + 10,
+                                                                           criticalAge: 5),
+                                                                  windowSeconds: window),
+                       .recentCriticalPressure(secondsSince: 5, windowSeconds: window),
+                       "a stale warning does not erase a critical that fired seconds ago: the "
+                       + "critical-age check still runs behind it")
+
+        // A reading built without an age at all is a reading from before this
+        // key existed. It is refused, because "no timestamp" must not become a
+        // way past the gate — the freshness has to be *stated* to be believed.
+        XCTAssertEqual(LocalBrainTranslationTier.pressureDeferral(reading(nil), windowSeconds: window),
+                       .memoryPressure(level: .warning))
     }
 
     /// The other side of the same gate, so it is a gate and not a refusal:

@@ -169,6 +169,124 @@ enum BrainFailureStage: String, Equatable, CaseIterable {
     case stageDeadline = "stage_deadline"
 }
 
+// [EMPTY-DECODE] (2026-09-19) The device report the next three types exist
+// for, stated here because they are only intelligible as a set.
+//
+// The owner's iPhone ran a Q4_K_M translation head whose load succeeded — no
+// load failures and no pressure refusals anywhere in the capture — and every
+// brain batch came back `degraded` with the whole batch unresolved after 7–20
+// seconds: the decode was given seconds and answered nothing the tier could
+// use. The two counts the batch event carried could not tell the three shapes
+// apart, and they need opposite responses:
+//
+//  - **nothing was emitted** (an empty completion — a context, template or
+//    stop-token problem),
+//  - **something was emitted that was not the grammar's answer** (a chat
+//    template wrapping it, a truncated decode, a grammar the model does not
+//    obey),
+//  - **a well-formed answer whose every string a rule refused** (a
+//    per-string judgement problem — most plausibly the language gate on short
+//    sign text, which is a different fix altogether).
+//
+// So the batch event now carries the raw character count, the structural shape
+// and a histogram of which rule refused what. All three are content-free by
+// construction — a count, a closed token and a histogram keyed by a closed
+// enum. A recognized string, a translated string, a prompt or a token id
+// cannot be expressed in any of them.
+
+/// What the decode structurally returned, before any per-string judgement.
+enum BrainGenerationShape: String, Equatable, CaseIterable {
+    /// Zero characters: the decode returned an empty string, so nothing was
+    /// emitted at all. The failure is upstream of every rule in the tier.
+    case empty
+    /// Non-empty and not JSON. Something was emitted and it was not the
+    /// grammar's object — a wrapped answer, a decode that stopped mid-stream,
+    /// or a grammar the model is not obeying.
+    case unparsable
+    /// JSON, but with no `translations` array: the wrong object, or a decode
+    /// that stopped after the opening brace.
+    case noArray = "no_array"
+    /// JSON with the array: the answer reached the per-string rules, and the
+    /// rejection histogram says what each rule did with it.
+    case array
+}
+
+/// Why one answer of a generation was refused, as a closed token.
+///
+/// The tier's own rules (`accepts`) plus the language gate's three reasons,
+/// kept apart because they are different facts with different next steps:
+/// "the model answered English", "the model answered Hindi" and "the model
+/// answered Devanagari with no evidence that it is Nepali" are not one bug.
+enum BrainAnswerRejection: String, Equatable, CaseIterable {
+    /// The answer never reached this position: the array was shorter than the
+    /// sources it was asked about, so the positional match ran out.
+    case missing
+    /// The position held something that is not a string.
+    case nonString = "non_string"
+    /// The model's own "I cannot translate this" — the empty string the prompt
+    /// asks for in that case.
+    case empty
+    /// Over `TranslationResponseParser.maxLength(forSource:config:)`, the
+    /// bound the cloud's parser applies too.
+    case tooLong = "too_long"
+    /// The source again, in comparison form.
+    case echo
+    /// No Devanagari in an answer that should be Nepali, when the source had
+    /// letters at all — the wrong-direction generation, caught directly.
+    case wrongScript = "wrong_script"
+    /// The language gate: the answer is the instruction, not a translation.
+    case instructionEcho = "instruction_echo"
+    /// The language gate: Hindi-exclusive evidence in the answer.
+    case hindiEvidence = "hindi_evidence"
+    /// The language gate: Devanagari with no Nepali-exclusive evidence of any
+    /// kind — the conservative rejection, and the one short sign text is most
+    /// exposed to.
+    case noNepaliEvidence = "no_nepali_evidence"
+}
+
+/// One generation's content-free self-portrait: how much came back, in what
+/// shape, and what became of each answer.
+///
+/// This is what makes the next device capture decisive rather than suggestive.
+/// The tier builds it from the same classification that decides each string,
+/// and the batch event carries it: a capture showing `generationLength=0` is a
+/// decode problem, one showing `generationShape=array` with
+/// `rejections=no_nepali_evidence:3` is a rule problem, and the two are not
+/// confused again.
+struct BrainGenerationReading: Equatable {
+    /// How many characters the decode returned, raw. Zero is the empty shape;
+    /// a large count under an `unparsable` shape is a model talking past its
+    /// grammar. Never the characters themselves — no part of this type holds
+    /// one.
+    let length: Int
+    /// What the answer structurally was.
+    let shape: BrainGenerationShape
+    /// Rule → how many answers it refused. Keyed by a closed enum, so it
+    /// cannot carry a string, and empty when nothing was refused.
+    let rejections: [BrainAnswerRejection: Int]
+
+    init(length: Int, shape: BrainGenerationShape, rejections: [BrainAnswerRejection: Int] = [:]) {
+        self.length = length
+        self.shape = shape
+        self.rejections = rejections
+    }
+
+    /// The histogram as the log spells it: `"echo:2,too_long:1"`, ascending by
+    /// token so the same batch always renders the same line, and `"none"` when
+    /// every answer was accepted (an explicit token rather than an empty
+    /// value, which a reader would have to guess the meaning of).
+    ///
+    /// The spelling is a shape, not a rule: every element is `token:count`
+    /// from a closed vocabulary, so no free text can survive it.
+    var rejectionsToken: String {
+        guard !rejections.isEmpty else { return "none" }
+        return rejections
+            .sorted { $0.key.rawValue < $1.key.rawValue }
+            .map { "\($0.key.rawValue):\($0.value)" }
+            .joined(separator: ",")
+    }
+}
+
 /// Closed vocabulary for the `mode` metadata key: what asked for speech.
 enum LiveTranslateSpeechMode: String, Equatable, CaseIterable {
     /// The tap-to-hear affordance in the overlay.
@@ -238,8 +356,12 @@ enum LiveTranslateEventCatalogue {
     /// conditional rather than quietly weakening the check.
     static let optionalMetadataKeys: [String: Set<String>] = [
         // Present exactly when the tier declined to attempt the batch
-        // ([PRESSURE-SAFE LOAD], 2026-09-19).
-        "brain_translation_batch": ["reason"],
+        // ([PRESSURE-SAFE LOAD], 2026-09-19) — and, for the other three,
+        // exactly when a generation ran ([EMPTY-DECODE], same day). The two
+        // conditions are disjoint in the tier: a declined batch is one that
+        // never reached the runtime, so it has no generation to describe and
+        // carries no shape, length or histogram to guess at.
+        "brain_translation_batch": ["reason", "generationLength", "generationShape", "rejections"],
     ]
 
     /// Event type → schema. One entry per emitter in `LiveTranslateEvents`.
@@ -302,8 +424,19 @@ enum LiveTranslateEventCatalogue {
         // present only when the tier declined to attempt the batch — see
         // `LiveTranslateBrainDeferralReason`. A batch that ran carries no
         // reason; one that did not carries exactly one closed token.
+        // [EMPTY-DECODE] (2026-09-19) `generationLength`, `generationShape`
+        // and `rejections` joined this entry with the owner's
+        // answered-nothing device report: three batches, 7–20 seconds each,
+        // zero strings resolved, and no way to tell a decode that emitted
+        // nothing from a decode whose every answer a rule refused. They are
+        // present exactly when the tier actually ran a generation — a batch
+        // that was declined (above) or that had nothing to ask (the batch bound
+        // refused every string) has no generation to describe — and each is
+        // content-free: a character count, a closed shape token and a histogram
+        // keyed by a closed rejection enum. See `BrainGenerationReading`.
         "brain_translation_batch": Entry(outcomes: ["success", "partial", "degraded"],
-                                         metadataKeys: ["resolvedCount", "unresolvedCount", "durationMs", "reason"]),
+                                         metadataKeys: ["resolvedCount", "unresolvedCount", "durationMs", "reason",
+                                                        "generationLength", "generationShape", "rejections"]),
         // `failureStage` joined the schema 2026-09-17 with the tier's device
         // report (see `BrainFailureStage`): the reason token says the attempt
         // could not answer, the stage says where it stopped. Both are closed
@@ -404,6 +537,20 @@ struct LiveTranslateEvents {
         /// Added 2026-09-17: the reason token alone could not tell a slow
         /// decode from a refused prompt from a stopped one.
         case failureStage
+        /// [EMPTY-DECODE] The size of the decode's raw answer, in characters,
+        /// and nothing else about it. Added 2026-09-19 with the owner's
+        /// answered-nothing capture: the counts and the duration could not tell
+        /// a generation that emitted nothing from one whose every answer a
+        /// rule refused, and those two need opposite fixes.
+        case generationLength
+        /// [EMPTY-DECODE] The structural shape of that answer
+        /// (`BrainGenerationShape`): empty, unparsable, JSON without the array,
+        /// or the array itself.
+        case generationShape
+        /// [EMPTY-DECODE] Which rules refused how many answers
+        /// (`BrainAnswerRejection`), rendered `token:count,…` — the histogram
+        /// that says whether the tier even reached its per-string rules.
+        case rejections
         case disclosureVersion
     }
 
@@ -645,10 +792,19 @@ struct LiveTranslateEvents {
     /// which is correct — the caller's next move is the same — but a capture
     /// that cannot tell them apart cannot say whether a phone is short of
     /// memory or the model is bad. It is a closed token, never free text.
+    /// [EMPTY-DECODE] (2026-09-19) `generation` is present exactly when a
+    /// generation ran, and it is the half of this event that makes an
+    /// answered-nothing batch actionable: the counts say the tier failed, the
+    /// reading says whether the model emitted anything at all, what shape it
+    /// was, and which rule refused each string it did emit. A batch that was
+    /// declined for memory (`deferral`) or that had nothing to ask never
+    /// reached the runtime, so it carries no reading — and that absence is
+    /// itself the fact "there was no generation", not a zero-filled one.
     func brainTranslationBatch(resolvedCount: Int,
                                unresolvedCount: Int,
                                durationMs: Int,
-                               deferral: LiveTranslateBrainDeferralReason? = nil) {
+                               deferral: LiveTranslateBrainDeferralReason? = nil,
+                               generation: BrainGenerationReading? = nil) {
         let outcome: String
         if unresolvedCount == 0 {
             outcome = "success"
@@ -668,6 +824,14 @@ struct LiveTranslateEvents {
                                                // disagree.
                                                .durationMs: String(durationMs)]
         if let deferral { metadata[.reason] = deferral.rawValue }
+        if let generation {
+            // Three values, all built from the reading's own typed members:
+            // an integer, a closed token and a histogram keyed by a closed
+            // enum. Nothing here can render a string.
+            metadata[.generationLength] = String(generation.length)
+            metadata[.generationShape] = generation.shape.rawValue
+            metadata[.rejections] = generation.rejectionsToken
+        }
         emit("brain_translation_batch", outcome: outcome,
              metadata: metadata,
              durationMs: durationMs)

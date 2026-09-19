@@ -1317,15 +1317,21 @@ final class ModelLifecycleManagerTests: XCTestCase {
         XCTAssertEqual(manager.memoryPressureReading().level, .warning)
         XCTAssertNil(manager.memoryPressureReading().secondsSinceCritical,
                      "a warning is not a critical: nothing has nearly killed us yet")
+        XCTAssertEqual(manager.memoryPressureReading().secondsSinceWarning, 0,
+                       "[PRESSURE-LATCH] a warning carries its own age. The level alone "
+                       + "cannot be trusted to clear — the UIKit route records it and nothing "
+                       + "takes it back — so the age is the whole basis of the gate's escape")
 
         now = now.addingTimeInterval(12)
         manager.handleMemoryPressure(level: .critical)
         XCTAssertEqual(manager.memoryPressureReading(),
-                       MemoryPressureReading(level: .critical, secondsSinceCritical: 0))
+                       MemoryPressureReading(level: .critical, secondsSinceCritical: 0,
+                                             secondsSinceWarning: 12))
 
         now = now.addingTimeInterval(4)
         XCTAssertEqual(manager.memoryPressureReading(),
-                       MemoryPressureReading(level: .critical, secondsSinceCritical: 4))
+                       MemoryPressureReading(level: .critical, secondsSinceCritical: 4,
+                                             secondsSinceWarning: 16))
 
         // The level eases; the fact that it was critical four seconds ago
         // does not. Both are in the reading because they are different
@@ -1336,6 +1342,9 @@ final class ModelLifecycleManagerTests: XCTestCase {
         XCTAssertEqual(eased.secondsSinceCritical, 4,
                        "the age of the last critical survives it — that is the reading a "
                        + "load gate needs in the window after the kernel goes quiet")
+        XCTAssertEqual(eased.secondsSinceWarning, 16,
+                       "and so does the warning's age: easing the level says the squeeze is "
+                       + "over, not that it never happened")
     }
 
     /// The UIKit path records the level too. `didReceiveMemoryWarning` is
@@ -1347,6 +1356,10 @@ final class ModelLifecycleManagerTests: XCTestCase {
 
         XCTAssertEqual(manager.memoryPressureReading().level, .warning)
         XCTAssertNil(manager.memoryPressureReading().secondsSinceCritical)
+        XCTAssertEqual(manager.memoryPressureReading().secondsSinceWarning, 0,
+                       "[PRESSURE-LATCH] this is the route that can latch — it records the "
+                       + "level and no counterpart ever clears it — so the timestamp it "
+                       + "leaves behind is what lets a later load tell it has gone stale")
     }
 
     /// The level is recorded **before** the sweep runs, and that ordering is

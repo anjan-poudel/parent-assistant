@@ -79,7 +79,14 @@ final class LiveTranslateAllowListTests: XCTestCase {
             // [SCOPE-LEDGER] + [DEAD-TAP] + [DECODE-DIAGNOSTIC]
             "calendar", "contacts", "chunks", "decode_detail",
             // [LLAMADEBUG] failure stage + [EMPTY-OVERLAY] region-set hash
-            "failureStage", "regionSetHash"
+            "failureStage", "regionSetHash",
+            // [EMPTY-DECODE] (2026-09-19) The answered-nothing capture's three
+            // keys: the raw answer's character count, its structural shape and
+            // the per-rule rejection histogram. All three are built by
+            // `LiveTranslateEvents` from a `BrainGenerationReading` — an
+            // integer, a closed token and a histogram keyed by a closed enum —
+            // so no string has a route into any of them.
+            "generationLength", "generationShape", "rejections"
         ], "the extension is exactly the union of the two declared key sets")
         XCTAssertNil(sanitisedMetadata(["somethingNoOneDeclared": "x"])["somethingNoOneDeclared"],
                      "unknown keys are still dropped outright")
@@ -156,6 +163,37 @@ final class LiveTranslateAllowListTests: XCTestCase {
     /// was the defect — `daily_cap_reached` arrived with a count and no cap.
     func testCapSurvivesSanitisation() {
         XCTAssertEqual(sanitisedMetadata(["cap": "200"])["cap"], "200")
+    }
+
+    // MARK: [EMPTY-DECODE] the answered-nothing capture's three keys
+
+    /// The value the tier actually produced on the owner's phone: an answer
+    /// that was well-formed JSON and whose every string the language gate
+    /// refused. It has to arrive intact — the whole point of the key is that
+    /// the next capture can read the histogram — and it has to survive the
+    /// PII scrub without being mistaken for a phone number or a key, which is
+    /// why the shape test below is not decoration.
+    func testTheRejectionHistogramSurvivesSanitisation() {
+        let histogram = BrainGenerationReading(
+            length: 96,
+            shape: .array,
+            rejections: [.noNepaliEvidence: 2, .wrongScript: 1]).rejectionsToken
+        XCTAssertEqual(histogram, "no_nepali_evidence:2,wrong_script:1",
+                       "the rendering is ascending by token, so one batch reads the same every time")
+        XCTAssertEqual(sanitisedMetadata(["rejections": histogram])["rejections"], histogram)
+    }
+
+    func testTheEmptyHistogramHasItsOwnToken() {
+        XCTAssertEqual(BrainGenerationReading(length: 40, shape: .array).rejectionsToken, "none",
+                       "an all-accepted batch says so rather than rendering an empty value")
+        XCTAssertEqual(sanitisedMetadata(["rejections": "none"])["rejections"], "none")
+    }
+
+    func testGenerationLengthAndShapeSurviveSanitisation() {
+        XCTAssertEqual(sanitisedMetadata(["generationLength": "0"])["generationLength"], "0",
+                       "zero is the value the whole diagnostic turns on, and it must not be dropped")
+        XCTAssertEqual(sanitisedMetadata(["generationShape": "unparsable"])["generationShape"],
+                       "unparsable")
     }
 
     // MARK: AM-2 decision: the code key, allow-listed AND bounded

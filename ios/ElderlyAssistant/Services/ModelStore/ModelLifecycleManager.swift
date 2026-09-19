@@ -130,6 +130,32 @@ struct MemoryPressureReading: Equatable {
     /// say about, and reporting `0` there would make every device look
     /// momentarily critical.
     let secondsSinceCritical: TimeInterval?
+    /// [PRESSURE-LATCH] (2026-09-19) How long ago `.warning` last fired, on
+    /// the same clock and with the same `nil` meaning as the critical age.
+    ///
+    /// It is here because a `.warning` is the one level that can arrive on a
+    /// route with no counterpart: the dispatch source sends `.normal` when the
+    /// pressure eases (which is what clears the level), while the UIKit route
+    /// records `.warning` and nothing in the app ever takes it back. A caller
+    /// that refuses a load on the bare level therefore refuses it for the rest
+    /// of the process's life after one transient warning. The age is the
+    /// caller's escape hatch, and the window it compares against is the
+    /// caller's own number for the same reason `secondsSinceCritical`'s is:
+    /// this type carries raw facts and no policy.
+    ///
+    /// Optional with a default rather than required, so every reading a test
+    /// or a caller built before this key existed keeps its meaning — and a
+    /// reading that carries no age is treated as *fresh* by the one caller
+    /// that reads it, which is the conservative half.
+    let secondsSinceWarning: TimeInterval?
+
+    init(level: MemoryPressureLevel,
+         secondsSinceCritical: TimeInterval?,
+         secondsSinceWarning: TimeInterval? = nil) {
+        self.level = level
+        self.secondsSinceCritical = secondsSinceCritical
+        self.secondsSinceWarning = secondsSinceWarning
+    }
 
     /// What a manager reports before any signal has arrived: the kernel has
     /// not said anything, so nothing is forbidden.
@@ -420,6 +446,20 @@ final class ModelLifecycleManager {
     /// asks at an arbitrary moment, so the ledger has to remember.
     private var pressureLevel: MemoryPressureLevel = .normal
     private var lastCriticalAt: Date?
+    /// [PRESSURE-LATCH] (2026-09-19) When `.warning` last fired.
+    ///
+    /// The level alone is a latch on one of its two routes. The dispatch
+    /// source (`startMemoryPressureMonitor`) sends `.normal` when pressure
+    /// eases, and that is what clears the level — but the **UIKit** route
+    /// (`didReceiveMemoryWarning` → `handleMemoryPressure()`) records
+    /// `.warning` and has nothing that ever takes it back, so a single
+    /// warning on a device where the source is not delivering leaves every
+    /// later load refused for the rest of the process's life. The age is the
+    /// second half of the fact, exactly as `lastCriticalAt` is for the
+    /// timestamp half of `.critical`: the caller's own recency window decides
+    /// what to do with it, and a report nobody has heard cleared stops
+    /// gating once it is older than that window.
+    private var lastWarningAt: Date?
 
     /// Bridged to the observability bus by the coordinator. Called outside
     /// the lock, on the caller's queue.
@@ -1795,7 +1835,15 @@ final class ModelLifecycleManager {
         lock.lock()
         defer { lock.unlock() }
         pressureLevel = level
-        if level == .critical { lastCriticalAt = clock() }
+        let now = clock()
+        if level == .critical { lastCriticalAt = now }
+        // [PRESSURE-LATCH] The warning's own age, stamped on both routes that
+        // can record one. `.normal` deliberately does not clear it — the same
+        // rule `lastCriticalAt` lives under: "the kernel is happy now" and "it
+        // was unhappy a moment ago" are both true at once, and the age is what
+        // lets a caller tell a report it has just been handed from one it has
+        // been sitting on.
+        if level == .warning { lastWarningAt = now }
     }
 
     /// The kernel's memory-pressure state as this manager last observed it.
@@ -1807,9 +1855,11 @@ final class ModelLifecycleManager {
     func memoryPressureReading() -> MemoryPressureReading {
         lock.lock()
         defer { lock.unlock() }
+        let now = clock()
         return MemoryPressureReading(
             level: pressureLevel,
-            secondsSinceCritical: lastCriticalAt.map { clock().timeIntervalSince($0) })
+            secondsSinceCritical: lastCriticalAt.map { now.timeIntervalSince($0) },
+            secondsSinceWarning: lastWarningAt.map { now.timeIntervalSince($0) })
     }
 
     @discardableResult
