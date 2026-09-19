@@ -1636,13 +1636,12 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
         // testing switch that could re-open that path would be a switch that
         // can kill the phone again.
         //
-        // **The flip is one line, and it is the owner's to make after the
-        // device pass** (2026-09-19 directive: "the bypass stays until
-        // proven on device, then flips off"). In
-        // `LiveTranslateConfig.wardenBypassForTesting`, change `= true` to
-        // `= false`. Nothing else moves: the gated path below is the one the
-        // round-2b work built, and the four behaviours it rests on are the
-        // ones to watch for on the device —
+        // **The flip was one line, and the device pass made it**
+        // (2026-09-19 directive: "the bypass stays until proven on device,
+        // then flips off"; flipped 2026-09-20 in `LiveTranslateConfig`).
+        // The gated path below is the one the round-2b work built, and the
+        // four behaviours it rests on are the ones to watch for on the
+        // device —
         //   1. the load is ADMITTED after evicting a background/warm
         //      resident, not refused (`over_budget_alone` in the console is
         //      the failure this task exists to remove);

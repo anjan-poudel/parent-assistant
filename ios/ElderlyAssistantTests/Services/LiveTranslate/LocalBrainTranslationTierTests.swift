@@ -1339,8 +1339,9 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         ledger.handleMemoryPressure(level: .critical)
 
         try await withTier(memory: probe, ledger: ledger) { tier, generator, bus in
-            XCTAssertTrue(LiveTranslateConfig.default.wardenBypassForTesting,
-                          "the bypass is the shipped default — the state this rule has to hold in")
+            XCTAssertFalse(LiveTranslateConfig.default.wardenBypassForTesting,
+                           "the bypass flipped off with the 2026-09-20 device pass — the gated "
+                           + "path is the shipped default, and this rule has to hold in it")
             let outcome = await tier.translate([self.brainText])
 
             XCTAssertTrue(generator.prompts.isEmpty,
