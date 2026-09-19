@@ -299,6 +299,15 @@ final class PointAskSessionModel: ObservableObject {
         PointAskConsentSurface(locale: locale, failureMessage: consentFailureMessage)
     }
 
+    /// The tap contract: a frame-NORMALIZED point (0…1, top-left origin),
+    /// clamped — never re-normalized. [TAP-FIX] (2026-09-19): the
+    /// double-normalization regression is pinned here so a future
+    /// "convenient" re-scaling cannot sneak back in.
+    nonisolated static func normalizedTapPoint(_ point: CGPoint) -> CGPoint {
+        CGPoint(x: min(max(point.x, 0), 1),
+                y: min(max(point.y, 0), 1))
+    }
+
     // MARK: - Frames
 
     /// One frame from the host session's loop, held as the picture the
@@ -314,11 +323,19 @@ final class PointAskSessionModel: ObservableObject {
     /// "look here": the answer (or failure) is dismissed, any in-flight
     /// analysis is dropped, and the box anchors where the finger is —
     /// one box at a time, re-anchored by design (§4).
-    func handleTap(atFramePoint point: CGPoint, framePixelSize: CGSize) {
-        guard !isClosed,
-              framePixelSize.width > 0, framePixelSize.height > 0 else { return }
-        let normalized = CGPoint(x: point.x / framePixelSize.width,
-                                 y: point.y / framePixelSize.height)
+    ///
+    /// [TAP-FIX] (2026-09-19) `point` is the FRAME-NORMALIZED position
+    /// (0…1, top-left origin) — the same unit the presentation's
+    /// `framePoint(ofContainerPoint:)` produces and the resolver
+    /// consumes. The previous version accepted "frame pixel" points and
+    /// divided by the frame size again, which DOUBLE-normalized every
+    /// tap: the finger at (0.5, 0.5) anchored near (0.0003, 0.0005) —
+    /// the tiny, way-off box the first device test reported. The call
+    /// site already produced normalized points; only the division here
+    /// was wrong.
+    func handleTap(atNormalizedPoint point: CGPoint) {
+        guard !isClosed else { return }
+        let normalized = Self.normalizedTapPoint(point)
         dismissCurrent()
         guard let frame = latestFrame else { return }
 

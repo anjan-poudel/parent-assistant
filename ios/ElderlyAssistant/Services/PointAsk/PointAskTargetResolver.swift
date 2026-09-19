@@ -47,10 +47,14 @@ protocol PointAskMaskProbing: AnyObject {
     /// but cannot run is not retried per tap.
     var supportsMasks: Bool { get }
 
-    /// Whether the point (normalized, top-left origin) lies on the
-    /// foreground instance in the frame. Throws when the request could not
-    /// be run at all — a refusal, not an empty answer.
-    func maskContains(_ point: CGPoint, in pixelBuffer: CVPixelBuffer) throws -> Bool
+    /// The foreground instance the tapped point lies on, as its TIGHT
+    /// bounding box (normalized, top-left origin) — the extent of the
+    /// instance's own pixels, the way an object detector boxes an object,
+    /// not a pad around the finger. Returns nil when the tapped point is
+    /// NOT on an instance (background) — the resolver then falls to the
+    /// saliency/pad ladder. Throws when the request could not be run at
+    /// all — a refusal, not an empty answer.
+    func maskBox(at point: CGPoint, in pixelBuffer: CVPixelBuffer) throws -> NormalizedBox?
 }
 
 /// The shipped mask engine: `VNGenerateForegroundInstanceMaskRequest`, a
@@ -81,7 +85,7 @@ final class PointAskMaskEngine: PointAskMaskProbing {
         return !probeFailed
     }
 
-    func maskContains(_ point: CGPoint, in pixelBuffer: CVPixelBuffer) throws -> Bool {
+    func maskBox(at point: CGPoint, in pixelBuffer: CVPixelBuffer) throws -> NormalizedBox? {
         guard #available(iOS 17, *) else { throw PointAskError.maskPassFailed }
         let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, options: [:])
         let mask: CVPixelBuffer
@@ -102,10 +106,44 @@ final class PointAskMaskEngine: PointAskMaskProbing {
         }
         let width = CVPixelBufferGetWidth(mask)
         let height = CVPixelBufferGetHeight(mask)
-        guard width > 0, height > 0 else { return false }
+        guard width > 0, height > 0 else { return nil }
         let x = min(max(Int(CGFloat(width) * point.x), 0), width - 1)
         let y = min(max(Int(CGFloat(height) * point.y), 0), height - 1)
-        return Self.pixelValue(atX: x, y: y, in: mask) == 0
+        guard Self.pixelValue(atX: x, y: y, in: mask) == 0 else { return nil }
+        return Self.instanceExtent(in: mask)
+    }
+
+    /// The tight bounding box of the instance's pixels — min/max of every
+    /// pixel carrying the instance label (0) — normalized against the mask
+    /// buffer's own size (which is the frame's size, top-left origin).
+    /// This is the object-detector behaviour: the box wraps the object's
+    /// silhouette, not a pad around the finger.
+    static func instanceExtent(in mask: CVPixelBuffer) -> NormalizedBox? {
+        let width = CVPixelBufferGetWidth(mask)
+        let height = CVPixelBufferGetHeight(mask)
+        guard width > 0, height > 0 else { return nil }
+        guard CVPixelBufferLockBaseAddress(mask, .readOnly) == kCVReturnSuccess else { return nil }
+        defer { CVPixelBufferUnlockBaseAddress(mask, .readOnly) }
+        guard let base = CVPixelBufferGetBaseAddress(mask) else { return nil }
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(mask)
+        let floatsPerRow = bytesPerRow / MemoryLayout<Float>.size
+        let pointer = base.assumingMemoryBound(to: Float.self)
+
+        var minX = Int.max, minY = Int.max, maxX = -1, maxY = -1
+        for row in 0..<height {
+            let rowBase = row * floatsPerRow
+            for column in 0..<width where pointer[rowBase + column] == 0 {
+                if column < minX { minX = column }
+                if column > maxX { maxX = column }
+                if row < minY { minY = row }
+                if row > maxY { maxY = row }
+            }
+        }
+        guard maxX >= 0 else { return nil }
+        return NormalizedBox(xMin: Double(minX) / Double(width),
+                             yMin: Double(minY) / Double(height),
+                             xMax: Double(maxX + 1) / Double(width),
+                             yMax: Double(maxY + 1) / Double(height))
     }
 
     /// Reads one pixel of the scaled mask (a single-channel float buffer).
@@ -179,8 +217,8 @@ final class PointAskTargetResolver {
                               y: min(max(point.y, 0), 1))
 
         if let maskEngine, maskEngine.supportsMasks,
-           (try? maskEngine.maskContains(clamped, in: pixelBuffer)) == true {
-            return anchor(Self.padBox(around: clamped), size: size, source: .mask)
+           let maskBox = try? maskEngine.maskBox(at: clamped, in: pixelBuffer) {
+            return anchor(maskBox, size: size, source: .mask)
         }
 
         if let saliencyBox = saliencyBox(containing: clamped, in: pixelBuffer) {
