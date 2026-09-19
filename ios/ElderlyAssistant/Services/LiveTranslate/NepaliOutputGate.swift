@@ -149,9 +149,31 @@ enum NepaliOutputGate {
         let evidence = evidence(in: text)
         if !evidence.echoed.isEmpty { return .reject(.instructionEcho) }
         if !evidence.hindi.isEmpty { return .reject(.hindiEvidence) }
-        if evidence.nepali.isEmpty { return .reject(.noNepaliEvidence) }
+        if evidence.nepali.isEmpty {
+            // [SHORT-ANSWER-EXEMPTION] (2026-09-20) The owner's 02:35 device
+            // capture: the on-device brain's real answers to short sign text
+            // are short bare translations, and every one was refused with
+            // `no_nepali_evidence` — a one-word answer cannot carry a
+            // grammatical marker, so the rule demanded evidence a correct
+            // short answer can never produce, and the elder saw nothing,
+            // ever. An answer at or under `maxMarkerlessWords` words is now
+            // accepted on script + non-Hindi + non-echo evidence alone. The
+            // bounded risk — a markerless Marathi bare noun shown once — is
+            // the deliberate price of ever showing a short answer at all.
+            // Longer markerless answers keep the refusal: a sentence has room
+            // for grammar, and its absence still means what it always did.
+            return devanagariWords(text).count <= Self.maxMarkerlessWords
+                ? .accept
+                : .reject(.noNepaliEvidence)
+        }
         return .accept
     }
+
+    /// [SHORT-ANSWER-EXEMPTION] The word-count bound above which a
+    /// markerless Devanagari answer is still refused. Two words is a bare
+    /// noun phrase — the largest "short sign" answer that cannot plausibly
+    /// carry grammar; three words has room for it.
+    static let maxMarkerlessWords = 2
 
     // MARK: - Reading the answer
 
