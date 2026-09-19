@@ -2086,7 +2086,8 @@ final class AppCoordinator: ObservableObject {
             // fetches the zip, verifies the strict sha256 and unpacks the
             // `.mlmodelc` directory).
             yoloEngine: PointAskYOLOEngine(modelStore: modelStore,
-                                           provisioner: modelDownloadService),
+                                           provisioner: modelDownloadService,
+                                           observabilityBus: observabilityBus),
             ocrEngine: VisionTextRecognitionEngine(),
             observabilityBus: observabilityBus,
             config: pointAskConfig,

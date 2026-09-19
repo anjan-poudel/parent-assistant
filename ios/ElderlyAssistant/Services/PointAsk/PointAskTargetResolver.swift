@@ -278,9 +278,12 @@ final class PointAskTargetResolver {
 
     /// The pure selection: the highest-confidence detection whose box
     /// CONTAINS the tap wins; when no box contains the tap, the
-    /// highest-confidence detection overall — a tap on the cap still
-    /// anchors the bottle's box (a real object box, never a pad). Nil
-    /// only for an empty scene, which is the ladder's cue to continue.
+    /// detection whose box CENTER is nearest the tap — the object under
+    /// the finger — instead of the global confidence maximum (which
+    /// grabbed the most confident thing anywhere in the scene, e.g. the
+    /// elder's own hand, and was the "wrong object" device report).
+    /// Nil only for an empty scene, which is the ladder's cue to
+    /// continue.
     static func yoloBox(_ detections: [YOLODetection],
                         containing point: CGPoint) -> YOLODetection? {
         guard !detections.isEmpty else { return nil }
@@ -288,7 +291,20 @@ final class PointAskTargetResolver {
             .filter { $0.normalizedBox.contains(point) }
             .max { $0.confidence < $1.confidence }
         if let containing { return containing }
-        return detections.max { $0.confidence < $1.confidence }
+        return detections.min { lhs, rhs in
+            Self.centerDistance(lhs.normalizedBox, to: point)
+                < Self.centerDistance(rhs.normalizedBox, to: point)
+        }
+    }
+
+    /// The box center's distance to the tap — the "what is under the
+    /// finger" metric for the no-containment fallback.
+    static func centerDistance(_ box: NormalizedBox, to point: CGPoint) -> Double {
+        let centerX = (box.xMin + box.xMax) / 2
+        let centerY = (box.yMin + box.yMax) / 2
+        let dx = centerX - Double(point.x)
+        let dy = centerY - Double(point.y)
+        return (dx * dx + dy * dy).squareRoot()
     }
 
     // MARK: The pass and the cache

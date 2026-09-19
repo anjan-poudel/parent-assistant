@@ -102,13 +102,19 @@ final class PointAskYOLOEngine: PointAskObjectDetecting {
     /// The load attempted and failed — the probe reports false from then
     /// on, never retried per tap.
     private var loadFailed = false
+    /// [YOLO-OBSERVABILITY] (2026-09-19) The detections' evidence trail —
+    /// the owner asked for the detector's output to be logged. Bounded
+    /// to counts, COCO class names and confidences; never pixels.
+    private let observabilityBus: ObservabilityBus?
 
     init(modelStore: ModelStore,
          modelId: ModelID = ModelCatalog.yolo11n,
-         provisioner: PointAskYOLOProvisioning? = nil) {
+         provisioner: PointAskYOLOProvisioning? = nil,
+         observabilityBus: ObservabilityBus? = nil) {
         self.modelStore = modelStore
         self.modelId = modelId
         self.provisioner = provisioner
+        self.observabilityBus = observabilityBus
     }
 
     var isAvailable: Bool {
@@ -159,7 +165,39 @@ final class PointAskYOLOEngine: PointAskObjectDetecting {
               let multiArray = observation.featureValue.multiArrayValue else {
             throw PointAskError.yoloPassFailed
         }
-        return YOLODecoder.detections(from: multiArray)
+        let detections = YOLODecoder.detections(from: multiArray)
+        emitPass(detections)
+        return detections
+    }
+
+    /// The evidence trail for one detector pass: how many objects, the
+    /// top three with confidences, and every detection's box in the
+    /// "x,y,w,h" normalized shape. COCO class names only — closed
+    /// vocabulary, never scene content beyond the detector's own labels.
+    private func emitPass(_ detections: [YOLODetection]) {
+        guard let observabilityBus else { return }
+        let top = detections.sorted { $0.confidence > $1.confidence }.prefix(3)
+        let labels = top.map { String(format: "%@:%.2f", $0.label, $0.confidence) }
+            .joined(separator: ",")
+        let boxes = detections.prefix(8).map { detection in
+            let box = detection.normalizedBox
+            return String(
+                format: "%.3f,%.3f,%.3f,%.3f",
+                box.xMin, box.yMin, box.xMax, box.yMax)
+        }.joined(separator: ";")
+        let metadata: [String: String] = [
+            "count": "\(detections.count)",
+            "labels": labels,
+            "boxes": boxes,
+        ]
+        observabilityBus.emit(ObservabilityEvent(
+            component: "pointask",
+            eventType: "yolo_pass",
+            durationMs: nil,
+            outcome: "success",
+            errorCode: nil,
+            metadata: metadata
+        ))
     }
 }
 
