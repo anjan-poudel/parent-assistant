@@ -1359,7 +1359,14 @@ actor LiveTranslationPipeline {
     private func resolveThroughTheBrain(_ items: [CloudTranslationTier.Item]) async -> [CloudTranslationTier.Item] {
         guard !items.isEmpty else { return [] }
 
-        let outcome = await deviceAnswers(items)
+        // [PATIENT-STAGE] With no next tier (the cloud switch off), the
+        // stage waits out the tier's own bound rather than cancelling a
+        // generation mid-answer — the owner's screenshot report: the panel
+        // failed every string while the model was still executing. The
+        // switch, not the route: an unpathable cloud is still the cascade's
+        // next tier, and its fail-fast keeps the claims honest.
+        let outcome = await deviceAnswers(items,
+                                          mayWaitPastTheStageDeadline: !geminiCloudEnabled)
         guard let outcome else {
             // The clock won, and `deviceAnswers` has already recorded the
             // timeout — a stage that fell through to the cloud without a
@@ -1416,14 +1423,32 @@ actor LiveTranslationPipeline {
     ///
     /// `nil` is "the stage did not return within its deadline" — the caller
     /// treats it exactly as it treats an outcome with no translations.
-    private func deviceAnswers(_ items: [CloudTranslationTier.Item])
+    private func deviceAnswers(_ items: [CloudTranslationTier.Item],
+                               mayWaitPastTheStageDeadline: Bool = false)
         async -> LocalBrainTranslationOutcome? {
         guard !items.isEmpty else { return .none }
 
+        // [PATIENT-STAGE] (owner directive, 2026-09-20: "I'd rather wait a
+        // bit than not get any translation which is already on the way and
+        // getting executed.") With no next tier, the strings have nowhere
+        // to go — so the TIER gets the patient bound instead of its
+        // standard one, and the stage deadline extends by the same grace
+        // it always had. The owner's screenshot report was the standard
+        // bound firing while the model was still producing: every string
+        // in the panel failed, and the answers that would have landed a
+        // few seconds later were thrown away.
+        let timeout = mayWaitPastTheStageDeadline
+            ? config.brainTranslationPatientTimeoutSeconds
+            : config.brainTranslationTimeoutSeconds
+        let stageBound = mayWaitPastTheStageDeadline
+            ? timeout + config.brainTranslationStageGraceSeconds
+            : config.brainTranslationStageDeadlineSeconds
+
         let brain = self.brain
-        let generation = Task { await brain.translate(items.map(\.text)) }
-        let outcome = await Self.waiting(for: generation,
-                                         upTo: config.brainTranslationStageDeadlineSeconds)
+        let generation = Task {
+            await brain.translate(items.map(\.text), timeoutSeconds: timeout)
+        }
+        let outcome = await Self.waiting(for: generation, upTo: stageBound)
         generation.cancel()
         guard let outcome else {
             // The clock won: the tier is not being waited on any more and has
@@ -1653,7 +1678,8 @@ actor LiveTranslationPipeline {
         //    exactly as they are live.
         let deviceAsked = Set(onDeviceFirst.map(\.id))
         if !onDeviceFirst.isEmpty {
-            let outcome = await deviceAnswers(onDeviceFirst)
+            let outcome = await deviceAnswers(onDeviceFirst,
+                                              mayWaitPastTheStageDeadline: !geminiCloudEnabled)
             for item in onDeviceFirst {
                 guard let translation = outcome?.translations[item.text] else { continue }
                 answers[item.id] = .resolved(originalText: item.text,
@@ -1717,7 +1743,12 @@ actor LiveTranslationPipeline {
         //    than degrading — the same fallback the live cycle runs, for the
         //    same reason.
         if !fallback.isEmpty {
-            let outcome = await deviceAnswers(fallback.map(\.0))
+            // [PATIENT-STAGE] These strings have no next tier by
+            // definition — the cloud already came back empty-handed — so
+            // the device stage waits out its own bound rather than failing
+            // them at the stage deadline.
+            let outcome = await deviceAnswers(fallback.map(\.0),
+                                              mayWaitPastTheStageDeadline: true)
             for (item, error) in fallback {
                 if let translation = outcome?.translations[item.text] {
                     answers[item.id] = .resolved(originalText: item.text,

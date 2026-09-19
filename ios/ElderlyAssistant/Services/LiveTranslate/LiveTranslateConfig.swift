@@ -1209,6 +1209,16 @@ struct LiveTranslateConfig: Equatable {
     /// Nominal, not frozen: the device spike to come may move it.
     var brainTranslationTimeoutSeconds: TimeInterval = 25
 
+    /// [PATIENT-STAGE] (owner directive, 2026-09-20) The tier's bound when
+    /// there is NO next tier — the cloud switch off or unreachable. The
+    /// standard bound is the fail-fast the cascade needs (the strings go
+    /// onward); with nowhere to go, a bound that fires while the model is
+    /// still producing throws away answers that would have landed seconds
+    /// later (the owner's screenshot report: every string failed, the
+    /// translations were on the way). The patient bound is the wait the
+    /// owner asked for instead.
+    var brainTranslationPatientTimeoutSeconds: TimeInterval = 45
+
     /// Grace added to `brainTranslationTimeoutSeconds` to form the pipeline's
     /// own deadline for the whole brain stage.
     ///
