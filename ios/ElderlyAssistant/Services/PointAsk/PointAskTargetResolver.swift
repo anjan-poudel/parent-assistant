@@ -268,23 +268,26 @@ final class PointAskTargetResolver {
     /// The box the tap anchors. `point` is normalized against the frame
     /// (top-left origin, 0…1); the frame is the one the elder tapped on.
     ///
-    /// Order of evidence, most specific first:
-    ///  1. [YOLO] the real object-detector pass, while the engine is
-    ///     available — the box that WRAPS the object (the owner's
-    ///     device-test verdict: the tap box must be a real detection box,
-    ///     "any size"), carrying the detector's class label;
-    ///  2. the opt-in mask pass, while `supportsMasks` holds — the
-    ///     silhouette answer, and the spike path;
-    ///  3. the saliency boxes, refreshed only when the cached pass is
-    ///     stale or absent;
+    /// Order of evidence, class-free first ([CLASS-FREE-FIRST],
+    /// 2026-09-20 — the owner's 06:03 capture showed YOLO11n hallucinating
+    /// books on a scene with none, and the false boxes contained the
+    /// taps, so a classed detector must never speak first):
+    ///  1. the opt-in mask pass, while `supportsMasks` holds — the
+    ///     silhouette answer: pixel-precise, class-free, the one pass
+    ///     that hugs an arbitrary object;
+    ///  2. the saliency boxes, refreshed only when the cached pass is
+    ///     stale or absent — class-free objectness;
+    ///  3. [YOLO] the classed object-detector pass, while the engine is
+    ///     available — trusted only when both class-free passes missed
+    ///     and its box CONTAINS the tap, carrying the detector's label;
     ///  4. the pad box around the tap — the honest fallback that keeps
-    ///     "tap outside re-anchors" true even when the pass fails or finds
-    ///     nothing.
+    ///     "tap outside re-anchors" true even when every pass fails or
+    ///     finds nothing.
     ///
-    /// A failing detector pass degrades to the mask path, a failing mask
-    /// pass to the saliency path (the probe flips and the resolver never
-    /// asks again), and a failing saliency pass to the pad box. Never an
-    /// error to the elder — the box is a pointer, not an answer
+    /// A failing mask pass degrades to the saliency path (the probe flips
+    /// and the resolver never asks again), a failing saliency pass to the
+    /// YOLO pass, and a failing YOLO pass to the pad box. Never an error
+    /// to the elder — the box is a pointer, not an answer
     /// (FR-LCT-004's degradation shape).
     func resolve(tap point: CGPoint, in pixelBuffer: CVPixelBuffer) -> ResolvedPointAskTarget {
         let size = CGSize(width: CVPixelBufferGetWidth(pixelBuffer),
@@ -315,12 +318,14 @@ final class PointAskTargetResolver {
             ))
         }
 
-        if let yoloEngine, yoloEngine.isAvailable,
-           let yolo = yoloDetection(using: yoloEngine, in: pixelBuffer, containing: clamped) {
-            return anchor(yolo.normalizedBox, size: size, source: .yolo,
-                          detectedLabel: yolo.label)
-        }
-
+        // [CLASS-FREE-FIRST] (2026-09-20) The ladder runs the class-free
+        // passes first: the owner's 06:03 capture showed YOLO11n
+        // hallucinating books (0.27–0.69) on a scene with none — a tub of
+        // moisturiser — and the false boxes CONTAINED the taps, so the
+        // classed detector anchored ghosts. The mask is pixel-precise and
+        // class-free; the saliency pass is class-free; only when both miss
+        // is a classed YOLO box trusted, and then only when it contains
+        // the tap. The pad remains the final honest fallback.
         if let maskEngine, maskEngine.supportsMasks,
            let maskBox = try? maskEngine.maskBox(at: clamped, in: pixelBuffer) {
             return anchor(maskBox, size: size, source: .mask, detectedLabel: nil)
@@ -328,6 +333,12 @@ final class PointAskTargetResolver {
 
         if let saliencyBox = saliencyBox(containing: clamped, in: pixelBuffer) {
             return anchor(saliencyBox, size: size, source: .saliency, detectedLabel: nil)
+        }
+
+        if let yoloEngine, yoloEngine.isAvailable,
+           let yolo = yoloDetection(using: yoloEngine, in: pixelBuffer, containing: clamped) {
+            return anchor(yolo.normalizedBox, size: size, source: .yolo,
+                          detectedLabel: yolo.label)
         }
         return anchor(Self.padBox(around: clamped), size: size, source: .pad,
                       detectedLabel: nil)

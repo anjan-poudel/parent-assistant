@@ -356,18 +356,21 @@ final class PointAskTargetResolverTests: XCTestCase {
         XCTAssertEqual(object.passCount, 1)
     }
 
-    // MARK: - Scenario: the YOLO detector answers first (the real object box)
+    // MARK: - Scenario: the class-free passes answer before the classed detector
 
-    func testTheYOLOBoxWinsOverMaskAndSaliencyAndCarriesItsLabel() {
-        // The owner's device-test verdict: the tap box is a REAL
-        // detection box — the detector's, not a mask extent or a
-        // saliency blob.
+    func testTheMaskBoxWinsOverYOLOAndSaliency() {
+        // [CLASS-FREE-FIRST] (2026-09-20) The owner's 06:03 capture showed
+        // YOLO11n hallucinating books on a scene with none; a classed
+        // detector never speaks before the class-free passes. The mask —
+        // pixel-precise, class-free — wins the anchor, and the classed
+        // passes are not even paid for.
         let yoloBox = NormalizedBox(xMin: 0.3, yMin: 0.3, xMax: 0.7, yMax: 0.7)
         let yolo = StubPointAskYOLOEngine()
         yolo.detections = [YOLODetection(normalizedBox: yoloBox,
                                          label: "bottle", confidence: 0.9)]
+        let maskBox = NormalizedBox(xMin: 0.2, yMin: 0.2, xMax: 0.8, yMax: 0.8)
         let mask = StubPointAskMaskEngine()
-        mask.box = NormalizedBox(xMin: 0.2, yMin: 0.2, xMax: 0.8, yMax: 0.8)
+        mask.box = maskBox
         let object = StubPointAskObjectEngine()
         object.boxes = [PointAskBoxes.leftHalf]
         let resolver = makeResolver(object: object, mask: mask, yolo: yolo)
@@ -375,14 +378,14 @@ final class PointAskTargetResolverTests: XCTestCase {
 
         let target = resolver.resolve(tap: tap, in: frame())
 
-        XCTAssertEqual(target.source, .yolo)
-        XCTAssertEqual(target.normalizedBox, yoloBox)
-        XCTAssertEqual(target.detectedLabel, "bottle",
-                       "the winning box's label rides the target into the analysis")
-        XCTAssertEqual(yolo.passCount, 1)
-        XCTAssertEqual(mask.passCount, 0, "the detector came first; no mask pass was paid")
+        XCTAssertEqual(target.source, .mask)
+        XCTAssertEqual(target.normalizedBox, maskBox)
+        XCTAssertNil(target.detectedLabel,
+                     "the mask carries no class — and cannot hallucinate one")
+        XCTAssertEqual(mask.passCount, 1)
+        XCTAssertEqual(yolo.passCount, 0, "the classed pass was not paid: the mask answered")
         XCTAssertEqual(object.passCount, 0, "… and no saliency pass")
-        XCTAssertEqual(bus.events(named: "tap_anchored").last?.metadata["origin"], "yolo")
+        XCTAssertEqual(bus.events(named: "tap_anchored").last?.metadata["origin"], "mask")
     }
 
     func testTheContainingYOLOBoxIsPreferredOverAHigherConfidenceOne() {
