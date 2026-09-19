@@ -12153,6 +12153,76 @@
         }
       }
     },
+    "settings.schemeProbe.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "URL scheme tester" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "URL स्किम परीक्षक" } }
+      }
+    },
+    "settings.schemeProbe.probe": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Probe" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "जाँच्नुहोस्" } }
+      }
+    },
+    "settings.schemeProbe.open": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Open" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "खोल्नुहोस्" } }
+      }
+    },
+    "settings.schemeProbe.registered": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Registered — an app on this device answers this scheme." } },
+        "ne": { "stringUnit": { "state": "translated", "value": "दर्ता छ — यो स्किम खोल्ने एप यो फोनमा छ।" } }
+      }
+    },
+    "settings.schemeProbe.notRegistered": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Not registered — no app on this device answers this scheme." } },
+        "ne": { "stringUnit": { "state": "translated", "value": "दर्ता छैन — यो स्किम खोल्ने एप यो फोनमा छैन।" } }
+      }
+    },
+    "settings.schemeProbe.notWhitelisted": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Not whitelisted — this app hasn't declared the scheme, so the probe answer cannot be trusted." } },
+        "ne": { "stringUnit": { "state": "translated", "value": "सूचीमा छैन — यो एपले स्किम घोषणा गरेको छैन, त्यसैले जाँचको उत्तर भरपर्दो छैन।" } }
+      }
+    },
+    "settings.schemeProbe.opened": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Opened." } },
+        "ne": { "stringUnit": { "state": "translated", "value": "खुल्यो।" } }
+      }
+    },
+    "settings.schemeProbe.openFailed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Could not open." } },
+        "ne": { "stringUnit": { "state": "translated", "value": "खोल्न सकिएन।" } }
+      }
+    },
+    "settings.schemeProbe.chipsHeader": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Candidates to test:" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "परीक्षण गर्ने उम्मेदवारहरू:" } }
+      }
+    },
+    "settings.schemeProbe.whitelistNote": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Probe answers are only honest for whitelisted schemes. Type anything — but a custom scheme that is not whitelisted reports \"cannot be trusted\" rather than a confident lie." } },
+        "ne": { "stringUnit": { "state": "translated", "value": "जाँचको उत्तर सूचीकृत स्किमका लागि मात्र भरपर्दो हुन्छ। जे लेख्नुहोस् — तर सूचीमा नभएको स्किमले \"भरपर्दो छैन\" भन्छ, ढाँट्दैन।" } }
+      }
+    },
     "calendarShare.scope.calendar": {
       "extractionState": "manual",
       "localizations": {

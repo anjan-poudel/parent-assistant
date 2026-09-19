@@ -454,6 +454,17 @@ struct HiddenSettingsSheet: View {
                     }
                     .buttonStyle(.plain)
 
+                    // [SCHEME-PROBE] (2026-09-19) The URL scheme tester —
+                    // a diagnostic tool, so it lives here with the other
+                    // developer surfaces, never in the family tabs.
+                    NavigationLink {
+                        SchemeProbeView()
+                    } label: {
+                        SettingsRowChrome(icon: "link",
+                                          titleKey: "settings.schemeProbe.title")
+                    }
+                    .buttonStyle(.plain)
+
                     Text("settings.hidden.note")
                         .font(.system(size: DesignTokens.minCaptionPointSize))
                         .foregroundStyle(DesignTokens.textSecondary.opacity(0.8))
