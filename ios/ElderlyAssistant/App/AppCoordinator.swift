@@ -2079,6 +2079,14 @@ final class AppCoordinator: ObservableObject {
             client: geminiClient,
             objectEngine: VisionObjectDetectionEngine(maximumObjects: pointAskConfig.resolverObjectLimit),
             maskEngine: pointAskConfig.maskEngineEnabled ? PointAskMaskEngine() : nil,
+            // [YOLO] The real object detector behind the tap box: YOLO11n
+            // on the Neural Engine, auto-installed on first point-ask use
+            // (the engine's availability probe kicks the catalog download
+            // when the artifact is absent — the standard downloader
+            // fetches the zip, verifies the strict sha256 and unpacks the
+            // `.mlmodelc` directory).
+            yoloEngine: PointAskYOLOEngine(modelStore: modelStore,
+                                           provisioner: modelDownloadService),
             ocrEngine: VisionTextRecognitionEngine(),
             observabilityBus: observabilityBus,
             config: pointAskConfig,

@@ -17,11 +17,19 @@ struct ResolvedPointAskTarget: Equatable {
     /// The same box in pixel coordinates (top-left origin) for the crop.
     let pixelRect: CGRect
     let source: PointAskTargetSource
+    /// [YOLO] The detector's COCO label for the winning box, when the
+    /// source is `.yolo`. Carried into the analysis so the ladder-1
+    /// answer can name the object.
+    let detectedLabel: String?
 }
 
 /// How a tap's box was chosen. Closed vocabulary — it travels as the
 /// `origin` token on `tap_anchored` (the `PointAskEvents` contract).
 enum PointAskTargetSource: String, Equatable {
+    /// [YOLO] A real object-detector box (YOLO11n on the Neural Engine) —
+    /// the box that WRAPS the object the elder pointed at, with a class
+    /// label. The preferred source.
+    case yolo
     /// One of the objectness-saliency boxes contained the tap.
     case saliency
     /// The foreground-instance mask contained the tap (opt-in spike
@@ -164,17 +172,21 @@ final class PointAskMaskEngine: PointAskMaskProbing {
 /// The tap → target stage (research §Q6 stage 1: <50 ms, refresh only when
 /// the cached saliency pass is stale).
 ///
-/// The geometry comes from the **existing** `LiveObjectDetectionEngine`
-/// (the shipped `VisionObjectDetectionEngine` over
-/// `VNGenerateObjectnessBasedSaliencyImageRequest` — the same engine the
-/// live-translate detector runs its scene-block pass with, used here for its
-/// boxes only, on tap, never per frame). The result is cached for
-/// `saliencyCacheSeconds`: a second tap on the same scene is a hit-test over
-/// remembered boxes and costs no Vision pass.
+/// [YOLO] The evidence order is detector-first: when the `yoloEngine` is
+/// wired and its artifact is installed, the tap box is a REAL YOLO11n
+/// detection box with a class label (the owner's device-test verdict).
+/// Below that, the geometry comes from the **existing**
+/// `LiveObjectDetectionEngine` (the shipped `VisionObjectDetectionEngine`
+/// over `VNGenerateObjectnessBasedSaliencyImageRequest` — the same engine
+/// the live-translate detector runs its scene-block pass with, used here
+/// for its boxes only, on tap, never per frame). The saliency result is
+/// cached for `saliencyCacheSeconds`: a second tap on the same scene is a
+/// hit-test over remembered boxes and costs no Vision pass.
 final class PointAskTargetResolver {
 
     private let objectEngine: LiveObjectDetectionEngine
     private let maskEngine: PointAskMaskProbing?
+    private let yoloEngine: PointAskObjectDetecting?
     private let config: PointAskConfig
     private let events: PointAskEvents
     private let now: () -> Date
@@ -184,11 +196,13 @@ final class PointAskTargetResolver {
 
     init(objectEngine: LiveObjectDetectionEngine,
          maskEngine: PointAskMaskProbing? = nil,
+         yoloEngine: PointAskObjectDetecting? = nil,
          config: PointAskConfig = .default,
          observabilityBus: ObservabilityBus,
          now: @escaping () -> Date = Date.init) {
         self.objectEngine = objectEngine
         self.maskEngine = maskEngine
+        self.yoloEngine = yoloEngine
         self.config = config
         self.events = PointAskEvents(bus: observabilityBus, config: config)
         self.now = now
@@ -198,38 +212,84 @@ final class PointAskTargetResolver {
     /// (top-left origin, 0…1); the frame is the one the elder tapped on.
     ///
     /// Order of evidence, most specific first:
-    ///  1. the opt-in mask pass, while `supportsMasks` holds — the
+    ///  1. [YOLO] the real object-detector pass, while the engine is
+    ///     available — the box that WRAPS the object (the owner's
+    ///     device-test verdict: the tap box must be a real detection box,
+    ///     "any size"), carrying the detector's class label;
+    ///  2. the opt-in mask pass, while `supportsMasks` holds — the
     ///     silhouette answer, and the spike path;
-    ///  2. the saliency boxes, refreshed only when the cached pass is
+    ///  3. the saliency boxes, refreshed only when the cached pass is
     ///     stale or absent;
-    ///  3. the pad box around the tap — the honest fallback that keeps
+    ///  4. the pad box around the tap — the honest fallback that keeps
     ///     "tap outside re-anchors" true even when the pass fails or finds
     ///     nothing.
     ///
-    /// A failing mask pass degrades to the saliency path (the probe flips
-    /// and the resolver never asks again); a failing saliency pass degrades
-    /// to the pad box. Never an error to the elder — the box is a pointer,
-    /// not an answer (FR-LCT-004's degradation shape).
+    /// A failing detector pass degrades to the mask path, a failing mask
+    /// pass to the saliency path (the probe flips and the resolver never
+    /// asks again), and a failing saliency pass to the pad box. Never an
+    /// error to the elder — the box is a pointer, not an answer
+    /// (FR-LCT-004's degradation shape).
     func resolve(tap point: CGPoint, in pixelBuffer: CVPixelBuffer) -> ResolvedPointAskTarget {
         let size = CGSize(width: CVPixelBufferGetWidth(pixelBuffer),
                           height: CVPixelBufferGetHeight(pixelBuffer))
         let clamped = CGPoint(x: min(max(point.x, 0), 1),
                               y: min(max(point.y, 0), 1))
 
+        if let yoloEngine, yoloEngine.isAvailable,
+           let yolo = yoloDetection(using: yoloEngine, in: pixelBuffer, containing: clamped) {
+            return anchor(yolo.normalizedBox, size: size, source: .yolo,
+                          detectedLabel: yolo.label)
+        }
+
         if let maskEngine, maskEngine.supportsMasks,
            let maskBox = try? maskEngine.maskBox(at: clamped, in: pixelBuffer) {
-            return anchor(maskBox, size: size, source: .mask)
+            return anchor(maskBox, size: size, source: .mask, detectedLabel: nil)
         }
 
         if let saliencyBox = saliencyBox(containing: clamped, in: pixelBuffer) {
-            return anchor(saliencyBox, size: size, source: .saliency)
+            return anchor(saliencyBox, size: size, source: .saliency, detectedLabel: nil)
         }
-        return anchor(Self.padBox(around: clamped), size: size, source: .pad)
+        return anchor(Self.padBox(around: clamped), size: size, source: .pad,
+                      detectedLabel: nil)
     }
 
     /// How many saliency boxes the resolver is holding from the last pass.
     /// Evidence for tests; nothing else reads it.
     var cachedSaliencyBoxCount: Int { cachedBoxes.count }
+
+    // MARK: The YOLO pass
+
+    /// One detector pass (per tap — a tap is a rare event, and the probe
+    /// re-checks the artifact's presence so a mid-session install lands
+    /// on the next tap), then the pure selection. A failing pass is nil —
+    /// the ladder continues with the mask path, exactly like a failing
+    /// mask pass (never an error to the elder).
+    private func yoloDetection(using engine: PointAskObjectDetecting,
+                               in pixelBuffer: CVPixelBuffer,
+                               containing point: CGPoint) -> YOLODetection? {
+        let detections: [YOLODetection]
+        do {
+            detections = try engine.detectObjects(in: pixelBuffer)
+        } catch {
+            return nil
+        }
+        return Self.yoloBox(detections, containing: point)
+    }
+
+    /// The pure selection: the highest-confidence detection whose box
+    /// CONTAINS the tap wins; when no box contains the tap, the
+    /// highest-confidence detection overall — a tap on the cap still
+    /// anchors the bottle's box (a real object box, never a pad). Nil
+    /// only for an empty scene, which is the ladder's cue to continue.
+    static func yoloBox(_ detections: [YOLODetection],
+                        containing point: CGPoint) -> YOLODetection? {
+        guard !detections.isEmpty else { return nil }
+        let containing = detections
+            .filter { $0.normalizedBox.contains(point) }
+            .max { $0.confidence < $1.confidence }
+        if let containing { return containing }
+        return detections.max { $0.confidence < $1.confidence }
+    }
 
     // MARK: The pass and the cache
 
@@ -287,11 +347,13 @@ final class PointAskTargetResolver {
 
     private func anchor(_ box: NormalizedBox,
                         size: CGSize,
-                        source: PointAskTargetSource) -> ResolvedPointAskTarget {
+                        source: PointAskTargetSource,
+                        detectedLabel: String?) -> ResolvedPointAskTarget {
         events.tapAnchored(source: source)
         return ResolvedPointAskTarget(normalizedBox: box,
                                       pixelRect: Self.pixelRect(of: box, in: size),
-                                      source: source)
+                                      source: source,
+                                      detectedLabel: detectedLabel)
     }
 
     /// The box in pixel coordinates, top-left origin — the unit the crop

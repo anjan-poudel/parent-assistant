@@ -65,6 +65,10 @@ struct PointAskSessionDependencies {
     /// The opt-in mask engine, or nil (the shipped default: the spike
     /// stays behind the probe).
     let maskEngine: PointAskMaskProbing?
+    /// [YOLO] The real object detector (YOLO11n on the Neural Engine) —
+    /// the tap box's preferred source. Nil keeps the mask/saliency/pad
+    /// ladder exactly as shipped.
+    let yoloEngine: PointAskObjectDetecting?
     let ocrEngine: LiveTextRecognitionEngine
     let observabilityBus: ObservabilityBus
     let config: PointAskConfig
@@ -79,6 +83,7 @@ struct PointAskSessionDependencies {
          client: GeminiClient,
          objectEngine: LiveObjectDetectionEngine,
          maskEngine: PointAskMaskProbing? = nil,
+         yoloEngine: PointAskObjectDetecting? = nil,
          ocrEngine: LiveTextRecognitionEngine,
          observabilityBus: ObservabilityBus,
          config: PointAskConfig = .default,
@@ -90,6 +95,7 @@ struct PointAskSessionDependencies {
         self.client = client
         self.objectEngine = objectEngine
         self.maskEngine = maskEngine
+        self.yoloEngine = yoloEngine
         self.ocrEngine = ocrEngine
         self.observabilityBus = observabilityBus
         self.config = config
@@ -250,6 +256,12 @@ final class PointAskSessionModel: ObservableObject {
     /// the first cloud need: the frame and box the elder asked about.
     private var pendingAnalysis: (frame: CameraFrame, box: NormalizedBox, pixelRect: CGRect)?
 
+    /// [YOLO] The anchored target's detector label (when the tap box was
+    /// a real YOLO detection). Carried from the anchor into the analysis
+    /// request so the ladder-1 answer can name the object; cleared with
+    /// every dismiss, exactly like the box itself.
+    private var anchoredDetectedLabel: String?
+
     private var isClosed = false
 
     // MARK: Init
@@ -264,6 +276,7 @@ final class PointAskSessionModel: ObservableObject {
                                      config: dependencies.config)
         self.resolver = PointAskTargetResolver(objectEngine: dependencies.objectEngine,
                                                maskEngine: dependencies.maskEngine,
+                                               yoloEngine: dependencies.yoloEngine,
                                                config: dependencies.config,
                                                observabilityBus: dependencies.observabilityBus)
         self.speak = dependencies.speak
@@ -460,6 +473,10 @@ final class PointAskSessionModel: ObservableObject {
         guard !isClosed else { return }
         guard case .awaitingTap = phase else { return }
         phase = .boxAnchored(target.normalizedBox, pixelRect: target.pixelRect)
+        // [YOLO] The label rides with its box: whatever the phase does
+        // next, the analysis the chip launches reads the SAME target the
+        // elder saw anchored.
+        anchoredDetectedLabel = target.detectedLabel
         boxGeneration += 1
         let generation = boxGeneration
         let seconds = UInt64(max(0, config.boxAgeOutSeconds) * 1_000_000_000)
@@ -493,6 +510,7 @@ final class PointAskSessionModel: ObservableObject {
         isConsentPromptPresented = false
         consentFailureMessage = nil
         pendingAnalysis = nil
+        anchoredDetectedLabel = nil
         phase = .awaitingTap
     }
 
@@ -529,6 +547,10 @@ final class PointAskSessionModel: ObservableObject {
         let speak = self.speak
         let locale = self.locale
         let targetLanguage = AppLanguage(locale: locale)
+        // [YOLO] Captured here: the task below runs detached, and the
+        // label is part of "the picture the elder asked about" — the
+        // anchor's own value, read once at launch.
+        let detectedLabel = anchoredDetectedLabel
 
         analysisTask = Task { [weak self] in
             // The crop and the re-encode are the analysis's own cost
@@ -560,7 +582,8 @@ final class PointAskSessionModel: ObservableObject {
                 return
             }
             let findings = await pipeline.analyze(
-                PointAskAnalysisRequest(crop: crop, uploadJPEG: jpeg),
+                PointAskAnalysisRequest(crop: crop, uploadJPEG: jpeg,
+                                       detectedLabel: detectedLabel),
                 cloudEnabled: cloud)
             guard !Task.isCancelled else { return }
             let composed = Self.compose(findings,
@@ -627,7 +650,10 @@ final class PointAskSessionModel: ObservableObject {
         if findings.quotaCapped {
             spokenParts.append(L10n.str("router.capReached", locale: locale))
         }
-        if let label = findings.classLabel {
+        // [YOLO] The detector's label leads: it names the WHOLE object the
+        // elder tapped (the box that wrapped it), the classifier's name is
+        // the fallback when the anchor had no detector box.
+        if let label = findings.detectedLabel ?? findings.classLabel {
             let looks = L10n.fmt("pointask.answer.looksLike", locale: locale, label)
             spokenParts.append(looks)
             cardLines.append(looks)

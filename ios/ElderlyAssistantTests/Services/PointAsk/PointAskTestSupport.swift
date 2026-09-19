@@ -150,6 +150,24 @@ final class StubPointAskMaskEngine: PointAskMaskProbing {
     }
 }
 
+/// [YOLO] A scripted `PointAskObjectDetecting`: returns the detections it
+/// is given, counts its passes, and can be made unavailable or throwing —
+/// the resolver's priority tests drive the detector-first ladder through
+/// it.
+final class StubPointAskYOLOEngine: PointAskObjectDetecting {
+
+    var isAvailable: Bool = true
+    var detections: [YOLODetection] = []
+    var error: Error?
+    private(set) var passCount = 0
+
+    func detectObjects(in pixelBuffer: CVPixelBuffer) throws -> [YOLODetection] {
+        passCount += 1
+        if let error { throw error }
+        return detections
+    }
+}
+
 // MARK: - Convenience
 
 enum PointAskBoxes {

@@ -475,4 +475,28 @@ final class PointAskAnalysisPipelineTests: XCTestCase {
         XCTAssertEqual(findings.ocrText.count, PointAskConfig.default.promptTextMaxLength,
                        "the joined text is bounded to the configured prompt budget")
     }
+
+    // MARK: - Scenario: the detector label rides the request into the findings
+
+    func testTheDetectorLabelFlowsIntoTheFindings() async {
+        let pipeline = makePipeline()
+        var request = request()
+        request.detectedLabel = "bottle"
+
+        let findings = await pipeline.analyze(request, cloudEnabled: false)
+
+        XCTAssertEqual(findings.detectedLabel, "bottle",
+                       "the resolver's winning label reaches the answer's raw materials")
+        XCTAssertTrue(findings.hasLocalContent,
+                      "the detector's name alone is local content — never the failure line")
+    }
+
+    func testANilDetectorLabelLeavesTheFindingsDetectorFree() async {
+        let pipeline = makePipeline()
+
+        let findings = await pipeline.analyze(request(), cloudEnabled: false)
+
+        XCTAssertNil(findings.detectedLabel,
+                     "a tap that anchored without a detector box carries no label")
+    }
 }
