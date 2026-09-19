@@ -263,6 +263,42 @@ final class PointAskTargetResolverTests: XCTestCase {
 
     // MARK: - Scenario: the mask extent is the object's silhouette
 
+    func testAFullFramePersonBoxIsLoggedButNeverSelected() {
+        // [FULL-FRAME-FILTER] The 2026-09-20 device report: a `person`
+        // box over the whole frame won the containing test and the tap
+        // anchored the room. Coverage > 85% is not a pointer target.
+        let fullFramePerson = YOLODetection(
+            normalizedBox: NormalizedBox(xMin: 0.004, yMin: 0.003,
+                                         xMax: 0.992, yMax: 0.991),
+            label: "person", confidence: 0.51)
+        let remote = YOLODetection(
+            normalizedBox: NormalizedBox(xMin: 0.3, yMin: 0.3,
+                                         xMax: 0.85, yMax: 0.75),
+            label: "remote", confidence: 0.94)
+
+        // A tap the person box contains but the remote box does not:
+        // the filtered selection must take the NEAREST selectable box
+        // (the remote), never the full-frame person.
+        let selected = PointAskTargetResolver.yoloBox(
+            [fullFramePerson, remote], containing: CGPoint(x: 0.5, y: 0.5))
+        XCTAssertEqual(selected?.label, "remote")
+        // Only the full-frame box present: nil — the ladder continues
+        // (mask/saliency/pad), never the room as the answer's pointer.
+        XCTAssertNil(PointAskTargetResolver.yoloBox(
+            [fullFramePerson], containing: CGPoint(x: 0.5, y: 0.5)))
+    }
+
+    func testFrameCoverageIsTheBoxAreaShare() {
+        XCTAssertEqual(
+            PointAskTargetResolver.frameCoverage(
+                NormalizedBox(xMin: 0, yMin: 0, xMax: 1, yMax: 1)),
+            1.0, accuracy: 0.0001)
+        XCTAssertEqual(
+            PointAskTargetResolver.frameCoverage(
+                NormalizedBox(xMin: 0.25, yMin: 0.25, xMax: 0.75, yMax: 0.75)),
+            0.25, accuracy: 0.0001)
+    }
+
     func testInstanceExtentWrapsTheInstancePixels() {
         // A mask buffer: instance pixels (0) form a left-half block; the
         // rest is background (1).
