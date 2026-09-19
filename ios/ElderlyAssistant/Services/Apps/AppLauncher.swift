@@ -169,7 +169,18 @@ final class AppLauncher {
     /// 2026-09 — each must be declared in LSApplicationQueriesSchemes for
     /// `canOpenURL` to answer honestly).
     static let catalog: [App] = [
-        App(id: "phone", nameKey: "app.name.phone", systemImage: "phone.fill", scheme: "tel"),
+        App(id: "phone", nameKey: "app.name.phone", systemImage: "phone.fill",
+            // [PHONE-DEEPLINKS] (2026-09-19) The Phone tile opens RECENTS —
+            // the dialer's real landing surface — through Apple's
+            // `mobilephone-recents://` scheme, not the bare `tel:` dialer
+            // (which iOS treated as an empty call sheet on recent builds).
+            // The companion surfaces are the sibling schemes: contacts
+            // `mobilephone-contacts://`, favorites
+            // `mobilephone-favorites://`, voicemail
+            // `mobilephone-voicemail://` (all whitelisted for probing in
+            // LSApplicationQueriesSchemes — a future per-surface tiles
+            // change consumes them without an Info.plist pass).
+            scheme: "mobilephone-recents"),
         App(id: "messages", nameKey: "app.name.messages", systemImage: "message.fill", scheme: "sms"),
         App(id: "facetime", nameKey: "app.name.facetime", systemImage: "video.fill", scheme: "facetime"),
         App(id: "mail", nameKey: "app.name.mail", systemImage: "envelope.fill", scheme: "message"),

@@ -43,6 +43,9 @@ final class LiveTranslateEventsTests: XCTestCase {
         events.brainTranslationBatch(resolvedCount: 0, unresolvedCount: 2, durationMs: 0,
                                      deferral: .memoryPressure)
         events.brainTranslationUnavailable(.modelNotInstalled, stage: .availability)
+        // The warden's two user-visible moments (2026-09-19).
+        events.brainTranslationLoadAnnounced(count: 3)
+        events.brainTranslationPreempted(count: 0)
         events.translationDegraded(reason: .noNetwork, regionCount: 1)
         events.translationResolved(tier: .cloud, origin: .fresh, count: 2)
         events.translationResolved(tier: .dictionary, origin: .cache, count: 1)
@@ -367,6 +370,31 @@ final class LiveTranslateEventsTests: XCTestCase {
         XCTAssertEqual(event?.metadata["regionSetHash"], "1234:5678")
         XCTAssertNotEqual(event?.metadata["regionSetHash"], "[redacted]")
         XCTAssertEqual(event?.metadata["regionCount"], "4")
+    }
+
+    // MARK: The warden's two moments (owner directive, 2026-09-19)
+
+    /// The "hold on a sec" moment: the elder is waiting for a handle to page
+    /// in, and the count is the batch riding on that load.
+    func testTheLoadAnnouncementCarriesTheBatchCountAndNothingElse() {
+        events.brainTranslationLoadAnnounced(count: 7)
+        let event = bus.events(named: "brain_translation_load_announced").first
+        XCTAssertEqual(event?.outcome, "pending")
+        XCTAssertEqual(event?.metadata, ["count": "7"],
+                       "a wait is a count of strings, never a string")
+        XCTAssertNil(event?.errorCode)
+    }
+
+    /// The hand-off to the voice stack. Zero is the honest count for an idle
+    /// handle — nothing was decoding, so the voice turn cost no answer.
+    func testThePreemptionEventCarriesWhatTheHandOffCost() {
+        events.brainTranslationPreempted(count: 4)
+        events.brainTranslationPreempted(count: 0)
+        let emitted = bus.events(named: "brain_translation_preempted")
+        XCTAssertEqual(emitted.count, 2)
+        XCTAssertEqual(emitted.map(\.outcome), ["preempted", "preempted"])
+        XCTAssertEqual(emitted.map { $0.metadata["count"] }, ["4", "0"])
+        XCTAssertEqual(emitted.first?.errorCode, nil)
     }
 
     func testCameraEventsCarryOnlyClosedReasonTokens() {

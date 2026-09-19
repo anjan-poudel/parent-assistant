@@ -234,6 +234,47 @@ extension LocalBrainDeferral {
     }
 }
 
+/// The two moments the warden's hand-off owes the elder an explanation.
+///
+/// Owner directive, 2026-09-19: "keep the user in the loop so they don't
+/// wonder about the silences." Both are moments where the camera feature is
+/// doing something the elder did not ask for and cannot see: paying a model
+/// load, or handing its model to the voice stack.
+///
+/// **This is the indicator path a surface renders.** The tier pushes these
+/// through `LocalBrainTranslationTier.setWardenNoticeSink`; the sentence is
+/// `copyKey`'s catalog entry, resolved in the active language — never a
+/// literal at a call site, and never a value on the event vocabulary (see
+/// `LiveTranslateEvents.brainTranslationLoadAnnounced` / `…Preempted`, which
+/// record the same two moments as counts).
+enum LocalBrainWardenNotice: String, Equatable, CaseIterable, Sendable {
+    /// A handle has to page in before this batch can run. The elder is
+    /// looking at untranslated text with nothing on screen to explain the
+    /// wait, which is the whole reason this moment has copy.
+    case loadingModel
+    /// The warden took the translation model for the voice stack. The
+    /// alternative to saying so is a session that silently stops
+    /// translating, which reads as the feature being broken.
+    ///
+    /// The one caveat, stated because the copy is the owner's own words: the
+    /// warden's hand-off does not say *who* asked for the bytes, so a load
+    /// that is not a voice turn (a Settings picker picking a brain, say)
+    /// produces the same sentence. In this app the only thing that takes a
+    /// 2.6 GB handle mid-session is the voice stack, and the owner's
+    /// directive names exactly that case.
+    case offloadedForVoiceTurn
+
+    /// The catalog entry this notice renders. Pinned by
+    /// `LiveTranslateCopyTests`, which resolves every case in en and ne, so a
+    /// notice cannot exist without a sentence an elder can read.
+    var copyKey: String {
+        switch self {
+        case .loadingModel: return "livetranslate.warden.loading"
+        case .offloadedForVoiceTurn: return "livetranslate.warden.offloaded"
+        }
+    }
+}
+
 /// The generation half, behind a seam so the tier's own tests drive a
 /// deterministic fake: bounding, parsing, the event vocabulary and the
 /// timeout-to-fallback contract are all exercised without a model on disk, and
@@ -259,11 +300,24 @@ protocol BrainTextGenerating: Sendable {
     /// would happen), so the default is the conservative half for a fake and
     /// the honest one for a runtime that has not been asked.
     func isHoldingHandle() async -> Bool
+
+    /// Told when the warden takes the resident handle away on a path the tier
+    /// did not ask for — the preemption ask, or the registered release path
+    /// when that ask was refused and overruled.
+    ///
+    /// Not `async` and deliberately not awaited: the warden calls it from its
+    /// own reservation path, outside its lock, and nothing about admitting a
+    /// voice turn's model may wait on a camera feature's bookkeeping. A
+    /// generator that holds nothing (every fake) keeps the default no-op,
+    /// which is why this is a requirement with a default rather than a new
+    /// parameter on `generate`.
+    func setWardenOffloadHandler(_ handler: (@Sendable () -> Void)?)
 }
 
 extension BrainTextGenerating {
     func release() async {}
     func isHoldingHandle() async -> Bool { false }
+    func setWardenOffloadHandler(_ handler: (@Sendable () -> Void)?) {}
 }
 
 /// Why a generation did not produce an answer. Mapped 1:1 onto
@@ -353,20 +407,66 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
     /// without this tier claiming anything.
     private let ledger: ModelLifecycleManager
 
+    /// Where the two warden notices go, if anything is listening. A sink
+    /// rather than a return value because both moments happen *during* an
+    /// attempt — a load that is running, a handle that was just taken — and
+    /// an outcome can only be read after it.
+    ///
+    /// Nil is the honest default: the events still record both moments, and
+    /// a caller that has nothing to render loses nothing. Set at init or
+    /// later via `setWardenNoticeSink`.
+    private var noticeSink: (@Sendable (LocalBrainWardenNotice) -> Void)?
+
+    /// How many strings are riding on the attempt in flight, so an offload
+    /// that lands mid-decode can say what it cost. 0 between attempts — and a
+    /// preemption that lands while the handle is idle is honestly a
+    /// zero-cost hand-off.
+    ///
+    /// Actor-isolated and read from `noteWardenTookTheHandle`, which runs on
+    /// this actor: the decode is an `await`, so the actor is free to answer
+    /// while it is running.
+    private var inFlightStrings = 0
+
     init(config: LiveTranslateConfig = .default,
          modelStore: ModelStore?,
          events: LiveTranslateEvents,
          generator: (any BrainTextGenerating)? = nil,
          targetLanguage: AppLanguage = LiveTranslationPipeline.defaultTargetLanguage,
          memory: MemoryProbing = SystemMemoryProbe(),
-         ledger: ModelLifecycleManager = .shared) {
+         ledger: ModelLifecycleManager = .shared,
+         onWardenNotice: (@Sendable (LocalBrainWardenNotice) -> Void)? = nil) {
         self.config = config
         self.modelStore = modelStore
         self.events = events
-        self.generator = generator ?? LlamaBrainTextGenerator(config: config)
+        let generator = generator ?? LlamaBrainTextGenerator(config: config)
+        self.generator = generator
         self.targetLanguage = targetLanguage
         self.memory = memory
         self.ledger = ledger
+        self.noticeSink = onWardenNotice
+        // The warden can take the handle at any moment, so the wiring is
+        // done here rather than at the first load: an offload that beats the
+        // first batch would otherwise be the one nobody hears about.
+        generator.setWardenOffloadHandler { [weak self] in
+            Task { await self?.noteWardenTookTheHandle() }
+        }
+    }
+
+    /// Attaches (or detaches) the surface that renders the warden's two
+    /// notices. A method rather than only an init parameter, because the
+    /// surface is built after the session is: a camera that attaches late
+    /// still gets every notice after it attaches, and nothing before it is
+    /// owed to a surface that did not exist.
+    func setWardenNoticeSink(_ sink: (@Sendable (LocalBrainWardenNotice) -> Void)?) {
+        noticeSink = sink
+    }
+
+    /// A hand-off the tier did not ask for: the warden took the handle for
+    /// another reservation. Called from the warden's thread via a `Task`, so
+    /// it reads the in-flight count on this actor.
+    private func noteWardenTookTheHandle() {
+        events.brainTranslationPreempted(count: inFlightStrings)
+        noticeSink?(.offloadedForVoiceTurn)
     }
 
     // MARK: Availability
@@ -429,7 +529,27 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
             return .none
         }
 
+        // [WARDEN-NOTICE] The "hold on a sec" moment (owner directive,
+        // 2026-09-19). A batch that has to page in a 2.6 GB handle takes
+        // seconds, and the elder is looking at text that has not changed with
+        // nothing on screen to explain why. Asked of the generator rather
+        // than assumed: a handle already resident costs no load, and
+        // announcing one would be a wait the elder is not having.
+        //
+        // Announced when the load is *due*, not when it succeeds — a load
+        // that then fails reports its own reason through
+        // `brainTranslationUnavailable`, and the notice was still true.
+        if await generator.isHoldingHandle() == false {
+            events.brainTranslationLoadAnnounced(count: batch.count)
+            noticeSink?(.loadingModel)
+        }
+
         let started = Date()
+        // The attempt in flight, for a warden preemption that lands during
+        // it. Cleared on every exit — a hand-off between attempts is a
+        // zero-cost one, and stale counts would say otherwise.
+        inFlightStrings = batch.count
+        defer { inFlightStrings = 0 }
         do {
             let output = try await generator.generate(prompt: Self.prompt(for: batch,
                                                                           targetLanguage: targetLanguage),
@@ -1048,6 +1168,7 @@ final class TranslateBrainHandleSlot: ModelResident, @unchecked Sendable {
     /// rather than merely be described as un-droppable.
     func releaseForWarden() -> UnloadAck {
         lock.lock()
+<<<<<<< HEAD
         defer { lock.unlock() }
         if loadDepth > 0 {
             loadAbandonRequested = true
@@ -1055,9 +1176,55 @@ final class TranslateBrainHandleSlot: ModelResident, @unchecked Sendable {
         }
         guard handle != nil else { return .notHolding }
         guard decodeDepth == 0 else { return .refused(.inUse) }
+=======
+        guard handle != nil else {
+            lock.unlock()
+            return .notHolding
+        }
+        guard decodeDepth == 0 else {
+            lock.unlock()
+            return .refused(.inUse)
+        }
+>>>>>>> origin/master
         handle = nil
         handleModelURL = nil
+        let notify = onOffloadedByWarden
+        lock.unlock()
+        // Outside the lock, and after the bytes are already given back: the
+        // handler is a `Task` hop into the tier (see
+        // `setWardenOffloadHandler`), so nothing here can wait on it.
+        notify?()
         return .released
+    }
+
+    /// The warden's **registered release path** — what runs when the ask was
+    /// refused and `ModelReleaseContract.actorDeferredFree` allowed the
+    /// refusal to be overruled, and what a `.budget` eviction of this slot
+    /// runs.
+    ///
+    /// `drop()` plus the notice, because the elder is owed the sentence: the
+    /// tier did not ask for this, and from the camera's side the translation
+    /// simply stopped. The handle reference goes first (the notice must not
+    /// be able to outlive the drop it describes), and the handler is invoked
+    /// with no lock held.
+    func dropForWarden() {
+        drop()
+        lock.lock()
+        let notify = onOffloadedByWarden
+        lock.unlock()
+        notify?()
+    }
+
+    /// Called by the generator when the warden takes the handle on a path the
+    /// tier did not ask for. Invoked outside this box's lock, synchronously,
+    /// on the warden's thread.
+    private var onOffloadedByWarden: (@Sendable () -> Void)?
+
+    /// Wired once, before the first load; read under the lock at the ask.
+    func setOffloadHandler(_ handler: (@Sendable () -> Void)?) {
+        lock.lock()
+        defer { lock.unlock() }
+        onOffloadedByWarden = handler
     }
 }
 
@@ -1086,6 +1253,7 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
     /// The handle, and the ledger's view of it. Not an actor-stored property
     /// any more — see `TranslateBrainHandleSlot`.
     ///
+<<<<<<< HEAD
     /// Internal rather than private for exactly one reader:
     /// `LocalBrainTranslationTierTests` drives the warden's ask against the
     /// in-flight window (`releaseForWarden` while `isLoading`). The ledger
@@ -1099,6 +1267,18 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
     /// box carries its own lock and is `@unchecked Sendable`, and the load
     /// window it describes is exactly the interval in which an `await` would
     /// be too late.
+=======
+    /// `nonisolated let` and internal rather than `private` so the tier's
+    /// tests can drive the warden's ask against the real box — `store` a
+    /// handle, call `releaseForWarden` — without a model on disk or a llama
+    /// runtime. It is the same object this actor would have asked.
+    ///
+    /// `nonisolated` because the warden does not go through this actor to
+    /// reach it (`setWardenOffloadHandler` is `nonisolated` for the same
+    /// reason: a reservation path may not have to await a decode). The box
+    /// guards its own state, which is why the property is a `let` of a
+    /// `Sendable` type and not actor-isolated state.
+>>>>>>> origin/master
     nonisolated let slot = TranslateBrainHandleSlot()
     private var lastUse: Date?
     /// The armed idle release, if one is. Cancelled and re-armed by every use,
@@ -1139,6 +1319,14 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
     }
 
     func isHoldingHandle() async -> Bool { slot.isHoldingHandle }
+
+    /// `nonisolated` so it can satisfy `BrainTextGenerating`'s synchronous
+    /// requirement: the warden asks from its own reservation path and must
+    /// not have to await this actor (which may be mid-decode) to install a
+    /// handler. The box guards its own copy of the reference.
+    nonisolated func setWardenOffloadHandler(_ handler: (@Sendable () -> Void)?) {
+        slot.setOffloadHandler(handler)
+    }
 
     func release() async {
         idleRelease?.cancel()
@@ -1273,7 +1461,12 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
                            evictable: true,
                            priority: ReservationPurpose.liveTranslate.priority,
                            resident: slot) { [weak slot] in
-            slot?.drop()
+            // `dropForWarden`, not `drop`: this closure is the warden's
+            // forced half of the ask (and a budget eviction of this slot),
+            // and both are moments the elder is owed the sentence for. The
+            // tier's own releases go through `dropHandle`, which says
+            // nothing — nobody needs telling about a release they made.
+            slot?.dropForWarden()
         }
 
         // [MODEL-WARDEN] Step 1 — ask the warden BEFORE allocating.
@@ -1302,6 +1495,7 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
         // while `wardenBypassForTesting` is on, the load skips the
         // reserve/admit gate entirely — no permit, no eviction, no denial.
         // Residency is still recorded (didLoad below), so the ledger stays
+<<<<<<< HEAD
         // honest about what is in memory. Testing-only; reverts to the gated
         // path when the round-3 quant ships.
         //
@@ -1315,6 +1509,25 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
         // would have refused the load the owner's phone died starting, and a
         // testing switch that could re-open that path would be a switch that
         // can kill the phone again.
+=======
+        // honest about what is in memory. Testing-only.
+        //
+        // **The flip is one line, and it is the owner's to make after the
+        // device pass** (2026-09-19 directive: "the bypass stays until
+        // proven on device, then flips off"). In
+        // `LiveTranslateConfig.wardenBypassForTesting`, change `= true` to
+        // `= false`. Nothing else moves: the gated path below is the one the
+        // round-2b work built, and the four behaviours it rests on are the
+        // ones to watch for on the device —
+        //   1. the load is ADMITTED after evicting a background/warm
+        //      resident, not refused (`over_budget_alone` in the console is
+        //      the failure this task exists to remove);
+        //   2. a voice turn takes the handle back (`brain_translation_preempted`
+        //      on component `livetranslate`);
+        //   3. the elder sees "hold on a sec" copy while a load runs;
+        //   4. the elder sees "switched for your voice request" when it is
+        //      taken, and translation resumes on the next batch.
+>>>>>>> origin/master
         let reservation: ModelReservation?
         if config.wardenBypassForTesting {
             reservation = nil
