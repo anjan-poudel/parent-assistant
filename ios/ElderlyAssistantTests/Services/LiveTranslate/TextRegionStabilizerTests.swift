@@ -32,10 +32,19 @@ final class TextRegionStabilizerTests: XCTestCase {
     /// A config whose hysteresis is satisfied in one pass, so a scenario can
     /// test the *event gate* rather than the flicker bound. The hysteresis
     /// itself gets its own scenarios with the shipped shape.
+    ///
+    /// `readingConsensusPasses` is one of those bounds, and it is made
+    /// immediate here for the same reason `regionAppearPasses` is: the
+    /// scenarios that take this config are about what an event *is* — one
+    /// identity, one text change, a box that moved and said nothing — and they
+    /// script a single pass per reading to say it. The reading consensus has
+    /// its own scenarios with the shipped numbers, where a wobbling reading
+    /// that never persists is the whole subject.
     private func immediateConfig() -> LiveTranslateConfig {
         var config = LiveTranslateConfig()
         config.regionAppearPasses = 1
         config.regionMissPasses = 1
+        config.readingConsensusPasses = 1
         return config
     }
 
@@ -860,8 +869,20 @@ final class TextRegionStabilizerTests: XCTestCase {
     /// The remedy is in the rule, not in the numbers: a one-line key is not a
     /// grouping, so it cannot take the box's decision away. What must survive is
     /// the whole of it — the identifier, the publish, and the never-empty
-    /// overlay — while the *reading* is still reported as what it is, a text
-    /// change on a region that has not moved.
+    /// overlay.
+    ///
+    /// **The reading's half of this was superseded, not weakened** (owner device
+    /// report, 2026-09-19). The rework above stopped the identity churning and
+    /// left the readings churning: the same trace, one layer down — a constant
+    /// `regionCount`, stable boxes, and a `regionSetHash` that moved every pass
+    /// because the *string* did. A reading that alternates every pass is the
+    /// reading consensus's own case, and holding the sign's words still is now
+    /// the feature rather than the defect. So the assertions below pin the same
+    /// four invariants — one identity, one publish, no re-key, no phantom
+    /// candidate — plus the new one: the wobble reaches neither the overlay nor
+    /// the change gate (which is the translation key and the digest). That a
+    /// reading which *does* persist is still reported as a change is pinned in
+    /// this suite's reading-consensus scenarios.
     func testAOneLineBlocksWobblingReadingKeepsItsRegionAndItsPublish() {
         var stabilizer = TextRegionStabilizer(config: LiveTranslateConfig())
         let sign = box(0.2, 0.3)
@@ -874,6 +895,8 @@ final class TextRegionStabilizerTests: XCTestCase {
             return XCTFail("the second sighting is the appear hysteresis satisfied, got \(second)")
         }
 
+        // Eight passes of the device's own shape: the reading alternates every
+        // pass, so no variant is ever seen twice in a row.
         for pass in 2..<10 {
             let reading = readings[pass % 2]
             let changes = stabilizer.consume(regions: [
@@ -881,9 +904,12 @@ final class TextRegionStabilizerTests: XCTestCase {
             ])
             XCTAssertEqual(stabilizer.visible.map(\.id), [identity],
                            "pass \(pass): the sign was re-keyed while its box stood still")
-            XCTAssertEqual(changes, [.textChanged(id: identity)],
-                           "pass \(pass): the new reading is a text change on the same region, "
-                           + "never a departure and a fresh appearance")
+            XCTAssertEqual(changes, [],
+                           "pass \(pass): a reading that never persisted reached the change gate, "
+                           + "which is the translation key and the scene digest the owner's log "
+                           + "was counting — and the overlay's own words with them")
+            XCTAssertEqual(stabilizer.visible.map(\.text), ["START"],
+                           "pass \(pass): the published reading moved with the wobble")
             XCTAssertEqual(stabilizer.activeRegionCount, 1,
                            "pass \(pass): no phantom candidate was left behind the visible region")
         }
@@ -946,6 +972,249 @@ final class TextRegionStabilizerTests: XCTestCase {
         XCTAssertEqual(stabilizer.visible.map(\.id), [identity],
                        "a one-line key is not a grouping claim: the box still decided")
         XCTAssertEqual(regrouped, [.textChanged(id: identity)])
+    }
+
+    // MARK: - Reading consensus (owner device report, 2026-09-19)
+
+    /// The owner's device log, at the level it is decided.
+    ///
+    /// The block-identity rework fixed the *identity* churn — `regionCount`
+    /// stopped moving — and left the other half standing: `regionSetHash`
+    /// changed on **every** pass while the scene stood still. The regions were
+    /// stable; the readings were not. A sign read as "START" on one pass and
+    /// "5TART" on the next is a different string every time, so the
+    /// change-only gate fired every time: a new translation key, a new digest,
+    /// and the elder watching the words under the box swap.
+    ///
+    /// This is the pin. A reading that does not survive the next pass is a
+    /// claim about the recognition, not about the sign, and it never reaches
+    /// the published region.
+    func testAFlickeringReadingNeverReachesThePublishedRegion() {
+        var stabilizer = TextRegionStabilizer(config: LiveTranslateConfig())
+        let sign = box(0.2, 0.3)
+
+        _ = stabilizer.consume(regions: [block("text\u{1}start", "START", sign)])
+        let published = stabilizer.consume(regions: [block("text\u{1}start", "START", sign)])
+        guard case .appeared(let identity) = published.first else {
+            return XCTFail("expected an appeared event, got \(published)")
+        }
+
+        // Nine passes of the device's own shape: one variant, then the other,
+        // never the same reading twice in a row.
+        for pass in 0..<9 {
+            let reading = pass.isMultiple(of: 2) ? "5TART" : "START"
+            let changes = stabilizer.consume(regions: [
+                block("text\u{1}" + reading.lowercased(), reading, sign)
+            ])
+            XCTAssertEqual(stabilizer.visible.map(\.id), [identity])
+            XCTAssertEqual(stabilizer.visible.map(\.text), ["START"],
+                           "pass \(pass): a one-pass reading reached the published region")
+            XCTAssertEqual(changes, [],
+                           "pass \(pass): a one-pass reading was reported as a text change — "
+                           + "that event is the translation key and the digest the owner's log "
+                           + "was counting, and it is what must stop")
+        }
+    }
+
+    /// The other half of the rule, so the pin above cannot be read as "the
+    /// stabiliser stops reporting real re-reads": a reading that **does**
+    /// persist replaces the held one, on exactly the pass it has persisted
+    /// through.
+    func testAReadingThatPersistsTwoPassesReplacesTheHeldOne() {
+        var stabilizer = TextRegionStabilizer(config: LiveTranslateConfig())
+        let sign = box(0.2, 0.3)
+
+        _ = stabilizer.consume(regions: [block("text\u{1}start", "START", sign)])
+        let published = stabilizer.consume(regions: [block("text\u{1}start", "START", sign)])
+        guard case .appeared(let identity) = published.first else {
+            return XCTFail("expected an appeared event, got \(published)")
+        }
+
+        // The first sighting of the new reading is a candidate, not a change.
+        XCTAssertEqual(stabilizer.consume(regions: [block("text\u{1}5tart", "5TART", sign)]), [],
+                       "one sighting of a new reading is not yet the region's reading")
+        XCTAssertEqual(stabilizer.visible.map(\.text), ["START"])
+
+        // The second consecutive one is: the same identity, one text change.
+        XCTAssertEqual(stabilizer.consume(regions: [block("text\u{1}5tart", "5TART", sign)]),
+                       [.textChanged(id: identity)])
+        XCTAssertEqual(stabilizer.visible.map(\.id), [identity],
+                       "the corrected reading is a change on the region, never a new region")
+        XCTAssertEqual(stabilizer.visible.map(\.text), ["5TART"])
+    }
+
+    /// "Persists" means consecutive. A claim that skips a pass has not
+    /// persisted, so two sightings with the held reading between them are two
+    /// first sightings, not one second.
+    func testAReadingDoesNotPersistThroughAPassThatWasNotSeen() {
+        var stabilizer = TextRegionStabilizer(config: LiveTranslateConfig())
+        let sign = box(0.2, 0.3)
+
+        _ = stabilizer.consume(regions: [block("text\u{1}start", "START", sign)])
+        _ = stabilizer.consume(regions: [block("text\u{1}start", "START", sign)])
+
+        for pass in 0..<4 {
+            let reading = pass.isMultiple(of: 2) ? "5TART" : "START"
+            _ = stabilizer.consume(regions: [block("text\u{1}" + reading.lowercased(), reading, sign)])
+            XCTAssertEqual(stabilizer.visible.map(\.text), ["START"],
+                           "pass \(pass): the window restarted at the held reading")
+        }
+
+        // Two consecutive sightings of the candidate, and only now is it
+        // adopted — the count was four passes of alternating readings.
+        _ = stabilizer.consume(regions: [block("text\u{1}5tart", "5TART", sign)])
+        _ = stabilizer.consume(regions: [block("text\u{1}5tart", "5TART", sign)])
+        XCTAssertEqual(stabilizer.visible.map(\.text), ["5TART"])
+    }
+
+    /// A reading the recogniser is **substantially surer** of does not wait
+    /// the two passes out (owner report, 2026-09-19: the rule is "persistence
+    /// or confidence", not "persistence").
+    func testASubstantiallyMoreConfidentReadingReplacesTheHeldOneAtOnce() {
+        var stabilizer = TextRegionStabilizer(config: LiveTranslateConfig())
+        let sign = box(0.2, 0.3)
+
+        // The camera has not settled: the first reading is a weak one.
+        _ = stabilizer.consume(regions: [block("text\u{1}start", "START", sign, confidence: 0.4)])
+        let published = stabilizer.consume(regions: [block("text\u{1}start", "START", sign,
+                                                           confidence: 0.4)])
+        guard case .appeared(let identity) = published.first else {
+            return XCTFail("expected an appeared event, got \(published)")
+        }
+
+        // The sign resolves, and the recogniser says so. 0.9 − 0.4 = 0.5, well
+        // over `readingConfidenceGain` (0.15), so the first sighting is the
+        // reading — there is nothing to corroborate; the evidence arrived with
+        // it.
+        XCTAssertEqual(stabilizer.consume(regions: [block("text\u{1}5tart", "5TART", sign,
+                                                          confidence: 0.9)]),
+                       [.textChanged(id: identity)])
+        XCTAssertEqual(stabilizer.visible.map(\.text), ["5TART"])
+    }
+
+    /// The threshold's own boundary, pinned from both sides: a gain **below**
+    /// `readingConfidenceGain` buys no early switch, and the same reading that
+    /// missed the bar is adopted the ordinary way one pass later.
+    ///
+    /// Without this, "substantially higher confidence" could be implemented as
+    /// "higher confidence" — which, on a scene whose readings differ by a
+    /// hundredth, is no rule at all.
+    func testAConfidenceGainBelowTheThresholdDoesNotSwitchTheReadingEarly() {
+        var stabilizer = TextRegionStabilizer(config: LiveTranslateConfig())
+        let sign = box(0.2, 0.3)
+
+        _ = stabilizer.consume(regions: [block("text\u{1}start", "START", sign, confidence: 0.8)])
+        _ = stabilizer.consume(regions: [block("text\u{1}start", "START", sign, confidence: 0.8)])
+
+        // 0.9 − 0.8 = 0.10, under the 0.15 gain: a candidate, not a change.
+        XCTAssertEqual(stabilizer.consume(regions: [block("text\u{1}5tart", "5TART", sign,
+                                                          confidence: 0.9)]), [])
+        XCTAssertEqual(stabilizer.visible.map(\.text), ["START"],
+                       "a gain under the threshold is not a substantial one")
+
+        // And the ordinary route still works: the second consecutive sighting
+        // adopts it, whatever the confidences are.
+        XCTAssertEqual(stabilizer.consume(regions: [block("text\u{1}5tart", "5TART", sign,
+                                                          confidence: 0.9)]).count, 1)
+        XCTAssertEqual(stabilizer.visible.map(\.text), ["5TART"])
+    }
+
+    /// The held reading carries the **highest** confidence seen for it while
+    /// it is held, not the most recent sample: a still scene's confidences
+    /// wander, and the number that decides whether a replacement is
+    /// "substantially surer" must not wander with them.
+    func testTheHeldReadingKeepsTheHighestConfidenceSeenForIt() {
+        var stabilizer = TextRegionStabilizer(config: LiveTranslateConfig())
+        let sign = box(0.2, 0.3)
+
+        _ = stabilizer.consume(regions: [block("text\u{1}start", "START", sign, confidence: 0.9)])
+        _ = stabilizer.consume(regions: [block("text\u{1}start", "START", sign, confidence: 0.5)])
+        XCTAssertEqual(stabilizer.visible.map(\.confidence), [0.9],
+                       "the held reading is the best-evidenced reading, so its number is the "
+                       + "best it has ever carried — not the last sample")
+
+        // Which is a rule with teeth: a variant 0.2 surer than the *last*
+        // sample but only 0.15 of the way past the *held* reading is a
+        // candidate. 1.0 − 0.9 = 0.10.
+        XCTAssertEqual(stabilizer.consume(regions: [block("text\u{1}5tart", "5TART", sign,
+                                                          confidence: 1.0)]), [])
+        XCTAssertEqual(stabilizer.visible.map(\.text), ["START"])
+    }
+
+    /// The instrument the owner reads the acceptance off: **on a scene whose
+    /// readings flicker but whose regions do not, the digest is a constant.**
+    ///
+    /// The digest folds the visible regions' *normalized* strings, so it is
+    /// exactly the number that moved on every pass of the device log. It is a
+    /// constant here for the same reason the screen is still: the reading the
+    /// set is folded from is the consensus one.
+    func testTheSceneDigestStaysConstantAcrossAFlickeringReading() {
+        let salt: UInt = 0x51_7a2f_1b3c_4d5e
+        var stabilizer = TextRegionStabilizer(config: LiveTranslateConfig())
+        let sign = box(0.2, 0.3)
+
+        _ = stabilizer.consume(regions: [block("text\u{1}start", "START", sign)])
+        _ = stabilizer.consume(regions: [block("text\u{1}start", "START", sign)])
+
+        var digests: [UInt32] = []
+        var texts: [[String]] = []
+        for pass in 0..<10 {
+            let reading = pass.isMultiple(of: 2) ? "5TART" : "START"
+            _ = stabilizer.consume(regions: [block("text\u{1}" + reading.lowercased(), reading, sign)])
+            digests.append(LiveTranslateRegionSetDigest
+                .digest(of: stabilizer.visible.map(\.normalizedText), salt: salt))
+            texts.append(stabilizer.visible.map(\.text))
+        }
+
+        XCTAssertEqual(Set(digests).count, 1,
+                       "the digest moved \(Set(digests).count) times over a still scene: "
+                       + "\(digests)")
+        XCTAssertEqual(texts, Array(repeating: ["START"], count: 10),
+                       "the published reading held, pass for pass")
+        // And the instrument is not blind: the digest of a genuinely different
+        // reading is a different value, so a constant here means "unchanged"
+        // and not "always the same number".
+        XCTAssertNotEqual(LiveTranslateRegionSetDigest.digest(of: ["5tart"], salt: salt), digests[0])
+    }
+
+    /// A tracking pass carries geometry and **no reading** (T-007), and the
+    /// region it follows is the one whose *last observed* text its key names —
+    /// which, mid-consensus, is the candidate and not the held reading.
+    ///
+    /// Getting this wrong does not look like a text bug on the device: the
+    /// region stops being refreshed, its box stops following, and the
+    /// departure grace eventually takes a sign off the screen that never left
+    /// it. The candidate's own count must not advance either — a tracking pass
+    /// cannot vote on a reading.
+    func testATrackedPassRefreshesTheRegionWhoseReadingIsStillBeingWeighed() {
+        var stabilizer = TextRegionStabilizer(config: LiveTranslateConfig())
+        let held = box(0.2, 0.3)
+        let nudged = box(0.22, 0.32)
+
+        _ = stabilizer.consume(regions: [block("text\u{1}start", "START", held)])
+        let published = stabilizer.consume(regions: [block("text\u{1}start", "START", held)])
+        guard case .appeared(let identity) = published.first else {
+            return XCTFail("expected an appeared event, got \(published)")
+        }
+
+        // One sighting of a new reading: a candidate, and the key the tracker
+        // is about to be handed.
+        _ = stabilizer.consume(regions: [block("text\u{1}5tart", "5TART", nudged)])
+
+        // A tracking pass, keyed by that last observed text.
+        XCTAssertEqual(stabilizer.consume(regions: [], tracked: ["5TART": nudged]), [],
+                       "a tracking pass changes no reading, so it reports no change")
+        XCTAssertEqual(stabilizer.visible.map(\.id), [identity])
+        XCTAssertEqual(stabilizer.visible.map(\.text), ["START"],
+                       "the candidate is not the region's text until it is adopted")
+        XCTAssertEqual(stabilizer.visible.map(\.box), [nudged],
+                       "the box followed the tracking pass")
+
+        // The tracking pass is not a second sighting: one more OCR sighting of
+        // the candidate is what carries it to two.
+        XCTAssertEqual(stabilizer.consume(regions: [block("text\u{1}5tart", "5TART", nudged)]),
+                       [.textChanged(id: identity)])
+        XCTAssertEqual(stabilizer.visible.map(\.text), ["5TART"])
     }
 
     // MARK: - Content-free events

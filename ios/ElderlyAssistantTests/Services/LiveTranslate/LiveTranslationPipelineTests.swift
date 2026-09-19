@@ -32,6 +32,11 @@ final class LiveTranslationPipelineTests: XCTestCase {
     /// cloud questions.
     private let secondCloudText = "Push the green button"
 
+    /// A third, for the burst the pacing has to hold: two strings are enough to
+    /// show a batch, three are enough to show a batch that was *accumulated*
+    /// rather than merely grouped.
+    private let thirdCloudText = "No entry without a ticket"
+
     // MARK: - Doubles
 
     /// The frame tick, scripted: what one pass returns, and what was asked.
@@ -230,6 +235,29 @@ final class LiveTranslationPipelineTests: XCTestCase {
 
     // MARK: - Harness
 
+    /// The shipped config with the two dispatch-pacing intervals taken out.
+    ///
+    /// The pacing (`translationDispatchMinInterval`,
+    /// `brainAttemptMinInterval`) is the subject of its own section below; every
+    /// other scenario in this suite is about what a dispatch *contains* and in
+    /// what order, and nearly all of them drive several passes back to back on
+    /// a clock that has not moved — which in production is one pacing window.
+    /// Leaving the shipped intervals in would make those scenarios wait on the
+    /// wall clock to say what they mean, and would make each of them a claim
+    /// about pacing as well as about the cascade. Zero is the documented escape
+    /// hatch (both keys make every dispatch immediate at 0), exactly as
+    /// `immediateConfig()` is for the stabiliser's flicker bounds.
+    ///
+    /// The shipped values are pinned by `LiveTranslateConfigTests`, and the
+    /// section that follows this harness runs the real intervals against a
+    /// scripted clock.
+    static func unpacedDispatchConfig() -> LiveTranslateConfig {
+        var config = LiveTranslateConfig.default
+        config.translationDispatchMinInterval = 0
+        config.brainAttemptMinInterval = 0
+        return config
+    }
+
     @MainActor
     private struct Harness {
         let pipeline: LiveTranslationPipeline
@@ -266,7 +294,7 @@ final class LiveTranslationPipelineTests: XCTestCase {
                              handsInABrain: Bool = true,
                              cacheChannel: EncryptedLocalStorage? = nil,
                              now: @escaping () -> Date = Date.init,
-                             config: LiveTranslateConfig = .default,
+                             config: LiveTranslateConfig = LiveTranslationPipelineTests.unpacedDispatchConfig(),
                              /// Extract mode's initial state (owner verdict,
                              /// 2026-09-18). Defaulted so every scenario that
                              /// predates the mode keeps the translated view it
@@ -987,7 +1015,16 @@ final class LiveTranslationPipelineTests: XCTestCase {
 
         var identities: Set<TextRegionStabilizer.RegionIdentity> = []
         for pass in 0..<10 {
-            harness.recogniser.defaultStep = .regions(pass.isMultiple(of: 2) ? steady : wobbly)
+            // Each reading stands for two consecutive passes. The wobble is the
+            // same wobble the device produced; what changed is that a reading
+            // the OCR holds for one pass only no longer counts as the sign's
+            // reading at all (see `readingConsensusPasses`), so a scripted
+            // one-pass alternation would now pin the *absence* of change rather
+            // than the presence of it. Two passes is the shipped persistence
+            // rule, and the claim this scenario makes — a reading that really
+            // did change is a change, and the identity is untouched by it —
+            // needs the reading to really change.
+            harness.recogniser.defaultStep = .regions((pass / 2).isMultiple(of: 2) ? steady : wobbly)
             let stabilization = oscillatingStabilization(pass: pass,
                                                           margin: harness.config.frameStabMargin)
             await harness.pipeline.updateLayout(layout(pushedThrough: stabilization))
@@ -1013,6 +1050,105 @@ final class LiveTranslationPipelineTests: XCTestCase {
         XCTAssertEqual(harness.bus.events(named: "region_removed").count, 0)
         XCTAssertGreaterThan(harness.bus.events(named: "text_change").count, 1,
                              "the reading really did change, and text_change is the event for it")
+    }
+
+    // MARK: - Scenario: the reading consensus (owner device report, 2026-09-19)
+
+    /// The owner's acceptance instrument, end to end: **on a scene whose
+    /// readings flicker but whose regions do not, `regionSetHash` is a
+    /// constant.**
+    ///
+    /// The device log this work answers shows the opposite — `regionCount`
+    /// standing still and `regionSetHash` moving on every pass — and the digest
+    /// is the number the next device capture is read against. It is a constant
+    /// here for exactly the reason the screen is still: the reading the set is
+    /// folded from is the consensus one, so a pass that reads the sign
+    /// differently is a pass that changed nothing the elder can see.
+    ///
+    /// The single `text_change` is the publish pass, which is a real change —
+    /// four regions arriving where there were none. Everything after it is the
+    /// wobble, and the wobble logs nothing.
+    @MainActor
+    func testScenarioAFlickeringReadingLeavesTheSceneDigestConstant() async throws {
+        let salt: UInt = 0x51_7a2f_1b3c_4d5e
+        let harness = makeHarness(dictionary: oneLineSignTranslations, regionDigestSalt: salt)
+        await harness.pipeline.updateLayout(layout)
+        let frame = try makeFrame()
+
+        let boxes = oneLineSigns().map(\.normalizedBox)
+        let readings = ["Closed", "Push", "Exit", "Mind the step"]
+        let steady = grouped(readings, boxes: boxes)
+        let wobbly = grouped(["Clased", "Push the", "Exil", "Mind the stops"], boxes: boxes)
+
+        for pass in 0..<12 {
+            harness.recogniser.defaultStep = .regions(pass.isMultiple(of: 2) ? steady : wobbly)
+            await harness.pipeline.ingest(frame)
+        }
+
+        // The screen: four regions, one identity each, the readings it was
+        // first given — none of them the wobble.
+        let published = try await latest(harness)
+        XCTAssertEqual(published.regions.count, 4)
+        XCTAssertEqual(published.regions.map(\.text).sorted(), readings.sorted(),
+                       "a reading that never persisted reached the overlay")
+
+        // The instrument: one change event for the whole scene (the publish),
+        // and one digest value, which is the digest of the readings on screen.
+        let digestEvents = harness.bus.events(named: "text_change")
+        XCTAssertEqual(digestEvents.count, 1,
+                       "the flicker reached the change gate on \(digestEvents.count - 1) pass(es) "
+                       + "beyond the publish — that is the hash the owner watched move")
+        let logged = try XCTUnwrap(digestEvents.first?.metadata["regionSetHash"])
+        XCTAssertEqual(logged, LiveTranslateEvents.regionSetHashHex(
+            LiveTranslateRegionSetDigest.digest(
+                of: readings.map { LiveTranslateTextNormalization.normalized($0) }, salt: salt)),
+                       "the digest is over the consensus reading, which is what is on screen")
+
+        // The identity half of the device defect stays fixed too, in the same
+        // run: the rework before this one is not allowed to regress behind it.
+        XCTAssertEqual(harness.bus.events(named: "region_appeared").count, 4)
+        XCTAssertEqual(harness.bus.events(named: "region_removed").count, 0)
+    }
+
+    /// The translation half of the same claim: **a flickering variant is never
+    /// a new question.**
+    ///
+    /// The change-only gate is keyed by the region's text, so a reading that
+    /// wobbles per pass used to ask the tiers about each variant in turn —
+    /// one cloud question per pass for a sign nobody had moved. With the
+    /// reading held, the variant is never the region's key, so it is never
+    /// sent: one question for the sign, whatever the OCR did behind it.
+    @MainActor
+    func testScenarioAFlickeringReadingIsNeverANewTranslationQuestion() async throws {
+        // The harness's dictionary answers the curated fixture string only, so
+        // both strings below are uncurated and the one that *is* asked goes all
+        // the way to the transport: the count below is a fact about what was
+        // actually sent.
+        let harness = makeHarness(transport: Self.respondingTransport())
+        await harness.pipeline.updateLayout(layout)
+        let frame = try makeFrame()
+
+        let sign = box(0.20, 0.40, 0.60, 0.50)
+        let steady = grouped([cloudText], boxes: [sign])
+        let flicker = grouped([secondCloudText], boxes: [sign])
+
+        for pass in 0..<8 {
+            harness.recogniser.defaultStep = .regions(pass.isMultiple(of: 2) ? steady : flicker)
+            await harness.pipeline.ingest(frame)
+        }
+        await waitUntil("the sign's one question to be asked") {
+            self.requests(carrying: self.cloudText, in: harness) == 1
+        }
+
+        let published = try await latest(harness)
+        XCTAssertEqual(published.regions.map(\.id).count, 1, "one sign, one region")
+        XCTAssertEqual(published.regions.map(\.text), [cloudText],
+                       "the variant is not the region's reading, so it is not the region's text")
+        XCTAssertEqual(requests(carrying: secondCloudText, in: harness), 0,
+                       "a one-pass variant was sent to be translated — every flicker would be "
+                       + "another question, which is the traffic the gate exists to stop")
+        XCTAssertEqual(requests(carrying: cloudText, in: harness), 1,
+                       "the reading on screen is asked once")
     }
 
     /// The same scene and the same ten passes, run with and without a
@@ -1403,7 +1539,15 @@ final class LiveTranslationPipelineTests: XCTestCase {
         XCTAssertEqual(requests(carrying: cloudText, in: harness), 1)
 
         // The same box now reads a different string: same region, new text.
+        //
+        // Two passes, because a reading belongs to the region only once the OCR
+        // has stood behind it twice (owner device report, 2026-09-19: a
+        // one-pass misread is the flicker the reading consensus exists to keep
+        // off the screen). The claim under test is about a string that really
+        // changed, so the script gives the change the evidence it needs; the
+        // first of these two passes is the candidate and asks nothing.
         harness.recogniser.defaultStep = .regions([detected(secondCloudText)])
+        await harness.pipeline.ingest(frame)
         await harness.pipeline.ingest(frame)
         await waitUntil("the new string to be asked") {
             self.requests(carrying: self.secondCloudText, in: harness) == 1
@@ -2392,7 +2536,7 @@ final class LiveTranslationPipelineTests: XCTestCase {
         // test's claim — a brain that does not come back does not keep the
         // region pending for the rest of the session. The strings go to the
         // cloud in the same cycle, and the stage that lost the race is named.
-        var config = LiveTranslateConfig.default
+        var config = LiveTranslationPipelineTests.unpacedDispatchConfig()
         config.brainTranslationTimeoutSeconds = 0.05
         config.brainTranslationStageGraceSeconds = 0.05
         let brain = RecordingBrain()
@@ -2480,7 +2624,7 @@ final class LiveTranslationPipelineTests: XCTestCase {
         // belongs to the pipeline: only the pipeline can see that the OCR
         // passes are finding nothing. The threshold is the config's, and the
         // announcement is a transition — said once, not once per frame.
-        var config = LiveTranslateConfig.default
+        var config = LiveTranslationPipelineTests.unpacedDispatchConfig()
         config.stalePassesBeforeReducedCadence = 3
         let harness = makeHarness(consent: true,
                                   transport: Self.respondingTransport(),
@@ -2756,5 +2900,220 @@ final class LiveTranslationPipelineTests: XCTestCase {
                        "a block that has been translated keeps its translation: the mode "
                        + "changes what an *unanswered* block draws, never what an answered "
                        + "one does")
+    }
+
+    // MARK: - Scenario: the dispatch pacing (owner device report, 2026-09-19)
+    //
+    // The device log these three claims answer is a `cache_miss` and a fresh
+    // attempt on *every* pass — several per second for as long as a sign stayed
+    // in frame — over a brain whose 5 s idle-unload meant the next attempt
+    // loaded the same gigabyte again, ending in memory-pressure kills.
+    //
+    // The clock is the subject here, so every test below hands the pipeline a
+    // `ScriptedClock` and states its own instants. The shipped intervals are in
+    // force (`LiveTranslateConfig.default`): what is pinned is what the device
+    // will actually do, not what the harness made convenient.
+
+    /// A burst of strings that arrives inside one pacing window leaves as
+    /// **one** dispatch — one generation, one request — and the strings that
+    /// arrive while the window is shut are neither dropped nor sent.
+    @MainActor
+    func testScenarioABurstOfStringsInsideOneWindowIsOneDispatch() async throws {
+        let clock = ScriptedClock()
+        let transport = Self.respondingTransport()
+        let brain = RecordingBrain()
+        let config = LiveTranslateConfig.default
+        let harness = makeHarness(transport: transport, brain: brain,
+                                  now: { clock.now }, config: config)
+        await harness.pipeline.updateLayout(layout)
+        let frame = try makeFrame()
+
+        // The first sign, and the dispatch it earns: a session's first is
+        // immediate, because nothing has been paid for yet.
+        harness.recogniser.defaultStep = .regions([detected(cloudText)])
+        await harness.pipeline.ingest(frame)
+        clock.advance(by: 0.1)
+        await harness.pipeline.ingest(frame)
+        await waitUntil("the first string to be dispatched") { harness.transport.requestCount == 1 }
+
+        // Two more signs arrive inside the window. Each takes its two passes to
+        // be published (`regionAppearPasses`), and every tick in between is
+        // held: the window is 1.5 s wide and the clock has moved 0.4.
+        let scene = [detected(cloudText),
+                     detected(secondCloudText, box: box(0.1, 0.1, 0.4, 0.2)),
+                     detected(thirdCloudText, box: box(0.5, 0.1, 0.9, 0.2))]
+        harness.recogniser.defaultStep = .regions(Array(scene.prefix(2)))
+        clock.advance(by: 0.1)
+        await harness.pipeline.ingest(frame)
+        clock.advance(by: 0.1)
+        await harness.pipeline.ingest(frame)
+        harness.recogniser.defaultStep = .regions(scene)
+        clock.advance(by: 0.1)
+        await harness.pipeline.ingest(frame)
+        clock.advance(by: 0.1)
+        await harness.pipeline.ingest(frame)
+        await settleTheCycle()
+
+        XCTAssertEqual(transport.requestCount, 1,
+                       "four passes inside one window dispatched \(transport.requestCount) times")
+        XCTAssertEqual(requests(carrying: secondCloudText, in: harness), 0,
+                       "a string that arrived inside the window was dispatched before it opened")
+        XCTAssertEqual(requests(carrying: thirdCloudText, in: harness), 0)
+        XCTAssertEqual(brain.calls, [[cloudText]],
+                       "the held strings were not generated for either: \(brain.calls)")
+
+        // The window opens — both of them, the dispatch's and the brain's — and
+        // everything that accumulated goes out together.
+        clock.advance(by: config.brainAttemptMinInterval)
+        await harness.pipeline.ingest(frame)
+        await waitUntil("the accumulated strings to be dispatched") { harness.transport.requestCount == 2 }
+
+        let batched = TranslationRecordingTransport.items(in: transport.requests[1]).values
+        XCTAssertEqual(Set(batched), [secondCloudText, thirdCloudText],
+                       "the two strings that waited went out as one batch, not one each")
+        XCTAssertEqual(brain.calls.count, 2,
+                       "the burst cost \(brain.calls.count) generation(s): \(brain.calls)")
+        XCTAssertEqual(Set(brain.calls[1]), [secondCloudText, thirdCloudText],
+                       "one generation carried the whole accumulated batch")
+    }
+
+    /// The brain's own window, isolated: a string that arrives inside it is
+    /// **held**, not dropped and not asked about — and it is asked about the
+    /// moment the window opens, on device, with nothing leaving the device.
+    @MainActor
+    func testScenarioAStringInsideTheBrainWindowWaitsForItRatherThanBeingDropped() async throws {
+        let clock = ScriptedClock()
+        let transport = Self.respondingTransport()
+        let brain = RecordingBrain()
+        brain.answers = [cloudText: brainTranslation, secondCloudText: brainTranslation]
+        let config = LiveTranslateConfig.default
+        let harness = makeHarness(transport: transport, brain: brain,
+                                  now: { clock.now }, config: config)
+        await harness.pipeline.updateLayout(layout)
+        let frame = try makeFrame()
+
+        // The first sign: one generation, answered on device in the first pass.
+        harness.recogniser.defaultStep = .regions([detected(cloudText)])
+        await harness.pipeline.ingest(frame)
+        clock.advance(by: 0.1)
+        await harness.pipeline.ingest(frame)
+        await waitUntil("the first string to be answered on device") {
+            guard let latest = await harness.recorder.latest,
+                  let sign = latest.regions.first(where: { $0.text == self.cloudText }) else { return false }
+            return latest.result(for: sign).sourceTier == .onDeviceBrain
+        }
+
+        // The second sign appears 0.1 s later: well inside the brain's 8 s
+        // window, and published (so it *is* a question) on the pass after.
+        harness.recogniser.defaultStep = .regions([detected(cloudText),
+                                                   detected(secondCloudText, box: box(0.1, 0.1, 0.4, 0.2))])
+        clock.advance(by: 0.1)
+        await harness.pipeline.ingest(frame)
+        clock.advance(by: 0.1)
+        await harness.pipeline.ingest(frame)
+        clock.advance(by: 2)
+        await harness.pipeline.ingest(frame)
+        await settleTheCycle()
+
+        XCTAssertEqual(brain.calls, [[cloudText]],
+                       "the second string was generated for inside the window: \(brain.calls)")
+        let held = try await latest(harness)
+        let waiting = try XCTUnwrap(region(secondCloudText, in: held))
+        XCTAssertEqual(held.result(for: waiting), .pending(secondCloudText),
+                       "a string held by the window is still a question: it is pending, not dropped")
+        XCTAssertTrue(held.hasVisibleText, "and the never-empty rule holds while it waits")
+
+        // The window opens: the held string is asked about, on device.
+        clock.advance(by: config.brainAttemptMinInterval)
+        await harness.pipeline.ingest(frame)
+        await waitUntil("the held string to be answered on device") {
+            guard let latest = await harness.recorder.latest,
+                  let sign = latest.regions.first(where: { $0.text == self.secondCloudText }) else { return false }
+            return latest.result(for: sign).sourceTier == .onDeviceBrain
+        }
+
+        XCTAssertEqual(brain.calls, [[cloudText], [secondCloudText]],
+                       "the waiting string was asked for exactly once, when its window opened")
+        XCTAssertEqual(transport.requestCount, 0,
+                       "the brain answered both, so nothing should have left the device")
+    }
+
+    /// The elder's own ask is not a pass: a tap inside the background windows
+    /// still translates, and still moves them.
+    ///
+    /// Extract mode is where tap-to-translate lives, and both of its windows
+    /// are shut when the second tap lands — 0.1 s after the first, against a
+    /// 1.5 s dispatch window and an 8 s brain window. A tap that waited for
+    /// either of them would be the mode failing at the one thing it does.
+    @MainActor
+    func testScenarioATapIsNotHeldByTheBackgroundWindows() async throws {
+        let clock = ScriptedClock()
+        let transport = Self.respondingTransport()
+        let brain = RecordingBrain()
+        brain.answers = [cloudText: brainTranslation, secondCloudText: brainTranslation]
+        let config = LiveTranslateConfig.default
+        let harness = makeHarness(transport: transport, brain: brain, now: { clock.now },
+                                  config: config, extractionMode: true)
+        await harness.pipeline.updateLayout(layout)
+        let frame = try makeFrame()
+
+        harness.recogniser.defaultStep = .regions([
+            detected(cloudText, box: box(0.2, 0.15, 0.6, 0.25)),
+            detected(secondCloudText, box: box(0.2, 0.6, 0.7, 0.7)),
+            detected(thirdCloudText, box: box(0.2, 0.8, 0.7, 0.9)),
+        ])
+        await harness.pipeline.ingest(frame)
+        clock.advance(by: 0.1)
+        await harness.pipeline.ingest(frame)
+
+        let extracting = try await latest(harness)
+        let first = try XCTUnwrap(region(cloudText, in: extracting))
+        let second = try XCTUnwrap(region(secondCloudText, in: extracting))
+        XCTAssertEqual(extracting.regions.count, 3,
+                       "extract mode published no dispatch of its own")
+        XCTAssertTrue(brain.calls.isEmpty)
+        XCTAssertEqual(transport.requestCount, 0)
+
+        await harness.pipeline.translateRegion(first.id)
+        await waitUntil("the first tapped block to be answered") {
+            guard let latest = await harness.recorder.latest,
+                  let sign = latest.regions.first(where: { $0.text == self.cloudText }) else { return false }
+            return latest.result(for: sign).sourceTier == .onDeviceBrain
+        }
+
+        clock.advance(by: 0.1)
+        await harness.pipeline.translateRegion(second.id)
+        await waitUntil("the second tapped block to be answered") {
+            guard let latest = await harness.recorder.latest,
+                  let sign = latest.regions.first(where: { $0.text == self.secondCloudText }) else { return false }
+            return latest.result(for: sign).sourceTier == .onDeviceBrain
+        }
+
+        XCTAssertEqual(brain.calls, [[cloudText], [secondCloudText]],
+                       "each tap was translated on its own turn: \(brain.calls)")
+
+        // …and the taps moved the clocks behind them: the scene-wide dispatch
+        // that follows (leaving extract mode) is held, and reaches the brain
+        // only when the window it left behind has passed.
+        await harness.pipeline.updateExtractMode(false)
+        clock.advance(by: 0.1)
+        await harness.pipeline.ingest(frame)
+        await settleTheCycle()
+        XCTAssertEqual(brain.calls.count, 2,
+                       "the background cycle ran inside the window the taps had just used: "
+                       + "\(brain.calls)")
+
+        clock.advance(by: config.brainAttemptMinInterval)
+        harness.recogniser.defaultStep = .regions([
+            detected(cloudText, box: box(0.2, 0.15, 0.6, 0.25)),
+            detected(secondCloudText, box: box(0.2, 0.6, 0.7, 0.7)),
+            detected(thirdCloudText, box: box(0.2, 0.8, 0.7, 0.9)),
+        ])
+        await harness.pipeline.ingest(frame)
+        await waitUntil("the untapped block to reach the cloud") {
+            harness.transport.requestCount == 1
+        }
+        XCTAssertEqual(requests(carrying: thirdCloudText, in: harness), 1,
+                       "the block nobody tapped was dispatched once the window opened")
     }
 }

@@ -380,11 +380,14 @@ actor LiveTranslationPipeline {
 
     /// The session's one clock, injected (the consent gate's `now:` seam,
     /// same convention). The pipeline is not time-driven — it is a frame tick,
-    /// and AM-6 puts every *ordering* decision on a counter — but a departure
-    /// has to be bounded in the unit the elder experiences it in, which is
-    /// seconds, so exactly one rule reads this: the stabiliser's departure
-    /// grace. Production passes `Date.init`; a test that asserts the grace
-    /// passes its own clock and never waits on the wall.
+    /// and AM-6 puts every *ordering* decision on a counter — but three rules
+    /// are bounded in the unit the elder experiences them in, which is
+    /// seconds: the stabiliser's departure grace, and the two dispatch-pacing
+    /// intervals (`translationDispatchMinInterval`,
+    /// `brainAttemptMinInterval`). One clock for all three, so a test that
+    /// advances it moves the whole feature. Production passes `Date.init`; a
+    /// test that asserts any of them passes its own clock and never waits on
+    /// the wall.
     private let now: () -> Date
 
     // MARK: State (actor-isolated)
@@ -420,6 +423,15 @@ actor LiveTranslationPipeline {
     /// the same text seen again is a new question, answered again (the
     /// sampling is deterministic, so it is answered the same way).
     private var brainAttemptedKeys: Set<String> = []
+    /// The two pacing clocks (`translationDispatchMinInterval`,
+    /// `brainAttemptMinInterval`), read and written together in the dispatch's
+    /// own prologue: when pending strings were last dispatched, and when the
+    /// brain was last asked for a generation. `nil` is "nothing has been paid
+    /// for yet", which is what makes a session's first dispatch always
+    /// immediate. Cleared by a resume, so an interruption is not a pause in a
+    /// rate limit: the first tick after it dispatches like a first tick.
+    private var lastDispatchAt: Date?
+    private var lastBrainAttemptAt: Date?
     /// The session-scoped task tree: one entry per dispatched attempt, removed
     /// by the attempt itself when it finishes, so this stays bounded by the
     /// number of in-flight requests rather than by the session's length.
@@ -682,6 +694,12 @@ actor LiveTranslationPipeline {
         cancelResolutionTasks()
         settledOutcomes.removeAll()
         brainAttemptedKeys.removeAll()
+        // The pacing clocks are claims about what has already been paid for,
+        // and a resume takes every such claim back: the first tick after an
+        // interruption dispatches immediately rather than waiting out an
+        // interval that belonged to the session before it.
+        lastDispatchAt = nil
+        lastBrainAttemptAt = nil
         stabilizer.reset()
         outcomes.removeAll()
         // A resume restarts the scene as well as the regions: the frame source
@@ -722,6 +740,8 @@ actor LiveTranslationPipeline {
         outcomes.removeAll()
         settledOutcomes.removeAll()
         brainAttemptedKeys.removeAll()
+        lastDispatchAt = nil
+        lastBrainAttemptAt = nil
     }
 
     // MARK: - Pushed state
@@ -936,12 +956,23 @@ actor LiveTranslationPipeline {
     /// a string the brain has already been asked about is carried straight to
     /// the gate, so the tick that follows the elder's answer reaches the cloud
     /// without paying for the same generation twice.
+    /// Two clocks pace it, and neither of them is allowed to cost a string:
+    /// `translationDispatchMinInterval` spaces the dispatches themselves and
+    /// `brainAttemptMinInterval` spaces the generations inside them (owner
+    /// device report, 2026-09-19 — a cache miss per pass against a 5 s
+    /// idle-unload was one model load per frame). A tick that is held back
+    /// leaves its strings pending and unclaimed, so the next tick that is
+    /// allowed to dispatch carries them, and a burst of arrivals goes out as
+    /// one batch rather than one request each.
     /// `only` narrows the hand-over to one string's key — extract mode's
     /// tap-to-translate, which must not become a dispatch for the whole scene.
     /// `nil` is every pending region, which is the mode-off behaviour the
-    /// cycle has always had.
+    /// cycle has always had. The elder's ask is not a pass: a tap skips both
+    /// clocks (and still moves them), because a tap that did nothing because a
+    /// background dispatch happened 0.9 s ago would be the mode failing at the
+    /// one thing it does.
     private func dispatchResolutionNeeds(only onlyKey: String? = nil) {
-        var items: [CloudTranslationTier.Item] = []
+        var candidates: [CloudTranslationTier.Item] = []
         var claimed: Set<String> = []
         for region in stabilizer.visible {
             guard let existing = outcomes[region.id], case .pending = existing.outcome else { continue }
@@ -950,14 +981,49 @@ actor LiveTranslationPipeline {
             guard claimed.insert(key).inserted else { continue }
             guard settledOutcomes[key] == nil,
                   !attemptKeys.contains(key) else { continue }
-            items.append(CloudTranslationTier.Item(id: key,
-                                                   text: region.text,
-                                                   detectedSourceLanguage: region.detectedLanguage))
+            candidates.append(CloudTranslationTier.Item(id: key,
+                                                         text: region.text,
+                                                         detectedSourceLanguage: region.detectedLanguage))
         }
+        guard !candidates.isEmpty else { return }
+
+        // The pacing (owner device report, 2026-09-19). Both clocks are read and
+        // written here, in the prologue, before anything is claimed, so a tick
+        // either dispatches and moves the clocks or dispatches nothing at all.
+        // A tick that is held back claims nothing, settles nothing and drops
+        // nothing: the strings are still pending, so the next tick that is
+        // allowed to dispatch carries them — which is what turns a burst of
+        // arrivals into one batch instead of one request each.
+        let moment = now()
+        let explicit = onlyKey != nil
+
+        if !explicit,
+           let last = lastDispatchAt,
+           moment.timeIntervalSince(last) < config.translationDispatchMinInterval {
+            return
+        }
+
+        // The brain's clock, inside the dispatch clock: a generation per
+        // dispatch beside an idle-unload is the load-thrash the device log is
+        // made of. A string the brain has not been asked about is **held**
+        // rather than carried onward — handing it to the cloud now would put
+        // the tiers out of order (FR-LCT-008) — while a string it has already
+        // been asked about is not held at all: that generation is paid for, and
+        // the tick that follows the elder's answer must still reach the cloud
+        // without paying for it twice.
+        let brainMayAttempt = explicit
+            || (lastBrainAttemptAt.map {
+                moment.timeIntervalSince($0) >= config.brainAttemptMinInterval
+            } ?? true)
+        let items = brainMayAttempt
+            ? candidates
+            : candidates.filter { brainAttemptedKeys.contains($0.id) }
         guard !items.isEmpty else { return }
 
+        lastDispatchAt = moment
         attemptKeys.formUnion(items.map(\.id))
         let unanswered = items.filter { !brainAttemptedKeys.contains($0.id) }
+        if !unanswered.isEmpty { lastBrainAttemptAt = moment }
         brainAttemptedKeys.formUnion(unanswered.map(\.id))
         let fresh = Set(unanswered.map(\.id))
 

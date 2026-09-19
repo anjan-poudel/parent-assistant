@@ -1052,9 +1052,11 @@ open class LLM: ObservableObject {
         self.repeatPenalty = repeatPenalty
         self.repetitionLookback = repetitionLookback
         
-        #if DEBUG
-        print("GNERATING WITH SEEED: \(seed)")
-        #endif
+        // elderly-ai-assistant (2026-09-19): removed a DEBUG-only
+        // print("GNERATING WITH SEEED: \(seed)") that fired on every
+        // generation in Debug builds (the owner's device-test config).
+        // The seed is deterministic via OnDeviceSampling.fixedSeed, so
+        // the log line carried no diagnostic value — only console noise.
         var modelParams = llama_model_default_params()
         #if targetEnvironment(simulator)
         modelParams.n_gpu_layers = 0
