@@ -30,6 +30,27 @@ final class LiveTranslateConfigTests: XCTestCase {
         // not a departure, and well under the 1.4 s two misses cost at the
         // reduced one.
         XCTAssertEqual(config.overlayDepartureGraceSeconds, 1.2)
+        // The reading consensus (owner device report, 2026-09-19): the number
+        // of consecutive passes a new reading must be seen in before it is the
+        // region's reading, and the confidence gain that lets an unmistakably
+        // better reading through without waiting. The first is the same 2 the
+        // appearance hysteresis uses, and for the same reason — one pass is a
+        // claim about the recognition, not about the sign; the second is the
+        // width of "substantially surer", and it is pinned because a run of
+        // readings that differ by a hundredth must not be able to switch the
+        // reading on confidence alone.
+        XCTAssertEqual(config.readingConsensusPasses, 2)
+        XCTAssertEqual(config.readingConfidenceGain, 0.15)
+
+        // The dispatch pacing (owner device report, 2026-09-19): the window a
+        // burst of pending strings accumulates inside before it is dispatched
+        // as one batch, and the window a brain generation is spaced by. Pinned
+        // because both are read as escape hatches by the suites — the pipeline
+        // harness zeroes them so its scenarios are about content and order, not
+        // about waiting — so the shipped values have to be asserted somewhere,
+        // and this is that place.
+        XCTAssertEqual(config.translationDispatchMinInterval, 1.5)
+        XCTAssertEqual(config.brainAttemptMinInterval, 8)
 
         // Decluttering (OD5), both re-tuned by the 2026-09-17 UX rework: a
         // wider merge (clustered same-string boxes become one overlay) and a

@@ -743,6 +743,118 @@ struct LiveTranslateConfig: Equatable {
     /// vouch for and no further.
     var regionStringIdentityPasses: Int = 2
 
+    // MARK: Reading consensus (owner device report, 2026-09-19)
+
+    // The owner's device log, after the block-identity rework: `regionCount`
+    // constant, the overlay's identity and geometry stable — and
+    // `regionSetHash` changing on **every** pass. The regions were no longer
+    // churning; the readings were. A sign the OCR read as "START" on one pass
+    // and "5TART" on the next was a different string every time, so the
+    // change-only gate fired every time: a new translation key per pass, a new
+    // digest per pass, and the elder's overlay swapping the words under them.
+    //
+    // These two keys are the string-level half of the same stability the
+    // hysteresis above already gives identity and geometry. The stabiliser
+    // holds the reading a region has *adopted* and lets an observation replace
+    // it only when it has earned the place — which is what makes a still scene
+    // a still screen, and a still scene's digest a constant the device log can
+    // be checked against.
+    //
+    // Both keys are the shipped defaults' own escape hatches as well as
+    // thresholds: `readingConsensusPasses = 1` and `readingConfidenceGain = 0`
+    // each make a new reading adopt immediately, which is the behaviour this
+    // feature had before the consensus existed.
+
+    /// Consecutive passes a **new reading** of a region must be observed in
+    /// before it replaces the reading the region carries.
+    ///
+    /// The unit is the same one the appearance hysteresis uses, and for the
+    /// same reason: an OCR pass is a claim about a picture, and a claim that
+    /// does not survive the next pass is a claim about the recognition rather
+    /// than about the sign. Two consecutive passes is one pass of evidence
+    /// that the first reading was wrong, at a cost of 0.5 s at the nominal
+    /// cadence before the corrected words appear — a delay the elder spends
+    /// looking at a *stable* reading, which is the trade the whole key makes.
+    ///
+    /// Below 2 there is no consensus to speak of: at 1 every observation is
+    /// adopted on sight, which is exactly the per-pass string flicker the
+    /// owner's log is made of.
+    var readingConsensusPasses: Int = 2
+
+    /// How much more confidence a new reading must carry than the one being
+    /// held, to replace it **without** waiting out `readingConsensusPasses`.
+    ///
+    /// The persistence rule alone would make a genuine re-read of a corrected
+    /// sign wait two passes even when the recogniser is emphatic; this is the
+    /// half that lets an unmistakably better reading through at once. It is a
+    /// *gain* and not a floor on purpose: what matters is not how sure the
+    /// recogniser is in absolute terms — Vision's confidences are not
+    /// comparable across scenes — but whether it is substantially surer than
+    /// it was of the reading currently on screen.
+    ///
+    /// 0.15 is set where the two readings stop being a coin toss: a
+    /// near-miss pair ("START" 0.62, "5TART" 0.55) never clears it however
+    /// often it repeats, while a reading the recogniser has genuinely resolved
+    /// ("START" 0.4 → "START" 0.9 the moment the camera settles) does.
+    var readingConfidenceGain: Double = 0.15
+
+    // MARK: Dispatch pacing (owner device report, 2026-09-19)
+
+    // The same device log the consensus above was read out of, read for its
+    // *timing* rather than its strings. A tick that finds a pending region
+    // dispatches it, and a region the tier has not answered stays pending —
+    // which is deliberate, and which on the device read as a `cache_miss` and
+    // a fresh attempt on **every** pass, several per second for as long as the
+    // sign stayed in frame. Each of those is a request the elder did not ask
+    // for; each one that reaches the brain is a 1 GB generation started beside
+    // the Whisper and camera stacks, and the brain's own idle-unload (5 s)
+    // means the dispatch a second later loads that gigabyte again. The log
+    // ends in memory-pressure events and the app dying, and the shape of it is
+    // not "too much work" but "the same work, restarted".
+    //
+    // Two clocks pace it, both read against the pipeline's own injected clock
+    // and both checked in the dispatch's prologue, before anything is claimed.
+    // **Neither one drops a string.** A string held back is still pending and
+    // still unclaimed, so the first tick that is allowed to dispatch carries
+    // it — which is also what turns a burst of arrivals into one batch rather
+    // than one request each. The consensus above is the other half of the same
+    // fix: fewer reading changes are fewer strings to dispatch at all.
+    //
+    // The elder's own ask is not a pass. Extract mode's tap asks for one
+    // region, once, and is not paced — a tap that did nothing because a
+    // background dispatch happened 0.9 s earlier would be the mode failing at
+    // its one job. A tap still moves both clocks, so the background work it
+    // pre-empts waits behind it rather than racing it.
+
+    /// Minimum seconds between two dispatches of pending strings.
+    ///
+    /// Sized against the OCR cadence rather than against politeness: the
+    /// nominal pass is 0.25 s and the reduced still-scene cadence is 0.7 s, so
+    /// before this key a still scene with an unanswerable string dispatched
+    /// **six to fourteen times** per second-old sign. 1.5 s is a little over
+    /// two passes at the reduced cadence — long enough that consecutive passes
+    /// genuinely accumulate into one batch, short enough that a string which
+    /// appears the moment the camera settles still leaves the device within
+    /// the beat the elder reads as "it is translating". It is not a timeout:
+    /// nothing is given up on when the interval passes, it is simply sent.
+    var translationDispatchMinInterval: TimeInterval = 1.5
+
+    /// Minimum seconds between two **brain generation attempts**.
+    ///
+    /// A generation is the one step measured in seconds of a 1 GB model
+    /// resident and the one step whose cost a following dispatch re-pays in
+    /// full. The device log's shape was one attempt per cycle against a 5 s
+    /// idle-unload: the model loaded, generated, unloaded, and was loaded
+    /// again for the next cycle, indefinitely. 8 s is comfortably longer than
+    /// that unload and comfortably inside `brainTranslationTimeoutSeconds`, so a
+    /// scene being read steadily produces roughly one generation per several
+    /// seconds — and the strings that arrive inside the interval **wait for
+    /// it** rather than skipping it. A string the brain has not been asked
+    /// about is never handed to the cloud ahead of it: the cascade is the
+    /// cascade (FR-LCT-008), so holding a string is the only honest way to
+    /// hold the brain back.
+    var brainAttemptMinInterval: TimeInterval = 8
+
     // MARK: Decluttering (OD5)
 
     /// Normalised centroid distance below which two nearby regions are

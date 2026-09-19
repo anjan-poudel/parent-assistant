@@ -36,6 +36,20 @@ import Foundation
 //    `regionMissPasses` consecutive misses; one missed pass leaves the region
 //    and its translation intact. The identifier of a removed region is
 //    released and never resurrected.
+//  - **The reading is stabilised, not just the identity** (owner device
+//    report, 2026-09-19: `regionCount` constant, overlay stable, and
+//    `regionSetHash` changing every pass). An observation does not become the
+//    region's string by arriving: the region *holds* the reading it has
+//    adopted, and a different reading replaces it only once it is
+//    corroborated — `readingConsensusPasses` consecutive sightings, or a
+//    `readingConfidenceGain` over the held reading's confidence. A one-pass
+//    misread therefore never reaches the overlay, the translation key or the
+//    scene digest, and a still scene's digest is a constant the device log can
+//    be checked against. The held reading carries the **highest** confidence
+//    seen for it while it is held, so a flicker of confidence cannot dislodge
+//    it either. This is the string-level half of the same stability the
+//    hysteresis above gives identity and geometry; before it, the gate fired
+//    on every pass because the *reading* was the thing churning.
 //  - **A departure is bounded in time, not only in passes** (owner device
 //    verdict, 2026-09-17: "the translation sticks around even when the camera
 //    moved away"). Pass-count hysteresis is the wrong unit for how long an
@@ -199,14 +213,59 @@ struct TextRegionStabilizer {
     /// even if the two ever drift apart.
     private var passIndex = 0
 
+    /// A reading this region is still weighing against the one it holds
+    /// (owner device report, 2026-09-19).
+    ///
+    /// It exists so that the *pass count* and the *confidence* a replacement
+    /// has to earn are carried across passes rather than re-derived from the
+    /// pass in hand: "seen twice" and "seen once, but far surer" are the two
+    /// questions `TextRegionStabilizer.observe` asks, and neither can be
+    /// answered from one observation.
+    ///
+    /// `confidence` is the **highest** seen for this candidate, so a flicker of
+    /// confidence inside an otherwise stable candidate cannot restart its
+    /// count — the same "highest seen over the window" rule the held reading's
+    /// own confidence follows.
+    private struct CandidateReading: Equatable {
+        /// The candidate's text as last observed; the latest spelling of a
+        /// reading whose normalized form has not changed.
+        var text: String
+        /// trim + collapse + case-fold. This is the candidate's identity: two
+        /// observations that normalize alike are the same reading, which is
+        /// the feature's one definition of "the same string".
+        var normalizedText: String
+        var detectedLanguage: String?
+        /// The highest confidence seen for this candidate while it has been
+        /// under observation.
+        var confidence: Double
+        /// Consecutive passes this candidate has been observed in. Reset by
+        /// any pass that observes a *different* reading, including the held
+        /// one — a claim that skips a pass has not persisted.
+        var passes: Int
+    }
+
     /// What the stabiliser carries for one region between passes.
     private struct TrackedRegion: Equatable {
         let id: RegionIdentity
+        /// The **adopted** reading's text — what the overlay draws, what the
+        /// translation key is derived from and what the scene digest folds.
+        /// Not every observation reaches it: see `observe`.
         var text: String
+        /// The adopted reading's normalized form. Always
+        /// `LiveTranslateTextNormalization.normalized(text)` — the two move
+        /// together or not at all.
         var normalizedText: String
         var box: NormalizedBox
         var detectedLanguage: String?
+        /// The **highest** confidence seen for the adopted reading while it
+        /// has been held, not the last one observed: the reading that is kept
+        /// is the best-evidenced one, so the number that decides whether a
+        /// replacement is "substantially surer" must be the best the held
+        /// reading ever had, not its latest sample.
         var confidence: Double
+        /// The reading currently being weighed, if this pass's observation
+        /// differed from the adopted one.
+        var candidate: CandidateReading?
         /// The grouper's identity for the block this region is, when the
         /// detector reported one (scene-block rework, 2026-09-18). It is the
         /// strongest identity signal there is — the member-string *set* of the
@@ -236,6 +295,93 @@ struct TextRegionStabilizer {
             StableTextRegion(id: id, text: text, normalizedText: normalizedText,
                              box: box, detectedLanguage: detectedLanguage,
                              confidence: confidence)
+        }
+
+        /// The string this region was **last observed** at — the reading it
+        /// carries when that is what the pass saw, and the candidate it is
+        /// still weighing when the pass saw something else.
+        ///
+        /// This is the value the region's text *was* before the reading
+        /// consensus existed, and it is why the matching rules read it and not
+        /// the adopted reading: **the consensus decides what the elder sees,
+        /// never which surface a pass is looking at.** Identity, the string
+        /// window, the block claim and the geometry gates therefore behave
+        /// exactly as they did — a region whose reading is mid-consensus is
+        /// still found by its box, still claimable by its last observation, and
+        /// still refused to a block that says it is another surface — and the
+        /// only thing that changes is what the publication carries.
+        var lastObservedText: String { candidate?.text ?? text }
+
+        /// `lastObservedText`'s normalized form — the matching key proper.
+        var lastObservedNormalizedText: String { candidate?.normalizedText ?? normalizedText }
+
+        /// Folds one pass's observation into this region's reading consensus.
+        ///
+        /// Three cases, and nothing else:
+        ///
+        ///  - **The observation is the held reading** (its normalized form
+        ///    equals the held one — the feature's one definition of "the same
+        ///    string"). Nothing moves: the held reading's confidence rises to
+        ///    the higher of the two, and any candidate under observation is
+        ///    dropped, because a reading that skips a pass has not persisted.
+        ///    The held *spelling* is not refreshed from a re-spelling: the
+        ///    reading is what the elder sees, and holding it whole — text and
+        ///    normalized form together — is what makes the screen still. The
+        ///    two are the same reading by construction, so the digest and the
+        ///    translation key are unchanged either way.
+        ///  - **A different reading, already under observation.** It takes the
+        ///    pass count up by one and the higher of the two confidences.
+        ///  - **A different reading, not under observation.** It starts a
+        ///    candidate at one pass. A third reading arriving mid-window
+        ///    *replaces* the candidate rather than adding to it: the question
+        ///    is "has one new reading persisted", and two alternating readings
+        ///    have not.
+        ///
+        /// The candidate is then adopted when it has **persisted** for
+        /// `readingConsensusPasses` consecutive passes, or when it is
+        /// **substantially surer** than the held reading — a
+        /// `readingConfidenceGain` or more over the highest confidence the
+        /// held reading ever carried. Adoption replaces text, normalized form,
+        /// language and confidence together, and clears the candidate: the
+        /// reading is one value, and a half-adopted one is exactly the state
+        /// that would let a box show a string its key was not derived from.
+        mutating func observe(text observedText: String,
+                              normalizedText normalizedObservedText: String,
+                              detectedLanguage observedLanguage: String?,
+                              confidence observedConfidence: Double,
+                              config: LiveTranslateConfig) {
+            guard normalizedObservedText != normalizedText else {
+                confidence = max(confidence, observedConfidence)
+                candidate = nil
+                return
+            }
+
+            var pending: CandidateReading
+            if let watched = candidate, watched.normalizedText == normalizedObservedText {
+                var carried = watched
+                carried.passes += 1
+                carried.confidence = max(carried.confidence, observedConfidence)
+                carried.text = observedText
+                carried.detectedLanguage = observedLanguage ?? carried.detectedLanguage
+                pending = carried
+            } else {
+                pending = CandidateReading(text: observedText,
+                                           normalizedText: normalizedObservedText,
+                                           detectedLanguage: observedLanguage,
+                                           confidence: observedConfidence,
+                                           passes: 1)
+            }
+            candidate = pending
+
+            let persisted = pending.passes >= config.readingConsensusPasses
+            let substantiallySurer = pending.confidence - confidence >= config.readingConfidenceGain
+            guard persisted || substantiallySurer else { return }
+
+            text = pending.text
+            normalizedText = pending.normalizedText
+            detectedLanguage = pending.detectedLanguage
+            confidence = pending.confidence
+            candidate = nil
         }
     }
 
@@ -281,18 +427,28 @@ struct TextRegionStabilizer {
             guard !normalized.isEmpty, observation.normalizedBox.isValid else { continue }
 
             if let index = bestMatchIndex(for: observation, normalized: normalized, seen: seen) {
-                regions[index].text = observation.text
-                regions[index].normalizedText = normalized
+                // Geometry and liveness always follow the observation; the
+                // *reading* goes through the consensus (`TrackedRegion.observe`).
+                // A wobbling string therefore moves the box the elder is
+                // looking at and nothing they are reading.
                 regions[index].box = observation.normalizedBox
-                regions[index].detectedLanguage = observation.detectedLanguage
-                regions[index].confidence = observation.confidence
                 regions[index].blockIdentity = observation.blockIdentity
                 regions[index].lastSeenPass = passIndex
                 regions[index].lastSeenAt = now
                 regions[index].consecutiveDetections += 1
                 regions[index].consecutiveMisses = 0
+                regions[index].observe(text: observation.text,
+                                       normalizedText: normalized,
+                                       detectedLanguage: observation.detectedLanguage,
+                                       confidence: observation.confidence,
+                                       config: config)
                 seen.insert(regions[index].id)
             } else {
+                // A new region adopts its first observation outright: there is
+                // nothing yet for a flicker to be a flicker *of*, and the
+                // appear hysteresis already holds it off the screen for
+                // `regionAppearPasses` passes. A different reading on the next
+                // pass is a candidate like any other.
                 let region = TrackedRegion(
                     id: RegionIdentity(rawValue: nextIdentityRawValue),
                     text: observation.text,
@@ -300,6 +456,7 @@ struct TextRegionStabilizer {
                     box: observation.normalizedBox,
                     detectedLanguage: observation.detectedLanguage,
                     confidence: observation.confidence,
+                    candidate: nil,
                     blockIdentity: observation.blockIdentity,
                     lastSeenPass: passIndex,
                     lastSeenAt: now,
@@ -318,9 +475,19 @@ struct TextRegionStabilizer {
         //    followed region is *seen*, so it refreshes the departure clock
         //    too: the overlay is following its box, and the grace exists for
         //    the camera having left, not for the OCR having skipped a pass.
+        //
+        //    The key is the string the last OCR pass remembered, which is the
+        //    region's `lastObservedText`: its adopted reading when that is
+        //    what was just seen, and the candidate it is still weighing when
+        //    the reading has moved on from what is on screen. Matching on the
+        //    adopted reading alone would leave the region whose text is
+        //    mid-consensus untracked — and the consensus is a rendering
+        //    decision, so that is the adopted reading being allowed to say
+        //    which surface the tracker is talking about, which it must not.
         for (text, box) in tracked.sorted(by: { $0.key < $1.key }) {
-            guard let index = regions.firstIndex(where: { !seen.contains($0.id) && $0.text == text })
-            else { continue }
+            guard let index = regions.firstIndex(where: {
+                !seen.contains($0.id) && $0.lastObservedText == text
+            }) else { continue }
             regions[index].box = box
             regions[index].lastSeenPass = passIndex
             regions[index].lastSeenAt = now
@@ -466,7 +633,7 @@ struct TextRegionStabilizer {
             } else {
                 sameBlock = false
             }
-            let sameString = region.normalizedText == normalized
+            let sameString = region.lastObservedNormalizedText == normalized
                 && passIndex - region.lastSeenPass <= config.regionStringIdentityPasses
             // Two blocks whose member lines have nothing in common are two
             // different surfaces, and geometry cannot make one into the other: a

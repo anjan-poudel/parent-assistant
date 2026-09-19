@@ -268,8 +268,12 @@ enum LlamaGrammar {
 /// defaults) so a future LLM.swift default bump cannot silently change
 /// on-device behavior.
 enum OnDeviceSampling {
-    /// Fixed seed — dated so the constant is self-explaining in logs
-    /// ("GNERATING WITH SEEED" debug print in LLM.swift).
+    /// Fixed seed — dated so the constant is self-explaining.
+    ///
+    /// A debug print in LLM.swift used to echo this seed on every generation;
+    /// it was removed on 2026-09-19 (it fired on every Debug build, which is
+    /// the owner's device-test configuration, and told the log nothing the
+    /// constant here does not).
     static let fixedSeed: UInt32 = 20_260_907
     static let temperature: Float = 0
     static let topK: Int32 = 40

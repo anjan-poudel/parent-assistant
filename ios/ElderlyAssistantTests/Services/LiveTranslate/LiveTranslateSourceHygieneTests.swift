@@ -33,7 +33,12 @@ final class LiveTranslateSourceHygieneTests: XCTestCase {
         ("64", "translationMaxLengthAllowance"),
         ("120", "sceneTextMaxLength"),
         ("200", "cacheGeneralEntryLimit"),
-        ("1200", "cloudBatchMaxCharacters")
+        ("1200", "cloudBatchMaxCharacters"),
+        // The dispatch pacing (owner device report, 2026-09-19). Only the
+        // window: `brainAttemptMinInterval` is 8, and the note above puts small
+        // integers out of scope because they are not a signal. 1.5 is the one
+        // an "I'll just send it here" would carry into the pipeline.
+        ("1.5", "translationDispatchMinInterval")
     ]
 
     /// Files allowed to carry one of those literals, each with the reason. A
