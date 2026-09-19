@@ -1352,8 +1352,17 @@ struct LiveTranslateConfig: Equatable {
     /// local translation model on device without the warden's reserve/admit
     /// gate in the way. While true, the tier's load skips the reservation
     /// entirely (residency still recorded); false restores the gated path.
-    /// Testing-only — reverts to false when the round-3 quant ships.
-    var wardenBypassForTesting: Bool = true
+    ///
+    /// FLIPPED OFF (2026-09-20) by the owner's own directive ("the bypass
+    /// stays until proven on device, then flips off"). The 02:35 capture
+    /// proved the load path — loads proceed, generations answer, the device
+    /// survives — and the 05:25 capture showed the bypass's failure mode:
+    /// an unreserved ~1 GB page-in spiked the device mid-load (warden
+    /// evicted the encoder, tier abandoned the load) because no victim was
+    /// evicted BEFORE the page-in. The gated path evicts first. The Q4's
+    /// live footprint (~1.5 GB) sits under the 3.2 GB class budget, so the
+    /// reserve grants with evictions rather than denying `over_budget_alone`.
+    var wardenBypassForTesting: Bool = false
 
     /// How long the warden's notice stays on screen before it takes itself
     /// down, in seconds (owner directive, 2026-09-19: "keep the user in the

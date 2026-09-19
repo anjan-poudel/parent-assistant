@@ -91,6 +91,15 @@ final class AppCoordinator: ObservableObject {
         liveTranslateConsentGate.currentDecision()
     }
 
+    /// [POINT-ASK] The point-ask consent decision — the photo-egress
+    /// counterpart of the accessor above, for the Settings leaf's
+    /// revocation surface (Phase 2). Read-only here: recording and
+    /// revocation go through the session's prompt and the future control,
+    /// the only pair of writers the design sanctions.
+    var pointAskConsentDecision: PointAskConsentGate.Decision {
+        pointAskConsentGate.currentDecision()
+    }
+
     /// The region-qualified app locale — the Settings locale row's
     /// binding (encoder-branch SettingsView, 2026-09-14). Bridged to
     /// `AppLocale`'s own UserDefaults persistence; `activeLocale` keeps
@@ -775,6 +784,19 @@ final class AppCoordinator: ObservableObject {
     /// init (a lock and a closure, no I/O; nothing is read until a decision
     /// is asked for) and never a second one anywhere.
     private let liveTranslateConsentGate: LiveTranslateConsentGate
+    /// [POINT-ASK] The app's ONE point-ask consent gate — the photo-egress
+    /// counterpart of the live-translate gate above, with its own key
+    /// (`plugin.point_ask.consent.v1`) and its own disclosure version
+    /// (design: docs/superpowers/specs/2026-09-19-point-tap-ask-design.md
+    /// §5, constitution OD-14). The session's prompt and (Phase 2) the
+    /// Settings revocation control drive THIS instance; no other writer
+    /// exists. Constructed in init over the same cipher store, so both
+    /// consent records ride the encrypted file channel.
+    private let pointAskConsentGate: PointAskConsentGate
+    /// [POINT-ASK] The point-ask master-switch store (cloud default OFF —
+    /// design §1 item 2). A plain `UserDefaults` preference, read by the
+    /// session at every attempt decision.
+    private let pointAskSettings = PointAskSettings()
     /// [LIVE-TRANSLATE T-015] The prompt/control state shared by the session
     /// view's prompt and the Settings leaf. Created on the main actor on
     /// first use — it is view state, so it is born where views live.
@@ -2040,6 +2062,42 @@ final class AppCoordinator: ObservableObject {
     /// instead of a session that silently cannot talk.
     private func makeLiveTranslateDependencies(locale: Locale) -> LiveTranslateSessionDependencies? {
         guard let queue = speakQueue else { return nil }
+        // [POINT-ASK] The hosted point-ask session's dependencies: the
+        // process's own gate, settings, cache and client, plus per-session
+        // engines — the saliency engine the tap hit-test reads boxes from
+        // (the shipped `VisionObjectDetectionEngine`, bounded to the
+        // resolver's object limit) and the OCR engine the analysis reads.
+        // The mask engine is wired behind the config's opt-in
+        // (`maskEngineEnabled`) and, since [MASK-OBSERVABILITY], carries
+        // the bus so a pass that fails or answers "background" is visible
+        // in the capture instead of silently degrading every tap to a pad.
+        let pointAskConfig = PointAskConfig.default
+        let pointAsk = PointAskSessionDependencies(
+            locale: locale,
+            consentGate: pointAskConsentGate,
+            settings: pointAskSettings,
+            cache: labelTranslationCache,
+            client: geminiClient,
+            objectEngine: VisionObjectDetectionEngine(maximumObjects: pointAskConfig.resolverObjectLimit),
+            maskEngine: pointAskConfig.maskEngineEnabled
+                ? PointAskMaskEngine(observabilityBus: observabilityBus)
+                : nil,
+            // [YOLO] The real object detector behind the tap box: YOLO11n
+            // on the Neural Engine, auto-installed on first point-ask use
+            // (the engine's availability probe kicks the catalog download
+            // when the artifact is absent — the standard downloader
+            // fetches the zip, verifies the strict sha256 and unpacks the
+            // `.mlmodelc` directory).
+            yoloEngine: PointAskYOLOEngine(modelStore: modelStore,
+                                           provisioner: modelDownloadService,
+                                           observabilityBus: observabilityBus),
+            ocrEngine: VisionTextRecognitionEngine(),
+            observabilityBus: observabilityBus,
+            config: pointAskConfig,
+            // The shell's own speak path: the answer is the assistant's
+            // speech, on the same lane every other reply takes. Spoken,
+            // never logged.
+            speak: { [weak self] line in self?.speak(text: line) })
         return LiveTranslateSessionDependencies(
             locale: locale,
             camera: LiveCameraSession(observabilityBus: observabilityBus),
@@ -2059,7 +2117,8 @@ final class AppCoordinator: ObservableObject {
             // A struct over `UserDefaults`: one store, so the session's
             // toggle and Settings read and write the same preference.
             settings: LiveTranslateSettings(),
-            observabilityBus: observabilityBus)
+            observabilityBus: observabilityBus,
+            pointAsk: pointAsk)
     }
 
     /// [LIVE-TRANSLATE T-027] The Home feature tile's entry (FR-LCT-001).
@@ -2157,6 +2216,12 @@ final class AppCoordinator: ObservableObject {
         // only thing in the app that records or revokes consent.
         self.liveTranslateConsentGate = LiveTranslateConsentGate(storage: liveTranslateStorage,
                                                                  observabilityBus: bus)
+        // [POINT-ASK] The point-ask consent gate, on the same encrypted
+        // channel under its own key: one instance for the process lifetime,
+        // the only thing in the app that records or revokes the photo-egress
+        // consent (design §5 / OD-14).
+        self.pointAskConsentGate = PointAskConsentGate(storage: liveTranslateStorage,
+                                                       observabilityBus: bus)
         // [TURN-TIMING] The turn tracer lives as long as the app: every
         // voice component (pipeline, router, speaker, recognizers) shares
         // it. Its finalize callback (the transcript caption) is wired in

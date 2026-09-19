@@ -80,6 +80,21 @@ struct LogSanitiser {
         // capture received — count-shaped, the discriminator between a
         // silent capture and a dead tap.
         "chunks",
+        // [ANALYSIS-DIAGNOSTIC] (2026-09-19) The pre-pipeline failure's
+        // geometry — "1920x1080" frame size and "x,y,w,h" rect. Count-
+        // and coordinate-shaped; the numbers that name why a crop was
+        // refused. Never text, never pixels' content.
+        "frame",
+        "rect",
+        // The analysis launch's cloud switch state — "on"/"off", a closed
+        // two-token vocabulary.
+        "cloud",
+        // [YOLO-OBSERVABILITY] (2026-09-19) The detector pass's evidence —
+        // COCO class names with confidences ("bottle:0.87,person:0.45")
+        // and normalized boxes ("0.1,0.2,0.5,0.6;…"). Closed vocabulary
+        // and coordinates; never pixels, never scene text.
+        "labels",
+        "boxes",
         // [TURN-TIMING] The serialized per-turn stage list
         // (`[{stage, ms}, …]`) — stage names and integer durations only,
         // never transcript or reply text (see VoiceTurnLatencyTracer).
@@ -169,6 +184,25 @@ struct LogSanitiser {
         // `brain_translation_unavailable` and the `reason` token could not
         // say which of four different failures it was.
         "failureStage",
+        // [EMPTY-DECODE] (2026-09-19) The three keys the owner's
+        // answered-nothing capture needed. Every brain batch ran 7–20 seconds
+        // and resolved nothing, and `resolvedCount`/`unresolvedCount`/
+        // `durationMs` could not say whether the decode emitted anything at
+        // all or emitted a well-formed answer that every rule refused — two
+        // different bugs with two different fixes.
+        //
+        //  - `generationLength` is a character COUNT of the raw answer. The
+        //    characters themselves are never passed to the emitter, which
+        //    takes a `BrainGenerationReading` and renders only its integer.
+        //  - `generationShape` is `BrainGenerationShape`, a closed token set
+        //    (empty / unparsable / no_array / array).
+        //  - `rejections` is a histogram keyed by `BrainAnswerRejection`,
+        //    another closed set, rendered `token:count,…` (or `none`). A
+        //    closed enum is the only key type, so a recognized string has no
+        //    way to be expressed in this value.
+        "generationLength",
+        "generationShape",
+        "rejections",
         "disclosureVersion",
         // [LIVE-CAMERA-TRANSLATION] AM-2 decision, recorded rather than
         // widened silently: `cap`. The shipped `GeminiCostGovernor` emits

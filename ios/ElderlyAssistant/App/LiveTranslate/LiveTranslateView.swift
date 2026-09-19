@@ -111,7 +111,14 @@ struct LiveTranslateView: View {
                         // translation, and the chrome's toggle asks for the
                         // translated view (or back to extract mode).
                         onTranslateRegion: { model.translateRegion($0) },
-                        onSetTranslateAll: { model.setExtractMode(!$0) })
+                        onSetTranslateAll: { model.setExtractMode(!$0) },
+                        // [POINT-ASK] The tap box + chip, drawn through the
+                        // same presentation the picture is drawn with, with
+                        // the chip's tap routed to the hosted session. Nil
+                        // surface (no point-ask wiring) draws nothing new.
+                        pointAsk: model.pointAsk?.overlaySurface,
+                        presentation: presentation(in: proxy),
+                        onPointAskChipTap: { model.pointAsk?.chipTapped() })
                 }
 
                 chrome(in: proxy)
@@ -120,6 +127,10 @@ struct LiveTranslateView: View {
                 // one thing that must not be missed) and the permission card
                 // explains before the system prompt appears.
                 consentPrompt
+
+                // [POINT-ASK] The point-ask consent sheet, over everything:
+                // the one decision that may let a crop leave the phone.
+                pointAskConsentPrompt
 
                 permissionCard
             }
@@ -179,7 +190,17 @@ struct LiveTranslateView: View {
                                      onPinchEnded: { zoom.pinchEnded() },
                                      onPan: { zoom.pan(to: $0) },
                                      onPanEnded: { zoom.panEnded() },
-                                     onFocusTap: { zoom.focus(atDevicePoint: $0) })
+                                     onFocusTap: { zoom.focus(atDevicePoint: $0) },
+                                     // [POINT-ASK] The same tap also anchors
+                                     // the point-ask box: one gesture, two
+                                     // intents — focus *and* point. The
+                                     // hosted session resolves the frame
+                                     // point (the picture's coordinates,
+                                     // not the device's).
+                                     onPointAskTap: { framePoint in
+                                         model.pointAsk?.handleTap(
+                                             atNormalizedPoint: framePoint)
+                                     })
                 .accessibilityHidden(true)
         } else {
             Color.black
@@ -196,6 +217,13 @@ struct LiveTranslateView: View {
                     closeControl
                     Spacer(minLength: DesignTokens.interElementSpacing)
                     CloudActivityIndicatorView(surface: model.cloudIndicator)
+                    // [POINT-ASK] The visible cloud indicator for the
+                    // point-ask tier: on while a crop may be leaving the
+                    // phone (design §5). Beside the live-translate
+                    // indicator — the elder reads both the same way.
+                    if model.pointAsk?.cloudIndicatorActive == true {
+                        PointAskCloudIndicatorView(locale: model.locale)
+                    }
                 }
                 // Centred, so the freeze is one tap away in the middle of the
                 // strip and cannot be confused with the exit on the leading
@@ -431,6 +459,23 @@ struct LiveTranslateView: View {
                 ConsentPromptView(surface: model.consent.promptSurface,
                                   onGrant: { model.grantCloudConsent() },
                                   onDecline: { model.declineCloudConsent() })
+                    .padding(DesignTokens.interElementSpacing)
+            }
+        }
+    }
+
+    /// [POINT-ASK] The point-ask consent sheet, presented by the hosted
+    /// session at its first cloud need — the same "over everything, no
+    /// auto-dismiss" surface the live-translate prompt uses, with the
+    /// point-ask disclosure copy.
+    @ViewBuilder
+    private var pointAskConsentPrompt: some View {
+        if let pointAsk = model.pointAsk, pointAsk.isConsentPromptPresented {
+            ZStack {
+                Color.black.opacity(0.45)
+                PointAskConsentPromptView(surface: pointAsk.consentSurface,
+                                          onGrant: { pointAsk.grantCloudConsent() },
+                                          onDecline: { pointAsk.declineCloudConsent() })
                     .padding(DesignTokens.interElementSpacing)
             }
         }
@@ -837,6 +882,11 @@ struct LiveTranslatePreviewHost: UIViewRepresentable {
     /// A tap on the picture, converted to the device's own point of interest
     /// (normalized, top-left origin) through the window and then the layer.
     let onFocusTap: (CGPoint) -> Void
+    /// [POINT-ASK] The same tap, in the **frame's** coordinates (pixels,
+    /// top-left origin) — the picture's own space, which the point-ask
+    /// session resolves the tapped box in. The focus path and this path
+    /// are one gesture with two intents; neither replaces the other.
+    let onPointAskTap: (CGPoint) -> Void
 
     func makeUIView(context: Context) -> PreviewView {
         let view = PreviewView()
@@ -861,6 +911,7 @@ struct LiveTranslatePreviewHost: UIViewRepresentable {
         context.coordinator.onPan = onPan
         context.coordinator.onPanEnded = onPanEnded
         context.coordinator.onFocusTap = onFocusTap
+        context.coordinator.onPointAskTap = onPointAskTap
         context.coordinator.presentation = presentation
         // The drag exists only while a window does: with the whole frame on
         // screen there is nothing to move, and a disabled recogniser leaves the
@@ -876,7 +927,8 @@ struct LiveTranslatePreviewHost: UIViewRepresentable {
                     onPinchEnded: onPinchEnded,
                     onPan: onPan,
                     onPanEnded: onPanEnded,
-                    onFocusTap: onFocusTap)
+                    onFocusTap: onFocusTap,
+                    onPointAskTap: onPointAskTap)
     }
 
     /// The gesture target: it reads each touch in the preview view's own
@@ -891,6 +943,7 @@ struct LiveTranslatePreviewHost: UIViewRepresentable {
         var onPan: (CGPoint) -> Void
         var onPanEnded: () -> Void
         var onFocusTap: (CGPoint) -> Void
+        var onPointAskTap: (CGPoint) -> Void
         weak var panRecognizer: UIPanGestureRecognizer?
 
         init(presentation: LiveCameraPresentation,
@@ -898,13 +951,15 @@ struct LiveTranslatePreviewHost: UIViewRepresentable {
              onPinchEnded: @escaping () -> Void,
              onPan: @escaping (CGPoint) -> Void,
              onPanEnded: @escaping () -> Void,
-             onFocusTap: @escaping (CGPoint) -> Void) {
+             onFocusTap: @escaping (CGPoint) -> Void,
+             onPointAskTap: @escaping (CGPoint) -> Void = { _ in }) {
             self.presentation = presentation
             self.onPinch = onPinch
             self.onPinchEnded = onPinchEnded
             self.onPan = onPan
             self.onPanEnded = onPanEnded
             self.onFocusTap = onFocusTap
+            self.onPointAskTap = onPointAskTap
         }
 
         func makePinchRecognizer() -> UIPinchGestureRecognizer {
@@ -973,6 +1028,11 @@ struct LiveTranslatePreviewHost: UIViewRepresentable {
             let framePoint = presentation.framePoint(ofContainerPoint: point)
             let unzoomedPoint = presentation.unzoomedContainerPoint(ofFramePoint: framePoint)
             onFocusTap(layer.captureDevicePointConverted(fromLayerPoint: unzoomedPoint))
+            // [POINT-ASK] The same tap, in the picture's own coordinates:
+            // the session anchors the box where the finger is on the frame
+            // (which is the same place the focus landed — one map, two
+            // intents).
+            onPointAskTap(framePoint)
         }
 
         /// Where the fingers landed, inside the visible window: 0–1 from the
@@ -1016,5 +1076,111 @@ struct LiveTranslatePreviewHost: UIViewRepresentable {
                 presentation.layerTransform(anchor: CGPoint(x: bounds.midX, y: bounds.midY)))
             CATransaction.commit()
         }
+    }
+}
+
+// MARK: - Point, tap & ask surfaces
+
+/// [POINT-ASK] The consent sheet the point-ask session presents at its
+/// first cloud need — the same card, the same equal-weight choices and the
+/// same no-auto-dismiss rule as the shipped `ConsentPromptView`, with the
+/// point-ask disclosure copy (design §5: what leaves — the small crop,
+/// nothing else — where it goes, nothing until agreement, stop any time).
+struct PointAskConsentPromptView: View {
+
+    let surface: PointAskConsentSurface
+    let onGrant: () -> Void
+    let onDecline: () -> Void
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text(surface.title)
+                .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .foregroundColor(DesignTokens.textPrimary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("pointask.consent.heading")
+
+            Text(surface.message)
+                .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize))
+                .foregroundColor(DesignTokens.textPrimary)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("pointask.consent.message")
+
+            if let failure = surface.failureMessage {
+                Text(failure)
+                    .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize))
+                    .foregroundColor(DesignTokens.textPrimary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("pointask.consent.failure")
+            }
+
+            VStack(spacing: 12) {
+                ForEach(surface.actions, id: \.kind) { action in
+                    actionButton(action)
+                }
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity)
+        .background(DesignTokens.card)
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    /// The one button construction: both choices come through it, so
+    /// neither can acquire a style the other does not have (the shipped
+    /// `ConsentPromptView` rule).
+    private func actionButton(_ action: PointAskConsentSurface.Action) -> some View {
+        Button {
+            switch action.kind {
+            case .grant: onGrant()
+            case .decline: onDecline()
+            }
+        } label: {
+            Text(action.title)
+                .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .foregroundColor(.white)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 20)
+                .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
+                .background(DesignTokens.accent)
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier(action.accessibilityIdentifier)
+    }
+}
+
+/// [POINT-ASK] The visible cloud indicator (design §5): on while a crop
+/// may be leaving the phone, labelled from the catalog in the active
+/// language ("Looking online" — the mirror of the shipped "Translating
+/// online" indicator).
+struct PointAskCloudIndicatorView: View {
+
+    let locale: Locale
+
+    /// An SF Symbol name is a system identifier, not user-visible copy, so
+    /// it is a constant here — the same rule every other glyph in this
+    /// file states.
+    static let symbolName = "icloud.and.arrow.up"
+
+    var body: some View {
+        HStack(spacing: DesignTokens.interElementSpacing / 2) {
+            Image(systemName: Self.symbolName)
+                .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                                            weight: .semibold))
+            Text(L10n.str("pointask.cloudIndicator.label", locale: locale))
+                .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                                            weight: .semibold))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .foregroundColor(DesignTokens.textPrimary)
+        .padding(.horizontal, DesignTokens.interElementSpacing)
+        .frame(minHeight: DesignTokens.minTapTargetSize)
+        .background(DesignTokens.card)
+        .clipShape(Capsule())
+        .accessibilityIdentifier("pointask.cloudIndicator")
     }
 }

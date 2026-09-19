@@ -694,6 +694,64 @@ final class ModelLifecycleManagerTests: XCTestCase {
             manager, request(.brain, modelID: brain17B, owner: owner)))
     }
 
+    /// [LOAD-SERIALIZATION] The translation tier's preempt: the in-flight
+    /// reservation of the named slot stands down, nothing else moves, and
+    /// the stand-down is reported under the reason it happened for — the
+    /// recognizer reads `isReservationHeld` and the tier reads the return.
+    /// The second reservation is the encoder because the serial large-load
+    /// bound admits only one heavy load at a time (the denial is the rule
+    /// this preempt exists to keep out of the tier's way).
+    func testAbandonInFlightPreemptsTheReservationOfTheSlotAndOnlyThatSlot() {
+        var events: [ModelLifecycleEvent] = []
+        manager.onEvent = { events.append($0) }
+        let owner = FakeOwner()
+
+        guard let stt = reserveOrFail(
+            manager, request(.speechToText,
+                             modelID: ModelCatalog.whisperKitNepaliMedium,
+                             owner: owner)),
+              let encoder = reserveOrFail(
+            manager, request(.intentEncoder,
+                             modelID: ModelCatalog.intentEncoderSpike,
+                             owner: owner)) else { return }
+
+        let abandoned = manager.abandonInFlight(slot: .speechToText, reason: .preempted)
+
+        XCTAssertEqual(abandoned.map(\.id), [stt.id],
+                       "the in-flight reservation of the preempted slot stands down")
+        XCTAssertTrue(manager.isReservationHeld(encoder.id),
+                      "a reservation of another slot is not touched")
+        XCTAssertFalse(manager.isReservationHeld(stt.id),
+                       "the preempted permit is gone — that is the word the load "
+                       + "site reads when its load completes")
+        XCTAssertTrue(events.contains(.reservationAbandoned(slot: .speechToText,
+                                                            reason: .preempted)),
+                      "the stand-down is reported under the reason it happened for")
+        XCTAssertEqual(manager.snapshot().transientLiveBytes,
+                       ModelLifecycleInventory.footprint(for: .intentEncoder,
+                                                         modelID: ModelCatalog.intentEncoderSpike).liveBytes,
+                       "the ledger's arithmetic now sees only the surviving reservation")
+        // The preempt is not sticky either: the recognizer's next load is
+        // judged on its own merits.
+        XCTAssertNotNil(reserveOrFail(
+            manager, request(.speechToText,
+                             modelID: ModelCatalog.whisperKitNepaliMedium,
+                             owner: owner)))
+    }
+
+    /// The preempt on an idle slot is a no-op, not an event storm: the tier
+    /// calls it before every translation load, most of which happen with no
+    /// recognizer load in flight at all.
+    func testAbandonInFlightOnAnIdleSlotIsANoOp() {
+        var events: [ModelLifecycleEvent] = []
+        manager.onEvent = { events.append($0) }
+
+        let abandoned = manager.abandonInFlight(slot: .speechToText, reason: .preempted)
+
+        XCTAssertTrue(abandoned.isEmpty)
+        XCTAssertTrue(events.isEmpty, "nothing stood down, nothing to report")
+    }
+
     func testReservationTTLReapsALoadThatNeverCommitted() {
         var events: [ModelLifecycleEvent] = []
         manager.onEvent = { events.append($0) }
@@ -1317,15 +1375,21 @@ final class ModelLifecycleManagerTests: XCTestCase {
         XCTAssertEqual(manager.memoryPressureReading().level, .warning)
         XCTAssertNil(manager.memoryPressureReading().secondsSinceCritical,
                      "a warning is not a critical: nothing has nearly killed us yet")
+        XCTAssertEqual(manager.memoryPressureReading().secondsSinceWarning, 0,
+                       "[PRESSURE-LATCH] a warning carries its own age. The level alone "
+                       + "cannot be trusted to clear — the UIKit route records it and nothing "
+                       + "takes it back — so the age is the whole basis of the gate's escape")
 
         now = now.addingTimeInterval(12)
         manager.handleMemoryPressure(level: .critical)
         XCTAssertEqual(manager.memoryPressureReading(),
-                       MemoryPressureReading(level: .critical, secondsSinceCritical: 0))
+                       MemoryPressureReading(level: .critical, secondsSinceCritical: 0,
+                                             secondsSinceWarning: 12))
 
         now = now.addingTimeInterval(4)
         XCTAssertEqual(manager.memoryPressureReading(),
-                       MemoryPressureReading(level: .critical, secondsSinceCritical: 4))
+                       MemoryPressureReading(level: .critical, secondsSinceCritical: 4,
+                                             secondsSinceWarning: 16))
 
         // The level eases; the fact that it was critical four seconds ago
         // does not. Both are in the reading because they are different
@@ -1336,6 +1400,9 @@ final class ModelLifecycleManagerTests: XCTestCase {
         XCTAssertEqual(eased.secondsSinceCritical, 4,
                        "the age of the last critical survives it — that is the reading a "
                        + "load gate needs in the window after the kernel goes quiet")
+        XCTAssertEqual(eased.secondsSinceWarning, 16,
+                       "and so does the warning's age: easing the level says the squeeze is "
+                       + "over, not that it never happened")
     }
 
     /// The UIKit path records the level too. `didReceiveMemoryWarning` is
@@ -1347,6 +1414,10 @@ final class ModelLifecycleManagerTests: XCTestCase {
 
         XCTAssertEqual(manager.memoryPressureReading().level, .warning)
         XCTAssertNil(manager.memoryPressureReading().secondsSinceCritical)
+        XCTAssertEqual(manager.memoryPressureReading().secondsSinceWarning, 0,
+                       "[PRESSURE-LATCH] this is the route that can latch — it records the "
+                       + "level and no counterpart ever clears it — so the timestamp it "
+                       + "leaves behind is what lets a later load tell it has gone stale")
     }
 
     /// The level is recorded **before** the sweep runs, and that ordering is

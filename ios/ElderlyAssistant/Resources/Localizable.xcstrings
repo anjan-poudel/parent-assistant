@@ -11184,6 +11184,312 @@
         }
       }
     },
+    "pointask.answer.labelSays":     {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The label says: %@"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "लेबलमा लेखिएको छ: %@"
+          }
+        }
+      }
+    },
+    "pointask.answer.looksLike":     {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "It looks like %@."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो %@ जस्तो देखिन्छ।"
+          }
+        }
+      }
+    },
+    "pointask.answer.medicineRefusal":     {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This looks like a medicine. For medicines, please ask your doctor or your family."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो औषधि जस्तो देखिन्छ। औषधिको बारेमा आफ्नो डाक्टर वा परिवारलाई सोध्नुहोस्।"
+          }
+        }
+      }
+    },
+    "pointask.chip.label":     {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "What is this?"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो के हो?"
+          }
+        }
+      }
+    },
+    "pointask.cloudIndicator.label":     {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Looking online"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अनलाइन हेर्दैछ"
+          }
+        }
+      }
+    },
+    "pointask.consent.body":     {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When you tap 'what is this?', the small picture of the thing you tapped — only that picture, and nothing else from your camera — is sent to the assistant's cloud service to work out what it is. Nothing is sent until you agree, and you can stop it any time."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंले 'यो के हो?' थिच्दा, तपाईंले छुनुभएको चीजको सानो तस्बिर मात्र — त्यो तस्बिर, र तपाईंको क्यामेराको अरू केही होइन — के हो भनेर पत्ता लगाउन असिस्टेन्टको क्लाउड सेवामा पठाइन्छ। तपाईंले सहमति नदिएसम्म केही पठाइँदैन, र तपाईं जहिले पनि बन्द गर्न सक्नुहुन्छ।"
+          }
+        }
+      }
+    },
+    "pointask.consent.decline":     {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "No, keep it on this phone"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "होइन, यही फोनमै राख्नुहोस्"
+          }
+        }
+      }
+    },
+    "pointask.consent.failed":     {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "That could not be saved. Please try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो सुरक्षित हुन सकेन। कृपया फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "pointask.consent.grant":     {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Yes, use the internet"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "हो, इन्टरनेट प्रयोग गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "pointask.consent.grantedNote":     {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The small picture of the thing you tap is sent to the assistant's cloud service. You can stop this at any time."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंले छुनुभएको चीजको सानो तस्बिर असिस्टेन्टको क्लाउड सेवामा पठाइन्छ। तपाईं जहिले पनि यो बन्द गर्न सक्नुहुन्छ।"
+          }
+        }
+      }
+    },
+    "pointask.consent.grantedTitle":     {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Looking at pictures online is on"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अनलाइन तस्बिर हेर्ने चालु छ"
+          }
+        }
+      }
+    },
+    "pointask.consent.revoke":     {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Stop using the internet to look at pictures"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तस्बिर हेर्न इन्टरनेट प्रयोग बन्द गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "pointask.consent.revokeFailedNote":     {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Nothing is being sent now, but the setting may come back when the app is restarted. Please try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अहिले केही पठाइँदैन, तर एप फेरि खोल्दा यो सेटिङ फर्किन सक्छ। कृपया फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "pointask.consent.revokeFailedTitle":     {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your change could not be saved"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तपाईंको परिवर्तन सुरक्षित हुन सकेन"
+          }
+        }
+      }
+    },
+    "pointask.consent.title":     {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use the internet to look at the picture?"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तस्बिर हेर्न इन्टरनेट प्रयोग गर्ने?"
+          }
+        }
+      }
+    },
+    "pointask.settings.cloud.note":     {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When this is off, the phone only tells you what it can see by itself — nothing is sent anywhere."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो बन्द हुँदा फोनले आफैं देखेको कुरा मात्र बताउँछ — कहीँ पनि केही पठाइँदैन।"
+          }
+        }
+      }
+    },
+    "pointask.settings.cloud.title":     {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use online object recognition (Gemini)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अनलाइन चीज पहिचान प्रयोग गर्नुहोस् (Gemini)"
+          }
+        }
+      }
+    },
+    "pointask.state.failed":     {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I couldn't work out what that is right now. Please try again."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "त्यो के हो भनेर अहिले पत्ता लगाउन सकिनँ। कृपया फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
     "quickApps.addFor": {
       "extractionState": "manual",
       "localizations": {

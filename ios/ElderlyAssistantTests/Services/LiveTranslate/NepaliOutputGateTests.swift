@@ -84,10 +84,13 @@ final class NepaliOutputGateTests: XCTestCase {
         "जोलेर काछे बिद्युत जोन्त्रो राखबेन ना।" // Bengali, transliterated into Devanagari
     ]
 
-    /// Correct translations the gate declines, on purpose: single shared nouns
-    /// and a bare noun phrase, which are spelled identically in Hindi and
-    /// Nepali, so nothing in the string establishes the elder's language. This
-    /// is the cost of never showing them Hindi, and the count below pins it.
+    /// Correct translations the gate ACCEPTS on purpose since the
+    /// short-answer exemption (2026-09-20): single shared nouns and a bare
+    /// noun phrase, spelled identically in Hindi and Nepali, so nothing in
+    /// the string establishes the elder's language. Declining them was the
+    /// cost of never showing the elder Hindi — until the owner's device
+    /// capture showed the real price: every real short answer refused, and
+    /// the elder shown nothing, ever. The count below pins the acceptance.
     private let markerFreeAnswers = [
         "फार्मेसी",        // Pharmacy
         "प्रवेश निषेध",     // No entry
@@ -377,16 +380,23 @@ final class NepaliOutputGateTests: XCTestCase {
         XCTAssertEqual(acceptedWrong, 0,
                        "false accepts on the wrong-language corpus: "
                        + "\(acceptedWrong) of \(hindiAnswers.count + instructionEchoes.count + otherDevanagari.count)")
-        XCTAssertEqual(acceptedMarkerFree, 0,
-                       "the marker-free cost moved: \(acceptedMarkerFree) of \(markerFreeAnswers.count) "
-                       + "shared-noun answers settled. If this is a deliberate relaxation, restate the "
-                       + "trade-off here; if it is a marker that started matching, the marker is wrong.")
+        // [SHORT-ANSWER-EXEMPTION] (2026-09-20) The deliberate relaxation,
+        // restated: every fixture here is at or under the two-word bound, so
+        // all of them settle. The trade-off — a markerless Marathi bare noun
+        // shown once — is the price of ever showing a short answer at all,
+        // which the owner's 02:35 capture proved the old rule never did.
+        XCTAssertEqual(acceptedMarkerFree, markerFreeAnswers.count,
+                       "the short-answer exemption: every marker-free fixture is inside the "
+                       + "two-word bound, so all of them settle now — if one stops settling, "
+                       + "the bound moved without moving this pin")
 
         // And the same numbers, by reason, so a future change that keeps the
-        // totals but swaps which rule fires still has to look here.
+        // totals but swaps which rule fires still has to look here. The
+        // long markerless answers live in `otherDevanagari` (three words and
+        // up) — they still carry the refusal this fixture no longer does.
         XCTAssertEqual(markerFreeAnswers.filter {
             NepaliOutputGate.verdict(for: $0, targetLanguage: .nepali) == .reject(.noNepaliEvidence)
-        }.count, markerFreeAnswers.count)
+        }.count, 0)
         XCTAssertEqual(hindiAnswers.filter {
             NepaliOutputGate.verdict(for: $0, targetLanguage: .nepali) == .reject(.hindiEvidence)
         }.count, hindiAnswers.count)
