@@ -72,14 +72,16 @@ final class LiveTranslateSessionModelTests: XCTestCase {
                              configurationError: LiveTranslateError? = nil,
                              dictionary: [String: String]? = nil,
                              transport: TierTranslationTransport = TierTranslationTransport(),
-                             extractMode: Bool = false) -> Harness {
+                             extractMode: Bool = false,
+                             locale: Locale = Locale(identifier: "ne-NP"),
+                             config: LiveTranslateConfig = .default) -> Harness {
         let parts = makeLiveTranslateSessionTestParts(authorization: authorization,
                                                       consent: consent,
                                                       configured: configured,
                                                       configurationError: configurationError,
                                                       dictionary: dictionary ?? [:],
                                                       transport: transport,
-                                                      locale: nepali,
+                                                      locale: locale,
                                                       extractMode: extractMode,
                                                       config: config)
         suiteNames.append(parts.suiteName)
@@ -772,5 +774,167 @@ final class LiveTranslateSessionModelTests: XCTestCase {
         let answeredInTranslatedView = try XCTUnwrap(translated.regions.first { $0.text == curatedText })
         XCTAssertEqual(translated.result(for: answeredInTranslatedView).sourceTier, .dictionary,
                        "leaving extract mode discarded an answer the elder already had")
+    }
+
+    // MARK: - The warden's notices reach the screen (owner directive, 2026-09-19)
+
+    /// The two moments the elder is owed an explanation for — a model load the
+    /// camera feature is paying for, and a model the voice stack has taken —
+    /// are pushed by `LocalBrainTranslationTier` and land on this model's
+    /// published surface. What the tier's own suite proves is that it *pushes*;
+    /// what this section proves is that what it pushes becomes a sentence on
+    /// screen and then goes away on its own.
+    ///
+    /// The sink under test is the one the session actually installs
+    /// (`wardenNoticeSink(for:)`, handed to the pipeline in `start()`), not a
+    /// re-written copy of it — so a test that passes here passes for the
+    /// reason the feature works.
+
+    /// Idle is the state the banner must never be in: a session that has said
+    /// nothing has nothing to render, and the view draws no banner at all.
+    @MainActor
+    func testASessionWithNoNoticeRendersNoBanner() async throws {
+        let harness = makeHarness()
+        await harness.model.start()
+
+        XCTAssertNil(harness.model.wardenNotice)
+        XCTAssertNil(harness.model.wardenNoticeSurface,
+                     "idle is the absence of a sentence, not an empty one")
+        await harness.model.close()
+    }
+
+    /// The whole chain, through the sink the tier is given: a load announced →
+    /// the model's published state → the sentence the banner draws, resolved
+    /// from the catalog in the language the session is running in.
+    @MainActor
+    func testALoadAnnouncedThroughTheSinkBecomesTheCatalogSentenceOnScreen() async throws {
+        let harness = makeHarness(locale: nepali)
+        await harness.model.start()
+
+        // Exactly what the tier does, on the tier's own thread: the sink is
+        // `@Sendable` and its caller may be any actor.
+        let sink = LiveTranslateSessionModel.wardenNoticeSink(for: harness.model)
+        sink(.loadingModel)
+
+        await waitUntil("the announced load to reach the model") {
+            harness.model.wardenNotice == .loadingModel
+        }
+        let surface = try XCTUnwrap(harness.model.wardenNoticeSurface)
+        XCTAssertEqual(surface.notice, .loadingModel)
+        XCTAssertEqual(surface.copy,
+                       L10n.str(LocalBrainWardenNotice.loadingModel.copyKey, locale: nepali),
+                       "the banner draws the catalog's sentence, not the key and not a literal")
+        XCTAssertNotEqual(surface.copy, LocalBrainWardenNotice.loadingModel.copyKey,
+                          "the catalog key is not the elder-facing words")
+        XCTAssertNotEqual(surface.copy, LocalBrainWardenNotice.loadingModel.rawValue,
+                          "the case name is not the elder-facing words")
+        XCTAssertTrue(surface.copy.contains("पर्खनुहोस्"),
+                      "the owner asked for 'hold on a sec' in both languages: \(surface.copy)")
+
+        await harness.model.close()
+        XCTAssertNil(harness.model.wardenNotice)
+    }
+
+    /// The same push in an English session renders the English sentence, and
+    /// differs from the Nepali one — the copy is resolved in the *active*
+    /// language rather than in a language fixed at build time.
+    @MainActor
+    func testTheBannerSaysTheSameMomentInTheActiveLanguage() async throws {
+        let english = Locale(identifier: "en")
+        let harness = makeHarness(locale: english)
+        await harness.model.start()
+
+        LiveTranslateSessionModel.wardenNoticeSink(for: harness.model)(.offloadedForVoiceTurn)
+        await waitUntil("the hand-off to reach the model") {
+            harness.model.wardenNotice == .offloadedForVoiceTurn
+        }
+        let surface = try XCTUnwrap(harness.model.wardenNoticeSurface)
+        XCTAssertEqual(surface.copy,
+                       L10n.str(LocalBrainWardenNotice.offloadedForVoiceTurn.copyKey,
+                                locale: english))
+        XCTAssertTrue(surface.copy.lowercased().contains("voice"),
+                      "the sentence names what took the model: \(surface.copy)")
+        XCTAssertNotEqual(surface.copy,
+                          WardenNoticeSurface(notice: .offloadedForVoiceTurn, locale: nepali).copy,
+                          "the two languages must not render the same words")
+
+        await harness.model.close()
+    }
+
+    /// A status, not a modal: nothing is tapped, nothing is acknowledged, and
+    /// the sentence takes itself down after `wardenNoticeDismissSeconds`.
+    @MainActor
+    func testANoticeDismissesItselfAfterTheConfiguredWindow() async throws {
+        var config = LiveTranslateConfig.default
+        config.wardenNoticeDismissSeconds = 0.2
+        let harness = makeHarness(config: config)
+        await harness.model.start()
+
+        LiveTranslateSessionModel.wardenNoticeSink(for: harness.model)(.loadingModel)
+        await waitUntil("the notice to appear") {
+            harness.model.wardenNotice == .loadingModel
+        }
+        XCTAssertNotNil(harness.model.wardenNoticeSurface,
+                        "the notice is on screen the moment it arrives, not after a delay")
+
+        await waitUntil("the notice to take itself down") {
+            harness.model.wardenNotice == nil
+        }
+        XCTAssertNil(harness.model.wardenNoticeSurface,
+                     "a dismissed notice draws no banner at all")
+
+        await harness.model.close()
+    }
+
+    /// Two moments can land close together (a load announced, then the handle
+    /// taken). The newer sentence replaces the older one and gets its own full
+    /// window — the older notice's timer must not blank it early.
+    @MainActor
+    func testASecondNoticeReplacesTheFirstAndKeepsItsOwnWindow() async throws {
+        var config = LiveTranslateConfig.default
+        config.wardenNoticeDismissSeconds = 0.3
+        let harness = makeHarness(config: config)
+        await harness.model.start()
+
+        let sink = LiveTranslateSessionModel.wardenNoticeSink(for: harness.model)
+        sink(.loadingModel)
+        sink(.offloadedForVoiceTurn)
+        await waitUntil("the newer notice to replace the older one") {
+            harness.model.wardenNotice == .offloadedForVoiceTurn
+        }
+        XCTAssertEqual(harness.model.wardenNoticeSurface?.notice, .offloadedForVoiceTurn,
+                       "the sentence on screen is the newer moment's")
+
+        await waitUntil("the newer notice to take itself down") {
+            harness.model.wardenNotice == nil
+        }
+        await harness.model.close()
+    }
+
+    /// Closing takes the sentence with it, exactly as it takes the spinner and
+    /// the held picture: nothing a closed session was saying may outlive it.
+    @MainActor
+    func testClosingTheSessionTakesANoticeDownWithIt() async throws {
+        // Long enough that the notice would still be up when the close runs:
+        // what is asserted is the teardown, not the timer.
+        var config = LiveTranslateConfig.default
+        config.wardenNoticeDismissSeconds = 600
+        let harness = makeHarness(config: config)
+        await harness.model.start()
+
+        LiveTranslateSessionModel.wardenNoticeSink(for: harness.model)(.loadingModel)
+        await waitUntil("the notice to appear") {
+            harness.model.wardenNotice == .loadingModel
+        }
+
+        await harness.model.close()
+        XCTAssertNil(harness.model.wardenNotice)
+        XCTAssertNil(harness.model.wardenNoticeSurface)
+
+        // A notice pushed after close is dropped rather than painted onto a
+        // session that has ended.
+        LiveTranslateSessionModel.wardenNoticeSink(for: harness.model)(.offloadedForVoiceTurn)
+        try await Task<Never, Never>.sleep(for: .milliseconds(50))
+        XCTAssertNil(harness.model.wardenNotice)
     }
 }

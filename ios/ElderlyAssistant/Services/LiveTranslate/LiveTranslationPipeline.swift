@@ -495,6 +495,15 @@ actor LiveTranslationPipeline {
          config: LiveTranslateConfig = .default,
          observabilityBus: ObservabilityBus,
          brain: LocalBrainTranslating? = nil,
+         /// Where the warden's two notices go (owner directive, 2026-09-19).
+         /// Forwarded to the tier this initializer builds; ignored when a
+         /// brain was handed in, because an injected tier owns its own wiring
+         /// and a caller that replaced the tier has replaced its surface too.
+         ///
+         /// Defaulted, so every caller that predates the notice path keeps
+         /// exactly the behaviour it had: the events still record both
+         /// moments, and a session with nothing listening loses nothing.
+         onWardenNotice: (@Sendable (LocalBrainWardenNotice) -> Void)? = nil,
          now: @escaping () -> Date = Date.init,
          /// The scene digest's salt (`LiveTranslateRegionSetDigest`). Random per
          /// pipeline by default — a digest the log carries is only ever compared
@@ -523,7 +532,8 @@ actor LiveTranslationPipeline {
         self.brain = brain ?? LocalBrainTranslationTier(config: config,
                                                         modelStore: try? ModelStore(observabilityBus: observabilityBus),
                                                         events: events,
-                                                        targetLanguage: targetLanguage)
+                                                        targetLanguage: targetLanguage,
+                                                        onWardenNotice: onWardenNotice)
         self.publishToSink = publish
         self.now = now
         self.regionDigestSalt = regionDigestSalt

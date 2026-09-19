@@ -1200,6 +1200,22 @@ struct LiveTranslateConfig: Equatable {
     /// Testing-only — reverts to false when the round-3 quant ships.
     var wardenBypassForTesting: Bool = true
 
+    /// How long the warden's notice stays on screen before it takes itself
+    /// down, in seconds (owner directive, 2026-09-19: "keep the user in the
+    /// loop so they don't wonder about the silences").
+    ///
+    /// This is a **status**, not a modal: both moments it describes resolve on
+    /// their own — a load finishes, a voice turn ends — so the surface must
+    /// not depend on the elder dismissing it, and must never outlive the wait
+    /// it is explaining. Four seconds is long enough to be read at the app's
+    /// body size by someone who was not looking at the screen when it
+    /// appeared, and short enough that a fast load does not leave a stale
+    /// sentence behind the thing it announced.
+    ///
+    /// Read by the session model, which owns the dismissal timer; nothing in
+    /// the tier or the view knows how long a notice lasts.
+    var wardenNoticeDismissSeconds: TimeInterval = 4.0
+
     // MARK: Tier 2
 
     /// Base timeout for one tier-2 request. **Derived, never stored (CL-8):**

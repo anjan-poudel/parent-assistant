@@ -73,6 +73,16 @@ final class LiveTranslateConfigTests: XCTestCase {
         XCTAssertEqual(config.brainTranslationIdleUnloadSeconds, 5)
         XCTAssertEqual(config.brainTranslationHeadroomFactor, 1.0)
         XCTAssertTrue(config.brainTranslationDefersToResidentBrain)
+
+        // The warden's notice (owner directive, 2026-09-19). A status line,
+        // not a modal: its window is the whole of how it ends, so the value is
+        // pinned here rather than left to whichever surface happens to draw it.
+        XCTAssertEqual(config.wardenNoticeDismissSeconds, 4.0)
+        XCTAssertGreaterThan(config.wardenNoticeDismissSeconds, 0,
+                             "a zero window would be a notice nobody can read")
+        XCTAssertLessThanOrEqual(config.wardenNoticeDismissSeconds, 10,
+                                 "a long-lived status stops being a status and starts "
+                                 + "outliving the wait it explains")
     }
 
     /// The green highlight's three values (owner spec, 2026-09-18: "the

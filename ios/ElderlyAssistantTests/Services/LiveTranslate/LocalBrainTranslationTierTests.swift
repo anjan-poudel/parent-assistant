@@ -1188,6 +1188,42 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         }
     }
 
+    /// The late-attach half of the same seam (`setWardenNoticeSink`). The
+    /// session model does not need it — it attaches at construction, through
+    /// `LiveTranslationPipeline` — but a surface built *after* the session is
+    /// must still hear every notice from the moment it attaches, and this is
+    /// the path that promises it. An attached sink is the init sink: the next
+    /// load announces to it.
+    func testASinkAttachedAfterConstructionHearsTheNextNotice() async throws {
+        let notices = NoticeBox()
+        try await withTier { tier, generator, _ in
+            await tier.setWardenNoticeSink { notices.record($0) }
+            generator.holdingHandle = false
+            generator.output = answer([brainAnswer])
+
+            _ = await tier.translate([brainText])
+
+            XCTAssertEqual(notices.notices, [.loadingModel])
+        }
+    }
+
+    /// And detaching is what a surface that has gone away gets: no sink, no
+    /// push. The moment still happened — the capture keeps it — but nobody is
+    /// told a sentence for a screen that is no longer there.
+    func testADetachedSinkHearsNothing() async throws {
+        let notices = NoticeBox()
+        try await withTier(onWardenNotice: { notices.record($0) }) { tier, generator, _ in
+            await tier.setWardenNoticeSink(nil)
+            generator.holdingHandle = false
+            generator.output = answer([brainAnswer])
+
+            _ = await tier.translate([brainText])
+
+            XCTAssertTrue(notices.notices.isEmpty,
+                          "a detached surface is not owed a notice it cannot draw")
+        }
+    }
+
     /// The hand-off: the warden takes the handle the tier did not offer, and
     /// the sentence the elder is owed goes out. Nothing was decoding, so the
     /// count is an honest zero.

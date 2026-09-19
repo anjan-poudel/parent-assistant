@@ -187,6 +187,44 @@ final class LiveTranslateCopyTests: XCTestCase {
                       "the Nepali sentence must ask for the same wait")
     }
 
+    // MARK: Scenario: the notice reaches the screen as a sentence (2026-09-19)
+
+    /// The notice's last step before it is read: `WardenNoticeSurface` is what
+    /// `LiveTranslateSessionModel` publishes and
+    /// `LiveTranslateWardenNoticeBanner` draws, so this is where "the banner
+    /// renders the catalog's sentence, in the active language" is asserted —
+    /// for both languages, and per notice, because the two moments must never
+    /// collapse into one wording.
+    ///
+    /// The assertions are the ones a key-instead-of-a-sentence bug or a
+    /// frozen-language bug would fail: not the key, not the case name,
+    /// Devanagari where the elder reads Nepali, and two languages that are not
+    /// the same string.
+    func testEveryWardenNoticeSurfaceRendersASentenceInBothLanguages() {
+        for notice in LocalBrainWardenNotice.allCases {
+            let en = WardenNoticeSurface(notice: notice, locale: english)
+            let ne = WardenNoticeSurface(notice: notice, locale: nepali)
+
+            XCTAssertFalse(en.copy.isEmpty)
+            XCTAssertFalse(ne.copy.isEmpty)
+            XCTAssertNotEqual(en.copy, notice.copyKey,
+                              "\(notice.rawValue) drew its catalog key instead of a sentence")
+            XCTAssertNotEqual(en.copy, notice.rawValue,
+                              "\(notice.rawValue) drew its case name instead of a sentence")
+            XCTAssertNotEqual(en.copy, ne.copy,
+                              "\(notice.rawValue) renders the same words in both languages")
+            XCTAssertTrue(hasDevanagari(ne.copy),
+                          "\(notice.rawValue) draws no Devanagari in a Nepali session: \(ne.copy)")
+        }
+
+        // The two moments say different things, in both languages: one wait,
+        // one hand-off.
+        XCTAssertNotEqual(WardenNoticeSurface(notice: .loadingModel, locale: english).copy,
+                          WardenNoticeSurface(notice: .offloadedForVoiceTurn, locale: english).copy)
+        XCTAssertNotEqual(WardenNoticeSurface(notice: .loadingModel, locale: nepali).copy,
+                          WardenNoticeSurface(notice: .offloadedForVoiceTurn, locale: nepali).copy)
+    }
+
     // MARK: Scenario: the command phrases exist in both languages
 
     func testTheCommandPhraseTableExistsInBothLanguages() {
