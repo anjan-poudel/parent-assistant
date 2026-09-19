@@ -272,11 +272,11 @@ enum ModelCatalog {
     /// The Q8_0 build is THE ship quant: the Q5_K_M export of the same
     /// checkpoint failed 2 of 12 runtime probes and is not published.
     static let nmtEnNeQwen17bR2bQ8 = ModelID("nmt-en-ne-qwen17b-r2b-q8_0")
-    /// TESTING-ONLY quant of the same checkpoint (owner device test,
-    /// 2026-09-19): fits standard-class phones with headroom. Fails 1 probe
-    /// row (S02) — the negation router gates those; REPLACED by the round-3
-    /// quant when it lands. Sideloaded; not in the download row list.
-    static let nmtEnNeQwen17bR2bQ4 = ModelID("nmt-en-ne-qwen17b-r2b-q4_k_m")
+    /// Round-3 fine-tune (negation-compound repair mixture), q5_k_m — the
+    /// smallest quant that holds BOTH the 34-row app-header gate and the
+    /// 12-row probe (34/34 accepted, 0 polarity failures, post_train_r3,
+    /// 2026-09-19). Replaces the TESTING-ONLY round-2b Q4 sideload.
+    static let nmtEnNeQwen17bR3Q5 = ModelID("nmt-en-ne-qwen17b-r3-q5_k_m")
     /// The GEMMA leg of the bake-off (2026-09-07): the QLoRA fine-tune
     /// over google/gemma-3-1b-it, merged to fp16 and exported Q4_K_M
     /// (`intent-ne-gemma-q4_k_m.gguf`, release v7). A real, hosted
@@ -970,20 +970,19 @@ enum ModelCatalog {
             languages: ["ne"]
         ),
         ModelCatalogEntry(
-            id: nmtEnNeQwen17bR2bQ4,
+            id: nmtEnNeQwen17bR3Q5,
             kind: .llamaBase,
-            // TESTING-ONLY entry (owner device test, 2026-09-19): the
-            // standard-class quant of the same round-2b checkpoint,
-            // sideloaded — not in `availableTranslationEntries`, so the
-            // settings row never offers a download for it. Fails 1 probe
-            // row (S02); the negation router gates those. REPLACED by the
-            // round-3 quant when it lands.
-            displayName: "Translate — English to Nepali (Qwen 1.7B, Q4 test)",
-            filename: "translate-en-ne-qwen17b-r2b-q4_k_m.gguf",
-            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v18/translate-en-ne-qwen17b-r2b-q4_k_m.gguf")!,
-            sizeBytes: 1_107_408_608,
-            // Server-original digest (round2b Q4 export):
-            sha256: "a557dc2a066c482a9127396c5d7836305c54112aee9dd721b11309c45c01a156",
+            // Round-3 fine-tune (negation-compound repair mixture), q5_k_m:
+            // the smallest quant that holds both the 34-row app-header gate
+            // and the 12-row probe (34/34 accepted, 0 polarity failures —
+            // post_train_r3, 2026-09-19). Replaces the TESTING-ONLY
+            // round-2b Q4 sideload, which this entry supersedes.
+            displayName: "Translate — English to Nepali (Qwen 1.7B, R3 Q5)",
+            filename: "translate-en-ne-qwen17b-r3-q5_k_m.gguf",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v19/translate-en-ne-qwen17b-r3-q5_k_m.gguf")!,
+            sizeBytes: 1_257_879_264,
+            // Server-original digest (round3 q5_k_m export):
+            sha256: "c8557b9ab5704273079a32a502a5f282477755467d8b90719a8a989bb16dd5bf",
             minDeviceRAMBytes: 3_000_000_000,
             dependsOn: nil,
             languages: ["ne"]
@@ -1453,7 +1452,7 @@ enum ModelCatalog {
     /// moved cannot leave the row fetching a model the tier no longer leads
     /// with.
     static let availableTranslationEntries: [ModelCatalogEntry] =
-        [nmtEnNeQwen17bR2bQ8].compactMap { entry(for: $0) }
+        [nmtEnNeQwen17bR3Q5, nmtEnNeQwen17bR2bQ8].compactMap { entry(for: $0) }
 
     /// The reply voices the language-aware default lookup draws from —
     /// curated the same way as the two lists above (the shipped voices,

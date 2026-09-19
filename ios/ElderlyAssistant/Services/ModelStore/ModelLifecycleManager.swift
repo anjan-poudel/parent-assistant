@@ -382,6 +382,13 @@ final class ModelLifecycleManager {
     /// Test hook: pins the class budget so arithmetic is not at the mercy of
     /// the host machine's RAM. `nil` in production.
     private let budgetOverrideBytes: UInt64?
+    /// [CAMERA-BUDGET] (2026-09-20) The session-profile model budget, set
+    /// while a camera translation session is active and cleared when it
+    /// ends. Sits between the constructor's test pin and the live probe
+    /// arithmetic: `budgetOverrideBytes` (tests) wins, then this, then the
+    /// class default — so every test that fixes the budget keeps the
+    /// arithmetic it was written against.
+    private var sessionProfileOverrideBytes: UInt64?
 
     /// [MODEL-WARDEN] Step 3 — what each resident costs to bring back, from
     /// measurements the app already takes.
@@ -759,11 +766,19 @@ final class ModelLifecycleManager {
             // `budgetOverrideBytes` pins both, so every test that fixes the
             // budget keeps the arithmetic it was written against.
             let sessionBudget = budgetOverrideBytes
+                ?? sessionProfileOverrideBytes
                 ?? ModelLifecycleBudget.effectiveBudgetBytes(
                     deviceClass: deviceClass,
                     availableBytes: probe.availableProcessMemoryBytes,
                     residentLiveBytes: residentLive)
+            // [CAMERA-BUDGET] The class bound is lowered by the same
+            // profile: a camera session's 1.4 GB working set is real bytes
+            // the escape-hatch arithmetic must not pretend are free, or the
+            // translation load's victim plan leaves residents standing and
+            // the brain gets pressure-evicted the moment it commits (the
+            // owner's 06:23 capture).
             let classBudget = budgetOverrideBytes
+                ?? sessionProfileOverrideBytes
                 ?? ModelLifecycleBudget.modelsBudgetBytes(for: deviceClass)
             let budget = request.purpose.mayEvictPastTheSessionBudget
                 && incoming.liveBytes <= classBudget
@@ -1130,6 +1145,31 @@ final class ModelLifecycleManager {
         lock.lock()
         defer { lock.unlock() }
         return reservations[id] != nil
+    }
+
+    /// [CAMERA-BUDGET] (2026-09-20) Set the session profile the model
+    /// budget is computed for. While a camera translation session is
+    /// active, the measured 1.4 GB camera working set lowers the budget by
+    /// that amount (`ModelBudgetPolicy.sessionModelBudgetBytes(session:)`),
+    /// so loads are judged — and pressure evictions sized — against the
+    /// room that actually exists. `nil` restores the idle budget.
+    ///
+    /// The owner's 06:23 capture is the evidence: the brain was admitted,
+    /// committed, and evicted for `memoryPressure` 0.7 s later because the
+    /// resident set had no room the arithmetic could see. With the profile
+    /// active, the warm STT resident is the first thing over the lowered
+    /// budget — the trade the owner approved (2026-09-20): first talk
+    /// after camera costs a load.
+    func setSessionProfile(_ profile: ModelBudgetPolicy.SessionProfile?) {
+        lock.lock()
+        if let profile {
+            let deviceClass = currentDeviceClassLocked()
+            sessionProfileOverrideBytes = ModelBudgetPolicy.policy(for: deviceClass)
+                .sessionModelBudgetBytes(session: profile)
+        } else {
+            sessionProfileOverrideBytes = nil
+        }
+        lock.unlock()
     }
 
     private func abandonInternal(_ reservation: ModelReservation,
@@ -1759,6 +1799,7 @@ final class ModelLifecycleManager {
         lock.lock()
         pruneDeadOwnersLocked()
         let fullBudget = budgetOverrideBytes
+            ?? sessionProfileOverrideBytes
             ?? ModelLifecycleBudget.modelsBudgetBytes(for: currentDeviceClassLocked())
         let budget = UInt64(Double(fullBudget)
             * ModelLifecycleManager.memoryPressureBudgetFraction)
@@ -2019,6 +2060,7 @@ final class ModelLifecycleManager {
         let deviceClass = currentDeviceClassLocked()
         let residentLive = residentLiveBytesLocked()
         let budget = budgetOverrideBytes
+            ?? sessionProfileOverrideBytes
             ?? ModelLifecycleBudget.effectiveBudgetBytes(
                 deviceClass: deviceClass,
                 availableBytes: probe.availableProcessMemoryBytes,
@@ -2026,6 +2068,7 @@ final class ModelLifecycleManager {
         return ModelLifecycleSnapshot(
             deviceClass: deviceClass,
             budgetBytes: budgetOverrideBytes
+                ?? sessionProfileOverrideBytes
                 ?? ModelLifecycleBudget.modelsBudgetBytes(for: deviceClass),
             effectiveBudgetBytes: budget,
             residentLiveBytes: residentLive,
