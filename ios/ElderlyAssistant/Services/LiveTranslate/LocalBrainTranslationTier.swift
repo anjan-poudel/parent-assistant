@@ -681,19 +681,25 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
     /// how a load ends up refused at the door and then taken anyway through a
     /// window the second copy forgot.
     ///
-    /// A fresh `.warning` and any `.critical` both refuse. A warning is the OS
-    /// asking for memory back and the only honest answer to "may I spend
+    /// A fresh `.warning` and a fresh `.critical` both refuse. A warning is the
+    /// OS asking for memory back and the only honest answer to "may I spend
     /// another 1 GB" is no; a critical is it about to act, where a load begun
     /// now would still be allocating while the kernel reclaims. The window
     /// covers the third case the level cannot: a device that was critical
     /// seconds ago and has been quiet since.
     ///
     /// [PRESSURE-LATCH] (2026-09-19) **The two levels are not read the same
-    /// way, and the asymmetry is the fix.** A `.critical` is paired: the
-    /// dispatch source that sends it also sends `.normal` when the pressure
-    /// eases, and that second event is what clears the level — so a level that
-    /// still reads `.critical` is a device that is still critical, and refusing
-    /// on it needs no age. A `.warning` has a route with no counterpart:
+    /// way, and the asymmetry is the fix — until the device said otherwise.**
+    /// A `.critical` was assumed paired: the dispatch source that sends it
+    /// also sends `.normal` when the pressure eases, and that second event is
+    /// what clears the level — so a level that still reads `.critical` was a
+    /// device that is still critical, and refusing on it needed no age. The
+    /// owner's 15:51 capture falsified the assumption: forty-two seconds of
+    /// uniform `reason=memory_pressure durationMs=0` refusals while the
+    /// warden was silent — no pressure events, no evictions — so a latched
+    /// `.critical` is a real mode on this device, and it now ages out on the
+    /// same window as the warning, with the caller's headroom arithmetic as
+    /// the second line of defence. A `.warning` has a route with no counterpart:
     /// `UIApplication.didReceiveMemoryWarningNotification` arrives, the
     /// manager records `.warning`, and nothing on that path ever takes it
     /// back. On a device where only that route has fired — no dispatch source,
@@ -714,6 +720,20 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
                                  windowSeconds: TimeInterval) -> LocalBrainDeferral? {
         switch reading.level {
         case .critical:
+            // [PRESSURE-LATCH] (2026-09-19, owner's 15:51 device capture)
+            // The critical level latches exactly the way the warning did:
+            // forty-two seconds of uniform `reason=memory_pressure
+            // durationMs=0` refusals while the warden was silent — no
+            // pressure events, no evictions, nothing that would still be
+            // firing if the device were still critical. A fresh critical is
+            // the kernel about to act, and refuses as the level itself
+            // (same token as before); a critical older than the window is
+            // stale evidence and falls through to the caller's headroom
+            // arithmetic, which re-checks the process's own account and
+            // refuses a genuinely starved device there.
+            if let age = reading.secondsSinceCritical, age >= windowSeconds {
+                break // stale critical — the level latched, the pressure did not
+            }
             return .memoryPressure(level: .critical)
         case .warning:
             if let age = reading.secondsSinceWarning, age >= windowSeconds {
@@ -1544,6 +1564,16 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
         if let abandoned = loadAbandonReason() {
             throw BrainGenerationFailure.loadAbandoned(abandoned)
         }
+
+        // [LOAD-SERIALIZATION] (2026-09-19) Stand any in-flight STT load
+        // down before this one starts allocating. The owner's 15:39 capture
+        // shows the two colliding: the STT warm finished its 85-second load
+        // in the same second this load was admitted, and two heavy page-ins
+        // at once are the spike the device died from. The warm is
+        // anticipatory and re-loads on demand; this load answers the
+        // elder's live request. The recognizer detects the abandonment via
+        // `isReservationHeld` when its load completes and stands down.
+        lifecycle.abandonInFlight(slot: .speechToText, reason: .preempted)
 
         // [MODEL-WARDEN] Step 2 — declare the position before asking for the
         // bytes. `resident:` is what makes this handle *preemptible* rather

@@ -610,6 +610,19 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
                                   ? .cancelled : .loadFailed)
             throw error
         }
+        // [LOAD-SERIALIZATION] (2026-09-19) The load completed, but the
+        // permit may have been preempted while it ran: the translation tier
+        // abandons an in-flight `.speechToText` reservation before its own
+        // load starts, so a warm and a live-translate load can never both
+        // commit residency. Standing down here drops the construct (the
+        // throw lands before `kitInstance` is assigned, so the bytes return
+        // to the kernel) and routes a live turn to the next engine exactly
+        // as a cancellation would; the warm reports its failure and the
+        // recognizer re-loads on demand.
+        if !lifecycle.isReservationHeld(reservation.id) {
+            lifecycle.abandon(reservation, reason: .preempted)
+            throw CancellationError()
+        }
         let loadMs = Int((CFAbsoluteTimeGetCurrent() - loadStart) * 1000)
         kitInstance = created
         loadedDescriptor = descriptor

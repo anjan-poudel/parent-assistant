@@ -1325,6 +1325,50 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         }
     }
 
+    /// [LOAD-SERIALIZATION] The load path stands an in-flight STT load down
+    /// before it starts allocating — the owner's 15:39 collision, pinned: an
+    /// STT warm finishing in the same second the translation load was
+    /// admitted was the exact two-page-in spike the device died from. The
+    /// warm is anticipatory and re-loads on demand; this load answers the
+    /// elder's live request.
+    ///
+    /// The load path is reached directly (the real generator, the gated
+    /// configuration): the scripted generator the `withTier` tests use never
+    /// enters `loadHandle`, which is where the preempt lives. Without the
+    /// preempt, the reserve below would be refused `loadInFlight(holder:
+    /// .speechToText)` and the permit would survive the whole attempt.
+    func testTheLoadPreemptsAnInFlightSTTReservation() async throws {
+        let clock = PressureClock()
+        let ledger = makePressureLedger(clock)
+        ledger.handleMemoryPressure(level: .normal)
+        let sttOwner = FakeOwner()
+        guard case .success(let sttReservation) = ledger.reserve(ModelLoadRequest(
+            slot: .speechToText,
+            modelID: ModelCatalog.whisperKitNepaliMedium,
+            owner: sttOwner,
+            purpose: .voiceTurn,
+            replacesSlotContents: true)) else {
+            XCTFail("expected the STT reservation to be granted")
+            return
+        }
+
+        let generator = makeGenerator(on: ledger)
+        let modelURL = try catalogURL(Self.modelID)
+
+        do {
+            _ = try await generator.generate(prompt: "1. \(brainText)",
+                                             jsonSchema: LocalBrainTranslationTier.jsonSchema,
+                                             modelURL: modelURL,
+                                             timeout: 5)
+            XCTFail("the generation cannot succeed in tests: no model artifact is installed")
+        } catch {
+            // The downstream load is not the fact under test — the preempt is.
+        }
+        XCTAssertFalse(ledger.isReservationHeld(sttReservation.id),
+                       "the in-flight STT permit stood down before the translation "
+                       + "load started allocating")
+    }
+
     /// The UIKit path — the level-2 warning the app has always handled — is
     /// the same rule. A gate that only listened to the dispatch source would
     /// miss every warning on a device where that source failed to install.
@@ -1387,11 +1431,39 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         }
     }
 
+    /// [PRESSURE-LATCH] The owner's 15:51 capture as a regression pin: the
+    /// level latches at `.critical` — no `.normal` ever follows — and the
+    /// tier must load anyway once the critical is older than the window,
+    /// because the alternative is every batch refused with
+    /// `reason=memory_pressure durationMs=0` for the rest of the session
+    /// while the warden sits silent.
+    func testALatchedCriticalOlderThanTheWindowNoLongerDefersTheLoad() async throws {
+        let clock = PressureClock()
+        let ledger = makePressureLedger(clock)
+        ledger.handleMemoryPressure(level: .critical)
+        clock.advance(40)
+
+        try await withTier(ledger: ledger) { tier, generator, bus in
+            generator.output = answer([self.brainAnswer])
+            let outcome = await tier.translate([self.brainText])
+
+            XCTAssertEqual(generator.prompts.count, 1,
+                           "40s past the window the critical is history, not a device state: "
+                           + "nothing has ever cleared the level, and the load must still happen")
+            XCTAssertNil(outcome.deferral)
+            XCTAssertEqual(outcome.translations, [self.brainText: self.brainAnswer])
+            XCTAssertNotEqual(batchEvent(bus)?.metadata["reason"], "memory_pressure",
+                              "and the batch does not carry the pressure reason")
+        }
+    }
+
     /// [PRESSURE-LATCH] The same window, applied to the level that can *latch*.
     ///
-    /// `.critical` is paired: the dispatch source that sends it sends
-    /// `.normal` when the squeeze ends, and that second event is what clears
-    /// the level. A `.warning` routed from
+    /// `.critical` was assumed paired — the dispatch source that sends it
+    /// sends `.normal` when the squeeze ends, and that second event is what
+    /// clears the level — but the owner's 15:51 capture showed it latching
+    /// the same way: forty-two seconds of refusals while the warden was
+    /// silent. A `.warning` routed from
     /// `UIApplication.didReceiveMemoryWarningNotification` has no counterpart —
     /// the app records the level and nothing on that route ever takes it back —
     /// so a gate that refused on the bare level would refuse every load for the
@@ -1457,6 +1529,42 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         // way past the gate — the freshness has to be *stated* to be believed.
         XCTAssertEqual(LocalBrainTranslationTier.pressureDeferral(reading(nil), windowSeconds: window),
                        .memoryPressure(level: .warning))
+    }
+
+    /// [PRESSURE-LATCH] The same window, on the level the original fix
+    /// declared immune.
+    ///
+    /// The assumption was that a `.critical` is paired: the dispatch source
+    /// that sends it also sends `.normal` when the squeeze ends, so a level
+    /// that still read `.critical` was a device that was still critical. The
+    /// owner's 15:51 device capture (2026-09-19) falsified it: forty-two
+    /// seconds of `reason=memory_pressure` refusals while the warden was
+    /// silent. A critical now ages out on the same window: fresh refuses as
+    /// the level itself (the token a capture already knows), stale falls
+    /// through to the caller's headroom arithmetic.
+    func testTheCriticalWindowRefusesWhileFreshAndReleasesOnceStale() {
+        let window = LiveTranslateConfig.default.brainTranslationCriticalPressureWindowSeconds
+        func reading(_ criticalAge: TimeInterval?) -> MemoryPressureReading {
+            MemoryPressureReading(level: .critical,
+                                  secondsSinceCritical: criticalAge,
+                                  secondsSinceWarning: nil)
+        }
+
+        XCTAssertEqual(LocalBrainTranslationTier.pressureDeferral(reading(0), windowSeconds: window),
+                       .memoryPressure(level: .critical),
+                       "a critical happening now is refused, as it always was")
+        XCTAssertEqual(LocalBrainTranslationTier.pressureDeferral(reading(window - 1),
+                                                                  windowSeconds: window),
+                       .memoryPressure(level: .critical),
+                       "one second inside the window is inside it")
+        XCTAssertNil(LocalBrainTranslationTier.pressureDeferral(reading(window), windowSeconds: window),
+                     "at the window the critical is stale — the same boundary the warning rule "
+                     + "uses — and the latched level stops refusing anything on its own")
+
+        // The conservative half, unchanged: no timestamp is not a way past
+        // the gate — the freshness has to be *stated* to be believed.
+        XCTAssertEqual(LocalBrainTranslationTier.pressureDeferral(reading(nil), windowSeconds: window),
+                       .memoryPressure(level: .critical))
     }
 
     /// The other side of the same gate, so it is a gate and not a refusal:
