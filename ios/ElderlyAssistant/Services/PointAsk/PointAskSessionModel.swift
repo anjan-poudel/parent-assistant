@@ -1,5 +1,6 @@
 import Combine
 import CoreGraphics
+import CoreVideo
 import Foundation
 
 // The point-ask session model (design §4's state machine):
@@ -299,6 +300,15 @@ final class PointAskSessionModel: ObservableObject {
         PointAskConsentSurface(locale: locale, failureMessage: consentFailureMessage)
     }
 
+    /// The tap contract: a frame-NORMALIZED point (0…1, top-left origin),
+    /// clamped — never re-normalized. [TAP-FIX] (2026-09-19): the
+    /// double-normalization regression is pinned here so a future
+    /// "convenient" re-scaling cannot sneak back in.
+    nonisolated static func normalizedTapPoint(_ point: CGPoint) -> CGPoint {
+        CGPoint(x: min(max(point.x, 0), 1),
+                y: min(max(point.y, 0), 1))
+    }
+
     // MARK: - Frames
 
     /// One frame from the host session's loop, held as the picture the
@@ -314,11 +324,19 @@ final class PointAskSessionModel: ObservableObject {
     /// "look here": the answer (or failure) is dismissed, any in-flight
     /// analysis is dropped, and the box anchors where the finger is —
     /// one box at a time, re-anchored by design (§4).
-    func handleTap(atFramePoint point: CGPoint, framePixelSize: CGSize) {
-        guard !isClosed,
-              framePixelSize.width > 0, framePixelSize.height > 0 else { return }
-        let normalized = CGPoint(x: point.x / framePixelSize.width,
-                                 y: point.y / framePixelSize.height)
+    ///
+    /// [TAP-FIX] (2026-09-19) `point` is the FRAME-NORMALIZED position
+    /// (0…1, top-left origin) — the same unit the presentation's
+    /// `framePoint(ofContainerPoint:)` produces and the resolver
+    /// consumes. The previous version accepted "frame pixel" points and
+    /// divided by the frame size again, which DOUBLE-normalized every
+    /// tap: the finger at (0.5, 0.5) anchored near (0.0003, 0.0005) —
+    /// the tiny, way-off box the first device test reported. The call
+    /// site already produced normalized points; only the division here
+    /// was wrong.
+    func handleTap(atNormalizedPoint point: CGPoint) {
+        guard !isClosed else { return }
+        let normalized = Self.normalizedTapPoint(point)
         dismissCurrent()
         guard let frame = latestFrame else { return }
 
@@ -505,6 +523,7 @@ final class PointAskSessionModel: ObservableObject {
         // window that contains the actual VLM request (the shipped
         // indicator's own semantics: on while tier-2 work is in flight).
         cloudIndicatorActive = cloud
+        events.analysisStarted(cloud: cloud)
         let pipeline = ensurePipeline()
         let config = self.config
         let speak = self.speak
@@ -516,12 +535,28 @@ final class PointAskSessionModel: ObservableObject {
             // (bounded — the research's <15 ms stage), and the pipeline
             // runs on its own actor; the elder's screen never waits on
             // Vision or the network.
+            let frameSize = CGSize(width: CVPixelBufferGetWidth(frame.pixelBuffer),
+                                   height: CVPixelBufferGetHeight(frame.pixelBuffer))
             let crop = PointAskCrop.cropped(frame.pixelBuffer, pixelRect: pixelRect)
             let jpeg = crop.flatMap {
                 PointAskCrop.jpegUploadData(from: $0, maxSide: config.maxUploadSide)
             }
             guard !Task.isCancelled, let crop, let jpeg else {
-                await self?.finishFailed(box: box)
+                // [ANALYSIS-DIAGNOSTIC] (2026-09-19) The device's chip tap
+                // ran with no answer and no event — the only silent path
+                // in this method. Name the exact reason (with the frame
+                // size vs the requested rect, the mismatch the crop
+                // refusal usually is) and SPEAK the honest failure so a
+                // dead chip can never be invisible again.
+                let reason = crop == nil ? "crop_failed" : "encode_failed"
+                let width = CVPixelBufferGetWidth(frame.pixelBuffer)
+                let height = CVPixelBufferGetHeight(frame.pixelBuffer)
+                self?.events.analysisFailed(reason: reason, metadata: [
+                    .frame: "\(width)x\(height)",
+                    .rect: "\(Int(pixelRect.minX)),\(Int(pixelRect.minY)),"
+                        + "\(Int(pixelRect.width)),\(Int(pixelRect.height))",
+                ])
+                self?.finishFailed(box: box)
                 return
             }
             let findings = await pipeline.analyze(
@@ -547,9 +582,14 @@ final class PointAskSessionModel: ObservableObject {
     private func finishFailed(box: NormalizedBox) {
         guard !isClosed else { return }
         cloudIndicatorActive = false
-        answer = Self.failureAnswer(locale: locale)
+        let failure = Self.failureAnswer(locale: locale)
+        answer = failure
         phase = .failed(box)
         analysisTask = nil
+        // [ANALYSIS-DIAGNOSTIC] The failure must be HEARD, not only shown
+        // (the 2026-09-19 dead-chip report: the card set a state and the
+        // elder got nothing).
+        speak(failure.spokenLine)
     }
 
     // MARK: - Answer composition

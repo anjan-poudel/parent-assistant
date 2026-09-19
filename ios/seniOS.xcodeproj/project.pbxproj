@@ -148,6 +148,7 @@
 		36701044EB3087A577870C0B /* ModelPreferenceMemoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89B3C3B7DE00708964619C09 /* ModelPreferenceMemoryTests.swift */; };
 		36BE348CA5BACCC5139BD5E9 /* CloudFallbackTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F63BE0F70F8D66B3FF4F28F /* CloudFallbackTests.swift */; };
 		36E22F0466C005027B0921E5 /* TithiCalculatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 269C71573D21DF9EAFB68405 /* TithiCalculatorTests.swift */; };
+		3730CAF4FDBD7702BB70BE03 /* PointAskSessionModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D443AB370B4D9E49A41E086 /* PointAskSessionModelTests.swift */; };
 		374D750511389F70858A0612 /* EventsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40CEC0F6B2E9FE0B1EF96F9B /* EventsView.swift */; };
 		377C7455BD7DCB0331E37176 /* GeminiClient+PointAsk.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4D6FDA9969BA206BE532ED0 /* GeminiClient+PointAsk.swift */; };
 		37BD4D9598593990C23B396D /* RepetitionGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 788D1FDD5EE237D36E52AD69 /* RepetitionGuard.swift */; };
@@ -1093,6 +1094,7 @@
 		7D15E89A116B24DADD574A85 /* TimerAlarmSystemShared.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerAlarmSystemShared.swift; sourceTree = "<group>"; };
 		7D20F36D1AE5D46DF4157698 /* StoragePlacementTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoragePlacementTests.swift; sourceTree = "<group>"; };
 		7D2ED01FCF99CA9D9BE6B255 /* CaregiverNotifySettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaregiverNotifySettings.swift; sourceTree = "<group>"; };
+		7D443AB370B4D9E49A41E086 /* PointAskSessionModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PointAskSessionModelTests.swift; sourceTree = "<group>"; };
 		7D49812CA1F554874D8110E5 /* CalendarShareService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarShareService.swift; sourceTree = "<group>"; };
 		7D9AC31B5DB2C1114913928D /* CameraCaptureFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraCaptureFlowTests.swift; sourceTree = "<group>"; };
 		7DABC3572B08562A22CE7497 /* PointAskConsentGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PointAskConsentGate.swift; sourceTree = "<group>"; };
@@ -1852,6 +1854,7 @@
 				57A685EAD015A500E88179D5 /* PointAskCopyTests.swift */,
 				1FB4868E506837569A964C84 /* PointAskCropTests.swift */,
 				87BCDFBAB36C9BAEE6B86AD7 /* PointAskQuotaTests.swift */,
+				7D443AB370B4D9E49A41E086 /* PointAskSessionModelTests.swift */,
 				97CBF4705CA1E4B966254F1E /* PointAskTargetResolverTests.swift */,
 				DE4FACD9CCAF7374320EA729 /* PointAskTestSupport.swift */,
 				04C3966617D7CA1053804B84 /* PointAskWebDetectionClientTests.swift */,
@@ -3514,6 +3517,7 @@
 				FCB4886903510C351EBBC066 /* PointAskCopyTests.swift in Sources */,
 				7D6DDF1F447174536549D757 /* PointAskCropTests.swift in Sources */,
 				ADEC15DD752EF43D6DD34D66 /* PointAskQuotaTests.swift in Sources */,
+				3730CAF4FDBD7702BB70BE03 /* PointAskSessionModelTests.swift in Sources */,
 				01593DE7893E8F33B7711839 /* PointAskTargetResolverTests.swift in Sources */,
 				2E155C78A5E6B1D82D8DAF0F /* PointAskTestSupport.swift in Sources */,
 				51FC8EF801105EC6F7BAF496 /* PointAskWebDetectionClientTests.swift in Sources */,

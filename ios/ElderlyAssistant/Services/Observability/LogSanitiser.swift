@@ -80,6 +80,15 @@ struct LogSanitiser {
         // capture received — count-shaped, the discriminator between a
         // silent capture and a dead tap.
         "chunks",
+        // [ANALYSIS-DIAGNOSTIC] (2026-09-19) The pre-pipeline failure's
+        // geometry — "1920x1080" frame size and "x,y,w,h" rect. Count-
+        // and coordinate-shaped; the numbers that name why a crop was
+        // refused. Never text, never pixels' content.
+        "frame",
+        "rect",
+        // The analysis launch's cloud switch state — "on"/"off", a closed
+        // two-token vocabulary.
+        "cloud",
         // [TURN-TIMING] The serialized per-turn stage list
         // (`[{stage, ms}, …]`) — stage names and integer durations only,
         // never transcript or reply text (see VoiceTurnLatencyTracer).

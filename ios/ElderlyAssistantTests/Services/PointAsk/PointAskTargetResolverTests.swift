@@ -224,13 +224,13 @@ final class PointAskTargetResolverTests: XCTestCase {
         XCTAssertEqual(recovered.source, .saliency)
     }
 
-    // MARK: - Scenario: the mask path (opt-in, behind the probe)
+    // MARK: - Scenario: the mask path (tight object box, on by default)
 
-    func testTheMaskPassAnswersBeforeTheSaliencyPassWhenItContainsTheTap() {
+    func testTheMaskPassAnswersBeforeTheSaliencyPassAndAnchorsItsOwnBox() {
         let object = StubPointAskObjectEngine()
         object.boxes = [PointAskBoxes.leftHalf]
         let mask = StubPointAskMaskEngine()
-        mask.contains = true
+        mask.box = NormalizedBox(xMin: 0.2, yMin: 0.3, xMax: 0.4, yMax: 0.7)
         let resolver = makeResolver(object: object, mask: mask)
         let tap = CGPoint(x: 0.25, y: 0.5)
 
@@ -240,15 +240,16 @@ final class PointAskTargetResolverTests: XCTestCase {
         XCTAssertEqual(mask.passCount, 1)
         XCTAssertEqual(object.passCount, 0,
                        "the silhouette answer came first; no saliency pass was paid")
-        XCTAssertEqual(target.normalizedBox, PointAskTargetResolver.padBox(around: tap),
-                       "the mask path anchors the pad box around the tap")
+        XCTAssertEqual(target.normalizedBox,
+                       NormalizedBox(xMin: 0.2, yMin: 0.3, xMax: 0.4, yMax: 0.7),
+                       "the box is the OBJECT'S extent, not a pad around the tap")
     }
 
     func testAMaskMissFallsToTheSaliencyPath() {
         let object = StubPointAskObjectEngine()
         object.boxes = [PointAskBoxes.leftHalf]
         let mask = StubPointAskMaskEngine()
-        mask.contains = false
+        mask.box = nil
         let resolver = makeResolver(object: object, mask: mask)
 
         let target = resolver.resolve(tap: CGPoint(x: 0.25, y: 0.5), in: frame())
@@ -256,6 +257,26 @@ final class PointAskTargetResolverTests: XCTestCase {
         XCTAssertEqual(target.source, .saliency,
                        "a mask miss is not a 'no': the saliency boxes answer next")
         XCTAssertEqual(mask.passCount, 1)
+    }
+
+    // MARK: - Scenario: the mask extent is the object's silhouette
+
+    func testInstanceExtentWrapsTheInstancePixels() {
+        // A mask buffer: instance pixels (0) form a left-half block; the
+        // rest is background (1).
+        let mask = PointAskTestFrames.pixelBuffer(width: 8, height: 4) { x, _ in
+            (x < 4) ? (0, 0, 0, 0) : (1, 1, 1, 1)
+        }
+        let extent = PointAskMaskEngine.instanceExtent(in: mask)
+
+        XCTAssertEqual(extent, NormalizedBox(xMin: 0, yMin: 0, xMax: 0.5, yMax: 1),
+                       "the extent is the instance's min/max pixels, normalized")
+    }
+
+    func testInstanceExtentIsNilForAnEmptyMask() {
+        let mask = PointAskTestFrames.solidPixelBuffer(width: 8, height: 4,
+                                                       rgba: (1, 1, 1, 1))
+        XCTAssertNil(PointAskMaskEngine.instanceExtent(in: mask))
     }
 
     func testAMaskPassFailureFallsToTheSaliencyPathAndNeverErrors() {

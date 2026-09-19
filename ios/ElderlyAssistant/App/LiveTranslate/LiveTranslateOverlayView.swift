@@ -1260,6 +1260,15 @@ struct PointAskOverlayBoxView: View {
     let presentation: LiveCameraPresentation
     let onChipTap: () -> Void
 
+    /// [BOX-STABILITY] (2026-09-19) The box's screen rect, PINNED at the
+    /// first frame it renders. The live presentation's crop settles for
+    /// the first moments after the session starts, so re-mapping the
+    /// normalized box every frame made the anchored box visibly SHRINK in
+    /// stages under the elder's finger (device report). The box the elder
+    /// sees first is the box they tapped — it stays exactly there until a
+    /// re-anchor (new box) or age-out.
+    @State private var pinnedRect: CGRect?
+
     /// The pending-state glyph. An SF Symbol name is a system identifier,
     /// not user-visible copy, so it is a constant here — the same rule the
     /// region bubbles' `pendingSymbolName` states.
@@ -1267,7 +1276,7 @@ struct PointAskOverlayBoxView: View {
 
     var body: some View {
         guard let box = surface.box, presentation.isUsable else { return AnyView(EmptyView()) }
-        let boxRect = presentation.containerRect(ofFrameBox: box)
+        let boxRect = pinnedRect ?? presentation.containerRect(ofFrameBox: box)
         let chipRect = chipRect(below: boxRect)
         return AnyView(
             ZStack(alignment: .topLeading) {
@@ -1294,6 +1303,16 @@ struct PointAskOverlayBoxView: View {
                 case .idle:
                     EmptyView()
                 }
+            }
+            // [BOX-STABILITY] Pin on the first frame a box exists and the
+            // presentation is usable; a NEW box (re-anchor) re-pins. Until
+            // then the live mapping fills in.
+            .onChange(of: surface.box) { newBox in
+                guard let newBox, presentation.isUsable else {
+                    pinnedRect = nil
+                    return
+                }
+                pinnedRect = presentation.containerRect(ofFrameBox: newBox)
             }
         )
     }

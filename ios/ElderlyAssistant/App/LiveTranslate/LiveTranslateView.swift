@@ -199,8 +199,7 @@ struct LiveTranslateView: View {
                                      // not the device's).
                                      onPointAskTap: { framePoint in
                                          model.pointAsk?.handleTap(
-                                             atFramePoint: framePoint,
-                                             framePixelSize: model.framePixelSize)
+                                             atNormalizedPoint: framePoint)
                                      })
                 .accessibilityHidden(true)
         } else {

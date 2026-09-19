@@ -74,6 +74,12 @@ enum PointAskEventCatalogue {
         "box_aged_out": Entry(outcomes: ["success"], metadataKeys: []),
         // The elder asked "what is this?".
         "chip_tapped": Entry(outcomes: ["success"], metadataKeys: []),
+        // [ANALYSIS-DIAGNOSTIC] The pipeline launch + its pre-flight
+        // failure (crop/encode), with the frame-size vs rect numbers.
+        "analysis_started": Entry(outcomes: ["success"],
+                                  metadataKeys: ["cloud"]),
+        "analysis_failed": Entry(outcomes: ["failure"],
+                                 metadataKeys: ["frame", "rect"]),
         // One local stage completed. `stage` is the stage token carried in
         // the event type itself (one type per stage), so it needs no key.
         "stage_ocr": Entry(outcomes: ["success", "failure"],
@@ -116,6 +122,10 @@ struct PointAskEvents {
         case reason
         case confidence
         case disclosureVersion
+        // [ANALYSIS-DIAGNOSTIC] The pre-pipeline failure's geometry.
+        case cloud
+        case frame
+        case rect
     }
 
     let bus: ObservabilityBus
@@ -139,6 +149,22 @@ struct PointAskEvents {
 
     func chipTapped() {
         emit("chip_tapped", outcome: "success")
+    }
+
+    /// [ANALYSIS-DIAGNOSTIC] (2026-09-19) The analysis launch itself —
+    /// so a dead chip tap can never again leave the console silent about
+    /// whether the pipeline even started.
+    func analysisStarted(cloud: Bool) {
+        emit("analysis_started", outcome: "success",
+             metadata: [.cloud: cloud ? "on" : "off"])
+    }
+
+    /// The pre-pipeline failure (crop or re-encode) with the frame size
+    /// vs the requested rect — the numbers that name WHY the crop was
+    /// refused.
+    func analysisFailed(reason: String, metadata: [MetadataKey: String]) {
+        emit("analysis_failed", outcome: "failure", errorCode: reason,
+             metadata: metadata)
     }
 
     func ocrCompleted(count: Int, durationMs: Int) {
