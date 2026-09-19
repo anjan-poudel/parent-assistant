@@ -1168,7 +1168,6 @@ final class TranslateBrainHandleSlot: ModelResident, @unchecked Sendable {
     /// rather than merely be described as un-droppable.
     func releaseForWarden() -> UnloadAck {
         lock.lock()
-<<<<<<< HEAD
         defer { lock.unlock() }
         if loadDepth > 0 {
             loadAbandonRequested = true
@@ -1176,16 +1175,6 @@ final class TranslateBrainHandleSlot: ModelResident, @unchecked Sendable {
         }
         guard handle != nil else { return .notHolding }
         guard decodeDepth == 0 else { return .refused(.inUse) }
-=======
-        guard handle != nil else {
-            lock.unlock()
-            return .notHolding
-        }
-        guard decodeDepth == 0 else {
-            lock.unlock()
-            return .refused(.inUse)
-        }
->>>>>>> origin/master
         handle = nil
         handleModelURL = nil
         let notify = onOffloadedByWarden
@@ -1253,7 +1242,6 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
     /// The handle, and the ledger's view of it. Not an actor-stored property
     /// any more — see `TranslateBrainHandleSlot`.
     ///
-<<<<<<< HEAD
     /// Internal rather than private for exactly one reader:
     /// `LocalBrainTranslationTierTests` drives the warden's ask against the
     /// in-flight window (`releaseForWarden` while `isLoading`). The ledger
@@ -1262,23 +1250,13 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
     /// sweep that would ask skips it — and the ask is nevertheless the fact
     /// the fix is about.
     ///
-    /// `nonisolated` so that a reader outside the actor — the warden's own
-    /// event hook, in the test — can reach it without a suspension point: the
-    /// box carries its own lock and is `@unchecked Sendable`, and the load
-    /// window it describes is exactly the interval in which an `await` would
-    /// be too late.
-=======
-    /// `nonisolated let` and internal rather than `private` so the tier's
-    /// tests can drive the warden's ask against the real box — `store` a
-    /// handle, call `releaseForWarden` — without a model on disk or a llama
-    /// runtime. It is the same object this actor would have asked.
-    ///
     /// `nonisolated` because the warden does not go through this actor to
     /// reach it (`setWardenOffloadHandler` is `nonisolated` for the same
     /// reason: a reservation path may not have to await a decode). The box
-    /// guards its own state, which is why the property is a `let` of a
-    /// `Sendable` type and not actor-isolated state.
->>>>>>> origin/master
+    /// carries its own lock and is `@unchecked Sendable`, and the load window
+    /// it describes is exactly the interval in which an `await` would be too
+    /// late. It is the same object this actor would have asked; tests drive
+    /// the real box without a model on disk or a llama runtime.
     nonisolated let slot = TranslateBrainHandleSlot()
     private var lastUse: Date?
     /// The armed idle release, if one is. Cancelled and re-armed by every use,
@@ -1495,9 +1473,7 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
         // while `wardenBypassForTesting` is on, the load skips the
         // reserve/admit gate entirely — no permit, no eviction, no denial.
         // Residency is still recorded (didLoad below), so the ledger stays
-<<<<<<< HEAD
-        // honest about what is in memory. Testing-only; reverts to the gated
-        // path when the round-3 quant ships.
+        // honest about what is in memory. Testing-only.
         //
         // [PRESSURE-SAFE LOAD] **The bypass skips the arithmetic. It does not
         // skip the device.** Every checkpoint in this method runs whatever
@@ -1509,8 +1485,6 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
         // would have refused the load the owner's phone died starting, and a
         // testing switch that could re-open that path would be a switch that
         // can kill the phone again.
-=======
-        // honest about what is in memory. Testing-only.
         //
         // **The flip is one line, and it is the owner's to make after the
         // device pass** (2026-09-19 directive: "the bypass stays until
@@ -1527,7 +1501,6 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
         //   3. the elder sees "hold on a sec" copy while a load runs;
         //   4. the elder sees "switched for your voice request" when it is
         //      taken, and translation resumes on the next batch.
->>>>>>> origin/master
         let reservation: ModelReservation?
         if config.wardenBypassForTesting {
             reservation = nil
