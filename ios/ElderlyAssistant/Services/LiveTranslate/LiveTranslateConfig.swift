@@ -1352,6 +1352,16 @@ struct LiveTranslateConfig: Equatable {
     /// reserve grants with evictions rather than denying `over_budget_alone`.
     var wardenBypassForTesting: Bool = false
 
+    /// [DEBUG-LOG] (owner directive, 2026-09-20: "clearly log the response
+    /// from translation request — both source and target strings. Easier
+    /// to debug.") Prints raw source→translation pairs to the console's
+    /// debug lane (`print`) — never the observability bus, whose
+    /// content-free contract this flag exists to protect. ON while the
+    /// feature is in device testing; flips OFF before any release, because
+    /// scene text in a log is content the shipped privacy posture does not
+    /// keep.
+    var translationDebugLoggingEnabled: Bool = true
+
     /// How long the warden's notice stays on screen before it takes itself
     /// down, in seconds (owner directive, 2026-09-19: "keep the user in the
     /// loop so they don't wonder about the silences").

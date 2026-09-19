@@ -1169,6 +1169,16 @@ actor LiveTranslationPipeline {
         var remainder: [CloudTranslationTier.Item] = []
         for item in items {
             if let translation = outcome.translations[item.text] {
+                // [BRAIN-CACHE] (2026-09-20) The generation is paid for;
+                // the same text seen again must not pay it twice. The
+                // store failure is the cache's own business — recorded by
+                // the cache, never changing the answer — so the string
+                // settles either way. The producing tier rides with the
+                // entry so a re-read attributes the answer truthfully.
+                _ = cache.store(text: item.text,
+                                translation: translation,
+                                targetLanguage: targetLanguage,
+                                tier: .onDeviceBrain)
                 answered.append((item, .resolved(originalText: item.text,
                                                  translation: translation,
                                                  tier: .onDeviceBrain)))

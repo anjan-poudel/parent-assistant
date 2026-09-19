@@ -98,6 +98,32 @@ final class LabelTranslationCacheTests: XCTestCase {
         XCTAssertEqual(persistedHits.count, 2, "each hit is recorded with its origin token")
     }
 
+    /// [BRAIN-CACHE] A brain answer persists with its own tier, so the same
+    /// text seen again is served in this session and the next without paying
+    /// a second generation — and the hit is attributed truthfully (a brain
+    /// answer is not a cloud request, FR-LCT-008).
+    func testABrainTranslationIsServedWithItsOwnTierAcrossSessions() {
+        let first = makeCache()
+        XCTAssertTrue(first.store(text: recognizedText,
+                                  translation: translationText,
+                                  tier: .onDeviceBrain).isSuccess)
+
+        guard case .success(.some(let hit)) = first.lookup(text: recognizedText) else {
+            return XCTFail("the brain's translation must be served")
+        }
+        XCTAssertEqual(hit.translation, translationText)
+        XCTAssertEqual(hit.origin, .persisted)
+        XCTAssertEqual(hit.tier, .onDeviceBrain,
+                       "the producing tier rides with the entry — the re-read must not "
+                       + "claim a cloud request that never happened")
+
+        let second = makeCache()
+        guard case .success(.some(let laterHit)) = second.lookup(text: recognizedText) else {
+            return XCTFail("a brain answer must survive a new session like a cloud one")
+        }
+        XCTAssertEqual(laterHit.tier, .onDeviceBrain)
+    }
+
     func testOnlyTheDeclaredStorageKeyIsUsed() {
         let cache = makeCache()
         _ = cache.store(text: recognizedText, translation: translationText)
@@ -178,9 +204,11 @@ final class LabelTranslationCacheTests: XCTestCase {
                        "the payload carries the schema version and the entries, nothing else")
         XCTAssertEqual(entries.count, 2)
         for entry in entries {
-            XCTAssertEqual(Set(entry.keys), ["key", "translation", "lastAccessSequence"],
-                           "an entry holds the key, the translation and the LRU bookkeeping field "
-                           + "and nothing more (NFR-LCT-008 scenario 2)")
+            // [BRAIN-CACHE] The tier token joined the entry (schema 2): a
+            // closed token, so the "nothing scene-derived" contract holds.
+            XCTAssertEqual(Set(entry.keys), ["key", "translation", "lastAccessSequence", "tierToken"],
+                           "an entry holds the key, the translation, the LRU bookkeeping field "
+                           + "and the producing tier's token — nothing else, nothing scene-derived")
             XCTAssertNotNil(entry["lastAccessSequence"] as? NSNumber,
                             "the ordering field is a counter, not a timestamp")
         }
@@ -281,12 +309,12 @@ final class LabelTranslationCacheTests: XCTestCase {
         let payloadJSON = try XCTUnwrap(
             JSONSerialization.jsonObject(with: plaintext) as? [String: Any])
         let entries = try XCTUnwrap(payloadJSON["entries"] as? [[String: Any]])
-        XCTAssertEqual(Set(entries[0].keys), ["key", "translation", "lastAccessSequence"])
+        XCTAssertEqual(Set(entries[0].keys), ["key", "translation", "lastAccessSequence", "tierToken"])
 
         // No recognized text, no image data and no scene metadata rides beside
-        // the payload: the plaintext's only strings are the schema, the three
-        // field names, the key and the translation itself — and none of them
-        // is what the container holds.
+        // the payload: the plaintext's only strings are the schema, the field
+        // names, the key, the tier token and the translation itself — and
+        // none of them is what the container holds.
         let decrypted = String(decoding: plaintext, as: UTF8.self)
         for forbidden in ["image", "boundingBox", "timestamp", "latitude", "location", "device"] {
             XCTAssertFalse(decrypted.contains(forbidden),

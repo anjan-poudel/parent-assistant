@@ -80,7 +80,21 @@ final class LabelTranslationCache {
     struct Hit: Equatable {
         let translation: String
         let origin: Origin
-        var tier: TranslationTier { origin.tier }
+        /// [BRAIN-CACHE] (2026-09-20) The tier that produced this
+        /// translation, when the entry records it. Legacy persisted
+        /// entries carry none — those are cloud by definition, which is
+        /// what the fallback says. A brain answer read back from the
+        /// cache reports `.onDeviceBrain`, so a re-resolved string is
+        /// attributed truthfully instead of as a cloud request that never
+        /// happened (FR-LCT-008).
+        private let tierOverride: TranslationTier?
+        var tier: TranslationTier { tierOverride ?? origin.tier }
+
+        init(translation: String, origin: Origin, tierOverride: TranslationTier? = nil) {
+            self.translation = translation
+            self.origin = origin
+            self.tierOverride = tierOverride
+        }
     }
 
     // MARK: Persisted shape
@@ -94,14 +108,24 @@ final class LabelTranslationCache {
         /// timestamp. Ordered comparisons give LRU; nothing scene-derived is
         /// stored.
         var lastAccessSequence: Int
+        /// [BRAIN-CACHE] (2026-09-20) The producing tier's token. Optional
+        /// so the schema-v1 payloads this store discards would decode, and
+        /// so every test construction before the field existed still
+        /// compiles. Nil on read means the legacy default: cloud.
+        /// `var` (not `let`) because a `let` with an initializer is
+        /// excluded from the memberwise initializer entirely.
+        var tierToken: String? = nil
     }
 
     /// The whole payload under one key (the storage protocol has no key
     /// enumeration).
     struct Persisted: Codable, Equatable {
         /// Bumped when the entry shape changes; an unknown value is treated
-        /// exactly like a corrupt payload.
-        static let currentSchemaVersion = 1
+        /// exactly like a corrupt payload (self-healing: the store re-fills
+        /// from new resolutions).
+        ///
+        /// 2: [BRAIN-CACHE] entries carry a tier token.
+        static let currentSchemaVersion = 2
 
         let schemaVersion: Int
         var entries: [Entry]
@@ -183,25 +207,40 @@ final class LabelTranslationCache {
             }
             touch(key: key, translation: entry.translation)
             events.cacheHit(origin: Origin.persisted.eventOrigin, count: 1)
-            return .success(Hit(translation: entry.translation, origin: .persisted))
+            // [BRAIN-CACHE] The producing tier rides with the entry; a
+            // token this store does not know (a future tier) reads as the
+            // legacy default — cloud — rather than a misattribution to a
+            // tier that never answered.
+            let tier = entry.tierToken.flatMap(TranslationTier.init(rawValue:)) ?? .cloud
+            return .success(Hit(translation: entry.translation,
+                                origin: .persisted,
+                                tierOverride: tier))
         }
     }
 
     // MARK: Store
 
-    /// Persists a resolved translation. Called by the tier-2 completion path.
+    /// Persists a resolved translation. Called by the tier-2 completion
+    /// path and, since [BRAIN-CACHE] (2026-09-20), by the on-device
+    /// brain's success path — the same text seen again must not pay a
+    /// second generation or a second request, whichever tier produced it.
+    /// The producing tier rides with the entry so a re-read attributes the
+    /// answer truthfully (`Hit.tier`).
     ///
     /// A curated key is **not** written: it is answered by lookup, and a
     /// stored copy could shadow the curated value it duplicates (FR-LCT-019).
     @discardableResult
     func store(text: String,
                translation: String,
-               targetLanguage: AppLanguage = .nepali) -> Result<Void, LiveTranslateError> {
+               targetLanguage: AppLanguage = .nepali,
+               tier: TranslationTier = .cloud) -> Result<Void, LiveTranslateError> {
         let key = Self.normalizationKey(text: text, targetLanguage: targetLanguage)
         return withLock {
             guard curatedTranslation(forKey: key) == nil else { return .success(()) }
             _ = loadIfNeeded()
-            index[key] = Entry(key: key, translation: translation, lastAccessSequence: nextSequence)
+            index[key] = Entry(key: key, translation: translation,
+                               lastAccessSequence: nextSequence,
+                               tierToken: tier.rawValue)
             nextSequence += 1
             evictIfNeeded()
             guard let failure = persist() else {
