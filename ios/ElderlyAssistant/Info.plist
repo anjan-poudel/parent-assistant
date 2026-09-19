@@ -69,6 +69,19 @@
 		<string>instagram</string>
 		<string>maps</string>
 		<string>message</string>
+		<!-- [SCHEME-PROBE] Candidate schemes the URL-scheme tester probes —
+		     a probe for an un-whitelisted scheme answers false REGARDLESS
+		     of registration, so the tester's chips must be declared here
+		     to be honest. -->
+		<string>contact</string>
+		<string>people</string>
+		<string>mobilephone</string>
+		<string>mobilephone-contacts</string>
+		<string>mobilephone-favorites</string>
+		<string>mobilephone-recents</string>
+		<string>mobilephone-voicemail</string>
+		<string>vmshow</string>
+		<string>telprompt</string>
 		<string>photos-redirect</string>
 		<string>sms</string>
 		<string>x-apple-health</string>
