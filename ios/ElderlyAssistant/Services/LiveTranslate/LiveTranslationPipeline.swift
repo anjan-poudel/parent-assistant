@@ -165,8 +165,9 @@ enum LiveTranslateCloudAttempt: Equatable {
     /// The elder has not answered the prompt. Nothing was sent; the question
     /// is open, not failed.
     case awaitingDecision
-    /// No send at all: the honest reason the tier is unavailable (declined,
-    /// revoked, unreadable, unrecorded-and-unaskable).
+    /// No send at all: the honest reason the tier is unavailable (switched off
+    /// at the household's master switch, declined, revoked, unreadable,
+    /// unrecorded-and-unaskable).
     case unavailable(LiveTranslateError)
     /// The tier answered every item it was handed.
     case answered(CloudTranslationTier.BatchResult)
@@ -452,6 +453,19 @@ actor LiveTranslationPipeline {
     /// the cycle that used it.
     private var framePixelSize: CGSize = .zero
     private var alwaysShowOriginal: Bool
+    /// The cloud tier's master switch (owner directive, 2026-09-19): when it
+    /// is off, the gate answers `.cloudDisabled` before the consent question
+    /// is even asked, so no prompt is presented and no request is built.
+    ///
+    /// It is a `Bool` and not an `Optional`: the initializer resolves the
+    /// caller's `nil` into the config's nominal default once, so there is no
+    /// later read at which "the household never chose" and "the household
+    /// chose off" could diverge. The switch is checked in
+    /// `attemptThroughTheGate` — the one gate-then-tier sequence the live
+    /// cycle and the snapshot path share — which is what makes "off" mean the
+    /// same thing in extract mode's tap-to-translate, in the translated view,
+    /// and on a frozen frame.
+    private var geminiCloudEnabled: Bool
     /// Extract mode (owner verdict, 2026-09-18): the overlay shows the
     /// recognized text, and **no tier runs until a region is asked for**.
     ///
@@ -500,6 +514,13 @@ actor LiveTranslationPipeline {
          cloudNeed: LiveTranslateCloudNeedDeciding,
          backpressure: LiveTranslateBackpressure?,
          alwaysShowOriginal: Bool,
+         /// The cloud tier's master switch (owner directive, 2026-09-19).
+         /// **Optional and defaulted to `nil`**, which resolves to
+         /// `config.geminiCloudEnabledDefault` — so every call site that
+         /// predates the switch (and every test that is not about it) keeps
+         /// the shipped behaviour without being edited, and a caller that
+         /// means something hands in the value it means.
+         geminiCloudEnabled: Bool? = nil,
          /// Extract mode's initial state (owner verdict, 2026-09-18). Defaulted
          /// so every caller that predates the mode keeps the translated view,
          /// which is what its tests assert about it.
@@ -507,6 +528,15 @@ actor LiveTranslationPipeline {
          config: LiveTranslateConfig = .default,
          observabilityBus: ObservabilityBus,
          brain: LocalBrainTranslating? = nil,
+         /// Where the warden's two notices go (owner directive, 2026-09-19).
+         /// Forwarded to the tier this initializer builds; ignored when a
+         /// brain was handed in, because an injected tier owns its own wiring
+         /// and a caller that replaced the tier has replaced its surface too.
+         ///
+         /// Defaulted, so every caller that predates the notice path keeps
+         /// exactly the behaviour it had: the events still record both
+         /// moments, and a session with nothing listening loses nothing.
+         onWardenNotice: (@Sendable (LocalBrainWardenNotice) -> Void)? = nil,
          now: @escaping () -> Date = Date.init,
          /// The scene digest's salt (`LiveTranslateRegionSetDigest`). Random per
          /// pipeline by default — a digest the log carries is only ever compared
@@ -522,6 +552,9 @@ actor LiveTranslationPipeline {
         self.cloudNeed = cloudNeed
         self.backpressure = backpressure
         self.alwaysShowOriginal = alwaysShowOriginal
+        // The one place the switch's absent value is resolved: past this line
+        // the pipeline holds a decision, never a question.
+        self.geminiCloudEnabled = geminiCloudEnabled ?? config.geminiCloudEnabledDefault
         self.extractionMode = extractionMode
         self.config = config
         let events = LiveTranslateEvents(bus: observabilityBus, config: config)
@@ -535,7 +568,8 @@ actor LiveTranslationPipeline {
         self.brain = brain ?? LocalBrainTranslationTier(config: config,
                                                         modelStore: try? ModelStore(observabilityBus: observabilityBus),
                                                         events: events,
-                                                        targetLanguage: targetLanguage)
+                                                        targetLanguage: targetLanguage,
+                                                        onWardenNotice: onWardenNotice)
         self.publishToSink = publish
         self.now = now
         self.regionDigestSalt = regionDigestSalt
@@ -766,6 +800,37 @@ actor LiveTranslationPipeline {
         guard !isClosed, alwaysShowOriginal != value else { return }
         alwaysShowOriginal = value
         await publish()
+    }
+
+    /// The cloud tier's master switch, from its one writer (the session model,
+    /// behind the Settings leaf's row). Owner directive, 2026-09-19.
+    ///
+    /// The write is deliberately smaller than `updateAlwaysShowOriginal`'s: it
+    /// guards and assigns, and it does **not** publish. The display preference
+    /// republishes because it moves where every callout is drawn; this switch
+    /// does not move a single placement and does not touch a region's outcome,
+    /// so a publication from here would be a frame a consumer re-renders to
+    /// produce exactly the picture already on screen. What it does affect is
+    /// the *next* attempt, and that attempt publishes its own result — the
+    /// degraded region it produces is the visible consequence of switching the
+    /// cloud off, which is a state the elder can read.
+    ///
+    /// It does **not** cancel, retry or re-dispatch anything either:
+    ///
+    ///  - turning it **off** stops the next attempt, not the one in flight. A
+    ///    request that has already left is not un-sent by flipping a switch,
+    ///    and pretending otherwise (a cancelled batch reported as "never
+    ///    sent") would be a lie in the evidence; what the switch guarantees is
+    ///    that nothing *new* starts, and `attemptThroughTheGate` is where that
+    ///    is enforced for both callers.
+    ///  - turning it **on** does not by itself re-attempt strings the session
+    ///    already settled as `cloud_disabled`. They are terminal for the
+    ///    session's own monotonicity rule (AM-8), and the honest way to ask
+    ///    again is the one the design already has — a resume — rather than a
+    ///    switch that silently re-opens settled regions.
+    func updateGeminiCloudEnabled(_ value: Bool) async {
+        guard !isClosed, geminiCloudEnabled != value else { return }
+        geminiCloudEnabled = value
     }
 
     /// The extract-mode toggle, from its one writer (the overlay chrome).
@@ -1181,7 +1246,23 @@ actor LiveTranslationPipeline {
     /// ordering serves the live cycle and the snapshot path (T-033), so
     /// "consent is read immediately before every attempt" and "an unanswered
     /// prompt sends nothing" cannot diverge between them.
+    ///
+    /// The ordering is: **the household's master switch, then consent, then
+    /// the send.** The switch leads because with it off there is no attempt to
+    /// gate — no prompt, no in-flight registration, no request — and because a
+    /// feature that asked the elder to consent to something the household had
+    /// already switched off would be asking a question it would not act on.
     private func attemptThroughTheGate(_ items: [CloudTranslationTier.Item]) async -> LiveTranslateCloudAttempt {
+        // The master switch first, and before the gate (owner directive,
+        // 2026-09-19): with it off there is no cloud need to detect, so the
+        // consent prompt is never presented, no request is ever built, and the
+        // honest reason is the switch itself rather than a question the elder
+        // was asked and answered. **This is the one place the switch is read**,
+        // which is what makes the live cycle, extract mode's tap-to-translate
+        // and the snapshot path honour it by construction instead of by three
+        // matching guards.
+        guard geminiCloudEnabled else { return .unavailable(.cloudDisabled) }
+
         switch await cloudNeed.cloudNeedDetected() {
         case .awaitingDecision:
             return .awaitingDecision

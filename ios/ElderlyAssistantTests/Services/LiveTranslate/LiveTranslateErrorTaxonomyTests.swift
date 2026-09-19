@@ -28,6 +28,9 @@ final class LiveTranslateErrorTaxonomyTests: XCTestCase {
         .consentDenied,
         .consentRecordUnreadable,
         .costBudgetExhausted,
+        // Owner directive, 2026-09-19: the household's master switch is off,
+        // so the tier was never asked and no consent prompt was shown.
+        .cloudDisabled,
         .providerNotConfigured,
         .cloudTransient(.timedOut),
         .cloudTransient(.offline),
@@ -83,6 +86,11 @@ final class LiveTranslateErrorTaxonomyTests: XCTestCase {
             return ("consent_record_unreadable", .consentNotGranted)
         case .costBudgetExhausted:
             return ("cost_budget_exhausted", .costBudgetExhausted)
+        case .cloudDisabled:
+            // Its own reason, not `consentNotGranted`: the tier was never
+            // asked, which is a different fact from a refusal — and the
+            // elder-facing wording names neither.
+            return ("cloud_disabled", .cloudDisabled)
         case .providerNotConfigured:
             return ("provider_not_configured", .providerNotConfigured)
         case .cloudTransient(let failure):

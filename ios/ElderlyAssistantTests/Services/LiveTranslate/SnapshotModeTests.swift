@@ -86,13 +86,24 @@ final class SnapshotModeTests: XCTestCase {
                              configured: Bool = false,
                              dictionary: [String: String] = [:],
                              transport: TierTranslationTransport = TierTranslationTransport(),
-                             recording: Bool = false) -> Harness {
+                             recording: Bool = false,
+                             /// The cloud tier's master switch (owner
+                             /// directive, 2026-09-19) in the session's own
+                             /// settings. The factory's default keeps the
+                             /// tier reachable, which is what the scenarios in
+                             /// this suite were written against; the
+                             /// switch's own snapshot scenario asks for
+                             /// `false` explicitly. `nil` leaves the key
+                             /// absent, which is the household that has never
+                             /// chosen.
+                             geminiCloudEnabled: Bool? = true) -> Harness {
         let parts = makeLiveTranslateSessionTestParts(consent: consent,
                                                       configured: configured,
                                                       dictionary: dictionary,
                                                       transport: transport,
                                                       locale: nepali,
-                                                      config: config)
+                                                      config: config,
+                                                      geminiCloudEnabled: geminiCloudEnabled)
         suiteNames.append(parts.suiteName)
 
         guard recording else {
@@ -1112,6 +1123,45 @@ final class SnapshotModeTests: XCTestCase {
         let vision = code("ElderlyAssistant/Services/Gemini/GeminiClient+Vision.swift")
         XCTAssertNotNil(FeatureSourceScan.firstMatch(of: "\\.inlineData\\(", in: vision),
                         "the scan must find the shipped image path, or it proves nothing here")
+    }
+
+    /// The owner directive of 2026-09-19, at the freeze: the snapshot path
+    /// goes through the same gate the live cycle does
+    /// (`LiveTranslationPipeline.attemptThroughTheGate`), so the master switch
+    /// shuts it too — and it is checked **before** the consent prompt, so a
+    /// household that never turned the cloud on is not asked about it just
+    /// because a frame was frozen.
+    ///
+    /// Consent is granted and the provider key is present: the switch is the
+    /// only thing stopping the request, which is what makes this a test of the
+    /// switch rather than of the gate.
+    @MainActor
+    func testTheCloudSwitchOffDegradesTheFrozenAnswerWithoutSendingOrPrompting() async throws {
+        let transport = Self.respondingTransport()
+        let harness = makeHarness(consent: true, configured: true,
+                                  transport: transport,
+                                  geminiCloudEnabled: false)
+        reportLayout(harness)
+        harness.parts.engine.regions = [detected(cloudText)]
+        await harness.model.start()
+        try await deliverPass(harness)
+        try await deliverPass(harness)
+        await freeze(harness)
+        await waitForFrozenAnswer(harness, text: cloudText)
+
+        let publication = try XCTUnwrap(harness.model.frozen?.publication)
+        let region = try XCTUnwrap(publication.regions.first { $0.text == cloudText })
+        XCTAssertEqual(publication.result(for: region).outcome,
+                       .degraded(originalText: cloudText, reason: .cloudDisabled),
+                       "the held frame says why it has no translation, in its own words")
+        XCTAssertEqual(publication.result(for: region).text, cloudText,
+                       "the frozen frame still shows what was recognized")
+
+        XCTAssertEqual(transport.requestCount, 0,
+                       "a frozen frame is not a reason to send either")
+        XCTAssertEqual(harness.bus.events(named: "consent_prompt_shown").count, 0,
+                       "freezing a frame must not prompt a household that has not opted in")
+        XCTAssertEqual(harness.parts.governor.callsToday, 0)
     }
 
     // MARK: - 6. The stabiliser is not involved

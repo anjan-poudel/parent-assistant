@@ -57,6 +57,12 @@ final class LiveTranslateCopyTests: XCTestCase {
         "livetranslate.snapshot.capture",
         "livetranslate.snapshot.holding",
         "livetranslate.snapshot.live",
+        // Owner directive, 2026-09-19: the cloud tier's master switch, drawn
+        // on the Settings consent leaf. Two keys — the row's title and the
+        // line under it that says what "off" means. Drafts awaiting the same
+        // OD3 copy review as the consent wording around them.
+        "livetranslate.settings.cloud.title",
+        "livetranslate.settings.cloud.note",
         // 2026-09-19: the warden's two moments. The owner's directive is
         // explicit that the elder is not left wondering about the silences —
         // one sentence for a model that is loading ("hold on a sec"), one for
@@ -145,6 +151,45 @@ final class LiveTranslateCopyTests: XCTestCase {
         XCTAssertTrue(hasDevanagari(ne))
     }
 
+    // MARK: Scenario: the cloud switch says what "off" means, in both languages
+
+    /// Owner directive, 2026-09-19. The generic resolver test above already
+    /// covers "resolves in en + ne" for these keys; this pins the part of the
+    /// copy a reword could quietly drop — that off means *the phone
+    /// translates by itself and nothing is sent anywhere*, which is the state
+    /// a household that never touches the switch stays in, and that the title
+    /// names the service being asked for rather than "online" in the abstract.
+    func testTheCloudSwitchCopySaysWhatOffMeansInBothLanguages() {
+        let title = GeminiCloudToggleSurface.titleKey
+        let note = GeminiCloudToggleSurface.noteKey
+
+        XCTAssertEqual(title, "livetranslate.settings.cloud.title")
+        XCTAssertEqual(note, "livetranslate.settings.cloud.note")
+
+        let enNote = L10n.str(note, locale: english).lowercased()
+        XCTAssertTrue(enNote.contains("off"),
+                      "the note must name the state it explains: \(enNote)")
+        XCTAssertTrue(enNote.contains("by itself") || enNote.contains("on its own")
+                        || enNote.contains("on the phone"),
+                      "the note must say the phone translates on its own: \(enNote)")
+        XCTAssertTrue(enNote.contains("nothing is sent") || enNote.contains("nothing leaves"),
+                      "the note must say nothing leaves the phone: \(enNote)")
+
+        let neNote = L10n.str(note, locale: nepali)
+        XCTAssertTrue(hasDevanagari(neNote))
+        XCTAssertTrue(neNote.contains("बन्द"),
+                      "the Nepali note must name the off state: \(neNote)")
+        XCTAssertTrue(neNote.contains("फोन"),
+                      "the Nepali note must name the phone: \(neNote)")
+        XCTAssertTrue(neNote.contains("पठाइँदैन"),
+                      "the Nepali note must say nothing is sent: \(neNote)")
+
+        // The provider is named in the title in both languages: the household
+        // is being asked to let one particular service do the work.
+        XCTAssertTrue(L10n.str(title, locale: english).contains("Gemini"))
+        XCTAssertTrue(L10n.str(title, locale: nepali).contains("Gemini"))
+    }
+
     // MARK: Scenario: every warden notice has a sentence (2026-09-19)
 
     /// The indicator path is `LocalBrainWardenNotice`; this is the test that
@@ -185,6 +230,44 @@ final class LiveTranslateCopyTests: XCTestCase {
         XCTAssertTrue(L10n.str(LocalBrainWardenNotice.loadingModel.copyKey, locale: nepali)
                         .contains("पर्खनुहोस्"),
                       "the Nepali sentence must ask for the same wait")
+    }
+
+    // MARK: Scenario: the notice reaches the screen as a sentence (2026-09-19)
+
+    /// The notice's last step before it is read: `WardenNoticeSurface` is what
+    /// `LiveTranslateSessionModel` publishes and
+    /// `LiveTranslateWardenNoticeBanner` draws, so this is where "the banner
+    /// renders the catalog's sentence, in the active language" is asserted —
+    /// for both languages, and per notice, because the two moments must never
+    /// collapse into one wording.
+    ///
+    /// The assertions are the ones a key-instead-of-a-sentence bug or a
+    /// frozen-language bug would fail: not the key, not the case name,
+    /// Devanagari where the elder reads Nepali, and two languages that are not
+    /// the same string.
+    func testEveryWardenNoticeSurfaceRendersASentenceInBothLanguages() {
+        for notice in LocalBrainWardenNotice.allCases {
+            let en = WardenNoticeSurface(notice: notice, locale: english)
+            let ne = WardenNoticeSurface(notice: notice, locale: nepali)
+
+            XCTAssertFalse(en.copy.isEmpty)
+            XCTAssertFalse(ne.copy.isEmpty)
+            XCTAssertNotEqual(en.copy, notice.copyKey,
+                              "\(notice.rawValue) drew its catalog key instead of a sentence")
+            XCTAssertNotEqual(en.copy, notice.rawValue,
+                              "\(notice.rawValue) drew its case name instead of a sentence")
+            XCTAssertNotEqual(en.copy, ne.copy,
+                              "\(notice.rawValue) renders the same words in both languages")
+            XCTAssertTrue(hasDevanagari(ne.copy),
+                          "\(notice.rawValue) draws no Devanagari in a Nepali session: \(ne.copy)")
+        }
+
+        // The two moments say different things, in both languages: one wait,
+        // one hand-off.
+        XCTAssertNotEqual(WardenNoticeSurface(notice: .loadingModel, locale: english).copy,
+                          WardenNoticeSurface(notice: .offloadedForVoiceTurn, locale: english).copy)
+        XCTAssertNotEqual(WardenNoticeSurface(notice: .loadingModel, locale: nepali).copy,
+                          WardenNoticeSurface(notice: .offloadedForVoiceTurn, locale: nepali).copy)
     }
 
     // MARK: Scenario: the command phrases exist in both languages

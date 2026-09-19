@@ -170,17 +170,17 @@ final class AppLauncher {
     /// `canOpenURL` to answer honestly).
     static let catalog: [App] = [
         App(id: "phone", nameKey: "app.name.phone", systemImage: "phone.fill",
-            // [PHONE-DEEPLINKS] (2026-09-19) The Phone tile opens RECENTS —
-            // the dialer's real landing surface — through Apple's
-            // `mobilephone-recents://` scheme, not the bare `tel:` dialer
-            // (which iOS treated as an empty call sheet on recent builds).
-            // The companion surfaces are the sibling schemes: contacts
-            // `mobilephone-contacts://`, favorites
-            // `mobilephone-favorites://`, voicemail
-            // `mobilephone-voicemail://` (all whitelisted for probing in
-            // LSApplicationQueriesSchemes — a future per-surface tiles
-            // change consumes them without an Info.plist pass).
-            scheme: "mobilephone-recents"),
+            // [PHONE-DEEPLINKS-REVERT] (2026-09-19) Back on the
+            // slashes-less `tel:` dialer — DEVICE-VERIFIED that
+            // `mobilephone-recents://` (and the sibling mobilephone-*
+            // schemes) are NOT registered by the Phone app on stock iOS:
+            // canOpenURL fails with OSStatus -10814 (application not
+            // found). Apple exposes no public deep link for the Phone
+            // app's Recents/Contacts/Favorites/Voicemail tabs; the bare
+            // `tel:` dialer is the only honest surface. The dead schemes
+            // were removed from LSApplicationQueriesSchemes with this
+            // revert (see docs/deeplink-schemes.md).
+            scheme: "tel"),
         App(id: "messages", nameKey: "app.name.messages", systemImage: "message.fill", scheme: "sms"),
         App(id: "facetime", nameKey: "app.name.facetime", systemImage: "video.fill", scheme: "facetime"),
         App(id: "mail", nameKey: "app.name.mail", systemImage: "envelope.fill", scheme: "message"),

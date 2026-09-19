@@ -168,6 +168,15 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// The FR-LCT-017 preference, as the control renders it.
     @Published private(set) var alwaysShowOriginal: Bool
 
+    /// The cloud tier's master switch, as the Settings leaf renders it and as
+    /// the pipeline is gated by (owner directive, 2026-09-19).
+    ///
+    /// Read from `LiveTranslateSettings` when the session is built and
+    /// mirrored on every write, so the value the elder sees in Settings, the
+    /// value the session model publishes and the value the gate reads are one
+    /// value rather than three that have to be kept in step.
+    @Published private(set) var geminiCloudEnabled: Bool
+
     /// **Extract mode** (owner verdict, 2026-09-18), as the mode control
     /// renders it: `true` ⇒ the overlay shows the recognized text and no tier
     /// runs until a block is asked for; `false` ⇒ the translated view.
@@ -178,6 +187,22 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// accessibility setting that should follow them into every session, and
     /// the translated view is one tap away whenever they want it.
     @Published private(set) var isExtracting: Bool
+
+    /// The warden's current notice, or nil when there is nothing to say
+    /// (owner directive, 2026-09-19: "keep the user in the loop so they don't
+    /// wonder about the silences").
+    ///
+    /// A *status*, not a prompt: the tier pushes one of
+    /// `LocalBrainWardenNotice`'s two moments when it pays a model load or
+    /// hands its handle to the voice stack, this property carries it to the
+    /// screen, and the dismissal below takes it down again. Nothing waits on
+    /// the elder to acknowledge it, and nothing here can outlive the wait it
+    /// explains — see `noteWardenNotice(_:)`.
+    ///
+    /// The sentence is never stored: the view resolves `copyKey` through
+    /// `L10n` in the active language (`wardenNoticeSurface`), so a notice
+    /// cannot exist with a stale or literal wording.
+    @Published private(set) var wardenNotice: LocalBrainWardenNotice?
 
     /// The camera preview layer, or nil until the session's capture session
     /// exists. Handed to the view's host, which only lays it out — the gravity
@@ -276,6 +301,18 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// when the elder returns to live or the session closes, so a slow pass
     /// cannot land a frozen frame nobody asked for any more.
     private var snapshotTask: Task<Void, Never>?
+
+    /// The notice's own dismissal timer — the only task this object owns
+    /// besides the frame loop, and the reason a notice needs no tap to go
+    /// away. Replaced (and the previous one cancelled) on every new notice,
+    /// and cancelled outright on close.
+    private var wardenNoticeTask: Task<Void, Never>?
+    /// Which notice the pending timer belongs to. A timer that fires after a
+    /// newer notice replaced its own must take nothing down, and this is what
+    /// says so — the count is the whole guard, so a notice that is already on
+    /// screen when a second one arrives still gets its full window.
+    private var wardenNoticeGeneration = 0
+
     private var lifecycleObservers: [NSObjectProtocol] = []
     private var consentForwarding: AnyCancellable?
     private var indicatorForwarding: AnyCancellable?
@@ -306,6 +343,11 @@ final class LiveTranslateSessionModel: ObservableObject {
                                                locale: dependencies.locale)
         self.notifications = dependencies.notifications
         self.alwaysShowOriginal = dependencies.settings.alwaysShowOriginal
+        // The cloud switch is read from the same store, for the same reason:
+        // the elder's choice in Settings is the session's opening state, with
+        // the config's nominal default (off) standing in for a household that
+        // has never chosen.
+        self.geminiCloudEnabled = dependencies.settings.geminiCloudEnabled
         self.isExtracting = dependencies.config.extractModeDefault
         self.indicator = CloudActivityIndicatorModel(observabilityBus: dependencies.observabilityBus,
                                                      config: dependencies.config)
@@ -420,6 +462,19 @@ final class LiveTranslateSessionModel: ObservableObject {
                                      locale: locale)
     }
 
+    /// The warden's notice as the banner renders it, or nil when there is
+    /// nothing to say (which is every moment but two).
+    ///
+    /// The sentence is resolved here, from `copyKey` and the active locale,
+    /// for the reason `repromptText` is: a surface value answers in the
+    /// language the session is running in, and the view is handed a sentence
+    /// rather than a key it would have to know how to read. Nothing is
+    /// duplicated — `LocalBrainWardenNotice.copyKey` is the one place a notice
+    /// names its catalog entry, and this is the one place it is resolved.
+    var wardenNoticeSurface: WardenNoticeSurface? {
+        wardenNotice.map { WardenNoticeSurface(notice: $0, locale: locale) }
+    }
+
     /// Whether the session is in a phase that has (or is about to have) a
     /// camera picture on screen.
     private var isCameraPhase: Bool {
@@ -506,9 +561,19 @@ final class LiveTranslateSessionModel: ObservableObject {
             cloudNeed: consent,
             backpressure: camera,
             alwaysShowOriginal: alwaysShowOriginal,
+            // The gate the whole session is built behind (owner directive,
+            // 2026-09-19): handed in explicitly rather than left to the
+            // config's default, so the switch the elder set in Settings is the
+            // switch this session runs under — from its very first cloud need.
+            geminiCloudEnabled: geminiCloudEnabled,
             extractionMode: isExtracting,
             config: config,
             observabilityBus: dependencies.observabilityBus,
+            // The warden's two moments land on the model's own surface. The
+            // hop itself is the named factory below rather than an inline
+            // closure, so the wiring a test exercises is the wiring that
+            // ships.
+            onWardenNotice: Self.wardenNoticeSink(for: self),
             publish: { [weak self] publication in
                 await self?.receive(publication)
             })
@@ -587,6 +652,13 @@ final class LiveTranslateSessionModel: ObservableObject {
         // The session is over: a closed model is never mid-capture, and no
         // spinner may outlive the view that drew it.
         freezeInProgress = false
+        // And no sentence may either: the warden's notice is about work this
+        // session is doing, the timer that would have taken it down is
+        // cancelled with it, and a view torn down a moment later must not
+        // paint a status for a session that has ended.
+        wardenNoticeTask?.cancel()
+        wardenNoticeTask = nil
+        wardenNotice = nil
 
         // The observation surface returns to the state it had before the first
         // cycle. The last scene is not a claim about a session that has
@@ -728,6 +800,45 @@ final class LiveTranslateSessionModel: ObservableObject {
 
     func toggleAlwaysShowOriginal() {
         setAlwaysShowOriginal(!alwaysShowOriginal)
+    }
+
+    /// The cloud tier's master switch, as the Settings leaf writes it (owner
+    /// directive, 2026-09-19).
+    ///
+    /// The same write path shape as the display preference above, and for the
+    /// same reason: the value is written to the store, then read back from it,
+    /// so the surface the elder touched and the gate the session runs behind
+    /// cannot hold two different answers. That matters more here than there —
+    /// this is the setting that decides whether anything leaves the phone —
+    /// and it is why the switch is not a `@Published` the view writes
+    /// directly.
+    func setGeminiCloudEnabled(_ value: Bool) {
+        guard !isClosed else { return }
+        settings.setGeminiCloudEnabled(value)
+        refreshGeminiCloudEnabled()
+    }
+
+    /// Mirrors the switch into the model and the pipeline.
+    ///
+    /// Nothing is re-placed and nothing is re-attempted: this setting is not
+    /// part of any placement policy, and strings the session already settled
+    /// stay settled (the pipeline's `updateGeminiCloudEnabled` says why). What
+    /// it *does* affect is the next attempt — and it reaches the gate through
+    /// the pipeline's own flag, which is the one the gate reads, rather than
+    /// through a copy held here.
+    private func refreshGeminiCloudEnabled() {
+        geminiCloudEnabled = settings.geminiCloudEnabled
+        let pipeline = self.pipeline
+        let resolved = geminiCloudEnabled
+        Task { await pipeline?.updateGeminiCloudEnabled(resolved) }
+    }
+
+    /// The switch as its row renders it, in the active language — the same
+    /// shape every other surface this model owns has (`alwaysShowOriginalSurface`,
+    /// `translateAllSurface`, `cloudIndicator`), so the session's chrome and
+    /// the Settings leaf draw the same words from the same catalog keys.
+    var geminiCloudToggleSurface: GeminiCloudToggleSurface {
+        GeminiCloudToggleSurface(isOn: geminiCloudEnabled, locale: locale)
     }
 
     /// The extract-mode toggle's single write path (the chrome's control).
@@ -1050,6 +1161,74 @@ final class LiveTranslateSessionModel: ObservableObject {
         // same correction (owner device verdict, 2026-09-18).
         if frameStabilization != frame.stabilization { frameStabilization = frame.stabilization }
         await pipeline?.ingest(frame)
+    }
+
+    // MARK: - The warden's notices (owner directive, 2026-09-19)
+
+    /// The sink the tier pushes its two notices into: the one place a
+    /// `@Sendable` call from the tier's actor (or from the warden's thread, on
+    /// a hand-off) meets this object's main-confined surface.
+    ///
+    /// A named factory rather than an inline closure at the one call site,
+    /// because the hop is the whole of the wiring and a test cannot exercise a
+    /// closure it has to re-write to reach: `LiveTranslateSessionModelTests`
+    /// hands a real model this sink, pushes through it exactly as the tier
+    /// does, and asserts what the screen would show. The weak capture is the
+    /// pipeline's own rule — a session that has gone away is not kept alive by
+    /// the tier that used to feed it.
+    static func wardenNoticeSink(
+        for model: LiveTranslateSessionModel
+    ) -> @Sendable (LocalBrainWardenNotice) -> Void {
+        { [weak model] notice in
+            Task { @MainActor in model?.noteWardenNotice(notice) }
+        }
+    }
+
+    /// The tier's notice sink, on this side of the actor boundary. The tier
+    /// pushes both moments from its own actor (and, for a hand-off, from the
+    /// warden's thread via a `Task`), so this is where they join the model's
+    /// main-confined surface — the same shape `receive(_:)` has for
+    /// publications, and the same shape the view reads.
+    ///
+    /// Auto-dismiss is here rather than in the view, deliberately: a view that
+    /// owned the timer would be a view that starts a task and holds state, and
+    /// this feature's render path is a pure function of its surface. The
+    /// window is `config.wardenNoticeDismissSeconds`.
+    ///
+    /// A second notice replaces the first *and* restarts the window: the two
+    /// moments can land close together (a load announced, then the handle
+    /// taken), and the sentence on screen must be the newer one for its own
+    /// full time rather than for the remainder of the older one's.
+    func noteWardenNotice(_ notice: LocalBrainWardenNotice) {
+        guard !isClosed else { return }
+        wardenNotice = notice
+        wardenNoticeGeneration += 1
+        let generation = wardenNoticeGeneration
+        wardenNoticeTask?.cancel()
+        // The sleep is the one wait in this file that is not a tier's: it is
+        // how long a *sentence* stays up, which is the unit the elder
+        // experiences it in (the same reasoning as the pipeline's departure
+        // grace). It is bounded below at zero so a config that was handed a
+        // negative value dismisses at once instead of trapping on the
+        // conversion.
+        let nanoseconds = UInt64(max(0, config.wardenNoticeDismissSeconds) * 1_000_000_000)
+        wardenNoticeTask = Task { [weak self] in
+            try? await Task<Never, Never>.sleep(nanoseconds: nanoseconds)
+            guard !Task.isCancelled else { return }
+            self?.dismissWardenNotice(generation: generation)
+        }
+    }
+
+    /// Takes the notice down, if it is still the one the caller was shown for.
+    ///
+    /// The generation check is what makes a replaced notice's timer harmless:
+    /// a timer that fires after a newer notice arrived finds a count that has
+    /// moved and does nothing, so a slow dismissal can never blank a sentence
+    /// the elder has only just been given.
+    private func dismissWardenNotice(generation: Int) {
+        guard !isClosed, wardenNoticeGeneration == generation else { return }
+        wardenNotice = nil
+        wardenNoticeTask = nil
     }
 
     // MARK: - Publications

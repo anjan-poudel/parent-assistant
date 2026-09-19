@@ -66,6 +66,10 @@ final class LiveTranslateConfigTests: XCTestCase {
         XCTAssertEqual(config.overlayMinPointSize, 18)
         XCTAssertFalse(config.alwaysShowOriginalDefault)
 
+        // Tier 2 — the master switch (owner directive, 2026-09-19)
+        XCTAssertFalse(config.geminiCloudEnabledDefault,
+                       "the cloud tier does not cascade: a household opting in is the only way it runs")
+
         // Tier 2
         XCTAssertEqual(config.cloudDeadlineGraceSeconds, 5)
         XCTAssertEqual(config.cloudMaxRetries, 1)
@@ -94,6 +98,16 @@ final class LiveTranslateConfigTests: XCTestCase {
         XCTAssertEqual(config.brainTranslationIdleUnloadSeconds, 5)
         XCTAssertEqual(config.brainTranslationHeadroomFactor, 1.0)
         XCTAssertTrue(config.brainTranslationDefersToResidentBrain)
+
+        // The warden's notice (owner directive, 2026-09-19). A status line,
+        // not a modal: its window is the whole of how it ends, so the value is
+        // pinned here rather than left to whichever surface happens to draw it.
+        XCTAssertEqual(config.wardenNoticeDismissSeconds, 4.0)
+        XCTAssertGreaterThan(config.wardenNoticeDismissSeconds, 0,
+                             "a zero window would be a notice nobody can read")
+        XCTAssertLessThanOrEqual(config.wardenNoticeDismissSeconds, 10,
+                                 "a long-lived status stops being a status and starts "
+                                 + "outliving the wait it explains")
     }
 
     /// The green highlight's three values (owner spec, 2026-09-18: "the
@@ -190,6 +204,27 @@ final class LiveTranslateConfigTests: XCTestCase {
 
     func testDefaultIsTheDocumentedNominalValueBundle() {
         XCTAssertEqual(LiveTranslateConfig.default, LiveTranslateConfig())
+    }
+
+    // MARK: The cloud tier's master switch (owner directive, 2026-09-19)
+
+    /// The directive's first requirement, at the one place every operational
+    /// default lives (NFR-LCT-011): the Gemini tier is off until a household
+    /// turns it on. This is the value the store's absent key falls back to and
+    /// the value a pipeline built without an explicit switch opens with, so it
+    /// is the single word "off" for the whole feature.
+    func testTheCloudTierDoesNotCascadeUnlessAHouseholdTurnsItOn() {
+        XCTAssertFalse(LiveTranslateConfig.default.geminiCloudEnabledDefault)
+        XCTAssertFalse(LiveTranslateConfig().geminiCloudEnabledDefault,
+                       "the nominal bundle and the default are the same value")
+
+        // A default and not a constant — a knob like every other operational
+        // value here, so a household's stored choice (or a test's injected
+        // config) can move it without editing a component.
+        var config = LiveTranslateConfig.default
+        config.geminiCloudEnabledDefault = true
+        XCTAssertTrue(config.geminiCloudEnabledDefault)
+        XCTAssertNotEqual(config, LiveTranslateConfig.default)
     }
 
     // MARK: Scenario: the cloud base timeout has exactly one source of truth
