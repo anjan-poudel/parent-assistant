@@ -13,6 +13,12 @@ import Foundation
 ///   (alternate → link, enclosure → media), `<summary>`/`<content>`,
 ///   `<id>`, `<published>`/`<updated>` (ISO 8601).
 ///
+/// The SUMMARY (`description` / `summary`) and the article BODY
+/// (`content:encoded` / `content`) are retained as separate fields
+/// (feeds readaloud task, 2026-09-19): the card shows the summary and
+/// the full-article reading speaks the body. A feed that publishes only
+/// one of the two puts it in both fields — the body is never invented.
+///
 /// XML character references and CDATA are decoded by `XMLParser` itself
 /// (`foundCharacters` receives decoded text), so titles/summaries arrive
 /// entity-free — the pin tests assert that ("Tom & Jerry", not
@@ -34,6 +40,15 @@ final class FeedRSSParser: NSObject, XMLParserDelegate {
     private let sourceName: String
     private let maxItems: Int
 
+    /// Hard cap on the retained article BODY, in Characters (feeds
+    /// readaloud task, 2026-09-19): a feed may ship a whole article per
+    /// item and the parser keeps up to `maxItems` of them per source, so
+    /// an uncapped body would let one source hold megabytes of
+    /// third-party text in memory. Past this the body is truncated — the
+    /// stored text is what the reading can honestly speak, and no more is
+    /// claimed.
+    static let maxFullTextLength = 20_000
+
     private(set) var items: [FeedItem] = []
 
     /// Root element discriminates RSS vs Atom; anything else stays
@@ -45,6 +60,10 @@ final class FeedRSSParser: NSObject, XMLParserDelegate {
     private var inItem = false
     private var currentTitle = ""
     private var currentSummary = ""
+    /// The article body — accumulated separately from the summary
+    /// (feeds readaloud task, 2026-09-19), capped at
+    /// `maxFullTextLength`.
+    private var currentFullText = ""
     private var currentLink = ""
     private var currentDate: Date?
     private var currentID: String?
@@ -52,7 +71,7 @@ final class FeedRSSParser: NSObject, XMLParserDelegate {
     /// The element whose character content is being accumulated.
     private var accumulating: Accumulator = .none
     private enum Accumulator {
-        case none, title, summary, link, id, date
+        case none, title, summary, fullText, link, id, date
     }
     /// Date elements are buffered as text and parsed at end-element —
     /// `foundCharacters` may arrive in fragments, and parsing a fragment
@@ -163,6 +182,7 @@ final class FeedRSSParser: NSObject, XMLParserDelegate {
         inItem = true
         currentTitle = ""
         currentSummary = ""
+        currentFullText = ""
         currentLink = ""
         currentDate = nil
         currentID = nil
@@ -177,9 +197,14 @@ final class FeedRSSParser: NSObject, XMLParserDelegate {
         case "description":
             accumulating = .summary
         case "content:encoded":
-            // Prefer description; content:encoded is the fallback only
-            // (handled on end-element — see handleRSSEnd).
-            if currentSummary.isEmpty { accumulating = .summary }
+            // `<description>` is the summary; `<content:encoded>` is the
+            // article BODY and is retained separately (feeds readaloud
+            // task, 2026-09-19) — the full-article reading speaks it
+            // while the card keeps showing the summary. When the feed
+            // ships NO description, the body still backs the summary
+            // (see `endItem`), so a body-only feed renders exactly as it
+            // always did.
+            accumulating = .fullText
         case "link":
             accumulating = .link
         case "guid":
@@ -216,8 +241,15 @@ final class FeedRSSParser: NSObject, XMLParserDelegate {
 
     private func handleAtomStart(_ elementName: String, attributes: [String: String]) {
         switch elementName {
-        case "title", "summary", "content":
-            accumulating = elementName == "title" ? .title : .summary
+        case "title":
+            accumulating = .title
+        case "summary":
+            accumulating = .summary
+        case "content":
+            // Atom's `<content>` is the article body, exactly like RSS's
+            // `<content:encoded>` — retained separately from `<summary>`
+            // (feeds readaloud task, 2026-09-19).
+            accumulating = .fullText
         case "id":
             accumulating = .id
         case "published", "updated":
@@ -268,11 +300,29 @@ final class FeedRSSParser: NSObject, XMLParserDelegate {
         switch accumulating {
         case .title: currentTitle += string
         case .summary: currentSummary += string
+        case .fullText: appendToFullText(string)
         case .link: currentLink += string
         case .id: if currentID == nil { currentID = string } else { currentID! += string }
         case .date: currentDateText += string
         case .none: break
         }
+    }
+
+    /// Appends a body fragment, NEVER taking the accumulated body past
+    /// the storage cap. Character-counted (grapheme-safe, like every
+    /// other length in this codebase): a multi-byte Devanagari body is
+    /// bounded by what it SAYS, not by its byte width, and the truncation
+    /// is a Character prefix — a cut inside a grapheme cluster would
+    /// corrupt the script (the Devanagari substring lesson). XMLParser
+    /// delivers a large text node in several `foundCharacters` calls, so
+    /// the cap is enforced here, on every fragment, rather than at the
+    /// element's end.
+    private func appendToFullText(_ fragment: String) {
+        let remaining = Self.maxFullTextLength - currentFullText.count
+        guard remaining > 0 else { return }
+        currentFullText += fragment.count > remaining
+            ? String(fragment.prefix(remaining))
+            : fragment
     }
 
     func parser(_ parser: XMLParser, didEndElement elementName: String,
@@ -285,6 +335,8 @@ final class FeedRSSParser: NSObject, XMLParserDelegate {
                 endItem()
             case "title", "description", "content:encoded", "link", "guid":
                 accumulating = .none
+                // The cut-off is enforced at the SOURCE: body text past
+                // the cap was never accumulated (see `appendToFullText`).
             case "pubDate":
                 accumulating = .none
                 // Parse the buffered text; a garbage date stays nil
@@ -329,7 +381,15 @@ final class FeedRSSParser: NSObject, XMLParserDelegate {
         guard items.count < maxItems else { return }
 
         let title = currentTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        let summary = currentSummary.trimmingCharacters(in: .whitespacesAndNewlines)
+        let fullText = currentFullText.trimmingCharacters(in: .whitespacesAndNewlines)
+        // The summary falls back to the body when the source published no
+        // `<description>`/`<summary>` — the pre-existing behaviour for
+        // body-only feeds, unchanged (such an item then carries the same
+        // text in both fields, and the full-article affordance correctly
+        // reports there is nothing MORE to read).
+        let summary = currentSummary
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nilIfEmpty ?? fullText
         guard !title.isEmpty || !summary.isEmpty else { return }
 
         let resolved = FeedMediaResolver.resolve(enclosures: enclosures)
@@ -350,7 +410,8 @@ final class FeedRSSParser: NSObject, XMLParserDelegate {
             linkURL: currentLink.trimmingCharacters(in: .whitespacesAndNewlines),
             imageURL: resolved.imageURL,
             mediaURL: resolved.mediaURL,
-            sourceName: sourceName
+            sourceName: sourceName,
+            fullText: fullText
         ))
     }
 }
