@@ -694,6 +694,64 @@ final class ModelLifecycleManagerTests: XCTestCase {
             manager, request(.brain, modelID: brain17B, owner: owner)))
     }
 
+    /// [LOAD-SERIALIZATION] The translation tier's preempt: the in-flight
+    /// reservation of the named slot stands down, nothing else moves, and
+    /// the stand-down is reported under the reason it happened for — the
+    /// recognizer reads `isReservationHeld` and the tier reads the return.
+    /// The second reservation is the encoder because the serial large-load
+    /// bound admits only one heavy load at a time (the denial is the rule
+    /// this preempt exists to keep out of the tier's way).
+    func testAbandonInFlightPreemptsTheReservationOfTheSlotAndOnlyThatSlot() {
+        var events: [ModelLifecycleEvent] = []
+        manager.onEvent = { events.append($0) }
+        let owner = FakeOwner()
+
+        guard let stt = reserveOrFail(
+            manager, request(.speechToText,
+                             modelID: ModelCatalog.whisperKitNepaliMedium,
+                             owner: owner)),
+              let encoder = reserveOrFail(
+            manager, request(.intentEncoder,
+                             modelID: ModelCatalog.intentEncoderSpike,
+                             owner: owner)) else { return }
+
+        let abandoned = manager.abandonInFlight(slot: .speechToText, reason: .preempted)
+
+        XCTAssertEqual(abandoned.map(\.id), [stt.id],
+                       "the in-flight reservation of the preempted slot stands down")
+        XCTAssertTrue(manager.isReservationHeld(encoder.id),
+                      "a reservation of another slot is not touched")
+        XCTAssertFalse(manager.isReservationHeld(stt.id),
+                       "the preempted permit is gone — that is the word the load "
+                       + "site reads when its load completes")
+        XCTAssertTrue(events.contains(.reservationAbandoned(slot: .speechToText,
+                                                            reason: .preempted)),
+                      "the stand-down is reported under the reason it happened for")
+        XCTAssertEqual(manager.snapshot().transientLiveBytes,
+                       ModelLifecycleInventory.footprint(for: .intentEncoder,
+                                                         modelID: ModelCatalog.intentEncoderSpike).liveBytes,
+                       "the ledger's arithmetic now sees only the surviving reservation")
+        // The preempt is not sticky either: the recognizer's next load is
+        // judged on its own merits.
+        XCTAssertNotNil(reserveOrFail(
+            manager, request(.speechToText,
+                             modelID: ModelCatalog.whisperKitNepaliMedium,
+                             owner: owner)))
+    }
+
+    /// The preempt on an idle slot is a no-op, not an event storm: the tier
+    /// calls it before every translation load, most of which happen with no
+    /// recognizer load in flight at all.
+    func testAbandonInFlightOnAnIdleSlotIsANoOp() {
+        var events: [ModelLifecycleEvent] = []
+        manager.onEvent = { events.append($0) }
+
+        let abandoned = manager.abandonInFlight(slot: .speechToText, reason: .preempted)
+
+        XCTAssertTrue(abandoned.isEmpty)
+        XCTAssertTrue(events.isEmpty, "nothing stood down, nothing to report")
+    }
+
     func testReservationTTLReapsALoadThatNeverCommitted() {
         var events: [ModelLifecycleEvent] = []
         manager.onEvent = { events.append($0) }

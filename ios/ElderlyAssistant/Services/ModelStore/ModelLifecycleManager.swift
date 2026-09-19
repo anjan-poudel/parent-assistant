@@ -1089,6 +1089,49 @@ final class ModelLifecycleManager {
         abandonInternal(reservation, reason: reason, emittingEvents: true)
     }
 
+    /// Abandon every in-flight reservation for one slot, before a caller
+    /// whose own load would collide with them starts allocating.
+    ///
+    /// [LOAD-SERIALIZATION] (2026-09-19) The translation tier calls this for
+    /// `.speechToText` before its own load starts: the owner's 15:39 device
+    /// capture shows an STT warm finishing its 85-second load in the same
+    /// second the translation load was admitted, and two heavy page-ins at
+    /// once are the exact spike the serial large-load bound exists to
+    /// prevent. The warm is anticipatory (first-talk latency); the
+    /// translation load answers the elder's live request, so the warm
+    /// stands down and the recognizer re-loads on demand.
+    ///
+    /// Returns the abandoned reservations so the caller (or a test) can
+    /// report what stood down. The load site detects the abandonment
+    /// through `isReservationHeld(_:)` when its own load completes.
+    @discardableResult
+    func abandonInFlight(slot: ModelSlot,
+                         reason: ReservationAbandonReason) -> [ModelReservation] {
+        lock.lock()
+        let targets = reservations.values.filter { $0.slot == slot }
+        for reservation in targets {
+            reservations.removeValue(forKey: reservation.id)
+            reservationOwners.removeValue(forKey: reservation.id)
+        }
+        lock.unlock()
+        for reservation in targets {
+            onEvent?(.reservationAbandoned(slot: reservation.slot, reason: reason))
+        }
+        return targets
+    }
+
+    /// Whether a reservation is still held. Load sites ask this when their
+    /// load completes, to detect a preemption that arrived mid-load
+    /// ([LOAD-SERIALIZATION]): the permit was granted, the load began, and
+    /// a colliding load abandoned it before this site committed. A gone
+    /// reservation is the ledger's word that the bytes are no longer
+    /// wanted, and the site stands down instead of committing residency.
+    func isReservationHeld(_ id: UUID) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return reservations[id] != nil
+    }
+
     private func abandonInternal(_ reservation: ModelReservation,
                                  reason: ReservationAbandonReason,
                                  emittingEvents: Bool) {
