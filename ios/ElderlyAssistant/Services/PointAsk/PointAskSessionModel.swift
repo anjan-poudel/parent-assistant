@@ -261,6 +261,12 @@ final class PointAskSessionModel: ObservableObject {
     /// request so the ladder-1 answer can name the object; cleared with
     /// every dismiss, exactly like the box itself.
     private var anchoredDetectedLabel: String?
+    /// [ONE-TAP] The anchor's own crop geometry and frame, kept past the
+    /// anchor so the analysis (and the consent prompt a local failure
+    /// can raise) re-reads the SAME target the elder saw — the box the
+    /// chip used to carry for itself.
+    private var anchoredPixelRect: CGRect?
+    private var anchoredFrame: CameraFrame?
 
     private var isClosed = false
 
@@ -477,15 +483,38 @@ final class PointAskSessionModel: ObservableObject {
         // next, the analysis the chip launches reads the SAME target the
         // elder saw anchored.
         anchoredDetectedLabel = target.detectedLabel
+        anchoredPixelRect = target.pixelRect
+        anchoredFrame = latestFrame
         boxGeneration += 1
         let generation = boxGeneration
         let seconds = UInt64(max(0, config.boxAgeOutSeconds) * 1_000_000_000)
         ageOutTask?.cancel()
+        // The age-out remains the escape hatch for the one path that
+        // cannot analyze (no frame yet): its guard checks the phase, so
+        // once the analysis below starts it is a harmless no-op.
         ageOutTask = Task { [weak self] in
             try? await Task<Never, Never>.sleep(nanoseconds: seconds)
             guard !Task.isCancelled else { return }
             self?.ageOut(generation: generation)
         }
+
+        // [ONE-TAP] (2026-09-20) The analysis starts with the anchor —
+        // the chip's second tap is gone from the shipped flow (owner
+        // verdict: "tap creates a rectangle and that's about it"). The
+        // local ladder runs without consent exactly as it did behind the
+        // chip; cloud runs only when consent was already recorded. A
+        // local failure with the cloud available presents the consent
+        // prompt instead (first cloud need, proven), so the prompt still
+        // precedes any egress and the box never idles waiting for a tap
+        // the elder does not know to make.
+        guard let frame = anchoredFrame else { return }
+        ageOutTask?.cancel()
+        ageOutTask = nil
+        phase = .analyzing(target.normalizedBox)
+        startAnalysis(frame: frame,
+                      box: target.normalizedBox,
+                      pixelRect: target.pixelRect,
+                      cloud: consentGate.currentDecision().allowsEgress)
     }
 
     private func ageOut(generation: Int) {
@@ -511,6 +540,8 @@ final class PointAskSessionModel: ObservableObject {
         consentFailureMessage = nil
         pendingAnalysis = nil
         anchoredDetectedLabel = nil
+        anchoredPixelRect = nil
+        anchoredFrame = nil
         phase = .awaitingTap
     }
 
@@ -596,10 +627,32 @@ final class PointAskSessionModel: ObservableObject {
 
     private func finishAnswered(box: NormalizedBox, composed: PointAskAnswer) {
         guard !isClosed else { return }
+        // [ONE-TAP] A local failure with the cloud available is the first
+        // cloud need, now proven: the consent prompt is the next thing
+        // the elder sees, not a failure they cannot act on. The pending
+        // analysis re-reads the SAME target, so the grant re-runs it
+        // with the cloud tier. The prompt still precedes any egress —
+        // the local ladder never left the device.
+        if composed.isFailure,
+           settings.cloudEnabled,
+           consentGate.currentDecision() == .notRecorded,
+           let frame = anchoredFrame,
+           let pixelRect = anchoredPixelRect {
+            pendingAnalysis = (frame, box, pixelRect)
+            presentConsent()
+            return
+        }
         answer = composed
         cloudIndicatorActive = false
         phase = composed.isFailure ? .failed(box) : .answered(box)
         analysisTask = nil
+        // [ONE-TAP] The failure must be HEARD, exactly as the thrown-error
+        // path speaks it ([ANALYSIS-DIAGNOSTIC]): with the chip gone, the
+        // spoken line is the only signal a one-tap elder gets that the
+        // answer did not land.
+        if composed.isFailure {
+            speak(composed.spokenLine)
+        }
     }
 
     private func finishFailed(box: NormalizedBox) {
