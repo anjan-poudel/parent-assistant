@@ -133,19 +133,20 @@ final class StubPointAskClassifier: PointAskClassificationEngine {
     }
 }
 
-/// A scripted `PointAskMaskProbing`: the opt-in path's fake, and the reason
-/// the resolver takes the protocol rather than the concrete engine.
+/// A scripted `PointAskMaskProbing`: the tight-box path's fake, and the
+/// reason the resolver takes the protocol rather than the concrete engine.
 final class StubPointAskMaskEngine: PointAskMaskProbing {
 
     var supportsMasks: Bool = true
-    var contains: Bool = true
+    /// The box the fake answers; nil = the tap is on background.
+    var box: NormalizedBox? = NormalizedBox(xMin: 0.25, yMin: 0.25, xMax: 0.5, yMax: 0.5)
     var error: Error?
     private(set) var passCount = 0
 
-    func maskContains(_ point: CGPoint, in pixelBuffer: CVPixelBuffer) throws -> Bool {
+    func maskBox(at point: CGPoint, in pixelBuffer: CVPixelBuffer) throws -> NormalizedBox? {
         passCount += 1
         if let error { throw error }
-        return contains
+        return box
     }
 }
 

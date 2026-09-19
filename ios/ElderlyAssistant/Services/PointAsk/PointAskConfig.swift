@@ -160,7 +160,12 @@ struct PointAskConfig: Equatable {
     /// item 6 / ship gate: "opt-in stays behind the probe"); the shipped
     /// path hit-tests the existing saliency boxes. A device spike measures
     /// the mask request's latency before this default is ever moved.
-    var maskEngineEnabled: Bool = false
+    /// [TAP-FIX] (2026-09-19) Default ON: the instance-mask pass is what
+    /// makes the box WRAP the object (the tight silhouette extent) — the
+    /// behaviour the owner's first device test asked for. The probe still
+    /// gates availability honestly (pre-iOS 17 devices and failed passes
+    /// fall to the saliency/pad ladder).
+    var maskEngineEnabled: Bool = true
 
     /// The most OCR text, in characters, handed into the VLM prompt. The
     /// text is a *hint* for the model, never an instruction, and a short
