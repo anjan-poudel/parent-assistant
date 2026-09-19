@@ -22,7 +22,7 @@ PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # The generated project is named seniOS (project.yml `name:`); the scheme is
 # still ElderlyAssistant. Build.sh uses the same pairing.
 APP_NAME="seniOS"
-SCHEME="${APP_NAME}"
+SCHEME="ElderlyAssistant"
 BUILD_DIR="${PROJECT_DIR}/../build"
 TEST_DERIVED_DATA="${IOS_TEST_DERIVED_DATA:-${BUILD_DIR}/DerivedDataTests}"
 TEST_SRC="${PROJECT_DIR}/ElderlyAssistantTests"
@@ -83,7 +83,7 @@ else
                 ;;
             "ios/ElderlyAssistant/"*.swift)
                 stem="$(basename "$f" .swift)"
-                if [ -f "${TEST_SRC}" ] && \
+                if [ -d "${TEST_SRC}" ] && \
                    find "$TEST_SRC" -name "${stem}Tests.swift" -print -quit | grep -q .; then
                     SELECTED_CLASSES+=("${stem}Tests")
                 fi
@@ -128,6 +128,16 @@ fi
 
 echo "diff base: ${BASE} (${#UNIT_CLASSES[@]} unit + ${#UI_CLASSES[@]} ui classes selected)"
 $LIST_ONLY && { printf '%s\n' "${ONLY[@]:-<full unit target>}"; exit 0; }
+
+# The checked-in xcodeproj drifts from project.yml — master has shipped
+# source files its pbxproj never listed (#90's PointAsk), and build.sh
+# hides the drift by regenerating. The harness must generate exactly like
+# build.sh does, or it compiles a stale file list.
+if ! command -v xcodegen >/dev/null 2>&1; then
+    echo "ERROR: xcodegen not found. Install with: brew install xcodegen" >&2
+    exit 2
+fi
+(cd "${PROJECT_DIR}" && xcodegen generate --spec project.yml --project .)
 
 # Same invocation as build.sh run_tests() so caching/warmup applies.
 DESTINATION="${IOS_TEST_DESTINATION:-}"
