@@ -205,7 +205,13 @@ final class TranslationResultTests: XCTestCase {
             "provider_rejected",
             "text_quarantined",
             "deadline_exceeded",
-            "no_tier_resolved"
+            "no_tier_resolved",
+            // Owner directive, 2026-09-19: the cloud tier's master switch is
+            // off, so the tier was never asked — a different fact from a
+            // withheld consent, and the elder-facing wording stays cause-free
+            // either way (`livetranslate.state.unavailable` names none of
+            // these).
+            "cloud_disabled"
         ])
     }
 

@@ -673,7 +673,10 @@ private enum RetryPolicy {
             // 408 / 429 / 5xx once (row 14); every other 4xx never (row 15) —
             // a malformed request does not become well-formed by repeating it.
             return status == 408 || status == 429 || (500...599).contains(status)
-        case .providerNotConfigured,      // row 10
+        case .cloudDisabled,              // the master switch is off: the pipeline
+                                          // gates before this tier is ever reached,
+                                          // so there is no request to repeat
+             .providerNotConfigured,      // row 10
              .consentNotRecorded,         // row 11
              .consentDenied,              // row 11
              .consentRecordUnreadable,    // row 11

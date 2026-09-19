@@ -8019,6 +8019,40 @@
         }
       }
     },
+    "livetranslate.settings.cloud.note": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When this is off, the phone translates by itself and nothing is sent anywhere."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो बन्द हुँदा फोन आफैं अनुवाद गर्छ र कहीँ पनि केही पठाइँदैन।"
+          }
+        }
+      }
+    },
+    "livetranslate.settings.cloud.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use online translation (Gemini)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अनलाइन अनुवाद प्रयोग गर्नुहोस् (Gemini)"
+          }
+        }
+      }
+    },
     "livetranslate.snapshot.capture": {
       "comment": "T-033 freeze-frame control. DRAFT: awaiting the owner's OD3 copy review at final sign-off.",
       "extractionState": "manual",
