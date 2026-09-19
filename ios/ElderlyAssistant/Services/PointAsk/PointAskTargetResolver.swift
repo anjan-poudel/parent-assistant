@@ -237,10 +237,18 @@ final class PointAskTargetResolver {
     private let yoloEngine: PointAskObjectDetecting?
     private let config: PointAskConfig
     private let events: PointAskEvents
+    private let observabilityBus: ObservabilityBus
     private let now: () -> Date
 
     private var cachedBoxes: [NormalizedBox] = []
     private var cachedAt: Date?
+    /// [MASK-OBSERVABILITY] Whether this session has already reported the
+    /// mask engine's state once. The report exists so a mask that is
+    /// unavailable — a failed probe, an unwired engine, an OS below 17 —
+    /// can never degrade every tap to a pad *silently* again (the owner's
+    /// "bounding boxes are just squares" session produced zero mask_pass
+    /// events, which could not tell a stale build from a dead probe).
+    private var maskStateReported = false
 
     init(objectEngine: LiveObjectDetectionEngine,
          maskEngine: PointAskMaskProbing? = nil,
@@ -253,6 +261,7 @@ final class PointAskTargetResolver {
         self.yoloEngine = yoloEngine
         self.config = config
         self.events = PointAskEvents(bus: observabilityBus, config: config)
+        self.observabilityBus = observabilityBus
         self.now = now
     }
 
@@ -282,6 +291,29 @@ final class PointAskTargetResolver {
                           height: CVPixelBufferGetHeight(pixelBuffer))
         let clamped = CGPoint(x: min(max(point.x, 0), 1),
                               y: min(max(point.y, 0), 1))
+
+        // [MASK-OBSERVABILITY] One report per session, before the ladder:
+        // whether the mask engine exists and whether it will be consulted.
+        // A session of pad-only anchors with `mask_probe state=unavailable`
+        // is a dead probe, not a missing build — the distinction the
+        // owner's "bounding boxes are just squares" session could not make.
+        if !maskStateReported {
+            maskStateReported = true
+            let state: String
+            if let maskEngine {
+                state = maskEngine.supportsMasks ? "available" : "unavailable"
+            } else {
+                state = "unwired"
+            }
+            observabilityBus.emit(ObservabilityEvent(
+                component: "pointask",
+                eventType: "mask_probe",
+                durationMs: nil,
+                outcome: state == "available" ? "success" : "degraded",
+                errorCode: nil,
+                metadata: ["state": state]
+            ))
+        }
 
         if let yoloEngine, yoloEngine.isAvailable,
            let yolo = yoloDetection(using: yoloEngine, in: pixelBuffer, containing: clamped) {
