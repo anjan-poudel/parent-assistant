@@ -66,7 +66,15 @@ enum TranslationReliabilityRouter {
     /// Punctuation that marks a clause rather than a label. A label does not
     /// end in a full stop and does not carry a clause separator; a line that
     /// does is a sentence however few words it uses.
-    private static let clausePunctuation: [Character] = [".", "!", "?", ";", ":", "—", "–"]
+    ///
+    /// The Devanagari danda (`।`, U+0964) and double danda (`॥`, U+0965) are
+    /// here because they are the full stop of the target script: a Nepali sign
+    /// line ends with one, and the rest of the app already treats them as
+    /// sentence stops (`NepaliOutputGate`, `NepaliTextNormalizer`) rather than
+    /// as ordinary characters. Without them a Devanagari clause was classified
+    /// as a proven short form on its word count alone and settled on the tier
+    /// that is not proven on sentences.
+    private static let clausePunctuation: [Character] = [".", "!", "?", ";", ":", "—", "–", "।", "॥"]
 
     // MARK: - The decision
 

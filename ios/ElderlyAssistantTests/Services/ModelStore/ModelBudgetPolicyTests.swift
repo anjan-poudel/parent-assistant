@@ -142,13 +142,17 @@ final class ModelBudgetPolicyTests: XCTestCase {
     /// alone, and 2.81 GB beside the 1.0 GB warm STT, which is also inside.
     /// No eviction, no cloud round trip, no `.overBrainCeiling`.
     func testTheTranslationShipQuantFitsTheStandardClass() {
-        // The 4 GB class refuses it too, but for the LIGHTER reason: 1.81 GB
-        // live fits the 2.0 GB budget on its own (the superseded Q8's 2.63 GB
-        // did not — that got `.overClassBudget`), so the refusal is now only
-        // about the 0.65 GB STT that class runs beside it.
+        // The 4 GB class no longer reaches the arithmetic: the quant declares
+        // a 5 GB floor, and 5 GB is exactly where `deviceClass` stops calling
+        // a phone `.compact`. The device gate is checked first, so the 4 GB
+        // verdict is a device problem rather than a budget one — which is the
+        // honest sentence, because the download itself is refused (1.1 GB
+        // landing on a phone whose class then refuses to load it was the
+        // reason the floor moved). The budget arithmetic below still holds on
+        // the classes that can hold it.
         XCTAssertEqual(availability(translationShipQuant, on: compactPhone).reason,
-                       .requiresEvictingWarmSTT,
-                       "1.81 GB live fits the 2.0 GB budget alone; + 0.65 GB STT does not")
+                       .deviceTooSmall,
+                       "the 5 GB floor is the `.compact` boundary itself")
 
         XCTAssertEqual(availability(translationShipQuant, on: standardPhone), .available,
                        "1.81 GB live + 1.0 GB warm STT = 2.81 GB ≤ 3.2 GB")
@@ -182,9 +186,11 @@ final class ModelBudgetPolicyTests: XCTestCase {
         // which is why §3.2 pairs it with the small whisper.cpp context and
         // why the refusal is the honest answer rather than a silent admit.
         // The round-3 Q4 quant is in this list on purpose: it clears the
-        // *standard* class, and the fact that it still cannot share a 4 GB
-        // phone with an STT is the arithmetic that keeps the compact class
-        // on the small whisper context.
+        // *standard* class, and it is refused here at the device gate — its
+        // 5 GB floor is the `.compact` boundary, so a 4 GB phone never gets
+        // as far as the class arithmetic above. The compact class stays on
+        // the small whisper context either way; this pins that it does not
+        // get a translation brain it cannot load.
         for id in [intent1B, brain17B, translationBrain, translationShipQuant,
                    brain3B, brain4B] {
             let result = availability(id, on: compactPhone)

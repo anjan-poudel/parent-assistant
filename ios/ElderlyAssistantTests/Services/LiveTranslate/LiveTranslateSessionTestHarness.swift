@@ -400,7 +400,28 @@ func makeLiveTranslateSessionTestParts(
     /// the thing under test. `nil` leaves the key absent, which is how a test
     /// exercises the household that has never chosen (the shipped default);
     /// `false` is how a test says the household turned the cloud off.
-    geminiCloudEnabled: Bool? = true) -> LiveTranslateSessionTestParts {
+    geminiCloudEnabled: Bool? = true,
+    /// Whether the session's encrypted store accepts writes.
+    ///
+    /// `false` is the phone whose keychain write failed. The store is the
+    /// session's one store — the consent record, the cache and the config all
+    /// go through it — so a scenario that asks for this is asking for storage
+    /// that is broken, not for one key that is; what it buys is the state
+    /// AM-4 part 3 is about: an answer the elder gave that was not recorded.
+    consentWriteFails: Bool = false,
+    /// The network path the session's router reads.
+    ///
+    /// **Reachable by default, and deliberately so.** Production passes
+    /// nothing and the pipeline builds the shipped `PathMonitorReachability`,
+    /// which answers with whatever network the host machine has — a simulator
+    /// on a laptop with Wi-Fi and a build machine without would run two
+    /// different suites, and the difference is invisible in the assertions
+    /// (it decides whether the cloud may lead the sentence class). The suites
+    /// that came through here were written on a networked host, so the
+    /// reachable default is the behaviour they assert; a suite whose subject is
+    /// the no-path order passes `ScriptedReachability(reachable: false)`.
+    reachability: NetworkReachability? = ScriptedReachability(reachable: true))
+        -> LiveTranslateSessionTestParts {
 
     // A session opens showing the *recognized text* — that is the shipped
     // default (owner verdict, 2026-09-18) and it is pinned as one, by
@@ -426,6 +447,7 @@ func makeLiveTranslateSessionTestParts(
     let bus = LiveTranslateSanitisingBus()
     let notifications = NotificationCenter()
     let storage = LabelTranslationCacheTestStorage()
+    storage.failsWrites = consentWriteFails
     let configStore = GeminiConfigStore(storage: storage)
     if configured { configStore.save("fake-key") }
     let gate = LiveTranslateConsentGate(storage: storage, config: config, observabilityBus: bus)
@@ -465,6 +487,7 @@ func makeLiveTranslateSessionTestParts(
         detector: detector,
         cache: cache,
         brain: brain,
+        reachability: reachability,
         consentGate: gate,
         costGovernor: governor,
         client: client,
@@ -498,6 +521,34 @@ func makeLiveTranslateSessionTestParts(
                                          clock: clock,
                                          defaults: defaults,
                                          suiteName: suiteName)
+}
+
+/// [RELIABILITY-ROUTER] The network's answer, scripted. A scenario that wants
+/// the cloud to be ABLE to lead says so; the conservative answer — no path —
+/// is what the cascade shipped with, and a suite that means the no-path order
+/// has to ask for it rather than inherit whatever the host machine has.
+///
+/// It lives here rather than beside one of its callers because two seams take
+/// it: the pipeline's own `reachability:` and the session's
+/// `LiveTranslateSessionDependencies.reachability`, so a session-level suite
+/// can pin the router's order without a live path monitor in the way.
+final class ScriptedReachability: NetworkReachability, @unchecked Sendable {
+    private let lock = NSLock()
+    private var reachable: Bool
+
+    init(reachable: Bool) {
+        self.reachable = reachable
+    }
+
+    var isReachable: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return reachable
+    }
+
+    func set(reachable: Bool) {
+        lock.lock(); defer { lock.unlock() }
+        self.reachable = reachable
+    }
 }
 
 /// Tier 1, scripted — the on-device brain the pipeline asks before the

@@ -111,6 +111,47 @@ final class ModelCatalogLanguageTests: XCTestCase {
                       "the translation row is not an assistant-brain choice")
     }
 
+    /// Two lists decide what "a translation artifact" is, and until this test
+    /// nothing tied them: the catalog's `allTranslationEntries` (the pool the
+    /// translation card may append an installed leftover from) and the tier's
+    /// own `brainTranslationModelIDs` (the order the brain tries, whose tail
+    /// is assistant brains the catalog calls brains). They are hand-kept, and
+    /// the failure is silent in both directions.
+    ///
+    /// A quant added to the tier list alone is *nothing* in the catalog: the
+    /// brain section subtracts `allTranslationEntries` from its pool, so the
+    /// artifact would be offered as an assistant brain, translated by the
+    /// tier, and never deletable from the translation card that holds it. A
+    /// quant added to the catalog's list alone is a row the tier never tries —
+    /// a download that changes nothing. Both are asserted here, through the
+    /// derived `brainEntries` rather than a third hand-kept list.
+    func testTheTranslationListsAgreeWithTheTier() {
+        let artifacts = Set(ModelCatalog.allTranslationEntries.map(\.id))
+        let brains = Set(ModelCatalog.brainEntries.map(\.id))
+        let tier = LiveTranslateConfig.default.brainTranslationModelIDs
+
+        XCTAssertFalse(artifacts.isEmpty, "the list this test exists to tie is empty")
+        // Every translation artifact is one the tier actually tries.
+        for id in artifacts {
+            XCTAssertTrue(tier.contains(id),
+                          "\(id.rawValue) is a translation artifact the tier never asks")
+        }
+        // Every id the tier tries is one of the two things the catalog says
+        // it is: a translation artifact, or a brain row.
+        for id in tier {
+            XCTAssertTrue(artifacts.contains(id) || brains.contains(id),
+                          "\(id.rawValue) is in the tier list but is neither a "
+                          + "translation artifact nor a brain entry — the lists have drifted")
+        }
+        // The same, stated the other way round: the derived brain pool is
+        // exactly the tier's brain tail, so a translation artifact can never
+        // be offered as an assistant-brain pick.
+        XCTAssertTrue(brains.isDisjoint(with: artifacts),
+                      "a translation artifact is also a brain row")
+        XCTAssertTrue(ModelCatalog.brainEntries.allSatisfy { $0.kind == .llamaBase },
+                      "the brain pool is not brains")
+    }
+
     /// The row's title is copy, so it lives in the string table like every
     /// other row's — in both shipped languages. The English value is the
     /// catalog's own `displayName` verbatim; a row that drifted from it

@@ -394,8 +394,11 @@ struct LiveTranslateSnapshotPath {
     // MARK: The cloud, for what the device could not answer
 
     /// The plan's answers for `publication`'s still-pending strings, merged
-    /// onto its outcomes — or `nil` when there is nothing to ask, the elder has
-    /// not answered the prompt yet, or the session is gone.
+    /// onto its outcomes — or `nil` when there is nothing to ask, when the plan
+    /// could answer nothing at all (the elder has not answered the prompt and
+    /// the device had nothing to say), or when the session is gone. An open
+    /// prompt does not by itself withhold a device answer: the device needs no
+    /// consent, so a frame it could answer keeps that answer.
     ///
     /// Not "the cloud's answers": the frozen frame is planned by the same
     /// reliability router the live cycle plans by, so a short-form string the
