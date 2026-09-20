@@ -173,7 +173,15 @@ enum NepaliOutputGate {
     /// markerless Devanagari answer is still refused. Two words is a bare
     /// noun phrase — the largest "short sign" answer that cannot plausibly
     /// carry grammar; three words has room for it.
-    static let maxMarkerlessWords = 2
+    /// [EXEMPTION-WIDENED] (owner's 22:41 capture: the dispatch fires, the
+    /// model answers every batch with 48–89-char Devanagari arrays, and
+    /// `no_nepali_evidence` refuses them ALL — three-plus-word real answers
+    /// the owner never sees.) The exemption now covers the model's real
+    /// answer lengths: markerless Devanagari of ten words or fewer settles
+    /// on script + non-Hindi + non-echo evidence. The bounded risk — a
+    /// markerless Marathi sentence shown once — is the documented price of
+    /// showing any real answer at all.
+    static let maxMarkerlessWords = 10
 
     // MARK: - Reading the answer
 

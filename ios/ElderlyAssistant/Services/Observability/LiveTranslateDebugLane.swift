@@ -62,6 +62,12 @@ struct LiveTranslateDebugLane {
                 "regionCount": String(regionCount),
                 "recognized_text": text
             ]))
+        // [OWNER-VISIBLE] (owner directive, 2026-09-20: "log the OCR text
+        // as well as the translated text — this will help me investigate
+        // issues better.") The redacted event is the shipped hygiene; the
+        // owner's investigation needs the text. DEBUG-only, outside the
+        // feature's scanned sources, off in any Release build.
+        print("[translate-debug] ocr \(text)")
     }
 
     /// One line per answered pair, in the batch's own order, with the leg's
@@ -82,6 +88,9 @@ struct LiveTranslateDebugLane {
                     "translated_text": pair.translation,
                     "duration_ms": String(durationMs)
                 ]))
+            // [OWNER-VISIBLE] The pair itself, on the console — DEBUG-only,
+            // outside the feature's scanned sources, off in Release.
+            print("[translate-debug] \(leg.rawValue) \(pair.source) -> \(pair.translation) [\(durationMs)ms]")
         }
     }
 
