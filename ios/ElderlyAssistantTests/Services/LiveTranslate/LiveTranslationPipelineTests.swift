@@ -4041,4 +4041,476 @@ final class LiveTranslationPipelineTests: XCTestCase {
         XCTAssertEqual(requests(carrying: thirdCloudText, in: harness), 1,
                        "the block nobody tapped was dispatched once the window opened")
     }
+
+    // MARK: - The combined fix round (2026-09-20)
+    //
+    // One scenario per finding, grouped here rather than beside the feature it
+    // belongs to because what they have in common is the review, not the
+    // cascade.
+
+    /// **A claim a plan never used is released again** (finding A1, and the
+    /// half of A12 that makes it reachable).
+    ///
+    /// A tick the dispatch clock refuses asks nothing — but the dispatcher has
+    /// already claimed its strings, because the claim moved into the
+    /// synchronous dispatch step to close the check-then-act window (A12). So
+    /// the release has to happen on that early return too. It used to happen
+    /// only at the end of a plan, and the claim a throttled tick left behind
+    /// outlived the tick: the region stayed pending for the rest of the
+    /// session with nothing left to dispatch it.
+    @MainActor
+    func testScenarioAThrottledTickReleasesTheClaimItMade() async throws {
+        let clock = ScriptedClock()
+        let brain = RecordingBrain()
+        var config = LiveTranslationPipelineTests.unpacedDispatchConfig()
+        config.translationDispatchMinInterval = 30
+        let harness = makeHarness(brain: brain, now: { clock.now }, config: config)
+        await harness.pipeline.updateLayout(layout)
+        let frame = try makeFrame()
+
+        // The first dispatch settles, so what stands between the second string
+        // and its translation is the window the first one left behind.
+        brain.answers = [cloudText: brainTranslation]
+        harness.recogniser.defaultStep = .regions([detected(cloudText, box: box(0.1, 0.1, 0.5, 0.25))])
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+        await waitUntil("the first dispatch to answer and release") {
+            await harness.pipeline.inFlightAttemptCount == 0
+        }
+        let bought = brain.calls.count
+
+        // A new sentence inside that window: the plan is refused before it asks
+        // anything, and the claim the dispatcher made goes back.
+        harness.recogniser.defaultStep = .regions([detected(secondCloudText, box: box(0.1, 0.5, 0.6, 0.65))])
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+        await settleTheCycle()
+
+        let claimed = await inFlightKeys(harness)
+        XCTAssertTrue(claimed.isEmpty,
+                      "a tick the dispatch clock refused released its claim: \(claimed)")
+        XCTAssertEqual(brain.calls.count, bought, "and it bought nothing")
+
+        // The window opens: the string is still the session's to answer.
+        brain.answers = [cloudText: brainTranslation, secondCloudText: brainTranslation]
+        clock.advance(by: config.translationDispatchMinInterval + 0.1)
+        await harness.pipeline.ingest(frame)
+        await waitUntil("the throttled string to be asked once the window opens") {
+            brain.calls.contains([self.secondCloudText])
+        }
+    }
+
+    /// **A second capture does not wipe the first one's open question**
+    /// (finding A5).
+    ///
+    /// Both stills' strings are the elder's to answer, and the registry that
+    /// holds them is what the retry goes back to. Replacing it with the newest
+    /// frame's asks dropped an earlier frame's question the moment another
+    /// picture was taken — the elder answered the prompt and the frame they
+    /// had asked about was never retried, because nothing remembered it had
+    /// been asked.
+    @MainActor
+    func testScenarioASecondCaptureKeepsTheFirstOnesOpenAsk() async throws {
+        let harness = makeHarness(consent: false, transport: Self.respondingTransport())
+        await harness.pipeline.updateLayout(layout)
+
+        // A sentence the gate asks about, with no consent recorded: the
+        // question is open, not answered.
+        let first = await harness.pipeline.resolveFrozen([frozenItem("f1", cloudText)])
+        XCTAssertNil(first?["f1"], "a question with no answer yet is not an answer")
+        let oneAsk = await harness.pipeline.awaitingResolutionKeys
+        XCTAssertEqual(oneAsk.count, 1, "the first frame's ask is open")
+
+        // A second still, a different sentence.
+        _ = await harness.pipeline.resolveFrozen([frozenItem("f2", secondCloudText)])
+
+        let asks = await harness.pipeline.awaitingResolutionKeys
+        XCTAssertEqual(asks.count, 2,
+                       "both frames' questions are still open, so both go back in the retry: \(asks)")
+    }
+
+    /// **A held frame's answer is not pruned by the live scene** (finding A8).
+    ///
+    /// A held frame's keys are absent from the live picture by construction —
+    /// it is a still, not the scene the stabiliser is watching — so a live
+    /// reconcile used to drop the frame's settlements and its next refresh
+    /// asked the tiers for a string the session had already paid for.
+    @MainActor
+    func testScenarioAHeldFramesAnswerSurvivesTheLivePrune() async throws {
+        let brain = RecordingBrain()
+        brain.answers = [cloudText: brainTranslation]
+        let harness = makeHarness(brain: brain)
+        await harness.pipeline.updateLayout(layout)
+
+        // The still picture's string is answered on the device, and the answer
+        // is the session's.
+        let held = await harness.pipeline.resolveFrozen([frozenItem("f1", cloudText)])
+        XCTAssertEqual(held?["f1"]?.sourceTier, .onDeviceBrain)
+        XCTAssertEqual(brain.calls.filter { $0.contains(self.cloudText) }.count, 1)
+
+        // The live scene moves on — a different string entirely — and the cycle
+        // reconciles. The held key is not on the live picture.
+        harness.recogniser.defaultStep = .regions([detected(secondCloudText)])
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+        await settleTheCycle()
+
+        let again = await harness.pipeline.resolveFrozen([frozenItem("f1", cloudText)])
+        XCTAssertEqual(again?["f1"]?.sourceTier, .onDeviceBrain,
+                       "the frame's answer is still the session's")
+        XCTAssertEqual(brain.calls.filter { $0.contains(self.cloudText) }.count, 1,
+                       "the frame's answer was not paid for a second time")
+    }
+
+    /// **A wait nobody is waiting for is not a model that timed out** (finding
+    /// A6).
+    ///
+    /// The stage is what tells "the model is too slow" from "a thaw, a resume
+    /// or a close stopped the wait on purpose". The wait reported every empty
+    /// ending as the stage deadline, so cancelling a session mid-decode
+    /// fabricated an `inferenceTimeout` the model never had.
+    @MainActor
+    func testScenarioACancelledBrainWaitIsReportedAsCancelledNotAsADeadline() async throws {
+        let brain = RecordingBrain()
+        var config = LiveTranslationPipelineTests.unpacedDispatchConfig()
+        // The deadline cannot be what ends this wait: the session does. The
+        // window is stated in the two fields the derived deadline is built
+        // from (`brainTranslationStageDeadlineSeconds` is read-only), and it
+        // is orders of magnitude longer than this test's own wall-clock, so
+        // the only ending available to the wait is the close below.
+        config.brainTranslationTimeoutSeconds = 300
+        config.brainTranslationStageGraceSeconds = 30
+        let harness = makeHarness(brain: brain, config: config)
+        await harness.pipeline.updateLayout(layout)
+        brain.hangs = true
+        harness.recogniser.defaultStep = .regions([detected(cloudText)])
+
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+        await waitUntil("the generation to start") { brain.calls.count == 1 }
+
+        // The session ends while the model is still decoding.
+        await harness.pipeline.close()
+
+        await waitUntil("the ending to be reported") {
+            !harness.bus.events(named: "brain_translation_unavailable").isEmpty
+        }
+        let event = harness.bus.events(named: "brain_translation_unavailable").first
+        XCTAssertEqual(event?.metadata["failureStage"], "cancelled",
+                       "the wait ended because nobody was waiting, not because the model was slow")
+        // The reason vocabulary has no cancellation token — the wait *is* a
+        // timeout from the reason's point of view, and the stage is the field
+        // that says whose it was. The two together are the diagnosis: the
+        // same `inference_timeout` with `stage_deadline` is the model being
+        // slow, and that is the reading this test exists to keep out.
+        XCTAssertEqual(event?.metadata["reason"], "inference_timeout")
+    }
+
+    /// **A served answer is reported as served** (finding A7).
+    ///
+    /// The histogram's second half is whether anyone was paid: a curated hit
+    /// and a cloud response are the same tier if only the tier is reported,
+    /// and the settle used to claim `.fresh` for every answer it wrote — so a
+    /// string the device already knew was reported as one the cloud had just
+    /// produced.
+    @MainActor
+    func testScenarioTheHistogramNamesWhereEachAnswerCameFrom() async throws {
+        let harness = makeHarness(transport: Self.respondingTransport(),
+                                  reachability: ScriptedReachability(reachable: true))
+        await harness.pipeline.updateLayout(layout)
+
+        // One frame, two answers from two different places: the curated table
+        // (served, tier 0) and the cloud (paid, tier 2).
+        let answers = await harness.pipeline.resolveFrozen([frozenItem("f1", curatedText),
+                                                            frozenItem("f2", cloudText)])
+        XCTAssertEqual(answers?["f1"]?.sourceTier, .dictionary)
+        XCTAssertEqual(answers?["f2"]?.sourceTier, .cloud)
+
+        let resolved = harness.bus.events(named: "translation_resolved")
+        let served = resolved.first { $0.metadata["tier"] == TranslationTier.dictionary.rawValue }
+        XCTAssertEqual(served?.metadata["origin"], LiveTranslateResolutionOrigin.cache.rawValue,
+                       "a curated answer is served from the device's table, not computed")
+        let paid = resolved.first { $0.metadata["tier"] == TranslationTier.cloud.rawValue }
+        XCTAssertEqual(paid?.metadata["origin"], LiveTranslateResolutionOrigin.fresh.rawValue,
+                       "a cloud answer nobody had stored is the one that was paid for")
+    }
+
+    // MARK: - Review round 2 (PR #110 findings)
+
+    /// **One outage is one `translation_degraded`, whichever layer reports it**
+    /// (finding 1).
+    ///
+    /// The cloud tier reports the failures it returns: it is the layer that
+    /// knows the failure class, the only one that can count the regions a
+    /// failure covers, and the only emission that survives a caller
+    /// *reserving* a string instead of settling it — the reliability router's
+    /// shape, where the string is answered on the device and would otherwise
+    /// leave the cloud's own outage out of the evidence entirely. The
+    /// pipeline's terminal writer reports every degradation it wrote itself and
+    /// none that arrived in a `BatchResult`.
+    ///
+    /// Both halves are asserted here, because either one alone passes while the
+    /// other double-counts: suppressing the pipeline's emission wholesale is
+    /// what the review of d33089d found (a deletion, not an ownership rule).
+    @MainActor
+    func testScenarioOneOutageIsOneDegradationEventWhicheverLayerReportsIt() async throws {
+        // (a) A failure the tier produced, which the pipeline settles: the
+        // tier's one report stands and the pipeline adds none.
+        let transport = TierTranslationTransport()
+        transport.answers = [.failure(URLError(.notConnectedToInternet))]
+        let failed = makeHarness(transport: transport)
+        await failed.pipeline.updateLayout(layout)
+        failed.recogniser.defaultStep = .regions([detected(cloudText)])
+
+        let frame = try makeFrame()
+        await failed.pipeline.ingest(frame)
+        await failed.pipeline.ingest(frame)
+        await waitUntil("the cloud failure to settle") {
+            guard let latest = await failed.recorder.latest,
+                  let region = latest.regions.first else { return false }
+            if case .degraded = latest.result(for: region).outcome { return true }
+            return false
+        }
+
+        let degraded = failed.bus.events(named: "translation_degraded")
+        XCTAssertEqual(degraded.count, 1,
+                       "one outage is one event: "
+                       + degraded.map {
+                           "\($0.metadata["reason"] ?? "?")×\($0.metadata["regionCount"] ?? "?")"
+                       }.joined(separator: ", "))
+        XCTAssertEqual(degraded.first?.metadata["regionCount"], "1",
+                       "the tier counts the regions it covers — one string, one region")
+
+        // (b) A refusal no tier ever saw: the consent gate fails the attempt
+        // before the tier is called, so this degradation is the pipeline's own
+        // and must still be reported. A pipeline that simply stopped emitting
+        // would pass (a) and lose this.
+        let refused = makeHarness(consent: false)
+        _ = refused.gate.record(granted: false)
+        await refused.pipeline.updateLayout(layout)
+        refused.recogniser.defaultStep = .regions([detected(cloudText)])
+
+        await refused.pipeline.ingest(frame)
+        await refused.pipeline.ingest(frame)
+        await waitUntil("the refusal to settle") {
+            guard let latest = await refused.recorder.latest,
+                  let region = latest.regions.first else { return false }
+            if case .degraded = latest.result(for: region).outcome { return true }
+            return false
+        }
+        let refusals = refused.bus.events(named: "translation_degraded")
+        XCTAssertEqual(refusals.count, 1,
+                       "the gate's own degradation is reported by the pipeline, exactly once")
+        XCTAssertEqual(refusals.first?.metadata["reason"],
+                       TranslationUnavailableReason.consentNotGranted.rawValue)
+    }
+
+    /// **A held frame renders the answer a live plan settled for it** (finding
+    /// 2).
+    ///
+    /// A string claimed by an in-flight live plan is that plan's to answer, and
+    /// the frame's own plan must not pay for it a second time — but *dropping*
+    /// it, which was the first fix for the double payment, left the still
+    /// showing "Translating…" for its whole life: the live plan settled the
+    /// string a moment later into the live picture, and nothing ever asked the
+    /// frame to render it. The hand-over now waits for the plans that own its
+    /// strings and re-plans what is left, which step 0 answers out of the
+    /// ledger the live plan wrote.
+    @MainActor
+    func testScenarioAHeldFrameRendersTheAnswerALivePlanSettledForIt() async throws {
+        let transport = Self.respondingTransport()
+        let latch = TransportLatch()
+        let arrival = TransportArrival()
+        transport.latch = latch
+        transport.arrival = arrival
+
+        let harness = makeHarness(transport: transport)
+        await harness.pipeline.updateLayout(layout)
+        harness.recogniser.defaultStep = .regions([detected(cloudText)])
+
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+        // The live cycle's request is at the provider, and the string belongs
+        // to the plan that sent it.
+        await arrival.wait()
+        XCTAssertEqual(transport.requestCount, 1)
+
+        let key = LabelTranslationCache.normalizationKey(text: cloudText, targetLanguage: .nepali)
+        let item = CloudTranslationTier.Item(id: key, text: cloudText, detectedSourceLanguage: "en")
+
+        // The frame is handed over while the live plan is still out, and it is
+        // given the window to get there first.
+        let held = Task { await harness.pipeline.resolveFrozen([item]) }
+        await settleTheCycle()
+        await latch.open()
+        let answers = await held.value
+
+        XCTAssertEqual(answers?[key]?.sourceTier, .cloud,
+                       "the live plan's settlement is routed to the held picture, not dropped")
+        XCTAssertEqual(transport.requestCount, 1,
+                       "the frame's plan paid for nothing the live plan had already bought")
+    }
+
+    /// **A frozen plan that lands after the picture was put down holds nothing**
+    /// (finding 3).
+    ///
+    /// The held set is what keeps a frame's answers out of the live prune, and
+    /// it is a claim about a *picture*: the epoch guard is what stops a plan
+    /// made for a frame which no longer exists from holding its answers against
+    /// the session that followed. The guard that mattered was the empty one —
+    /// putting down a frame whose plan had not answered yet returned *before*
+    /// the epoch moved, so the answer this plan went on to settle was held for
+    /// a picture that was already gone, could never be released, and could not
+    /// be taken back by the live prune either.
+    @MainActor
+    func testScenarioAFrozenPlanThatLandsAfterTheThawHoldsNothing() async throws {
+        let transport = TierTranslationTransport()
+        transport.answers = [.failure(URLError(.timedOut)), .failure(URLError(.timedOut))]
+        let latch = TransportLatch()
+        let arrival = TransportArrival()
+        transport.latch = latch
+        transport.arrival = arrival
+
+        let harness = makeHarness(transport: transport)
+        await harness.pipeline.updateLayout(layout)
+
+        let key = LabelTranslationCache.normalizationKey(text: cloudText, targetLanguage: .nepali)
+        let item = CloudTranslationTier.Item(id: key, text: cloudText, detectedSourceLanguage: "en")
+
+        let held = Task { await harness.pipeline.resolveFrozen([item]) }
+        await arrival.wait()
+
+        // The elder puts the picture down while its plan is still out.
+        await harness.pipeline.discardHeldAnswers()
+        await latch.open()
+        _ = await held.value
+
+        // The live scene moves on — to a string the curated table answers, so
+        // this cycle buys nothing — and the reconcile runs. The frame's key is
+        // not on the live picture.
+        harness.recogniser.defaultStep = .regions([detected(curatedText)])
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+        await settleTheCycle()
+
+        // Nothing is holding the key, so the prune takes it: the frame it was
+        // bought for is gone, and a later frame asks the tier for it again. A
+        // held answer would be found in the ledger and cost nothing at all, so
+        // the *delta* is what this test is about — the exact count is the
+        // tier's retry policy, not this rule.
+        let before = transport.requestCount
+        let again = await harness.pipeline.resolveFrozen([item])
+        XCTAssertNotNil(again?[key], "the answer is re-asked, and answered")
+        XCTAssertGreaterThan(transport.requestCount, before,
+                             "the answer was not held against a picture that had been put down")
+    }
+
+    /// **The frozen retry counts the regions the frame was showing** (finding
+    /// 6).
+    ///
+    /// A held frame's ask is raised over a still that is not on the live
+    /// picture, so the scanner counts 0 regions for its strings and the
+    /// degradation count fell back to the floor of 1 whatever the frame showed.
+    /// The ask records the frame's own multiplicity; the retry hands it back,
+    /// and it is the count the terminal writer uses.
+    @MainActor
+    func testScenarioAFrozenRetryCountsTheRegionsTheFrameWasShowing() async throws {
+        let harness = makeHarness(consent: false, transport: Self.respondingTransport())
+        await harness.pipeline.updateLayout(layout)
+
+        let key = LabelTranslationCache.normalizationKey(text: cloudText, targetLanguage: .nepali)
+        let item = CloudTranslationTier.Item(id: key, text: cloudText, detectedSourceLanguage: "en")
+
+        // A still showing the string twice: the consent question goes up over
+        // both, and the frame's multiplicity goes into the ask.
+        _ = await harness.pipeline.resolveFrozen([item], regionCounts: [key: 2])
+        let asks = await harness.pipeline.awaitingResolutionKeys
+        XCTAssertEqual(asks, [key], "the frame's question is open")
+
+        // The elder declines, which releases the retry.
+        _ = harness.gate.record(granted: false)
+        await harness.pipeline.retryAwaitingResolution()
+
+        let degraded = harness.bus.events(named: "translation_degraded")
+        XCTAssertEqual(degraded.count, 1,
+                       "one string, one degradation: "
+                       + degraded.map {
+                           "\($0.metadata["reason"] ?? "?")×\($0.metadata["regionCount"] ?? "?")"
+                       }.joined(separator: ", "))
+        XCTAssertEqual(degraded.first?.metadata["reason"],
+                       TranslationUnavailableReason.consentNotGranted.rawValue)
+        XCTAssertEqual(degraded.first?.metadata["regionCount"], "2",
+                       "the retry counts the frame's two regions, not the live picture's none")
+    }
+
+    /// **A deadline that expired is reported as a deadline** (finding 8).
+    ///
+    /// The two arms that end a brain wait are the clock and the cancellation,
+    /// and the stage is the field that says whose it was. The stage used to be
+    /// read off `Task.isCancelled`, which is sticky: a plan cancelled in the
+    /// window between a real deadline and the report named the elapsed deadline
+    /// a cancellation, and the model was blamed for a wait that had simply run
+    /// out — or, the other way round, a stopped wait was credited to a slow
+    /// model. The arbiter now records which arm actually fired.
+    @MainActor
+    func testScenarioTheStageDeadlineIsReportedAsItsOwnEnding() async throws {
+        let brain = RecordingBrain()
+        var config = LiveTranslationPipelineTests.unpacedDispatchConfig()
+        // The window the derived stage deadline is built from, small enough
+        // that the model's own slowness is what ends the wait.
+        config.brainTranslationTimeoutSeconds = 0.2
+        config.brainTranslationStageGraceSeconds = 0.1
+        let harness = makeHarness(brain: brain, config: config)
+        await harness.pipeline.updateLayout(layout)
+        brain.hangs = true
+        harness.recogniser.defaultStep = .regions([detected(cloudText)])
+
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        await waitUntil("the stage deadline to be reported") {
+            !harness.bus.events(named: "brain_translation_unavailable").isEmpty
+        }
+        let event = harness.bus.events(named: "brain_translation_unavailable").first
+        XCTAssertEqual(event?.metadata["failureStage"], BrainFailureStage.stageDeadline.rawValue,
+                       "the clock ended this wait; nobody walked away from it")
+        XCTAssertEqual(event?.metadata["reason"], "inference_timeout")
+    }
+
+    /// **One string, two spellings, one answer** (finding 9).
+    ///
+    /// The ledger is keyed by the normalized string, so the comparison that
+    /// decides "already settled" has to be the comparison those keys promise.
+    /// `TranslationResult` carries the *region's* spelling of the original
+    /// text, and two regions showing the same sign can be recognized
+    /// differently ("Light" beside "LIGHT") while normalizing to one key: an
+    /// equality test that included the spelling let the second region settle a
+    /// string the first had already settled, which counted its degradation
+    /// twice.
+    @MainActor
+    func testScenarioTwoSpellingsOfOneStringAreTheSameAnswer() {
+        let lower = TranslationResult.degraded(originalText: cloudText, reason: .noNetwork)
+        let upper = TranslationResult.degraded(originalText: cloudText.uppercased(),
+                                               reason: .noNetwork)
+        XCTAssertTrue(LiveTranslationPipeline.sameAnswer(lower, upper),
+                      "the same string spelled differently is the same answer")
+        XCTAssertTrue(LiveTranslationPipeline.sameAnswer(lower, lower))
+
+        // …and the rule is not "everything matches": a different reason, a
+        // different translation and a different tier are all different answers.
+        XCTAssertFalse(LiveTranslationPipeline.sameAnswer(lower,
+                                                          .degraded(originalText: cloudText,
+                                                                    reason: .deadlineExceeded)),
+                       "a different reason is a different answer")
+        XCTAssertFalse(LiveTranslationPipeline.sameAnswer(lower,
+                                                          .resolved(originalText: cloudText,
+                                                                    translation: "ने:" + cloudText,
+                                                                    tier: .cloud)),
+                       "a translation is not a degradation")
+    }
 }

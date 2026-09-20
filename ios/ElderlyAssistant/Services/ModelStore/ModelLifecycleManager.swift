@@ -175,8 +175,10 @@ enum SessionProfileEventReason: String, Equatable {
     /// The owner was deallocated without clearing: the leak the owner token
     /// exists to stop.
     case ownerReleased
-    /// A `clear` arrived from something that is not the owner that set the
-    /// profile — a stale session's late `false`. Refused, and reported.
+    /// A caller that is not the owner that set the profile tried to change it
+    /// — a stale session's late `false`, or a second session applying its own
+    /// profile over a live one. Both directions are one rule about whose
+    /// profile this is, so both report the same token. Refused, and reported.
     case refusedStaleOwner
 }
 
@@ -258,6 +260,15 @@ enum ModelLifecycleEvent: Equatable {
 struct ModelLifecycleSnapshot: Equatable {
     let deviceClass: ModelLifecycleBudget.DeviceClass
     let budgetBytes: UInt64
+    /// [CAMERA-BUDGET] The **class's own promise with no session profile
+    /// folded in** — a different number from `budgetBytes` whenever a camera
+    /// session is live, and reported because it is the ceiling the
+    /// translation tier's escape hatch is judged against
+    /// (`ReservationPurpose.mayEvictPastTheSessionBudget`). Without it a
+    /// capture sees the tier's model refused and cannot tell which of the two
+    /// bounds refused it, which is exactly the confusion the two accessors'
+    /// near-identical names used to invite.
+    let classBudgetBytes: UInt64
     let effectiveBudgetBytes: UInt64
     let residentLiveBytes: UInt64
     /// [MODEL-WARDEN] Step 1 — `T(t)`: bytes reserved and not yet in
@@ -845,7 +856,7 @@ final class ModelLifecycleManager {
             // bound every additive load is judged against, and the escaping
             // load's victim plan plus phase 3's re-probe still decide whether
             // the bytes are really there.
-            let classBudget = classBudgetLocked(deviceClass: deviceClass)
+            let classBudget = unprofiledClassBudgetLocked(deviceClass: deviceClass)
             let budget = request.purpose.mayEvictPastTheSessionBudget
                 && incoming.liveBytes <= classBudget
                 ? classBudget
@@ -1233,11 +1244,12 @@ final class ModelLifecycleManager {
     /// of lowering it for the process's life. A `nil` owner is the
     /// process-level spelling tests use.
     ///
-    /// Passing `nil` clears the profile, and the clear is honoured **only for
-    /// the owner that set it**: a stale session's late `false` cannot take a
-    /// live session's profile down. Both the clear and the refusal are
-    /// reported; so is a lease that expired on its own (see
-    /// `reapExpiredSessionProfile(now:)`).
+    /// Passing `nil` clears the profile. A change — an apply or a clear — is
+    /// honoured **only from the owner that set the lease**: a stale session's
+    /// late `false` cannot take a live session's profile down, and a second
+    /// session cannot take it by applying its own profile over it. The refused
+    /// attempt is reported either way; so is a lease that expired on its own
+    /// (see `reapExpiredSessionProfile(now:)`).
     ///
     /// `now` is injectable for the same reason `reapExpiredReservations` takes
     /// one: the TTL is a fact about a clock the tests own.
@@ -1248,12 +1260,26 @@ final class ModelLifecycleManager {
         // A lease that has already died is cleared before this call's own
         // outcome is decided, so the events tell the truth in order: the
         // expiry is reported as an expiry, and a clear that arrives after it
-        // is a clear of nothing rather than a `refused_stale_owner` against a
+        // is a clear of nothing rather than a `refusedStaleOwner` against a
         // profile that was never going to apply again.
         reapExpiredSessionProfile(now: reference)
         var event: ModelLifecycleEvent?
         lock.lock()
-        if let profile {
+        if let profile, let live = sessionProfileLease,
+           !Self.leaseIsFromCurrentCaller(live, caller: owner) {
+            // The ownership rule, in the **other direction** (review): it was
+            // enforced on `clear` only, so a second session could apply its own
+            // profile over a live one and the first session's budget silently
+            // became the second's — the exact take-over the owner token exists
+            // to stop. The live profile stays, and the attempt is reported, as
+            // its `clear` twin below is. A dead or expired owner's lease is
+            // already gone by here (`reapExpiredSessionProfile` above), so this
+            // can only refuse a *live* owner's profile.
+            event = .sessionProfile(profile: live.profile,
+                                    budgetBytes: live.budgetBytes,
+                                    generation: live.generation,
+                                    reason: .refusedStaleOwner)
+        } else if let profile {
             sessionProfileGeneration += 1
             let budgetBytes = ModelBudgetPolicy.policy(for: currentDeviceClassLocked())
                 .sessionModelBudgetBytes(session: profile)
@@ -1268,7 +1294,7 @@ final class ModelLifecycleManager {
                                     generation: sessionProfileGeneration,
                                     reason: .applied)
         } else if let lease = sessionProfileLease {
-            if Self.clearIsFromCurrentOwner(lease, clearer: owner) {
+            if Self.leaseIsFromCurrentCaller(lease, caller: owner) {
                 sessionProfileLease = nil
                 event = .sessionProfile(profile: nil,
                                         budgetBytes: nil,
@@ -1288,14 +1314,19 @@ final class ModelLifecycleManager {
         if let event { onEvent?(event) }
     }
 
-    /// Whether `clearer` may take `lease` down: the owner that set it, or the
-    /// process-level spelling (no owner at all), which tests and any
-    /// pre-owner call site use.
-    private static func clearIsFromCurrentOwner(_ lease: SessionProfileLease,
-                                                clearer: AnyObject?) -> Bool {
+    /// Whether `caller` may take `lease` down **or replace it**: the owner that
+    /// set it, or the process-level spelling (no owner at all), which tests and
+    /// any pre-owner call site use.
+    ///
+    /// One rule for both directions. An apply and a clear are the same claim
+    /// about whose profile this is, and the rule used to be checked on the way
+    /// out alone — so a second session could take the budget by applying over a
+    /// live lease while being unable to give it back by clearing it (review).
+    private static func leaseIsFromCurrentCaller(_ lease: SessionProfileLease,
+                                                 caller: AnyObject?) -> Bool {
         guard let box = lease.owner else { return true }
-        guard let clearer else { return false }
-        return box.value === clearer
+        guard let caller else { return false }
+        return box.value === caller
     }
 
     /// [CAMERA-BUDGET] Drop a session profile whose owner is gone or that has
@@ -1982,7 +2013,7 @@ final class ModelLifecycleManager {
         // The profile is included: with a camera session live the squeeze has
         // to be computed from the budget the session actually lowered, or the
         // response is sized for a working set that is not on screen.
-        let fullBudget = profileAdjustedClassBudgetLocked(
+        let fullBudget = profiledClassBudgetLocked(
             deviceClass: currentDeviceClassLocked())
         let budget = UInt64(Double(fullBudget)
             * ModelLifecycleManager.memoryPressureBudgetFraction)
@@ -2158,7 +2189,7 @@ final class ModelLifecycleManager {
         // the CLASS budget while the warden was judging loads against the
         // session one — a capture reading the number would have concluded the
         // budget was 1.1 GB larger than it was.
-        let budget = profileAdjustedClassBudgetLocked(
+        let budget = profiledClassBudgetLocked(
             deviceClass: currentDeviceClassLocked())
         lock.unlock()
 
@@ -2247,7 +2278,12 @@ final class ModelLifecycleManager {
         // expiry the read discovers must be *reported*, and this is the read
         // a capture goes through. Outside the lock — the reaper takes it, and
         // the `defer` below is not yet in scope here.
-        reapExpiredSessionProfile()
+        // **One clock read for the whole snapshot** (review): the reaper, the
+        // guard query and the budget arithmetic are three views of one instant,
+        // and reading the clock three times let a lease be live for one field
+        // and expired for the next — a capture that disagrees with itself.
+        let moment = clock()
+        reapExpiredSessionProfile(now: moment)
         lock.lock()
         defer { lock.unlock() }
         pruneDeadOwnersLocked()
@@ -2257,7 +2293,11 @@ final class ModelLifecycleManager {
                                          residentLiveBytes: residentLive)
         return ModelLifecycleSnapshot(
             deviceClass: deviceClass,
-            budgetBytes: profileAdjustedClassBudgetLocked(deviceClass: deviceClass),
+            budgetBytes: profiledClassBudgetLocked(deviceClass: deviceClass),
+            // The bound the escape hatch is judged against, reported beside
+            // the profiled one so a capture can tell which of the two a
+            // refusal came from (review finding on #109).
+            classBudgetBytes: unprofiledClassBudgetLocked(deviceClass: deviceClass),
             effectiveBudgetBytes: budget,
             residentLiveBytes: residentLive,
             transientLiveBytes: transientLiveBytesLocked(),
@@ -2268,7 +2308,7 @@ final class ModelLifecycleManager {
             pinned: entries.filter { $0.value.pinCount > 0 }
                 .map { $0.key }.sorted { $0.rawValue < $1.rawValue },
             priorities: entries.mapValues(\.priority),
-            quarantined: guardSparedLocked(now: clock(),
+            quarantined: guardSparedLocked(now: moment,
                                            config: wardenConfig,
                                            priority: .foreground)
                 .keys.sorted { $0.rawValue < $1.rawValue },
@@ -2519,7 +2559,8 @@ final class ModelLifecycleManager {
 
     // MARK: [CAMERA-BUDGET] The budgets in force
 
-    /// The **class** budget: the device class's own promise, or the test pin.
+    /// The class budget with **no session profile folded in**: the device
+    /// class's own promise, or the test pin.
     ///
     /// This is the bound the translation tier's escape hatch
     /// (`ReservationPurpose.mayEvictPastTheSessionBudget`) is judged against,
@@ -2527,23 +2568,48 @@ final class ModelLifecycleManager {
     /// profile that lowered it closed the hatch and refused the tier's own
     /// model `over_budget_alone` for the whole camera session (review finding
     /// on #99). The profile's job is done by `sessionBudgetLocked` below.
-    private func classBudgetLocked(deviceClass: ModelLifecycleBudget.DeviceClass) -> UInt64 {
+    ///
+    /// Named for its rule rather than for its subject: `profiledClassBudgetLocked`
+    /// below is the same quantity *with* the profile folded in, and two
+    /// accessors that both read as "the class budget" while computing
+    /// opposite numbers is how a call site ends up judging a load against the
+    /// wrong one (review finding on #109).
+    private func unprofiledClassBudgetLocked(deviceClass: ModelLifecycleBudget.DeviceClass) -> UInt64 {
         budgetOverrideBytes ?? ModelLifecycleBudget.modelsBudgetBytes(for: deviceClass)
     }
 
     /// The class budget with an active session profile folded in, and the
-    /// probe deliberately left out: what the snapshot reports as the class
-    /// budget, and what the pressure responses squeeze to a fraction of.
+    /// probe deliberately left out: what the snapshot reports as
+    /// `budgetBytes`, and what the pressure responses squeeze to a fraction
+    /// of.
     ///
     /// It exists as its own spelling so those two call sites cannot drift
     /// from each other — the shape the five copy-pasted
     /// `budgetOverrideBytes ?? sessionProfileOverrideBytes ?? …` chains used
     /// to invite.
-    private func profileAdjustedClassBudgetLocked(
+    private func profiledClassBudgetLocked(
         deviceClass: ModelLifecycleBudget.DeviceClass) -> UInt64 {
-        budgetOverrideBytes
-            ?? sessionProfileBytesLocked()
-            ?? ModelLifecycleBudget.modelsBudgetBytes(for: deviceClass)
+        if let pinned = budgetOverrideBytes { return pinned }
+        guard let profileBytes = sessionProfileBytesLocked() else {
+            // No profile: the class budget as it has always been, the probe
+            // deliberately left out (see `unprofiledClassBudgetLocked`'s note
+            // — the profile is what this accessor exists to fold in).
+            return ModelLifecycleBudget.modelsBudgetBytes(for: deviceClass)
+        }
+        // **A profile is clamped by the probe**, exactly as it is in
+        // `sessionBudgetLocked`: a fixed profile budget could otherwise sit
+        // ABOVE a probe reading that memory pressure had already pushed below
+        // it, and the pressure response — which squeezes a fraction of this
+        // number — would start from a budget the device no longer has,
+        // re-admitting the very eviction the profile exists to prevent
+        // (review: the clamp was on one of the two budgets that fold the
+        // profile in, and the un-clamped one is the one a pressure response
+        // acts on).
+        let probeDerived = ModelLifecycleBudget.effectiveBudgetBytes(
+            deviceClass: deviceClass,
+            availableBytes: probe.availableProcessMemoryBytes,
+            residentLiveBytes: residentLiveBytesLocked())
+        return min(profileBytes, probeDerived)
     }
 
     /// The **session** budget: what a load whose bytes are purely additive to

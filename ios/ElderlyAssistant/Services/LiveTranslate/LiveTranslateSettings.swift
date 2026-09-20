@@ -55,6 +55,19 @@ struct LiveTranslateSettings: Equatable {
     static let translationDebugLoggingEnabledKey =
         "livetranslate.translationDebugLoggingEnabled"
 
+    /// [DEBUG-LOG] The **production writer** for the diagnostic switch: a
+    /// launch argument, so a run can turn the content-free console line on
+    /// without a rebuild — the reason the owner asked for the logging at all —
+    /// and without a Settings row an elder could find and flip.
+    ///
+    /// A launch argument rather than a row, deliberately: this switch changes
+    /// nothing about what leaves the device, what is stored or what the elder
+    /// sees, so it is a developer's diagnostic and belongs in the scheme that
+    /// starts the run, not in a household's settings. It is read only when
+    /// nobody has persisted a value (see `translationDebugLoggingEnabled`), so
+    /// a stored choice still wins over the argument.
+    static let translationDebugLoggingLaunchArgument = "-liveTranslateDebugLogging"
+
     /// Every key this feature is allowed to write to `UserDefaults`. The
     /// persisted state is three booleans — the two preferences and the
     /// DEBUG-ONLY diagnostic switch — and nothing else.
@@ -64,15 +77,23 @@ struct LiveTranslateSettings: Equatable {
 
     private let defaults: UserDefaults
 
+    /// The launch arguments the deciding switches are read from. Injected
+    /// rather than read from `ProcessInfo` at each use site for the same
+    /// reason the store and the clock are: a test can then prove the
+    /// production writer works without starting a second process.
+    private let launchArguments: [String]
+
     /// The operational config, held here so the nominal default for the
     /// preference comes from one place (`alwaysShowOriginalDefault`) rather
     /// than a second literal.
     let config: LiveTranslateConfig
 
     init(defaults: UserDefaults = .standard,
-         config: LiveTranslateConfig = .default) {
+         config: LiveTranslateConfig = .default,
+         launchArguments: [String] = ProcessInfo.processInfo.arguments) {
         self.defaults = defaults
         self.config = config
+        self.launchArguments = launchArguments
     }
 
     /// Whether original recognized text stays visible alongside translations.
@@ -150,13 +171,26 @@ struct LiveTranslateSettings: Equatable {
     /// This is a *diagnostic* preference, not a third display preference: it
     /// changes what the developer's console shows and **nothing about what
     /// leaves the device, what is stored, or what the elder sees**.
-    var translationDebugLoggingEnabled: Bool {
-        get {
-            guard defaults.object(forKey: Self.translationDebugLoggingEnabledKey) != nil else {
-                return config.translationDebugLoggingEnabled
-            }
+    ///
+    /// The value someone actually *chose*, or `nil` when nobody has — the
+    /// distinction that lets `applyingDebugLogging(to:)` tell "off" from
+    /// "unset". A persisted write is a choice; so is this run's launch
+    /// argument; the config's nominal default is not.
+    var chosenDebugLogging: Bool? {
+        if defaults.object(forKey: Self.translationDebugLoggingEnabledKey) != nil {
             return defaults.bool(forKey: Self.translationDebugLoggingEnabledKey)
         }
+        // The launch argument can only turn it *on* — there is no `-no-…`
+        // form, so an explicit choice is always the stored one and this
+        // branch is reached only when nothing is stored.
+        if launchArguments.contains(Self.translationDebugLoggingLaunchArgument) {
+            return true
+        }
+        return nil
+    }
+
+    var translationDebugLoggingEnabled: Bool {
+        get { chosenDebugLogging ?? config.translationDebugLoggingEnabled }
         nonmutating set {
             defaults.set(newValue, forKey: Self.translationDebugLoggingEnabledKey)
         }
@@ -167,12 +201,19 @@ struct LiveTranslateSettings: Equatable {
         translationDebugLoggingEnabled = value
     }
 
-    /// The config a session runs with, with the persisted diagnostic switch
+    /// The config a session runs with, with the chosen diagnostic switch
     /// applied. One call site (the session model), so the tiers and the
     /// pipeline cannot disagree about whether the diagnostic is on.
+    ///
+    /// **It overrides only what someone chose.** When nobody has — no stored
+    /// value and no launch argument — the caller's config is returned
+    /// untouched, which is what keeps a caller who asked for the logging (a
+    /// debug build's config, a test's) from being silently switched off by
+    /// this function's own default. "Nobody chose" is not "off".
     func applyingDebugLogging(to config: LiveTranslateConfig) -> LiveTranslateConfig {
+        guard let chosen = chosenDebugLogging else { return config }
         var resolved = config
-        resolved.translationDebugLoggingEnabled = translationDebugLoggingEnabled
+        resolved.translationDebugLoggingEnabled = chosen
         return resolved
     }
 

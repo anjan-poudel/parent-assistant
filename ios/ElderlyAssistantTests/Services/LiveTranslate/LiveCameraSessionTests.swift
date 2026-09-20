@@ -25,6 +25,22 @@ final class LiveCameraSessionTests: XCTestCase {
         func advance(by seconds: TimeInterval) { now += seconds }
     }
 
+    /// A bus that forwards to the recording one and then hands the event to a
+    /// hook, so a test can act at the exact point in a session's execution
+    /// where an event is emitted — the only seam that lands inside a window
+    /// between two adjacent statements.
+    final class HookedObservabilityBus: ObservabilityBus {
+        private let inner: LiveTranslateSanitisingBus
+        var onEvent: ((ObservabilityEvent) -> Void)?
+
+        init(inner: LiveTranslateSanitisingBus) { self.inner = inner }
+
+        func emit(_ event: ObservabilityEvent) {
+            inner.emit(event)
+            onEvent?(event)
+        }
+    }
+
     override func setUp() {
         super.setUp()
         bus = LiveTranslateSanitisingBus()
@@ -508,6 +524,47 @@ final class LiveCameraSessionTests: XCTestCase {
             live = active
         }
         XCTAssertTrue(live, "the last transition resumed the capture")
+    }
+
+    /// The other route into the same ordering, and the one the review found:
+    /// an interruption that lands **after** the start has moved the session to
+    /// `.running` but **before** it announces. The old spelling announced the
+    /// caller's belief — `true`, unconditionally — for a capture the
+    /// interruption had already stopped, and nothing later corrected it,
+    /// because the `false`/`true` pair the warden waits for was spent inside
+    /// the same call. The level has to be read from the state at the moment of
+    /// the announcement, never taken from the caller.
+    ///
+    /// The seam is `session_started`: it is emitted after the state change and
+    /// before the announcement, so an observer of it lands exactly in the
+    /// window rather than merely near it.
+    func testAnInterruptionLandingAfterTheStartMovedToRunningAnnouncesNothing() async throws {
+        let hooked = HookedObservabilityBus(inner: bus)
+        let session = LiveCameraSession(config: .default,
+                                        observabilityBus: hooked,
+                                        capture: layer,
+                                        notificationCenter: centre,
+                                        now: { 0 })
+        var activations: [Bool] = []
+        session.onSessionActiveChanged = { activations.append($0) }
+        hooked.onEvent = { [centre, layer] event in
+            guard event.eventType == "session_started" else { return }
+            centre?.post(name: AVCaptureSession.wasInterruptedNotification,
+                         object: layer?.session,
+                         userInfo: [AVCaptureSessionInterruptionReasonKey:
+                                    AVCaptureSession.InterruptionReason
+                                        .videoDeviceNotAvailableInBackground.rawValue])
+        }
+
+        let result = await session.start()
+        hooked.onEvent = nil
+
+        XCTAssertTrue(result.isSuccess)
+        XCTAssertEqual(session.state, .interrupted(.backgrounded))
+        XCTAssertEqual(activations, [],
+                       "the capture was already stopped when the start would have "
+                       + "announced it: the warden must not be sized for a camera "
+                       + "that is not running")
     }
 
     // MARK: Thermal response (NFR-LCT-002 scenario 3)
@@ -1190,6 +1247,93 @@ final class LiveCameraSessionTests: XCTestCase {
         let frame = await waiter.value
         timeout.cancel()
         return frame
+    }
+
+    // MARK: - Review round 2 (PR #110 findings)
+
+    /// **A start that lost the race to a teardown reports that it did not
+    /// start** (finding 5).
+    ///
+    /// `start()` is not atomic with respect to the rest of the session: the
+    /// teardown can land inside `startRunning()`. A session that is `.stopped`
+    /// after that race has no camera — the stack was never handed to anyone —
+    /// and `.success(())` told the caller a camera nobody holds was live, which
+    /// is the one answer it cannot recover from, because nothing later corrects
+    /// it. `.interrupted`/`.running` are different: there the session did start,
+    /// the state and `camera_interrupted` already say so, and the caller's next
+    /// move is `resume()`.
+    func testAStartIntoATeardownReportsThatItDidNotStart() async throws {
+        let session = makeSession()
+        layer.onStartRunning = { session.stop() }
+
+        let result = await session.start()
+        layer.onStartRunning = nil
+
+        guard case .failure(.cameraUnavailable(.configurationFailed)) = result else {
+            return XCTFail("a torn-down start is not a success: \(result)")
+        }
+        XCTAssertEqual(session.state, .stopped)
+        XCTAssertEqual(layer.startRunningCallCount, 1)
+        XCTAssertEqual(layer.stopRunningCallCount, 1,
+                       "the teardown could not stop a stack the start had not yet claimed")
+    }
+
+    /// A sink the racing transitions can share: the activation is delivered on
+    /// whichever thread drove the transition, and this test drives two at once.
+    final class ActivationLog: @unchecked Sendable {
+        private let lock = NSLock()
+        private var levels: [Bool] = []
+
+        func record(_ live: Bool) {
+            lock.lock(); defer { lock.unlock() }
+            levels.append(live)
+        }
+
+        var all: [Bool] {
+            lock.lock(); defer { lock.unlock() }
+            return levels
+        }
+    }
+
+    /// **A racing pair cannot leave the announced level disagreeing with the
+    /// session** (finding 12).
+    ///
+    /// The level is read under the lock but was delivered outside it, so two
+    /// racing calls could invert: the one that read `true` delivered after the
+    /// one that read `false`, and the warden was left sized for a camera that
+    /// is not running with nothing later to correct it — the level is reported
+    /// once per change, so the pair that would have fixed it was already spent.
+    /// The read and the delivery are one step on the capture queue now, which
+    /// is what the invariant below states: the last level the warden hears is
+    /// the level the session is actually at, and every delivery flips.
+    func testRacingTransitionsCannotInvertTheAnnouncedLevel() async throws {
+        let session = makeSession()
+        let log = ActivationLog()
+        session.onSessionActiveChanged = { log.record($0) }
+
+        _ = await session.start()
+
+        let nc = centre!
+        for _ in 0..<100 {
+            DispatchQueue.global().async {
+                nc.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+            }
+            DispatchQueue.global().async {
+                nc.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+            }
+        }
+        try? await Task.sleep(for: .milliseconds(300))
+
+        let levels = log.all
+        XCTAssertEqual(levels.last, session.state == .running,
+                       "the warden's last word is the session's actual level; "
+                       + "a pause and a resume that invert leave it sized for a camera "
+                       + "that is not there: \(levels.suffix(6))")
+        var live = false
+        for (index, level) in levels.enumerated() {
+            XCTAssertNotEqual(live, level, "index \(index) repeated the level it was already at")
+            live = level
+        }
     }
 }
 

@@ -296,6 +296,95 @@ struct LogSanitiser {
     /// before this feature is additive; changing one that did is not.
     private static let codeShapedMetadataKeys: Set<String> = ["errorCode"]
 
+    /// The allow-listed metadata keys whose value is a **bare count** — a byte
+    /// total, a millisecond duration, a boolean — rather than text.
+    ///
+    /// They need naming because the phone-number pattern is a 7-digit run with
+    /// optional separators, which is exactly what a byte budget looks like:
+    /// `budgetBytes: "268435456"` reached the capture as `[redacted]`, and the
+    /// memory-pressure evidence was unreadable for the very quantities the
+    /// ledger exists to report (review). The exemption is **value-shaped, not
+    /// key-shaped**: a key listed here is scrubbed in full the moment its value
+    /// is not a bare number, because a key name is a promise and a value is a
+    /// fact. It deliberately does not route through `codeShapedMetadataKeys`:
+    /// `boundErrorCode` scrubs before it bounds, so an already-`[redacted]`
+    /// value fails its charset check and would have been replaced by an empty
+    /// string — one mangling traded for another.
+    private static let numericMetadataKeys: Set<String> = [
+        "liveBytes",
+        "budgetBytes",
+        "transientLiveBytes",
+        "phys_footprint",
+        "ceiling_bytes",
+        "working_set_bytes",
+        "projected_peak_bytes",
+        "freed_bytes",
+        "load_ms",
+        "heldSeconds"
+    ]
+
+    /// The longest **bare** digit run each numeric key may legitimately carry —
+    /// the bound that keeps the exemption from being a bypass (review finding
+    /// 10).
+    ///
+    /// The exemption above exists because a byte total *is* a 9-or-10-digit run,
+    /// which is exactly the phone pattern; the fix for that cannot be to
+    /// re-redact the ledger (finding B2), so the count shape is bounded by what
+    /// each key's unit can honestly hold. A run past its key's bound is not a
+    /// count for that key and takes the full scrub — which is where an
+    /// unformatted phone number written into one of these keys is caught.
+    ///
+    /// The bounds are the units', not the values': a byte total on a phone is
+    /// under 1e12 (12 digits), and a load or a hold is under 1e9 ms/seconds
+    /// (`load_ms: "86400000"` — a day — is a real reading and is well inside
+    /// it). A key named in `numericMetadataKeys` with no bound here gets `0`, so
+    /// a key added without a stated unit is scrubbed rather than trusted: the
+    /// fail-closed direction. The residual is stated rather than implied: a bare
+    /// phone number *inside* a byte key's bound is indistinguishable from a byte
+    /// total by shape, and the ledger's readability is the requirement that wins
+    /// (see the B2 tests).
+    private static let numericMetadataDigitLimits: [String: Int] = [
+        "liveBytes": 12,
+        "budgetBytes": 12,
+        "transientLiveBytes": 12,
+        "phys_footprint": 12,
+        "ceiling_bytes": 12,
+        "working_set_bytes": 12,
+        "projected_peak_bytes": 12,
+        "freed_bytes": 12,
+        "load_ms": 9,
+        "heldSeconds": 9
+    ]
+
+    /// Whether a metadata value is a bare count **for its key**: ASCII digits
+    /// with at most one decimal point and no more digits than the key's unit can
+    /// carry, or one of the two boolean words.
+    ///
+    /// Anything else is not a number — a leading `+`, a space, a dash, a
+    /// parenthesis run, a run longer than the bound — and keeps the full PII
+    /// scrub, because that is a phone number's shape. A lone `.` is not a count
+    /// either: the digit is what makes it one.
+    private static func isBareCount(_ value: String, forKey key: String) -> Bool {
+        if value == "true" || value == "false" { return true }
+        let limit = numericMetadataDigitLimits[key] ?? 0
+        var seenDigit = false
+        var seenPoint = false
+        var digits = 0
+        for character in value {
+            if character.isASCII, character.isNumber {
+                seenDigit = true
+                digits += 1
+                continue
+            }
+            if character == ".", !seenPoint, seenDigit {
+                seenPoint = true
+                continue
+            }
+            return false
+        }
+        return seenDigit && digits <= limit
+    }
+
     private static let piiPatterns: [NSRegularExpression] = {
         let patterns = [
             // phone numbers (7+ digits, common separators)
@@ -314,9 +403,21 @@ struct LogSanitiser {
             // A code-shaped key gets the same bound as the top-level field,
             // so allow-listing it cannot become a PII-scrubbed bypass of
             // that bound (T-050/B2). Every other allowed key is unchanged.
-            cleanMetadata[key] = Self.codeShapedMetadataKeys.contains(key)
-                ? (boundErrorCode(value) ?? "")
-                : scrubValue(value)
+            if Self.codeShapedMetadataKeys.contains(key) {
+                cleanMetadata[key] = boundErrorCode(value) ?? ""
+            } else if Self.numericMetadataKeys.contains(key),
+                      Self.isBareCount(value, forKey: key) {
+                // A count is not a phone number. The allow-list's own contract
+                // says these keys carry numbers, so the scrub's work here is to
+                // catch a value that is *not* one for its key: text, separators,
+                // a sign, or a digit run longer than the unit can carry — each
+                // of which takes the full scrub below (review finding 10: the
+                // unlimited digit run was the unformatted phone number's way
+                // through).
+                cleanMetadata[key] = value
+            } else {
+                cleanMetadata[key] = scrubValue(value)
+            }
         }
         return ObservabilityEvent(
             component: event.component,

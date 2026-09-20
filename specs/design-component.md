@@ -830,7 +830,7 @@ excluded from backups). There is no plaintext at rest, including no temporary fi
 
 | Key | Payload | Written by | Notes |
 |---|---|---|---|
-| `plugin.live_translate.cache.v1` | `Persisted { schemaVersion: Int, entries: [Entry] }` where `Entry { key, translation, lastAccessSequence }` (monotone counter, AM-6 — no timestamps) and `key = "<normalizedText>|<targetLanguageCode>"` | tier-2 completion path; LRU/upkeep | Whole-payload single-key write (protocol has no enumeration). Contains no image, box, scene timestamp, identifier or location. Unreadable payload ⇒ discard and rebuild. |
+| `plugin.live_translate.cache.v1` | `Persisted { schemaVersion: Int, entries: [Entry], producerToken: String? }` where `Entry { key, translation, lastAccessSequence, tierToken: String? }` (monotone counter, AM-6 — no timestamps) and `key = "<normalizedText>|<targetLanguageCode>"` | tier-1 (brain) and tier-2 (cloud) completion path; LRU/upkeep | Whole-payload single-key write (protocol has no enumeration). Contains no image, box, scene timestamp, identifier or location. Unreadable payload ⇒ discard and rebuild. `tierToken` records the tier that produced the entry (`nil` = the v1 default, cloud) and `producerToken` records the brain model its brain-produced entries were written under; a payload whose `producerToken` differs from the live brain's has its brain entries dropped on load ([BRAIN-CACHE], `invalidateSupersededBrainEntriesLocked`) — a translation is a fact about a model, so a replaced model's sentences must not be served from disk. Both fields are optional so a v1 payload is **adopted**, never discarded. |
 | `plugin.live_translate.consent.v1` | `ConsentRecord { granted, recordedAt, disclosureVersion }` | consent prompt / revocation | Absent, corrupt or unreadable ⇒ **deny** (fail closed). Deleted on revocation. |
 | `livetranslate.alwaysShowOriginal` | `Bool` | settings toggle | `UserDefaults`; a UI preference containing no user content. |
 
@@ -839,7 +839,10 @@ feature (OD7).
 
 A `schemaVersion` on the cache payload is present so a future shape change can be detected and the
 payload rebuilt rather than mis-decoded; a payload whose version is unknown is treated exactly like a
-corrupt one.
+corrupt one. The current version is **2** (`Entry.tierToken` was added; see the row above): a version-1
+payload is adopted field-for-field rather than rebuilt, because the added fields are optional and their
+absent value has a defined meaning — the tier that produced an entry with no token is cloud, the tier
+that wrote before the brain cache existed.
 
 ### Observability: event catalogue and log-safety discipline
 

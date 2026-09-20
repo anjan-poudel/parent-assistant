@@ -785,6 +785,44 @@ final class LabelTranslationCacheTests: XCTestCase {
                         "the failed write is retried on the next resolution of the key")
     }
 
+    /// **The write a read path owes is reported when it fails, and the debt
+    /// does not outlive the payload** (finding 7).
+    ///
+    /// A read that drops superseded brain entries makes the drop durable
+    /// itself, and that write can fail. Discarding the failure left two facts
+    /// unrecorded: the store had refused a write (no `cacheWriteFailed`
+    /// evidence at all), and the drop was still owed with nothing saying so.
+    /// The second half is the flag — and a flag that survives `removeAll()`
+    /// is a claim about a payload that no longer exists, which is how a later
+    /// write comes to report a failure for a drop that was already discarded.
+    func testAFailedInvalidationPersistOnAReadPathIsReportedAndNotOwedPastARemoval() throws {
+        let first = makeCache()
+        _ = first.store(text: recognizedText, translation: translationText, tier: .onDeviceBrain)
+
+        var replaced = LiveTranslateConfig.default
+        replaced.brainTranslationModelIDs = []
+        let second = makeCache(config: replaced)
+
+        // The store refuses the write the read path owes.
+        storage.failsWrites = true
+        guard case .success(let miss) = second.lookup(text: recognizedText) else {
+            return XCTFail("a lookup answers, whatever the store does")
+        }
+        XCTAssertNil(miss, "the superseded entry is not served")
+        XCTAssertEqual(bus.events(named: "cache_write_failed").count, 1,
+                       "the dropped write is evidence, not a silent discard")
+
+        // The payload goes: there is no drop left in it to make durable, and
+        // the store is still refusing writes, which is how a stale flag shows.
+        XCTAssertTrue(second.removeAll().isSuccess)
+        _ = second.storeBatch([LabelTranslationCache.Resolution(text: "Start",
+                                                                 translation: "सुरु गर्ने",
+                                                                 tier: .cloud)],
+                              targetLanguage: .nepali)
+        XCTAssertEqual(bus.events(named: "cache_write_failed").count, 1,
+                       "the debt went with the payload it was about")
+    }
+
     func testAnUnreadableStoreReadsAsAnEmptyCacheOnAFreshInstallRatherThanAReset() {
         storage.failsReads = true
         let cache = makeCache()
@@ -875,5 +913,66 @@ final class LabelTranslationCacheTests: XCTestCase {
                           "\(event.eventType) carried undeclared metadata: \(event.metadata.keys)")
             XCTAssertEqual(event.component, LiveTranslateEventCatalogue.component)
         }
+    }
+
+    // MARK: - [BATCH-STORE] The all-curated batch still makes the drop durable
+
+    /// `storeBatch` loads the payload and skips the load's own write (it
+    /// persists the whole payload itself, a few lines later). When the batch
+    /// then holds **nothing but curated keys** it returns early without
+    /// persisting — and the drop the load just made went with it. The eviction
+    /// ran again at every launch and the report it exists to make never stuck.
+    ///
+    /// The hole is precisely a batch of curated keys, which is the ordinary
+    /// shape: a frame of appliance labels is exactly the text the dictionary
+    /// already answers.
+    func testABatchOfOnlyCuratedKeysStillMakesTheSupersededDropDurable() throws {
+        let first = makeCache()
+        _ = first.store(text: recognizedText, translation: translationText,
+                        tier: .onDeviceBrain)
+        XCTAssertEqual(storage.writeCount(forKey: storageKey), 1)
+
+        // A different model is in force, so the next load drops the brain entry.
+        var replaced = LiveTranslateConfig.default
+        replaced.brainTranslationModelIDs = []
+        let second = makeCache(config: replaced)
+
+        // "Start" is curated, so this batch is accepted-empty by construction.
+        _ = second.storeBatch([LabelTranslationCache.Resolution(text: "Start",
+                                                                translation: "सुरु गर्ने",
+                                                                tier: .cloud)])
+
+        XCTAssertEqual(bus.events(named: "cache_evicted").count, 1,
+                       "the load's drop is reported by the batch that discovered it")
+        XCTAssertEqual(storage.writeCount(forKey: storageKey), 2,
+                       "…and written: a batch of curated keys is not a reason to lose it")
+        XCTAssertTrue(try storedPayload().entries.isEmpty,
+                      "the superseded answer is no longer on disk")
+
+        // The property the write exists for: a relaunch has nothing left to
+        // drop, so the eviction is reported once rather than once per launch.
+        let third = makeCache(config: replaced)
+        _ = third.lookup(text: recognizedText)
+        XCTAssertEqual(bus.events(named: "cache_evicted").count, 1,
+                       "reported once, not once per launch")
+    }
+
+    /// The other half, and the reason the batch's own early return is allowed
+    /// to be a no-op in the first place: a fresh install's first frame of
+    /// labels is all-curated and has nothing to make durable, so it must not
+    /// touch the disk at all (FR-LCT-019, and the batch's stated contract).
+    func testAFreshInstallsAllCuratedBatchWritesNothing() {
+        let cache = makeCache()
+
+        _ = cache.storeBatch([LabelTranslationCache.Resolution(text: "Start",
+                                                               translation: "सुरु गर्ने",
+                                                               tier: .cloud),
+                              LabelTranslationCache.Resolution(text: "Stop",
+                                                               translation: "रोक्ने",
+                                                               tier: .cloud)])
+
+        XCTAssertEqual(storage.writeCount, 0,
+                       "nothing curated is written, and there was nothing else to make durable")
+        XCTAssertNil(storage.bytes(forKey: storageKey))
     }
 }

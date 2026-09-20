@@ -96,6 +96,19 @@ actor CloudTranslationTier {
             case .cloud: return .cloud
             }
         }
+
+        /// The same fact in the evidence's vocabulary: an answer served from
+        /// the device's own store is `.cache` (it cost nothing this time), a
+        /// genuine response is `.fresh` (it did). The layer that answered is
+        /// not part of this token — the histogram's question is "did anyone get
+        /// paid for this", and a curated entry and a persisted one answer it
+        /// the same way (CL-3 keeps the layer visible through the *tier*).
+        var resolutionOrigin: LiveTranslateResolutionOrigin {
+            switch self {
+            case .cache: return .cache
+            case .cloud: return .fresh
+            }
+        }
     }
 
     /// One region's answer: the translation, and what produced it.
@@ -134,6 +147,22 @@ actor CloudTranslationTier {
                 return .degraded(originalText: item.text, reason: error.unavailableReason)
             }
             return .pending(item.text)
+        }
+
+        /// Where each of these items' answers came from — the provenance the
+        /// caller's histogram reports, and the reason `result(for:)` alone
+        /// cannot carry it: a `TranslationResult` names the tier and drops the
+        /// origin, so a string the cloud served out of the device's own store
+        /// is indistinguishable there from one it just fetched (review). Items
+        /// this batch did not answer are absent, exactly as they are from
+        /// `resolved`.
+        func origins(for items: [Item]) -> [String: LiveTranslateResolutionOrigin] {
+            var origins: [String: LiveTranslateResolutionOrigin] = [:]
+            for item in items {
+                guard let resolution = resolved[item.id] else { continue }
+                origins[item.id] = resolution.origin.resolutionOrigin
+            }
+            return origins
         }
     }
 
@@ -271,6 +300,29 @@ actor CloudTranslationTier {
                                failures: &failures)
         }
 
+        // The failures are reported here **and** returned to the caller. Both,
+        // and the split of ownership is the point: this tier is the emitter for
+        // every failure it produced, and the pipeline's terminal writer is the
+        // emitter for every degradation it wrote itself (a gate refusal no tier
+        // saw, the device's own endings, a held frame's). The caller knows the
+        // failures of this batch were reported — they arrived in this
+        // `BatchResult` — and does not report them a second time
+        // (`GateDecision.degradationsAreTheTiersOwn`). One degradation, one
+        // event, whichever layer wrote it.
+        //
+        // Reporting at the tier is not a convenience. The tier is the layer that
+        // knows the failure class, and it reports once per reason counted in the
+        // regions it covers — the count exists only here. It is also the only
+        // emission that survives the caller's disposition of the failure: a
+        // string the reliability router *reserves* is answered on the device and
+        // never settled degraded (settling it would publish a degraded overlay
+        // for a string the device is about to translate), so a pipeline-only
+        // emission would drop the cloud outage from the evidence entirely — and
+        // that outage, the one the router exists to work around, is the one the
+        // evidence most needs. Deleting this emission is how the review of
+        // d33089d found `SecurityEvidenceBoundaryTests` red: its AM-9 case
+        // drives the tier directly and pins the block→`translation_degraded`
+        // contract at this layer, where the shipped residual is.
         reportDegradation(failures)
         return BatchResult(resolved: resolved, failures: failures)
     }
@@ -388,6 +440,14 @@ actor CloudTranslationTier {
 
     /// Reports the unretryable-refusal kinds the call site cannot see, once per
     /// reason, with the region count it covers.
+    ///
+    /// The caller *does* receive these failures — it gets the whole
+    /// `BatchResult` — but it cannot always be the one to report them. A caller
+    /// that reserves a failure answers the string on the device and settles no
+    /// degradation at all, and a caller that is already closed settles nothing
+    /// either; the outage happened either way, and this is the emission that
+    /// does not depend on what the caller does next. Counted in regions: the
+    /// dictionary is keyed by item id, and one id is one region on screen.
     private func reportDegradation(_ failures: [String: LiveTranslateError]) {
         var counts: [TranslationUnavailableReason: Int] = [:]
         for error in failures.values { counts[error.unavailableReason, default: 0] += 1 }

@@ -421,21 +421,37 @@ struct LiveTranslateSnapshotPath {
         async -> [TextRegionStabilizer.RegionIdentity: TranslationResult]? {
         var keyedRegions: [String: [TextRegionStabilizer.RegionIdentity]] = [:]
         var items: [String: CloudTranslationTier.Item] = [:]
+        // The keys in **region order**, kept beside the map: the plan bounds a
+        // batch by taking a prefix of what it is handed, so handing it the
+        // dictionary's values asked a different subset of the same scene on
+        // every capture — and the answers, the payments and the degradation
+        // counts moved with the hash order (review). The live adapter has
+        // always planned in region order; this is the frozen half of the same
+        // rule.
+        var orderedKeys: [String] = []
         for region in publication.regions {
             guard case .pending? = publication.outcomes[region.id]?.outcome else { continue }
             let key = LabelTranslationCache.normalizationKey(text: region.text,
                                                              targetLanguage: targetLanguage)
             keyedRegions[key, default: []].append(region.id)
+            if items[key] == nil { orderedKeys.append(key) }
             items[key] = CloudTranslationTier.Item(id: key,
                                                    text: region.text,
                                                    detectedSourceLanguage: region.detectedLanguage)
         }
-        guard !items.isEmpty else { return nil }
+        let orderedItems = orderedKeys.compactMap { items[$0] }
+        // The frame's own region multiplicities travel with the ask: a held
+        // frame's regions are not in the live stabiliser, so the degradation
+        // count could not see them and every frozen degradation was reported as
+        // one region whatever the frame held (review).
+        let regionCounts = keyedRegions.mapValues(\.count)
+        guard !orderedItems.isEmpty else { return nil }
         // One call, the whole plan: the device for its class, the cloud for the
         // class the device is not proven on, and the device again for whatever
         // the cloud could not answer. `nil` is the open consent question and
         // the closed session — the two cases in which nothing may be applied.
-        guard let answers = await cycle.resolveFrozen(Array(items.values)) else { return nil }
+        guard let answers = await cycle.resolveFrozen(orderedItems,
+                                                      regionCounts: regionCounts) else { return nil }
 
         var outcomes = publication.outcomes
         for item in items.values {
