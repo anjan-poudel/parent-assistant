@@ -1268,7 +1268,14 @@ struct LiveTranslateConfig: Equatable {
     /// It exists because the shared context is 1,024 tokens (`n_ctx`):
     /// prompt and output share it, so an unbounded batch is a truncated
     /// answer. 8 strings of a scene's short sign text leaves room for both.
-    var brainTranslationMaxStrings: Int = 8
+    /// Sized to the model's MEASURED throughput so one batch finishes
+    /// inside `brainTranslationTimeoutSeconds`: the device captures show
+    /// ~4 s per string (3 strings ≈ 12 s), and an 8-string batch was
+    /// refused at the 25 s bound (owner's 11:02 capture — the batch the
+    /// tier was handed while the pipeline waited). Four strings ≈ 16–20 s,
+    /// leaving the bound its margin; a denser scene dispatches
+    /// sequentially and its answers arrive batch by batch.
+    var brainTranslationMaxStrings: Int = 4
 
     /// Characters per brain request — the second bound on the same batch, for
     /// a scene of two long lines rather than eight short ones. Same rule: the
