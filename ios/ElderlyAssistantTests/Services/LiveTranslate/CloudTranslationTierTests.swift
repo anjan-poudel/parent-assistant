@@ -133,7 +133,7 @@ final class CloudTranslationTierTests: XCTestCase {
         let result = await harness.tier.resolve(items: [item("r1", "Push the green button"),
                                                         item("r2", "Light")])
 
-        XCTAssertEqual(result.resolved["r1"]?.origin, .cache(.persisted))
+        XCTAssertEqual(result.resolved["r1"]?.origin, .cache(.persistedLayer))
         XCTAssertEqual(result.resolved["r1"]?.tier, .cloud,
                        "a cloud-produced string is a cloud translation even when the device serves it")
         XCTAssertNotEqual(result.resolved["r1"]?.tier, .dictionary,
@@ -486,6 +486,32 @@ final class CloudTranslationTierTests: XCTestCase {
 
     // MARK: - Batching (FR-LCT-009)
 
+    /// [BATCH-STORE] (review finding on #99, 2026-09-20) A frame's answers are
+    /// persisted in **one** write. The per-item spelling paid a full
+    /// encrypt-and-atomic-write of the entire payload for every string, and
+    /// the overlay resolves at the OCR cadence — that was N writes a frame, a
+    /// thermal and battery cost with nothing to show for it (NFR-LCT-002).
+    @MainActor
+    func testTheFramesAnswersArePersistedInOneWrite() async throws {
+        let harness = makeHarness()
+        harness.transport.autoRespond = { byID in
+            let out = byID.mapValues { "त:" + $0 }
+            return String(data: try! JSONSerialization.data(withJSONObject: out),
+                          encoding: .utf8)!
+        }
+
+        let result = await harness.tier.resolve(items: [item("r1", "First label"),
+                                                        item("r2", "Second label"),
+                                                        item("r3", "Third label")])
+
+        XCTAssertEqual(result.resolvedCount, 3)
+        XCTAssertEqual(harness.transport.requestCount, 1,
+                       "one cycle, one request — the store is the thing under test")
+        XCTAssertEqual(harness.storage.writeCount(forKey: LabelTranslationCache.storageKey), 1,
+                       "three answers, one atomic write of the payload")
+        await assertNothingOutstanding(harness)
+    }
+
     @MainActor
     func testAnOverLargeSceneIsSentAsSequentialBatchesWithBatchIndexesAndNoDroppedString() async throws {
         let harness = makeHarness()
@@ -722,7 +748,7 @@ final class CloudTranslationTierTests: XCTestCase {
         let second = await harness.tier.resolve(items: [item("r1", text)])
 
         XCTAssertEqual(harness.transport.requestCount, 1, "the second cycle cost no request")
-        XCTAssertEqual(second.resolved["r1"]?.origin, .cache(.persisted))
+        XCTAssertEqual(second.resolved["r1"]?.origin, .cache(.persistedLayer))
         XCTAssertEqual(second.resolved["r1"]?.tier, .cloud)
         XCTAssertEqual(second.resolved["r1"]?.translation, "बत्ती")
         await assertNothingOutstanding(harness)

@@ -1543,7 +1543,7 @@ final class LiveTranslationPipelineTests: XCTestCase {
             return XCTFail("the next session must answer a cloud-resolved string from the cache")
         }
         XCTAssertEqual(hit.translation, "ने:" + cloudText)
-        XCTAssertEqual(hit.origin, .persisted)
+        XCTAssertEqual(hit.origin, .persistedLayer)
         XCTAssertEqual(hit.tier, .cloud)
     }
 

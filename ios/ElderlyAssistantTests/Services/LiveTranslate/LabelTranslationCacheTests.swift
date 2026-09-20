@@ -82,7 +82,7 @@ final class LabelTranslationCacheTests: XCTestCase {
             return XCTFail("the stored translation must be served")
         }
         XCTAssertEqual(hit.translation, translationText)
-        XCTAssertEqual(hit.origin, .persisted)
+        XCTAssertEqual(hit.origin, .persistedLayer)
         XCTAssertEqual(hit.tier, .cloud, "a persisted entry was cloud-produced, and saying so "
                        + "claims no request happened (FR-LCT-008)")
 
@@ -92,7 +92,7 @@ final class LabelTranslationCacheTests: XCTestCase {
             return XCTFail("the persisted layer must survive a new session")
         }
         XCTAssertEqual(laterHit.translation, translationText)
-        XCTAssertEqual(laterHit.origin, .persisted)
+        XCTAssertEqual(laterHit.origin, .persistedLayer)
 
         let persistedHits = bus.events(named: "cache_hit").filter { $0.metadata["origin"] == "persisted" }
         XCTAssertEqual(persistedHits.count, 2, "each hit is recorded with its origin token")
@@ -112,7 +112,9 @@ final class LabelTranslationCacheTests: XCTestCase {
             return XCTFail("the brain's translation must be served")
         }
         XCTAssertEqual(hit.translation, translationText)
-        XCTAssertEqual(hit.origin, .persisted)
+        XCTAssertTrue(hit.origin.isPersistedLayer,
+                      "the persisted payload answered — the layer, not a particular tier: "
+                      + "the tier it carries is the next assertion's")
         XCTAssertEqual(hit.tier, .onDeviceBrain,
                        "the producing tier rides with the entry — the re-read must not "
                        + "claim a cloud request that never happened")
@@ -122,6 +124,243 @@ final class LabelTranslationCacheTests: XCTestCase {
             return XCTFail("a brain answer must survive a new session like a cloud one")
         }
         XCTAssertEqual(laterHit.tier, .onDeviceBrain)
+    }
+
+    // MARK: - [BRAIN-CACHE] The tier survives a touch, and `==` agrees
+
+    /// The LRU touch used to rebuild the entry from a `translation` argument:
+    /// a fresh `Entry` naming three fields, silently dropping every field it
+    /// did not name. A brain answer's tier token was the field it dropped, so
+    /// the first read that rewrote the payload reverted the entry to the
+    /// legacy cloud default — and the *next* session served a brain answer
+    /// attributed to a request that never happened (FR-LCT-008).
+    ///
+    /// Three sessions, because that is the interval the defect lived in: the
+    /// write, the touch that corrupted it, and the read that believed the
+    /// corruption.
+    func testABrainEntryKeepsItsTierAcrossTheTouchThatRewritesThePayload() {
+        let first = makeCache()
+        XCTAssertTrue(first.store(text: recognizedText,
+                                  translation: translationText,
+                                  tier: .onDeviceBrain).isSuccess)
+        let writesAfterTheStore = storage.writeCount(forKey: storageKey)
+
+        // A second session resolves it: the hit's touch is what rewrites the
+        // payload, and it must rewrite the entry as it found it.
+        let second = makeCache()
+        guard case .success(.some) = second.lookup(text: recognizedText) else {
+            return XCTFail("the brain's answer must resolve")
+        }
+        XCTAssertGreaterThan(storage.writeCount(forKey: storageKey), writesAfterTheStore,
+                             "the read rewrote the payload — the interval under test")
+
+        // A third session reads what the touch wrote.
+        let third = makeCache()
+        guard case .success(.some(let hit)) = third.lookup(text: recognizedText) else {
+            return XCTFail("the entry must survive the rewrite")
+        }
+        XCTAssertEqual(hit.tier, .onDeviceBrain,
+                       "a touch must not rewrite the producing tier into the legacy default")
+        XCTAssertEqual(hit.origin, .persisted(tier: .onDeviceBrain),
+                       "the whole origin, not just the case name")
+    }
+
+    /// Attribution is one value. `Hit` used to carry the tier in a private
+    /// field beside the `Origin`, so the synthesized `Equatable` compared the
+    /// two hits below as equal — an `XCTAssertEqual`, a `Set` membership test
+    /// or a `contains` could pass for an answer that is not the same fact.
+    func testTwoHitsThatReportDifferentTiersAreNotEqual() {
+        let cloud = LabelTranslationCache.Hit(translation: translationText,
+                                              origin: .persisted(tier: .cloud))
+        let brain = LabelTranslationCache.Hit(translation: translationText,
+                                              origin: .persisted(tier: .onDeviceBrain))
+
+        XCTAssertNotEqual(cloud, brain,
+                          "the producing tier is part of what the hit says")
+        XCTAssertEqual(Set([cloud, brain]).count, 2,
+                       "a Set is what a dedup or a containment check reads")
+        XCTAssertEqual(brain.tier, .onDeviceBrain)
+        XCTAssertEqual(cloud.tier, .cloud)
+        XCTAssertEqual(cloud.origin.eventOrigin, brain.origin.eventOrigin,
+                       "…while the two are still the same *layer*, which is all the "
+                       + "cache_miss/cache_evicted events name")
+    }
+
+    // MARK: - [BRAIN-CACHE] A translation is a fact about a model
+
+    /// A replaced translation model must not keep serving the superseded
+    /// model's sentences from disk — and replacing it must **not** take the
+    /// household's cloud answers down with it: a cloud translation does not
+    /// depend on a local model, and discarding the working cache is exactly
+    /// the data loss the v1-adoption rule exists to prevent.
+    func testAnEntryFromASupersededBrainModelIsDroppedAndCloudOnesAreKept() throws {
+        let first = makeCache()
+        _ = first.store(text: recognizedText, translation: translationText,
+                        tier: .onDeviceBrain)
+        _ = first.store(text: "Another label", translation: "अर्को", tier: .cloud)
+        XCTAssertEqual(try storedPayload().producerToken,
+                       ModelCatalog.nmtEnNeQwen17bR3Q4.rawValue,
+                       "the payload names the model the brain answers came from")
+
+        // The model in force is not the one that wrote them.
+        var replaced = LiveTranslateConfig.default
+        replaced.brainTranslationModelIDs = []
+        let second = makeCache(config: replaced)
+
+        guard case .success(let brainMiss) = second.lookup(text: recognizedText) else {
+            return XCTFail("a lookup must answer, not fail, on a superseded entry")
+        }
+        XCTAssertNil(brainMiss, "the superseded model's answer is not served")
+
+        guard case .success(.some(let kept)) = second.lookup(text: "Another label") else {
+            return XCTFail("the cloud answer must survive the model change")
+        }
+        XCTAssertEqual(kept.translation, "अर्को")
+        XCTAssertEqual(kept.tier, .cloud)
+
+        let evictions = bus.events(named: "cache_evicted")
+        XCTAssertEqual(evictions.count, 1, "the drop is recorded as an eviction")
+        XCTAssertEqual(evictions.first?.metadata["origin"], "persisted")
+        XCTAssertEqual(evictions.first?.metadata["count"], "1",
+                       "count only: the event carries no text (NFR-LCT-006)")
+    }
+
+    /// The other half of the same rule: while the model in force is the one
+    /// that wrote the payload, nothing is invalidated — a cache that dropped
+    /// its brain answers on every read would be a cache that never serves one.
+    func testPayloadsWrittenByTheModelInForceKeepTheirBrainEntries() throws {
+        let first = makeCache()
+        _ = first.store(text: recognizedText, translation: translationText,
+                        tier: .onDeviceBrain)
+
+        let second = makeCache()
+        guard case .success(.some(let hit)) = second.lookup(text: recognizedText) else {
+            return XCTFail("the brain's answer must be served by the same model that wrote it")
+        }
+        XCTAssertEqual(hit.tier, .onDeviceBrain)
+        XCTAssertTrue(bus.events(named: "cache_evicted").isEmpty,
+                      "no model changed, so nothing may be dropped")
+        XCTAssertEqual(try storedPayload().entries.count, 1)
+    }
+
+    /// A payload with **no recorded producer** is not a payload from a
+    /// different model. #99 shipped a schema-2 payload whose brain entries
+    /// carry a tier token and no producer token at all, so reading "no record"
+    /// as "the model changed" would empty the cache of every household that
+    /// upgraded — the wipe the owner saw, and the one the v1-adoption rule
+    /// exists to prevent. The entries stay, and the next persist stamps the
+    /// token in force.
+    func testAPayloadWithNoRecordedProducerKeepsItsBrainEntries() throws {
+        let entry = LabelTranslationCache.Entry(
+            key: LabelTranslationCache.normalizationKey(text: recognizedText,
+                                                        targetLanguage: .nepali),
+            translation: translationText,
+            lastAccessSequence: 1,
+            tierToken: TranslationTier.onDeviceBrain.rawValue)
+        let legacyShape = LabelTranslationCache.Persisted(
+            schemaVersion: LabelTranslationCache.Persisted.currentSchemaVersion,
+            entries: [entry],
+            producerToken: nil)
+        storage.setRaw(try JSONEncoder().encode(legacyShape), forKey: storageKey)
+
+        let cache = makeCache()
+        guard case .success(.some(let hit)) = cache.lookup(text: recognizedText) else {
+            return XCTFail("an un-recorded producer is not a mismatch")
+        }
+        XCTAssertEqual(hit.tier, .onDeviceBrain,
+                       "the entry keeps the tier that produced it")
+        XCTAssertTrue(bus.events(named: "cache_evicted").isEmpty,
+                      "nothing may be dropped for a model that cannot be shown to have changed")
+    }
+
+    /// The drop is made durable by the read that discovered it. Persisting
+    /// nothing would leave the superseded entries in the payload, so every
+    /// launch would recompute the same drop and report the same eviction —
+    /// an event describing a change that is not happening again.
+    func testTheSupersededDropIsWrittenBackAndReportedOnce() throws {
+        let first = makeCache()
+        _ = first.store(text: recognizedText, translation: translationText,
+                        tier: .onDeviceBrain)
+
+        var replaced = LiveTranslateConfig.default
+        replaced.brainTranslationModelIDs = []
+        let second = makeCache(config: replaced)
+        _ = second.lookup(text: recognizedText)
+        XCTAssertEqual(bus.events(named: "cache_evicted").count, 1)
+        XCTAssertEqual(storage.writeCount(forKey: storageKey), 2,
+                       "one write stored the entry, one made the drop durable")
+        XCTAssertTrue(try storedPayload().entries.isEmpty,
+                      "the payload no longer holds the superseded answer")
+
+        // A relaunch on the same model-in-force state: the drop already
+        // happened, so there is nothing left to report.
+        let third = makeCache(config: replaced)
+        _ = third.lookup(text: recognizedText)
+        XCTAssertEqual(bus.events(named: "cache_evicted").count, 1,
+                       "the eviction is reported once, not once per launch")
+    }
+
+    // MARK: - [BATCH-STORE] One frame, one write (NFR-LCT-002)
+
+    /// The overlay resolves a whole frame's answers at once, and the per-item
+    /// spelling persisted each one separately: one full encrypt-and-atomic
+    /// write of the entire payload *per string*, at the OCR cadence. A batch
+    /// is one mutation pass, one eviction pass and one write.
+    func testAFramesAnswersArePersistedInOneWrite() throws {
+        let cache = makeCache()
+        let resolutions = (0..<6).map { index in
+            LabelTranslationCache.Resolution(text: "Batch label \(index)",
+                                             translation: "ब्याच \(index)",
+                                             tier: .cloud)
+        }
+
+        XCTAssertTrue(cache.storeBatch(resolutions).isSuccess)
+
+        XCTAssertEqual(storage.writeCount(forKey: storageKey), 1,
+                       "six answers, one atomic write — not six")
+        XCTAssertEqual(try storedPayload().entries.count, 6)
+
+        for index in 0..<6 {
+            guard case .success(.some(let hit)) = cache.lookup(text: "Batch label \(index)") else {
+                return XCTFail("every answer in the batch must resolve")
+            }
+            XCTAssertEqual(hit.translation, "ब्याच \(index)")
+            XCTAssertEqual(hit.tier, .cloud)
+        }
+    }
+
+    /// A batch that holds nothing but curated keys is a no-op that does not
+    /// touch the disk: a curated key is answered by lookup, and a stored copy
+    /// could shadow the curated value it duplicates (FR-LCT-019).
+    func testABatchOfCuratedKeysWritesNothingAndDoesNotShadowTheDictionary() {
+        let cache = makeCache()
+
+        XCTAssertTrue(cache.storeBatch([
+            LabelTranslationCache.Resolution(text: "Start", translation: "WRONG",
+                                             tier: .cloud)
+        ]).isSuccess)
+
+        XCTAssertEqual(storage.writeCount, 0, "nothing curated is stored")
+        guard case .success(.some(let hit)) = cache.lookup(text: "Start") else {
+            return XCTFail("the curated label must resolve")
+        }
+        XCTAssertEqual(hit.translation, "सुरु गर्ने", "the curated value is the answer")
+        XCTAssertEqual(hit.origin, .curatedDictionary)
+    }
+
+    /// The single-item spelling is the batch's own path, so the two cannot
+    /// write different things.
+    func testTheSingleItemSpellingIsTheBatchPath() throws {
+        let cache = makeCache()
+        XCTAssertTrue(cache.store(text: recognizedText, translation: translationText,
+                                  tier: .onDeviceBrain).isSuccess)
+
+        XCTAssertEqual(storage.writeCount(forKey: storageKey), 1,
+                       "one item is one write")
+        let payload = try storedPayload()
+        XCTAssertEqual(payload.entries.count, 1)
+        XCTAssertEqual(payload.entries.first?.tierToken, TranslationTier.onDeviceBrain.rawValue,
+                       "the token is written by the same code the batch uses")
     }
 
     func testOnlyTheDeclaredStorageKeyIsUsed() {
@@ -200,8 +439,16 @@ final class LabelTranslationCacheTests: XCTestCase {
             return XCTFail("the payload is not the declared shape")
         }
 
-        XCTAssertEqual(Set(json.keys), ["schemaVersion", "entries"],
-                       "the payload carries the schema version and the entries, nothing else")
+        // [BRAIN-CACHE] `producerToken` joined the payload (2026-09-20): the
+        // identity of the translation model the brain answers inside it were
+        // produced by — a model id, not scene data, and the field that lets a
+        // replaced model's sentences be dropped instead of served.
+        XCTAssertEqual(Set(json.keys), ["schemaVersion", "entries", "producerToken"],
+                       "the payload carries the schema version, the entries and the "
+                       + "producing model's token, nothing else")
+        XCTAssertEqual(json["producerToken"] as? String,
+                       LiveTranslateConfig.default.brainTranslationModelIDs.first?.rawValue,
+                       "the token is the model in force when the payload was written")
         XCTAssertEqual(entries.count, 2)
         for entry in entries {
             // [BRAIN-CACHE] The tier token joined the entry (schema 2): a

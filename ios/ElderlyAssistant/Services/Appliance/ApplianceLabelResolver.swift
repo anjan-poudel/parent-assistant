@@ -84,7 +84,7 @@ enum ApplianceLabelResolver {
         guard let cache else { return Resolution(display: local, origin: nil) }
 
         switch cache.lookup(text: trimmed) {
-        case .success(.some(let hit)) where hit.origin == .persisted:
+        case .success(.some(let hit)) where hit.origin.isPersistedLayer:
             // The same Display shape the localizer produces for an applied
             // translation: the translation, with the printed English kept as
             // the reference line.

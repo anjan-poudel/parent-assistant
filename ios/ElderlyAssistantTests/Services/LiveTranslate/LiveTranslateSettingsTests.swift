@@ -99,6 +99,10 @@ final class LiveTranslateSettingsTests: XCTestCase {
     func testThePersistedStoreCarriesOnlyTheBooleanPreference() {
         settings().setAlwaysShowOriginal(true)
         settings().setGeminiCloudEnabled(true)
+        // [DEBUG-LOG] The diagnostic switch is persisted like the two
+        // preferences, and it is a boolean too: this walk is what keeps the
+        // feature's namespace to booleans and nothing else.
+        settings().setTranslationDebugLoggingEnabled(true)
 
         let featureKeys = featureScopedEntries().map(\.key)
         XCTAssertEqual(Set(featureKeys), LiveTranslateSettings.featureKeys,
@@ -113,6 +117,62 @@ final class LiveTranslateSettingsTests: XCTestCase {
             XCTAssertFalse(entry.value is String,
                            "\(entry.key) holds a string — no user content belongs in this store")
         }
+    }
+
+    // MARK: The [DEBUG-LOG] diagnostic switch (review finding on #99)
+
+    /// The switch is **off** until someone turns it on, and the absent key
+    /// reads the config's nominal default rather than `false` by accident —
+    /// the same rule the other two preferences follow. The default matters
+    /// more here: it decides whether a shipped app writes content-free
+    /// diagnostics at all, so it must not be able to be on by construction.
+    func testTheDiagnosticSwitchIsOffUntilSomeoneTurnsItOn() {
+        XCTAssertFalse(settings().translationDebugLoggingEnabled)
+        XCTAssertFalse(LiveTranslateConfig.default.translationDebugLoggingEnabled,
+                       "the config's own nominal default is the other half of the rule")
+        XCTAssertNil(defaults.object(forKey: LiveTranslateSettings.translationDebugLoggingEnabledKey),
+                     "reading the default must not write a value nobody chose")
+    }
+
+    func testTheDiagnosticSwitchRoundTripsAcrossASimulatedRelaunch() {
+        settings().setTranslationDebugLoggingEnabled(true)
+        XCTAssertTrue(settings().translationDebugLoggingEnabled)
+
+        // A relaunch: fresh settings over the same store.
+        XCTAssertTrue(settings().translationDebugLoggingEnabled,
+                      "the switch survives the process, which is the point of "
+                      + "persisting it — a capture cannot wait for a rebuild")
+
+        settings().setTranslationDebugLoggingEnabled(false)
+        XCTAssertFalse(settings().translationDebugLoggingEnabled)
+        XCTAssertEqual(defaults.object(forKey: LiveTranslateSettings.translationDebugLoggingEnabledKey)
+                        as? Bool,
+                       false)
+    }
+
+    /// The switch reaches the tiers by exactly one route: the config the
+    /// session runs with, built by `applyingDebugLogging(to:)`. Nothing else
+    /// about the config moves with it.
+    func testTheSwitchReachesTheSessionThroughTheConfigAndMovesNothingElse() {
+        var config = LiveTranslateConfig.default
+        config.geminiCloudEnabledDefault = false
+
+        settings().setTranslationDebugLoggingEnabled(true)
+        let resolved = settings().applyingDebugLogging(to: config)
+
+        XCTAssertTrue(resolved.translationDebugLoggingEnabled,
+                      "the live session's config carries the persisted switch")
+        XCTAssertEqual(resolved.geminiCloudEnabledDefault, config.geminiCloudEnabledDefault,
+                       "the diagnostic is not an egress switch and cannot move one")
+        XCTAssertEqual(resolved.brainTranslationModelIDs, config.brainTranslationModelIDs,
+                       "nor does it choose a model")
+        XCTAssertEqual(resolved.cacheGeneralEntryLimit, config.cacheGeneralEntryLimit,
+                       "nor does it change what is stored")
+
+        // And the other direction: nothing else about the store moves it.
+        settings().setAlwaysShowOriginal(true)
+        XCTAssertTrue(settings().applyingDebugLogging(to: config).translationDebugLoggingEnabled,
+                      "the display preference does not turn the diagnostic off")
     }
 
     // MARK: The cloud tier's master switch (owner directive, 2026-09-19)

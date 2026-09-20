@@ -776,6 +776,261 @@ final class ModelLifecycleManagerTests: XCTestCase {
                        "the session's end restores the idle budget")
     }
 
+    // MARK: - [CAMERA-BUDGET] The lease: owner, TTL, and what it may not do
+
+    /// The profile belongs to the object that set it, and only that object may
+    /// take it down: a stale session's late `false` — a transition that
+    /// arrived after the session which set the profile was already replaced —
+    /// must not lower a live session's budget to the idle arithmetic. The
+    /// refusal is reported rather than silently obeyed, so the pair
+    /// (who asked, what happened) is in the capture.
+    func testOnlyTheOwningSessionMayClearTheProfile() {
+        var events: [ModelLifecycleEvent] = []
+        let unpinned = makeUnpinnedManager()
+        unpinned.onEvent = { events.append($0) }
+        let session = FakeOwner()
+        let staleSession = FakeOwner()
+        let idleBudget = unpinned.snapshot().budgetBytes
+
+        unpinned.setSessionProfile(.cameraLive, owner: session)
+        let cameraBudget = unpinned.snapshot().budgetBytes
+        XCTAssertLessThan(cameraBudget, idleBudget)
+
+        unpinned.setSessionProfile(nil, owner: staleSession)
+
+        XCTAssertEqual(unpinned.snapshot().budgetBytes, cameraBudget,
+                       "another object's clear must not take a live session's profile down")
+        guard let refusal = events.last,
+              case .sessionProfile(let refusedProfile, let refusedBudget,
+                                   let refusedGeneration, let refusalReason) = refusal else {
+            return XCTFail("the refusal is reported")
+        }
+        XCTAssertEqual(refusedProfile, .cameraLive)
+        XCTAssertEqual(refusedBudget, cameraBudget)
+        XCTAssertEqual(refusedGeneration, 1,
+                       "the refusal names the lease it refused to take down — the one "
+                       + "application this manager has seen")
+        XCTAssertEqual(refusalReason, .refusedStaleOwner,
+                       "the refusal is reported rather than obeyed")
+
+        unpinned.setSessionProfile(nil, owner: session)
+
+        XCTAssertEqual(unpinned.snapshot().budgetBytes, idleBudget,
+                       "the owner's own clear is the one that counts")
+        guard let cleared = events.last,
+              case .sessionProfile(let clearedProfile, let clearedBudget,
+                                   let clearedGeneration, let clearedReason) = cleared else {
+            return XCTFail("the clear is reported")
+        }
+        XCTAssertNil(clearedProfile)
+        XCTAssertNil(clearedBudget)
+        XCTAssertEqual(clearedGeneration, 1,
+                       "the clear pairs with the application it ends by its ordinal, "
+                       + "not by the order two lines of a capture happen to be in")
+        XCTAssertEqual(clearedReason, .cleared)
+    }
+
+    /// A session that goes away without ever reporting its end — a torn-down
+    /// coordinator, a transition that never arrived — must not leave the
+    /// budget lowered for the life of the process. The lease is held weakly,
+    /// exactly like a reservation's owner, and the drop says which of the two
+    /// endings it was.
+    func testALeaseWhoseOwnerIsGoneIsDroppedAndReported() {
+        var events: [ModelLifecycleEvent] = []
+        let unpinned = makeUnpinnedManager()
+        unpinned.onEvent = { events.append($0) }
+        let idleBudget = unpinned.snapshot().budgetBytes
+        var session: FakeOwner? = FakeOwner()
+
+        unpinned.setSessionProfile(.cameraLive, owner: session)
+        let cameraBudget = unpinned.snapshot().budgetBytes
+
+        session = nil   // the view went away without a `false`
+
+        XCTAssertEqual(unpinned.reapExpiredSessionProfile(), .ownerReleased)
+        XCTAssertEqual(unpinned.snapshot().budgetBytes, idleBudget,
+                       "a session that is gone does not keep paying for a camera")
+
+        guard let last = events.last,
+              case .sessionProfile(let profile, let budgetBytes,
+                                   let generation, let reason) = last else {
+            return XCTFail("the drop is reported")
+        }
+        XCTAssertNil(profile)
+        XCTAssertEqual(budgetBytes, cameraBudget,
+                       "the event names the budget that stopped applying")
+        XCTAssertEqual(generation, 1, "…and the lease it belonged to")
+        XCTAssertEqual(reason, .ownerReleased)
+    }
+
+    /// A session that comes back — a second `true` after a `false` that
+    /// nothing paired — gets a new ordinal. Without it a capture would show
+    /// two `applied` and one `cleared` with no way to say which application
+    /// the clear ended, and a churning session would look like a steady one.
+    func testEachApplicationGetsItsOwnOrdinal() {
+        var events: [ModelLifecycleEvent] = []
+        let unpinned = makeUnpinnedManager()
+        unpinned.onEvent = { events.append($0) }
+        let session = FakeOwner()
+
+        unpinned.setSessionProfile(.cameraLive, owner: session)
+        unpinned.setSessionProfile(nil, owner: session)
+        unpinned.setSessionProfile(.cameraLive, owner: session)
+
+        let ordinals: [UInt64] = events.compactMap { event in
+            guard case .sessionProfile(_, _, let generation, _) = event else { return nil }
+            return generation
+        }
+        XCTAssertEqual(ordinals, [1, 1, 2],
+                       "the re-application is a different lease, and the ordinal says so")
+    }
+
+    /// The TTL is the backstop for a lease nobody clears: an owner that is
+    /// still alive but has stopped reporting (a session whose `false` was
+    /// dropped on the floor) still stops lowering the budget.
+    func testALeasePastItsTTLIsDroppedAndReported() {
+        let unpinned = makeUnpinnedManager()
+        unpinned.wardenConfig.sessionProfileTTLSeconds = 60
+        let idleBudget = unpinned.snapshot().budgetBytes
+        let session = FakeOwner()
+
+        unpinned.setSessionProfile(.cameraLive, owner: session)
+        XCTAssertLessThan(unpinned.snapshot().budgetBytes, idleBudget)
+
+        now = now.addingTimeInterval(61)
+
+        XCTAssertEqual(unpinned.reapExpiredSessionProfile(), .expired)
+        XCTAssertEqual(unpinned.snapshot().budgetBytes, idleBudget)
+    }
+
+    /// …and the read is where it stops applying, before anyone reaps it: the
+    /// load gate computes with the budget in force *now*, so an expired lease
+    /// must not still be in the arithmetic for the interval between the TTL
+    /// and the next pressure response. A read must not drop it silently
+    /// either — the interval between the TTL and the next pressure response is
+    /// exactly when a capture is taken — so the read reaps (and reports) first
+    /// and the explicit reap afterwards finds nothing left to say.
+    func testAnExpiredLeaseStopsLoweringTheBudgetBeforeAnyoneReapsIt() {
+        var events: [ModelLifecycleEvent] = []
+        let unpinned = makeUnpinnedManager()
+        unpinned.onEvent = { events.append($0) }
+        unpinned.wardenConfig.sessionProfileTTLSeconds = 60
+        let idleBudget = unpinned.snapshot().budgetBytes
+
+        // A live owner, held for the length of the test: a temporary would
+        // deallocate at the end of the call and the drop below would be
+        // reported as `.ownerReleased` — a true statement about a different
+        // ending, which is not what this test is about.
+        let session = FakeOwner()
+        unpinned.setSessionProfile(.cameraLive, owner: session)
+        now = now.addingTimeInterval(61)
+
+        XCTAssertEqual(unpinned.snapshot().budgetBytes, idleBudget,
+                       "an expired lease must not still be in the arithmetic")
+        guard let reported = events.last,
+              case .sessionProfile(let profile, _, let generation, let reason) = reported else {
+            return XCTFail("the read reports the expiry it had to apply")
+        }
+        XCTAssertNil(profile)
+        XCTAssertEqual(generation, 1)
+        XCTAssertEqual(reason, .expired)
+        XCTAssertNil(unpinned.reapExpiredSessionProfile(),
+                     "the read already dropped and reported it; it is reported once")
+        withExtendedLifetime(session) {}
+    }
+
+    /// `min(profile, probe)`, never the profile alone: the profile is a fixed
+    /// 2.1 GB for the camera session, and a probe reading that pressure has
+    /// already pushed below it must win. Short-circuiting the probe was the
+    /// review's finding — the fixed budget could sit ABOVE the live ceiling
+    /// and re-admit exactly the pressure eviction the profile exists to
+    /// prevent.
+    func testTheProfileNeverRaisesAProbeReadingThatIsAlreadyLower() {
+        probe.availableProcessMemoryBytes = 1_500_000_000
+        let unpinned = makeUnpinnedManager()
+        let probeDerived = ModelLifecycleBudget.effectiveBudgetBytes(
+            deviceClass: .standard,
+            availableBytes: probe.availableProcessMemoryBytes,
+            residentLiveBytes: 0)
+        let profileBudget = ModelBudgetPolicy.standard.sessionModelBudgetBytes(session: .cameraLive)
+        XCTAssertLessThan(probeDerived, profileBudget,
+                          "the case means nothing unless the probe is the lower bound")
+
+        unpinned.setSessionProfile(.cameraLive)
+
+        XCTAssertEqual(unpinned.snapshot().effectiveBudgetBytes, probeDerived,
+                       "a fixed profile budget must never be raised over the live ceiling")
+    }
+
+    /// The tier's escape hatch is judged against the **class** budget, and a
+    /// camera session may not lower it. Lowering it was the review's finding:
+    /// on a standard phone both bounds became 2.1 GB, the translation head
+    /// (2.63 GB live) exceeded both, and the hatch that exists so the
+    /// household's chosen brain is never unloadable refused the tier its own
+    /// model for as long as the camera was open.
+    func testTheCameraProfileDoesNotCloseTheTranslationTiersEscapeHatch() {
+        probe.availableProcessMemoryBytes = 1_500_000_000
+        let unpinned = makeUnpinnedManager()
+        var events: [ModelLifecycleEvent] = []
+        unpinned.onEvent = { events.append($0) }
+        unpinned.setSessionProfile(.cameraLive)
+
+        let warmOwner = FakeOwner()
+        load(.speechToText, modelID: sttQ8, owner: warmOwner, on: unpinned,
+             priority: .background)
+
+        let incoming = footprint(.translateBrain, translateQ8)
+        XCTAssertGreaterThan(incoming,
+                             ModelBudgetPolicy.standard.sessionModelBudgetBytes(session: .cameraLive),
+                             "the head must be over the CAMERA budget, or the case "
+                             + "tests nothing")
+        XCTAssertLessThanOrEqual(incoming,
+                                 ModelLifecycleBudget.standardModelsBudgetBytes,
+                                 "…and inside the class budget, which is the other half")
+
+        let translateOwner = FakeOwner()
+        unpinned.register(slot: .translateBrain, modelID: translateQ8,
+                          owner: translateOwner, evictable: true,
+                          priority: ReservationPurpose.liveTranslate.priority) { [weak translateOwner] in
+            translateOwner?.unload()
+        }
+
+        guard let reservation = reserveOrFail(
+            unpinned, request(.translateBrain, modelID: translateQ8,
+                              owner: translateOwner, purpose: .liveTranslate))
+        else { return }
+
+        XCTAssertEqual(reservation.budgetBytes,
+                       ModelLifecycleBudget.standardModelsBudgetBytes,
+                       "the escape hatch is judged against the class promise, which a "
+                       + "camera session may not lower")
+        XCTAssertFalse(reservation.soloOverBudget,
+                       "on-device translation is not refused while the camera is open")
+        XCTAssertEqual(reservation.evicted, [.speechToText],
+                       "the warm background resident is what makes the room")
+    }
+
+    /// The profile is part of the number the pressure response reports. It was
+    /// omitted from `.critical`, so a capture read the class budget while the
+    /// warden was judging loads against the session one — a number 1.1 GB
+    /// larger than the truth.
+    func testCriticalPressureReportsTheBudgetTheCameraProfileLowered() {
+        let unpinned = makeUnpinnedManager()
+        var budgets: [UInt64] = []
+        unpinned.onEvent = { event in
+            if case .memoryPressure(let budgetBytes, _) = event { budgets.append(budgetBytes) }
+        }
+
+        unpinned.handleMemoryPressure(level: .critical)
+        unpinned.setSessionProfile(.cameraLive)
+        unpinned.handleMemoryPressure(level: .critical)
+
+        XCTAssertEqual(budgets.count, 2, "both responses are reported")
+        XCTAssertEqual(budgets[0] - budgets[1], 1_100_000_000,
+                       "the critical response must name the budget the camera session "
+                       + "actually left, not the class promise")
+    }
+
     func testReservationTTLReapsALoadThatNeverCommitted() {
         var events: [ModelLifecycleEvent] = []
         manager.onEvent = { events.append($0) }
