@@ -754,6 +754,14 @@ actor LiveTranslationPipeline {
             // degraded on its account.
             return
         case .success(let result):
+            // [DEBUG-LOG] (owner directive, 2026-09-20: "log the OCR text
+            // extracted as well as the translated text.") One line per pass
+            // with the recognized strings — the source half of every pair
+            // the other debug lines carry, on the same gated lane.
+            if config.translationDebugLoggingEnabled, !result.regions.isEmpty {
+                let texts = result.regions.map(\.text).joined(separator: " | ")
+                print("[translate-debug] ocr \(texts)")
+            }
             let changes = stabilizer.consume(regions: result.regions,
                                              tracked: result.trackedBoxes,
                                              at: now())
