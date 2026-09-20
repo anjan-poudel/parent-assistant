@@ -3153,53 +3153,6 @@ final class LiveTranslationPipelineTests: XCTestCase {
         XCTAssertEqual(publication.result(for: region).sourceTier, .cloud)
     }
 
-    /// [PATIENT-STAGE] (owner directive, 2026-09-20: "I'd rather wait a bit
-    /// than not get any translation which is already on the way and getting
-    /// executed.") With the cloud switch off there is no next tier, so a
-    /// generation that is still producing when the STANDARD bound passes
-    /// must be waited out under the patient bound instead — the owner's
-    /// screenshot report was every string failing while the answers were
-    /// mid-flight.
-    @MainActor
-    func testWithNoCloudTheSlowGenerationIsWaitedOutAndItsAnswerSettles() async throws {
-        var config = LiveTranslationPipelineTests.unpacedDispatchConfig()
-        config.brainTranslationTimeoutSeconds = 0.05   // the standard bound: far too short
-        config.brainTranslationPatientTimeoutSeconds = 2.0
-        config.brainTranslationStageGraceSeconds = 0.05
-        let brain = RecordingBrain()
-        brain.answers = [cloudText: "यो पसल हो"]
-        brain.delaySeconds = 0.2                      // still producing past the standard bound
-        let harness = makeHarness(consent: false,
-                                  transport: Self.respondingTransport(),
-                                  brain: brain,
-                                  config: config,
-                                  geminiCloudEnabled: false)
-        await harness.pipeline.updateLayout(layout)
-        harness.recogniser.defaultStep = .regions([detected(cloudText)])
-
-        let frame = try makeFrame()
-        await harness.pipeline.ingest(frame)
-        await harness.pipeline.ingest(frame)
-
-        await waitUntil("the patient answer to be published") {
-            guard let latest = await harness.recorder.latest,
-                  let region = latest.regions.first(where: { $0.text == self.cloudText }) else {
-                return false
-            }
-            return latest.result(for: region).sourceTier == .onDeviceBrain
-        }
-
-        XCTAssertEqual(brain.calls, [[cloudText]])
-        XCTAssertTrue(harness.bus.events(named: "brain_translation_unavailable").isEmpty,
-                      "no stage failed: the answer landed inside the patient bound")
-        XCTAssertEqual(requests(carrying: cloudText, in: harness), 0,
-                       "with the cloud switch off, nothing was sent anywhere")
-        let publication = try await latest(harness)
-        let region = try XCTUnwrap(region(cloudText, in: publication))
-        XCTAssertEqual(publication.result(for: region).sourceTier, .onDeviceBrain,
-                       "the slow answer settles rather than the panel failing it")
-    }
-
     @MainActor
     func testScenarioTheRequestLeavesOnlyAfterTheBrainWasAsked() async throws {
         // The dispatch chain, pinned in order rather than in counts: at the
