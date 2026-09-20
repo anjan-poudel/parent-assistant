@@ -207,8 +207,9 @@ struct ModelBudgetPolicy: Sendable, Equatable {
 
     // MARK: The shipped table
 
-    /// 4 GB physical. The class where the ANE STT and *any* shipped brain
-    /// cannot co-reside at all — see the finding in the Step 3 report.
+    /// Under 5 GB physical — the 4 GB iPhone tier. The class where the ANE
+    /// STT and *any* shipped brain cannot co-reside at all — see the finding
+    /// in the Step 3 report.
     static let compact = ModelBudgetPolicy(
         deviceClass: .compact,
         workingSetIdleBytes: 300 * 1_000_000,
@@ -219,8 +220,8 @@ struct ModelBudgetPolicy: Sendable, Equatable {
         maxTransientReserveBytes: ModelLifecycleBudget.compactModelsBudgetBytes,
         maxLoadsPerMinute: 4)
 
-    /// 6 GB physical — the class the whole mechanism exists for, and the one
-    /// §3.2 says must not be offered a 3B.
+    /// 5–7 GB physical — the 6 GB iPhone tier, the class the whole mechanism
+    /// exists for, and the one §3.2 says must not be offered a 3B.
     static let standard = ModelBudgetPolicy(
         deviceClass: .standard,
         workingSetIdleBytes: 300 * 1_000_000,
@@ -322,6 +323,30 @@ struct ModelBudgetPolicy: Sendable, Equatable {
     /// a catalog size bump moves it. `nil` falls back to the policy's own
     /// reserve, which is what a caller with no selection to hand (a
     /// Settings list rendered before any model is chosen) has.
+    ///
+    /// **Floors below the compact boundary** (`ModelCatalog`). A floor is
+    /// about the PHONE — `minDeviceRAMBytes` against physical RAM — while
+    /// this policy is about the CLASS, so a sub-boundary floor deliberately
+    /// admits a `.compact` device and this function is what refuses it. The
+    /// reconciliation, so the two are not read as disagreeing:
+    ///
+    ///  · Harmless exactly when the refusal is *shown*. A brain card hides
+    ///    its Download on a refusal (`ModelManagementRow`), so the household
+    ///    reads the sentence instead of spending the data; the entry is
+    ///    still deletable. It is harmful on the translation card, which
+    ///    offers its download while unavailable
+    ///    (`downloadsWhileUnavailable: true`) — which is why the two shipped
+    ///    translation floors sit ON the boundary
+    ///    (`ModelLifecycleBudget.compactBoundaryBytes`) rather than inside
+    ///    it, and why `ModelDownloadService` now consults this policy before
+    ///    it starts.
+    ///  · A sub-boundary brain floor that compact genuinely *can* hold
+    ///    (`llama3_2_1B`, `intentGemma1B`: ~1.3 GB live, inside the 2 GB
+    ///    compact budget) is correct as it stands; both are hidden rungs.
+    ///  · Non-brain kinds (STT, TTS, VAD, KWS, the encoder) are exempt by
+    ///    construction: for them this function returns right after the
+    ///    device check above, so their floor is the only bound there is and
+    ///    the class line has nothing to do with it.
     func availability(of entry: ModelCatalogEntry,
                       physicalMemoryBytes: UInt64,
                       warmSTTLiveBytes: UInt64? = nil,

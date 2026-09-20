@@ -154,6 +154,25 @@ final class ModelBudgetPolicyTests: XCTestCase {
                        .deviceTooSmall,
                        "the 5 GB floor is the `.compact` boundary itself")
 
+        // The floor is the boundary EXACTLY, not one byte above it: a device
+        // reporting 5 GB is `.standard` — the smallest class whose budget
+        // holds 1.81 GB beside the 1.0 GB warm STT — so the gate admits every
+        // device that can actually run it and refuses every one that cannot.
+        // Pinning the boundary from both sides is what keeps the floor from
+        // drifting back inside `.compact` (where it promises a 1.1 GB
+        // download the warden then refuses) or above it (where it refuses a
+        // device the budget would have held).
+        // The line is named once (`ModelLifecycleBudget.compactBoundaryBytes`)
+        // and its VALUE is pinned here, so the catalog floors and this
+        // assertion can reference the constant without either of them
+        // stopping to notice a silent move of the line itself.
+        XCTAssertEqual(ModelLifecycleBudget.compactBoundaryBytes, 5_000_000_000,
+                       "the compact/standard line: 5 GB between the 4 GB and "
+                       + "6 GB iPhone tiers")
+        XCTAssertEqual(availability(translationShipQuant, on: ModelLifecycleBudget.compactBoundaryBytes),
+                       .available,
+                       "a device AT the floor is `.standard`, and can run it")
+
         XCTAssertEqual(availability(translationShipQuant, on: standardPhone), .available,
                        "1.81 GB live + 1.0 GB warm STT = 2.81 GB ≤ 3.2 GB")
         XCTAssertEqual(ModelBudgetPolicy.standard.availability(

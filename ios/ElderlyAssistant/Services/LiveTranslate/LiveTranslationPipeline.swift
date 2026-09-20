@@ -754,14 +754,18 @@ actor LiveTranslationPipeline {
             // degraded on its account.
             return
         case .success(let result):
-            // [DEBUG-LOG] (owner directive, 2026-09-20: "log the OCR text
-            // extracted as well as the translated text.") One line per pass
-            // with the recognized strings — the source half of every pair
-            // the other debug lines carry, on the same gated lane.
-            if config.translationDebugLoggingEnabled, !result.regions.isEmpty {
-                let texts = result.regions.map(\.text).joined(separator: " | ")
-                print("[translate-debug] ocr \(texts)")
-            }
+            // The pass's region count travels the sanitising bus from the
+            // detector (`ocrPass(regionCount:)`); the recognized strings travel
+            // it through `LiveTranslateDebugLane`, which hands them to the bus
+            // for `LogSanitiser` to redact. A capture shows the pass, its count
+            // and the leg's timing and never the text — the feature carries no
+            // console write at all, in any configuration (NFR-LCT-006).
+            #if DEBUG
+            LiveTranslateDebugLane(bus: events.bus,
+                                   enabled: config.translationDebugLoggingEnabled)
+                .recognizedText(result.regions.map(\.text).joined(separator: " | "),
+                                regionCount: result.regions.count)
+            #endif
             let changes = stabilizer.consume(regions: result.regions,
                                              tracked: result.trackedBoxes,
                                              at: now())

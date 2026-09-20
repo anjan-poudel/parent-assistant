@@ -618,8 +618,19 @@ final class LiveTranslateSessionModelTests: XCTestCase {
     /// the next question, with no restart.
     @MainActor
     func testTheSwitchReachesTheRunningPipelineWithoutARestart() async throws {
+        // Unpaced — both pacing clocks at zero — because this scenario is
+        // about the switch reaching the RUNNING pipeline, not about the
+        // pacing: this suite's passes all happen inside a few hundred
+        // milliseconds of wall time, so a scenario that delivers its frames
+        // and waits would be measuring the shipped 1.5 s dispatch interval
+        // and 8 s brain interval instead of the wiring it is named for. One
+        // helper, owned by the suite that needs it most
+        // (`LiveTranslationPipelineTests`, whose twin scenario is unpaced for
+        // the same reason); the shipped values stay pinned by
+        // `LiveTranslateConfigTests`.
         let harness = makeHarness(consent: true, configured: true,
                                   transport: Self.respondingTransport(),
+                                  config: LiveTranslationPipelineTests.unpacedDispatchConfig(),
                                   geminiCloudEnabled: false)
         reportLayout(harness)
         harness.engine.regions = [detected(cloudText)]
