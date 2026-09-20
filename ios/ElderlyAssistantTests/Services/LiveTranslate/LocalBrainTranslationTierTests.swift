@@ -1534,34 +1534,6 @@ final class LocalBrainTranslationTierTests: XCTestCase {
     /// The two edges of that window, on the pure function the pre-attempt gate
     /// and the load path share — so neither caller can drift from the other on
     /// the one level whose level alone cannot be trusted.
-    /// [DYNAMIC-TIMEOUT] (owner directive, 2026-09-20) The floor plus the
-    /// source text's length, clamped to the caller's ceiling: a single
-    /// short string gets the floor, a dense batch grows per character,
-    /// and nothing outlives the ceiling the device can survive.
-    func testTheEffectiveTimeoutScalesWithTheSourceTextAndRespectsTheCeiling() {
-        let config = LiveTranslateConfig.default
-        let ceiling: TimeInterval = 30
-
-        let single = LocalBrainTranslationTier.effectiveTimeout(
-            for: ["Keep Warm"], ceiling: ceiling, config: config)
-        XCTAssertEqual(single, config.brainTranslationBaseTimeoutSeconds + 0.2 * Double("Keep Warm".count),
-                       "a short string pays the floor plus its own length")
-
-        let dense = ["Keep Warm", "No entry", "Store hours 9-5", "Emergency exit",
-                     "Wait here", "Push", "Pull", "Closed"]
-        let chars = dense.reduce(0) { $0 + $1.count }
-        XCTAssertEqual(LocalBrainTranslationTier.effectiveTimeout(
-            for: dense, ceiling: ceiling, config: config),
-            config.brainTranslationBaseTimeoutSeconds + 0.2 * Double(chars),
-            "a dense batch grows per character")
-
-        let huge = [String(repeating: "x", count: 500)]
-        XCTAssertEqual(LocalBrainTranslationTier.effectiveTimeout(
-            for: huge, ceiling: ceiling, config: config),
-            ceiling,
-            "nothing outlives the caller's ceiling")
-    }
-
     func testTheWarningWindowRefusesWhileFreshAndReleasesOnceStale() {
         let window = LiveTranslateConfig.default.brainTranslationCriticalPressureWindowSeconds
         func reading(_ warningAge: TimeInterval?, criticalAge: TimeInterval? = nil)

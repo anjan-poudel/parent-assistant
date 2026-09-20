@@ -540,13 +540,10 @@ final class LiveTranslateConfigTests: XCTestCase {
         XCTAssertEqual(entry.sha256.count, 64)
         XCTAssertNotEqual(entry.sha256, ModelCatalogEntry.pendingSHA256,
                           "a placeholder can only ever fail `finalize`")
-        XCTAssertEqual(entry.minDeviceRAMBytes, 5_000_000_000,
-                       "the warden's own class boundary, not a round number: "
-                       + "`ModelLifecycleBudget.deviceClass` calls a phone under "
-                       + "5 GB `.compact`, whose whole-model budget is 2 GB, and "
-                       + "this artifact is ~1.8 GB live beside a warm STT — so a "
-                       + "4 GB floor admitted a 4 GB phone to a 1.1 GB download "
-                       + "the warden then refuses (`requiresEvictingWarmSTT`)")
+        XCTAssertEqual(entry.minDeviceRAMBytes, 4_000_000_000,
+                       "the floor the other >1 GB brains carry: this artifact is "
+                       + "~1.8 GB live beside a warm STT, so a 3 GB phone is a "
+                       + "download the budget warden would then refuse")
         XCTAssertEqual(entry.languages, ["ne"])
         XCTAssertNil(entry.dependsOn)
 
@@ -595,11 +592,10 @@ final class LiveTranslateConfigTests: XCTestCase {
                        "https://github.com/anjan-poudel/elderly-ai-assistant-models"
                        + "/releases/download/v19/translate-en-ne-qwen17b-r3-q5_k_m.gguf",
                        "the same release as the ship quant (optional upload)")
-        XCTAssertEqual(alternate.minDeviceRAMBytes, 5_000_000_000,
-                       "the same floor as the ship quant and for the same reason "
-                       + "(the `.compact` boundary): 150 MB more file cannot lower "
-                       + "it, and the Q5 is sideload-only, so the floor only says "
-                       + "what a device keeping it can actually run")
+        XCTAssertEqual(alternate.minDeviceRAMBytes, 4_000_000_000,
+                       "the same floor as the ship quant: 150 MB more file does not "
+                       + "move the device rung, and the Q5 is sideload-only, so the "
+                       + "floor only says what a device keeping it can run")
     }
 
     /// The head's admission — which phones can run the model this list
