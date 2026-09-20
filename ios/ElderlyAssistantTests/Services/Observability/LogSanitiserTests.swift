@@ -186,4 +186,70 @@ final class LogSanitiserTests: XCTestCase {
         let atLimit = String(repeating: "b", count: LogSanitiser.maxUnbrokenRunLength)
         XCTAssertEqual(sanitiser.sanitise(event(errorCode: atLimit)).errorCode, "[redacted]")
     }
+
+    // MARK: - Memory-ledger counts (finding B2: the phone pattern ate the bytes)
+
+    func testByteBudgetsSurviveTheSanitiser() {
+        // The 9-digit phone pattern matches a byte budget exactly, so the
+        // ledger's own numbers used to arrive as "[redacted]" — the review's
+        // evidence for the memory-pressure story, unreadable. These are the
+        // real magnitudes the ledger reports.
+        let clean = sanitiser.sanitise(event(metadata: [
+            "budgetBytes": "268435456",
+            "liveBytes": "1200000000",
+            "transientLiveBytes": "33554432",
+            "phys_footprint": "734003200",
+        ]))
+        XCTAssertEqual(clean.metadata["budgetBytes"], "268435456")
+        XCTAssertEqual(clean.metadata["liveBytes"], "1200000000")
+        XCTAssertEqual(clean.metadata["transientLiveBytes"], "33554432")
+        XCTAssertEqual(clean.metadata["phys_footprint"], "734003200")
+    }
+
+    func testDecimalAndLongDurationsSurviveTheSanitiser() {
+        // Both are long enough that the phone pattern matches them, so both
+        // are discriminating cases rather than values the scrub would have
+        // passed through anyway: a fractional duration and a long one.
+        let clean = sanitiser.sanitise(event(metadata: [
+            "heldSeconds": "1234567.5",
+            "load_ms": "86400000",
+        ]))
+        XCTAssertEqual(clean.metadata["heldSeconds"], "1234567.5",
+                       "one decimal point is a count, so the scrub must not run")
+        XCTAssertEqual(clean.metadata["load_ms"], "86400000")
+    }
+
+    /// The exemption is **value-shaped, not key-shaped**: naming a key as
+    /// numeric is a promise about its content, and a value that breaks the
+    /// promise keeps the full scrub. A phone number written into a byte key
+    /// must not become a redaction bypass.
+    func testANumericKeysNonNumericValueIsStillScrubbed() {
+        let clean = sanitiser.sanitise(event(metadata: [
+            "budgetBytes": "555 123 4567",
+            "liveBytes": "268-435-4567",
+        ]))
+        XCTAssertEqual(clean.metadata["budgetBytes"], "[redacted]",
+                       "a listed key carrying a phone shape is scrubbed in full")
+        XCTAssertEqual(clean.metadata["liveBytes"], "[redacted]",
+                       "separators are not a count shape, so the scrub decides")
+    }
+
+    /// Boundary pairs on a numeric key: the count shape is digits with at
+    /// most one decimal point, so one decimal is a count and two is not —
+    /// and the second one takes the scrub path, where a separator-joined
+    /// digit run is exactly the phone shape. A leading `+` reads the same
+    /// way: signed-number intent, phone-number shape.
+    func testCountShapeBoundarySplitsDecimalsAndSigns() {
+        let clean = sanitiser.sanitise(event(metadata: [
+            "heldSeconds": "12.5",
+            "ceiling_bytes": "1234567.8.9",
+            "load_ms": "+2684354561",
+        ]))
+        XCTAssertEqual(clean.metadata["heldSeconds"], "12.5",
+                       "one decimal point is still a count")
+        XCTAssertEqual(clean.metadata["ceiling_bytes"], "[redacted]",
+                       "a second point is not a number, so the scrub decides")
+        XCTAssertEqual(clean.metadata["load_ms"], "[redacted]",
+                       "a leading + is the phone shape, not a signed count")
+    }
 }

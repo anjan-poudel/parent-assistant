@@ -206,6 +206,16 @@ final class LabelTranslationCache {
     /// Whether the payload has been read (once, lazily — construction
     /// performs no I/O, so a startup cannot pay for a cache it never uses).
     private var didLoad = false
+    /// Whether a load dropped superseded brain entries and no write has made
+    /// that drop durable yet.
+    ///
+    /// The drop is a fact about the *payload*, not about this process: leaving
+    /// it only in memory means the same eviction runs again at every launch,
+    /// which is the report `[BRAIN-CACHE]` exists to make once. Only a write
+    /// path persists it (a read path that rewrote the payload on every lookup
+    /// is the other half of the same review), so the flag is what carries the
+    /// drop from the read that found it to the next write that can keep it.
+    private var invalidationPendingPersist = false
 
     // MARK: Init
 
@@ -248,6 +258,14 @@ final class LabelTranslationCache {
                 events.cacheHit(origin: Origin.curatedDictionary.eventOrigin, count: 1)
                 return .success(Hit(translation: curated, origin: .curatedDictionary))
             }
+            // **This is deliberately the persisting spelling** (review finding
+            // B6 asked for `false` here and must not have it): the drop a load
+            // makes has to become a fact about the payload, or every launch
+            // recomputes it and reports the same eviction again — an event
+            // describing a change that is not happening again. The write is not
+            // a per-read cost either: `loadIfNeeded` runs once per instance and
+            // persists only when it actually dropped something, which is once
+            // per producer change.
             if let failure = loadIfNeeded() {
                 return .failure(.cacheReadFailed(failure))
             }
@@ -323,7 +341,17 @@ final class LabelTranslationCache {
                 nextSequence += 1
                 accepted.append(key)
             }
-            guard !accepted.isEmpty else { return .success(()) }
+            if accepted.isEmpty {
+                // Nothing to write — but the load above may still have dropped
+                // superseded brain entries, and that drop is a fact about the
+                // payload that only a write makes durable. Returning here
+                // without persisting lost it: the eviction ran again at every
+                // launch and the report it exists to make never stuck (review:
+                // a batch of curated keys is the whole hole, and a curated key
+                // is exactly what a batch of curated keys holds).
+                if invalidationPendingPersist { _ = persist() }
+                return .success(())
+            }
             evictIfNeeded()
             guard let failure = persist() else {
                 touchedThisSession.formUnion(accepted)
@@ -372,6 +400,8 @@ final class LabelTranslationCache {
     /// payload once, lazily, like every other entry point.
     var generalEntryCount: Int {
         withLock {
+            // Same spelling as `lookup`, for the same reason: the drop has to
+            // be durable for the "reported once" property to hold.
             _ = loadIfNeeded()
             return index.keys.filter { !isCuratedKey($0) }.count
         }
@@ -426,9 +456,18 @@ final class LabelTranslationCache {
             // is a fact about the payload rather than a report repeated at
             // every launch. `storeBatch` skips it: it persists the whole
             // payload itself, one write per batch, a few lines after it loads.
-            if invalidateSupersededBrainEntriesLocked(recorded: payload.producerToken),
-               persistingInvalidation {
-                _ = persist()
+            if invalidateSupersededBrainEntriesLocked(recorded: payload.producerToken) {
+                // **Only a write path persists the drop** (review: a lookup
+                // rewrote the whole payload every time a read was the first
+                // thing to touch the store — a read must not cost a write).
+                // The drop itself is made durable by the next write, which the
+                // flag above carries it to; the caller that asked for the write
+                // in the first place does not need the flag.
+                if persistingInvalidation {
+                    _ = persist()
+                } else {
+                    invalidationPendingPersist = true
+                }
             }
             return nil
         case .failure:
@@ -577,6 +616,9 @@ final class LabelTranslationCache {
                                 producerToken: currentProducerToken)
         switch storage.write(key: Self.storageKey, value: payload) {
         case .success:
+            // The payload on disk is this index, so any drop a load made is now
+            // as durable as the index it happened in.
+            invalidationPendingPersist = false
             return nil
         case .failure:
             return .writeRejected

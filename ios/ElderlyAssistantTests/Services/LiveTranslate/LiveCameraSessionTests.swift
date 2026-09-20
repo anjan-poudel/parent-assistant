@@ -25,6 +25,22 @@ final class LiveCameraSessionTests: XCTestCase {
         func advance(by seconds: TimeInterval) { now += seconds }
     }
 
+    /// A bus that forwards to the recording one and then hands the event to a
+    /// hook, so a test can act at the exact point in a session's execution
+    /// where an event is emitted — the only seam that lands inside a window
+    /// between two adjacent statements.
+    final class HookedObservabilityBus: ObservabilityBus {
+        private let inner: LiveTranslateSanitisingBus
+        var onEvent: ((ObservabilityEvent) -> Void)?
+
+        init(inner: LiveTranslateSanitisingBus) { self.inner = inner }
+
+        func emit(_ event: ObservabilityEvent) {
+            inner.emit(event)
+            onEvent?(event)
+        }
+    }
+
     override func setUp() {
         super.setUp()
         bus = LiveTranslateSanitisingBus()
@@ -508,6 +524,47 @@ final class LiveCameraSessionTests: XCTestCase {
             live = active
         }
         XCTAssertTrue(live, "the last transition resumed the capture")
+    }
+
+    /// The other route into the same ordering, and the one the review found:
+    /// an interruption that lands **after** the start has moved the session to
+    /// `.running` but **before** it announces. The old spelling announced the
+    /// caller's belief — `true`, unconditionally — for a capture the
+    /// interruption had already stopped, and nothing later corrected it,
+    /// because the `false`/`true` pair the warden waits for was spent inside
+    /// the same call. The level has to be read from the state at the moment of
+    /// the announcement, never taken from the caller.
+    ///
+    /// The seam is `session_started`: it is emitted after the state change and
+    /// before the announcement, so an observer of it lands exactly in the
+    /// window rather than merely near it.
+    func testAnInterruptionLandingAfterTheStartMovedToRunningAnnouncesNothing() async throws {
+        let hooked = HookedObservabilityBus(inner: bus)
+        let session = LiveCameraSession(config: .default,
+                                        observabilityBus: hooked,
+                                        capture: layer,
+                                        notificationCenter: centre,
+                                        now: { 0 })
+        var activations: [Bool] = []
+        session.onSessionActiveChanged = { activations.append($0) }
+        hooked.onEvent = { [centre, layer] event in
+            guard event.eventType == "session_started" else { return }
+            centre?.post(name: AVCaptureSession.wasInterruptedNotification,
+                         object: layer?.session,
+                         userInfo: [AVCaptureSessionInterruptionReasonKey:
+                                    AVCaptureSession.InterruptionReason
+                                        .videoDeviceNotAvailableInBackground.rawValue])
+        }
+
+        let result = await session.start()
+        hooked.onEvent = nil
+
+        XCTAssertTrue(result.isSuccess)
+        XCTAssertEqual(session.state, .interrupted(.backgrounded))
+        XCTAssertEqual(activations, [],
+                       "the capture was already stopped when the start would have "
+                       + "announced it: the warden must not be sized for a camera "
+                       + "that is not running")
     }
 
     // MARK: Thermal response (NFR-LCT-002 scenario 3)

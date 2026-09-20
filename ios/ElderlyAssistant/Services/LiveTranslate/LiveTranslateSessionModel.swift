@@ -622,14 +622,24 @@ final class LiveTranslateSessionModel: ObservableObject {
     private func refreshHeldFrame() async {
         guard !isClosed, let path = snapshotPath, let held = frozen else { return }
         let layout = pendingLayout
+        let sequence = held.publication.sequence
         guard let answers = await path.outcomesAfterCloudAnswers(of: held.publication) else { return }
-        guard !isClosed, var refreshed = frozen, refreshed.image === held.image else { return }
+        // The picture **and** its publication's sequence: the image identity
+        // alone passes for a frame that has been re-placed since (a rotation, a
+        // chrome change, a geometry push) while this call was awaiting, and
+        // writing this publication over that one would draw the answers on the
+        // layout the frame no longer has. `rePlaceHeldFrame` has always guarded
+        // on the sequence; this path did not (review).
+        guard !isClosed, var refreshed = frozen,
+              refreshed.image === held.image,
+              refreshed.publication.sequence == sequence else { return }
         refreshed.publication = await path.placed(regions: refreshed.publication.regions,
                                                    outcomes: answers,
                                                    policy: refreshed.publication.policy,
                                                    layout: layout,
                                                    framePixelSize: refreshed.framePixelSize)
-        guard !isClosed, frozen?.image === held.image else { return }
+        guard !isClosed, frozen?.image === held.image,
+              frozen?.publication.sequence == sequence else { return }
         frozen = refreshed
     }
 
@@ -1067,6 +1077,14 @@ final class LiveTranslateSessionModel: ObservableObject {
         snapshotTask?.cancel()
         snapshotTask = nil
         frozen = nil
+        // The frame's answers go with the picture. The pipeline holds a held
+        // frame's settlements out of the live sighting's prune so the frame's
+        // own refresh cannot pay for them a second time; this is the moment
+        // that hold is released, and it is the thaw that owns it — the only
+        // moment the picture they belong to stops existing.
+        if let pipeline {
+            Task { await pipeline.discardHeldAnswers() }
+        }
         // Thawing ends the wait as surely as holding the picture does: whatever
         // the cancelled task was doing is no longer being waited for.
         freezeInProgress = false

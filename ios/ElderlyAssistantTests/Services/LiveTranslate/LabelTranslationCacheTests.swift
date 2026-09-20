@@ -876,4 +876,65 @@ final class LabelTranslationCacheTests: XCTestCase {
             XCTAssertEqual(event.component, LiveTranslateEventCatalogue.component)
         }
     }
+
+    // MARK: - [BATCH-STORE] The all-curated batch still makes the drop durable
+
+    /// `storeBatch` loads the payload and skips the load's own write (it
+    /// persists the whole payload itself, a few lines later). When the batch
+    /// then holds **nothing but curated keys** it returns early without
+    /// persisting — and the drop the load just made went with it. The eviction
+    /// ran again at every launch and the report it exists to make never stuck.
+    ///
+    /// The hole is precisely a batch of curated keys, which is the ordinary
+    /// shape: a frame of appliance labels is exactly the text the dictionary
+    /// already answers.
+    func testABatchOfOnlyCuratedKeysStillMakesTheSupersededDropDurable() throws {
+        let first = makeCache()
+        _ = first.store(text: recognizedText, translation: translationText,
+                        tier: .onDeviceBrain)
+        XCTAssertEqual(storage.writeCount(forKey: storageKey), 1)
+
+        // A different model is in force, so the next load drops the brain entry.
+        var replaced = LiveTranslateConfig.default
+        replaced.brainTranslationModelIDs = []
+        let second = makeCache(config: replaced)
+
+        // "Start" is curated, so this batch is accepted-empty by construction.
+        _ = second.storeBatch([LabelTranslationCache.Resolution(text: "Start",
+                                                                translation: "सुरु गर्ने",
+                                                                tier: .cloud)])
+
+        XCTAssertEqual(bus.events(named: "cache_evicted").count, 1,
+                       "the load's drop is reported by the batch that discovered it")
+        XCTAssertEqual(storage.writeCount(forKey: storageKey), 2,
+                       "…and written: a batch of curated keys is not a reason to lose it")
+        XCTAssertTrue(try storedPayload().entries.isEmpty,
+                      "the superseded answer is no longer on disk")
+
+        // The property the write exists for: a relaunch has nothing left to
+        // drop, so the eviction is reported once rather than once per launch.
+        let third = makeCache(config: replaced)
+        _ = third.lookup(text: recognizedText)
+        XCTAssertEqual(bus.events(named: "cache_evicted").count, 1,
+                       "reported once, not once per launch")
+    }
+
+    /// The other half, and the reason the batch's own early return is allowed
+    /// to be a no-op in the first place: a fresh install's first frame of
+    /// labels is all-curated and has nothing to make durable, so it must not
+    /// touch the disk at all (FR-LCT-019, and the batch's stated contract).
+    func testAFreshInstallsAllCuratedBatchWritesNothing() {
+        let cache = makeCache()
+
+        _ = cache.storeBatch([LabelTranslationCache.Resolution(text: "Start",
+                                                               translation: "सुरु गर्ने",
+                                                               tier: .cloud),
+                              LabelTranslationCache.Resolution(text: "Stop",
+                                                               translation: "रोक्ने",
+                                                               tier: .cloud)])
+
+        XCTAssertEqual(storage.writeCount, 0,
+                       "nothing curated is written, and there was nothing else to make durable")
+        XCTAssertNil(storage.bytes(forKey: storageKey))
+    }
 }

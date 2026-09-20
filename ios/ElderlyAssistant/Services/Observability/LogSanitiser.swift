@@ -296,6 +296,58 @@ struct LogSanitiser {
     /// before this feature is additive; changing one that did is not.
     private static let codeShapedMetadataKeys: Set<String> = ["errorCode"]
 
+    /// The allow-listed metadata keys whose value is a **bare count** — a byte
+    /// total, a millisecond duration, a boolean — rather than text.
+    ///
+    /// They need naming because the phone-number pattern is a 7-digit run with
+    /// optional separators, which is exactly what a byte budget looks like:
+    /// `budgetBytes: "268435456"` reached the capture as `[redacted]`, and the
+    /// memory-pressure evidence was unreadable for the very quantities the
+    /// ledger exists to report (review). The exemption is **value-shaped, not
+    /// key-shaped**: a key listed here is scrubbed in full the moment its value
+    /// is not a bare number, because a key name is a promise and a value is a
+    /// fact. It deliberately does not route through `codeShapedMetadataKeys`:
+    /// `boundErrorCode` scrubs before it bounds, so an already-`[redacted]`
+    /// value fails its charset check and would have been replaced by an empty
+    /// string — one mangling traded for another.
+    private static let numericMetadataKeys: Set<String> = [
+        "liveBytes",
+        "budgetBytes",
+        "transientLiveBytes",
+        "phys_footprint",
+        "ceiling_bytes",
+        "working_set_bytes",
+        "projected_peak_bytes",
+        "freed_bytes",
+        "load_ms",
+        "heldSeconds"
+    ]
+
+    /// Whether a metadata value is a bare count: ASCII digits with at most one
+    /// decimal point, or one of the two boolean words.
+    ///
+    /// Anything else is not a number — a leading `+`, a space, a dash, a
+    /// parenthesis run — and keeps the full PII scrub, because that is a phone
+    /// number's shape. A lone `.` is not a count either: the digit is what
+    /// makes it one.
+    private static func isBareCount(_ value: String) -> Bool {
+        if value == "true" || value == "false" { return true }
+        var seenDigit = false
+        var seenPoint = false
+        for character in value {
+            if character.isASCII, character.isNumber {
+                seenDigit = true
+                continue
+            }
+            if character == ".", !seenPoint, seenDigit {
+                seenPoint = true
+                continue
+            }
+            return false
+        }
+        return seenDigit
+    }
+
     private static let piiPatterns: [NSRegularExpression] = {
         let patterns = [
             // phone numbers (7+ digits, common separators)
@@ -314,9 +366,17 @@ struct LogSanitiser {
             // A code-shaped key gets the same bound as the top-level field,
             // so allow-listing it cannot become a PII-scrubbed bypass of
             // that bound (T-050/B2). Every other allowed key is unchanged.
-            cleanMetadata[key] = Self.codeShapedMetadataKeys.contains(key)
-                ? (boundErrorCode(value) ?? "")
-                : scrubValue(value)
+            if Self.codeShapedMetadataKeys.contains(key) {
+                cleanMetadata[key] = boundErrorCode(value) ?? ""
+            } else if Self.numericMetadataKeys.contains(key), Self.isBareCount(value) {
+                // A count is not a phone number. The allow-list's own contract
+                // says these keys carry numbers, so the scrub's work here is to
+                // catch a value that is *not* one (a key that drifts into
+                // carrying text still goes through the full scrub below).
+                cleanMetadata[key] = value
+            } else {
+                cleanMetadata[key] = scrubValue(value)
+            }
         }
         return ObservabilityEvent(
             component: event.component,

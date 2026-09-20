@@ -96,6 +96,19 @@ actor CloudTranslationTier {
             case .cloud: return .cloud
             }
         }
+
+        /// The same fact in the evidence's vocabulary: an answer served from
+        /// the device's own store is `.cache` (it cost nothing this time), a
+        /// genuine response is `.fresh` (it did). The layer that answered is
+        /// not part of this token — the histogram's question is "did anyone get
+        /// paid for this", and a curated entry and a persisted one answer it
+        /// the same way (CL-3 keeps the layer visible through the *tier*).
+        var resolutionOrigin: LiveTranslateResolutionOrigin {
+            switch self {
+            case .cache: return .cache
+            case .cloud: return .fresh
+            }
+        }
     }
 
     /// One region's answer: the translation, and what produced it.
@@ -134,6 +147,22 @@ actor CloudTranslationTier {
                 return .degraded(originalText: item.text, reason: error.unavailableReason)
             }
             return .pending(item.text)
+        }
+
+        /// Where each of these items' answers came from — the provenance the
+        /// caller's histogram reports, and the reason `result(for:)` alone
+        /// cannot carry it: a `TranslationResult` names the tier and drops the
+        /// origin, so a string the cloud served out of the device's own store
+        /// is indistinguishable there from one it just fetched (review). Items
+        /// this batch did not answer are absent, exactly as they are from
+        /// `resolved`.
+        func origins(for items: [Item]) -> [String: LiveTranslateResolutionOrigin] {
+            var origins: [String: LiveTranslateResolutionOrigin] = [:]
+            for item in items {
+                guard let resolution = resolved[item.id] else { continue }
+                origins[item.id] = resolution.origin.resolutionOrigin
+            }
+            return origins
         }
     }
 
@@ -271,7 +300,15 @@ actor CloudTranslationTier {
                                failures: &failures)
         }
 
-        reportDegradation(failures)
+        // The failures go back to the caller **unsaid**. This tier used to
+        // report them itself (`reportDegradation`, once per reason, counted in
+        // strings), and the pipeline's terminal writer reported the same
+        // failures again, counted in regions — one outage, two events, two
+        // different counts, and the evidence file could not tell them apart
+        // (review: the tier's emission against the pipeline's single-emitter
+        // contract). There is one terminal writer and one degradation emitter,
+        // and it is the pipeline's: every caller here settles what it gets
+        // through `settleTerminal`, which is where a degradation is counted.
         return BatchResult(resolved: resolved, failures: failures)
     }
 
@@ -383,16 +420,6 @@ actor CloudTranslationTier {
             let outcomes = await bridge.task.value
             adopt(outcomes[bridge.key], for: bridge.key, idsByKey: idsByKey,
                   resolved: &resolved, failures: &failures)
-        }
-    }
-
-    /// Reports the unretryable-refusal kinds the call site cannot see, once per
-    /// reason, with the region count it covers.
-    private func reportDegradation(_ failures: [String: LiveTranslateError]) {
-        var counts: [TranslationUnavailableReason: Int] = [:]
-        for error in failures.values { counts[error.unavailableReason, default: 0] += 1 }
-        for reason in counts.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
-            events.translationDegraded(reason: reason, regionCount: counts[reason] ?? 0)
         }
     }
 

@@ -8604,7 +8604,12 @@ self.noteTalkContractChanged()
             metadata = ["budgetBytes": String(budgetBytes),
                         "evicted": evicted.map(\.rawValue).joined(separator: ",")]
         // [CAMERA-BUDGET] A closed token, a byte count and a reason token:
-        // applied / cleared / expired / owner_released / refused_stale_owner.
+        // applied / cleared / expired / ownerReleased / refusedStaleOwner —
+        // the enum's own raw values, which is what `reason.rawValue` below
+        // emits (the comment here used to spell them snake_case, tokens this
+        // bridge has never written; the `type` is what separates a profile's
+        // token from a reservation's, not the spelling, and both vocabularies
+        // are camelCase for that reason — see `SessionProfileEventReason`).
         // The pair is what makes a leaked profile visible in a capture, and
         // the reason is what tells a leak from an ordinary session end.
         //

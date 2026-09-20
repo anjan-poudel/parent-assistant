@@ -1246,6 +1246,82 @@ final class SnapshotModeTests: XCTestCase {
                       "the device was asked for the string the cloud refused: \(brain.calls)")
     }
 
+    /// **The frozen plan asks in the frame's own region order** (finding A13).
+    ///
+    /// The plan bounds a batch by taking a **prefix** of what it is handed, so
+    /// handing it a dictionary's values asked a different subset of the same
+    /// scene on every capture — the answers, the payments and the degradation
+    /// counts moved with the hash order. The live adapter has always planned in
+    /// region order; this is the frozen half of the same rule.
+    @MainActor
+    func testTheFrozenPlansAskFollowsTheFramesRegionOrder() async throws {
+        let brain = RecordingBrain()
+        let harness = makeHarness(consent: true, configured: true,
+                                  brain: brain,
+                                  geminiCloudEnabled: false)
+        reportLayout(harness)
+        // An empty live scene first, so the batch below is the frozen plan's
+        // own ask rather than a carry of one the live cycle already paid for —
+        // a batch the device was asked about once is carried, not re-asked.
+        harness.parts.engine.regions = []
+        await harness.model.start()
+        try await deliverPass(harness)
+        try await deliverPass(harness)
+
+        let texts = ["Members only beyond this point",
+                     "Push the green button",
+                     "Beware of the dog"]
+        harness.parts.engine.regions = [detected(texts[0], box: (0.1, 0.1, 0.9, 0.2)),
+                                        detected(texts[1], box: (0.1, 0.4, 0.9, 0.5)),
+                                        detected(texts[2], box: (0.1, 0.7, 0.9, 0.8))]
+        await freeze(harness)
+        await waitForFrozenAnswer(harness, text: texts[0])
+
+        let publication = try XCTUnwrap(harness.model.frozen?.publication)
+        let shown = publication.regions.map(\.text)
+        XCTAssertEqual(brain.calls.count, 1, "one plan, one batch: \(brain.calls)")
+        XCTAssertEqual(brain.calls.first, shown,
+                       "the device is asked in region order, not in the order a dictionary "
+                       + "happened to enumerate: \(brain.calls)")
+    }
+
+    /// **A frozen degradation counts the frame's own regions** (finding A14).
+    ///
+    /// The live stabiliser cannot see a held frame's regions, so the count it
+    /// gives is zero — and zero was clamped to one, which made a string showing
+    /// twice on the still read as a single region on the evidence bus.
+    @MainActor
+    func testAFrozenDegradationCountsEveryRegionTheHeldFrameShows() async throws {
+        let brain = RecordingBrain()
+        // The switch off is what makes the string degrade rather than be sent:
+        // the device was asked and had nothing, and there is no tier behind it.
+        let harness = makeHarness(consent: true, configured: true,
+                                  brain: brain,
+                                  geminiCloudEnabled: false)
+        reportLayout(harness)
+        // An empty live scene, so every degradation on the bus is the frozen
+        // frame's.
+        harness.parts.engine.regions = []
+        await harness.model.start()
+        try await deliverPass(harness)
+        try await deliverPass(harness)
+
+        // The same string in two places on the frame: a sign and its repeat.
+        harness.parts.engine.regions = [detected(cloudText, box: (0.1, 0.1, 0.6, 0.2)),
+                                        detected(cloudText, box: (0.1, 0.5, 0.6, 0.6))]
+        await freeze(harness)
+        await waitForFrozenAnswer(harness, text: cloudText)
+
+        let publication = try XCTUnwrap(harness.model.frozen?.publication)
+        XCTAssertEqual(publication.regions.filter { $0.text == cloudText }.count, 2,
+                       "the held frame shows the string twice")
+
+        let degraded = harness.bus.events(named: "translation_degraded")
+        XCTAssertEqual(degraded.count, 1, "one string degraded is one event")
+        XCTAssertEqual(degraded.first?.metadata["regionCount"], "2",
+                       "the count is the held frame's, not the live picture's")
+    }
+
     // MARK: - 6. The stabiliser is not involved
 
     /// The directive's fourth bullet, as a source scan: nothing on the snapshot

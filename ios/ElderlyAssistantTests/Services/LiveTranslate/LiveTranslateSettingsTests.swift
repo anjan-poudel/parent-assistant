@@ -175,6 +175,59 @@ final class LiveTranslateSettingsTests: XCTestCase {
                       "the display preference does not turn the diagnostic off")
     }
 
+    /// The switch had **no production writer**: the only thing that ever turned
+    /// it on was a test's own `setTranslationDebugLoggingEnabled(true)`, so the
+    /// [DEBUG-LOG] diagnostic the whole feature was built around could not be
+    /// enabled on a device at all. The launch argument is the writer.
+    func testTheLaunchArgumentIsAProductionWriterForTheDiagnosticSwitch() {
+        XCTAssertFalse(settings().translationDebugLoggingEnabled,
+                       "the argument is the only thing that turns it on; the default is still off")
+
+        let launched = LiveTranslateSettings(defaults: defaults,
+                                             config: .default,
+                                             launchArguments: ["-liveTranslateDebugLogging"])
+        XCTAssertTrue(launched.translationDebugLoggingEnabled,
+                      "a launch argument is how a shipped build gets the diagnostic")
+        XCTAssertEqual(launched.chosenDebugLogging, true,
+                       "and it reads as *chosen*, so it reaches the session's config")
+        XCTAssertTrue(launched.applyingDebugLogging(to: .default).translationDebugLoggingEnabled)
+    }
+
+    /// A persisted choice outranks the launch argument, in both directions: a
+    /// household (or a support call) that turned the diagnostic off does not
+    /// get it back because a developer left the flag on the scheme, and the
+    /// argument cannot turn it off either.
+    func testAPersistedChoiceOutranksTheLaunchArgument() {
+        defaults.set(false, forKey: LiveTranslateSettings.translationDebugLoggingEnabledKey)
+        let off = LiveTranslateSettings(defaults: defaults,
+                                        config: .default,
+                                        launchArguments: ["-liveTranslateDebugLogging"])
+        XCTAssertFalse(off.translationDebugLoggingEnabled,
+                       "an explicit off is a choice, and a choice outranks an argument")
+
+        defaults.set(true, forKey: LiveTranslateSettings.translationDebugLoggingEnabledKey)
+        let on = LiveTranslateSettings(defaults: defaults, config: .default, launchArguments: [])
+        XCTAssertTrue(on.translationDebugLoggingEnabled)
+    }
+
+    /// `applyingDebugLogging` used to write the config's nominal default over
+    /// the caller's value (`resolved.translationDebugLoggingEnabled =
+    /// translationDebugLoggingEnabled`, which is `chosen ?? config.default`),
+    /// so a caller that had deliberately switched the diagnostic **on** in the
+    /// config it built had it silently switched off. Nothing chosen means the
+    /// config is left exactly as it came in.
+    func testApplyingDebugLoggingLeavesACallersOwnChoiceAlone() {
+        var config = LiveTranslateConfig.default
+        config.translationDebugLoggingEnabled = true
+
+        let untouched = settings().applyingDebugLogging(to: config)
+
+        XCTAssertTrue(untouched.translationDebugLoggingEnabled,
+                      "no stored choice and no argument: the caller's config is untouched")
+        XCTAssertEqual(untouched.translationDebugLoggingEnabled,
+                       config.translationDebugLoggingEnabled)
+    }
+
     // MARK: The cloud tier's master switch (owner directive, 2026-09-19)
 
     /// The directive's requirement, at the store: a household that has never

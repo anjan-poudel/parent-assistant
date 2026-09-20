@@ -1932,4 +1932,121 @@ final class ModelLifecycleManagerTests: XCTestCase {
                            "\(other) must stay inside the session budget")
         }
     }
+
+    // MARK: - [CAMERA-BUDGET] The ownership rule in both directions (B4)
+
+    /// The ownership rule was enforced on `clear` only, so a second session
+    /// could **apply** its own profile over a live one — taking the budget
+    /// while being unable to give it back. The two directions are one claim
+    /// about whose profile this is, so both are refused for a non-owner.
+    func testASecondSessionMayNotApplyItsProfileOverALiveOne() {
+        var events: [ModelLifecycleEvent] = []
+        let unpinned = makeUnpinnedManager()
+        unpinned.onEvent = { events.append($0) }
+        let liveSession = FakeOwner()
+        let intruder = FakeOwner()
+
+        unpinned.setSessionProfile(.cameraLive, owner: liveSession)
+        let cameraBudget = unpinned.snapshot().budgetBytes
+        events.removeAll()
+
+        // The intruder applies *the same* profile: the budget number would
+        // not move, so the test has to watch the lease, not the arithmetic.
+        unpinned.setSessionProfile(.cameraLive, owner: intruder)
+
+        XCTAssertEqual(unpinned.snapshot().budgetBytes, cameraBudget)
+        guard let refusal = events.last,
+              case .sessionProfile(_, _, _, let reason) = refusal else {
+            return XCTFail("the refused apply is reported")
+        }
+        XCTAssertEqual(reason, .refusedStaleOwner,
+                       "an apply over someone else's live lease is the same take-over "
+                       + "as a clear of it")
+
+        // …and the refusal did not disturb the lease: its own owner still
+        // holds it, and only that owner's clear ends it.
+        unpinned.setSessionProfile(nil, owner: intruder)
+        XCTAssertEqual(unpinned.snapshot().budgetBytes, cameraBudget,
+                       "the intruder cannot clear it either — one rule, two directions")
+        unpinned.setSessionProfile(nil, owner: liveSession)
+        XCTAssertEqual(unpinned.snapshot().budgetBytes,
+                       ModelLifecycleBudget.modelsBudgetBytes(for: .standard),
+                       "the live owner's clear still works")
+    }
+
+    /// The intruder's apply is refused even when it asks for a **different**
+    /// profile — the point is the lease, not the number. `.idle` is the other
+    /// profile in the vocabulary and its budget is 1.1 GB higher, so a
+    /// take-over here would *raise* the camera session's budget mid-capture.
+    func testTheOwnershipRuleIsAboutTheLeaseNotTheNumberOfTheProfile() {
+        let unpinned = makeUnpinnedManager()
+        let liveSession = FakeOwner()
+        let intruder = FakeOwner()
+
+        unpinned.setSessionProfile(.cameraLive, owner: liveSession)
+        let cameraBudget = unpinned.snapshot().budgetBytes
+        unpinned.setSessionProfile(.idle, owner: intruder)
+
+        XCTAssertEqual(unpinned.snapshot().budgetBytes, cameraBudget,
+                       "a second session cannot raise a live camera's budget by applying "
+                       + "a different profile over it")
+        XCTAssertGreaterThan(
+            ModelBudgetPolicy.standard.sessionModelBudgetBytes(session: .idle),
+            cameraBudget,
+            "the case means nothing unless the intruder's profile is the higher one")
+    }
+
+    // MARK: - [CAMERA-BUDGET] The two class budgets, named apart (B9, B11)
+
+    /// Two accessors both read as "the class budget" while computing opposite
+    /// numbers: the escape hatch's ceiling (profile **not** folded in) and the
+    /// session budget the warden admits against (profile folded in). A call
+    /// site that picks the wrong one judges a load against the wrong bound,
+    /// and the snapshot could only expose one of them — so a capture could not
+    /// say which bound a refusal used.
+    func testTheSnapshotExposesBothClassBudgetsAndTheyDifferUnderAProfile() {
+        let unpinned = makeUnpinnedManager()
+        let idle = unpinned.snapshot()
+        XCTAssertEqual(idle.classBudgetBytes, idle.budgetBytes,
+                       "with no session profile the two are the same number")
+
+        unpinned.setSessionProfile(.cameraLive)
+        let live = unpinned.snapshot()
+
+        XCTAssertLessThan(live.budgetBytes, live.classBudgetBytes,
+                          "the profile lowers the session budget…")
+        XCTAssertEqual(live.classBudgetBytes, idle.classBudgetBytes,
+                       "…and leaves the escape hatch's ceiling alone: that is the "
+                       + "whole distinction the two accessors exist to hold apart")
+    }
+
+    /// The clamp the profile must not escape: a probe reading already below the
+    /// profile's fixed 2.1 GB is the lower bound, in the accessor the pressure
+    /// response acts on as well as in the effective budget. Un-clamped, a
+    /// `.critical` response started from a budget the device no longer had and
+    /// re-admitted the eviction the profile exists to prevent.
+    func testAProfileNeverLiftsThePressureBudgetOverTheProbe() {
+        probe.availableProcessMemoryBytes = 1_500_000_000
+        let unpinned = makeUnpinnedManager()
+        var budgets: [UInt64] = []
+        unpinned.onEvent = { event in
+            if case .memoryPressure(let budgetBytes, _) = event { budgets.append(budgetBytes) }
+        }
+        let probeDerived = ModelLifecycleBudget.effectiveBudgetBytes(
+            deviceClass: .standard,
+            availableBytes: probe.availableProcessMemoryBytes,
+            residentLiveBytes: 0)
+        XCTAssertLessThan(probeDerived,
+                          ModelBudgetPolicy.standard.sessionModelBudgetBytes(session: .cameraLive),
+                          "the case means nothing unless the probe is below the profile")
+
+        unpinned.setSessionProfile(.cameraLive)
+        unpinned.handleMemoryPressure(level: .critical)
+
+        XCTAssertEqual(unpinned.snapshot().budgetBytes, probeDerived,
+                       "the snapshot's budget is clamped by the probe too, not just "
+                       + "the effective budget")
+        XCTAssertEqual(budgets.last, probeDerived,
+                       "the pressure response must name the budget the device actually has")
+    }
 }

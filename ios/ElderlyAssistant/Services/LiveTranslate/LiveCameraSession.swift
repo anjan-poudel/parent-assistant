@@ -915,7 +915,8 @@ final class LiveCameraSession {
     /// it, `stop()` reports it, and so do the two transitions in between —
     /// `pause(_:)` (a backgrounded app or an interruption stops the capture)
     /// and `resume()`. It is a **level, reported once per change** (see
-    /// `announceSessionActive`): a session that started into an interruption
+    /// `announceCaptureLiveness`, which reads the level off the state rather
+    /// than off whichever caller is announcing): a session that started into an interruption
     /// that was already pending never had a live capture to announce, and one
     /// that is torn down after being paused does not announce a second stop.
     /// A pair that does not describe the camera is worse than silence — a
@@ -1400,8 +1401,36 @@ final class LiveCameraSession {
         registerLifecycleObservers()
         registerSubjectAreaObserver()
         onCaptureQueue { capture.startRunning() }
-        withLock { startHasRun = true }
-        setState(.running)
+
+        // The start is not atomic with respect to the rest of the session:
+        // `capture.startRunning()` takes real time, and a teardown or an
+        // interruption can land inside it. `start()` therefore moves the
+        // state only while the session is still the one it began — a start
+        // that lost that race must not overwrite `.stopped` with `.running`,
+        // which would leave the warden sized for a capture nobody owns and
+        // no later transition to correct it.
+        let reachedRunning: Bool = withLock {
+            guard case .starting = currentState else { return false }
+            startHasRun = true
+            currentState = .running
+            return true
+        }
+
+        guard reachedRunning else {
+            // The teardown that won the race could not stop the capture stack
+            // itself: when it read `startHasRun` the start had not set it yet,
+            // so it treated the session as one that never ran. The stack is
+            // ours to stop.
+            if case .stopped = withLock({ currentState }) {
+                onCaptureQueue { capture.stopRunning() }
+            }
+            // `pause` on a session that is no longer `.starting` leaves the
+            // pending interruption for whoever owns the state now, and the
+            // state's own transition already reported whatever the warden
+            // needs to hear.
+            return .success(())
+        }
+
         events.sessionStarted()
 
         // An interruption that arrived while the session was starting is
@@ -1417,7 +1446,11 @@ final class LiveCameraSession {
             // `else` branch rather than a second, contradictory call.
             _ = pause(interruption)
         } else {
-            announceSessionActive(true)
+            // Derived from the state, not assumed: this is the window the
+            // review found — an interruption that lands between the state
+            // change above and this line has already stopped the capture and
+            // reported its own end.
+            announceCaptureLiveness()
         }
         return .success(())
     }
@@ -1440,7 +1473,7 @@ final class LiveCameraSession {
             // interval a brain load is likely to be attempted in (the app is
             // in the background, the phone is in a pocket, the elder has
             // stopped pointing the camera at anything).
-            announceSessionActive(false)
+            announceCaptureLiveness()
             return .success(())
 
         case .starting:
@@ -1507,7 +1540,7 @@ final class LiveCameraSession {
             // pairing with the `false` `pause(_:)` reported is what keeps the
             // profile's lifetime equal to the capture's lifetime across any
             // number of interruptions.
-            announceSessionActive(true)
+            announceCaptureLiveness()
             return .success(())
 
         case .running:
@@ -1582,8 +1615,9 @@ final class LiveCameraSession {
             events.sessionEnded()
             // A session that was already paused (`stop()` on a backgrounded
             // one) reported its stop then: the level has not changed, so this
-            // is not a second one.
-            announceSessionActive(false)
+            // is not a second one — which the state-derived read decides on
+            // its own, since `currentState` is already `.stopped` here.
+            announceCaptureLiveness()
         }
     }
 
@@ -1770,14 +1804,26 @@ final class LiveCameraSession {
     /// same bug from the warden's side — a pair that does not describe the
     /// camera's actual state — so the session reports the state, not the
     /// transition that happened to reach it.
-    private func announceSessionActive(_ active: Bool) {
-        let changed = withLock { () -> Bool in
-            guard activeAnnounced != active else { return false }
-            activeAnnounced = active
-            return true
+    ///
+    /// **The level is read from `currentState` under the lock, never taken
+    /// from the caller.** A caller's belief is stale by construction: a start
+    /// that is still executing when an interruption or a teardown lands has
+    /// already decided it is about to be live, and announcing that belief is
+    /// what pins the warden's profile on a capture that is not there — no
+    /// further transition follows to correct it, because the pair the warden
+    /// is waiting for was already spent. Reading the state at the moment of
+    /// the announcement makes every announcement describe the session as it
+    /// actually is, whatever raced the caller.
+    private func announceCaptureLiveness() {
+        let announcement: Bool? = withLock {
+            let live: Bool
+            if case .running = currentState { live = true } else { live = false }
+            guard activeAnnounced != live else { return nil }
+            activeAnnounced = live
+            return live
         }
-        guard changed else { return }
-        onSessionActiveChanged?(active)
+        guard let announcement else { return }
+        onSessionActiveChanged?(announcement)
     }
 
     /// Runs `body` on the serial capture queue, which owns every capture-stack
