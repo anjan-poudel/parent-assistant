@@ -411,11 +411,14 @@ actor CloudTranslationTier {
             let batchDurationMs = Int(Date().timeIntervalSince(start) * 1000)
             #if DEBUG
             if config.translationDebugLoggingEnabled {
-                let resolvedCount = keys.reduce(into: 0) { count, key in
-                    guard let outcome = outcomes[key], case .resolved = outcome else { return }
-                    count += 1
+                // [DEBUG-LOG] (owner directive) The exact pairs and the
+                // leg's time — the console's own lane, the bus stays
+                // content-free.
+                for (target, key) in zip(targets, keys) {
+                    if case .resolved(let translation, _)? = outcomes[key] {
+                        print("[translate-debug] cloud \(target.originalText) -> \(translation) [\(batchDurationMs)ms]")
+                    }
                 }
-                print("[translate-debug] cloud batch \(batchIndex): \(resolvedCount) of \(keys.count) resolved [\(batchDurationMs)ms]")
             }
             #endif
             let resolvedForBatch = regionIDs.filter { resolved[$0] != nil }.count

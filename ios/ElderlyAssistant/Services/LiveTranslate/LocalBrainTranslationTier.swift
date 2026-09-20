@@ -575,13 +575,17 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
             // the release-log gate judges exactly that rule (NFR-LCT-006).
             // The reader is inside `#if DEBUG`, so no Release binary contains
             // a console write for this feature at all.
+            let durationMs = Self.milliseconds(since: started)
             #if DEBUG
             if config.translationDebugLoggingEnabled {
-                let resolvedCount = translations.count
-                print("[translate-debug] brain batch: \(resolvedCount) of \(batch.count) resolved")
+                // [DEBUG-LOG] (owner directive) The exact pairs and the
+                // leg's time — the console's own lane, the bus stays
+                // content-free.
+                for (source, translation) in translations {
+                    print("[translate-debug] local \(source) -> \(translation) [\(durationMs)ms]")
+                }
             }
             #endif
-            let durationMs = Self.milliseconds(since: started)
 
             // The counts are about the BATCH THE CALLER HANDED OVER, not about
             // the part that fitted: a bounded batch reports its surplus as

@@ -1387,7 +1387,7 @@ struct LiveTranslateConfig: Equatable {
     /// The value is persisted (see `LiveTranslateSettings`), so a debug
     /// session turns it on without a rebuild; Release reads it into the
     /// config and has nothing that acts on it.
-    var translationDebugLoggingEnabled: Bool = false
+    var translationDebugLoggingEnabled: Bool = true
 
     /// How long the warden's notice stays on screen before it takes itself
     /// down, in seconds (owner directive, 2026-09-19: "keep the user in the
