@@ -252,4 +252,34 @@ final class LogSanitiserTests: XCTestCase {
         XCTAssertEqual(clean.metadata["load_ms"], "[redacted]",
                        "a leading + is the phone shape, not a signed count")
     }
+
+    /// **A bare digit run past its key's unit is scrubbed** (finding 10).
+    ///
+    /// The count shape used to be value-only — ASCII digits with at most one
+    /// decimal point — so an unformatted ten-digit string written into a
+    /// duration key took the fast path and the phone scrub never ran on it:
+    /// a bare phone number, in a metadata field, on the way to the log. The
+    /// bound is the key's own unit (a brain stage is under 1e9 ms, a byte
+    /// total on a phone is under 1e12), so a run past it is not a reading for
+    /// that key and keeps the full scrub. The boundary is stated here as well
+    /// as the refusal, because a bound that redacted every value would pass
+    /// this test for the wrong reason.
+    func testABareDigitRunPastItsKeysUnitIsScrubbed() {
+        let clean = sanitiser.sanitise(event(metadata: [
+            "load_ms": "9812345678",
+            "budgetBytes": "12345678901234",
+        ]))
+        XCTAssertEqual(clean.metadata["load_ms"], "[redacted]",
+                       "a duration key's unit is under 1e9 ms; ten bare digits is not a reading")
+        XCTAssertEqual(clean.metadata["budgetBytes"], "[redacted]",
+                       "…and a byte total is under 1e12")
+
+        let atTheBound = sanitiser.sanitise(event(metadata: [
+            "load_ms": "999999999",
+            "budgetBytes": "999999999999",
+        ]))
+        XCTAssertEqual(atTheBound.metadata["load_ms"], "999999999",
+                       "the bound refuses what is past it, not what is inside it")
+        XCTAssertEqual(atTheBound.metadata["budgetBytes"], "999999999999")
+    }
 }

@@ -349,7 +349,14 @@ final class LabelTranslationCache {
                 // launch and the report it exists to make never stuck (review:
                 // a batch of curated keys is the whole hole, and a curated key
                 // is exactly what a batch of curated keys holds).
-                if invalidationPendingPersist { _ = persist() }
+                // The same hole as the read path's inline write (review finding
+                // 7, which flagged that one): a discarded failure here lost the
+                // `cacheWriteFailed` evidence and left the drop owed with
+                // nothing saying it had not landed.
+                if invalidationPendingPersist, let failure = persist() {
+                    invalidationPendingPersist = true
+                    events.cacheWriteFailed(.cacheWriteFailed(failure))
+                }
                 return .success(())
             }
             evictIfNeeded()
@@ -384,6 +391,11 @@ final class LabelTranslationCache {
         withLock {
             index.removeAll()
             touchedThisSession.removeAll()
+            // The payload this flag was owed to is gone: there is nothing left
+            // to make durable, and a flag that survived the reset would have the
+            // next write persist nothing for an eviction that no longer exists
+            // (review finding 7).
+            invalidationPendingPersist = false
             didLoad = true
             switch storage.delete(key: Self.storageKey) {
             case .success:
@@ -464,7 +476,17 @@ final class LabelTranslationCache {
                 // flag above carries it to; the caller that asked for the write
                 // in the first place does not need the flag.
                 if persistingInvalidation {
-                    _ = persist()
+                    // The write that was to make the drop durable can fail, and
+                    // a discarded failure left the payload untouched with nothing
+                    // on the bus to say so (review finding 7). The drop stays in
+                    // memory either way — the entries are already out of the
+                    // index — and the flag keeps it owed to the next write, so
+                    // the eviction is made durable later instead of being
+                    // recomputed and re-reported at every launch.
+                    if let failure = persist() {
+                        invalidationPendingPersist = true
+                        events.cacheWriteFailed(.cacheWriteFailed(failure))
+                    }
                 } else {
                     invalidationPendingPersist = true
                 }

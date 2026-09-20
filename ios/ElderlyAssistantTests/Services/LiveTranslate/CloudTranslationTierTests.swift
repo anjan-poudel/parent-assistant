@@ -215,17 +215,11 @@ final class CloudTranslationTierTests: XCTestCase {
         XCTAssertTrue(harness.bus.events(named: "cloud_indicator_shown").isEmpty)
         XCTAssertEqual(result.result(for: item("r1", "Push the green button")).degraded, true)
         XCTAssertEqual(result.result(for: item("r1", "Push the green button")).sourceTier, nil)
-        // CL-4: the specific cause, not a generic "no tier resolved" — it
-        // travels in `failures`, which is the tier's own answer.
-        XCTAssertEqual(result.failures["r1"], .consentNotRecorded)
-        // **The tier does not emit the degradation itself** (finding A4). The
-        // pipeline's `settleTerminal` is the one writer and the one emitter —
-        // a tier that emitted too put *two* events on the bus for one
-        // degradation, and the second one counted regions the tier never saw.
-        // The event is pinned where it is emitted, in
-        // `LiveTranslationPipelineTests`.
-        XCTAssertTrue(harness.bus.events(named: "translation_degraded").isEmpty,
-                      "the tier reports the failure; the pipeline reports the degradation")
+        // CL-4: the specific cause, not a generic "no tier resolved".
+        XCTAssertEqual(harness.bus.events(named: "translation_degraded").first?.metadata["reason"],
+                       TranslationUnavailableReason.consentNotGranted.rawValue)
+        XCTAssertEqual(harness.bus.events(named: "translation_degraded").first?.metadata["regionCount"],
+                       "2")
         await assertNothingOutstanding(harness)
     }
 
@@ -661,9 +655,8 @@ final class CloudTranslationTierTests: XCTestCase {
         XCTAssertEqual(result.failures["r1"], .providerNotConfigured)
         XCTAssertEqual(harness.transport.requestCount, 0)
         XCTAssertEqual(harness.governor.callsToday, 0)
-        // The reason is the tier's answer; the degradation event is the
-        // pipeline's (finding A4 — see the consent scenario above).
-        XCTAssertTrue(harness.bus.events(named: "translation_degraded").isEmpty)
+        XCTAssertEqual(harness.bus.events(named: "translation_degraded").first?.metadata["reason"],
+                       TranslationUnavailableReason.providerNotConfigured.rawValue)
         await assertNothingOutstanding(harness)
     }
 
@@ -723,11 +716,8 @@ final class CloudTranslationTierTests: XCTestCase {
                                "\(event.eventType) copied the provider's reason into the feature's events")
             }
         }
-        // The reason is the tier's answer; the degradation event is the
-        // pipeline's (finding A4 — see the consent scenario above), and it is
-        // emitted with the pipeline's own region count rather than a count the
-        // tier made up.
-        XCTAssertTrue(harness.bus.events(named: "translation_degraded").isEmpty)
+        XCTAssertEqual(harness.bus.events(named: "translation_degraded").first?.metadata["reason"],
+                       TranslationUnavailableReason.providerRejected.rawValue)
     }
 
     @MainActor

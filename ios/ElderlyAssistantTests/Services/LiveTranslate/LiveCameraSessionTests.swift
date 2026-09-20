@@ -1248,5 +1248,92 @@ final class LiveCameraSessionTests: XCTestCase {
         timeout.cancel()
         return frame
     }
+
+    // MARK: - Review round 2 (PR #110 findings)
+
+    /// **A start that lost the race to a teardown reports that it did not
+    /// start** (finding 5).
+    ///
+    /// `start()` is not atomic with respect to the rest of the session: the
+    /// teardown can land inside `startRunning()`. A session that is `.stopped`
+    /// after that race has no camera — the stack was never handed to anyone —
+    /// and `.success(())` told the caller a camera nobody holds was live, which
+    /// is the one answer it cannot recover from, because nothing later corrects
+    /// it. `.interrupted`/`.running` are different: there the session did start,
+    /// the state and `camera_interrupted` already say so, and the caller's next
+    /// move is `resume()`.
+    func testAStartIntoATeardownReportsThatItDidNotStart() async throws {
+        let session = makeSession()
+        layer.onStartRunning = { session.stop() }
+
+        let result = await session.start()
+        layer.onStartRunning = nil
+
+        guard case .failure(.cameraUnavailable(.configurationFailed)) = result else {
+            return XCTFail("a torn-down start is not a success: \(result)")
+        }
+        XCTAssertEqual(session.state, .stopped)
+        XCTAssertEqual(layer.startRunningCallCount, 1)
+        XCTAssertEqual(layer.stopRunningCallCount, 1,
+                       "the teardown could not stop a stack the start had not yet claimed")
+    }
+
+    /// A sink the racing transitions can share: the activation is delivered on
+    /// whichever thread drove the transition, and this test drives two at once.
+    final class ActivationLog: @unchecked Sendable {
+        private let lock = NSLock()
+        private var levels: [Bool] = []
+
+        func record(_ live: Bool) {
+            lock.lock(); defer { lock.unlock() }
+            levels.append(live)
+        }
+
+        var all: [Bool] {
+            lock.lock(); defer { lock.unlock() }
+            return levels
+        }
+    }
+
+    /// **A racing pair cannot leave the announced level disagreeing with the
+    /// session** (finding 12).
+    ///
+    /// The level is read under the lock but was delivered outside it, so two
+    /// racing calls could invert: the one that read `true` delivered after the
+    /// one that read `false`, and the warden was left sized for a camera that
+    /// is not running with nothing later to correct it — the level is reported
+    /// once per change, so the pair that would have fixed it was already spent.
+    /// The read and the delivery are one step on the capture queue now, which
+    /// is what the invariant below states: the last level the warden hears is
+    /// the level the session is actually at, and every delivery flips.
+    func testRacingTransitionsCannotInvertTheAnnouncedLevel() async throws {
+        let session = makeSession()
+        let log = ActivationLog()
+        session.onSessionActiveChanged = { log.record($0) }
+
+        _ = await session.start()
+
+        let nc = centre!
+        for _ in 0..<100 {
+            DispatchQueue.global().async {
+                nc.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+            }
+            DispatchQueue.global().async {
+                nc.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+            }
+        }
+        try? await Task.sleep(for: .milliseconds(300))
+
+        let levels = log.all
+        XCTAssertEqual(levels.last, session.state == .running,
+                       "the warden's last word is the session's actual level; "
+                       + "a pause and a resume that invert leave it sized for a camera "
+                       + "that is not there: \(levels.suffix(6))")
+        var live = false
+        for (index, level) in levels.enumerated() {
+            XCTAssertNotEqual(live, level, "index \(index) repeated the level it was already at")
+            live = level
+        }
+    }
 }
 

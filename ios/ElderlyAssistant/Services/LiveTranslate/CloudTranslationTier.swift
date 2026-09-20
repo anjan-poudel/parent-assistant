@@ -300,15 +300,30 @@ actor CloudTranslationTier {
                                failures: &failures)
         }
 
-        // The failures go back to the caller **unsaid**. This tier used to
-        // report them itself (`reportDegradation`, once per reason, counted in
-        // strings), and the pipeline's terminal writer reported the same
-        // failures again, counted in regions — one outage, two events, two
-        // different counts, and the evidence file could not tell them apart
-        // (review: the tier's emission against the pipeline's single-emitter
-        // contract). There is one terminal writer and one degradation emitter,
-        // and it is the pipeline's: every caller here settles what it gets
-        // through `settleTerminal`, which is where a degradation is counted.
+        // The failures are reported here **and** returned to the caller. Both,
+        // and the split of ownership is the point: this tier is the emitter for
+        // every failure it produced, and the pipeline's terminal writer is the
+        // emitter for every degradation it wrote itself (a gate refusal no tier
+        // saw, the device's own endings, a held frame's). The caller knows the
+        // failures of this batch were reported — they arrived in this
+        // `BatchResult` — and does not report them a second time
+        // (`GateDecision.degradationsAreTheTiersOwn`). One degradation, one
+        // event, whichever layer wrote it.
+        //
+        // Reporting at the tier is not a convenience. The tier is the layer that
+        // knows the failure class, and it reports once per reason counted in the
+        // regions it covers — the count exists only here. It is also the only
+        // emission that survives the caller's disposition of the failure: a
+        // string the reliability router *reserves* is answered on the device and
+        // never settled degraded (settling it would publish a degraded overlay
+        // for a string the device is about to translate), so a pipeline-only
+        // emission would drop the cloud outage from the evidence entirely — and
+        // that outage, the one the router exists to work around, is the one the
+        // evidence most needs. Deleting this emission is how the review of
+        // d33089d found `SecurityEvidenceBoundaryTests` red: its AM-9 case
+        // drives the tier directly and pins the block→`translation_degraded`
+        // contract at this layer, where the shipped residual is.
+        reportDegradation(failures)
         return BatchResult(resolved: resolved, failures: failures)
     }
 
@@ -420,6 +435,24 @@ actor CloudTranslationTier {
             let outcomes = await bridge.task.value
             adopt(outcomes[bridge.key], for: bridge.key, idsByKey: idsByKey,
                   resolved: &resolved, failures: &failures)
+        }
+    }
+
+    /// Reports the unretryable-refusal kinds the call site cannot see, once per
+    /// reason, with the region count it covers.
+    ///
+    /// The caller *does* receive these failures — it gets the whole
+    /// `BatchResult` — but it cannot always be the one to report them. A caller
+    /// that reserves a failure answers the string on the device and settles no
+    /// degradation at all, and a caller that is already closed settles nothing
+    /// either; the outage happened either way, and this is the emission that
+    /// does not depend on what the caller does next. Counted in regions: the
+    /// dictionary is keyed by item id, and one id is one region on screen.
+    private func reportDegradation(_ failures: [String: LiveTranslateError]) {
+        var counts: [TranslationUnavailableReason: Int] = [:]
+        for error in failures.values { counts[error.unavailableReason, default: 0] += 1 }
+        for reason in counts.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
+            events.translationDegraded(reason: reason, regionCount: counts[reason] ?? 0)
         }
     }
 

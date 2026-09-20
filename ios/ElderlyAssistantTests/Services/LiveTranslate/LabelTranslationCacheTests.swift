@@ -785,6 +785,44 @@ final class LabelTranslationCacheTests: XCTestCase {
                         "the failed write is retried on the next resolution of the key")
     }
 
+    /// **The write a read path owes is reported when it fails, and the debt
+    /// does not outlive the payload** (finding 7).
+    ///
+    /// A read that drops superseded brain entries makes the drop durable
+    /// itself, and that write can fail. Discarding the failure left two facts
+    /// unrecorded: the store had refused a write (no `cacheWriteFailed`
+    /// evidence at all), and the drop was still owed with nothing saying so.
+    /// The second half is the flag — and a flag that survives `removeAll()`
+    /// is a claim about a payload that no longer exists, which is how a later
+    /// write comes to report a failure for a drop that was already discarded.
+    func testAFailedInvalidationPersistOnAReadPathIsReportedAndNotOwedPastARemoval() throws {
+        let first = makeCache()
+        _ = first.store(text: recognizedText, translation: translationText, tier: .onDeviceBrain)
+
+        var replaced = LiveTranslateConfig.default
+        replaced.brainTranslationModelIDs = []
+        let second = makeCache(config: replaced)
+
+        // The store refuses the write the read path owes.
+        storage.failsWrites = true
+        guard case .success(let miss) = second.lookup(text: recognizedText) else {
+            return XCTFail("a lookup answers, whatever the store does")
+        }
+        XCTAssertNil(miss, "the superseded entry is not served")
+        XCTAssertEqual(bus.events(named: "cache_write_failed").count, 1,
+                       "the dropped write is evidence, not a silent discard")
+
+        // The payload goes: there is no drop left in it to make durable, and
+        // the store is still refusing writes, which is how a stale flag shows.
+        XCTAssertTrue(second.removeAll().isSuccess)
+        _ = second.storeBatch([LabelTranslationCache.Resolution(text: "Start",
+                                                                 translation: "सुरु गर्ने",
+                                                                 tier: .cloud)],
+                              targetLanguage: .nepali)
+        XCTAssertEqual(bus.events(named: "cache_write_failed").count, 1,
+                       "the debt went with the payload it was about")
+    }
+
     func testAnUnreadableStoreReadsAsAnEmptyCacheOnAFreshInstallRatherThanAReset() {
         storage.failsReads = true
         let cache = makeCache()

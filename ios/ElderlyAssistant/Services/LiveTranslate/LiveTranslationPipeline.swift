@@ -415,6 +415,15 @@ actor LiveTranslationPipeline {
         let item: CloudTranslationTier.Item
         /// Whether the ask came from a region on the live picture.
         let isLive: Bool
+        /// How many regions were showing this string in the picture the ask
+        /// was made over, when that picture was not the live one. A held
+        /// frame's multiplicity rides with its ask so the retry that answers
+        /// the prompt degrades under the count the frame actually showed,
+        /// instead of the scanner's 0 for a string that is not on the live
+        /// picture at all (review: the frozen half of the retry dispatched
+        /// with no counts and undercounted the frame's degradation). `nil` is
+        /// "the live picture", which the scanner can count for itself.
+        let regionsShowing: Int?
     }
 
     // MARK: State (actor-isolated)
@@ -436,17 +445,35 @@ actor LiveTranslationPipeline {
     /// left the new region pending with nothing left to dispatch it, because
     /// the key was already settled.
     private var settledOutcomes: [String: TranslationResult] = [:]
-    /// Normalized keys a **held frame** has settled, which the live sighting's
-    /// prune must therefore leave alone (see `reconcile`). A frame's answers
-    /// outlive the picture they were rendered from, and the live cycle cannot
-    /// see them: they are released when the frame is put down
+    /// The answers a **held frame** settled, keyed by normalized key, which the
+    /// live sighting's prune must therefore leave alone (see `reconcile`). A
+    /// frame's answers outlive the picture they were rendered from, and the
+    /// live cycle cannot see them: they are released when the frame is put down
     /// (`discardHeldAnswers`), on a resume, and on a close — never by the
     /// live prune.
-    private var heldSettledKeys: Set<String> = []
+    ///
+    /// The **answer** is held, not merely the key, because the release is
+    /// ownership-checked: a key a live plan settled over the top of the frame's
+    /// answer is that plan's, and deleting it at the thaw destroyed a live
+    /// settlement the frame only borrowed (review).
+    private var heldSettledKeys: [String: TranslationResult] = [:]
+    /// Which picture the held answers belong to: bumped every time the frame is
+    /// put down. A frozen plan carries the epoch it was made for, so a plan
+    /// that lands after the elder has put the picture down settles its answers
+    /// **without holding them** — keys committed past the thaw guard used to be
+    /// held for a frame that no longer existed, and no later thaw released
+    /// them (review).
+    private var heldFrameEpoch = 0
     /// Normalized keys currently dispatched to the cloud tier. Cleared when
     /// the attempt reports back, so a key is never requested twice at once
     /// (the tier's own claim step is the second half of that guarantee).
     private var attemptKeys: Set<String> = []
+    /// The plan that holds each key in `attemptKeys`. A claim is a reference
+    /// the claimant releases itself: a release that went by key alone let one
+    /// plan drop another plan's claim, and a deferral that released whatever
+    /// happened to be in `attemptKeys` dropped strings a plan was still
+    /// working on (review).
+    private var claimOwner: [String: UUID] = [:]
     /// Normalized keys the on-device brain has already been asked about **in
     /// this sighting**. The brain is not a lookup: one attempt is a generation
     /// of seconds, so asking it again on the next tick — which is exactly what
@@ -1045,7 +1072,7 @@ actor LiveTranslationPipeline {
         // session had already answered and paid for (review). They are released
         // with the frame instead (`discardHeldAnswers`).
         settledOutcomes = settledOutcomes.filter {
-            visibleKeys.contains($0.key) || heldSettledKeys.contains($0.key)
+            visibleKeys.contains($0.key) || heldSettledKeys[$0.key] != nil
         }
         brainAttemptedKeys = Set(brainAttemptedKeys.filter { visibleKeys.contains($0) })
         // The router's two ledgers are per-sighting claims like the brain's,
@@ -1254,6 +1281,41 @@ actor LiveTranslationPipeline {
         /// the frame held (review: a two-region string degraded as one). Empty
         /// is "the live picture", which the scanner can count for itself.
         var regionCounts: [String: Int] = [:]
+        /// The held frame this ask is for, when `destination` is `.frozen` —
+        /// `heldFrameEpoch` at the moment the ask began. The plan holds its
+        /// answers for the frame only while this still names the frame the
+        /// session is holding; a plan that lands after the elder put the
+        /// picture down holds none of them (review). Ignored by the live
+        /// destination, which holds nothing.
+        var frozenEpoch: Int = 0
+    }
+
+    /// One plan's identity, and the picture it is answering for.
+    ///
+    /// What every stage that writes a claim, holds an answer or counts a
+    /// degradation needs, carried as one value so a call site cannot state one
+    /// half of the rule and assume the other: the token that releases exactly
+    /// the claims this plan made, and the picture whose counts and epoch the
+    /// settle needs. Nothing here has a default — a stage that counts a
+    /// degradation states which picture's counts it is counting (review: the
+    /// `[:]` defaults let a call site undercount in silence).
+    private struct PlanContext {
+        /// The plan's own token: `claim`/`release` match on it.
+        let token: UUID
+        let destination: ResolutionDestination
+        /// Regions per string in the picture this ask is about (a held frame's
+        /// own multiplicities); empty is the live picture.
+        let regionCounts: [String: Int]
+        /// The frame epoch this plan was made for (see
+        /// `ResolutionRequest.frozenEpoch`).
+        let frozenEpoch: Int
+
+        init(token: UUID, request: ResolutionRequest) {
+            self.token = token
+            self.destination = request.destination
+            self.regionCounts = request.regionCounts
+            self.frozenEpoch = request.frozenEpoch
+        }
     }
 
     /// [RELIABILITY-ROUTER] Hands the live picture's still-pending regions to
@@ -1288,14 +1350,14 @@ actor LiveTranslationPipeline {
         }
         guard !candidates.isEmpty else { return }
         // The claim is made **here**, on the actor and in the same synchronous
-        // step as the filter above. It used to happen inside the plan's own
-        // task body, so a second dispatch that ran before that task reached
-        // its claim passed the same `attemptKeys` filter and handed the tiers
-        // the same strings a second time (review: check-then-act across the
-        // dispatch boundary). `runResolution` claims again when it runs — a set
-        // union, so the two cannot double-count — and the plan's `defer`
-        // releases whatever it did not settle.
-        attemptKeys.formUnion(candidates.map(\.id))
+        // step as the filter above — `resolutionTask` claims before its task is
+        // created, and nothing between the filter and that call suspends. It
+        // used to happen inside the plan's own task body, so a second dispatch
+        // that ran before that task reached its claim passed the same
+        // `attemptKeys` filter and handed the tiers the same strings a second
+        // time (review: check-then-act across the dispatch boundary). The claim
+        // is **owned**: the plan's `defer` releases exactly the keys it claimed
+        // and no others (review finding 4).
         startResolution(ResolutionRequest(items: candidates,
                                           urgency: onlyKeys == nil ? .tick : .explicitAsk,
                                           destination: .live))
@@ -1321,9 +1383,16 @@ actor LiveTranslationPipeline {
     private func resolutionTask(_ request: ResolutionRequest)
         -> Task<[String: TranslationResult], Never> {
         let token = UUID()
+        // The claim is taken here — synchronously, in the caller's own actor
+        // step — so the dispatcher's check-then-act guarantee holds, and it is
+        // taken **as this plan's**: `claim` records the owner, which is what
+        // makes the plan's `defer` able to release its own claims and nothing
+        // else (review finding 4).
+        claim(keys: request.items.map(\.id), by: token)
+        let plan = PlanContext(token: token, request: request)
         let task = Task { [weak self] () -> [String: TranslationResult] in
             guard let self else { return [:] }
-            let answers = await self.runResolution(request)
+            let answers = await self.runResolution(request, plan: plan)
             await self.forget(task: token)
             return answers
         }
@@ -1373,26 +1442,30 @@ actor LiveTranslationPipeline {
     /// back to the device instead of degrading — a string the cloud failed is
     /// the device's to answer from then on.
     @discardableResult
-    private func runResolution(_ request: ResolutionRequest) async -> [String: TranslationResult] {
+    private func runResolution(_ request: ResolutionRequest,
+                               plan: PlanContext) async -> [String: TranslationResult] {
         var answers: [String: TranslationResult] = [:]
         guard !isClosed, !request.items.isEmpty else { return answers }
 
         // The claim, before any await **and before the first early return**: one
         // attempt is owed per string, and a plan that lands mid-plan must not
-        // start a second. It is made here rather than after the clock prologue
-        // because the dispatcher has already claimed these keys synchronously —
-        // a plan that then returns early at a throttled tick would leave the
-        // dispatcher's claim for a string nobody is asking about (review).
-        attemptKeys.formUnion(request.items.map(\.id))
+        // start a second. `resolutionTask` has already claimed these keys
+        // synchronously — this is the plan's own re-claim for a body that runs
+        // after a cancel cleared the ledger, and it is idempotent: a key
+        // another plan owns keeps its owner (review finding 4).
+        claim(keys: request.items.map(\.id), by: plan.token)
 
         // Every way out of this plan — the end of it **and every early return**
         // a throttle, a thaw, a resume or a close takes — releases whatever of
-        // this plan's strings is still claimed. The end-of-plan release used to
-        // be the only one, so a plan that returned early kept its claim for the
-        // rest of the session and no later plan could ask about that string
-        // (review: a claim nobody will settle is a region pending for good,
-        // because the settled filter is not the only thing that strands a key).
-        defer { release(keys: request.items.map(\.id).filter { attemptKeys.contains($0) }) }
+        // **this plan's own** strings is still claimed, and nothing else. The
+        // release used to go by key against the shared ledger, so a plan could
+        // drop a claim a later plan had made and a string being worked on was
+        // handed back to the next dispatch (review finding 4). The end-of-plan
+        // release used to be the only one, so a plan that returned early kept
+        // its claim for the rest of the session and no later plan could ask
+        // about that string (review: a claim nobody will settle is a region
+        // pending for good).
+        defer { release(keys: request.items.map(\.id), by: plan.token) }
 
         // 0. A string the session has already answered is an answer, not an
         //    ask. The live adapter filters these itself, but the two hand-over
@@ -1409,7 +1482,14 @@ actor LiveTranslationPipeline {
         guard !items.isEmpty else { return answers }
 
         // 1. The clocks, in one prologue, before anything is claimed: a plan
-        //    either runs and moves them or runs nothing at all.
+        //    either runs and moves them or runs nothing at all. A plan that is
+        //    **already cancelled** (a thaw, a resume or a close landed between
+        //    the dispatch and this body) settles nothing, so it must not move
+        //    the clock either: the first tick after the interruption would be
+        //    paced out of the picture by a plan that never ran (review
+        //    finding 11). The `defer` above still releases its claims, so the
+        //    string is askable by the next plan.
+        guard !Task.isCancelled, !isClosed else { return answers }
         let moment = now()
         if request.urgency == .tick {
             if let last = lastDispatchAt,
@@ -1443,7 +1523,7 @@ actor LiveTranslationPipeline {
         let held: [CloudTranslationTier.Item] = mayGenerateNow
             ? []
             : onDeviceFirst.filter { !brainAttemptedKeys.contains($0.id) }
-        release(keys: held.map(\.id))
+        release(keys: held.map(\.id), by: plan.token)
 
         // 2. The device leads for its class. A string the brain has already
         //    been asked about in this sighting is carried without a second
@@ -1454,10 +1534,13 @@ actor LiveTranslationPipeline {
         let owed = mayGenerateNow ? onDeviceFirst.filter { !brainAttemptedKeys.contains($0.id) } : []
         if !owed.isEmpty {
             lastBrainAttemptAt = moment
-            let stage = await askTheBrain(owed)
+            let stage = await askTheBrain(owed, by: plan.token)
             guard !Task.isCancelled, !isClosed else { return answers }
-            await commit(stage.answered, to: request.destination, into: &answers,
-                         regionCounts: request.regionCounts)
+            // The device tier reports no per-answer origin (the persisted cache
+            // answers it in `askTheBrain`, which is a local read the histogram
+            // counts as computed). Stated rather than defaulted, so the next
+            // reader can see that the emptiness is a decision.
+            await commit(stage.answered, to: plan, into: &answers, origins: [:])
             carryOnward += stage.unanswered
         }
 
@@ -1469,10 +1552,10 @@ actor LiveTranslationPipeline {
         if !cloudFirst.isEmpty {
             let decision = await gateDecision(for: cloudFirst, reservingFallback: true)
             guard !Task.isCancelled, !isClosed else { return answers }
-            await commit(decision.terminal, to: request.destination, into: &answers,
-                         regionCounts: request.regionCounts,
-                         origins: decision.origins)
-            record(awaiting: decision.awaiting, at: request.destination)
+            await commit(decision.terminal, to: plan, into: &answers,
+                         origins: decision.origins,
+                         degradationsAreTheTiersOwn: decision.degradationsAreTheTiersOwn)
+            record(awaiting: decision.awaiting, in: plan)
             reserved = decision.reserved
         }
 
@@ -1493,9 +1576,9 @@ actor LiveTranslationPipeline {
             let fresh = reserved.filter { !brainAttemptedKeys.contains($0.0.id) }
             await commit(spent.map { ($0.0, TranslationResult.degraded(originalText: $0.0.text,
                                                                       reason: $0.1.unavailableReason)) },
-                         to: request.destination,
+                         to: plan,
                          into: &answers,
-                         regionCounts: request.regionCounts)
+                         origins: [:])
             if !fresh.isEmpty {
                 // The generation this stage is about to cost — and this is the
                 // stage that runs *because* the tier ahead of it is failing, so
@@ -1506,12 +1589,12 @@ actor LiveTranslationPipeline {
                 // ledger, so the next plan the clock allows asks them in stage 2
                 // (review of #100: without the override an extract-mode tap
                 // could strand the only block it ever gets).
+                guard !Task.isCancelled, !isClosed else { return answers }
                 if maySpendAGeneration(request.urgency, at: now()) {
                     lastBrainAttemptAt = now()
-                    let stage = await askTheBrain(fresh.map(\.0))
+                    let stage = await askTheBrain(fresh.map(\.0), by: plan.token)
                     guard !Task.isCancelled, !isClosed else { return answers }
-                    await commit(stage.answered, to: request.destination, into: &answers,
-                                 regionCounts: request.regionCounts)
+                    await commit(stage.answered, to: plan, into: &answers, origins: [:])
                     // The device had its turn — a generation was paid and did
                     // not answer — and there is no tier behind it: the cloud is
                     // the tier that just failed. The honest terminal is the
@@ -1521,10 +1604,9 @@ actor LiveTranslationPipeline {
                     await commit(stage.unanswered.map { item in
                         (item, TranslationResult.degraded(originalText: item.text,
                                                           reason: reasonByID[item.id] ?? .noTierResolved))
-                    }, to: request.destination, into: &answers,
-                       regionCounts: request.regionCounts)
+                    }, to: plan, into: &answers, origins: [:])
                 } else {
-                    release(keys: fresh.map(\.0.id))
+                    release(keys: fresh.map(\.0.id), by: plan.token)
                 }
             }
         }
@@ -1534,10 +1616,10 @@ actor LiveTranslationPipeline {
         if !carryOnward.isEmpty {
             let decision = await gateDecision(for: carryOnward, reservingFallback: false)
             guard !Task.isCancelled, !isClosed else { return answers }
-            await commit(decision.terminal, to: request.destination, into: &answers,
-                         regionCounts: request.regionCounts,
-                         origins: decision.origins)
-            record(awaiting: decision.awaiting, at: request.destination)
+            await commit(decision.terminal, to: plan, into: &answers,
+                         origins: decision.origins,
+                         degradationsAreTheTiersOwn: decision.degradationsAreTheTiersOwn)
+            record(awaiting: decision.awaiting, in: plan)
         }
 
         // Whatever is left of the strings this plan was handed is released by
@@ -1569,7 +1651,7 @@ actor LiveTranslationPipeline {
     ///   answer — the callers that have a tier behind the device carry those
     ///   onward. The surplus the bound deferred is released here and is in
     ///   neither list.
-    private func askTheBrain(_ items: [CloudTranslationTier.Item])
+    private func askTheBrain(_ items: [CloudTranslationTier.Item], by token: UUID)
         async -> (answered: [(CloudTranslationTier.Item, TranslationResult)],
                   unanswered: [CloudTranslationTier.Item]) {
         guard !items.isEmpty else { return ([], []) }
@@ -1577,7 +1659,9 @@ actor LiveTranslationPipeline {
         let asked = Array(items.prefix(LocalBrainTranslationTier.batchPrefixLength(of: items.map(\.text),
                                                                                    config: config)))
         // Not asked yet, so not failed and not paid for: no claim, no outcome.
-        release(keys: items.dropFirst(asked.count).map(\.id))
+        // Released by the plan's own token, so a string another plan is holding
+        // is not handed back by this one (review finding 4).
+        release(keys: items.dropFirst(asked.count).map(\.id), by: token)
 
         // The generation is claimed before the stage, exactly as the dispatch has
         // always claimed its strings: one payment per string per sighting, and a
@@ -1624,12 +1708,16 @@ actor LiveTranslationPipeline {
     /// Records the elder's own asks (see `awaitingDecision`), and releases their
     /// claims so the plan that follows the answer can re-ask them.
     private func record(awaiting items: [CloudTranslationTier.Item],
-                        at destination: ResolutionDestination) {
+                        in plan: PlanContext) {
         guard !items.isEmpty else { return }
-        release(keys: items.map(\.id))
-        switch destination {
+        release(keys: items.map(\.id), by: plan.token)
+        switch plan.destination {
         case .live:
-            for item in items { awaitingDecision[item.id] = PendingAsk(item: item, isLive: true) }
+            for item in items {
+                awaitingDecision[item.id] = PendingAsk(item: item,
+                                                       isLive: true,
+                                                       regionsShowing: nil)
+            }
         case .frozen:
             // A held frame is a moment, not a stream: this capture's strings
             // are added to the registry beside any earlier frame's, and beside
@@ -1640,7 +1728,11 @@ actor LiveTranslationPipeline {
             // and the frame they had asked about was never retried, because
             // nothing remembered it had been asked. Both halves go back
             // together in `retryAwaitingResolution`.
-            for item in items { awaitingDecision[item.id] = PendingAsk(item: item, isLive: false) }
+            for item in items {
+                awaitingDecision[item.id] = PendingAsk(item: item,
+                                                       isLive: false,
+                                                       regionsShowing: plan.regionCounts[item.id])
+            }
         }
     }
 
@@ -1653,31 +1745,49 @@ actor LiveTranslationPipeline {
     /// published, so the region stops being pending in the frame after it
     /// arrived) or in the map a held frame's caller is about to render.
     private func commit(_ results: [(CloudTranslationTier.Item, TranslationResult)],
-                        to destination: ResolutionDestination,
+                        to plan: PlanContext,
                         into answers: inout [String: TranslationResult],
-                        regionCounts: [String: Int] = [:],
-                        origins: [String: LiveTranslateResolutionOrigin] = [:]) async {
+                        origins: [String: LiveTranslateResolutionOrigin],
+                        degradationsAreTheTiersOwn: Bool = false) async {
         let terminal = results.filter {
             if case .pending = $0.1.outcome { return false }
             return true
         }
         guard !terminal.isEmpty else { return }
-        settleTerminal(terminal, regionCounts: regionCounts, origins: origins)
-        switch destination {
+        let settled = settleTerminal(terminal,
+                                     regionCounts: plan.regionCounts,
+                                     origins: origins,
+                                     degradationsAreTheTiersOwn: degradationsAreTheTiersOwn,
+                                     plan: plan)
+        switch plan.destination {
         case .live:
             apply(items: terminal)
             await publish()
         case .frozen:
             for (item, result) in terminal {
                 answers[item.id] = result
-                // A held frame's answers are a moment's, not this sighting's: a
-                // live tick that reconciles while the frame is still held would
-                // prune the string out of `settledOutcomes` (its key is not on
-                // the live picture) and the frame's next refresh would ask for
-                // it again — the answer the elder already paid for, paid for
-                // again (review). Held until the frame is put down, released by
-                // `discardHeldAnswers`.
-                heldSettledKeys.insert(item.id)
+            }
+            // A held frame's answers are a moment's, not this sighting's: a
+            // live tick that reconciles while the frame is still held would
+            // prune the string out of `settledOutcomes` (its key is not on
+            // the live picture) and the frame's next refresh would ask for
+            // it again — the answer the elder already paid for, paid for
+            // again (review). Held until the frame is put down, released by
+            // `discardHeldAnswers`.
+            //
+            // Two tests before anything is held, and both are review findings.
+            // **What this plan settled**, not what it was handed: a key the
+            // ledger already held was deduped by the terminal writer, and
+            // holding it made this frame the owner of an answer another plan
+            // wrote — which `discardHeldAnswers` then deleted out of
+            // `settledOutcomes` at the thaw, destroying a live settlement and
+            // re-emitting the degradation the dedup existed to prevent. And
+            // **the frame this plan was made for**: a plan that lands after the
+            // elder put the picture down holds nothing, so its keys cannot wait
+            // for a thaw that has already happened.
+            guard plan.frozenEpoch == heldFrameEpoch else { return }
+            for id in settled {
+                if let result = answers[id] { heldSettledKeys[id] = result }
             }
         }
     }
@@ -1695,6 +1805,18 @@ actor LiveTranslationPipeline {
         var reserved: [(CloudTranslationTier.Item, LiveTranslateError)] = []
         /// The strings the elder is being asked about: no send, no failure.
         var awaiting: [CloudTranslationTier.Item] = []
+        /// The tier that produced these terminal results reported its own
+        /// failures — `CloudTranslationTier.reportDegradation`, once per reason,
+        /// counted in the regions it covers. Set on the `.answered` branch and
+        /// nowhere else, because that branch is the only one whose results came
+        /// out of a `BatchResult`: a gate refusal no tier ever saw, a device
+        /// ending and a held frame's degradation were written by this pipeline
+        /// and are this pipeline's to report. This flag is what keeps the one
+        /// outage from being counted twice, now that both layers report (review
+        /// of d33089d: deleting the tier's emission instead took the evidence
+        /// with it for every failure the caller never settles — the reserved
+        /// ones — and left `SecurityEvidenceBoundaryTests` red).
+        var degradationsAreTheTiersOwn = false
         /// Where each terminal answer came from — `.cache` for a string the
         /// tier served out of the device's own store, `.fresh` for a genuine
         /// response. Carried out of the gate because the gate is the last place
@@ -1756,6 +1878,7 @@ actor LiveTranslationPipeline {
             guard !isClosed else { return GateDecision() }
             guard reservingFallback else {
                 return GateDecision(terminal: items.map { ($0, batch.result(for: $0)) },
+                                    degradationsAreTheTiersOwn: true,
                                     origins: batch.origins(for: items))
             }
             // The strings the tier left unanswered, and the reason it left
@@ -1776,6 +1899,11 @@ actor LiveTranslationPipeline {
             let settled = items.filter { !reservedIDs.contains($0.id) }
             return GateDecision(terminal: settled.map { ($0, batch.result(for: $0)) },
                                 reserved: reserved,
+                                // The reserved strings' failures ride in the
+                                // same `BatchResult`, and the tier reported
+                                // them there: an outage the router works around
+                                // is still an outage the evidence counts.
+                                degradationsAreTheTiersOwn: true,
                                 origins: batch.origins(for: settled))
         }
     }
@@ -1800,8 +1928,8 @@ actor LiveTranslationPipeline {
 
         let brain = self.brain
         let generation = Task { await brain.translate(items.map(\.text)) }
-        let outcome = await Self.waiting(for: generation,
-                                         upTo: config.brainTranslationStageDeadlineSeconds)
+        let (outcome, arrival) = await Self.waiting(for: generation,
+                                                    upTo: config.brainTranslationStageDeadlineSeconds)
         generation.cancel()
         guard let outcome else {
             // The wait ended with no outcome, and two arrivals end it that way.
@@ -1813,7 +1941,13 @@ actor LiveTranslationPipeline {
             // purpose). Reporting the second as the first fabricated an
             // `inferenceTimeout` for a decode that was cancelled — an outage
             // the evidence counted and the model never had (review).
-            let stage: BrainFailureStage = Task.isCancelled ? .cancelled : .stageDeadline
+            //
+            // The stage is the **arbiter's** answer, not this task's: the two
+            // arms are the clock and the cancellation, and `Task.isCancelled`
+            // is sticky, so a plan cancelled in the window between a real
+            // deadline and this line reported the elapsed deadline as a
+            // cancellation (review finding 8).
+            let stage: BrainFailureStage = arrival == .cancellation ? .cancelled : .stageDeadline
             events.brainTranslationUnavailable(.inferenceTimeout, stage: stage)
             return nil
         }
@@ -1837,8 +1971,12 @@ actor LiveTranslationPipeline {
     /// tier's own timeout had already elapsed, the decoder ran to its end
     /// producing an answer nobody would apply, and the next capture queued
     /// behind a freeze that was still coming.
+    /// - Returns: the outcome, and which arm ended the wait. The caller needs
+    ///   the second half to name the stage honestly: `nil` alone cannot say
+    ///   whether the clock ran out or the session walked away (review finding
+    ///   8 — the sticky cancellation flag was standing in for the arrival).
     private static func waiting(for work: Task<LocalBrainTranslationOutcome, Never>,
-                                upTo seconds: TimeInterval) async -> LocalBrainTranslationOutcome? {
+                                upTo seconds: TimeInterval) async -> BrainStageRace.Decision {
         // The arbiter is created **before** the cancellation handler is
         // installed, so a cancellation that has already been requested when this
         // call begins finds an object to end the wait through: a continuation
@@ -1850,7 +1988,7 @@ actor LiveTranslationPipeline {
                 race.start(continuation, after: seconds, awaiting: work)
             }
         } onCancel: {
-            race.finish(with: nil)
+            race.finish(with: nil, arrival: .cancellation)
         }
     }
     /// [RELIABILITY-ROUTER] Resume the strings whose consent question has just
@@ -1923,9 +2061,22 @@ actor LiveTranslationPipeline {
             // half through `startResolution`, the frozen half inline — so a
             // session that ended mid-plan could not stop the frozen one walking
             // its strings to a tier (review).
+            //
+            // **The counts come with the strings.** A held frame's ask was
+            // raised over a still that is not on the live picture, so the
+            // scanner counts 0 regions for its strings and the degradation
+            // count fell back to the floor of 1 whatever the frame showed
+            // (review finding 6). The ask recorded the frame's own multiplicity
+            // (`PendingAsk.regionsShowing`); the retry hands it back, and it is
+            // the count the terminal writer uses for these strings.
+            var counts: [String: Int] = [:]
+            for ask in asks.values where !ask.isLive {
+                if let showing = ask.regionsShowing { counts[ask.item.id] = showing }
+            }
             let plan = resolutionTask(ResolutionRequest(items: frozen,
                                                         urgency: .explicitAsk,
-                                                        destination: .live))
+                                                        destination: .live,
+                                                        regionCounts: counts))
             _ = await plan.value
         }
     }
@@ -1999,19 +2150,46 @@ actor LiveTranslationPipeline {
                        regionCounts: [String: Int] = [:]) async -> [String: TranslationResult]? {
         guard !isClosed, !items.isEmpty else { return nil }
         // A string a live plan is already working on is **that plan's** to
-        // answer. The live adapter has always filtered its own hand-over
-        // against `attemptKeys`; the frozen half did not, so a refresh could
-        // re-ask a string the live cycle had in flight and pay for the same
-        // answer twice (review: the frozen adapter skipped the live one's
-        // claim filter). Dropped, not answered: the plan in flight has not
-        // settled it yet, so there is nothing honest to hand back, and the
-        // frame's next refresh — or the answer's own publication — carries it.
+        // answer, and the frame waits for it rather than dropping it. The live
+        // adapter has always filtered its own hand-over against `attemptKeys`;
+        // the frozen half did not, so a refresh could re-ask a string the live
+        // cycle had in flight and pay for the same answer twice (review: the
+        // frozen adapter skipped the live one's claim filter). Dropping those
+        // strings was the first fix for that, and it left the frame showing
+        // "translating…" for its whole life: the live plan settled the string a
+        // moment later, into the live picture, and nothing asked the frame to
+        // render it (review finding 2).
+        //
+        // So the frame waits for the owners. Their answers land in
+        // `settledOutcomes` — and in the live publication — and the plan below
+        // then answers them from that ledger (step 0) without a second payment,
+        // which is what routes a live settlement to the held picture. Bounded
+        // by the same deadlines every plan already has, because the wait is on
+        // plans whose every stage is bounded.
+        let claimed = items.filter { attemptKeys.contains($0.id) }
+        if !claimed.isEmpty {
+            let owners = Set(claimed.compactMap { claimOwner[$0.id] })
+            for owner in owners {
+                guard let task = resolutionTasks[owner] else { continue }
+                _ = await task.value
+            }
+            guard !isClosed else { return nil }
+        }
         let unclaimed = items.filter { !attemptKeys.contains($0.id) }
         guard !unclaimed.isEmpty else { return nil }
-        let answers = await runResolution(ResolutionRequest(items: unclaimed,
-                                                            urgency: .capture,
-                                                            destination: .frozen,
-                                                            regionCounts: regionCounts))
+        // Registered in the session's task tree **and** awaited — the shape the
+        // prompt's frozen retry uses, for the same two reasons: a thaw, a resume
+        // or a close must be able to stop this plan, and the caller needs the
+        // answers before it draws the frame. The claim and the plan's own
+        // context are `resolutionTask`'s, so this path owns exactly the keys it
+        // claimed (review finding 4) and carries the epoch of the frame it was
+        // made for (review finding 3).
+        let plan = resolutionTask(ResolutionRequest(items: unclaimed,
+                                                    urgency: .capture,
+                                                    destination: .frozen,
+                                                    regionCounts: regionCounts,
+                                                    frozenEpoch: heldFrameEpoch))
+        let answers = await plan.value
         return answers.isEmpty ? nil : answers
     }
 
@@ -2024,10 +2202,29 @@ actor LiveTranslationPipeline {
     /// picture is untouched: a key that is on screen now keeps its answer
     /// through the ordinary reconcile path.
     func discardHeldAnswers() async {
+        // The epoch moves **first, and whatever is held** — including nothing
+        // (review finding 3, "keys committed after the thaw guard"). The guard
+        // this replaced returned before the epoch moved whenever no answer had
+        // been held yet, which is exactly the window a frame is put down in: a
+        // frozen plan still in flight (a capture against a slow tier) landed a
+        // moment later, saw the epoch it was born under still current, and held
+        // its answers for a picture that no longer existed — they were then
+        // never released, and the live prune could not take them back either.
+        // The counter is a generation marker, not a record of what is held, so
+        // moving it costs nothing and closing the window is the whole point.
+        heldFrameEpoch += 1
         guard !heldSettledKeys.isEmpty else { return }
         let released = heldSettledKeys
         heldSettledKeys.removeAll()
-        settledOutcomes = settledOutcomes.filter { !released.contains($0.key) }
+        // Only the entries this frame's plan actually settled are dropped, and
+        // only while they are still the answer the ledger holds. A key a live
+        // plan settled over the top of the frame's answer is that plan's, and
+        // deleting it here destroyed a live settlement — and, for a degraded
+        // one, left the string to be settled a second time (review finding 3).
+        settledOutcomes = settledOutcomes.filter { key, result in
+            guard let held = released[key] else { return true }
+            return result != held
+        }
     }
     /// The session's next ordering value (AM-6), for a publication this actor
     /// did not build. One counter per session: a frozen frame's publication
@@ -2089,8 +2286,36 @@ actor LiveTranslationPipeline {
         return max(1, regionCount(forKey: key))
     }
 
-    private func release(keys: [String]) {
-        attemptKeys.subtract(keys)
+    /// Claims `keys` for one plan: the claim is owed, and it is **this plan's**
+    /// to release.
+    ///
+    /// A key another plan already holds keeps its owner. The claim is a
+    /// reference — "nobody else may ask about this string until I am done with
+    /// it" — so a second plan that overwrote the owner would take over a string
+    /// the first is still working on, and the first plan's release (which is
+    /// what the ownership exists for) would then drop the second plan's claim
+    /// (review finding 4).
+    private func claim(keys: [String], by token: UUID) {
+        for key in keys where claimOwner[key] == nil {
+            attemptKeys.insert(key)
+            claimOwner[key] = token
+        }
+    }
+
+    /// Releases the keys **this plan** claimed, and only those.
+    ///
+    /// Deliberately not "subtract these keys from the ledger": a deferral (a
+    /// clock holding a string, a batch bound leaving the surplus unasked, an ask
+    /// whose question the elder is being asked) hands a string back, and it may
+    /// only hand back what it is holding. A key that another plan claimed is
+    /// still that plan's question, and releasing it here made the string
+    /// dispatchable while the plan that owned it was still working — which is
+    /// the double ask the claim ledger exists to prevent (review finding 4).
+    private func release(keys: [String], by token: UUID) {
+        for key in keys where claimOwner[key] == token {
+            attemptKeys.remove(key)
+            claimOwner[key] = nil
+        }
     }
 
     /// **The** terminal writer: the one place a string's answer becomes the
@@ -2115,19 +2340,31 @@ actor LiveTranslationPipeline {
     ///
     /// One rule from here on, and it is a rule rather than a habit because the
     /// evidence file is how "which tier failed, how often" is answered: **every
-    /// terminal outcome is written here, and every degradation written here is
-    /// emitted exactly once, counted in regions.** No other code in this
-    /// pipeline emits `translationDegraded` (the cloud tier no longer emits it
-    /// either), so a degradation can be neither double-counted nor silently
-    /// dropped, and the claim ledger cannot disagree with the outcomes it holds.
+    /// terminal outcome is written here, and every degradation is emitted
+    /// exactly once, counted in regions.** No other code in this pipeline emits
+    /// `translationDegraded`, and the cloud tier emits it for the failures it
+    /// returns and for nothing else: this writer skips exactly those
+    /// (`degradationsAreTheTiersOwn`), because the tier is the layer that knows
+    /// the failure class, counts the regions it covers, and keeps the record
+    /// even when the caller reserves the string instead of settling it. So a
+    /// degradation can be neither double-counted nor silently dropped, and the
+    /// claim ledger cannot disagree with the outcomes it holds.
     ///
     /// Callers pass terminal results only — a `.pending` is not an answer the
     /// session can write, and `commit` filters it out. A string no tier answered
     /// keeps its claim for the caller's own release, so it is asked again rather
     /// than settled by a claim nobody made.
+    /// - Returns: the keys this call actually wrote. The caller that holds a
+    ///   held frame's answers holds **exactly these** and nothing else (review
+    ///   finding 3): a key that was deduped here belongs to the plan that
+    ///   settled it first, and a frame that claimed it would release another
+    ///   plan's answer at its own thaw.
+    @discardableResult
     private func settleTerminal(_ answered: [(CloudTranslationTier.Item, TranslationResult)],
-                                regionCounts: [String: Int] = [:],
-                                origins: [String: LiveTranslateResolutionOrigin] = [:]) {
+                                regionCounts: [String: Int],
+                                origins: [String: LiveTranslateResolutionOrigin],
+                                degradationsAreTheTiersOwn: Bool,
+                                plan: PlanContext) -> Set<String> {
         var reasons: [TranslationUnavailableReason: Int] = [:]
         var settled: [String] = []
 
@@ -2143,8 +2380,20 @@ actor LiveTranslationPipeline {
             // #100, finding 3: the double count this pipeline used to have).
             // The claim is still released: the string has been answered, and
             // the ledger's job is to stop a *third* attempt, not this one.
-            if settledOutcomes[item.id] == result {
-                attemptKeys.remove(item.id)
+            //
+            // The comparison is on the **answer**, not on the whole result
+            // (review finding 9). `TranslationResult` carries the region's
+            // spelling of the original text, and two regions showing the same
+            // string can be recognized differently ("Light" beside "LIGHT")
+            // while normalizing to the one key this ledger is indexed by: an
+            // equality test that included the spelling let the second region
+            // settle a string the first had already settled, which counted its
+            // degradation twice. The **first writer's spelling wins**, and it
+            // wins deterministically because the actor serializes these calls;
+            // every region still renders its own text, because that text is the
+            // region's (`restating`/`applying`) and never the ledger's.
+            if let existing = settledOutcomes[item.id], Self.sameAnswer(existing, result) {
+                release(keys: [item.id], by: plan.token)
                 continue
             }
             settledOutcomes[item.id] = result
@@ -2154,14 +2403,15 @@ actor LiveTranslationPipeline {
                                                                overrides: regionCounts)
             }
         }
-        guard !settled.isEmpty else { return }
+        guard !settled.isEmpty else { return [] }
 
         // The ledger transition, in one place: a string this writer settled has
         // had its attempt answered, so its claim is released here and not by the
-        // caller. (A string the *caller* is still working on re-claims itself by
+        // caller — and only if this plan is the one holding it (review finding
+        // 4). (A string the *caller* is still working on re-claims itself by
         // settling it here; a string no tier answered is never released by this
         // function at all.)
-        attemptKeys.subtract(settled)
+        release(keys: settled, by: plan.token)
 
         // The cascade's provenance (owner ask, 2026-09-19): which tier answered
         // and where the answer came from, counts only. Emitted here so every
@@ -2182,9 +2432,40 @@ actor LiveTranslationPipeline {
                                        count: entry.count)
         }
         // One event per reason, in a stable order, so two runs of the same scene
-        // produce the same evidence file.
+        // produce the same evidence file — unless the tier that produced these
+        // failures already reported them, which is the `.answered` branch and
+        // only that branch (`degradationsAreTheTiersOwn`). The outcomes above
+        // are still written: who reports a degradation and who writes the
+        // outcome are two different jobs, and the tier can only do the first.
+        guard !degradationsAreTheTiersOwn else { return Set(settled) }
         for (reason, count) in reasons.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
             events.translationDegraded(reason: reason, regionCount: count)
+        }
+        return Set(settled)
+    }
+
+    /// Whether two results are the same **answer** for the same string,
+    /// whatever the region that produced them spelled its original text as.
+    ///
+    /// The ledger is keyed by the normalized string, so this is the comparison
+    /// its keys promise: same translation and tier, or same degradation reason.
+    /// The original text is the *region's* and is deliberately not compared
+    /// (review finding 9). A `.pending` never matches anything terminal.
+    ///
+    /// Internal rather than private so the review's own test can pin the rule
+    /// itself — one spelling of a string is not a different answer from another
+    /// — rather than only its effect through two racing plans.
+    static func sameAnswer(_ lhs: TranslationResult,
+                           _ rhs: TranslationResult) -> Bool {
+        switch (lhs.outcome, rhs.outcome) {
+        case (.pending, .pending):
+            return true
+        case (.resolved(_, let left, let leftTier), .resolved(_, let right, let rightTier)):
+            return left == right && leftTier == rightTier
+        case (.degraded(_, let left), .degraded(_, let right)):
+            return left == right
+        default:
+            return false
         }
     }
 
@@ -2221,6 +2502,10 @@ actor LiveTranslationPipeline {
         for task in resolutionTasks.values { task.cancel() }
         resolutionTasks.removeAll()
         attemptKeys.removeAll()
+        // The owners go with the claims: a plan whose task was just cancelled
+        // has no claim to release, and a stale owner would make a later plan's
+        // release a no-op (review finding 4).
+        claimOwner.removeAll()
         // The attempt ledgers are claims about what has already been spent in
         // this sighting, and cancelling the tasks takes every such claim back:
         // both callers (a resume, a close) restart the scene, so the next
@@ -2232,6 +2517,9 @@ actor LiveTranslationPipeline {
         // the whole settled set a line later anyway, and holding the keys here
         // would keep a frame's answers alive past the session that framed them.
         heldSettledKeys.removeAll()
+        // …and the epoch moves with them, so a frozen plan still in flight
+        // cannot hold its answers against a session that has already restarted.
+        heldFrameEpoch += 1
     }
 
     private func forget(task token: UUID) {
@@ -2370,17 +2658,35 @@ extension LiveTranslationPipeline: LiveTranslateLiveCycle {}
 /// the lock.
 private final class BrainStageRace: @unchecked Sendable {
 
+    /// Which arm ended the wait. The two `nil` outcomes are not the same event —
+    /// one is an outage the evidence counts, the other is the session ending its
+    /// own wait — and the caller cannot tell them apart after the fact: asking
+    /// `Task.isCancelled` answers "has this task ever been cancelled", which is
+    /// sticky and can turn a genuine deadline into a cancellation (review
+    /// finding 8). So the arm that wins records itself here.
+    enum Arrival: Equatable {
+        case generation
+        case deadline
+        case cancellation
+    }
+
+    /// One arrival: the outcome it decided (nil for the clock and the
+    /// cancellation) and the arm that decided it. The arrival travels **with**
+    /// the outcome through the continuation, so the caller reads the arm the
+    /// wait actually ended on rather than asking a sticky flag afterwards.
+    typealias Decision = (outcome: LocalBrainTranslationOutcome?, arrival: Arrival)
+
     private let lock = NSLock()
-    private var continuation: CheckedContinuation<LocalBrainTranslationOutcome?, Never>?
+    private var continuation: CheckedContinuation<Decision, Never>?
     /// The arrival that came before the wait began: `nil` is "nothing has
-    /// arrived yet", `.some(nil)` is "it was decided with no outcome" (the
-    /// clock or a cancellation), and `.some(.some(outcome))` is the generation.
-    private var arrivedEarly: LocalBrainTranslationOutcome??
+    /// arrived yet"; otherwise the decision, taken by whichever arm got there
+    /// first (a `.generation` arrival always carries an outcome).
+    private var arrivedEarly: Decision?
 
     /// Begins the wait: takes the continuation, and starts the two arms that
     /// have not been observed yet. Called synchronously before the suspension,
     /// so an arrival that already happened resumes `continuation` here.
-    func start(_ continuation: CheckedContinuation<LocalBrainTranslationOutcome?, Never>,
+    func start(_ continuation: CheckedContinuation<Decision, Never>,
                after seconds: TimeInterval,
                awaiting work: Task<LocalBrainTranslationOutcome, Never>) {
         lock.lock()
@@ -2395,20 +2701,21 @@ private final class BrainStageRace: @unchecked Sendable {
 
         Task {
             let outcome = await work.value
-            self.finish(with: outcome)
+            self.finish(with: outcome, arrival: .generation)
         }
         Task {
             try? await Task.sleep(for: .seconds(seconds))
-            self.finish(with: nil)
+            self.finish(with: nil, arrival: .deadline)
         }
     }
 
-    func finish(with outcome: LocalBrainTranslationOutcome?) {
+    func finish(with outcome: LocalBrainTranslationOutcome?, arrival: Arrival) {
+        let decision: Decision = (outcome: outcome, arrival: arrival)
         lock.lock()
         let waiting = continuation
         continuation = nil
-        if waiting == nil, arrivedEarly == nil { arrivedEarly = .some(outcome) }
+        if waiting == nil, arrivedEarly == nil { arrivedEarly = decision }
         lock.unlock()
-        waiting?.resume(returning: outcome)
+        waiting?.resume(returning: decision)
     }
 }

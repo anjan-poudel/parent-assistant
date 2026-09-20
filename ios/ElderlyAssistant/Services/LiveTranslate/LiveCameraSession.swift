@@ -1417,18 +1417,37 @@ final class LiveCameraSession {
         }
 
         guard reachedRunning else {
+            let landed: State = withLock { currentState }
             // The teardown that won the race could not stop the capture stack
             // itself: when it read `startHasRun` the start had not set it yet,
             // so it treated the session as one that never ran. The stack is
             // ours to stop.
-            if case .stopped = withLock({ currentState }) {
+            if case .stopped = landed {
                 onCaptureQueue { capture.stopRunning() }
             }
             // `pause` on a session that is no longer `.starting` leaves the
             // pending interruption for whoever owns the state now, and the
             // state's own transition already reported whatever the warden
             // needs to hear.
-            return .success(())
+            //
+            // **The result is the state's, not this call's belief** (review
+            // finding 5). `.interrupted` is a session that started and whose
+            // capture the interruption then stopped — the state and
+            // `camera_interrupted` already say so, and the caller's next move is
+            // `resume()`. `.running` is a resume that won the state race while
+            // this call was still starting the stack: the session is live. A
+            // session that is `.stopped` **did not start**, and `start()`'s
+            // contract for one is the same failure the top of this function
+            // reports: a torn-down stack is not resurrected behind the caller's
+            // back, and reporting success told the caller a camera nobody holds
+            // was live — the one answer the caller cannot recover from, because
+            // nothing later corrects it.
+            switch landed {
+            case .running, .interrupted:
+                return .success(())
+            default:
+                return .failure(.cameraUnavailable(.configurationFailed))
+            }
         }
 
         events.sessionStarted()
@@ -1814,16 +1833,29 @@ final class LiveCameraSession {
     /// is waiting for was already spent. Reading the state at the moment of
     /// the announcement makes every announcement describe the session as it
     /// actually is, whatever raced the caller.
+    /// **The read and the delivery are one step**, on the serial capture queue
+    /// (review finding 12). Reading the level under the lock and then delivering
+    /// outside it let two racing calls invert: the one that read `true` could
+    /// deliver after the one that read `false`, and the warden was left sized
+    /// for a camera that is not running with nothing later to correct it —
+    /// because the level is reported once per change, so the pair that would
+    /// have fixed it was already spent. On the capture queue the two halves
+    /// cannot interleave, and the read still happens at the moment of the
+    /// announcement. (Delivering under the lock would order them too, at the
+    /// cost of running an observer — the warden's profile write — with this
+    /// session's lock held.)
     private func announceCaptureLiveness() {
-        let announcement: Bool? = withLock {
-            let live: Bool
-            if case .running = currentState { live = true } else { live = false }
-            guard activeAnnounced != live else { return nil }
-            activeAnnounced = live
-            return live
+        onCaptureQueue {
+            let announcement: Bool? = withLock {
+                let live: Bool
+                if case .running = currentState { live = true } else { live = false }
+                guard activeAnnounced != live else { return nil }
+                activeAnnounced = live
+                return live
+            }
+            guard let announcement else { return }
+            onSessionActiveChanged?(announcement)
         }
-        guard let announcement else { return }
-        onSessionActiveChanged?(announcement)
     }
 
     /// Runs `body` on the serial capture queue, which owns every capture-stack

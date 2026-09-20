@@ -323,20 +323,57 @@ struct LogSanitiser {
         "heldSeconds"
     ]
 
-    /// Whether a metadata value is a bare count: ASCII digits with at most one
-    /// decimal point, or one of the two boolean words.
+    /// The longest **bare** digit run each numeric key may legitimately carry —
+    /// the bound that keeps the exemption from being a bypass (review finding
+    /// 10).
+    ///
+    /// The exemption above exists because a byte total *is* a 9-or-10-digit run,
+    /// which is exactly the phone pattern; the fix for that cannot be to
+    /// re-redact the ledger (finding B2), so the count shape is bounded by what
+    /// each key's unit can honestly hold. A run past its key's bound is not a
+    /// count for that key and takes the full scrub — which is where an
+    /// unformatted phone number written into one of these keys is caught.
+    ///
+    /// The bounds are the units', not the values': a byte total on a phone is
+    /// under 1e12 (12 digits), and a load or a hold is under 1e9 ms/seconds
+    /// (`load_ms: "86400000"` — a day — is a real reading and is well inside
+    /// it). A key named in `numericMetadataKeys` with no bound here gets `0`, so
+    /// a key added without a stated unit is scrubbed rather than trusted: the
+    /// fail-closed direction. The residual is stated rather than implied: a bare
+    /// phone number *inside* a byte key's bound is indistinguishable from a byte
+    /// total by shape, and the ledger's readability is the requirement that wins
+    /// (see the B2 tests).
+    private static let numericMetadataDigitLimits: [String: Int] = [
+        "liveBytes": 12,
+        "budgetBytes": 12,
+        "transientLiveBytes": 12,
+        "phys_footprint": 12,
+        "ceiling_bytes": 12,
+        "working_set_bytes": 12,
+        "projected_peak_bytes": 12,
+        "freed_bytes": 12,
+        "load_ms": 9,
+        "heldSeconds": 9
+    ]
+
+    /// Whether a metadata value is a bare count **for its key**: ASCII digits
+    /// with at most one decimal point and no more digits than the key's unit can
+    /// carry, or one of the two boolean words.
     ///
     /// Anything else is not a number — a leading `+`, a space, a dash, a
-    /// parenthesis run — and keeps the full PII scrub, because that is a phone
-    /// number's shape. A lone `.` is not a count either: the digit is what
-    /// makes it one.
-    private static func isBareCount(_ value: String) -> Bool {
+    /// parenthesis run, a run longer than the bound — and keeps the full PII
+    /// scrub, because that is a phone number's shape. A lone `.` is not a count
+    /// either: the digit is what makes it one.
+    private static func isBareCount(_ value: String, forKey key: String) -> Bool {
         if value == "true" || value == "false" { return true }
+        let limit = numericMetadataDigitLimits[key] ?? 0
         var seenDigit = false
         var seenPoint = false
+        var digits = 0
         for character in value {
             if character.isASCII, character.isNumber {
                 seenDigit = true
+                digits += 1
                 continue
             }
             if character == ".", !seenPoint, seenDigit {
@@ -345,7 +382,7 @@ struct LogSanitiser {
             }
             return false
         }
-        return seenDigit
+        return seenDigit && digits <= limit
     }
 
     private static let piiPatterns: [NSRegularExpression] = {
@@ -368,11 +405,15 @@ struct LogSanitiser {
             // that bound (T-050/B2). Every other allowed key is unchanged.
             if Self.codeShapedMetadataKeys.contains(key) {
                 cleanMetadata[key] = boundErrorCode(value) ?? ""
-            } else if Self.numericMetadataKeys.contains(key), Self.isBareCount(value) {
+            } else if Self.numericMetadataKeys.contains(key),
+                      Self.isBareCount(value, forKey: key) {
                 // A count is not a phone number. The allow-list's own contract
                 // says these keys carry numbers, so the scrub's work here is to
-                // catch a value that is *not* one (a key that drifts into
-                // carrying text still goes through the full scrub below).
+                // catch a value that is *not* one for its key: text, separators,
+                // a sign, or a digit run longer than the unit can carry — each
+                // of which takes the full scrub below (review finding 10: the
+                // unlimited digit run was the unformatted phone number's way
+                // through).
                 cleanMetadata[key] = value
             } else {
                 cleanMetadata[key] = scrubValue(value)
