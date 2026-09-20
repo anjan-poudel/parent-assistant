@@ -1286,7 +1286,13 @@ struct LiveTranslateConfig: Equatable {
     /// tier was handed while the pipeline waited). Four strings ≈ 16–20 s,
     /// leaving the bound its margin; a denser scene dispatches
     /// sequentially and its answers arrive batch by batch.
-    var brainTranslationMaxStrings: Int = 4
+    /// The bound the tier's batch may not exceed. Pinned at the floor the
+    /// reserved-fallback invariant needs — a full visible scene
+    /// (`declutterMaxRegions`) must fit one batch — and the time a batch
+    /// of this size needs comes from the [DYNAMIC-TIMEOUT] bound, not
+    /// from cutting the batch smaller (6 strings ≈ 90 characters ≈ 26 s,
+    /// inside the kill-safe ceiling).
+    var brainTranslationMaxStrings: Int = 6
 
     /// Characters per brain request — the second bound on the same batch, for
     /// a scene of two long lines rather than eight short ones. Same rule: the
