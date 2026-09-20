@@ -130,6 +130,21 @@ extension LocalBrainTranslating {
     func release() async {}
 }
 
+extension LocalBrainTranslationTier {
+    /// [DYNAMIC-TIMEOUT] (owner directive: "a default floor and the rest
+    /// driven by the source text's length.") The effective bound for one
+    /// batch: the floor plus a per-character share of the source text,
+    /// clamped to the kill-safe ceiling. Pure and static so the suites pin
+    /// it without a model.
+    static func effectiveTimeout(for strings: [String],
+                                 config: LiveTranslateConfig) -> TimeInterval {
+        let characters = strings.reduce(0) { $0 + $1.count }
+        let dynamic = config.brainTranslationBaseTimeoutSeconds
+            + Double(characters) * config.brainTranslationTimeoutPerCharacterSeconds
+        return min(config.brainTranslationMaxTimeoutSeconds, dynamic)
+    }
+}
+
 /// The outcome of one batched attempt.
 struct LocalBrainTranslationOutcome: Equatable {
     /// Source string → translation, for the strings this attempt answered.
@@ -490,6 +505,15 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
     func translate(_ strings: [String]) async -> LocalBrainTranslationOutcome {
         guard !strings.isEmpty else { return .none }
 
+        // [DYNAMIC-TIMEOUT] (owner directive, 2026-09-20, re-landed on the
+        // owner's 21:16/21:18 captures: the flat 25 s bound refused the
+        // medical-page batches — one string of 110–180 characters, which
+        // the model needs ~0.2 s/char for.) The effective bound is the
+        // floor plus the source text's length, clamped to the kill-safe
+        // ceiling. Computed once here, so the generation call below and
+        // the tier's own deadline record agree.
+        let timeout = Self.effectiveTimeout(for: strings, config: config)
+
         #if canImport(LLM)
         guard let modelStore, let modelID = installedModel(),
               let modelURL = modelStore.path(for: modelID) else {
@@ -555,7 +579,7 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
                                                                           targetLanguage: targetLanguage),
                                                       jsonSchema: Self.jsonSchema,
                                                       modelURL: modelURL,
-                                                      timeout: config.brainTranslationTimeoutSeconds)
+                                                      timeout: timeout)
             let report = Self.report(output,
                                      sources: batch,
                                      targetLanguage: targetLanguage,

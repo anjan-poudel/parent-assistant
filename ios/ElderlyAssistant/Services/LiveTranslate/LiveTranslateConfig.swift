@@ -1209,6 +1209,17 @@ struct LiveTranslateConfig: Equatable {
     /// Nominal, not frozen: the device spike to come may move it.
     var brainTranslationTimeoutSeconds: TimeInterval = 25
 
+    /// [DYNAMIC-TIMEOUT] (owner directive, 2026-09-20: "make the timeout
+    /// dynamic — a default floor and the rest driven by the source text's
+    /// length.") The flat 25 s bound refused the owner's medical-page
+    /// batches (one string of 110–180 characters, ~0.2 s/char measured).
+    /// The tier's effective bound is `base + perChar × characters`,
+    /// clamped to the kill-safe maximum (the 45 s patient bound was
+    /// jetsam-killed — the owner's 10:48 capture's signal 9).
+    var brainTranslationBaseTimeoutSeconds: TimeInterval = 8
+    var brainTranslationTimeoutPerCharacterSeconds: TimeInterval = 0.2
+    var brainTranslationMaxTimeoutSeconds: TimeInterval = 30
+
     /// Grace added to `brainTranslationTimeoutSeconds` to form the pipeline's
     /// own deadline for the whole brain stage.
     ///

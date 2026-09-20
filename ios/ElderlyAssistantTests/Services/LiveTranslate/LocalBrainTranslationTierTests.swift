@@ -400,14 +400,17 @@ final class LocalBrainTranslationTierTests: XCTestCase {
                       "the mirror direction is derived, not duplicated: \(inEnglish)")
     }
 
-    func testTheConfiguredTimeoutIsTheOneTheGenerationGets() async throws {
+    func testTheEffectiveTimeoutIsTheOneTheGenerationGets() async throws {
         var config = LiveTranslateConfig.default
-        config.brainTranslationTimeoutSeconds = 7
+        config.brainTranslationBaseTimeoutSeconds = 7
+        config.brainTranslationTimeoutPerCharacterSeconds = 0
+        config.brainTranslationMaxTimeoutSeconds = 60
         try await withTier(config: config) { tier, generator, _ in
             generator.output = answer([brainAnswer])
             _ = await tier.translate([brainText])
             XCTAssertEqual(generator.timeouts, [7],
-                           "the deadline is the config's, not a literal at the call site")
+                           "the generation gets the EFFECTIVE bound — the dynamic "
+                           + "formula's, not a literal at the call site")
         }
     }
 
