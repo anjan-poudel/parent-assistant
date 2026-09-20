@@ -350,7 +350,9 @@ final class LabelTranslationCacheTests: XCTestCase {
             return XCTFail("a healed store answers normally")
         }
         XCTAssertNil(miss)
-        XCTAssertTrue(bus.events(named: "cache_miss").contains { $0.metadata["origin"] == "persisted" })
+        // [LOG-NOISE] The miss is silent now — the owner's "useful, not
+        // noisy" directive — so the pin is the ordinary lookup shape only.
+        XCTAssertTrue(bus.events(named: "cache_miss").isEmpty)
 
         // The dictionary layer still answers — the store is degraded, never
         // broken (FR-LCT-023).

@@ -204,7 +204,11 @@ final class LabelTranslationCache {
                 return .failure(.cacheReadFailed(failure))
             }
             guard let entry = index[key] else {
-                events.cacheMiss(origin: Origin.persisted.eventOrigin, count: 1)
+                // [LOG-NOISE] (owner directive, 2026-09-20: "logs should be
+                // useful, not noisy and annoying.") A miss per pending
+                // string per pass is the console's loudest line and carries
+                // nothing the hits and the resolutions do not — the miss is
+                // silent, the hit still announces itself.
                 return .success(nil)
             }
             touch(key: key, translation: entry.translation)
