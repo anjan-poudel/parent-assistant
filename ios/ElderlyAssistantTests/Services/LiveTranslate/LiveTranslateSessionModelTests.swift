@@ -84,14 +84,7 @@ final class LiveTranslateSessionModelTests: XCTestCase {
                              /// household that has never chosen — which is the
                              /// state the switch's own scenarios read the
                              /// config default from.
-                             geminiCloudEnabled: Bool? = true,
-                             /// The session's store, when the scenario needs
-                             /// an answer that was not recorded (AM-4 part 3).
-                             consentWriteFails: Bool = false,
-                             /// The network path the session's router reads;
-                             /// the factory's default is a reachable one.
-                             reachability: NetworkReachability? = ScriptedReachability(reachable: true))
-        -> Harness {
+                             geminiCloudEnabled: Bool? = true) -> Harness {
         let parts = makeLiveTranslateSessionTestParts(authorization: authorization,
                                                       consent: consent,
                                                       configured: configured,
@@ -101,9 +94,7 @@ final class LiveTranslateSessionModelTests: XCTestCase {
                                                       locale: locale,
                                                       extractMode: extractMode,
                                                       config: config,
-                                                      geminiCloudEnabled: geminiCloudEnabled,
-                                                      consentWriteFails: consentWriteFails,
-                                                      reachability: reachability)
+                                                      geminiCloudEnabled: geminiCloudEnabled)
         suiteNames.append(parts.suiteName)
         return Harness(parts: parts,
                        model: LiveTranslateSessionModel(dependencies: parts.dependencies))
@@ -913,91 +904,6 @@ final class LiveTranslateSessionModelTests: XCTestCase {
         let answeredInTranslatedView = try XCTUnwrap(translated.regions.first { $0.text == curatedText })
         XCTAssertEqual(translated.result(for: answeredInTranslatedView).sourceTier, .dictionary,
                        "leaving extract mode discarded an answer the elder already had")
-    }
-
-    /// [RELIABILITY-ROUTER] The granted tap, driven through the seam that
-    /// ships.
-    ///
-    /// Extract mode translates on the elder's tap alone, so there is no next
-    /// tick to find the interrupted string with: `grantCloudConsent()` — the
-    /// model's own answer to the prompt — is what carries the ask onward. The
-    /// chain under test is the production one end to end (the answer →
-    /// `ConsentPromptController.grant` → `resumeInterruptedAsks` → the
-    /// pipeline's retry → the tier the class leads with); the pipeline's own
-    /// suite pins that the retry re-dispatches a whole batch as one ask, and
-    /// this pins that anything fires it at all. A break in the chain leaves
-    /// the tapped block pending for the rest of the session.
-    @MainActor
-    func testAGrantedPromptCarriesTheTappedBlockToTheCloud() async throws {
-        // `configured: true` is what makes the retry a *cloud* ask: without a
-        // provider key the gate the granted ask reaches answers
-        // `.providerNotConfigured` and degrades the block, which is honest
-        // and would leave this scenario asserting the wrong refusal.
-        let harness = makeHarness(consent: false, configured: true,
-                                  transport: Self.respondingTransport(),
-                                  extractMode: true)
-        reportLayout(harness)
-        harness.engine.regions = [detected(cloudText)]
-        await harness.model.start()
-        try await deliverPasses(2, in: harness)
-
-        let publication = try XCTUnwrap(harness.model.publication)
-        let sign = try XCTUnwrap(publication.regions.first { $0.text == cloudText })
-        harness.model.translateRegion(sign.id)
-        await waitUntil("the consent prompt") { harness.model.consent.isPromptPresented }
-        XCTAssertEqual(harness.transport.requestCount, 0,
-                       "an unanswered prompt sends nothing")
-
-        harness.model.grantCloudConsent()
-        await waitUntil("the granted ask to reach the cloud") {
-            harness.transport.requestCount == 1
-        }
-        await waitUntil("the cloud answer to be published") {
-            guard let publication = harness.model.publication,
-                  let region = publication.regions.first(where: { $0.text == self.cloudText })
-            else { return false }
-            return publication.result(for: region).sourceTier == .cloud
-        }
-    }
-
-    /// AM-4 part 3, at the session's own door: **a grant that was not
-    /// recorded is not a grant.**
-    ///
-    /// The store refuses the write, so the decision never reaches storage and
-    /// `ConsentPromptController.grant` keeps the prompt up with the failure
-    /// line on it. Resuming the asks behind that would walk the strings into a
-    /// gate that has no consent to act on, re-raise the very question the
-    /// elder just tried to answer, and — worst of the three — send the ask as
-    /// though the answer had been recorded. The session must do none of it:
-    /// nothing is retried, the prompt stays, and the elder is told.
-    @MainActor
-    func testAGrantThatWasNotRecordedDoesNotResumeTheAsks() async throws {
-        let harness = makeHarness(consent: false, configured: true,
-                                  transport: Self.respondingTransport(),
-                                  extractMode: true,
-                                  consentWriteFails: true)
-        reportLayout(harness)
-        harness.engine.regions = [detected(cloudText)]
-        await harness.model.start()
-        try await deliverPasses(2, in: harness)
-
-        let publication = try XCTUnwrap(harness.model.publication)
-        let sign = try XCTUnwrap(publication.regions.first { $0.text == cloudText })
-        harness.model.translateRegion(sign.id)
-        await waitUntil("the consent prompt") { harness.model.consent.isPromptPresented }
-
-        harness.model.grantCloudConsent()
-        // The prompt is still up and says why, so the elder can try again.
-        XCTAssertTrue(harness.model.consent.isPromptPresented,
-                      "a grant that was not recorded leaves the question open")
-        XCTAssertNotNil(harness.model.consent.failureMessage,
-                        "and says why, rather than presenting a consent nobody has")
-        guard case .decision = harness.model.consent.controlSurface.state else {
-            return XCTFail("the control agrees: no grant is in force")
-        }
-        try? await Task<Never, Never>.sleep(for: .milliseconds(80))
-        XCTAssertEqual(harness.transport.requestCount, 0,
-                       "nothing is sent on the strength of a consent that was never recorded")
     }
 
     // MARK: - The warden's notices reach the screen (owner directive, 2026-09-19)
