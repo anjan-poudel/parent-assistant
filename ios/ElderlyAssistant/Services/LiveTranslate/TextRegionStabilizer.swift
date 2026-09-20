@@ -545,6 +545,15 @@ struct TextRegionStabilizer {
     /// overlay renders and the tier translates.
     var visible: [StableTextRegion] { emitted }
 
+    /// [DISPATCH-ON-FIRST-SIGHTING] (owner's 21:46 capture: 103 seconds of
+    /// OCR churn, zero dispatches.) The set the DISPATCH asks about: every
+    /// tracked region's current adopted reading, whether or not the appear
+    /// hysteresis has published it. The consensus still governs what the
+    /// overlay renders (`visible`); this set governs what may be ASKED.
+    /// The pacing clocks bound the model calls and the per-string ledgers
+    /// bound the re-asks.
+    var askable: [StableTextRegion] { regions.map(\.stable) }
+
     /// Every region alive inside the stabiliser (published or still proving
     /// itself). Exposed for diagnostics; the pipeline consumes `visible`.
     var activeRegionCount: Int { regions.count }

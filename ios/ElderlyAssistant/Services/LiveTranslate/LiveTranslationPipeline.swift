@@ -1062,7 +1062,7 @@ actor LiveTranslationPipeline {
     private func reconcile() {
         var next: [TextRegionStabilizer.RegionIdentity: TranslationResult] = [:]
         var visibleKeys: Set<String> = []
-        for region in stabilizer.visible {
+        for region in stabilizer.askable {
             let key = Self.cacheKey(for: region.text, targetLanguage: targetLanguage)
             visibleKeys.insert(key)
             if let existing = outcomes[region.id], existing.isFinal, existing.originalText == region.text {
@@ -1345,7 +1345,7 @@ actor LiveTranslationPipeline {
         guard !isClosed else { return }
         var candidates: [CloudTranslationTier.Item] = []
         var claimed: Set<String> = []
-        for region in stabilizer.visible {
+        for region in stabilizer.askable {
             guard let existing = outcomes[region.id], case .pending = existing.outcome else { continue }
             let key = Self.cacheKey(for: region.text, targetLanguage: targetLanguage)
             if let onlyKeys, !onlyKeys.contains(key) { continue }
@@ -2255,7 +2255,13 @@ actor LiveTranslationPipeline {
         var byKey: [String: TranslationResult] = [:]
         for (item, result) in items { byKey[item.id] = result }
 
-        for region in stabilizer.visible {
+        // [DISPATCH-ON-FIRST-SIGHTING] The askable set feeds the DISPATCH,
+        // but `outcomes` is the publication's map and the publication must
+        // carry exactly the visible regions — an answer for a region that
+        // has not corroborated into `visible` lands in the string ledger
+        // instead, and `reconcile` picks it up when the region appears.
+        let visibleIDs = Set(stabilizer.visible.map(\.id))
+        for region in stabilizer.askable where visibleIDs.contains(region.id) {
             let key = LabelTranslationCache.normalizationKey(text: region.text,
                                                              targetLanguage: targetLanguage)
             guard let result = byKey[key] else { continue }
