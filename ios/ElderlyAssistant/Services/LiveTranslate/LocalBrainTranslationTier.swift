@@ -858,6 +858,9 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
         var lines = [
             "You translate \(source) text into \(language).",
             "Answer with JSON only, exactly one \(language) translation per source, in the same order.",
+            "Translate the MEANING into natural \(language) sentences — never write \(source) words "
+                + "in \(language) letters, never transliterate. A translation of \"cough\" is the "
+                + "\(language) word for coughing, not the sound \"cough\" spelled in \(language) script.",
             "Use \"\" for a source you cannot translate. Keep each translation short.",
             "",
             "Source texts:"
