@@ -3078,6 +3078,381 @@ final class LiveTranslationPipelineTests: XCTestCase {
                        "the granted ask is answered, not left pending on a tick that never comes")
     }
 
+    /// The ask a prompt interrupted has no next tick in extract mode, so the
+    /// session model retries it when the answer arrives. This is that retry,
+    /// with the prompt's own path: the tap raises the question, the grant is
+    /// what carries the ask to the cloud, and nothing is sent before it.
+    @MainActor
+    func testScenarioAPromptAnswerReDispatchesTheInterruptedBatchAsOneAsk() async throws {
+        // The other half of the retry contract (the granted tap itself is
+        // driven through the shipping seam by
+        // `LiveTranslateSessionModelTests`): one prompt interrupted N strings,
+        // so the answer releases N strings — as **one** dispatch and one
+        // request. Retrying per key turns the batch the question was about
+        // into one request per string, and because an explicit ask skips both
+        // pacing clocks (`explicit`), nothing would space them out again.
+        let harness = makeHarness(consent: false,
+                                  transport: Self.respondingTransport(),
+                                  extractionMode: true,
+                                  reachability: ScriptedReachability(reachable: true))
+        await harness.pipeline.updateLayout(layout)
+        // Three strings of ONE class, and the class is the point. The router
+        // leads cloud-first for sentences and device-first for short forms, so
+        // a mixed batch reaches the network as two asks however it was
+        // dispatched — the sentences now, the short forms once the brain has
+        // missed them — and the request count would stop being evidence about
+        // the dispatch. These three are past `maxProvenWords` by construction,
+        // so one dispatch is observably one request.
+        let texts = [cloudText,
+                     "Push the green button before the alarm sounds",
+                     "Beware of the dog behind this gate"]
+        let boxes = [box(0.1, 0.2, 0.8, 0.3),
+                     box(0.1, 0.4, 0.8, 0.5),
+                     box(0.1, 0.6, 0.8, 0.7)]
+        harness.recogniser.defaultStep = .regions(zip(texts, boxes).map { detected($0.0, box: $0.1) })
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        let publication = try await latest(harness)
+        var tapped: [TextRegionStabilizer.RegionIdentity] = []
+        for text in texts {
+            tapped.append(try XCTUnwrap(region(text, in: publication)).id)
+        }
+        for id in tapped { await harness.pipeline.translateRegion(id) }
+        await waitUntil("the prompt to be presented") { harness.controller.isPromptPresented }
+        // **Every tap recorded, not merely the first** (review of #100, finding
+        // 12). A tap's plan is the tap's own task: one that reaches the gate
+        // after the grant below finds a decision in force and sends its ask by
+        // itself, which is a second request and a scenario whose count depends
+        // on which plan happened to be scheduled first. Waiting on the ask set
+        // the answer is about to release makes the sequence deterministic, and
+        // the wait is on the pipeline's own bookkeeping rather than on a sleep.
+        await waitUntil("every tap to be recorded behind the prompt") {
+            await harness.pipeline.awaitingResolutionKeys.count == tapped.count
+        }
+        XCTAssertEqual(harness.transport.requestCount, 0, "an unanswered prompt sends nothing")
+
+        // The elder answers: every string the prompt interrupted goes back as
+        // one ask.
+        if case .failure(let error) = harness.controller.grant() {
+            return XCTFail("a grant must be recorded: \(error)")
+        }
+        await harness.pipeline.retryAwaitingResolution()
+        await waitUntil("the interrupted batch to reach the cloud") {
+            harness.transport.requestCount == 1
+        }
+        try? await Task<Never, Never>.sleep(for: .milliseconds(80))
+        XCTAssertEqual(harness.transport.requestCount, 1,
+                       "three interrupted strings are one ask, not three")
+        // And the one ask carried the whole batch: three strings the elder
+        // answered for in one breath reach the tier together, rather than as
+        // three requests the clocks are skipped for and can no longer space.
+        let request = try XCTUnwrap(harness.transport.requests.first)
+        let carried = Set(TranslationRecordingTransport.items(in: request).values)
+        for text in texts {
+            XCTAssertTrue(carried.contains(text), "\(text) is missing from the one ask")
+        }
+
+        let answered = try await latest(harness)
+        for text in texts {
+            let region = try XCTUnwrap(region(text, in: answered))
+            XCTAssertEqual(answered.result(for: region).sourceTier, .cloud,
+                           "\(text) is answered, not left pending on a tick that never comes")
+        }
+    }
+
+    // MARK: - The shared plan's own rules (review of #100)
+    //
+    // One entry point owns the clock policy, the batch bound, the claim ledger
+    // and the terminal writer, and the three paths are adapters over it. These
+    // are the rules that belong to the plan itself rather than to any one
+    // adapter: what a capture may spend, what an elder's ask must not be held
+    // back by, and what happens when the same string is handed over twice.
+
+    /// One item of a held frame's batch, as the snapshot path hands it over: the
+    /// frame's own key, its text, and the language the pass read.
+    private func frozenItem(_ id: String, _ text: String) -> CloudTranslationTier.Item {
+        CloudTranslationTier.Item(id: id, text: text, detectedSourceLanguage: "en")
+    }
+
+    /// **A capture respects the brain's clock and is not paced by the dispatch
+    /// clock** (owner decision, 2026-09-20).
+    ///
+    /// The difference is what the two clocks are for. The dispatch clock spaces
+    /// *background* work, and a capture is not background work — the elder
+    /// pressed the shutter — so it is not deferred by a tick that happened a
+    /// second ago. The brain's clock protects the *model's load*, and a press is
+    /// exactly the moment the elder is paying attention to the scene: a capture
+    /// that bought a generation per press would thrash the load every time they
+    /// looked at something, and a cloud outage — when the device is the only
+    /// tier left — is when they press it repeatedly.
+    @MainActor
+    func testScenarioACaptureRespectsTheBrainClock() async throws {
+        let clock = ScriptedClock()
+        let brain = RecordingBrain()
+        let config = LiveTranslateConfig.default
+        let harness = makeHarness(consent: true,
+                                  transport: Self.respondingTransport(),
+                                  brain: brain,
+                                  now: { clock.now },
+                                  config: config)
+        await harness.pipeline.updateLayout(layout)
+        let frame = try makeFrame()
+
+        // A generation is paid on the live picture, for a short form the device
+        // leads with.
+        harness.recogniser.defaultStep = .regions([detected(thirdCloudText, box: box(0.1, 0.1, 0.5, 0.25))])
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+        await waitUntil("the live generation") { brain.calls.count == 1 }
+        let generationAt = clock.now
+
+        // The elder presses the shutter inside that window. The frame's own
+        // string is a short form too, so the device leads for it — and the
+        // generation it would cost is the brain's, which a press does not skip.
+        let captured = "Beware of the gate"
+        let held = await harness.pipeline.resolveFrozen([frozenItem("f1", captured)])
+
+        XCTAssertEqual(brain.calls.count, 1, "a capture inside the brain's window bought no generation")
+        XCTAssertNil(held?["f1"], "a held-back generation is a deferral: released, unclaimed, unanswered")
+        XCTAssertTrue(harness.bus.events(named: "translation_degraded").isEmpty,
+                      "a deferral is not a failure — nothing was asked, so nothing failed")
+        XCTAssertLessThan(clock.now.timeIntervalSince(generationAt), config.brainAttemptMinInterval,
+                          "the claim is about a capture made while the clock is still shut")
+
+        // The next capture, past the window, pays it: the deferred string is
+        // still the session's to answer, so the plan that is allowed carries it
+        // — and the model is asked once, not once per press.
+        brain.answers = [captured: brainTranslation]
+        clock.advance(by: config.brainAttemptMinInterval + 0.1)
+        let answered = await harness.pipeline.resolveFrozen([frozenItem("f1", captured)])
+        XCTAssertEqual(brain.calls.count, 2, "past the window the generation is the capture's to spend")
+        XCTAssertEqual(answered?["f1"]?.sourceTier, .onDeviceBrain,
+                       "the deferred string is answered by the plan that was allowed to ask")
+    }
+
+    /// **The elder's own ask skips both clocks** (owner decision, 2026-09-20),
+    /// and the case it saves is the one the review found stranded: an
+    /// extract-mode tap whose cloud attempt fails has no next tick, so a device
+    /// fallback held back by the brain's clock is a block that never translates.
+    @MainActor
+    func testScenarioAnElderAskSkipsTheBrainClock() async throws {
+        let clock = ScriptedClock()
+        let brain = RecordingBrain()
+        let config = LiveTranslateConfig.default
+        // A bare transport, not the suite's responding one: `respondingTransport`
+        // sets `autoRespond`, and that outranks the scripted answers — every
+        // request would come back a success and the cloud would never fail.
+        let transport = TierTranslationTransport()
+        transport.answers = [.failure(URLError(.timedOut)), .failure(URLError(.timedOut))]
+        let harness = makeHarness(consent: true,
+                                  transport: transport,
+                                  brain: brain,
+                                  now: { clock.now },
+                                  config: config,
+                                  extractionMode: true,
+                                  // The scenario needs a cloud to fail on: the
+                                  // harness's own default is "no path", and
+                                  // with no path the router keeps the device in
+                                  // front for every class, so the sentence would
+                                  // never be reserved and the tap's own
+                                  // generation would be the whole story.
+                                  reachability: ScriptedReachability(reachable: true))
+        await harness.pipeline.updateLayout(layout)
+        let frame = try makeFrame()
+
+        // A short form the device leads for: the elder's tap pays one generation
+        // for it, and that generation is what shuts the brain's window.
+        let label = thirdCloudText
+        brain.answers = [label: brainTranslation]
+        harness.recogniser.defaultStep = .regions([detected(label, box: box(0.1, 0.2, 0.6, 0.3))])
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+        let firstScene = try await latest(harness)
+        let tapped = try XCTUnwrap(region(label, in: firstScene))
+        await harness.pipeline.translateRegion(tapped.id)
+        await waitUntil("the tap's generation") { brain.calls.count == 1 }
+        let generationAt = clock.now
+
+        // A sentence — the class the cloud leads for — tapped in the same
+        // window, with the cloud failing. The plan reserves it for the device,
+        // and extract mode has no next tick to ask the device later.
+        let sentence = "Please keep this door closed at all times"
+        brain.answers = [label: brainTranslation, sentence: brainTranslation]
+        harness.recogniser.defaultStep = .regions([detected(label, box: box(0.1, 0.2, 0.6, 0.3)),
+                                                   detected(sentence, box: box(0.1, 0.5, 0.9, 0.6))])
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+        let secondScene = try await latest(harness)
+        let ask = try XCTUnwrap(region(sentence, in: secondScene))
+        await harness.pipeline.translateRegion(ask.id)
+
+        await waitUntil("the sentence to be answered on the device") {
+            guard let latest = await harness.recorder.latest,
+                  let region = latest.regions.first(where: { $0.text == sentence }) else { return false }
+            return latest.result(for: region).sourceTier == .onDeviceBrain
+        }
+        XCTAssertEqual(brain.calls.count, 2, "the elder's ask spent its generation inside the shut window")
+        XCTAssertLessThan(clock.now.timeIntervalSince(generationAt), config.brainAttemptMinInterval,
+                          "the claim is about an ask made while the brain's clock is still shut")
+        XCTAssertGreaterThan(harness.transport.requestCount, 0,
+                             "and it reached the cloud inside the dispatch window: an elder's ask "
+                             + "is not paced by a dispatch that happened seconds ago")
+    }
+
+    /// **One string degraded is one event** (review of #100, finding 3), on the
+    /// path that used to emit nothing at all.
+    ///
+    /// The gate is closed for good — the elder declined earlier in the session —
+    /// so a sentence has no tier left and its terminal is the cloud's own
+    /// reason, not a generic "no tier resolved" on a device nobody asked. The
+    /// event is asserted twice over: it is emitted at all (a frozen hand-over
+    /// used to write its terminals with no event while the tier emitted its
+    /// own), and it is emitted **once** for one string even though the frame is
+    /// handed over twice — a re-render, a second capture of the same scene, is
+    /// an answer the session already has rather than a second question.
+    @MainActor
+    func testScenarioAHeldFramesDegradationIsEmittedOnce() async throws {
+        // Extract mode, so the count is the frozen path's and nothing else: the
+        // live tick would take the same string to the same closed gate and emit
+        // its own event for the region it is showing — one degradation, two
+        // events, and this test could not tell the frozen path's from the
+        // tick's. Here the tick publishes and stops, so the only plan that runs
+        // is the hand-over's.
+        let harness = makeHarness(consent: false, configured: true,
+                                  transport: Self.respondingTransport(),
+                                  extractionMode: true)
+        await harness.pipeline.updateLayout(layout)
+        _ = harness.gate.record(granted: false)
+        let frame = try makeFrame()
+        harness.recogniser.defaultStep = .regions([detected(cloudText)])
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        let first = await harness.pipeline.resolveFrozen([frozenItem("f1", cloudText)])
+        XCTAssertNil(first?["f1"]?.sourceTier, "a closed gate translates nothing")
+        let degraded = harness.bus.events(named: "translation_degraded")
+        XCTAssertEqual(degraded.count, 1, "one string degraded is one event, never none and never two")
+        XCTAssertEqual(degraded.first?.metadata["reason"],
+                       TranslationUnavailableReason.consentNotGranted.rawValue,
+                       "the reason is the one that happened, not a generic no-tier-resolved")
+        XCTAssertEqual(degraded.first?.metadata["regionCount"], "1",
+                       "and the count is the string's own region")
+
+        let second = await harness.pipeline.resolveFrozen([frozenItem("f1", cloudText)])
+        XCTAssertEqual(second?["f1"]?.outcome, first?["f1"]?.outcome,
+                       "a settled string is answered with the answer it has")
+        XCTAssertEqual(harness.bus.events(named: "translation_degraded").count, 1,
+                       "a string the session already ended is not degraded a second time")
+    }
+
+    /// **A held frame's ask survives the prompt** (review of #100, finding 5).
+    ///
+    /// A frozen frame's strings are not the live picture's — a still capture can
+    /// show a sign the tick never stabilised — so the ask recorded for it cannot
+    /// be rebuilt by looking its keys up in `stabilizer.visible`. That rebuild
+    /// is where the frozen ask used to be lost: the elder answered the question
+    /// the capture had asked, and the block they were looking at stayed
+    /// untranslated.
+    @MainActor
+    func testScenarioAPromptAnswerCarriesAHeldFramesAsk() async throws {
+        let harness = makeHarness(consent: false, configured: true,
+                                  transport: Self.respondingTransport(),
+                                  extractionMode: true)
+        await harness.pipeline.updateLayout(layout)
+        let frame = try makeFrame()
+        // The live picture, carrying a string that is not the frozen one.
+        harness.recogniser.defaultStep = .regions([detected(curatedText, box: box(0.1, 0.1, 0.4, 0.2))])
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        let held = await harness.pipeline.resolveFrozen([frozenItem("f1", cloudText)])
+        XCTAssertNil(held, "an unanswered prompt answers nothing")
+        XCTAssertTrue(harness.controller.isPromptPresented,
+                      "the frozen ask raises the question — the string is on no live region")
+
+        if case .failure(let error) = harness.controller.grant() {
+            return XCTFail("a grant must be recorded: \(error)")
+        }
+        await harness.pipeline.retryAwaitingResolution()
+        await waitUntil("the frozen ask to reach the cloud") {
+            self.requests(carrying: self.cloudText, in: harness) == 1
+        }
+        // And the answer belongs to the session, not to the picture it was asked
+        // from: the frame's next render gets it without paying again.
+        let again = await harness.pipeline.resolveFrozen([frozenItem("f1", cloudText)])
+        XCTAssertEqual(again?["f1"]?.sourceTier, .cloud,
+                       "the answer the prompt released is the answer the held frame renders")
+        XCTAssertEqual(requests(carrying: cloudText, in: harness), 1,
+                       "and the string is not paid for twice")
+    }
+
+    /// **The brain's bound defers the surplus; it does not fail it.**
+    ///
+    /// `LocalBrainTranslationTier` keeps the first strings that fit its bound
+    /// and leaves the rest, so a hand-over larger than the bound is a plan that
+    /// answers a prefix and is silent about the surplus. That silence has to be
+    /// a *deferral*: those strings were never asked, so nothing failed, nothing
+    /// may be recorded as a generation paid for, and the reason must not be the
+    /// cloud's — and they must still be pending afterwards, so the next capture
+    /// carries them. The frozen hand-over is where this can happen (a still
+    /// frame of a whole sign overflows a bound sized for a tick's stage), which
+    /// is why the rule lives in the plan both paths run rather than in either
+    /// adapter.
+    @MainActor
+    func testScenarioAHeldBatchLargerThanTheBrainsBoundIsDeferredNotFailed() async throws {
+        let config = Self.unpacedDispatchConfig()
+        let texts = ["Exit", "Push", "Pull", "Stop", "Open", "Closed", "Danger", "Caution", "Fire", "Water"]
+        let bound = LocalBrainTranslationTier.batchPrefixLength(of: texts, config: config)
+        XCTAssertGreaterThan(bound, 0)
+        XCTAssertLessThan(bound, texts.count, "the premise: this hand-over is larger than the bound")
+        let prefix = Array(texts.prefix(bound))
+        let surplus = Array(texts.dropFirst(bound))
+
+        let brain = RecordingBrain()
+        brain.answers = Dictionary(uniqueKeysWithValues: texts.map { ($0, brainTranslation) })
+        // The switch off keeps every string device-led, so what is asserted is
+        // the bound and nothing about which tier leads.
+        let harness = makeHarness(transport: Self.respondingTransport(),
+                                  brain: brain,
+                                  config: config,
+                                  geminiCloudEnabled: false)
+        let items = texts.enumerated().map { frozenItem("f\($0.offset)", $0.element) }
+
+        let first = await harness.pipeline.resolveFrozen(items)
+        XCTAssertEqual(brain.calls.count, 1, "one hand-over is one batch")
+        XCTAssertEqual(brain.calls.first, prefix, "the device was asked for exactly what fits its bound")
+        XCTAssertEqual(first?.count, bound, "the plan answers the prefix and says nothing about the rest")
+        for (index, text) in texts.enumerated() {
+            let key = "f\(index)"
+            if index < bound {
+                XCTAssertEqual(first?[key]?.sourceTier, .onDeviceBrain,
+                               "'\(text)' is inside the bound and answered there")
+            } else {
+                XCTAssertNil(first?[key],
+                             "'\(text)' is past the bound: deferred, not answered and not failed")
+            }
+        }
+        XCTAssertTrue(harness.bus.events(named: "translation_degraded").isEmpty,
+                      "a string the device was never asked is not a string that failed")
+        let stillClaimed = await harness.pipeline.inFlightKeys
+        XCTAssertTrue(stillClaimed.isEmpty,
+                      "every claim the plan made was settled or released")
+
+        // The next capture carries them: the prefix is settled (answered once,
+        // never paid for twice) and the surplus is asked — which is what makes
+        // the silence a deferral rather than a loss.
+        let second = await harness.pipeline.resolveFrozen(items)
+        XCTAssertEqual(brain.calls.count, 2, "the deferred strings were asked once, on the plan that followed")
+        XCTAssertEqual(brain.calls.last, surplus, "and it was exactly the surplus that was still owed")
+        for (index, _) in texts.enumerated() {
+            XCTAssertEqual(second?["f\(index)"]?.sourceTier, .onDeviceBrain)
+        }
+        XCTAssertTrue(harness.bus.events(named: "translation_degraded").isEmpty,
+                      "no string was ever degraded — the whole batch was translatable")
+    }
+
     @MainActor
     func testScenarioAHungBrainDoesNotAbsorbTheCycle() async throws {
         // The generation is the one step with no upper bound of its own: a 4B

@@ -345,17 +345,27 @@ actor CloudTranslationTier {
                 adopt(outcomes[key], for: key, idsByKey: idsByKey,
                       resolved: &resolved, failures: &failures)
             }
-            // [DEBUG-LOG] (owner directive, 2026-09-20) The exact pairs,
-            // the producing tier and the leg's time — the console's own
-            // lane, gated and off for release.
+            // [DEBUG-LOG] (owner directive, 2026-09-20) What is left of the
+            // batch's console line: the **counts**, and the leg's time. The
+            // source→target pairs this used to render were removed — a
+            // recognized or translated string in a console write is a defect in
+            // every configuration, Debug included, and the release-log gate
+            // (`ios/tools/check-release-log-safety.sh`) judges exactly that
+            // rule (NFR-LCT-006). It fails this line as master carries it
+            // (`feature-console-write`, `feature-content-print`, at this
+            // print), and a counted line clears it. The reader is inside
+            // `#if DEBUG`, so no Release binary contains a console write for
+            // this feature at all.
             let batchDurationMs = Int(Date().timeIntervalSince(start) * 1000)
+            #if DEBUG
             if config.translationDebugLoggingEnabled {
-                for (target, key) in zip(targets, keys) {
-                    if case .resolved(let translation, _)? = outcomes[key] {
-                        print("[translate-debug] cloud \(target.originalText) -> \(translation) [\(batchDurationMs)ms]")
-                    }
+                let resolvedCount = keys.reduce(into: 0) { count, key in
+                    guard let outcome = outcomes[key], case .resolved = outcome else { return }
+                    count += 1
                 }
+                print("[translate-debug] cloud batch \(batchIndex): \(resolvedCount) of \(keys.count) resolved [\(batchDurationMs)ms]")
             }
+            #endif
             let resolvedForBatch = regionIDs.filter { resolved[$0] != nil }.count
             events.translationBatchResolved(
                 resolvedCount: resolvedForBatch,
