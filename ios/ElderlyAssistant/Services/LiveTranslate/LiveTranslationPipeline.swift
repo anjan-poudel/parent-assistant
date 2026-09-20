@@ -1047,9 +1047,20 @@ actor LiveTranslationPipeline {
             guard case .success(let hit) = cache.lookup(text: region.text,
                                                         targetLanguage: targetLanguage),
                   let hit else { continue }
-            outcomes[region.id] = .resolved(originalText: region.text,
-                                            translation: hit.translation,
-                                            tier: hit.tier)
+            let result = TranslationResult.resolved(originalText: region.text,
+                                                    translation: hit.translation,
+                                                    tier: hit.tier)
+            outcomes[region.id] = result
+            // [CACHE-SETTLE] (owner's 11:27 report: translations resolved in
+            // the capture but the screen stuck on the pending chip.) The
+            // answer must ride BOTH keys, the way every other settlement
+            // path's does: `outcomes` is keyed by the region's identity,
+            // which churns frame to frame, and `reconcile()` rebuilds a
+            // changed identity from `settledOutcomes[key]` — which this path
+            // never wrote. A cache hit therefore re-pended its region on the
+            // very next identity churn. The string key is the survivor.
+            settledOutcomes[Self.cacheKey(for: region.text,
+                                          targetLanguage: targetLanguage)] = result
             events.translationResolved(tier: hit.tier, origin: .cache, count: 1)
         }
     }
