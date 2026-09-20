@@ -1407,15 +1407,30 @@ struct LiveTranslateConfig: Equatable {
     /// reserve grants with evictions rather than denying `over_budget_alone`.
     var wardenBypassForTesting: Bool = false
 
-    /// [DEBUG-LOG] (owner directive, 2026-09-20: "clearly log the response
-    /// from translation request — both source and target strings. Easier
-    /// to debug.") Prints raw source→translation pairs to the console's
-    /// debug lane (`print`) — never the observability bus, whose
-    /// content-free contract this flag exists to protect. ON while the
-    /// feature is in device testing; flips OFF before any release, because
-    /// scene text in a log is content the shipped privacy posture does not
-    /// keep.
-    var translationDebugLoggingEnabled: Bool = true
+    /// [DEBUG-LOG] (owner directive, 2026-09-20) Whether the tiers emit a
+    /// console diagnostic while the feature is being debugged. **Default
+    /// off, read only from a Debug build, and content-free.**
+    ///
+    /// The owner asked to see "both source and target strings" while the
+    /// feature was in device testing. That shape cannot ship in any
+    /// configuration: NFR-LCT-006 forbids a recognized or translated string
+    /// in a console write, and the Release-log gate's `feature-content-print`
+    /// rule is judged in Debug too — a print naming a source or a translation
+    /// is a defect even inside `#if DEBUG`. The original spelling was worse
+    /// still: a DEBUG-free flag, ON by default, that compiled the pairs into
+    /// Release. What is left is the part that is safe *and* useful: the
+    /// batch's counts, from readers that exist only under `#if DEBUG`, so no
+    /// Release binary contains a console write for this feature at all.
+    ///
+    /// The pairs themselves have a home on the sanitising observability bus,
+    /// where they travel as counts and closed tokens —
+    /// `brainTranslationBatch(resolvedCount:unresolvedCount:…)` is the
+    /// content-free sibling of the line the owner asked for.
+    ///
+    /// The value is persisted (see `LiveTranslateSettings`), so a debug
+    /// session turns it on without a rebuild; Release reads it into the
+    /// config and has nothing that acts on it.
+    var translationDebugLoggingEnabled: Bool = false
 
     /// How long the warden's notice stays on screen before it takes itself
     /// down, in seconds (owner directive, 2026-09-19: "keep the user in the

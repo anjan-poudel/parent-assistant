@@ -561,24 +561,38 @@ actor CloudTranslationTier {
                        for targets: [Target],
                        targetLanguage: AppLanguage) -> [String: KeyOutcome] {
         var results: [String: KeyOutcome] = [:]
+        // [BATCH-STORE] (review finding on #99, 2026-09-20) The frame's
+        // answers are collected and persisted in ONE pass: the per-item
+        // spelling paid a full encrypt-and-atomic-write of the whole payload
+        // for every string, at the OCR cadence (NFR-LCT-002).
+        var resolutions: [LabelTranslationCache.Resolution] = []
         for (index, target) in targets.enumerated() {
             let id = String(index)
             if let translation = outcome.translations[id] {
-                // A store failure is recorded by the cache itself and never
-                // changes the outcome: the translation still renders.
-                _ = cache.store(text: target.originalText,
-                                translation: translation,
-                                targetLanguage: targetLanguage)
-                // [DEBUG-LOG] (owner directive, 2026-09-20) The exact pair,
-                // gated and off for release.
-                if config.translationDebugLoggingEnabled {
-                    print("[translate-debug] cloud \(target.originalText) -> \(translation)")
-                }
+                resolutions.append(LabelTranslationCache.Resolution(
+                    text: target.originalText,
+                    translation: translation,
+                    tier: .cloud))
                 results[target.key] = .resolved(translation, origin: .cloud)
             } else {
                 results[target.key] = .failed(.cloudResponseUnusable(outcome.rejections[id] ?? .missingIDs))
             }
         }
+        // A store failure is recorded by the cache itself and never changes
+        // the outcome: the translation still renders.
+        _ = cache.storeBatch(resolutions, targetLanguage: targetLanguage)
+        // [DEBUG-LOG] (owner directive, 2026-09-20) The counts, and only the
+        // counts. The source→target pairs this used to render were removed:
+        // recognized or translated text in a console write is a defect in
+        // every configuration, Debug included, and the Release-log gate
+        // judges exactly that rule (NFR-LCT-006). The reader is inside
+        // `#if DEBUG`, so no Release binary contains this line at all.
+        #if DEBUG
+        if config.translationDebugLoggingEnabled {
+            let resolvedCount = resolutions.count
+            print("[translate-debug] cloud batch: \(resolvedCount) of \(targets.count) resolved")
+        }
+        #endif
         return results
     }
 

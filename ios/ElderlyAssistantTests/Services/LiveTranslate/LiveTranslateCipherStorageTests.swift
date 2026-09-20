@@ -251,7 +251,7 @@ final class LiveTranslateCipherStorageTests: XCTestCase {
             return XCTFail("the stored translation must be served through the cipher")
         }
         XCTAssertEqual(hit.translation, translationText)
-        XCTAssertEqual(hit.origin, .persisted)
+        XCTAssertEqual(hit.origin, .persistedLayer)
     }
 
     func testAM10TheConsentRecordAtRestCarriesNoPlaintextFieldAndNeverTheKey() throws {
@@ -644,7 +644,7 @@ final class LiveTranslateCipherStorageTests: XCTestCase {
             return XCTFail("the persisted layer must survive a new session through the cipher")
         }
         XCTAssertEqual(hit.translation, translationText)
-        XCTAssertEqual(hit.origin, .persisted)
+        XCTAssertEqual(hit.origin, .persistedLayer)
         XCTAssertEqual(hit.tier, .cloud)
 
         // The dictionary layer is untouched by any of this: a curated label is

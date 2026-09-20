@@ -375,7 +375,12 @@ final class LiveTranslateSessionModel: ObservableObject {
     init(dependencies: LiveTranslateSessionDependencies) {
         self.dependencies = dependencies
         self.locale = dependencies.locale
-        self.config = dependencies.config
+        // [DEBUG-LOG] (review finding on #99) The one seam where the persisted
+        // diagnostic switch reaches the tiers and the pipeline: both are
+        // constructed with this config, so they cannot disagree about whether
+        // the content-free console line is on. The switch is off by default
+        // and only a Debug build has a reader for it.
+        self.config = dependencies.settings.applyingDebugLogging(to: dependencies.config)
         self.camera = dependencies.camera
         self.detector = dependencies.detector
         self.settings = dependencies.settings

@@ -396,6 +396,120 @@ final class LiveCameraSessionTests: XCTestCase {
         XCTAssertEqual(bus.events(named: "camera_interrupted").first?.metadata["reason"], "backgrounded")
     }
 
+    // MARK: [CAMERA-BUDGET] The activation signal the model budget rides on
+
+    /// The signal is a level: `true` while the capture stack is running,
+    /// `false` the moment it stops, reported once per change. The warden's
+    /// session profile rides on it, so an unpaired `true` sizes every later
+    /// load for a camera that is not there, and an unpaired `false` sizes it
+    /// for one that is. Every interruption in between is a pair.
+    func testTheSessionReportsActivationAndReleaseOncePerChange() async throws {
+        let session = makeSession()
+        var activations: [Bool] = []
+        session.onSessionActiveChanged = { activations.append($0) }
+
+        _ = await session.start()
+        XCTAssertEqual(activations, [true], "the capture is live")
+
+        centre.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        XCTAssertEqual(activations, [true, false],
+                       "a paused session draws no camera working set")
+
+        centre.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        XCTAssertEqual(activations, [true, false, true],
+                       "the resumed session draws it again")
+
+        // A second foreground signal resumes nothing, so it reports nothing.
+        centre.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        XCTAssertEqual(activations, [true, false, true],
+                       "one report per change, not per notification")
+
+        session.stop()
+        XCTAssertEqual(activations, [true, false, true, false],
+                       "the session's end is reported exactly once")
+
+        // …and a torn-down session reports nothing further.
+        centre.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        XCTAssertEqual(activations, [true, false, true, false])
+    }
+
+    /// A session that was already paused has nothing new to say when it is
+    /// torn down: the stop was reported by the pause, and a second one would
+    /// be a clear of nothing.
+    func testStoppingAPausedSessionDoesNotReportASecondRelease() async throws {
+        let session = makeSession()
+        var activations: [Bool] = []
+        session.onSessionActiveChanged = { activations.append($0) }
+
+        _ = await session.start()
+        centre.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        XCTAssertEqual(activations, [true, false])
+
+        session.stop()
+
+        XCTAssertEqual(session.state, .stopped)
+        XCTAssertEqual(activations, [true, false],
+                       "the release was already reported by the pause")
+    }
+
+    /// The ordering the review found: a session that starts into an
+    /// interruption that was already pending never had a live capture. The
+    /// old spelling announced `true` and then `false` inside the same call —
+    /// a profile raised and torn down for an interval no frame was captured
+    /// in — and the notification can also land between the start and its
+    /// announcement, which is the same fact by another route.
+    func testAStartIntoAnInterruptionNeverAnnouncesAnActivation() async throws {
+        let session = makeSession()
+        var activations: [Bool] = []
+        session.onSessionActiveChanged = { activations.append($0) }
+        layer.onStartRunning = { [centre, layer] in
+            centre?.post(name: AVCaptureSession.wasInterruptedNotification,
+                         object: layer?.session,
+                         userInfo: [AVCaptureSessionInterruptionReasonKey:
+                                    AVCaptureSession.InterruptionReason
+                                        .videoDeviceNotAvailableInBackground.rawValue])
+        }
+
+        let result = await session.start()
+        layer.onStartRunning = nil
+
+        XCTAssertTrue(result.isSuccess)
+        XCTAssertEqual(session.state, .interrupted(.backgrounded))
+        XCTAssertEqual(activations, [],
+                       "never active: no `true` may be announced for a session that "
+                       + "went straight into the background — and no `false` either, "
+                       + "because the warden's profile was never raised, so there is "
+                       + "nothing to clear. A `false` here would be a clear of nothing")
+    }
+
+    /// The pairing is symmetric in the other direction too: a resume that is
+    /// interrupted again reports the activation and then the stop, and the
+    /// profile's lifetime equals the capture's across any number of them.
+    func testRepeatedInterruptionsReportABalancedPairEachTime() async throws {
+        let session = makeSession()
+        var activations: [Bool] = []
+        session.onSessionActiveChanged = { activations.append($0) }
+
+        _ = await session.start()
+        for _ in 0..<3 {
+            centre.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+            centre.post(name: UIApplication.willEnterForegroundNotification, object: nil)
+        }
+
+        XCTAssertEqual(activations, [true, false, true, false, true, false, true])
+
+        // The invariant the warden depends on, stated independently of how
+        // many interruptions there were: no activation without a stop before
+        // the next one, and no stop without a capture that was live.
+        var live = false
+        for (index, active) in activations.enumerated() {
+            XCTAssertNotEqual(live, active,
+                              "index \(index) repeated the level it was already at")
+            live = active
+        }
+        XCTAssertTrue(live, "the last transition resumed the capture")
+    }
+
     // MARK: Thermal response (NFR-LCT-002 scenario 3)
 
     func testTheCadenceSlowsByTheConfiguredFactorAtOrAboveTheThermalThreshold() {

@@ -3,7 +3,10 @@ import Foundation
 /// The genuinely user-facing settings this feature owns (C14). Today that is
 /// two preferences — `alwaysShowOriginal`, the FR-LCT-017 toggle, and
 /// `geminiCloudEnabled`, the cloud tier's master switch (owner directive,
-/// 2026-09-19) — plus the disclosure version stamp the consent record carries.
+/// 2026-09-19) — plus the disclosure version stamp the consent record carries,
+/// and one developer-facing switch that is not a user preference at all:
+/// `translationDebugLoggingEnabled`, the [DEBUG-LOG] console diagnostic, which
+/// is off by default and has no reader outside a Debug build.
 ///
 /// Reachability and consistency:
 ///  - the display toggle is reachable by touch (the overlay chrome, T-022)
@@ -47,10 +50,17 @@ struct LiveTranslateSettings: Equatable {
     /// once so no call site spells it.
     static let geminiCloudEnabledKey = "livetranslate.geminiCloudEnabled"
 
+    /// The [DEBUG-LOG] diagnostic switch's key (review finding on #99,
+    /// 2026-09-20). Declared once so no call site spells it.
+    static let translationDebugLoggingEnabledKey =
+        "livetranslate.translationDebugLoggingEnabled"
+
     /// Every key this feature is allowed to write to `UserDefaults`. The
-    /// persisted state is two boolean preferences and nothing else.
+    /// persisted state is three booleans — the two preferences and the
+    /// DEBUG-ONLY diagnostic switch — and nothing else.
     static let featureKeys: Set<String> = [alwaysShowOriginalKey,
-                                           geminiCloudEnabledKey]
+                                           geminiCloudEnabledKey,
+                                           translationDebugLoggingEnabledKey]
 
     private let defaults: UserDefaults
 
@@ -122,6 +132,48 @@ struct LiveTranslateSettings: Equatable {
     /// model's own `setGeminiCloudEnabled` behind it. One setter, one key.
     func setGeminiCloudEnabled(_ value: Bool) {
         geminiCloudEnabled = value
+    }
+
+    // MARK: The [DEBUG-LOG] diagnostic switch (review finding on #99)
+
+    /// Whether the feature's tiers emit their content-free console
+    /// diagnostic. **Default off, and nothing in a Release build acts on it**:
+    /// the readers live under `#if DEBUG` (see
+    /// `LiveTranslateConfig.translationDebugLoggingEnabled`).
+    ///
+    /// Persisted rather than a source edit for the reason the owner asked for
+    /// the logging at all — a device capture cannot wait for a rebuild — and
+    /// the value is boilerplate-free for the same reason the other two are:
+    /// one key, one getter, one setter, and an absent key reads as the
+    /// config's nominal default rather than as a value nobody chose.
+    ///
+    /// This is a *diagnostic* preference, not a third display preference: it
+    /// changes what the developer's console shows and **nothing about what
+    /// leaves the device, what is stored, or what the elder sees**.
+    var translationDebugLoggingEnabled: Bool {
+        get {
+            guard defaults.object(forKey: Self.translationDebugLoggingEnabledKey) != nil else {
+                return config.translationDebugLoggingEnabled
+            }
+            return defaults.bool(forKey: Self.translationDebugLoggingEnabledKey)
+        }
+        nonmutating set {
+            defaults.set(newValue, forKey: Self.translationDebugLoggingEnabledKey)
+        }
+    }
+
+    /// The switch's write path — one setter, one key.
+    func setTranslationDebugLoggingEnabled(_ value: Bool) {
+        translationDebugLoggingEnabled = value
+    }
+
+    /// The config a session runs with, with the persisted diagnostic switch
+    /// applied. One call site (the session model), so the tiers and the
+    /// pipeline cannot disagree about whether the diagnostic is on.
+    func applyingDebugLogging(to config: LiveTranslateConfig) -> LiveTranslateConfig {
+        var resolved = config
+        resolved.translationDebugLoggingEnabled = translationDebugLoggingEnabled
+        return resolved
     }
 
     /// The version stamp a consent record is bound to (C09/C14). Exposed

@@ -484,6 +484,21 @@ struct ModelWardenConfig: Equatable {
     /// for residency.
     var reservationTTLSeconds: TimeInterval = 30
 
+    /// [CAMERA-BUDGET] (review finding on #99, 2026-09-20) How long a session
+    /// profile's lease may gate the model budget before it is dropped and
+    /// reported (`SessionProfileEventReason.expired`).
+    ///
+    /// The primary protection against a leaked profile is the owner token —
+    /// the profile dies with the session that set it — so this is the backstop
+    /// for the case the token cannot see: an owner that is still alive but
+    /// whose session ended without a transition ever reaching the ledger.
+    /// Fifteen minutes is longer than any camera translation session the
+    /// feature is built for (`LiveTranslateConfig`'s own interaction budget is
+    /// minutes, and the camera's thermal handling slows the cadence rather
+    /// than extending a session), and far shorter than the process lifetime
+    /// the pre-review scalar could lower the budget for.
+    var sessionProfileTTLSeconds: TimeInterval = 900
+
     /// A granted reservation older than this is reclaimed *and* its slot
     /// reported as suspect. The two bounds are deliberately different: the
     /// TTL is housekeeping, the watchdog is evidence.

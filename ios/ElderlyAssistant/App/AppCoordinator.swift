@@ -2107,8 +2107,17 @@ final class AppCoordinator: ObservableObject {
         // beside it (the owner's 06:23 capture: brain admitted, committed,
         // pressure-evicted 0.7 s later). The trade — first talk after
         // camera costs a load — was the owner's call.
-        cameraSession.onSessionActiveChanged = { active in
-            ModelLifecycleManager.shared.setSessionProfile(active ? .cameraLive : nil)
+        // The session itself is handed over as the profile's **owner**: the
+        // lease is held weakly, so a session that goes away without clearing
+        // its profile (a torn-down coordinator, a transition that never
+        // arrived) stops lowering the budget on the next read instead of
+        // lowering it for the process's life — and a *stale* session's late
+        // `false` cannot take a live session's profile down ([CAMERA-BUDGET]
+        // lease, review finding on #99). Captured weakly for the obvious
+        // reason: the closure lives on the session it would otherwise retain.
+        cameraSession.onSessionActiveChanged = { [weak cameraSession] active in
+            ModelLifecycleManager.shared.setSessionProfile(active ? .cameraLive : nil,
+                                                          owner: cameraSession)
         }
         return LiveTranslateSessionDependencies(
             locale: locale,
@@ -8593,6 +8602,28 @@ self.noteTalkContractChanged()
             type = "memory_pressure"
             metadata = ["budgetBytes": String(budgetBytes),
                         "evicted": evicted.map(\.rawValue).joined(separator: ",")]
+        // [CAMERA-BUDGET] A closed token, a byte count and a reason token:
+        // applied / cleared / expired / owner_released / refused_stale_owner.
+        // The pair is what makes a leaked profile visible in a capture, and
+        // the reason is what tells a leak from an ordinary session end.
+        //
+        // The profile rides an existing allowed key (`state`) rather than a
+        // new `profile` one: the allow-list in `LogSanitiser` is the PII
+        // filter, and widening it for a value that is already a closed token
+        // would let every other emitter write a string called "profile" —
+        // the vocabulary a future caller is most likely to fill with
+        // something about the elder. `state=cameraLive` says exactly as much.
+        //
+        // The lease's ordinal rides `count` for the same reason it exists at
+        // all: it is a count of applications, it is what pairs a `cleared`
+        // with the `applied` it ends, and it is an integer, not a token a
+        // caller could fill with prose.
+        case .sessionProfile(let profile, let budgetBytes, let generation, let reason):
+            type = "session_profile"
+            metadata = ["state": profile?.rawValue ?? "none",
+                        "budgetBytes": budgetBytes.map(String.init) ?? "none",
+                        "count": String(generation),
+                        "reason": reason.rawValue]
         // [MODEL-WARDEN] Step 1 — the reservation layer. Every value below is
         // a slot name, a closed token or a byte count; nothing here can carry
         // content, and every key is in `LogSanitiser.allowedKeys` (a test
