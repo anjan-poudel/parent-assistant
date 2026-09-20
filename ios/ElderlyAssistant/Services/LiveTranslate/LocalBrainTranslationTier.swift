@@ -120,6 +120,14 @@ protocol LocalBrainTranslating: Sendable {
     /// resolve is absent — never an empty string, never the source itself.
     func translate(_ strings: [String]) async -> LocalBrainTranslationOutcome
 
+    /// [PATIENT-STAGE] The same attempt under an explicit timeout: the
+    /// pipeline passes the patient bound when there is no next tier, so a
+    /// slow generation is waited out instead of failed mid-answer. The
+    /// default conformance ignores the override — a fake that does not
+    /// model time keeps answering at once.
+    func translate(_ strings: [String],
+                   timeoutSeconds: TimeInterval) async -> LocalBrainTranslationOutcome
+
     /// Releases any resident inference handle. Called when the session closes,
     /// so a closed session leaves no model parked in memory. A no-op for a
     /// brain that holds nothing.
@@ -128,6 +136,11 @@ protocol LocalBrainTranslating: Sendable {
 
 extension LocalBrainTranslating {
     func release() async {}
+
+    func translate(_ strings: [String],
+                   timeoutSeconds: TimeInterval) async -> LocalBrainTranslationOutcome {
+        await translate(strings)
+    }
 }
 
 /// The outcome of one batched attempt.
@@ -488,6 +501,14 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
     // MARK: The attempt
 
     func translate(_ strings: [String]) async -> LocalBrainTranslationOutcome {
+        await translate(strings, timeoutSeconds: config.brainTranslationTimeoutSeconds)
+    }
+
+    /// [PATIENT-STAGE] The attempt under the pipeline's chosen bound: the
+    /// standard one when the cloud can lead (the strings go onward), the
+    /// patient one when there is no next tier.
+    func translate(_ strings: [String],
+                   timeoutSeconds: TimeInterval) async -> LocalBrainTranslationOutcome {
         guard !strings.isEmpty else { return .none }
 
         #if canImport(LLM)
@@ -555,7 +576,7 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
                                                                           targetLanguage: targetLanguage),
                                                       jsonSchema: Self.jsonSchema,
                                                       modelURL: modelURL,
-                                                      timeout: config.brainTranslationTimeoutSeconds)
+                                                      timeout: timeoutSeconds)
             let report = Self.report(output,
                                      sources: batch,
                                      targetLanguage: targetLanguage,
@@ -567,6 +588,14 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
             // opposite, and the owner's answered-nothing batches were exactly
             // this ambiguity.
             let translations = report.translations
+            // [DEBUG-LOG] (owner directive, 2026-09-20) The exact pairs on
+            // the console's own lane, gated and off for release — the bus
+            // stays content-free; this is for the owner's capture.
+            if config.translationDebugLoggingEnabled {
+                for (source, translation) in translations {
+                    print("[translate-debug] brain \(source) -> \(translation)")
+                }
+            }
             let durationMs = Self.milliseconds(since: started)
             // The counts are about the BATCH THE CALLER HANDED OVER, not about
             // the part that fitted: a bounded batch reports its surplus as

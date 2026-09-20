@@ -606,6 +606,15 @@ final class RecordingBrain: LocalBrainTranslating, @unchecked Sendable {
         set { lock.lock(); defer { lock.unlock() }; storedHangs = newValue }
     }
 
+    /// [PATIENT-STAGE] How long a generation sleeps before answering —
+    /// the shape of a real model that is still producing when the stage
+    /// deadline passes and lands its answer inside the tier's own bound.
+    private var storedDelaySeconds: Double = 0
+    var delaySeconds: Double {
+        get { lock.lock(); defer { lock.unlock() }; return storedDelaySeconds }
+        set { lock.lock(); defer { lock.unlock() }; storedDelaySeconds = newValue }
+    }
+
     /// Every batch this brain was handed, in order.
     var calls: [[String]] {
         lock.lock(); defer { lock.unlock() }; return storedCalls
@@ -629,6 +638,7 @@ final class RecordingBrain: LocalBrainTranslating, @unchecked Sendable {
         let answers = storedAnswers
         let unavailable = storedUnavailable
         let hangs = storedHangs
+        let delaySeconds = storedDelaySeconds
         let events = self.events
         lock.unlock()
 
@@ -638,6 +648,13 @@ final class RecordingBrain: LocalBrainTranslating, @unchecked Sendable {
             // into nothing rather than blocking the test.
             try? await Task<Never, Never>.sleep(for: .seconds(30))
             return .none
+        }
+
+        // [PATIENT-STAGE] The slow-but-finite generation: sleeps, then
+        // answers — never observes cancellation, exactly like the real
+        // tier's own deadline-bound work.
+        if delaySeconds > 0 {
+            try? await Task<Never, Never>.sleep(for: .seconds(delaySeconds))
         }
 
         guard !unavailable else {

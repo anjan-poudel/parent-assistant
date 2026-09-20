@@ -569,6 +569,11 @@ actor CloudTranslationTier {
                 _ = cache.store(text: target.originalText,
                                 translation: translation,
                                 targetLanguage: targetLanguage)
+                // [DEBUG-LOG] (owner directive, 2026-09-20) The exact pair,
+                // gated and off for release.
+                if config.translationDebugLoggingEnabled {
+                    print("[translate-debug] cloud \(target.originalText) -> \(translation)")
+                }
                 results[target.key] = .resolved(translation, origin: .cloud)
             } else {
                 results[target.key] = .failed(.cloudResponseUnusable(outcome.rejections[id] ?? .missingIDs))

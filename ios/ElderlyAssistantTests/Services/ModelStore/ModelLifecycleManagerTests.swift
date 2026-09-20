@@ -752,6 +752,30 @@ final class ModelLifecycleManagerTests: XCTestCase {
         XCTAssertTrue(events.isEmpty, "nothing stood down, nothing to report")
     }
 
+    /// [CAMERA-BUDGET] The session profile moves the budget for exactly the
+    /// interval the camera draws its working set, and the session's end
+    /// restores it. A manager WITHOUT the constructor pin, so the profile
+    /// override is the one doing the moving (the pinned fixture masks it by
+    /// design — the pin is the tests' own promise).
+    func testTheSessionProfileLowersTheBudgetAndClearingItRestores() {
+        let probe = ScriptedProbe()
+        let unpinned = ModelLifecycleManager(probe: probe)
+        let idleBudget = unpinned.snapshot().budgetBytes
+
+        unpinned.setSessionProfile(.cameraLive)
+        let cameraBudget = unpinned.snapshot().budgetBytes
+
+        XCTAssertLessThan(cameraBudget, idleBudget,
+                          "a live camera's working set is real bytes the budget must not "
+                          + "pretend are free")
+        XCTAssertEqual(idleBudget - cameraBudget, 1_100_000_000,
+                       "the standard-class growth: 1.4 GB camera − 300 MB idle")
+
+        unpinned.setSessionProfile(nil)
+        XCTAssertEqual(unpinned.snapshot().budgetBytes, idleBudget,
+                       "the session's end restores the idle budget")
+    }
+
     func testReservationTTLReapsALoadThatNeverCommitted() {
         var events: [ModelLifecycleEvent] = []
         manager.onEvent = { events.append($0) }

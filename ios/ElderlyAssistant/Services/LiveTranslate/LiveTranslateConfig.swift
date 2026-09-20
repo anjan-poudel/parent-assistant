@@ -1209,6 +1209,16 @@ struct LiveTranslateConfig: Equatable {
     /// Nominal, not frozen: the device spike to come may move it.
     var brainTranslationTimeoutSeconds: TimeInterval = 25
 
+    /// [PATIENT-STAGE] (owner directive, 2026-09-20) The tier's bound when
+    /// there is NO next tier — the cloud switch off or unreachable. The
+    /// standard bound is the fail-fast the cascade needs (the strings go
+    /// onward); with nowhere to go, a bound that fires while the model is
+    /// still producing throws away answers that would have landed seconds
+    /// later (the owner's screenshot report: every string failed, the
+    /// translations were on the way). The patient bound is the wait the
+    /// owner asked for instead.
+    var brainTranslationPatientTimeoutSeconds: TimeInterval = 45
+
     /// Grace added to `brainTranslationTimeoutSeconds` to form the pipeline's
     /// own deadline for the whole brain stage.
     ///
@@ -1363,6 +1373,16 @@ struct LiveTranslateConfig: Equatable {
     /// live footprint (~1.5 GB) sits under the 3.2 GB class budget, so the
     /// reserve grants with evictions rather than denying `over_budget_alone`.
     var wardenBypassForTesting: Bool = false
+
+    /// [DEBUG-LOG] (owner directive, 2026-09-20: "clearly log the response
+    /// from translation request — both source and target strings. Easier
+    /// to debug.") Prints raw source→translation pairs to the console's
+    /// debug lane (`print`) — never the observability bus, whose
+    /// content-free contract this flag exists to protect. ON while the
+    /// feature is in device testing; flips OFF before any release, because
+    /// scene text in a log is content the shipped privacy posture does not
+    /// keep.
+    var translationDebugLoggingEnabled: Bool = true
 
     /// How long the warden's notice stays on screen before it takes itself
     /// down, in seconds (owner directive, 2026-09-19: "keep the user in the
