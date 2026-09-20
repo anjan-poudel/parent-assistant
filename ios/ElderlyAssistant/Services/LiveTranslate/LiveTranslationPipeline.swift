@@ -2562,10 +2562,18 @@ actor LiveTranslationPipeline {
         guard !isJitterOnly(regions: regions, policy: policy) else { return }
 
         publicationSequence += 1
+        // [DISPATCH-ON-FIRST-SIGHTING] The askable set feeds the dispatch,
+        // but the publication must carry exactly the visible regions — an
+        // answer for a region that has not corroborated into `visible`
+        // lives in the string ledger and lands through `reconcile` when it
+        // appears. The filter is the one central gate every settlement
+        // path flows through.
+        let visibleIDs = Set(regions.map(\.id))
+        let publicationOutcomes = outcomes.filter { visibleIDs.contains($0.key) }
         let publication = LiveTranslatePublication(
             sequence: publicationSequence,
             regions: regions,
-            outcomes: outcomes,
+            outcomes: publicationOutcomes,
             placements: place(regions: regions, policy: policy),
             policy: policy)
         lastPublished = publication
