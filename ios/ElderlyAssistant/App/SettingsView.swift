@@ -4415,7 +4415,14 @@ struct AIModelsSettingsView: View {
     }
 }
 
-private struct ModelManagementRow: View {
+/// One model's download/delete row.
+///
+/// `internal` rather than `fileprivate` since the translate-test screen
+/// (2026-09-21): that screen offers the SAME translation artifact — and
+/// only the artifact, never a picker — so it draws the same row. A second
+/// download UI would be a second place for the size, the live state and
+/// the device-class verdict to disagree with this one.
+struct ModelManagementRow: View {
     @Environment(\.locale) private var locale
     let entry: ModelCatalogEntry
     let state: ModelDownloadState

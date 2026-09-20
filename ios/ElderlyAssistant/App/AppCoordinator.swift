@@ -2074,6 +2074,65 @@ final class AppCoordinator: ObservableObject {
     /// `nil` rather than a session without speech is deliberate: the plugin
     /// turns it into the spoken apology the design's failure table specifies,
     /// instead of a session that silently cannot talk.
+    // MARK: - [TRANSLATE-TEST] The hidden dev screen's dependencies (2026-09-21)
+
+    /// The translate-test screen's dependencies: the app's OWN instances,
+    /// not fresh ones.
+    ///
+    /// Sharing the store, the consent gate, the cost governor and the bus is
+    /// the point rather than a shortcut. A second consent gate would be a
+    /// second consent record to keep honest (and the screen exists to show
+    /// what the SHIPPED path does); a second cost governor would let the
+    /// screen spend a budget nothing else in the app can see. Sharing also
+    /// means anything the screen records is what the camera session would
+    /// have recorded.
+    ///
+    /// The cloud switch and the key are read live, through closures, because
+    /// both can change while the screen is open — the household can flip the
+    /// switch in Settings, and a key can be entered there.
+    ///
+    /// The speech half is `startSearchPhraseCapture`, the shipped one-shot
+    /// mic the Phone and Directions leaves use. It suspends the voice
+    /// pipeline for the capture's duration and restarts it afterwards, which
+    /// is what makes this reuse safe: the shared engine has ONE tap slot, and
+    /// every shipped recogniser is push-mode. A screen that captured audio
+    /// itself would either fight the always-on pipeline for the tap or wait
+    /// forever for buffers nobody feeds it.
+    @MainActor
+    func makeTranslateTestDependencies() -> TranslateTestDependencies {
+        // One settings instance over `UserDefaults`, the same store the
+        // Settings leaf writes through, so the switch read here is the
+        // switch the household set.
+        let settings = LiveTranslateSettings()
+        return TranslateTestDependencies(
+            cache: labelTranslationCache,
+            consentGate: liveTranslateConsentGate,
+            costGovernor: geminiCostGovernor,
+            client: geminiClient,
+            observabilityBus: observabilityBus,
+            modelStore: modelStore,
+            isProviderConfigured: { [weak self] in
+                self?.geminiConfigStore.isConfigured ?? false
+            },
+            isCloudEnabled: { settings.geminiCloudEnabled },
+            startCapture: { [weak self] completion in
+                // A shell that is gone reports rather than hangs: the
+                // screen leaves its mic button in `.listening` until a
+                // completion arrives, so dropping it would strand the
+                // button lit with nothing coming.
+                guard let self else {
+                    completion(.failure(.audioUnavailable))
+                    return
+                }
+                self.startSearchPhraseCapture(completion: completion)
+            },
+            cancelCapture: { [weak self] in
+                self?.cancelSearchPhraseCapture()
+            },
+            config: LiveTranslateConfig.default,
+            targetLanguage: LiveTranslationPipeline.defaultTargetLanguage)
+    }
+
     private func makeLiveTranslateDependencies(locale: Locale) -> LiveTranslateSessionDependencies? {
         guard let queue = speakQueue else { return nil }
         // [POINT-ASK] The hosted point-ask session's dependencies: the
