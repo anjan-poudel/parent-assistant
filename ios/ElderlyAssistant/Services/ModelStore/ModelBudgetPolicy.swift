@@ -163,10 +163,13 @@ struct ModelBudgetPolicy: Sendable, Equatable {
     /// swings by more than the gap between the 1.7B and the 4B brains, so a
     /// session that also wants a brain has to spend budget it does not have.
     ///
-    /// **Not wired into the camera pipeline in Step 3** — reducing the
-    /// session's budget is a `LiveTranslateConfig` change and Step 3's
-    /// non-goals exclude the camera. The arithmetic is here, and
-    /// `sessionModelBudgetBytes(session:)` is what the wiring will call.
+    /// **Wired** ([CAMERA-BUDGET], 2026-09-20): `LiveCameraSession` reports
+    /// activation through `onSessionActiveChanged`, the coordinator hands
+    /// that to `ModelLifecycleManager.setSessionProfile(_:owner:)`, and
+    /// `sessionModelBudgetBytes(session:)` — which this field feeds — is what
+    /// the warden computes the lowered budget with. The field is what makes
+    /// the camera session's own footprint part of `W(t)` rather than
+    /// something the ledger hopes has already been subtracted.
     let workingSetCameraBytes: UInt64
 
     /// The artifact ceiling of the largest brain the class may be offered.

@@ -36,7 +36,9 @@ final class ApplianceHelperLabelSeamTests: XCTestCase {
 
     /// A persisted entry, seeded the way the live path's tier-2 completion
     /// would have left it (the helper itself never writes).
-    private func seedPersisted(label: String, translation: String) {
+    private func seedPersisted(label: String,
+                               translation: String,
+                               tier: TranslationTier? = nil) {
         var entries: [LabelTranslationCache.Entry] = []
         if let data = storage.bytes(forKey: LabelTranslationCache.storageKey),
            let payload = try? JSONDecoder().decode(LabelTranslationCache.Persisted.self, from: data) {
@@ -45,7 +47,8 @@ final class ApplianceHelperLabelSeamTests: XCTestCase {
         entries.append(LabelTranslationCache.Entry(
             key: LabelTranslationCache.normalizationKey(text: label, targetLanguage: .nepali),
             translation: translation,
-            lastAccessSequence: entries.count + 1))
+            lastAccessSequence: entries.count + 1,
+            tierToken: tier?.rawValue))
         let payload = LabelTranslationCache.Persisted(
             schemaVersion: LabelTranslationCache.Persisted.currentSchemaVersion,
             entries: entries)
@@ -100,8 +103,30 @@ final class ApplianceHelperLabelSeamTests: XCTestCase {
         XCTAssertEqual(resolution.display.secondary, "Delayed Start",
                        "the printed English stays as the reference line, exactly as for a "
                        + "curated label")
-        XCTAssertEqual(resolution.origin, .persisted)
+        XCTAssertEqual(resolution.origin, .persistedLayer)
         XCTAssertEqual(resolution.tier, .cloud)
+    }
+
+    /// …and for **any** persisted entry, not only a cloud-produced one. The
+    /// seam's guard asks whether the cache layer answered, while `Origin` now
+    /// carries *which tier* produced the answer: comparing the whole origin
+    /// against the cloud-default value is the easy mistake, and it would make
+    /// every on-device answer invisible to the helper — the same label
+    /// rendering untranslated while the store holds its translation. The tier
+    /// travels through unchanged (FR-LCT-008).
+    func testABrainProducedEntryIsStillServedByTheSeam() {
+        seedPersisted(label: "Delayed Start", translation: "ढिलो सुरु", tier: .onDeviceBrain)
+        let cache = makeCache()
+
+        let resolution = resolve("Delayed Start", cache: cache)
+
+        XCTAssertEqual(resolution.display.primary, "ढिलो सुरु",
+                       "an on-device answer is a persisted answer to this seam")
+        XCTAssertEqual(resolution.display.secondary, "Delayed Start",
+                       "the printed English stays as the reference line")
+        XCTAssertTrue(resolution.origin?.isPersistedLayer == true)
+        XCTAssertEqual(resolution.tier, .onDeviceBrain,
+                       "the answer is attributed to the tier that produced it, not to cloud")
     }
 
     // MARK: - R8, case three: precedence
@@ -163,7 +188,7 @@ final class ApplianceHelperLabelSeamTests: XCTestCase {
         guard case .success(.some(let live)) = cache.lookup(text: "Delayed Start") else {
             return XCTFail("the live path must be served from the shared store")
         }
-        XCTAssertEqual(live.origin, .persisted)
+        XCTAssertEqual(live.origin, .persistedLayer)
         XCTAssertGreaterThan(bus.events(named: "cache_hit").count, hitsBefore)
         XCTAssertEqual(bus.events(named: "cache_miss").count, missesAfterHelper,
                        "no miss was recorded for a label the shared store holds")

@@ -903,11 +903,25 @@ final class LiveCameraSession {
     private let notificationCenter: NotificationCenter
     private let now: () -> TimeInterval
     /// [CAMERA-BUDGET] (2026-09-20) Fired with `true` when the session's
-    /// capture goes live and `false` when it ends — the signal the warden's
+    /// capture goes live and `false` when it stops — the signal the warden's
     /// session-profile budget rides on: the measured 1.4 GB camera working
     /// set lowers the model budget for exactly the interval the camera is
     /// drawing it. Wired by the coordinator to
-    /// `ModelLifecycleManager.setSessionProfile`.
+    /// `ModelLifecycleManager.setSessionProfile`, with this session as the
+    /// profile's owner.
+    ///
+    /// "Live" is one definition everywhere: `true` while the capture stack is
+    /// running, `false` from the moment it is stopped. So `start()` reports
+    /// it, `stop()` reports it, and so do the two transitions in between —
+    /// `pause(_:)` (a backgrounded app or an interruption stops the capture)
+    /// and `resume()`. It is a **level, reported once per change** (see
+    /// `announceSessionActive`): a session that started into an interruption
+    /// that was already pending never had a live capture to announce, and one
+    /// that is torn down after being paused does not announce a second stop.
+    /// A pair that does not describe the camera is worse than silence — a
+    /// `true`/`false` inside one call lowers the budget for an interval no
+    /// frame was captured in, and a missing `false` sizes every later load
+    /// for a camera that is not there.
     var onSessionActiveChanged: ((Bool) -> Void)?
 
     private let captureQueue = DispatchQueue(label: "com.elderlyassistant.livetranslate.capture")
@@ -924,6 +938,13 @@ final class LiveCameraSession {
     private var explanationOffered = false
     private var startHasRun = false
     private var pendingInterruption: CameraInterruption?
+    /// The last value reported through `onSessionActiveChanged`, so the
+    /// signal is a **level** rather than an edge: a transition that does not
+    /// change it reports nothing, which is what keeps a start that goes
+    /// straight into the background from announcing an activation, and a
+    /// teardown of a session that was already paused from announcing a
+    /// second stop.
+    private var activeAnnounced = false
 
     /// The frame-change gate's state. Lock-guarded with the rest of the tap
     /// state, because the tap is the only writer and the tap is where the
@@ -1382,12 +1403,21 @@ final class LiveCameraSession {
         withLock { startHasRun = true }
         setState(.running)
         events.sessionStarted()
-        onSessionActiveChanged?(true)
 
         // An interruption that arrived while the session was starting is
-        // applied now: the session must not begin running in the background.
+        // applied before the activation is announced, not after: the two are
+        // one transition to the observer, and a session that begins in the
+        // background — or that a call interrupted before it ever showed a
+        // frame — was never live. Announcing `true` and then `false` in the
+        // same call would have the budget raised and torn down for an
+        // interval no frame was ever captured in, and would teach the warden
+        // nothing about the session it is sizing.
         if let interruption = withLock({ let pending = pendingInterruption; pendingInterruption = nil; return pending }) {
+            // `pause` is what reports the stop, so the announcement is the
+            // `else` branch rather than a second, contradictory call.
             _ = pause(interruption)
+        } else {
+            announceSessionActive(true)
         }
         return .success(())
     }
@@ -1403,6 +1433,14 @@ final class LiveCameraSession {
             onCaptureQueue { capture.stopRunning() }
             setState(.interrupted(reason))
             events.cameraInterrupted(reason)
+            // The capture stack is stopped: the working set the profile
+            // describes is not being drawn any more, so the budget goes back
+            // to the idle arithmetic for the whole interrupted interval —
+            // which is where the warden needs it, since this is exactly the
+            // interval a brain load is likely to be attempted in (the app is
+            // in the background, the phone is in a pocket, the elder has
+            // stopped pointing the camera at anything).
+            announceSessionActive(false)
             return .success(())
 
         case .starting:
@@ -1464,6 +1502,12 @@ final class LiveCameraSession {
             // write.
             zoomSurface.sessionReleased()
             events.cameraResumed(recoveringFrom: reason)
+            // The capture stack is running again, so the camera's working set
+            // is back in the picture the budget is computed against. The
+            // pairing with the `false` `pause(_:)` reported is what keeps the
+            // profile's lifetime equal to the capture's lifetime across any
+            // number of interruptions.
+            announceSessionActive(true)
             return .success(())
 
         case .running:
@@ -1536,7 +1580,10 @@ final class LiveCameraSession {
         if teardown.announced {
             onCaptureQueue { capture.stopRunning() }
             events.sessionEnded()
-            onSessionActiveChanged?(false)
+            // A session that was already paused (`stop()` on a backgrounded
+            // one) reported its stop then: the level has not changed, so this
+            // is not a second one.
+            announceSessionActive(false)
         }
     }
 
@@ -1713,6 +1760,24 @@ final class LiveCameraSession {
 
     private func setState(_ newState: State) {
         withLock { currentState = newState }
+    }
+
+    /// [CAMERA-BUDGET] Reports whether the capture stack is live, **once per
+    /// change**. The observer is the model warden, whose session profile is
+    /// raised and cleared by this signal: a repeated `false` is a clear of
+    /// nothing, and a `true` that is immediately followed by a `false` lowers
+    /// the budget for an interval no frame was captured in. Both are the
+    /// same bug from the warden's side — a pair that does not describe the
+    /// camera's actual state — so the session reports the state, not the
+    /// transition that happened to reach it.
+    private func announceSessionActive(_ active: Bool) {
+        let changed = withLock { () -> Bool in
+            guard activeAnnounced != active else { return false }
+            activeAnnounced = active
+            return true
+        }
+        guard changed else { return }
+        onSessionActiveChanged?(active)
     }
 
     /// Runs `body` on the serial capture queue, which owns every capture-stack

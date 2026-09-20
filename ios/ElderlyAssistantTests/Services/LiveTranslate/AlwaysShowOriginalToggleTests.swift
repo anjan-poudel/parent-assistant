@@ -113,16 +113,26 @@ final class AlwaysShowOriginalToggleTests: XCTestCase {
     /// 2026-09-19 the feature owns exactly one more: the cloud tier's master
     /// switch. It gets the identical treatment — one declared key, one setter,
     /// no second spelling at any call site — and this assertion is what makes
-    /// a third one a deliberate change rather than a drift. (The switch is not
+    /// a fourth one a deliberate change rather than a drift. (The switch is not
     /// a second *display* preference and cannot disagree with the voice
     /// command: the command writes only `alwaysShowOriginalKey`.)
-    func testTheFeatureOwnsExactlyTwoSettingsEachWithOneDeclaredKey() {
+    ///
+    /// [DEBUG-LOG] (review finding on #99, 2026-09-20) The third key is the
+    /// console diagnostic's switch. It is persisted for the reason the owner
+    /// asked for the logging at all — a device capture cannot wait for a
+    /// rebuild — and it is a *developer* key, not a third preference: it is
+    /// off unless someone turns it on, and nothing in a Release build reads
+    /// it. It is listed here so the store's key set stays closed.
+    func testEverySettingTheFeatureOwnsIsOneDeclaredKeyAndNoOthers() {
         XCTAssertEqual(LiveTranslateSettings.featureKeys,
                        [LiveTranslateSettings.alwaysShowOriginalKey,
-                        LiveTranslateSettings.geminiCloudEnabledKey],
+                        LiveTranslateSettings.geminiCloudEnabledKey,
+                        LiveTranslateSettings.translationDebugLoggingEnabledKey],
                        "each setting is one key, and the feature owns no others")
         XCTAssertEqual(LiveTranslateSettings.geminiCloudEnabledKey,
                        "livetranslate.geminiCloudEnabled")
+        XCTAssertEqual(LiveTranslateSettings.translationDebugLoggingEnabledKey,
+                       "livetranslate.translationDebugLoggingEnabled")
     }
 
     // MARK: - Scenario: enabling keeps originals visible alongside translations
