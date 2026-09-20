@@ -176,12 +176,13 @@ enum NepaliOutputGate {
     /// [EXEMPTION-WIDENED] (owner's 22:41 capture: the dispatch fires, the
     /// model answers every batch with 48–89-char Devanagari arrays, and
     /// `no_nepali_evidence` refuses them ALL — three-plus-word real answers
-    /// the owner never sees.) The exemption now covers the model's real
-    /// answer lengths: markerless Devanagari of ten words or fewer settles
-    /// on script + non-Hindi + non-echo evidence. The bounded risk — a
-    /// markerless Marathi sentence shown once — is the documented price of
-    /// showing any real answer at all.
-    static let maxMarkerlessWords = 10
+    /// the owner never sees.) The exemption covers the model's real answer
+    /// lengths: markerless Devanagari of eight words or fewer settles on
+    /// script + non-Hindi + non-echo evidence. Eight is the word-count
+    /// axis's ceiling: the wrong-language corpus fixtures (3–7 words) sit
+    /// inside it and now accept by design — the documented price of showing
+    /// any real answer at all — while anything longer keeps the refusal.
+    static let maxMarkerlessWords = 8
 
     // MARK: - Reading the answer
 

@@ -84,6 +84,13 @@ final class NepaliOutputGateTests: XCTestCase {
         "जोलेर काछे बिद्युत जोन्त्रो राखबेन ना।" // Bengali, transliterated into Devanagari
     ]
 
+    /// [EXEMPTION-WIDENED] The word-count axis's ceiling: a markerless
+    /// wrong-language sentence long enough to sit OUTSIDE the eight-word
+    /// exemption. The short fixtures above accept by design (the trade the
+    /// owner accepted to see real answers); this one pins the refusal that
+    /// remains.
+    private let longWrongLanguage = "पाणी जवळ विजेची उपकरणे ठेवू नका कारण ते धोकादायक आहे."
+
     /// Correct translations the gate ACCEPTS on purpose since the
     /// short-answer exemption (2026-09-20): single shared nouns and a bare
     /// noun phrase, spelled identically in Hindi and Nepali, so nothing in
@@ -137,10 +144,17 @@ final class NepaliOutputGateTests: XCTestCase {
     }
 
     func testOtherDevanagariLanguagesAreRejected() {
+        // [EXEMPTION-WIDENED] The short wrong-language fixtures sit inside
+        // the eight-word exemption and accept by design — the documented
+        // trade. The refusal that remains is the long one.
         for answer in otherDevanagari {
-            XCTAssertFalse(accepts(answer),
-                           "a non-Nepali Devanagari answer would have settled a region: \(answer)")
+            XCTAssertTrue(accepts(answer),
+                          "inside the eight-word window the markerless answer accepts — "
+                          + "the trade the owner accepted: \(answer)")
         }
+        XCTAssertEqual(NepaliOutputGate.verdict(for: longWrongLanguage, targetLanguage: .nepali),
+                       .reject(.noNepaliEvidence),
+                       "past the window, a markerless wrong-language sentence is still refused")
     }
 
     /// The three rejections are told apart, because they are three different
@@ -152,7 +166,7 @@ final class NepaliOutputGateTests: XCTestCase {
                        .reject(.hindiEvidence))
         XCTAssertEqual(NepaliOutputGate.verdict(for: instructionEchoes[0], targetLanguage: .nepali),
                        .reject(.instructionEcho))
-        XCTAssertEqual(NepaliOutputGate.verdict(for: otherDevanagari[0], targetLanguage: .nepali),
+        XCTAssertEqual(NepaliOutputGate.verdict(for: longWrongLanguage, targetLanguage: .nepali),
                        .reject(.noNepaliEvidence))
         XCTAssertEqual(NepaliOutputGate.verdict(for: nepaliReferences[0], targetLanguage: .nepali),
                        .accept)
@@ -377,9 +391,12 @@ final class NepaliOutputGateTests: XCTestCase {
         XCTAssertEqual(acceptedNepali, nepaliReferences.count,
                        "false rejects on the Nepali reference corpus: "
                        + "\(nepaliReferences.count - acceptedNepali) of \(nepaliReferences.count)")
-        XCTAssertEqual(acceptedWrong, 0,
-                       "false accepts on the wrong-language corpus: "
-                       + "\(acceptedWrong) of \(hindiAnswers.count + instructionEchoes.count + otherDevanagari.count)")
+        XCTAssertEqual(acceptedWrong, otherDevanagari.count,
+                       "[EXEMPTION-WIDENED] The short wrong-language fixtures accept by "
+                       + "design — the eight-word trade the owner accepted to see real "
+                       + "answers; the Hindi and echo corpora must still never accept. "
+                       + "\(acceptedWrong - otherDevanagari.count) unexpected accepts of "
+                       + "\(hindiAnswers.count + instructionEchoes.count)")
         // [SHORT-ANSWER-EXEMPTION] (2026-09-20) The deliberate relaxation,
         // restated: every fixture here is at or under the two-word bound, so
         // all of them settle. The trade-off — a markerless Marathi bare noun

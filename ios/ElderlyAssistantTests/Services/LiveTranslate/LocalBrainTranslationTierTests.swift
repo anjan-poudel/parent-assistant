@@ -640,7 +640,7 @@ final class LocalBrainTranslationTierTests: XCTestCase {
     /// grammar but not carrying it is still refused — a sentence has room
     /// for evidence, and its absence still means what it always did.
     func testALongMarkerFreeAnswerIsStillLeftForTheNextTier() {
-        XCTAssertNil(LocalBrainTranslationTier.accepts("पाणी जवळ विजेची उपकरणे ठेवू नका।",
+        XCTAssertNil(LocalBrainTranslationTier.accepts("पाणी जवळ विजेची उपकरणे ठेवू नका कारण ते धोकादायक आहे.",
                                                        for: brainText,
                                                        targetLanguage: .nepali,
                                                        config: config),
@@ -735,7 +735,7 @@ final class LocalBrainTranslationTierTests: XCTestCase {
     /// exemption does not apply to it.
     func testARefusedAnswerIsNamedInTheHistogramOnTheEvent() async throws {
         try await withTier { tier, generator, bus in
-            generator.output = answer(["पाणी जवळ विजेची उपकरणे ठेवू नका।"])
+            generator.output = answer(["पाणी जवळ विजेची उपकरणे ठेवू नका कारण ते धोकादायक आहे."])
 
             let outcome = await tier.translate([brainText])
 
@@ -773,7 +773,7 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         // short markerless answers now, and the rule's refusal needs a
         // sentence with room for grammar.
         let mixed = LocalBrainTranslationTier.report(
-            answer(["", "पाणी जवळ विजेची उपकरणे ठेवू नका।", "खुला है।", "Pharmacy"]),
+            answer(["", "पाणी जवळ विजेची उपकरणे ठेवू नका कारण ते धोकादायक आहे.", "खुला है।", "Pharmacy"]),
             sources: ["Pharmacy", "Open", "24", "No entry"],
             targetLanguage: .nepali,
             config: config)
