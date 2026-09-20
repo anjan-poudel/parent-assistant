@@ -779,7 +779,14 @@ struct LiveTranslateConfig: Equatable {
     /// Below 2 there is no consensus to speak of: at 1 every observation is
     /// adopted on sight, which is exactly the per-pass string flicker the
     /// owner's log is made of.
-    var readingConsensusPasses: Int = 2
+    /// [DISPATCH-ON-FIRST-SIGHTING] (owner's 21:46 capture: 103 seconds of
+    /// OCR churn, ZERO dispatches.) Two identical readings were required
+    /// before a region entered the dispatch set — a handheld camera never
+    /// repeats a reading exactly, so the owner's scenes never stabilized
+    /// and the pipeline never asked the brain. One sighting dispatches now;
+    /// the pacing clocks (dispatch 1.5 s, brain 8 s) still bound the model
+    /// calls, and the reading consensus still governs what is PUBLISHED.
+    var readingConsensusPasses: Int = 1
 
     /// How much more confidence a new reading must carry than the one being
     /// held, to replace it **without** waiting out `readingConsensusPasses`.

@@ -39,7 +39,7 @@ final class LiveTranslateConfigTests: XCTestCase {
         // width of "substantially surer", and it is pinned because a run of
         // readings that differ by a hundredth must not be able to switch the
         // reading on confidence alone.
-        XCTAssertEqual(config.readingConsensusPasses, 2)
+        XCTAssertEqual(config.readingConsensusPasses, 1)
         XCTAssertEqual(config.readingConfidenceGain, 0.15)
 
         // The dispatch pacing (owner device report, 2026-09-19): the window a
