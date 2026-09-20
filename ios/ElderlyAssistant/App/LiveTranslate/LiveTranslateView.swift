@@ -773,6 +773,18 @@ struct LiveTranslateResultsCardView: View {
     private func rowContent(_ row: LiveTranslateResultsCardSurface.Row) -> some View {
         HStack(alignment: .top, spacing: DesignTokens.interElementSpacing) {
             VStack(alignment: .leading, spacing: DesignTokens.interElementSpacing / 2) {
+                // [SNAPSHOT-ORDER] (owner directive, 2026-09-20: "show the
+                // original language and then the translated text.") The
+                // original reads FIRST, the translation beneath it — the
+                // translation keeps the prominent weight so the eye still
+                // lands where the answer is.
+                if let source = row.source, !source.isEmpty {
+                    Text(source)
+                        .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize))
+                        .foregroundColor(DesignTokens.textSecondary)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 HStack(alignment: .firstTextBaseline,
                        spacing: DesignTokens.interElementSpacing / 2) {
                     if let symbol = row.symbolName {
@@ -783,13 +795,6 @@ struct LiveTranslateResultsCardView: View {
                         .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize,
                                                     weight: .semibold))
                         .foregroundColor(DesignTokens.textPrimary)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                if let source = row.source, !source.isEmpty {
-                    Text(source)
-                        .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize))
-                        .foregroundColor(DesignTokens.textSecondary)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                 }
