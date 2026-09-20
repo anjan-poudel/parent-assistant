@@ -1375,28 +1375,39 @@ struct LiveTranslateConfig: Equatable {
     /// reserve grants with evictions rather than denying `over_budget_alone`.
     var wardenBypassForTesting: Bool = false
 
-    /// [DEBUG-LOG] (owner directive, 2026-09-20) Whether the tiers emit a
-    /// console diagnostic while the feature is being debugged. **Default
-    /// off, read only from a Debug build, and content-free.**
+    /// [DEBUG-LOG] (owner directive, 2026-09-20) Whether the feature's debug
+    /// lane emits while the feature is being debugged: the OCR pass, each
+    /// answered pair in the batch's own order, and the leg's timing.
+    /// **Nominal default on, acted on only from a Debug build, and never a
+    /// console write.**
     ///
     /// The owner asked to see "both source and target strings" while the
-    /// feature was in device testing. That shape cannot ship in any
-    /// configuration: NFR-LCT-006 forbids a recognized or translated string
-    /// in a console write, and the Release-log gate's `feature-content-print`
-    /// rule is judged in Debug too — a print naming a source or a translation
-    /// is a defect even inside `#if DEBUG`. The original spelling was worse
-    /// still: a DEBUG-free flag, ON by default, that compiled the pairs into
-    /// Release. What is left is the part that is safe *and* useful: the
-    /// batch's counts, from readers that exist only under `#if DEBUG`, so no
-    /// Release binary contains a console write for this feature at all.
+    /// feature was in device testing. The original spelling compiled the pairs
+    /// into Release with no flag at all; the corrected spelling was a
+    /// DEBUG-only, content-free count line — safe, but not the diagnostic the
+    /// owner asked for. The owner's decision of 2026-09-20 resolves the
+    /// conflict as the **sanitised debug lane**: the pairs and their timing do
+    /// travel, through `LiveTranslateDebugLane` onto the sanitising
+    /// observability bus, and `LogSanitiser` replaces every string with
+    /// `[redacted]` at that choke point (`LogSanitiser.redactedKeys`). A
+    /// capture therefore shows that a pair existed, in what order, with what
+    /// timing — and the text never reaches a log surface, in any build.
     ///
-    /// The pairs themselves have a home on the sanitising observability bus,
-    /// where they travel as counts and closed tokens —
-    /// `brainTranslationBatch(resolvedCount:unresolvedCount:…)` is the
-    /// content-free sibling of the line the owner asked for.
+    /// The shape that cannot ship remains impossible: NFR-LCT-006 forbids a
+    /// recognized or translated string on a log surface in any configuration,
+    /// the Release-log gate's `feature-content-print` rule is judged in Debug
+    /// too, and the feature's own sources carry no console write at all
+    /// (`LiveTranslateSourceHygieneTests`). The lane's readers and the lane
+    /// type itself live under `#if DEBUG`, so no Release binary contains any
+    /// part of this path.
+    ///
+    /// The count-only siblings on the bus are unchanged and still the wire
+    /// format a shipped build emits — `brainTranslationBatch(
+    /// resolvedCount:unresolvedCount:…)` carries the same batch's outcome
+    /// without the lane.
     ///
     /// The value is persisted (see `LiveTranslateSettings`), so a debug
-    /// session turns it on without a rebuild; Release reads it into the
+    /// session turns the lane off without a rebuild; Release reads it into the
     /// config and has nothing that acts on it.
     var translationDebugLoggingEnabled: Bool = true
 

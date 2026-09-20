@@ -457,10 +457,21 @@ final class SecurityEvidenceBoundaryTests: XCTestCase {
 
         // Nothing the feature emitted was altered on its way to the sink: the
         // family-visible counts and tokens arrive, and are all that arrives.
+        // The sanitised debug lane is excluded from *this* comparison for the
+        // reason `EvidenceRecorderBus.rawFeatureSignatures` records: its
+        // redaction is measured by the sweep above — which covers its events —
+        // and pinned in `LiveTranslateDebugLaneTests` / `LogSanitiserTests`.
         XCTAssertEqual(harness.bus.rawFeatureSignatures, harness.bus.deliveredFeatureSignatures,
                        "sanitisation changed a feature event — either a key was dropped "
                        + "(CL-5) or a value was scrubbed, and the emitters must not "
                        + "produce either shape in the first place")
+
+        // …and the exclusion is exercised rather than hypothetical: the lane
+        // really did emit in this run, and the sweep above really did cover
+        // its events.
+        XCTAssertTrue(harness.bus.raw.contains {
+            EvidenceRecorderBus.contentRedactedEventTypes.contains($0.eventType)
+        }, "the debug lane emitted nothing — the exclusion would be untested")
     }
 
     // MARK: - AM-10: structural characters cannot change the request
@@ -582,11 +593,34 @@ final class EvidenceRecorderBus: ObservabilityBus {
         delivered.filter { $0.eventType == eventType }
     }
 
+    /// The sanitised debug lane's three event types (owner decision,
+    /// 2026-09-20) — the one place where what an emitter hands over and what a
+    /// sink receives legitimately differ, because the lane carries recognized
+    /// and translated strings *by design* and `LogSanitiser` replaces each with
+    /// `[redacted]` before any sink sees it. That redaction is the point of the
+    /// lane, and it is pinned in `LiveTranslateDebugLaneTests` and
+    /// `LogSanitiserTests`.
+    static let contentRedactedEventTypes: Set<String> = ["translate_debug_ocr",
+                                                         "translate_debug_cloud",
+                                                         "translate_debug_local"]
+
     /// Every field of the feature's events, flattened so two runs can be
     /// compared without `ObservabilityEvent` itself being `Equatable` (it is
     /// the app's type, not the test's to change).
-    var rawFeatureSignatures: [String] { signatures(of: raw) }
-    var deliveredFeatureSignatures: [String] { signatures(of: delivered) }
+    ///
+    /// The lane's events are left out of this pair **so that the comparison
+    /// keeps its meaning**: with them in, "raw equals delivered" would stop
+    /// measuring "the emitters never produced a bad shape" and start measuring
+    /// "the sanitiser cleaned one up", which is the weaker property this suite
+    /// exists to distinguish. The lane is the declared exception to the
+    /// stronger property, not a counterexample to it; the leak sweep in the
+    /// test that uses these still runs over the lane's events.
+    var rawFeatureSignatures: [String] {
+        signatures(of: raw.filter { !Self.contentRedactedEventTypes.contains($0.eventType) })
+    }
+    var deliveredFeatureSignatures: [String] {
+        signatures(of: delivered.filter { !Self.contentRedactedEventTypes.contains($0.eventType) })
+    }
 
     private func signatures(of events: [ObservabilityEvent]) -> [String] {
         events

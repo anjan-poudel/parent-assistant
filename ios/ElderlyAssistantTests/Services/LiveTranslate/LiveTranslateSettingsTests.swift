@@ -121,15 +121,22 @@ final class LiveTranslateSettingsTests: XCTestCase {
 
     // MARK: The [DEBUG-LOG] diagnostic switch (review finding on #99)
 
-    /// The switch is **off** until someone turns it on, and the absent key
-    /// reads the config's nominal default rather than `false` by accident —
-    /// the same rule the other two preferences follow. The default matters
-    /// more here: it decides whether a shipped app writes content-free
-    /// diagnostics at all, so it must not be able to be on by construction.
-    func testTheDiagnosticSwitchIsOffUntilSomeoneTurnsItOn() {
-        XCTAssertFalse(settings().translationDebugLoggingEnabled)
-        XCTAssertFalse(LiveTranslateConfig.default.translationDebugLoggingEnabled,
-                       "the config's own nominal default is the other half of the rule")
+    /// The switch reads the config's **nominal default** until someone turns it
+    /// on or off, and the absent key reads that default rather than a value
+    /// nobody chose — the same rule the other two preferences follow.
+    ///
+    /// [SANITISED-DEBUG-LANE] (owner decision, 2026-09-20) The nominal default
+    /// is **on**. The owner's directive of 2026-09-20 turned it back on so a
+    /// fresh device build logs without a scheme edit, and the safety that used
+    /// to live in the default now lives in the route: the lane's readers are
+    /// `#if DEBUG`-only and every string the lane carries is redacted by
+    /// `LogSanitiser` before a sink sees it, so no shipped build writes
+    /// anything on account of this value, either way round.
+    func testTheDiagnosticSwitchFollowsTheNominalDefaultUntilSomeoneChooses() {
+        XCTAssertTrue(settings().translationDebugLoggingEnabled,
+                      "nothing stored: the config's nominal default answers")
+        XCTAssertTrue(LiveTranslateConfig.default.translationDebugLoggingEnabled,
+                      "the owner's 2026-09-20 directive put the nominal default back on")
         XCTAssertNil(defaults.object(forKey: LiveTranslateSettings.translationDebugLoggingEnabledKey),
                      "reading the default must not write a value nobody chose")
     }
@@ -180,8 +187,13 @@ final class LiveTranslateSettingsTests: XCTestCase {
     /// [DEBUG-LOG] diagnostic the whole feature was built around could not be
     /// enabled on a device at all. The launch argument is the writer.
     func testTheLaunchArgumentIsAProductionWriterForTheDiagnosticSwitch() {
-        XCTAssertFalse(settings().translationDebugLoggingEnabled,
-                       "the argument is the only thing that turns it on; the default is still off")
+        // The argument's job is not to change the effective value — the
+        // nominal default is already on (2026-09-20) — but to make the value
+        // *chosen*, which is what carries it into the session's config.
+        XCTAssertNil(settings().chosenDebugLogging,
+                     "with nothing stored and no argument, nobody has chosen")
+        XCTAssertTrue(settings().translationDebugLoggingEnabled,
+                      "the effective value is the config's nominal default")
 
         let launched = LiveTranslateSettings(defaults: defaults,
                                              config: .default,

@@ -1162,8 +1162,15 @@ final class LiveCameraSessionTests: XCTestCase {
         let heldFrame = await frames.next()
         let held = try XCTUnwrap(heldFrame)
 
-        XCTAssertEqual(held.stabilization.offset.x, 0.008, accuracy: 1e-9,
-                       "0.4 of a 2 % move, past the 1 % dead zone: the window took the tremor")
+        XCTAssertEqual(held.stabilization.offset.x, 0.85 * 0.02, accuracy: 1e-9,
+                       "0.85 of a 2 % move: the adaptive-follow law's tremor "
+                       + "band is strictly INSIDE two dead zones, and 2 % is "
+                       + "exactly two 1 % zones — the picture is unmistakably "
+                       + "behind there, so the fast rate applies. Written as "
+                       + "the derivation, not the digit it lands on, so a move "
+                       + "of the law's constants fails here loudly instead of "
+                       + "leaving a stale 0.017 (FrameAnchorEstimatorTests pins "
+                       + "the switch, and spells it the same way)")
         XCTAssertEqual(held.stabilization.margin, anchored.stabilization.margin,
                        "the inset is a property of the feature being on, not of the correction")
         XCTAssertEqual(held.crop, .whole,
@@ -1211,8 +1218,10 @@ final class LiveCameraSessionTests: XCTestCase {
         try layer.deliver(paintedFrame(luma: 90, pts: 2))
         let heldFrame = await frames.next()
         let held = try XCTUnwrap(heldFrame)
-        XCTAssertEqual(held.stabilization.offset.x, 0.008, accuracy: 1e-9,
-                       "the premise: there is a correction, and the zoom has to drop it")
+        XCTAssertEqual(held.stabilization.offset.x, 0.85 * 0.02, accuracy: 1e-9,
+                       "the premise: there is a correction — 0.85 of a 2 % move, "
+                       + "the fast rate two dead zones earn, as the derivation "
+                       + "rather than the literal — and the zoom has to drop it")
 
         session.zoomSurface.zoom(.closer)
 
@@ -1322,7 +1331,27 @@ final class LiveCameraSessionTests: XCTestCase {
                 nc.post(name: UIApplication.willEnterForegroundNotification, object: nil)
             }
         }
-        try? await Task.sleep(for: .milliseconds(300))
+        // Wait for the log to go QUIET rather than sleeping a fixed 300 ms.
+        // The posts above are asynchronous twice over — each notification is
+        // observed on the posting thread and then hops to the capture queue —
+        // so a fixed sleep is a bet on the machine: on a loaded host the log
+        // is still filling when the assertions read it, which is what made
+        // this test flaky, and on a fast one a short sleep would pass for a
+        // reason that is not the invariant. Quiescence is the condition the
+        // assertions actually need, so that is what is awaited: no new
+        // delivery for ~250 ms, with a hard ceiling so a genuine hang fails
+        // here rather than eating the suite's timeout.
+        var lastCount = -1
+        var quietTicks = 0
+        let deadline = Date().addingTimeInterval(10)
+        while Date() < deadline, quietTicks < 12 {
+            let count = log.all.count
+            quietTicks = count == lastCount ? quietTicks + 1 : 0
+            lastCount = count
+            if quietTicks < 12 {
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+        }
 
         let levels = log.all
         XCTAssertEqual(levels.last, session.state == .running,

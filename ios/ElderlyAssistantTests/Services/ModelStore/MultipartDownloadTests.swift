@@ -321,6 +321,56 @@ final class MultipartDownloadTests: XCTestCase {
         XCTAssertFalse(bus.emittedEvents.contains { $0.eventType == "download_size_cap_rejected" })
     }
 
+    // MARK: - The warden's class budget
+
+    /// [MODEL-WARDEN 2026-09-20] A floor value is not the last word. An entry
+    /// the device-class warden refuses (here `.requiresEvictingWarmSTT` — the
+    /// model fits the class alone and not beside the warm STT) must not start:
+    /// the household would spend the download on an artifact the app refuses
+    /// at use time, and the floor that admitted it is one number a later
+    /// catalog edit can move.
+    func testAnEntryTheWardenRefusesIsNotDownloaded() throws {
+        let entry = makeEntry(id: "synthetic-warden-refused", sizeBytes: 1_000)
+        let service = ModelDownloadService(
+            store: try makeStore(),
+            observabilityBus: bus,
+            sessionFactory: stubSessionFactory(),
+            availabilityProvider: { _ in .unavailable(reason: .requiresEvictingWarmSTT) })
+        service.start(entry)
+        waitUntil("the warden refusal") {
+            if case .failed = service.states[entry.id] ?? .notStarted { return true }
+            return false
+        }
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.eventType == "download_policy_rejected"
+                && $0.errorCode == ModelUnavailabilityReason.requiresEvictingWarmSTT.rawValue
+        }, "the refusal must name the class reason on the bus, not fail silently")
+        XCTAssertTrue(MultipartStubURLProtocol.requestedPaths.isEmpty,
+                      "a warden-refused entry must not touch the network")
+    }
+
+    /// The `soloOverBudget` escape hatch: a preference the household stored
+    /// itself is delivered even when the class refuses it
+    /// (`AppCoordinator.resolveBrainModelID` rule 1). Refusing here would
+    /// leave the pick stored, the row's Download hidden and the artifact
+    /// never arriving.
+    func testAStoredPreferenceIsDeliveredEvenWhenTheWardenRefuses() throws {
+        let entry = makeEntry(id: "synthetic-stored-pick", sizeBytes: 1_000)
+        let service = ModelDownloadService(
+            store: try makeStore(),
+            observabilityBus: bus,
+            sessionFactory: stubSessionFactory(),
+            availabilityProvider: { _ in .unavailable(reason: .overClassBudget) })
+        service.start(entry, deliveringStoredPreference: true)
+        waitUntil("the delivery to leave the gate") {
+            service.states[entry.id] != .notStarted
+        }
+        XCTAssertFalse(bus.emittedEvents.contains { $0.eventType == "download_policy_rejected" },
+                       "a stored pick is not refused by the warden gate")
+        XCTAssertNotEqual(service.states[entry.id], .failed(reason:
+            "the model is larger than this device class can hold"))
+    }
+
     // MARK: - Reassembly: order and the full-file checksum
 
     /// Stubbed small parts: the reassembly is the parts' bytes IN ORDER,

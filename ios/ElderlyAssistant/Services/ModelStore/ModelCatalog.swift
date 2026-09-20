@@ -667,8 +667,14 @@ enum ModelCatalog {
             sizeBytes: 1_400_000_000,
             // SHA-256 of the release ZIP — verified by installWhisperKitModel.
             sha256: "d14082ebef5e34ade16826bdb5d49e85c55687d781b11608d0282be3070798ae",
-            // q6 live footprint ~2.5-3 GB — 6 GB-class devices pass.
-            minDeviceRAMBytes: 5_000_000_000,
+            // q6 live footprint ~2.5-3 GB — 5 GB is the smallest device that
+            // can hold it, which is also the `.compact` line: the class the
+            // floor admits is `.standard`, so it is spelled
+            // `ModelLifecycleBudget.compactBoundaryBytes` rather than a copy
+            // of the number. (STT is not class-gated — for a non-brain kind
+            // `ModelBudgetPolicy.availability` returns after the RAM check —
+            // so this floor is the only bound this artifact has.)
+            minDeviceRAMBytes: ModelLifecycleBudget.compactBoundaryBytes,
             dependsOn: nil,
             whisperKitZipURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v6/whisperkit-ne-teacher-v2-q6.zip")!,
             whisperKitZipBytes: 1_199_427_423,
@@ -689,7 +695,9 @@ enum ModelCatalog {
             sizeBytes: 1_400_000_000,
             // SHA-256 of the release ZIP — verified by installWhisperKitModel.
             sha256: "cf4c8c206fd31e57821fcb2cf681c7db3c1052a831503a9ba72c9486f7d45f32",
-            minDeviceRAMBytes: 5_000_000_000,
+            // Same floor as its fine-tuned sibling above, and the same
+            // reading: the boundary line, named rather than copied.
+            minDeviceRAMBytes: ModelLifecycleBudget.compactBoundaryBytes,
             dependsOn: nil,
             whisperKitZipURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v6/whisperkit-ne-large-base-q6.zip")!,
             whisperKitZipBytes: 1_225_257_321,
@@ -914,10 +922,14 @@ enum ModelCatalog {
             // progress bar and the disk pre-flight measure against.
             sizeBytes: 2_497_278_784,
             sha256: "1662e2178c37ad7ab4f4eff9188adee90fd404fe649e23cbe421084d78f7a45f",
-            // Same 4 GB floor as its seed-43 predecessor: 4B Q4_K_M is a
-            // ~2.5 GB file and ~3.5-4 GB live, and the gate reads the
-            // CURRENT free budget (`os_proc_available_memory`), not total
-            // RAM — a 6 GB device must still be able to download it.
+            // A 4 GB floor, below the compact line on purpose: a floor is a
+            // claim about the PHONE — 4B Q4_K_M is a ~2.5 GB file and
+            // ~3.5-4 GB live, and `MemoryProbe.canFit` compares that against
+            // physical RAM, not against the app's free budget — while the
+            // class budget is a separate gate. A `.compact` phone passes this
+            // floor and is refused by the class (`.overClassBudget`), and its
+            // row SHOWS that refusal instead of offering the download; see
+            // the reconciliation in `ModelBudgetPolicy.availability`.
             minDeviceRAMBytes: 4_000_000_000,
             dependsOn: nil,
             // Language tag: ne-only model.
@@ -996,7 +1008,11 @@ enum ModelCatalog {
             // (`intentQwen4BSlotCanon`, `intentQwen4BS43`): a ~1.83 GB
             // file is ~2.6 GB live, and `minDeviceRAMBytes` reads the
             // device probe, not the class policy — a 6 GB phone must still
-            // be able to download and keep it.
+            // be able to download and keep it. Below the compact line, and
+            // exempt for a second reason: this rung is SUPERSEDED and never
+            // offered (its row appears only when the artifact is already on
+            // disk), so no `.compact` household is ever offered the download
+            // the class would refuse. `ModelBudgetPolicy.availability`.
             minDeviceRAMBytes: 4_000_000_000,
             dependsOn: nil,
             // Language tag: ne-only model (it translates INTO Nepali).
@@ -1080,17 +1096,25 @@ enum ModelCatalog {
             // digest, so `finalize` could only answer "mismatch" — a 1.1 GB
             // download blamed on a checksum over a placeholder.
             sha256: "f0bde6a4946cc74504a6b705c067240c6a30733b11e44a47c297e89ea0206987",
-            // 4 GB: the floor the other >1 GB brains carry
-            // (`nmtEnNeQwen17bR2bQ8`, `intentQwen4BSlotCanon`). The claim is
-            // about the DEVICE's physical RAM (`MemoryProbe.canFit`), not the
-            // app's current ceiling, and 1.1 GB of file is ~1.8 GB live
-            // beside the standard class's 1.0 GB warm STT: a 3 GB phone
-            // cannot hold that with iOS on top, so a 3 GB floor would have
-            // offered a download the budget warden then refuses
-            // (`requiresEvictingWarmSTT`) — a 1.1 GB download that never
-            // runs. The floor is the smallest device that can actually use
-            // it, which is what makes the row honest.
-            minDeviceRAMBytes: 4_000_000_000,
+            // **5 GB**, and the number is the warden's own line, not a
+            // preference — `ModelLifecycleBudget.compactBoundaryBytes`, the
+            // constant rather than a copy of it, so this floor cannot drift
+            // off the line it sits on.
+            //
+            // The claim is about the DEVICE's physical RAM:
+            // `MemoryProbe.canFit` is `physicalMemoryBytes >= requiredBytes`,
+            // and `ModelLifecycleBudget.deviceClass` calls anything under
+            // 5 GB `.compact`, whose whole-model budget is 2 GB. 1.1 GB of
+            // file is ~1.8 GB live beside the standard class's 1.0 GB warm
+            // STT, so a 4 GB floor offered this download to a 4 GB phone that
+            // the warden then refuses it on (`requiresEvictingWarmSTT`) — a
+            // 1.1 GB download that never runs. A floor inside `.compact` is a
+            // floor that promises what the budget cannot deliver; 5 GB is the
+            // smallest device that can actually use it, which is what makes
+            // the row honest. (Other floors sit below the boundary and are
+            // exempt for their own stated reasons — the reconciliation is in
+            // `ModelBudgetPolicy.availability`.)
+            minDeviceRAMBytes: ModelLifecycleBudget.compactBoundaryBytes,
             dependsOn: nil,
             // Language tag: ne-only model (it translates INTO Nepali).
             languages: ["ne"]
@@ -1118,12 +1142,27 @@ enum ModelCatalog {
             // Server-original digest (round-3 Q5_K_M export), `.sha256`
             // sidecar on the training box, 2026-09-19.
             sha256: "c8557b9ab5704273079a32a502a5f282477755467d8b90719a8a989bb16dd5bf",
-            // 4 GB: the same floor as the Q4 above and for the same reason —
-            // the artifact is 150 MB larger (1.26 GB, ~1.96 GB live), which
-            // does not move the *device* rung the way a whole size class
-            // does, and the Q5 is sideload-only besides: no row offers it, so
-            // the floor only says what a device keeping it can run.
-            minDeviceRAMBytes: 4_000_000_000,
+            // 5 GB: the same floor as the Q4 above, and stated as
+            // `ModelLifecycleBudget.compactBoundaryBytes` so it cannot drift
+            // off the line. The reason is CO-RESIDENCY, not the whole-model
+            // budget — the arithmetic matters, because the two refusals are
+            // different sentences to a household:
+            //
+            //   live 1.958 GB (1.258 GB file + the 1.7B rung's 0.7 GB
+            //   overhead) < the 2.0 GB compact budget — it FITS the class
+            //   alone, with ~42 MB to spare;
+            //   live + the compact class's 0.65 GB warm STT = 2.608 GB
+            //   > 2.0 GB — so `.compact` refuses it as
+            //   `.requiresEvictingWarmSTT` ("it needs the memory the speech
+            //   model is holding"), not as `.overClassBudget`.
+            //
+            // Either way a floor inside `.compact` would offer a download the
+            // warden then refuses; 5 GB is the smallest device that can run
+            // it. The artifact is 150 MB larger than the Q4, so its floor can
+            // never be the lower of the two; the Q5 is sideload-only besides,
+            // so the floor only says what a device keeping it can actually
+            // run.
+            minDeviceRAMBytes: ModelLifecycleBudget.compactBoundaryBytes,
             dependsOn: nil,
             languages: ["ne"]
         ),
@@ -1189,6 +1228,12 @@ enum ModelCatalog {
             downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v14/intent-ne-qwen-s43-q4_k_m.gguf")!,
             sizeBytes: 1_107_408_576,
             sha256: "c2135f786ace9c1020a27bb115600d90f9e3c4d788c995730b379b67e1ae74ef",
+            // 3 GB floor, inside the compact band on purpose: a floor is the
+            // phone's own RAM claim, and on a `.compact` phone the class
+            // refuses this rung (`.requiresEvictingWarmSTT` — 1.8 GB live
+            // fits the 2 GB budget alone, not beside the warm STT), which
+            // its row shows instead of offering the download. See
+            // `ModelBudgetPolicy.availability`.
             minDeviceRAMBytes: 3_000_000_000,
             dependsOn: nil,
             // Language tag (2026-09-13): ne-only model.
@@ -1250,7 +1295,12 @@ enum ModelCatalog {
             sizeBytes: 1_282_439_360,
             sha256: "b047d6617eba56dcfa3357566b06807f54b15816faf6182aabd12d7e2378e537",
             // ~2.2B params at Q4: 1.3 GB file, live footprint ~2 GB —
-            // one gate step above the LLaMA 1B entry.
+            // one gate step above the LLaMA 1B entry. The 3.5 GB floor sits
+            // inside the compact band on purpose: it fits the compact budget
+            // ALONE (1.98 GB against 2 GB) and not beside the warm STT, so
+            // `.compact` refuses it as `.requiresEvictingWarmSTT` — a refusal
+            // its row shows rather than a download behind it
+            // (`ModelBudgetPolicy.availability`).
             minDeviceRAMBytes: 3_500_000_000,
             dependsOn: nil,
             // Language-neutral: multilingual / any-language artifact.
@@ -1295,10 +1345,13 @@ enum ModelCatalog {
             downloadURL: URL(string: "http://192.168.1.117:8765/intent-ne-qwen3-4b-nepali-q4_k_m.gguf")!,
             sizeBytes: 2_529_263_424,
             sha256: "eb5ce8059636e36123a86f8fc65b952122e91da573adc54eb18829bd515d6305",
-            // 4B Q4_K_M: 2.5 GB file, ~3.5-4 GB live. os_proc_available_memory
-            // is the CURRENT free budget, not total RAM — a 6 GB floor
-            // reads ~3-4 GB available mid-session and blocks the download.
-            // 4 GB floor = testable on 6 GB devices; tight but workable.
+            // 4B Q4_K_M: 2.5 GB file, ~3.5-4 GB live. The floor is a claim
+            // about the phone's total RAM (`MemoryProbe.canFit`; the app's
+            // free budget is deliberately NOT the comparator) and sits below
+            // the compact line like its sibling above — a `.compact` phone
+            // passes it and is refused by the class (`.overClassBudget`),
+            // which its row shows rather than offering the download.
+            // `ModelBudgetPolicy.availability` states the rule.
             minDeviceRAMBytes: 4_000_000_000,
             dependsOn: nil,
             // Language tag (2026-09-13): ne-only model.

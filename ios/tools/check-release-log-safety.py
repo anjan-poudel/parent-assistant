@@ -192,6 +192,12 @@ FEATURE_OPENER_RE = re.compile(CALL_RE.pattern + "|" + EVENT_OPENER_RE.pattern)
 IF_DEBUG_RE = re.compile(r"^#if\s+DEBUG\s*$")
 IF_RE = re.compile(r"^#if\b")
 ELSE_RE = re.compile(r"^#else\b")
+# `#else\b` cannot match `#elseif` (`e` and `i` are both word characters, so
+# there is no boundary), which used to leave `#if DEBUG / #elseif X` inside
+# the debug region: a print in the second branch was excused as Debug-only
+# while it compiles into Release. The condition decides the branch that
+# follows, so `#elseif DEBUG` stays Debug and anything else is checked.
+ELSEIF_RE = re.compile(r"^#elseif\b\s*(.*)$")
 ENDIF_RE = re.compile(r"^#endif\b")
 
 # Members of an error that are content-free by construction (type/shape
@@ -219,7 +225,11 @@ FEATURE_CONTENT_PATTERNS = [
     CAMEL_TRANSCRIPT_RE,                                   # rawTranscript
     re.compile(r"(?<![A-Za-z0-9_])(translated|translations?)(?![A-Za-z0-9_])"),
     re.compile(r"(?<![A-Za-z0-9_])(recognized|recognised|recognition)(?![A-Za-z0-9_])"),
-    re.compile(r"(?<![A-Za-z0-9_])(?:[A-Za-z0-9]*Text|text)(?![A-Za-z0-9_])"),
+    # `text` and its plural `texts`, bare or as the tail of a camelCase name
+    # (`sceneText`, `regionTexts`). The plural was a hole: the trailing
+    # lookahead rejected `texts`, so `debugPrint(regionTexts)` — a collection
+    # of recognized strings — read as content-free.
+    re.compile(r"(?<![A-Za-z0-9_])(?:[A-Za-z0-9]*[Tt]exts?|texts?)(?![A-Za-z0-9_])"),
     re.compile(r"(?<![A-Za-z0-9_])prompts?(?![A-Za-z0-9_])"),
 ]
 
@@ -451,6 +461,16 @@ def statements(lines, opener_re):
             continue
         if IF_RE.match(stripped):
             stack.append("other")
+            index += 1
+            continue
+        if ELSEIF_RE.match(stripped):
+            if stack:
+                condition = ELSEIF_RE.match(stripped).group(1).strip()
+                # Fail-safe direction: only a condition that *is* `DEBUG`
+                # re-opens a Debug region; an unknown condition is Release
+                # text and is judged.
+                stack[-1] = ("debug" if IF_DEBUG_RE.match("#if " + condition)
+                             else "not_debug")
             index += 1
             continue
         if ELSE_RE.match(stripped):

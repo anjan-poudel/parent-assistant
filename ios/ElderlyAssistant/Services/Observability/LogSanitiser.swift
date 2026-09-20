@@ -285,8 +285,57 @@ struct LogSanitiser {
         "projected_peak_bytes",
         "freed_bytes",
         "load_ms",
-        "priority"
+        "priority",
+        // [SANITISED-DEBUG-LANE] (owner decision, 2026-09-20) The debug
+        // lane's three keys, declared here so the invariant this list exists
+        // for — *every key that can appear on a bus event is declared in one
+        // place* — stays true of the lane, rather than the lane becoming the
+        // one undeclared corner of the log surface. Declaring them here is
+        // NOT what makes them safe to carry: `redactedKeys` below replaces
+        // every one of their values with `redactionToken` on the way in, and
+        // it does so before this list is consulted. The value never survives
+        // the choke point in any configuration; what survives is the fact
+        // that a pair existed, in what order, with what timing. A test pins
+        // both halves (the key is declared, the value is redacted) and
+        // `LiveTranslateSourceHygieneTests` pins that the feature's own
+        // emitters cannot produce these keys at all.
+        "recognized_text",
+        "source_text",
+        "translated_text"
     ]
+
+    /// Metadata keys that carry **content by declaration**: the value is
+    /// replaced by `redactionToken` and can never reach a sink, in any
+    /// configuration.
+    ///
+    /// [SANITISED-DEBUG-LANE] (owner decision, 2026-09-20) The live-camera
+    /// translation debug lane has to show what the recogniser read and what
+    /// each leg answered, and the owner's answer is that the lane stays —
+    /// sanitised. Scene text therefore travels the bus under these keys and
+    /// dies at this choke point: `source_text` / `translated_text` /
+    /// `recognized_text` are redacted to the token here, so the console line
+    /// still carries the pair's *existence*, its order and its timing while
+    /// the text itself is never logged.
+    ///
+    /// **Why this set, and not an `allowedKeys` entry that merely gets
+    /// scrubbed.** The three keys *are* declared in `allowedKeys` — so the
+    /// log surface still has exactly one declaration — but the PII scrub is
+    /// not what protects them: it would leave a sentence intact (a sentence
+    /// holds no phone number), and the feature's whole log rule is that no
+    /// recognized string reaches a log surface in any build (NFR-LCT-006).
+    /// The redaction here is wholesale, and it runs **before** the allow-list
+    /// filter — the fail-closed direction: no future edit to `allowedKeys`
+    /// can turn one of these keys back into a pass-through.
+    private static let redactedKeys: Set<String> = [
+        "recognized_text",
+        "source_text",
+        "translated_text"
+    ]
+
+    /// What a redacted value is replaced by. The same token the PII scrub
+    /// writes, so a reader cannot tell — and does not need to tell — which
+    /// rule removed the text.
+    static let redactionToken = "[redacted]"
 
     /// Metadata keys whose value must satisfy the *code* bound rather than a
     /// PII scrub alone. Deliberately a separate set from `allowedKeys`: the
@@ -399,7 +448,15 @@ struct LogSanitiser {
 
     func sanitise(_ event: ObservabilityEvent) -> ObservabilityEvent {
         var cleanMetadata: [String: String] = [:]
-        for (key, value) in event.metadata where Self.allowedKeys.contains(key) {
+        for (key, value) in event.metadata {
+            // [SANITISED-DEBUG-LANE] Content-bearing by declaration: the value
+            // is dropped in favour of the token before anything else looks at
+            // the key, so the redaction cannot depend on the allow-list.
+            if Self.redactedKeys.contains(key) {
+                cleanMetadata[key] = Self.redactionToken
+                continue
+            }
+            guard Self.allowedKeys.contains(key) else { continue }
             // A code-shaped key gets the same bound as the top-level field,
             // so allow-listing it cannot become a PII-scrubbed bypass of
             // that bound (T-050/B2). Every other allowed key is unchanged.

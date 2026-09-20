@@ -617,11 +617,12 @@ enum ModelLifecycleInventory {
 enum ModelLifecycleBudget {
 
     enum DeviceClass: String, Codable {
-        /// ≤ 4 GB physical.
+        /// Under 5 GB physical (`compactBoundaryBytes`) — the 4 GB iPhone tier.
         case compact
-        /// 6 GB physical — the class this whole mechanism exists for.
+        /// 5 GB up to 7 GB (`standardBoundaryBytes`) — the 6 GB tier, and the
+        /// class this whole mechanism exists for.
         case standard
-        /// ≥ 8 GB physical.
+        /// 7 GB and above — the 8 GB tier and up.
         case roomy
     }
 
@@ -635,11 +636,25 @@ enum ModelLifecycleBudget {
     /// gate and the model being usable.
     static let safetyMarginBytes: UInt64 = 128 * 1_000_000
 
-    /// 5 GB is the midpoint between the 4 GB and 6 GB iPhone tiers — no
-    /// shipping iPhone has exactly 5 GB, so the boundary is unambiguous.
+    /// The physical-memory lines that draw the three classes, named once.
+    ///
+    /// Both are midpoints between iPhone RAM tiers that actually ship — 5 GB
+    /// between the 4 GB and 6 GB tiers, 7 GB between 6 GB and 8 GB — so no
+    /// shipping device sits exactly on a line and the comparison is
+    /// unambiguous.
+    ///
+    /// Named rather than spelled, because the class line is a *floor value*
+    /// in `ModelCatalog` too: "the smallest device that can actually run
+    /// this" is the boundary, and a catalog floor that spells its own copy of
+    /// the number can drift away from the line it is supposed to sit on (it
+    /// did: the round-3 translation floors were 4 GB until 2026-09-18, which
+    /// admitted a download the `.compact` budget then refused).
+    static let compactBoundaryBytes: UInt64 = 5_000_000_000
+    static let standardBoundaryBytes: UInt64 = 7_000_000_000
+
     static func deviceClass(physicalMemoryBytes: UInt64) -> DeviceClass {
-        if physicalMemoryBytes < 5_000_000_000 { return .compact }
-        if physicalMemoryBytes < 7_000_000_000 { return .standard }
+        if physicalMemoryBytes < compactBoundaryBytes { return .compact }
+        if physicalMemoryBytes < standardBoundaryBytes { return .standard }
         return .roomy
     }
 

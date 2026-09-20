@@ -852,7 +852,8 @@ the feature's events carry counts, durations, tiers and outcome classifications 
 `errorCode` field is always a `LogSafeErrorCode` constant or an HTTP status number — never a
 description, never an upstream body, never a recognized or translated string.
 
-Events emitted by component `livetranslate` (all content-free):
+Events emitted by component `livetranslate` (all content-free, except the two Debug-only rows at the
+end of the table, whose content values the bus redacts — see the sanitised debug lane below):
 
 | Event | Outcome values | Metadata (whitelisted) |
 |---|---|---|
@@ -874,6 +875,8 @@ Events emitted by component `livetranslate` (all content-free):
 | `cache_hit` / `cache_miss` / `cache_evicted` | success | `origin` token, `count` |
 | `cache_payload_reset` / `cache_write_failed` | failure | content-free code |
 | `speak_requested` / `speak_failed` | success / failure | `mode` token |
+| `translate_debug_ocr` (Debug only) | debug | `regionCount`, `recognized_text` (redacted at the bus) |
+| `translate_debug_cloud` / `translate_debug_local` (Debug only) | debug | `source_text`, `translated_text` (redacted at the bus), `duration_ms` |
 
 The observability record for a translation is the *fact* of a translation, never its content — which
 is also what makes the family-visible cost and usage stories possible without a privacy exception.
@@ -882,8 +885,22 @@ is also what makes the family-visible cost and usage stories possible without a 
 feature's sources are new scan roots — `Services/LiveTranslate/`, `App/LiveTranslate/`,
 `Services/Plugins/LiveTranslatePlugin.swift` and the translation client
 `Services/Gemini/GeminiClient+Translate.swift` — and the gate must exit 0 with those roots covered.
-The design's rule for implementers is absolute: no `print`, no `debugPrint`, no interpolation of a
-recognized or translated string into any log line or event field.
+The design's rule for implementers is absolute: no `print`, no `debugPrint`, and no recognized or
+translated string on a log surface — a log line or an event field — in any configuration.
+
+**The sanitised debug lane (owner decision, 2026-09-20).** The owner's device-testing diagnostic
+("both source and target strings") is not an exemption from that rule and is not a console write.
+It is `LiveTranslateDebugLane`, a `#if DEBUG`-only type in `Services/Observability/`, emitting each
+answered pair and the leg's timing onto the sanitising bus with the strings under keys
+`LogSanitiser.redactedKeys` declares content-typed. `LogSanitiser` replaces those values with
+`[redacted]` **before** the allow-list filter, so what a sink receives is the pair's existence, its
+order and its timing — `translate_debug_cloud outcome=debug metadata=[source_text: [redacted],
+translated_text: [redacted], duration_ms: 412]` — and never the text. The lane lives outside the
+feature's scan roots precisely because a feature source may carry neither a console write nor a
+content-typed event field; the redaction is the choke point's, so no call site can forget it; and
+the three keys are declared in `LogSanitiser.allowedKeys` so the log surface keeps exactly one
+declaration. `LiveTranslateDebugLaneTests` pins both ends of that route, and `LogSanitiserTests`
+and `LiveTranslateAllowListTests` pin the redaction itself.
 
 **What the gate actually enforces over those roots (corrected per AM-5).** Four rules were added to
 the shipped B1/T-049 engine, and each is judged on the feature's roots only:

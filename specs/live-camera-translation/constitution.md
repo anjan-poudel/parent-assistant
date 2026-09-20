@@ -70,7 +70,12 @@ without having translated.
 5. **Recognized text and translated text are user content.** No raw OCR text, no translated
    string, and no upstream error body may be printed to a log in any build. `ios/tools/check-release-log-safety.sh`
    (wired into `ios/build.sh`) must cover every new path this feature adds, with the same standard
-   as T-049/T-050.
+   as T-049/T-050. The owner's debug lane (decision, 2026-09-20) is **not an exemption** from this
+   rule; it is compliant only in its sanitised form, and that is the only form that exists: the
+   pairs and their timing travel the sanitising observability bus, `LogSanitiser` replaces every
+   recognized and translated string with `[redacted]` at that choke point *before* any sink sees
+   the event, and the whole path is `#if DEBUG`-only. Nothing here admits a raw string to a log
+   surface in any configuration.
 
 6. **Accessibility is a feature requirement, not a polish item.** Tap targets ≥ 44 pt; overlay text
    ≥ 18 pt, bold, high contrast; light/dark adaptive via existing `DesignTokens`. The overlay must

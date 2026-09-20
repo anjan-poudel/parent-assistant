@@ -157,10 +157,12 @@ struct LiveTranslateSettings: Equatable {
 
     // MARK: The [DEBUG-LOG] diagnostic switch (review finding on #99)
 
-    /// Whether the feature's tiers emit their content-free console
-    /// diagnostic. **Default off, and nothing in a Release build acts on it**:
-    /// the readers live under `#if DEBUG` (see
-    /// `LiveTranslateConfig.translationDebugLoggingEnabled`).
+    /// Whether the feature's tiers emit their debug lane — the pairs, their
+    /// order and their timing, with the strings redacted by `LogSanitiser`
+    /// (see `LiveTranslateDebugLane`). **Nothing in a Release build acts on
+    /// it**: the readers, and the lane type itself, live under `#if DEBUG`
+    /// (see `LiveTranslateConfig.translationDebugLoggingEnabled`, whose
+    /// nominal default the owner's 2026-09-20 directive turned on).
     ///
     /// Persisted rather than a source edit for the reason the owner asked for
     /// the logging at all — a device capture cannot wait for a rebuild — and

@@ -51,9 +51,24 @@ final class CloudTranslationTierTests: XCTestCase {
         let governor = GeminiCostGovernor(storage: storage, observabilityBus: bus)
         let cache = LabelTranslationCache(storage: storage, config: config, observabilityBus: bus)
         let indicator = CloudActivityIndicatorModel(observabilityBus: bus, config: config)
+        // The client's own transport retry (shipped default: one retry) is a
+        // layer BELOW the tier this suite pins. With it on, a scripted timeout
+        // costs two sends: the second is answered by the test transport's
+        // exhausted fallback (`{}`), which reaches the tier as an unusable
+        // response rather than as `.cloudTransient(.timedOut)` — so the send
+        // count stops being a count of TIER attempts and the failure class the
+        // table is being asked about never arrives. Hold the layer beneath at
+        // one send per attempt here; `GeminiClientTests` pins the retry itself.
+        // Zero retries is also the whole of "no backoff": the sleep below the
+        // retry is read only on a retry (`GeminiClient`, `canRetry`), so
+        // setting `retryBackoffSeconds` here would be a line that provably
+        // does nothing.
+        var clientConfig = GeminiClient.Config.default
+        clientConfig.maxTransportRetries = 0
         let client = GeminiClient(configStore: configStore,
                                   observabilityBus: bus,
                                   transport: transport,
+                                  config: clientConfig,
                                   costGovernor: governor)
         let tier = CloudTranslationTier(cache: cache,
                                         consentGate: gate,
@@ -675,9 +690,26 @@ final class CloudTranslationTierTests: XCTestCase {
             $0.component == LiveTranslateEventCatalogue.component
         }
         XCTAssertFalse(featureEvents.isEmpty)
+
+        // [SANITISED-DEBUG-LANE] (owner decision, 2026-09-20) One exemption, and
+        // only from the catalogue pin: the debug lane's three event types are
+        // deliberately outside the feature's content-free schema — the lane is
+        // the sanctioned `#if DEBUG`-only diagnostic, and its strings are
+        // redacted by `LogSanitiser` at the bus rather than by the schema. What
+        // the exemption must not do is hide a leak, so the field sweep below
+        // still runs over every feature event, the lane's included, and an
+        // anti-vacuity assertion pins that the lane really did fire here.
+        let debugLaneEventTypes: Set<String> = ["translate_debug_ocr",
+                                                "translate_debug_cloud",
+                                                "translate_debug_local"]
+        XCTAssertTrue(featureEvents.contains { debugLaneEventTypes.contains($0.eventType) },
+                      "the debug lane emitted nothing — the exemption would be vacuous")
+
         for event in featureEvents {
-            XCTAssertTrue(LiveTranslateEventCatalogue.allEventTypes.contains(event.eventType),
-                          "\(event.eventType) is not in the pinned catalogue")
+            if !debugLaneEventTypes.contains(event.eventType) {
+                XCTAssertTrue(LiveTranslateEventCatalogue.allEventTypes.contains(event.eventType),
+                              "\(event.eventType) is not in the pinned catalogue")
+            }
             let fields = [event.component, event.eventType, event.outcome]
                 + [event.errorCode].compactMap { $0 }
                 + Array(event.metadata.keys) + Array(event.metadata.values)

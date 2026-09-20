@@ -540,10 +540,14 @@ final class LiveTranslateConfigTests: XCTestCase {
         XCTAssertEqual(entry.sha256.count, 64)
         XCTAssertNotEqual(entry.sha256, ModelCatalogEntry.pendingSHA256,
                           "a placeholder can only ever fail `finalize`")
-        XCTAssertEqual(entry.minDeviceRAMBytes, 4_000_000_000,
-                       "the floor the other >1 GB brains carry: this artifact is "
-                       + "~1.8 GB live beside a warm STT, so a 3 GB phone is a "
-                       + "download the budget warden would then refuse")
+        XCTAssertEqual(entry.minDeviceRAMBytes, ModelLifecycleBudget.compactBoundaryBytes,
+                       "the warden's own line, referenced rather than copied: "
+                       + "`deviceClass` draws `.compact` below it, and a 4 GB "
+                       + "floor offered the download to a class whose 2 GB budget "
+                       + "then refuses it (this artifact is ~1.8 GB live beside a "
+                       + "warm STT). The constant's own value is pinned by "
+                       + "`ModelBudgetPolicyTests`, so a silent move of the line "
+                       + "still fails a test")
         XCTAssertEqual(entry.languages, ["ne"])
         XCTAssertNil(entry.dependsOn)
 
@@ -592,10 +596,13 @@ final class LiveTranslateConfigTests: XCTestCase {
                        "https://github.com/anjan-poudel/elderly-ai-assistant-models"
                        + "/releases/download/v19/translate-en-ne-qwen17b-r3-q5_k_m.gguf",
                        "the same release as the ship quant (optional upload)")
-        XCTAssertEqual(alternate.minDeviceRAMBytes, 4_000_000_000,
-                       "the same floor as the ship quant: 150 MB more file does not "
-                       + "move the device rung, and the Q5 is sideload-only, so the "
-                       + "floor only says what a device keeping it can run")
+        XCTAssertEqual(alternate.minDeviceRAMBytes, ModelLifecycleBudget.compactBoundaryBytes,
+                       "the same floor as the ship quant (the same constant, so "
+                       + "the two cannot drift apart): 150 MB more file does not "
+                       + "move the device rung, and a floor inside `.compact` "
+                       + "would promise what that class's 2 GB budget cannot "
+                       + "deliver — co-residency, not the whole-model budget, "
+                       + "which is what refuses the 1.96 GB-live Q5 there")
     }
 
     /// The head's admission — which phones can run the model this list

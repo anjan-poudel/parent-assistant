@@ -157,6 +157,10 @@ final class LiveTranslationPipelineTests: XCTestCase {
     /// The shipped values are pinned by `LiveTranslateConfigTests`, and the
     /// section that follows this harness runs the real intervals against a
     /// scripted clock.
+    ///
+    /// Shared, not copied: `LiveTranslateSessionModelTests` needs the same
+    /// config for the same reason, and a second copy of these two lines is a
+    /// second thing to keep in step with the escape hatch.
     static func unpacedDispatchConfig() -> LiveTranslateConfig {
         var config = LiveTranslateConfig.default
         config.translationDispatchMinInterval = 0

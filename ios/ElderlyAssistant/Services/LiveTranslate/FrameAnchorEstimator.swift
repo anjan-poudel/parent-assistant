@@ -486,9 +486,9 @@ enum FrameStabilizationLaw {
     /// applies is what bounds it either way.
     ///
     /// The number is the one the arithmetic allows rather than one tuned on a
-    /// device: a 4 % lag — twice the shipped dead zone, i.e. the smallest this
-    /// branch ever answers — leaves under 1 % after one measurement, which is
-    /// inside the dead zone, so the visible error is gone inside a single
+    /// device: a 2 % lag — twice the shipped 1 % dead zone, i.e. the smallest
+    /// this branch ever answers — leaves under 1 % after one measurement, which
+    /// is inside the dead zone, so the visible error is gone inside a single
     /// measurement of the shipped cadence rather than over the half second the
     /// fixed factor needed. It does not follow *exactly*, and must not: `1` would
     /// track the content perfectly and the picture would appear to stand still
