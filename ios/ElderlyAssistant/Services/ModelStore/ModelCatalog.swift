@@ -304,6 +304,12 @@ enum ModelCatalog {
     /// device that carries it (sideload, owner test) uses it, and a device
     /// that carries neither falls through to the round-2b entries.
     static let nmtEnNeQwen17bR3Q5 = ModelID("nmt-en-ne-qwen17b-r3-q5_k_m")
+    /// Round-4 fine-tune (anti-transliteration mix), Q5_K_M — the model
+    /// that answers with MEANING instead of writing English words in
+    /// Devanagari letters (the owner's 22:41 gibberish capture). Same gate
+    /// sweep as round-3's ship quant: 34/34 app-header, 0 polarity
+    /// failures, probe 12/12.
+    static let nmtEnNeQwen17bR4Q5 = ModelID("nmt-en-ne-qwen17b-r4-q5_k_m")
     /// The GEMMA leg of the bake-off (2026-09-07): the QLoRA fine-tune
     /// over google/gemma-3-1b-it, merged to fp16 and exported Q4_K_M
     /// (`intent-ne-gemma-q4_k_m.gguf`, release v7). A real, hosted
@@ -1167,6 +1173,26 @@ enum ModelCatalog {
             languages: ["ne"]
         ),
         ModelCatalogEntry(
+            id: nmtEnNeQwen17bR4Q5,
+            kind: .llamaBase,
+            // Round-4 fine-tune (anti-transliteration mix), Q5_K_M — the
+            // owner's gibberish fix: the r3 checkpoint wrote English words
+            // in Devanagari letters; r4's mix upweights real parallel
+            // translations and teaches the meaning rule in the prompt.
+            // Gate sweep: 34/34 app-header, 0 polarity failures, probe
+            // 12/12 (post_train_r4, 2026-09-21). The tier's new head.
+            displayName: "Translate — English to Nepali (Qwen 1.7B, R4)",
+            filename: "translate-en-ne-qwen17b-r4-q5_k_m.gguf",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v20/translate-en-ne-qwen17b-r4-q5_k_m.gguf")!,
+            sizeBytes: 1_257_879_264,
+            // Server-original digest (round-4 Q5_K_M export), `.sha256`
+            // sidecar on the training box, 2026-09-21.
+            sha256: "9b7d478ee33b58b142da137bceaa13c784324f61cde13cefd0cd76e568168100",
+            minDeviceRAMBytes: ModelLifecycleBudget.compactBoundaryBytes,
+            dependsOn: nil,
+            languages: ["ne"]
+        ),
+        ModelCatalogEntry(
             id: intentQwen4BS43,
             kind: .llamaBase,
             // HIDDEN from the picker (2026-09-14): superseded by the
@@ -1653,7 +1679,7 @@ enum ModelCatalog {
     /// have to make. They stay resolvable in the tier list and deletable
     /// from `all`, which is where a leftover installation surfaces.
     static let availableTranslationEntries: [ModelCatalogEntry] =
-        [nmtEnNeQwen17bR3Q4].compactMap { entry(for: $0) }
+        [nmtEnNeQwen17bR4Q5].compactMap { entry(for: $0) }
 
     /// **Every** translation artifact in the catalog, offered or not: the ship
     /// quant the translation section offers, the alternate quant behind it in

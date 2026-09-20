@@ -91,7 +91,7 @@ final class ModelCatalogLanguageTests: XCTestCase {
     /// assistant brains with rows of their own in the brain section.
     func testTheOfferedTranslationRowsAreExactlyTheTiersHead() {
         let offered = ModelCatalog.availableTranslationEntries.map(\.id)
-        XCTAssertEqual(offered, [ModelCatalog.nmtEnNeQwen17bR3Q4],
+        XCTAssertEqual(offered, [ModelCatalog.nmtEnNeQwen17bR4Q5],
                        "the section offers the tier's shipped head, alone")
         // Round 3 (2026-09-19) ended the round-2b split in which the tier
         // led with a sideload-only test quant the row did not offer: the
@@ -120,7 +120,7 @@ final class ModelCatalogLanguageTests: XCTestCase {
         // the superseded round-2b artifact it replaced — a device that
         // installed the old one before the upgrade holds both, and the
         // installed-hidden row renders beside the new one.
-        let entries = [ModelCatalog.nmtEnNeQwen17bR3Q4, ModelCatalog.nmtEnNeQwen17bR2bQ8]
+        let entries = [ModelCatalog.nmtEnNeQwen17bR4Q5, ModelCatalog.nmtEnNeQwen17bR2bQ8]
             .compactMap { ModelCatalog.entry(for: $0) }
         XCTAssertEqual(entries.count, 2, "both translation entries resolve")
         let en = Locale(identifier: "en")

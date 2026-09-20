@@ -484,7 +484,8 @@ final class LiveTranslateConfigTests: XCTestCase {
     /// fallbacks a device that has one but not the head keeps working on.
     func testTheTranslationListLeadsWithTheShippedTranslationModel() {
         let ids = LiveTranslateConfig.default.brainTranslationModelIDs
-        XCTAssertEqual(ids, [ModelCatalog.nmtEnNeQwen17bR3Q4,
+        XCTAssertEqual(ids, [ModelCatalog.nmtEnNeQwen17bR4Q5,
+                             ModelCatalog.nmtEnNeQwen17bR3Q4,
                              ModelCatalog.nmtEnNeQwen17bR3Q5,
                              ModelCatalog.nmtEnNeQwen17bR2bQ4,
                              ModelCatalog.nmtEnNeQwen17bR2bQ8,
@@ -507,7 +508,7 @@ final class LiveTranslateConfigTests: XCTestCase {
         // never be offered to `LlamaCommandInterpreter`'s picker, whose
         // prompt this artifact was not trained on.
         XCTAssertFalse(ModelCatalog.availableBrainEntries.contains {
-            $0.id == ModelCatalog.nmtEnNeQwen17bR3Q4
+            $0.id == ModelCatalog.nmtEnNeQwen17bR4Q5
         }, "the translation model is not an assistant-brain choice")
     }
 
@@ -524,16 +525,16 @@ final class LiveTranslateConfigTests: XCTestCase {
     /// below — it is still in the tier ladder for devices that hold it.
     func testTheShippedTranslationArtifactIsPinned() throws {
         let entry = try XCTUnwrap(
-            ModelCatalog.entry(for: ModelCatalog.nmtEnNeQwen17bR3Q4),
+            ModelCatalog.entry(for: ModelCatalog.nmtEnNeQwen17bR4Q5),
             "the tier's head model must exist in the catalog")
-        XCTAssertEqual(ModelCatalog.nmtEnNeQwen17bR3Q4.rawValue,
-                       "nmt-en-ne-qwen17b-r3-q4_k_m")
+        XCTAssertEqual(ModelCatalog.nmtEnNeQwen17bR4Q5.rawValue,
+                       "nmt-en-ne-qwen17b-r4-q5_k_m")
         XCTAssertEqual(entry.kind, .llamaBase)
-        XCTAssertEqual(entry.filename, "translate-en-ne-qwen17b-r3-q4_k_m.gguf")
-        XCTAssertEqual(entry.sizeBytes, 1_107_408_608,
-                       "the shipped round-3 Q4_K_M artifact's size on disk")
+        XCTAssertEqual(entry.filename, "translate-en-ne-qwen17b-r4-q5_k_m.gguf")
+        XCTAssertEqual(entry.sizeBytes, 1_257_879_264,
+                       "the shipped round-4 Q5_K_M artifact's size on disk")
         XCTAssertEqual(entry.sha256,
-                       "f0bde6a4946cc74504a6b705c067240c6a30733b11e44a47c297e89ea0206987",
+                       "9b7d478ee33b58b142da137bceaa13c784324f61cde13cefd0cd76e568168100",
                        "the digest of the server original's `.sha256` sidecar "
                        + "— the downloader verifies it, so an upload that does "
                        + "not match installs nothing")
@@ -561,8 +562,8 @@ final class LiveTranslateConfigTests: XCTestCase {
         // uploads the file to it; the pin is what makes the upload provable.
         XCTAssertEqual(entry.downloadURL.absoluteString,
                        "https://github.com/anjan-poudel/elderly-ai-assistant-models"
-                       + "/releases/download/v19/translate-en-ne-qwen17b-r3-q4_k_m.gguf",
-                       "the release the artifact must be published to (v19)")
+                       + "/releases/download/v20/translate-en-ne-qwen17b-r4-q5_k_m.gguf",
+                       "the release the artifact must be published to (v20)")
         XCTAssertEqual(entry.downloadURL.lastPathComponent, entry.filename,
                        "the asset name is the on-disk name, so "
                        + "`LlamaBrainTextGenerator.modelID(forURL:)` resolves "
@@ -613,10 +614,10 @@ final class LiveTranslateConfigTests: XCTestCase {
     /// this quant could become the head at all, and the round-2b Q8 it
     /// replaced (3B band, 2.63 GB live) was refused there.
     func testTheTranslationHeadsClassVerdictIsOutOfThisSuitesHands() {
-        let head = ModelCatalog.entry(for: ModelCatalog.nmtEnNeQwen17bR3Q4)!
+        let head = ModelCatalog.entry(for: ModelCatalog.nmtEnNeQwen17bR4Q5)!
         XCTAssertEqual(ModelLifecycleInventory
             .footprint(for: .translateBrain, modelID: head.id).liveBytes,
-                       1_807_408_608,
+                       1_957_879_264,
                        "the arithmetic the policy verdicts are derived from")
         XCTAssertTrue(ModelBudgetPolicy.standard
             .availability(of: head, physicalMemoryBytes: 6_000_000_000)
