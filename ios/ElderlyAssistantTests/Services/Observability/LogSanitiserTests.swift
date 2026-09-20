@@ -282,4 +282,59 @@ final class LogSanitiserTests: XCTestCase {
                        "the bound refuses what is past it, not what is inside it")
         XCTAssertEqual(atTheBound.metadata["budgetBytes"], "999999999999")
     }
+
+    // MARK: - The debug lane's content-typed keys (owner decision, 2026-09-20)
+
+    /// [SANITISED-DEBUG-LANE] The debug lane's three keys are redacted **by
+    /// declaration**: whatever the value is, the token replaces it. The
+    /// sentence below holds no phone number, no e-mail address and no blood
+    /// pressure shape, so the PII scrub would return it untouched — which is
+    /// exactly why the claim is pinned on this input. "Redacted" here cannot
+    /// mean "a PII pattern happened to match"; the key decides, in every
+    /// configuration.
+    func testAContentTypedKeyIsRedactedEvenWhenTheValueHoldsNoPII() {
+        let sentence = "Take two tablets after breakfast at eight"
+        let clean = sanitiser.sanitise(event(metadata: [
+            "recognized_text": sentence,
+            "source_text": sentence,
+            "translated_text": "नाश्ते के बाद दो गोलियाँ लें",
+        ]))
+        XCTAssertEqual(clean.metadata["recognized_text"], "[redacted]")
+        XCTAssertEqual(clean.metadata["source_text"], "[redacted]")
+        XCTAssertEqual(clean.metadata["translated_text"], "[redacted]")
+    }
+
+    /// The half that matters for a log surface: after sanitisation the text is
+    /// nowhere on the event. Every field is swept, because a redaction that
+    /// moved the string into `errorCode`, `eventType` or the component tag
+    /// would satisfy a metadata-only assertion and still leak.
+    func testNoFieldOfASanitisedEventCarriesTheRedactedText() {
+        let sentence = "Take two tablets after breakfast at eight"
+        let clean = sanitiser.sanitise(event(errorCode: sentence, metadata: [
+            "recognized_text": sentence,
+            "source_text": sentence,
+            "translated_text": sentence,
+        ]))
+        var fields = [clean.eventType, clean.outcome, clean.errorCode ?? "", clean.component]
+        fields.append(contentsOf: clean.metadata.map { "\($0.key)=\($0.value)" })
+        for field in fields {
+            XCTAssertFalse(field.contains(sentence),
+                           "the redacted text survived on the sanitised event in '\(field)'")
+        }
+    }
+
+    /// A redacted key is still a **declared** key: the lane adds no undeclared
+    /// corner to the log surface, and the by-declaration redaction is what
+    /// keeps the declaration from becoming a route for scene text. (The
+    /// declaration itself is pinned by `LiveTranslateAllowListTests`, whose
+    /// pinned extension set names these three.)
+    func testTheContentTypedKeysAreDeclaredAndRedactedTogether() {
+        for key in ["recognized_text", "source_text", "translated_text"] {
+            XCTAssertTrue(LogSanitiser.allowedKeys.contains(key),
+                          "\(key) travels the bus and must be declared here")
+            XCTAssertEqual(sanitiser.sanitise(event(metadata: [key: "anything at all"]))
+                            .metadata[key],
+                           LogSanitiser.redactionToken)
+        }
+    }
 }

@@ -1178,7 +1178,13 @@ final class AppCoordinator: ObservableObject {
     }()
     lazy var modelDownloadService = ModelDownloadService(
         store: modelStore,
-        observabilityBus: observabilityBus
+        observabilityBus: observabilityBus,
+        // [MODEL-WARDEN 2026-09-20] The download path asks the same ledger
+        // the Settings rows are rendered from, so no floor value can admit a
+        // download the class budget refuses. `ModelLifecycleManager.shared`
+        // is what `resolvedBrainModelID` and the rows already consult; the
+        // closure is lazy, so the ledger is not forced at construction.
+        availabilityProvider: { ModelLifecycleManager.shared.availability(of: $0) }
     )
     /// [BOOT-REVIEW P0-1] FIRST USE, not `init()`: constructing either
     /// recognizer forces `modelStore` (filesystem) and, for WhisperKit,
@@ -1912,7 +1918,15 @@ final class AppCoordinator: ObservableObject {
         let resolved = resolvedBrainModelID
         llamaCommandInterpreter.switchBaseModel(to: resolved)
         if !modelStore.isCached(resolved) {
-            modelDownloadService.start(resolved)
+            // `deliveringStoredPreference`: this is the didSet of a preference
+            // the household picked, and rule 1 of `resolveBrainModelID` is that
+            // an explicit pick outranks the class verdict (`soloOverBudget`).
+            // The warden gate in `ModelDownloadService` therefore stands aside
+            // here — refusing it would leave the pick stored, the row's button
+            // hidden (the card hides Download on a refusal) and the artifact
+            // never arriving: a silent no-op where the contract promises
+            // delivery.
+            modelDownloadService.start(resolved, deliveringStoredPreference: true)
         }
     }
 
@@ -5437,6 +5451,18 @@ self.noteTalkContractChanged()
             cloudEnabled: intentRouter?.cloudEnabled ?? false,
             cloudBrainAvailable: geminiCommandInterpreter?.isAvailable ?? false
         ) else { return }
+        // [MODEL-WARDEN 2026-09-20] The warden's verdict, consulted BEFORE
+        // `start()`: a model this device class refuses is not one to spend a
+        // household's data on. Silent on purpose, and on top of the service's
+        // own gate (`ModelDownloadService.start`) rather than instead of it:
+        // this path runs on every launch, so a refusal that only the service
+        // reported would re-emit `download_policy_rejected` every boot, while
+        // the paths a person actually taps still record it. `resolvedBrainModelID`
+        // may be a stored preference (rule 1), which is why the verdict is
+        // asked of the ledger rather than inferred from the id.
+        guard let entry = ModelCatalog.entry(for: resolvedBrainModelID),
+              ModelLifecycleManager.shared.availability(of: entry).isAvailable
+        else { return }
         modelDownloadService.start(resolvedBrainModelID)
     }
 

@@ -711,7 +711,7 @@ final class LanguageModelResolverTests: XCTestCase {
                        automaticPick(.llamaBase, "ne", on: compactPhone))
         // The class boundary, not the exact byte count, is what decides:
         // two phones on the same side of it resolve identically.
-        XCTAssertEqual(automaticPick(.llamaBase, "ne", on: 5_000_000_000),
+        XCTAssertEqual(automaticPick(.llamaBase, "ne", on: ModelLifecycleBudget.compactBoundaryBytes),
                        automaticPick(.llamaBase, "ne", on: 6_900_000_000))
         XCTAssertEqual(automaticPick(.llamaBase, "ne", on: 7_000_000_000),
                        automaticPick(.llamaBase, "ne", on: 8_000_000_000))

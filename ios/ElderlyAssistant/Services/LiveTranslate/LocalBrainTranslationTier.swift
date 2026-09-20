@@ -591,24 +591,22 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
             // opposite, and the owner's answered-nothing batches were exactly
             // this ambiguity.
             let translations = report.translations
-            // [DEBUG-LOG] (owner directive, 2026-09-20; review finding on
-            // #99, 2026-09-20) What is left of the owner's console line: the
-            // batch's **counts**. The source→target pairs it used to render
-            // were removed — a recognized or translated string in a console
-            // write is a defect in every configuration, Debug included, and
-            // the release-log gate judges exactly that rule (NFR-LCT-006).
-            // The reader is inside `#if DEBUG`, so no Release binary contains
-            // a console write for this feature at all.
+            // [DEBUG-LOG] (owner directive, 2026-09-20) The pairs and the
+            // leg's time go to the sanitised debug lane rather than to the
+            // console. `LiveTranslateDebugLane` hands them to the observability
+            // bus and `LogSanitiser` redacts the strings at that choke point,
+            // so a capture still shows that a pair happened, in the batch's own
+            // order, with its timing — and the text never reaches a log surface
+            // in any configuration (NFR-LCT-006). The feature's own sources
+            // carry no console write at all.
             let durationMs = Self.milliseconds(since: started)
             #if DEBUG
-            if config.translationDebugLoggingEnabled {
-                // [DEBUG-LOG] (owner directive) The exact pairs and the
-                // leg's time — the console's own lane, the bus stays
-                // content-free.
-                for (source, translation) in translations {
-                    print("[translate-debug] local \(source) -> \(translation) [\(durationMs)ms]")
-                }
-            }
+            LiveTranslateDebugLane(bus: events.bus,
+                                   enabled: config.translationDebugLoggingEnabled)
+                .translationPairs(batch.compactMap { source -> (source: String, translation: String)? in
+                    guard let translation = translations[source] else { return nil }
+                    return (source: source, translation: translation)
+                }, leg: .local, durationMs: durationMs)
             #endif
 
             // The counts are about the BATCH THE CALLER HANDED OVER, not about

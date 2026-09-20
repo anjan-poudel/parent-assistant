@@ -162,7 +162,15 @@ final class ModelBudgetPolicyTests: XCTestCase {
         // drifting back inside `.compact` (where it promises a 1.1 GB
         // download the warden then refuses) or above it (where it refuses a
         // device the budget would have held).
-        XCTAssertEqual(availability(translationShipQuant, on: 5_000_000_000), .available,
+        // The line is named once (`ModelLifecycleBudget.compactBoundaryBytes`)
+        // and its VALUE is pinned here, so the catalog floors and this
+        // assertion can reference the constant without either of them
+        // stopping to notice a silent move of the line itself.
+        XCTAssertEqual(ModelLifecycleBudget.compactBoundaryBytes, 5_000_000_000,
+                       "the compact/standard line: 5 GB between the 4 GB and "
+                       + "6 GB iPhone tiers")
+        XCTAssertEqual(availability(translationShipQuant, on: ModelLifecycleBudget.compactBoundaryBytes),
+                       .available,
                        "a device AT the floor is `.standard`, and can run it")
 
         XCTAssertEqual(availability(translationShipQuant, on: standardPhone), .available,

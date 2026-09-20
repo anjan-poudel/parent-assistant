@@ -43,6 +43,21 @@ final class ModelDownloadService: NSObject, ObservableObject {
     /// `nil` means "not measurable" — the guard is skipped, exactly as it
     /// already is when the volume query fails.
     private let availableBytesProvider: () -> Int64?
+    /// The warden's verdict for one entry, consulted before any bytes move.
+    ///
+    /// The RAM floor above is the phone's own claim about the model; this is
+    /// the class budget, which no per-entry floor can express: a floor is one
+    /// number a later catalog edit can move, while `.overClassBudget`,
+    /// `.requiresEvictingWarmSTT` and `.overBrainCeiling` are derived from the
+    /// device that is actually in the household's hand. Without this gate the
+    /// floor is the only thing between a tap and a download the warden refuses
+    /// at use time — bytes spent on an artifact this phone cannot run.
+    ///
+    /// Injected for the same reason `availableBytesProvider` is, and it
+    /// defaults to permissive so the service stays usable without a lifecycle
+    /// ledger (the download tests and the encoder spike installer construct it
+    /// directly). Production wires `ModelLifecycleManager.shared`.
+    private let availabilityProvider: (ModelCatalogEntry) -> ModelAvailability
     private var tasks: [ModelID: URLSessionDownloadTask] = [:]
     /// Multipart downloads in flight, keyed by model. A multipart model
     /// has NO entry in `tasks` — its parts are owned by the runner, which
@@ -72,9 +87,11 @@ final class ModelDownloadService: NSObject, ObservableObject {
     init(store: ModelStore,
          observabilityBus: ObservabilityBus,
          sessionFactory: (() -> URLSession)? = nil,
-         availableBytesProvider: (() -> Int64?)? = nil) {
+         availableBytesProvider: (() -> Int64?)? = nil,
+         availabilityProvider: ((ModelCatalogEntry) -> ModelAvailability)? = nil) {
         self.store = store
         self.observabilityBus = observabilityBus
+        self.availabilityProvider = availabilityProvider ?? { _ in .available }
         self.sessionFactory = sessionFactory ?? {
             let config = URLSessionConfiguration.default
             config.waitsForConnectivity = true
@@ -91,12 +108,12 @@ final class ModelDownloadService: NSObject, ObservableObject {
 
     // MARK: - Public API
 
-    func start(_ id: ModelID) {
+    func start(_ id: ModelID, deliveringStoredPreference: Bool = false) {
         guard let entry = ModelCatalog.entry(for: id) else {
             update(id, .failed(reason: "unknown model"))
             return
         }
-        start(entry)
+        start(entry, deliveringStoredPreference: deliveringStoredPreference)
     }
 
     /// The entry-driven core of `start(_:)`. `ModelCatalog` is the only
@@ -104,7 +121,16 @@ final class ModelDownloadService: NSObject, ObservableObject {
     /// drive a synthetic entry through the REAL flow (the size-cap
     /// refusal needs an entry no release ships, and the multipart
     /// reassembly can be exercised without a multi-GB download).
-    func start(_ entry: ModelCatalogEntry) {
+    ///
+    /// `deliveringStoredPreference` is the `soloOverBudget` escape hatch and
+    /// is `true` from exactly one caller (`AppCoordinator.applyBrainModel`,
+    /// the didSet of a preference the household stored itself): rule 1 of
+    /// `resolveBrainModelID` is that an explicit pick wins even when the
+    /// class refuses it, so delivering that pick must not be refused by the
+    /// warden gate below. Every other caller — the automatic brain download,
+    /// the Settings rows, the STT restore, the spike installer — leaves it
+    /// false, and the warden then stops the download before a byte moves.
+    func start(_ entry: ModelCatalogEntry, deliveringStoredPreference: Bool = false) {
         let id = entry.id
         if case .downloading = states[id] ?? .notStarted { return }
         if states[id] == .completed, store.isCached(id) { return }
@@ -138,6 +164,25 @@ final class ModelDownloadService: NSObject, ObservableObject {
             update(id, .failed(reason: "device does not have enough memory for this model"))
             emit("download_ram_tier_rejected", outcome: "failure", modelId: id, errorCode: "ram_tier")
             return
+        }
+
+        // [MODEL-WARDEN 2026-09-20] THE CLASS BUDGET. The guard above answers
+        // "does the phone have the RAM the entry declares"; this answers "may
+        // this device class hold the model at all" — the refusals a per-entry
+        // floor cannot express, because they are about the class's working
+        // set (`.requiresEvictingWarmSTT`), its budget (`.overClassBudget`)
+        // and its product ladder (`.overBrainCeiling`). It sits AFTER the RAM
+        // guard so the established precedence is unchanged, and it is the
+        // same ledger question the Settings rows are rendered from, so a row
+        // and its Download button cannot disagree.
+        if !deliveringStoredPreference {
+            let verdict = availabilityProvider(entry)
+            if let reason = verdict.reason {
+                update(id, .failed(reason: Self.refusalSentence(reason)))
+                emit("download_policy_rejected", outcome: "failure",
+                     modelId: id, errorCode: reason.rawValue)
+                return
+            }
         }
 
         // q6 palettized CoreML is spec v9 (grouped palettization) — needs
@@ -472,6 +517,25 @@ final class ModelDownloadService: NSObject, ObservableObject {
     private func update(_ id: ModelID, _ state: ModelDownloadState) {
         DispatchQueue.main.async { [weak self] in
             self?.states[id] = state
+        }
+    }
+
+    /// The reason string the download state carries when the warden refuses —
+    /// in the same voice as the RAM guard's, and not localized for the same
+    /// reason that one is not: the service has no locale. The row that
+    /// offered the download already shows the household the warden's own
+    /// sentence (`AIModelsSettingsView.unavailableNote`), resolved from the
+    /// same `ModelUnavailabilityReason` this maps.
+    private static func refusalSentence(_ reason: ModelUnavailabilityReason) -> String {
+        switch reason {
+        case .deviceTooSmall:
+            return "this device does not have the memory the model needs"
+        case .overClassBudget:
+            return "the model is larger than this device class can hold"
+        case .requiresEvictingWarmSTT:
+            return "the model needs the memory the speech model is holding"
+        case .overBrainCeiling:
+            return "the model is above the largest brain this device class offers"
         }
     }
 

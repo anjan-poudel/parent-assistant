@@ -397,29 +397,22 @@ actor CloudTranslationTier {
                 adopt(outcomes[key], for: key, idsByKey: idsByKey,
                       resolved: &resolved, failures: &failures)
             }
-            // [DEBUG-LOG] (owner directive, 2026-09-20) What is left of the
-            // batch's console line: the **counts**, and the leg's time. The
-            // source→target pairs this used to render were removed — a
-            // recognized or translated string in a console write is a defect in
-            // every configuration, Debug included, and the release-log gate
-            // (`ios/tools/check-release-log-safety.sh`) judges exactly that
-            // rule (NFR-LCT-006). It fails this line as master carries it
-            // (`feature-console-write`, `feature-content-print`, at this
-            // print), and a counted line clears it. The reader is inside
-            // `#if DEBUG`, so no Release binary contains a console write for
-            // this feature at all.
-            let batchDurationMs = Int(Date().timeIntervalSince(start) * 1000)
+            // The batch's counts and the leg's time travel the sanitising bus
+            // on the line below (`translationBatchResolved`); the owner's pair
+            // lane travels `LiveTranslateDebugLane`, which hands the strings to
+            // the bus for `LogSanitiser` to redact. A capture therefore shows
+            // the pair and its timing and never the text, and the feature
+            // carries no console write in any configuration (NFR-LCT-006,
+            // enforced by `LiveTranslateSourceHygieneTests`).
             #if DEBUG
-            if config.translationDebugLoggingEnabled {
-                // [DEBUG-LOG] (owner directive) The exact pairs and the
-                // leg's time — the console's own lane, the bus stays
-                // content-free.
-                for (target, key) in zip(targets, keys) {
-                    if case .resolved(let translation, _)? = outcomes[key] {
-                        print("[translate-debug] cloud \(target.originalText) -> \(translation) [\(batchDurationMs)ms]")
-                    }
-                }
-            }
+            let batchDurationMs = Int(Date().timeIntervalSince(start) * 1000)
+            LiveTranslateDebugLane(bus: events.bus,
+                                   enabled: config.translationDebugLoggingEnabled)
+                .translationPairs(zip(targets, keys).compactMap { pair -> (source: String, translation: String)? in
+                    let (target, key) = pair
+                    guard case .resolved(let translation, _)? = outcomes[key] else { return nil }
+                    return (source: target.originalText, translation: translation)
+                }, leg: .cloud, durationMs: batchDurationMs)
             #endif
             let resolvedForBatch = regionIDs.filter { resolved[$0] != nil }.count
             events.translationBatchResolved(
@@ -665,18 +658,10 @@ actor CloudTranslationTier {
         // A store failure is recorded by the cache itself and never changes
         // the outcome: the translation still renders.
         _ = cache.storeBatch(resolutions, targetLanguage: targetLanguage)
-        // [DEBUG-LOG] (owner directive, 2026-09-20) The counts, and only the
-        // counts. The source→target pairs this used to render were removed:
-        // recognized or translated text in a console write is a defect in
-        // every configuration, Debug included, and the Release-log gate
-        // judges exactly that rule (NFR-LCT-006). The reader is inside
-        // `#if DEBUG`, so no Release binary contains this line at all.
-        #if DEBUG
-        if config.translationDebugLoggingEnabled {
-            let resolvedCount = resolutions.count
-            print("[translate-debug] cloud batch: \(resolvedCount) of \(targets.count) resolved")
-        }
-        #endif
+        // The adopted batch's counts reach the sanitising bus through the
+        // caller's `translationBatchResolved`; the console line that mirrored
+        // them was removed 2026-09-20 (NFR-LCT-006 — the feature carries no
+        // console write in any configuration).
         return results
     }
 

@@ -86,8 +86,19 @@ final class LiveTranslateAllowListTests: XCTestCase {
             // `LiveTranslateEvents` from a `BrainGenerationReading` — an
             // integer, a closed token and a histogram keyed by a closed enum —
             // so no string has a route into any of them.
-            "generationLength", "generationShape", "rejections"
-        ], "the extension is exactly the union of the two declared key sets")
+            "generationLength", "generationShape", "rejections",
+            // [SANITISED-DEBUG-LANE] (owner decision, 2026-09-20) The debug
+            // lane's three content-typed keys. They are declared here for the
+            // same reason every other key is — the log surface keeps exactly
+            // one declaration — and declaring them is emphatically not what
+            // makes them safe: `LogSanitiser.redactedKeys` replaces their
+            // values with the token *before* this allow-list is consulted, so
+            // a sink receives `source_text=[redacted]` and never the scene
+            // text. What survives is that a pair existed, its order and its
+            // timing. `testTheContentTypedKeysAreDeclaredAndStillRedacted`
+            // pins both halves.
+            "recognized_text", "source_text", "translated_text"
+        ], "the extension is exactly the union of the three declared key sets")
         XCTAssertNil(sanitisedMetadata(["somethingNoOneDeclared": "x"])["somethingNoOneDeclared"],
                      "unknown keys are still dropped outright")
     }
@@ -257,6 +268,29 @@ final class LiveTranslateAllowListTests: XCTestCase {
         // …what it does do is scrub obvious PII shapes even in an allowed key:
         XCTAssertEqual(sanitisedMetadata(["reason": "call +9779812345678"])["reason"],
                        "call [redacted]")
+    }
+
+    /// [SANITISED-DEBUG-LANE] (owner decision, 2026-09-20) The debug lane's
+    /// three keys are the *only* keys whose values this bus replaces
+    /// wholesale, and the two halves of that rule are pinned together here:
+    /// they are **declared** (so the log surface keeps one declaration and an
+    /// undeclared bus key cannot hide behind the lane) and they are
+    /// **redacted** (so declaring them cannot become a route for scene text).
+    /// The sentence below holds no phone number, e-mail or blood pressure, so
+    /// the PII scrub would leave it intact — the token can only have come
+    /// from the by-declaration rule. The test above still holds for every
+    /// other allowed key, which is what makes this an addition to the bus's
+    /// rules rather than a rewrite of them.
+    func testTheContentTypedKeysAreDeclaredAndStillRedacted() {
+        let sentence = "नाश्ते के बाद दो गोलियाँ लें"
+        for key in ["recognized_text", "source_text", "translated_text"] {
+            XCTAssertTrue(LogSanitiser.allowedKeys.contains(key),
+                          "\(key) must be declared — an undeclared bus key is CL-5's hole")
+            XCTAssertEqual(sanitisedMetadata([key: sentence])[key], "[redacted]",
+                           "\(key) carries content by declaration: redacted, never scrubbed")
+        }
+        XCTAssertEqual(LogSanitiser.redactionToken, "[redacted]",
+                       "the token is the one the PII scrub already writes")
     }
 
     // MARK: Scenario: the shipped cap events keep their meaning
