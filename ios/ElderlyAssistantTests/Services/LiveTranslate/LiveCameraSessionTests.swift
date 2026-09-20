@@ -1162,8 +1162,12 @@ final class LiveCameraSessionTests: XCTestCase {
         let heldFrame = await frames.next()
         let held = try XCTUnwrap(heldFrame)
 
-        XCTAssertEqual(held.stabilization.offset.x, 0.008, accuracy: 1e-9,
-                       "0.4 of a 2 % move, past the 1 % dead zone: the window took the tremor")
+        XCTAssertEqual(held.stabilization.offset.x, 0.017, accuracy: 1e-9,
+                       "0.85 of a 2 % move: the adaptive-follow law's tremor "
+                       + "band is strictly INSIDE two dead zones, and 2 % is "
+                       + "exactly two 1 % zones — the picture is unmistakably "
+                       + "behind there, so the fast rate applies "
+                       + "(FrameAnchorEstimatorTests pins the switch)")
         XCTAssertEqual(held.stabilization.margin, anchored.stabilization.margin,
                        "the inset is a property of the feature being on, not of the correction")
         XCTAssertEqual(held.crop, .whole,
@@ -1211,8 +1215,10 @@ final class LiveCameraSessionTests: XCTestCase {
         try layer.deliver(paintedFrame(luma: 90, pts: 2))
         let heldFrame = await frames.next()
         let held = try XCTUnwrap(heldFrame)
-        XCTAssertEqual(held.stabilization.offset.x, 0.008, accuracy: 1e-9,
-                       "the premise: there is a correction, and the zoom has to drop it")
+        XCTAssertEqual(held.stabilization.offset.x, 0.017, accuracy: 1e-9,
+                       "the premise: there is a correction — 0.85 of a 2 % move, "
+                       + "the fast rate two dead zones earn — and the zoom has "
+                       + "to drop it")
 
         session.zoomSurface.zoom(.closer)
 

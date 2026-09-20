@@ -758,10 +758,19 @@ actor LiveTranslationPipeline {
             // extracted as well as the translated text.") One line per pass
             // with the recognized strings — the source half of every pair
             // the other debug lines carry, on the same gated lane.
+            //
+            // The one debug line in the family that carries CONTENT, and
+            // therefore the one the Release-log privacy guard (B1/T-049,
+            // AM-5) requires be compiled out of Release: a recognized string
+            // is transcript, and the guard admits it only inside `#if DEBUG`.
+            // The sibling lines print counts and a duration, so the runtime
+            // flag alone is enough for them.
+            #if DEBUG
             if config.translationDebugLoggingEnabled, !result.regions.isEmpty {
                 let texts = result.regions.map(\.text).joined(separator: " | ")
                 print("[translate-debug] ocr \(texts)")
             }
+            #endif
             let changes = stabilizer.consume(regions: result.regions,
                                              tracked: result.trackedBoxes,
                                              at: now())

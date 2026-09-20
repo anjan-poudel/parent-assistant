@@ -154,6 +154,17 @@ final class ModelBudgetPolicyTests: XCTestCase {
                        .deviceTooSmall,
                        "the 5 GB floor is the `.compact` boundary itself")
 
+        // The floor is the boundary EXACTLY, not one byte above it: a device
+        // reporting 5 GB is `.standard` — the smallest class whose budget
+        // holds 1.81 GB beside the 1.0 GB warm STT — so the gate admits every
+        // device that can actually run it and refuses every one that cannot.
+        // Pinning the boundary from both sides is what keeps the floor from
+        // drifting back inside `.compact` (where it promises a 1.1 GB
+        // download the warden then refuses) or above it (where it refuses a
+        // device the budget would have held).
+        XCTAssertEqual(availability(translationShipQuant, on: 5_000_000_000), .available,
+                       "a device AT the floor is `.standard`, and can run it")
+
         XCTAssertEqual(availability(translationShipQuant, on: standardPhone), .available,
                        "1.81 GB live + 1.0 GB warm STT = 2.81 GB ≤ 3.2 GB")
         XCTAssertEqual(ModelBudgetPolicy.standard.availability(

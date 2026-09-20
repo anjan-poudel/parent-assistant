@@ -51,9 +51,21 @@ final class CloudTranslationTierTests: XCTestCase {
         let governor = GeminiCostGovernor(storage: storage, observabilityBus: bus)
         let cache = LabelTranslationCache(storage: storage, config: config, observabilityBus: bus)
         let indicator = CloudActivityIndicatorModel(observabilityBus: bus, config: config)
+        // The client's own transport retry (shipped default: one retry) is a
+        // layer BELOW the tier this suite pins. With it on, a scripted timeout
+        // costs two sends: the second is answered by the test transport's
+        // exhausted fallback (`{}`), which reaches the tier as an unusable
+        // response rather than as `.cloudTransient(.timedOut)` — so the send
+        // count stops being a count of TIER attempts and the failure class the
+        // table is being asked about never arrives. Hold the layer beneath at
+        // one send per attempt here; `GeminiClientTests` pins the retry itself.
+        var clientConfig = GeminiClient.Config.default
+        clientConfig.maxTransportRetries = 0
+        clientConfig.retryBackoffSeconds = 0
         let client = GeminiClient(configStore: configStore,
                                   observabilityBus: bus,
                                   transport: transport,
+                                  config: clientConfig,
                                   costGovernor: governor)
         let tier = CloudTranslationTier(cache: cache,
                                         consentGate: gate,

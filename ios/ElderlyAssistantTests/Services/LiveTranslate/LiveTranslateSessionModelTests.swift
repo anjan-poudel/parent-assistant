@@ -612,6 +612,24 @@ final class LiveTranslateSessionModelTests: XCTestCase {
         XCTAssertEqual(surface, harness.model.geminiCloudToggleSurface)
     }
 
+    /// Both pacing clocks at zero, for the scenarios that are about a path
+    /// reaching the running pipeline rather than about the pacing itself.
+    ///
+    /// This suite's passes all happen inside a few hundred milliseconds of wall
+    /// time (its `SessionClock` is wired to the camera and detector, not to the
+    /// pipeline, which reads `Date.init`), so a scenario that delivers its
+    /// frames and waits would be measuring the shipped 1.5 s dispatch interval
+    /// and 8 s brain interval instead of the wiring it is named for. The clocks
+    /// are pinned where they live — `LiveTranslateConfigTests` for the shipped
+    /// values, `LiveTranslationPipelineTests` for their behaviour — and the twin
+    /// of the scenario below is unpaced there for this same reason.
+    private static func unpacedDispatchConfig() -> LiveTranslateConfig {
+        var config = LiveTranslateConfig.default
+        config.translationDispatchMinInterval = 0
+        config.brainAttemptMinInterval = 0
+        return config
+    }
+
     /// The wiring, end to end through the interface the Settings leaf uses:
     /// with the switch off nothing is sent and nobody is prompted; turning it
     /// on in a running session opens the pre-existing consent-gated path for
@@ -620,6 +638,7 @@ final class LiveTranslateSessionModelTests: XCTestCase {
     func testTheSwitchReachesTheRunningPipelineWithoutARestart() async throws {
         let harness = makeHarness(consent: true, configured: true,
                                   transport: Self.respondingTransport(),
+                                  config: Self.unpacedDispatchConfig(),
                                   geminiCloudEnabled: false)
         reportLayout(harness)
         harness.engine.regions = [detected(cloudText)]
