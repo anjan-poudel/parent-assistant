@@ -1215,9 +1215,18 @@ struct LiveTranslateConfig: Equatable {
     /// onward); with nowhere to go, a bound that fires while the model is
     /// still producing throws away answers that would have landed seconds
     /// later (the owner's screenshot report: every string failed, the
-    /// translations were on the way). The patient bound is the wait the
-    /// owner asked for instead.
-    var brainTranslationPatientTimeoutSeconds: TimeInterval = 45
+    /// translations were on the way).
+    ///
+    /// NEUTRALIZED (owner, 2026-09-20: "translation was working well with
+    /// the local model, now it's all messed up — restore it"). The 45 s
+    /// patient bound held the brain resident a generation too long and the
+    /// device killed the app (owner's 10:48 capture: three
+    /// inference_timeout events, then signal 9 — jetsam). The working
+    /// period's captures show 4–13 s generations, so the standard bound
+    /// was never the problem — the cache wipe was, and that is fixed.
+    /// Set equal to the standard bound: the patient path is behaviourally
+    /// inert until a device-proven bound exists.
+    var brainTranslationPatientTimeoutSeconds: TimeInterval = 25
 
     /// Grace added to `brainTranslationTimeoutSeconds` to form the pipeline's
     /// own deadline for the whole brain stage.
