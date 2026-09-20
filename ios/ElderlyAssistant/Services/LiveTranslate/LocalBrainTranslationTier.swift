@@ -120,14 +120,6 @@ protocol LocalBrainTranslating: Sendable {
     /// resolve is absent — never an empty string, never the source itself.
     func translate(_ strings: [String]) async -> LocalBrainTranslationOutcome
 
-    /// [PATIENT-STAGE] The same attempt under an explicit timeout: the
-    /// pipeline passes the patient bound when there is no next tier, so a
-    /// slow generation is waited out instead of failed mid-answer. The
-    /// default conformance ignores the override — a fake that does not
-    /// model time keeps answering at once.
-    func translate(_ strings: [String],
-                   timeoutSeconds: TimeInterval) async -> LocalBrainTranslationOutcome
-
     /// Releases any resident inference handle. Called when the session closes,
     /// so a closed session leaves no model parked in memory. A no-op for a
     /// brain that holds nothing.
@@ -136,11 +128,6 @@ protocol LocalBrainTranslating: Sendable {
 
 extension LocalBrainTranslating {
     func release() async {}
-
-    func translate(_ strings: [String],
-                   timeoutSeconds: TimeInterval) async -> LocalBrainTranslationOutcome {
-        await translate(strings)
-    }
 }
 
 /// The outcome of one batched attempt.
@@ -501,35 +488,7 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
     // MARK: The attempt
 
     func translate(_ strings: [String]) async -> LocalBrainTranslationOutcome {
-        await translate(strings, timeoutSeconds: config.brainTranslationTimeoutSeconds)
-    }
-
-    /// [DYNAMIC-TIMEOUT] (owner directive, 2026-09-20: "a default floor
-    /// and the rest driven by the source text's length.") The effective
-    /// bound for one batch: the floor plus a per-character share of the
-    /// source text, clamped to the caller's ceiling. Pure and static so
-    /// the suites pin it without a model.
-    static func effectiveTimeout(for strings: [String],
-                                 ceiling: TimeInterval,
-                                 config: LiveTranslateConfig) -> TimeInterval {
-        let characters = strings.reduce(0) { $0 + $1.count }
-        let dynamic = config.brainTranslationBaseTimeoutSeconds
-            + Double(characters) * config.brainTranslationTimeoutPerCharacterSeconds
-        return min(ceiling, dynamic)
-    }
-
-    /// [DYNAMIC-TIMEOUT] The attempt under the pipeline's chosen ceiling:
-    /// the standard one when the cloud can lead (the strings go onward),
-    /// the kill-safe maximum when there is no next tier. The effective
-    /// bound is the floor plus the source text's length, clamped to the
-    /// ceiling.
-    func translate(_ strings: [String],
-                   timeoutSeconds: TimeInterval) async -> LocalBrainTranslationOutcome {
         guard !strings.isEmpty else { return .none }
-
-        let timeout = Self.effectiveTimeout(for: strings,
-                                            ceiling: timeoutSeconds,
-                                            config: config)
 
         #if canImport(LLM)
         guard let modelStore, let modelID = installedModel(),
@@ -596,7 +555,7 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
                                                                           targetLanguage: targetLanguage),
                                                       jsonSchema: Self.jsonSchema,
                                                       modelURL: modelURL,
-                                                      timeout: timeout)
+                                                      timeout: config.brainTranslationTimeoutSeconds)
             let report = Self.report(output,
                                      sources: batch,
                                      targetLanguage: targetLanguage,
@@ -806,28 +765,16 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
     /// "the first N that fit", so the same scene always produces the same
     /// batch), and everything past it is left to the next tier.
     private func boundedBatch(_ strings: [String]) -> [String] {
-        Array(strings.prefix(Self.batchPrefixLength(of: strings, config: config)))
-    }
-
-    /// How many strings from the head of `strings` `boundedBatch` would keep.
-    ///
-    /// Static and shared rather than re-derived at the call site: a caller
-    /// that hands this tier a batch has to know exactly which strings the tier
-    /// will be *asked* about — the pipeline records the generation against the
-    /// ones it was handed, not the ones the tier silently dropped — and two
-    /// copies of a bound this fine-grained drift apart the first time one of
-    /// them is tuned.
-    static func batchPrefixLength(of strings: [String], config: LiveTranslateConfig) -> Int {
-        var count = 0
+        var batch: [String] = []
         var characters = 0
         for text in strings {
-            guard count < config.brainTranslationMaxStrings,
+            guard batch.count < config.brainTranslationMaxStrings,
                   characters + text.count <= config.brainTranslationMaxCharacters
             else { break }
-            count += 1
+            batch.append(text)
             characters += text.count
         }
-        return count
+        return batch
     }
 
     // MARK: The request

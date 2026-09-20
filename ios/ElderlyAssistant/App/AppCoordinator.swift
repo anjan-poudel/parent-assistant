@@ -2099,17 +2099,6 @@ final class AppCoordinator: ObservableObject {
             // never logged.
             speak: { [weak self] line in self?.speak(text: line) })
         let cameraSession = LiveCameraSession(observabilityBus: observabilityBus)
-        // [CAMERA-BUDGET] (2026-09-20) The session profile drives the
-        // warden's model budget for exactly the interval the camera is
-        // drawing its 1.4 GB working set: with the profile active, the
-        // warm STT resident is the first thing over the lowered budget,
-        // so the translation brain's load evicts it instead of dying
-        // beside it (the owner's 06:23 capture: brain admitted, committed,
-        // pressure-evicted 0.7 s later). The trade — first talk after
-        // camera costs a load — was the owner's call.
-        cameraSession.onSessionActiveChanged = { active in
-            ModelLifecycleManager.shared.setSessionProfile(active ? .cameraLive : nil)
-        }
         return LiveTranslateSessionDependencies(
             locale: locale,
             camera: cameraSession,
