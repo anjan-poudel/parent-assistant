@@ -592,9 +592,45 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// The decision is recorded by the time this runs (`consent.grant()` /
     /// `decline()` above), so the gate the retry reaches reads the elder's
     /// answer rather than asking for it again.
+    ///
+    /// **The held frame is refreshed too, and that is half the job** (review of
+    /// #100, finding 5). A still frame's asks are the pipeline's, and the
+    /// answers to them land in the pipeline's terminal state — but the picture
+    /// on screen is this model's held publication, built when the frame was
+    /// captured. The capture path already draws the answers onto the frame it
+    /// froze; a frame whose question was answered *after* that has had nobody
+    /// to draw its answers since. Without this, granting the prompt over a held
+    /// frame leaves the elder looking at the same untranslated picture they
+    /// were looking at before they answered — the one ask they made, answered
+    /// and paid for, with nothing on screen to show for it.
     private func resumeInterruptedAsks() {
         guard let pipeline else { return }
-        Task { await pipeline.retryAwaitingResolution() }
+        Task { [weak self] in
+            await pipeline.retryAwaitingResolution()
+            await self?.refreshHeldFrame()
+        }
+    }
+
+    /// Draws the answers that arrived for a held frame onto that frame — the
+    /// second half of `freezeFrame`'s tail, run again now that the asks the
+    /// prompt interrupted have been dispatched.
+    ///
+    /// Guarded the same way the capture is: the layout is the one in force, and
+    /// the frame is compared by its picture before and after the `await`, so a
+    /// thaw or a second capture in between keeps its own frame rather than
+    /// having this one's answers drawn onto it.
+    private func refreshHeldFrame() async {
+        guard !isClosed, let path = snapshotPath, let held = frozen else { return }
+        let layout = pendingLayout
+        guard let answers = await path.outcomesAfterCloudAnswers(of: held.publication) else { return }
+        guard !isClosed, var refreshed = frozen, refreshed.image === held.image else { return }
+        refreshed.publication = await path.placed(regions: refreshed.publication.regions,
+                                                   outcomes: answers,
+                                                   policy: refreshed.publication.policy,
+                                                   layout: layout,
+                                                   framePixelSize: refreshed.framePixelSize)
+        guard !isClosed, frozen?.image === held.image else { return }
+        frozen = refreshed
     }
 
     // MARK: - Life

@@ -772,16 +772,31 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
     /// "the first N that fit", so the same scene always produces the same
     /// batch), and everything past it is left to the next tier.
     private func boundedBatch(_ strings: [String]) -> [String] {
-        var batch: [String] = []
+        Array(strings.prefix(Self.batchPrefixLength(of: strings, config: config)))
+    }
+
+    /// The prefix of `strings` that fits one request — the bound above, as a
+    /// number, so that a *caller* can know what the tier will be asked about
+    /// before it hands the batch over.
+    ///
+    /// The rule is the tier's own and stays in one place: this is the same walk
+    /// `boundedBatch` performs. It is published because what is **not** asked
+    /// must not be claimed: a plan that hands over more than the bound and
+    /// records the whole batch as generation-paid claims a payment that was
+    /// never made, and a plan that then fails the surplus records a failure on a
+    /// tier the strings never reached (review of #100, finding 2). The caller
+    /// reads this and defers the rest instead.
+    static func batchPrefixLength(of strings: [String], config: LiveTranslateConfig) -> Int {
+        var count = 0
         var characters = 0
         for text in strings {
-            guard batch.count < config.brainTranslationMaxStrings,
+            guard count < config.brainTranslationMaxStrings,
                   characters + text.count <= config.brainTranslationMaxCharacters
             else { break }
-            batch.append(text)
+            count += 1
             characters += text.count
         }
-        return batch
+        return count
     }
 
     // MARK: The request

@@ -402,6 +402,14 @@ actor LiveTranslationPipeline {
     /// the wall.
     private let now: () -> Date
 
+    /// One string waiting on the elder's answer to the consent prompt, and who
+    /// raised the question (`awaitingDecision`).
+    private struct PendingAsk {
+        let item: CloudTranslationTier.Item
+        /// Whether the ask came from a region on the live picture.
+        let isLive: Bool
+    }
+
     // MARK: State (actor-isolated)
 
     private var stabilizer: TextRegionStabilizer
@@ -449,9 +457,9 @@ actor LiveTranslationPipeline {
     /// what makes the plan finite: both tiers tried, and if neither answered,
     /// the reason is recorded and the region says so.
     private var cloudFailedKeys: Set<String> = []
-    /// [RELIABILITY-ROUTER] Normalized keys currently waiting on the elder's
-    /// answer to the consent prompt: the gate returned `.awaitingDecision`,
-    /// nothing was sent and nothing failed.
+    /// Normalized keys currently waiting on the elder's answer to the consent
+    /// prompt: the gate returned `.awaitingDecision`, nothing was sent and
+    /// nothing failed.
     ///
     /// Kept because the live cycle is not the only asker. A tick follows every
     /// frame, so the live path re-asks these as soon as the answer is recorded
@@ -459,7 +467,20 @@ actor LiveTranslationPipeline {
     /// the one tap, and a key released by the prompt would sit pending for the
     /// rest of the session unless the elder's answer could hand it back to the
     /// plan. That is `retryAwaitingResolution`, which the answers call.
-    private var awaitingDecisionKeys: Set<String> = []
+    ///
+    /// The **item** is kept, not the key alone, because the answer has to be
+    /// able to re-ask the string the question interrupted, and the live picture
+    /// is not the only place a question is raised: a frozen frame asks about
+    /// the strings on the *held* picture, and those strings are in no
+    /// stabiliser. A registry of keys alone rebuilt its candidates from
+    /// `stabilizer.visible`, so every frozen ask was dropped on the floor and
+    /// the grant that answered it carried nothing (review of #100). `isLive` is
+    /// what keeps the registry bounded — a live ask is a claim about a sighting
+    /// and is pruned with it, while a held frame's ask is not pruned by frames
+    /// it is not in (the picture is still on screen and a frame has no next
+    /// tick to raise the question again) and is replaced wholesale by the next
+    /// capture, so the registry never holds more than one frame's worth.
+    private var awaitingDecision: [String: PendingAsk] = [:]
     /// The two pacing clocks (`translationDispatchMinInterval`,
     /// `brainAttemptMinInterval`), read and written together in the dispatch's
     /// own prologue: when pending strings were last dispatched, and when the
@@ -639,6 +660,19 @@ actor LiveTranslationPipeline {
     /// The strings currently dispatched but unanswered. Derived from the
     /// attempt registry, so it cannot disagree with it.
     var inFlightKeys: Set<String> { attemptKeys }
+
+    /// The strings the elder is being asked about: the asks
+    /// `retryAwaitingResolution` will carry when the answer arrives.
+    ///
+    /// A plan that meets an unanswered prompt leaves nothing else behind — no
+    /// event, no publication, no tier call — so this is the only thing a test
+    /// can read to know a tap has reached the gate. It is here for exactly
+    /// that: an extract-mode scenario with several taps has to wait for *every*
+    /// one of them to be recorded before it answers the prompt, or a plan the
+    /// answer overtakes goes on to send the ask by itself and the scenario's
+    /// request count means two different things on two runs (review of #100,
+    /// finding 12).
+    var awaitingResolutionKeys: Set<String> { Set(awaitingDecision.keys) }
 
     var activeRegionCount: Int { stabilizer.activeRegionCount }
 
@@ -922,7 +956,7 @@ actor LiveTranslationPipeline {
         let key = Self.cacheKey(for: region.text, targetLanguage: targetLanguage)
         resolveFromTheDevice(only: key)
         await publish()
-        dispatchResolutionNeeds(only: key)
+        dispatchResolutionNeeds(only: [key])
     }
 
     // MARK: - The cycle
@@ -991,7 +1025,9 @@ actor LiveTranslationPipeline {
         // costs nothing to forget, and one that is still on screen keeps its
         // spent attempt.
         cloudFailedKeys = Set(cloudFailedKeys.filter { visibleKeys.contains($0) })
-        awaitingDecisionKeys = Set(awaitingDecisionKeys.filter { visibleKeys.contains($0) })
+        // Only the *live* asks are pruned with the sighting: a held frame's ask
+        // is not about this picture at all (see `awaitingDecision`).
+        awaitingDecision = awaitingDecision.filter { !$0.value.isLive || visibleKeys.contains($0.key) }
         outcomes = next
     }
 
@@ -1107,6 +1143,24 @@ actor LiveTranslationPipeline {
         brainAttemptedKeys.formUnion(ids)
     }
 
+    /// Whether the brain's own clock allows a generation at `moment`.
+    ///
+    /// Every stage that can spend a generation asks it, so the paths that can
+    /// pay for one are paced by one rule. They were two: the fallback stage
+    /// asked the brain on every dispatch tick it ran under, which is a
+    /// generation per 1.5 s of a sustained cloud outage rather than the one per
+    /// `brainAttemptMinInterval` the device log asked for (owner device report,
+    /// 2026-09-19).
+    ///
+    /// The elder's own ask is the caller's business, not this method's: a tap
+    /// and a prompt's answer are the elder acting, and they are allowed through
+    /// the clock by `maySpendAGeneration`.
+    private func brainMayAttempt(at moment: Date) -> Bool {
+        lastBrainAttemptAt.map {
+            moment.timeIntervalSince($0) >= config.brainAttemptMinInterval
+        } ?? true
+    }
+
     /// Records that the cloud came back empty-handed for these strings (see
     /// `cloudFailedKeys`). A method for the same reason `noteBrainAttempt` is
     /// one: the task body is not actor-isolated.
@@ -1114,61 +1168,78 @@ actor LiveTranslationPipeline {
         cloudFailedKeys.formUnion(ids)
     }
 
-    /// Hands every still-pending string to the tiers the reliability router
-    /// leads it with — one session-scoped task, never awaited by the tick.
+    // MARK: - The resolution plan (the one way in)
+
+    /// How the elder came to ask for a resolution — the whole of the pacing
+    /// policy, stated once.
     ///
-    /// The order is the cascade (FR-LCT-008 as amended) for the class the
-    /// model is proven on: the dictionary has already answered what it can
-    /// (`resolveFromTheDevice`), the brain is asked next, and only what it did
-    /// not answer reaches the consent gate and the cloud. The gate therefore
-    /// sees the *remainder*, which is what keeps a scene the device can answer
-    /// from ever presenting the elder with a consent prompt (FR-LCT-011,
-    /// FR-LCT-020).
+    /// A clock is not a property of a *path*; it is a property of the ask. Three
+    /// paths resolve strings — the frame tick, the elder's own ask, and a still
+    /// frame — and before this type each of them carried its own copy of "may I
+    /// spend a dispatch, may I spend a generation", which is how one copy came
+    /// to skip the pacing that protects the model and another came to strand the
+    /// one block it was ever handed (review of #100).
+    private enum ResolutionUrgency {
+        /// A frame tick: background work. Both clocks apply — the dispatch
+        /// clock spaces the requests, and the brain's clock spaces the model
+        /// loads.
+        case tick
+        /// The elder acted: a tap on a block, or the answer to a prompt. Both
+        /// clocks are skipped (and still moved), because an ask that did
+        /// nothing because a background dispatch happened 0.9 s ago is the
+        /// feature failing at the one thing it does (owner verdict, 2026-09-18).
+        case explicitAsk
+        /// A still picture. Not background work — the elder pressed the shutter
+        /// — but not a reason to skip the brain's clock either: a capture that
+        /// paid a generation per press would thrash the model's load every time
+        /// the elder looked at something, and a cloud outage is exactly when
+        /// they press it repeatedly (owner decision, 2026-09-20). The dispatch
+        /// clock does not apply to it: a capture is one ask, not a cadence.
+        case capture
+    }
+
+    /// Where a plan's terminal answers land. The three paths differ in this and
+    /// in nothing else.
+    private enum ResolutionDestination {
+        /// The live cycle: a terminal answer is written onto the region on
+        /// screen and the cycle publishes it as it lands, so a region stops
+        /// being pending in the frame after its answer arrives.
+        case live
+        /// A held frame: answers are collected for the caller, which is about to
+        /// re-render one still picture and owns the publication they land on.
+        case frozen
+    }
+
+    /// One ask for resolution, as the adapters hand it to the plan.
+    private struct ResolutionRequest {
+        /// The strings to resolve, in the order they are to be planned — region
+        /// order for a tick (so the same scene produces the same batch and the
+        /// bounds are deterministic), the elder's own order for an ask, and the
+        /// frozen picture's region order for a capture.
+        var items: [CloudTranslationTier.Item]
+        var urgency: ResolutionUrgency
+        var destination: ResolutionDestination
+    }
+
+    /// [RELIABILITY-ROUTER] Hands the live picture's still-pending regions to
+    /// the plan — the live cycle's own adapter.
     ///
-    /// For the sentence class — the one the round-1/2/3 gate data does not
-    /// show the model is exact on — the order is the owner-approved
-    /// reliability routing: when the cloud can lead (the household's switch on
-    /// and a live network path) the sentence goes to the cloud, and comes back
-    /// to the device rather than degrading when the cloud cannot answer it.
-    /// Both orders are the *same* rule — ask the tier that is reliable for
-    /// this string first, and never lose a string to a tier that failed — and
-    /// `TranslationReliabilityRouter` is the one place that rule is stated.
-    ///
-    /// Region order, not dictionary order: the batch the brain receives is
-    /// built by walking the visible regions, so the same scene produces the
-    /// same batch and the first-N bound is deterministic.
-    ///
-    /// The two claims are not the same claim. `attemptKeys` is "an attempt is
-    /// owed for this string" and is released when the gate asks for a decision;
-    /// `brainAttemptedKeys` is "a generation has already been paid for this
-    /// string in this sighting" and is not, because the brain is a generation
-    /// rather than a lookup and a tick that re-asked it would turn one answer
-    /// into one generation per frame. The two are therefore applied separately:
-    /// a string the brain has already been asked about is carried straight to
-    /// the gate, so the tick that follows the elder's answer reaches the cloud
-    /// without paying for the same generation twice.
-    /// Two clocks pace it, and neither of them is allowed to cost a string:
-    /// `translationDispatchMinInterval` spaces the dispatches themselves and
-    /// `brainAttemptMinInterval` spaces the generations inside them (owner
-    /// device report, 2026-09-19 — a cache miss per pass against a 5 s
-    /// idle-unload was one model load per frame). A tick that is held back
-    /// leaves its strings pending and unclaimed, so the next tick that is
-    /// allowed to dispatch carries them, and a burst of arrivals goes out as
-    /// one batch rather than one request each.
-    /// `only` narrows the hand-over to one string's key — extract mode's
-    /// tap-to-translate, which must not become a dispatch for the whole scene.
-    /// `nil` is every pending region, which is the mode-off behaviour the
-    /// cycle has always had. The elder's ask is not a pass: a tap skips both
-    /// clocks (and still moves them), because a tap that did nothing because a
-    /// background dispatch happened 0.9 s ago would be the mode failing at the
-    /// one thing it does.
-    private func dispatchResolutionNeeds(only onlyKey: String? = nil) {
+    /// The candidates are built here because only this path has regions: the
+    /// visible pending ones, in region order, deduped by key. `only` narrows it
+    /// to a set of keys — extract mode's tap-to-translate, and the consent
+    /// prompt's own answered batch, which must go back as **one** dispatch
+    /// rather than one per key: five single-string dispatches are five requests
+    /// where the batch that asked the question was one, and both pacing clocks
+    /// are skipped by an explicit ask, so nothing would space them out again.
+    /// `nil` is every pending region, which is the mode-off behaviour the cycle
+    /// has always had.
+    private func dispatchResolutionNeeds(only onlyKeys: Set<String>? = nil) {
         var candidates: [CloudTranslationTier.Item] = []
         var claimed: Set<String> = []
         for region in stabilizer.visible {
             guard let existing = outcomes[region.id], case .pending = existing.outcome else { continue }
             let key = Self.cacheKey(for: region.text, targetLanguage: targetLanguage)
-            if let onlyKey, key != onlyKey { continue }
+            if let onlyKeys, !onlyKeys.contains(key) { continue }
             guard claimed.insert(key).inserted else { continue }
             guard settledOutcomes[key] == nil,
                   !attemptKeys.contains(key) else { continue }
@@ -1177,242 +1248,426 @@ actor LiveTranslationPipeline {
                                                          detectedSourceLanguage: region.detectedLanguage))
         }
         guard !candidates.isEmpty else { return }
+        startResolution(ResolutionRequest(items: candidates,
+                                          urgency: onlyKeys == nil ? .tick : .explicitAsk,
+                                          destination: .live))
+    }
 
-        // The pacing (owner device report, 2026-09-19). Both clocks are read and
-        // written here, in the prologue, before anything is claimed, so a tick
-        // either dispatches and moves the clocks or dispatches nothing at all.
-        // A tick that is held back claims nothing, settles nothing and drops
-        // nothing: the strings are still pending, so the next tick that is
-        // allowed to dispatch carries them — which is what turns a burst of
-        // arrivals into one batch instead of one request each.
+    /// Starts a plan off the caller's stack — the live cycle's shape. Resolution
+    /// is a session-scoped task, never awaited by the tick, so the OCR cadence
+    /// continues while a request or a generation is in flight and the next tick
+    /// is the retry.
+    private func startResolution(_ request: ResolutionRequest) {
+        let token = UUID()
+        resolutionTasks[token] = Task { [weak self] in
+            guard let self else { return }
+            await self.runResolution(request)
+            await self.forget(task: token)
+        }
+    }
+
+    /// **The** resolution plan: the one entry point every path that reaches a
+    /// tier goes through (the mandate of the third review, #100).
+    ///
+    /// Before any stage, one rule that is not a stage: **what the session has
+    /// already answered is an answer, not an ask** — a hand-over that names a
+    /// settled string gets that string's own result back and no second payment.
+    ///
+    /// It owns the four things that used to exist once per path and drifted:
+    ///
+    ///  1. **the clock policy** — the prologue below, from the ask's own
+    ///     `urgency`: a tick answers to both clocks, an elder's ask to neither,
+    ///     and a capture to the brain's (the dispatch clock does not pace a
+    ///     single press). A plan the clock holds claims nothing, settles nothing
+    ///     and drops nothing: the strings are still pending, so the next plan
+    ///     that is allowed carries them, which is what turns a burst of arrivals
+    ///     into one batch instead of one request each;
+    ///  2. **batch bounding with deferral** — `askTheBrain`, which asks the
+    ///     prefix the tier can be asked about and *releases* the surplus
+    ///     unclaimed, rather than recording a generation that was never paid for
+    ///     or failing a string the device never saw its turn on;
+    ///  3. **the claim ledger** — `attemptKeys` (an attempt is owed),
+    ///     `brainAttemptedKeys` (a generation has been paid for in this
+    ///     sighting), `cloudFailedKeys` (the cloud came back empty-handed) and
+    ///     `awaitingDecision` (the elder is being asked) — written here and by
+    ///     the stages below, never by a caller;
+    ///  4. **the terminal writer** — `settleTerminal`, the one place a string's
+    ///     answer becomes the session's answer, and the one place a degradation
+    ///     is emitted: exactly once, never silently, never twice.
+    ///
+    /// The three paths are thin adapters over it and differ in the destination
+    /// they hand in. The strings are planned in the order they are handed over —
+    /// region order, not dictionary order: a batch whose subset depended on
+    /// Dictionary iteration order asks a different prefix of the same scene on
+    /// every capture, which is what the review found the frozen path doing.
+    ///
+    /// The stages, and why they are in this order: the device leads for its
+    /// class (the device's answers must never queue behind a network round-trip
+    /// or an unanswered prompt), the gate leads for the class the device is not
+    /// proven on, and whatever the tier behind the device cannot answer comes
+    /// back to the device instead of degrading — a string the cloud failed is
+    /// the device's to answer from then on.
+    @discardableResult
+    private func runResolution(_ request: ResolutionRequest) async -> [String: TranslationResult] {
+        var answers: [String: TranslationResult] = [:]
+        guard !isClosed, !request.items.isEmpty else { return answers }
+
+        // 0. A string the session has already answered is an answer, not an
+        //    ask. The live adapter filters these itself, but the two hand-over
+        //    paths cannot: a held frame's refresh hands over the whole frame
+        //    again, and the prompt's retry hands back what it recorded — both
+        //    of which can name a string this pipeline settled while they were
+        //    waiting. Asking again would pay a second time for a scene the
+        //    elder has already been shown, and (for a degradation) emit the
+        //    second event that finding 3 of the review was about.
+        for item in request.items where settledOutcomes[item.id] != nil {
+            answers[item.id] = settledOutcomes[item.id]
+        }
+        let items = request.items.filter { settledOutcomes[$0.id] == nil }
+        guard !items.isEmpty else { return answers }
+
+        // 1. The clocks, in one prologue, before anything is claimed: a plan
+        //    either runs and moves them or runs nothing at all.
         let moment = now()
-        let explicit = onlyKey != nil
-
-        if !explicit,
+        if request.urgency == .tick,
            let last = lastDispatchAt,
            moment.timeIntervalSince(last) < config.translationDispatchMinInterval {
-            return
+            return answers
         }
+        lastDispatchAt = moment
+        let mayGenerateNow = maySpendAGeneration(request.urgency, at: moment)
 
-        // [RELIABILITY-ROUTER] The plan, made here so that the batch, its
-        // order and the clock below are all decided before anything is
-        // claimed: which tier leads each candidate, and therefore which of
-        // them this tick owes a brain generation.
+        // The plan (the router): which tier leads each string, decided before
+        // anything is claimed, so the batch, its order and the clocks below are
+        // all fixed first.
         var onDeviceFirst: [CloudTranslationTier.Item] = []
         var cloudFirst: [CloudTranslationTier.Item] = []
-        for item in candidates {
+        for item in items {
             switch leadingTier(for: item) {
             case .onDevice: onDeviceFirst.append(item)
             case .cloud: cloudFirst.append(item)
             }
         }
 
-        // The brain's clock, inside the dispatch clock: a generation per
-        // dispatch beside an idle-unload is the load-thrash the device log is
-        // made of. It is applied to the strings that **owe a generation** —
-        // the device-leading ones the brain has not been asked about yet — and
-        // to nothing else. A cloud-leading string pays nothing on the path it
-        // is about to take, so holding it back because a *brain* generation
-        // happened a moment ago would pace work this clock does not pace: the
-        // sentence class would lose its cloud translation to a limit that
-        // exists to protect the device's memory.
-        //
-        // A held string is not dropped: it is left pending and unclaimed, so
-        // the next tick that is allowed to dispatch carries it, and a burst of
-        // arrivals goes out as one batch rather than one request each.
-        let brainMayAttempt = explicit
-            || (lastBrainAttemptAt.map {
-                moment.timeIntervalSince($0) >= config.brainAttemptMinInterval
-            } ?? true)
-        var owed = onDeviceFirst.filter { !brainAttemptedKeys.contains($0.id) }
-        if !brainMayAttempt {
-            let held = Set(owed.map(\.id))
-            onDeviceFirst.removeAll { held.contains($0.id) }
-            owed = []
-        }
-        let items = onDeviceFirst + cloudFirst
-        guard !items.isEmpty else { return }
-
-        lastDispatchAt = moment
+        // The claim, before any await: one attempt is owed per string, and a
+        // plan that lands mid-plan must not start a second. The strings a clock
+        // holds are released again immediately — that is what makes them a
+        // deferral rather than a failure.
+        let held: [CloudTranslationTier.Item] = mayGenerateNow
+            ? []
+            : onDeviceFirst.filter { !brainAttemptedKeys.contains($0.id) }
         attemptKeys.formUnion(items.map(\.id))
-        if !owed.isEmpty { lastBrainAttemptAt = moment }
-        // The generation is claimed here, at dispatch time, exactly as it
-        // always was: the brain is asked once per string per sighting, and
-        // marking it before the stage rather than after is what stops a second
-        // tick from paying for a string whose first generation is still
-        // running.
-        brainAttemptedKeys.formUnion(owed.map(\.id))
+        release(keys: held.map(\.id))
 
-        let token = UUID()
-        resolutionTasks[token] = Task { [weak self] in
-            guard let self else { return }
-            await self.runThePlan(onDeviceFirst: onDeviceFirst,
-                                  cloudFirst: cloudFirst,
-                                  fresh: Set(owed.map(\.id)))
-            await self.forget(task: token)
-        }
-    }
-
-    /// The plan itself, off the actor: the device leads for its class, the
-    /// gate leads for the class the device is not proven on, and whatever the
-    /// cloud cannot answer comes back to the device rather than degrading.
-    ///
-    /// **The stages run device-first, and in this order, deliberately.** The
-    /// device's answers must never queue behind a network round-trip — a short
-    /// label the brain can translate in a moment would otherwise wait on the
-    /// cloud's deadline, or on an unanswered consent prompt, before the elder
-    /// saw anything at all.
-    ///
-    /// Nothing here settles a string the cloud did not answer: the reserved
-    /// strings stay pending while the device works on them, so a region never
-    /// flashes "can't translate" over a string that is about to be translated.
-    /// That flash is the same lie as a fabricated success, one frame long.
-    private func runThePlan(onDeviceFirst: [CloudTranslationTier.Item],
-                            cloudFirst: [CloudTranslationTier.Item],
-                            fresh: Set<String>) async {
-        // The close contract, checked before any work starts: a dispatch
-        // cancelled between the prologue and here would otherwise open a
-        // generation for a session that is gone.
-        guard !isClosed else { return }
-
-        // 1. The device leads for its class. A string the brain has already
-        //    been asked about is carried without a second payment — that
-        //    generation is paid for, and the tick that follows the elder's
-        //    answer must still reach the cloud without paying for it twice.
-        let owesNow = onDeviceFirst.filter { fresh.contains($0.id) }
-        var deviceRemainder: [CloudTranslationTier.Item] = []
-        if !owesNow.isEmpty {
-            deviceRemainder = await resolveThroughTheBrain(owesNow)
+        // 2. The device leads for its class. A string the brain has already
+        //    been asked about in this sighting is carried without a second
+        //    payment — that generation is paid for, and the plan after the
+        //    elder's answer must still reach the cloud without buying the same
+        //    one twice.
+        var carryOnward = onDeviceFirst.filter { brainAttemptedKeys.contains($0.id) }
+        let owed = mayGenerateNow ? onDeviceFirst.filter { !brainAttemptedKeys.contains($0.id) } : []
+        if !owed.isEmpty {
+            lastBrainAttemptAt = moment
+            let stage = await askTheBrain(owed)
+            guard !Task.isCancelled, !isClosed else { return answers }
+            await commit(stage.answered, to: request.destination, into: &answers)
+            carryOnward += stage.unanswered
         }
 
-        // 2. The class the device is not proven on leads with the gate, and
-        //    whatever the gate could not settle — the switch off, consent
-        //    declined or revoked, no path after all, a provider failure —
-        //    comes back reserved rather than degraded. That reservation is the
-        //    whole reason this order is allowed.
+        // 3. The class the device is not proven on leads with the gate, and
+        //    whatever the gate cannot settle comes back reserved rather than
+        //    degraded: that reservation is the whole reason this order is
+        //    allowed.
         var reserved: [(CloudTranslationTier.Item, LiveTranslateError)] = []
         if !cloudFirst.isEmpty {
-            reserved = await resolveThroughTheGate(cloudFirst, reservingFallback: true)
+            let decision = await gateDecision(for: cloudFirst, reservingFallback: true)
+            guard !Task.isCancelled, !isClosed else { return answers }
+            await commit(decision.terminal, to: request.destination, into: &answers)
+            record(awaiting: decision.awaiting, at: request.destination)
+            reserved = decision.reserved
         }
 
-        // 3. What the cloud could not answer is the device's now. The ledger
-        //    is written before they are asked again, so the tick that comes
-        //    back to these strings plans them device-first.
+        // 4. What the cloud could not answer is the device's now — and only
+        //    what has not already had its turn there. A string the device was
+        //    asked about already is not asked twice: the cloud is the tier that
+        //    just came back empty-handed and nothing is behind it, so the honest
+        //    terminal is the cloud's own reason. Its generation is not paid for
+        //    a second time, and its region does not degrade under a *cloud*
+        //    reason on a tier whose device was never asked (both review of #100
+        //    findings).
         if !reserved.isEmpty {
-            let items = reserved.map(\.0)
+            let ids = reserved.map(\.0.id)
+            noteCloudFailure(ids)
             let reasonByID = Dictionary(reserved.map { ($0.0.id, $0.1.unavailableReason) },
                                         uniquingKeysWith: { first, _ in first })
-            await noteCloudFailure(items.map(\.id))
-            // The generation these are about to cost is claimed first, for the
-            // same reason the dispatch claims its own: one payment per string
-            // per sighting.
-            await noteBrainAttempt(items.map(\.id))
-            let unanswered = await resolveThroughTheBrain(items)
-            if !unanswered.isEmpty {
-                // The device had its turn — a generation was paid and did not
-                // answer — and there is no tier behind it: the cloud is the
-                // tier that just failed. The honest terminal is the cloud's
-                // own reason, settled rather than left pending for the rest of
-                // the session.
-                //
-                // The batch this stage was handed is one cloud batch's
-                // failures, which cannot exceed the visible scene: the
-                // stabiliser caps that at `declutterMaxRegions` strings of at
-                // most `sceneTextMaxLength` characters each, under the brain's
-                // own prefix bound, so the bound can never be what leaves one
-                // of these unanswered.
-                let degraded = unanswered.map { item in
-                    (item, TranslationResult.degraded(originalText: item.text,
-                                                      reason: reasonByID[item.id] ?? .noTierResolved))
+            let spent = reserved.filter { brainAttemptedKeys.contains($0.0.id) }
+            let fresh = reserved.filter { !brainAttemptedKeys.contains($0.0.id) }
+            await commit(spent.map { ($0.0, TranslationResult.degraded(originalText: $0.0.text,
+                                                                      reason: $0.1.unavailableReason)) },
+                         to: request.destination,
+                         into: &answers)
+            if !fresh.isEmpty {
+                // The generation this stage is about to cost — and this is the
+                // stage that runs *because* the tier ahead of it is failing, so
+                // without this it is the one that runs most — is paced by the
+                // brain's clock like every other generation. The elder's own ask
+                // skips that clock by its urgency, and a plan the clock holds is
+                // released rather than dropped: the cloud failure is on the
+                // ledger, so the next plan the clock allows asks them in stage 2
+                // (review of #100: without the override an extract-mode tap
+                // could strand the only block it ever gets).
+                if maySpendAGeneration(request.urgency, at: now()) {
+                    lastBrainAttemptAt = now()
+                    let stage = await askTheBrain(fresh.map(\.0))
+                    guard !Task.isCancelled, !isClosed else { return answers }
+                    await commit(stage.answered, to: request.destination, into: &answers)
+                    // The device had its turn — a generation was paid and did
+                    // not answer — and there is no tier behind it: the cloud is
+                    // the tier that just failed. The honest terminal is the
+                    // cloud's own reason, written through the one terminal
+                    // writer, so an outage this path degrades is an outage the
+                    // evidence counts.
+                    await commit(stage.unanswered.map { item in
+                        (item, TranslationResult.degraded(originalText: item.text,
+                                                          reason: reasonByID[item.id] ?? .noTierResolved))
+                    }, to: request.destination, into: &answers)
+                } else {
+                    release(keys: fresh.map(\.0.id))
                 }
-                settle(degraded)
-                apply(items: degraded)
-                await publish()
             }
         }
 
-        // 4. Everything the plan put in front of the device-and-then-cloud,
-        //    and did not answer, goes on to the gate in region order.
-        let stillUnresolved = Set(deviceRemainder.map(\.id))
-        let onward = onDeviceFirst.filter { !fresh.contains($0.id) || stillUnresolved.contains($0.id) }
-        if !onward.isEmpty {
-            _ = await resolveThroughTheGate(onward)
+        // 5. Everything the plan put in front of the device-and-then-cloud, and
+        //    did not answer, goes on to the gate in region order.
+        if !carryOnward.isEmpty {
+            let decision = await gateDecision(for: carryOnward, reservingFallback: false)
+            guard !Task.isCancelled, !isClosed else { return answers }
+            await commit(decision.terminal, to: request.destination, into: &answers)
+            record(awaiting: decision.awaiting, at: request.destination)
+        }
+
+        // Every string this plan settled or deferred has released its claim by
+        // now; whatever is left of the strings it was handed is a string it
+        // decided nothing about — a plan a thaw cancelled mid-flight, or a batch
+        // that made no claim. Released, so the next plan still finds them: a
+        // claim nobody will settle is a region pending for the rest of the
+        // session.
+        release(keys: items.map(\.id).filter { attemptKeys.contains($0) })
+        return answers
+    }
+
+    /// Whether a generation may be paid at `moment` for an ask of this urgency:
+    /// the elder's own asks skip the clock, everything else is paced by it. One
+    /// rule, asked by every stage that can spend a generation.
+    private func maySpendAGeneration(_ urgency: ResolutionUrgency, at moment: Date) -> Bool {
+        urgency == .explicitAsk || brainMayAttempt(at: moment)
+    }
+
+    /// The device stage: one batch, under the tier's own bound.
+    ///
+    /// The bound is applied here rather than left to the tier, because what is
+    /// not asked must not be claimed. `LocalBrainTranslationTier` keeps the first
+    /// N that fit of what it is handed and leaves the rest, so a caller that
+    /// hands over more gets answers for a prefix and silence for the surplus —
+    /// and a caller that pre-claimed the whole batch, as the frozen path did,
+    /// recorded a generation that was never paid for and then failed the surplus
+    /// with a *cloud* reason on a tier with no cloud (review of #100). The
+    /// surplus is therefore a deferral: released, unclaimed, left pending for
+    /// the next plan.
+    ///
+    /// - Returns: the answers, and the strings that were asked and did not
+    ///   answer — the callers that have a tier behind the device carry those
+    ///   onward. The surplus the bound deferred is released here and is in
+    ///   neither list.
+    private func askTheBrain(_ items: [CloudTranslationTier.Item])
+        async -> (answered: [(CloudTranslationTier.Item, TranslationResult)],
+                  unanswered: [CloudTranslationTier.Item]) {
+        guard !items.isEmpty else { return ([], []) }
+
+        let asked = Array(items.prefix(LocalBrainTranslationTier.batchPrefixLength(of: items.map(\.text),
+                                                                                   config: config)))
+        // Not asked yet, so not failed and not paid for: no claim, no outcome.
+        release(keys: items.dropFirst(asked.count).map(\.id))
+
+        // The generation is claimed before the stage, exactly as the dispatch has
+        // always claimed its strings: one payment per string per sighting, and a
+        // generation that timed out was still paid for. Claiming it here is what
+        // stops a second plan from paying for a string whose first generation is
+        // still running.
+        noteBrainAttempt(asked.map(\.id))
+
+        let outcome = await deviceAnswers(asked)
+        // The cancellation contract: a thaw, a resume or a close that lands
+        // mid-generation wins, and the strings go back unanswered rather than
+        // onward — a cancelled plan must not walk them to the gate.
+        guard !Task.isCancelled, !isClosed, let outcome else { return ([], asked) }
+
+        var answered: [(CloudTranslationTier.Item, TranslationResult)] = []
+        var unanswered: [CloudTranslationTier.Item] = []
+        var resolutions: [LabelTranslationCache.Resolution] = []
+        for item in asked {
+            guard let translation = outcome.translations[item.text] else {
+                unanswered.append(item)
+                continue
+            }
+            resolutions.append(LabelTranslationCache.Resolution(text: item.text,
+                                                                translation: translation,
+                                                                tier: .onDeviceBrain))
+            answered.append((item, .resolved(originalText: item.text,
+                                             translation: translation,
+                                             tier: .onDeviceBrain)))
+        }
+        // [BRAIN-CACHE] The generation is paid for; the same text seen again
+        // must not pay it twice. This is the session's store, so the one path
+        // that had no store — a frozen frame — repays nothing on thaw, and a
+        // later cloud answer for the same text cannot overwrite the
+        // attribution with `.cloud`.
+        //
+        // One batch, one persist (NFR-LCT-002): the per-item spelling paid a
+        // full encrypt-and-atomic-write of the whole payload per string, and
+        // the brain answers a whole frame's worth at once
+        // (`LabelTranslationCache.storeBatch`).
+        _ = cache.storeBatch(resolutions, targetLanguage: targetLanguage)
+        return (answered, unanswered)
+    }
+
+    /// Records the elder's own asks (see `awaitingDecision`), and releases their
+    /// claims so the plan that follows the answer can re-ask them.
+    private func record(awaiting items: [CloudTranslationTier.Item],
+                        at destination: ResolutionDestination) {
+        guard !items.isEmpty else { return }
+        release(keys: items.map(\.id))
+        switch destination {
+        case .live:
+            for item in items { awaitingDecision[item.id] = PendingAsk(item: item, isLive: true) }
+        case .frozen:
+            // A held frame is a moment, not a stream: this capture's strings
+            // replace any earlier frame's ask (that picture is gone), so the
+            // registry holds one frame's worth beside the live picture's.
+            awaitingDecision = awaitingDecision.filter { $0.value.isLive }
+            for item in items { awaitingDecision[item.id] = PendingAsk(item: item, isLive: false) }
         }
     }
 
-    /// Tier 1: the on-device brain, before anything leaves the device.
+    /// Writes one stage's terminal answers where they belong.
     ///
-    /// Returns the items the brain did not answer, in the order it was handed
-    /// them — the caller sends exactly those to the gate, so a string the
-    /// brain answered never reaches the cloud and a string it did not is never
-    /// dropped (FR-LCT-008's cascade). Nothing here is consent-gated: no
-    /// request, no egress, no budget — the brain is the device's own, which is
-    /// why the gate is consulted *after* this stage and not before it.
-    ///
-    /// A brain answer is settled and published immediately, so the region
-    /// stops being pending in the cycle the answer arrives rather than waiting
-    /// for a tier that has not been asked yet. The answer is attributed to
-    /// `.onDeviceBrain`: it is neither curated nor cloud, and saying otherwise
-    /// would either misreport egress or let unvetted model output take the
-    /// in-place form only the curated tier may take (FR-LCT-015).
-    ///
-    /// Nothing to ask is not an attempt: an empty hand-over asks the brain for
-    /// nothing at all, rather than for everything and nothing.
-    ///
-    /// The stage is waited on under the pipeline's own deadline
-    /// (`brainTranslationStageDeadlineSeconds`), and the reason is the caller's
-    /// whole contract: this method's return value is what the gate is handed.
-    /// A stage that never returned would keep its strings claimed, every later
-    /// tick would skip them as already dispatched, and the region would hold on
-    /// the pending copy for the rest of the session. The deadline makes "did
-    /// not answer" and "did not return" the same thing: the strings go onward.
-    private func resolveThroughTheBrain(_ items: [CloudTranslationTier.Item]) async -> [CloudTranslationTier.Item] {
-        guard !items.isEmpty else { return [] }
-
-        let outcome = await deviceAnswers(items)
-        guard let outcome else {
-            // The clock won, and `deviceAnswers` has already recorded the
-            // timeout — a stage that fell through to the cloud without a
-            // record would be exactly the silent degradation this feature must
-            // not have. Nothing was answered, so every string goes onward.
-            return items
+    /// The writing itself is `settleTerminal` — the same for a live tick, an
+    /// elder's ask and a held frame, so a degradation is emitted exactly once on
+    /// every path and the claim ledger cannot disagree with the outcomes. What
+    /// differs is only where the answer lands: on the live regions (and then
+    /// published, so the region stops being pending in the frame after it
+    /// arrived) or in the map a held frame's caller is about to render.
+    private func commit(_ results: [(CloudTranslationTier.Item, TranslationResult)],
+                        to destination: ResolutionDestination,
+                        into answers: inout [String: TranslationResult]) async {
+        let terminal = results.filter {
+            if case .pending = $0.1.outcome { return false }
+            return true
         }
+        guard !terminal.isEmpty else { return }
+        settleTerminal(terminal)
+        switch destination {
+        case .live:
+            apply(items: terminal)
+            await publish()
+        case .frozen:
+            for (item, result) in terminal { answers[item.id] = result }
+        }
+    }
 
-        // The cancellation contract: a close that lands mid-generation wins.
-        // The keys were released by `cancelResolutionTasks`, so nothing is left
-        // claimed by this attempt.
-        guard !isClosed else { return [] }
-        guard !outcome.translations.isEmpty else { return items }
+    /// [RELIABILITY-ROUTER] What one pass through the gate means for the strings
+    /// it was handed — and nothing more: no outcome is written here, no claim is
+    /// settled and no event is emitted. The plan commits the decision, which is
+    /// what makes every path that ends a string terminally end it through the
+    /// one writer.
+    private struct GateDecision {
+        /// The strings this stage ended, with the result.
+        var terminal: [(CloudTranslationTier.Item, TranslationResult)] = []
+        /// The strings the cloud could not answer and the device still can (a
+        /// reserving caller only).
+        var reserved: [(CloudTranslationTier.Item, LiveTranslateError)] = []
+        /// The strings the elder is being asked about: no send, no failure.
+        var awaiting: [CloudTranslationTier.Item] = []
+    }
 
-        var answered: [(CloudTranslationTier.Item, TranslationResult)] = []
-        var remainder: [CloudTranslationTier.Item] = []
-        for item in items {
-            if let translation = outcome.translations[item.text] {
-                // [BRAIN-CACHE] (owner directive, 2026-09-20) The generation
-                // is paid for; the same text seen again must not pay it twice.
-                _ = cache.store(text: item.text,
-                                translation: translation,
-                                targetLanguage: targetLanguage,
-                                tier: .onDeviceBrain)
-                answered.append((item, .resolved(originalText: item.text,
-                                                 translation: translation,
-                                                 tier: .onDeviceBrain)))
-            } else {
-                remainder.append(item)
+    /// The gate, and what its answer means.
+    ///
+    /// - Parameter reservingFallback: when `true`, the strings the cloud could
+    ///   not translate are returned UNSETTLED — never degraded — so the caller
+    ///   can still answer them on a tier that needs no switch, no consent and no
+    ///   network. This is the [RELIABILITY-ROUTER] seam: the sentence class leads
+    ///   with the gate, and "the household switched the cloud off", "consent was
+    ///   declined", "there is no path after all" or a provider failure must leave
+    ///   those strings translatable on the device rather than degraded. The
+    ///   default is the shipped behaviour — settle them and say why.
+    ///
+    ///   Two things deliberately **do not** come back reserved: a string the
+    ///   elder is being asked about (the prompt is open — answering it on the
+    ///   device would answer for the elder the very question they are being
+    ///   asked) and a string the tier *did* answer, even by degrading it.
+    private func gateDecision(for items: [CloudTranslationTier.Item],
+                              reservingFallback: Bool) async -> GateDecision {
+        switch await attemptThroughTheGate(items) {
+        case .awaitingDecision:
+            // The prompt is on screen. The regions stay pending — not degraded,
+            // because nothing has failed and the elder has not answered yet.
+            return GateDecision(awaiting: items)
+
+        case .unavailable(let error):
+            // Declined, revoked, unreadable, unrecorded-and-unaskable, or the
+            // household's own switch: fail closed and say so with the honest
+            // reason. No request, no retry.
+            guard reservingFallback else {
+                // No tier ever saw these strings, so this degradation is the
+                // pipeline's own and the one terminal writer emits it. The
+                // shipped shape wrote it through a non-emitting settle, so the
+                // evidence never learned the region had degraded (review of
+                // #100).
+                return GateDecision(terminal: items.map {
+                    ($0, TranslationResult.degraded(originalText: $0.text,
+                                                    reason: error.unavailableReason))
+                })
             }
-        }
+            // Nothing was sent and nothing was translated, so every one of
+            // these strings is still the device's to answer. **Claimed, not
+            // released** — the same shape the answered case below uses: a
+            // release here would hand the strings back to the plan while this
+            // one is still walking them to the device, and the next tick could
+            // settle them DEGRADED at the gate before the fallback that is
+            // running right now ever reported.
+            return GateDecision(reserved: items.map { ($0, error) })
 
-        settle(answered)
-        apply(items: answered)
-        await publish()
-        return remainder
+        case .answered(let batch):
+            guard !isClosed else { return GateDecision() }
+            guard reservingFallback else {
+                return GateDecision(terminal: items.map { ($0, batch.result(for: $0)) })
+            }
+            // The strings the tier left unanswered, and the reason it left
+            // them: every failure it reports except quarantine is a failure that
+            // never reached the string, so the device can still answer it (see
+            // `leavesTheStringTranslatableOnTheDevice`).
+            var reserved: [(CloudTranslationTier.Item, LiveTranslateError)] = []
+            for item in items {
+                guard let error = batch.failures[item.id],
+                      error.leavesTheStringTranslatableOnTheDevice else { continue }
+                reserved.append((item, error))
+            }
+            // The reserved strings are settled by **nobody** here: settling them
+            // would publish a degraded overlay for a string the device is about
+            // to translate — a lie one frame long — and would make the region
+            // terminal before its fallback had run.
+            let reservedIDs = Set(reserved.map(\.0.id))
+            let settled = items.filter { !reservedIDs.contains($0.id) }
+            return GateDecision(terminal: settled.map { ($0, batch.result(for: $0)) },
+                                reserved: reserved)
+        }
     }
 
     /// The device tier's answers for a batch, with no cycle state touched — no
     /// settlement, no outcome, no publication, and no key of the live cycle's
     /// consulted.
     ///
-    /// This is the half of `resolveThroughTheBrain` that the frozen path (T-033)
+    /// This is the half of `askTheBrain` that the frozen path (T-033)
     /// needs and the half it must not have: a still frame owns its own
     /// outcomes and its own ordering, but the *tier* it asks — the model, the
     /// prompt, the deadline, the honest record of a timeout — is the
@@ -1445,122 +1700,38 @@ actor LiveTranslationPipeline {
     }
 
     /// Waits for a generation up to `seconds`, and answers `nil` when the clock
-    /// gets there first.
+    /// gets there first — or when the caller is cancelled.
     ///
     /// Not a task group, and deliberately so. A group **awaits its remaining
     /// children before it returns**, cancellation or not, so racing the
     /// generation against a sleep inside one would leave the caller waiting for
     /// exactly the thing the deadline exists to stop waiting for. What is
-    /// wanted here is weaker and simpler than cancellation — stop waiting, let
-    /// the loser finish into nothing — so the two arrivals are raced against a
-    /// continuation that only the first of them may resume.
+    /// wanted here is weaker and simpler than cancellation-by-structure — stop
+    /// waiting, let the loser finish into nothing — so the arrivals are raced
+    /// against a continuation that only the first of them may resume.
+    ///
+    /// **Cancellation is one of the arrivals** (review of #100, finding C). A
+    /// thaw, a resume or a close that lands while the model is decoding must end
+    /// this wait, not wait out the bound: without it the cancel fired after the
+    /// tier's own timeout had already elapsed, the decoder ran to its end
+    /// producing an answer nobody would apply, and the next capture queued
+    /// behind a freeze that was still coming.
     private static func waiting(for work: Task<LocalBrainTranslationOutcome, Never>,
                                 upTo seconds: TimeInterval) async -> LocalBrainTranslationOutcome? {
-        await withCheckedContinuation { continuation in
-            let race = BrainStageRace(continuation)
-            Task {
-                let outcome = await work.value
-                race.finish(with: outcome)
+        // The arbiter is created **before** the cancellation handler is
+        // installed, so a cancellation that has already been requested when this
+        // call begins finds an object to end the wait through: a continuation
+        // that does not exist yet cannot be resumed, and the wait would then
+        // suspend for a caller that is already gone.
+        let race = BrainStageRace()
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                race.start(continuation, after: seconds, awaiting: work)
             }
-            Task {
-                try? await Task.sleep(for: .seconds(seconds))
-                race.finish(with: nil)
-            }
+        } onCancel: {
+            race.finish(with: nil)
         }
     }
-
-    /// One attempt, in the order AM-1 and FR-LCT-011 fix: the gate decides
-    /// first, and the tier is consulted only when the answer allows a send.
-    ///
-    /// The sequence itself is `attemptThroughTheGate`, which the snapshot path
-    /// (T-033) calls too. What is here is only what *this* cycle does with its
-    /// answer: the settled set, the outcomes and the publication.
-    /// - Parameter reservingFallback: when `true`, the strings the cloud could
-    ///   not translate are returned UNSETTLED — released or left claimed, never
-    ///   degraded — so the caller can still answer them on a tier that needs no
-    ///   switch, no consent and no network. This is the [RELIABILITY-ROUTER]
-    ///   seam: the sentence class leads with the gate, and "the household
-    ///   switched the cloud off", "consent was declined", "there is no path
-    ///   after all" or a provider failure must leave those strings translatable
-    ///   on the device rather than degraded. The default is the shipped
-    ///   behaviour — settle them and say why.
-    /// - Returns: the strings the gate did not settle, each with the honest
-    ///   reason it did not, in the order the caller handed them over. Empty in
-    ///   the shipped mode, empty for a caller that reserved nothing, and empty
-    ///   when the gate settled everything it was given.
-    ///
-    ///   Two things deliberately **do not** come back: a string the elder is
-    ///   being asked about (the prompt is open — answering it on the device
-    ///   would answer for the elder the very question they are being asked, and
-    ///   the cloud attempt they are considering would have nothing left to do)
-    ///   and a string the tier *did* answer, even by degrading it.
-    private func resolveThroughTheGate(_ items: [CloudTranslationTier.Item],
-                                       reservingFallback: Bool = false)
-        async -> [(CloudTranslationTier.Item, LiveTranslateError)] {
-        switch await attemptThroughTheGate(items) {
-        case .awaitingDecision:
-            // The prompt is on screen. The regions stay pending — not degraded,
-            // because nothing has failed and the elder has not answered yet —
-            // and the keys are released so the next tick, after the answer,
-            // attempts them again. They are also remembered, because extract
-            // mode has no next tick (see `awaitingDecisionKeys`).
-            release(keys: items.map(\.id))
-            awaitingDecisionKeys.formUnion(items.map(\.id))
-            return []
-
-        case .unavailable(let error):
-            // Declined, revoked, unreadable or unrecorded-and-unaskable: fail
-            // closed and say so with the honest reason. No request, no retry.
-            if reservingFallback {
-                // Nothing was sent and nothing was translated, so every one of
-                // these strings is still the device's to answer. Released, not
-                // settled: the caller hands them to the brain, and *that*
-                // tier's outcome — not this one — decides whether the region
-                // degrades.
-                release(keys: items.map(\.id))
-                return items.map { ($0, error) }
-            }
-            let answered = items.map { item in
-                (item, TranslationResult.degraded(originalText: item.text,
-                                                  reason: error.unavailableReason))
-            }
-            settle(answered)
-            apply(items: answered)
-            await publish()
-            return []
-
-        case .answered(let batch):
-            guard !isClosed else { return [] }
-            guard reservingFallback else {
-                settleOrRelease(items: items, batch: batch)
-                apply(items: items.map { ($0, batch.result(for: $0)) })
-                await publish()
-                return []
-            }
-            // The strings the tier left unanswered, and the reason it left
-            // them: every failure it reports except quarantine is a failure
-            // that never reached the string, so the device can still answer it
-            // (see `leavesTheStringTranslatableOnTheDevice`).
-            var reserved: [(CloudTranslationTier.Item, LiveTranslateError)] = []
-            for item in items {
-                guard let error = batch.failures[item.id],
-                      error.leavesTheStringTranslatableOnTheDevice else { continue }
-                reserved.append((item, error))
-            }
-            // The reserved strings are settled by **nobody** here. Settling
-            // them would publish a degraded overlay for a string the device is
-            // about to translate — a lie one frame long — and would make the
-            // region terminal before its fallback had run. They stay claimed:
-            // the attempt is not over, it has only changed tier.
-            let reservedIDs = Set(reserved.map(\.0.id))
-            let settled = items.filter { !reservedIDs.contains($0.id) }
-            settleOrRelease(items: settled, batch: batch)
-            apply(items: settled.map { ($0, batch.result(for: $0)) })
-            await publish()
-            return reserved
-        }
-    }
-
     /// [RELIABILITY-ROUTER] Resume the strings whose consent question has just
     /// been answered.
     ///
@@ -1571,25 +1742,64 @@ actor LiveTranslationPipeline {
     /// never reach the tiers, and the region would sit pending for the rest of
     /// the session.
     ///
-    /// The keys are dispatched explicitly (`only`), which skips both pacing
-    /// clocks exactly as a tap does: the elder has just acted, and an ask that
-    /// did nothing because a background dispatch happened 0.9 s ago would be
-    /// the mode failing at the one thing it does.
+    /// The strings that were interrupted are the ones the plan *recorded* when it
+    /// raised the question — not the keys the stabiliser happens to be showing
+    /// now. That distinction is the whole of review of #100's finding 5: a held
+    /// frame's ask is raised over a still the elder has since put down, so the
+    /// frozen string is not in the stabiliser at all, and a resume that rebuilt
+    /// its candidates from `stabilizer.visible` dropped the frozen ask on the
+    /// floor — the elder granted consent and the frame stayed untranslated.
+    ///
+    /// Both halves go back with `.explicitAsk`, which skips both pacing clocks
+    /// exactly as a tap does: the elder has just acted, and an ask that did
+    /// nothing because a background dispatch happened 0.9 s ago would be the
+    /// feature failing at the one thing it does.
     ///
     /// Called for **either** answer. A refusal is not a dead end: it resolves
-    /// the strings through the same plan, and the plan's device fallback is
-    /// what turns "the elder said no to the cloud" into a translation rather
-    /// than an unavailable region.
+    /// the strings through the same plan, and the plan's device fallback is what
+    /// turns "the elder said no to the cloud" into a translation rather than an
+    /// unavailable region.
     func retryAwaitingResolution() async {
         guard !isClosed else { return }
-        let keys = awaitingDecisionKeys
-        guard !keys.isEmpty else { return }
-        awaitingDecisionKeys.removeAll()
-        for key in keys {
-            dispatchResolutionNeeds(only: key)
+        let asks = awaitingDecision
+        guard !asks.isEmpty else { return }
+        awaitingDecision.removeAll()
+
+        let live = asks.values.filter(\.isLive).map(\.item)
+        let frozen = asks.values.filter { !$0.isLive }.map(\.item)
+
+        // One dispatch for the whole interrupted batch: the prompt was raised
+        // for these strings together and its answer releases them together, so
+        // the ask that follows is the one ask the prompt interrupted. A per-key
+        // loop here would turn a five-string question into five single-string
+        // dispatches — five requests behind the batch's one, and with the
+        // explicit path's clocks skipped, nothing to space them out again.
+        if !live.isEmpty {
+            dispatchResolutionNeeds(only: Set(live.map(\.id)))
+        }
+        // The frozen frame's own strings, dispatched as the items they were —
+        // not as keys to be looked up in the live picture, which is where the
+        // old shape lost them. They land on the live destination on purpose: the
+        // frame they were asked over is gone, and the answer still belongs to the
+        // session — a live region showing the same text inherits it, the cache
+        // holds it for the next frame, and nothing is left half-answered.
+        //
+        // **Awaited, not started.** The caller that answered the prompt
+        // re-renders the held frame the moment this returns
+        // (`LiveTranslateSessionModel.refreshHeldFrame`), and that render asks
+        // the plan for the frame's answers. A fire-and-forget dispatch here
+        // would have the two plans running at once — the retry's request in
+        // flight, the refresh's hand-over naming the same strings — and the
+        // second one pays for a request the first has already sent. Awaiting
+        // makes the order the review's mandate asks for: the answers are the
+        // session's before the frame is drawn from them, and the refresh finds
+        // them as settled rather than re-asking (step 0 of the plan).
+        if !frozen.isEmpty {
+            await runResolution(ResolutionRequest(items: frozen,
+                                                  urgency: .explicitAsk,
+                                                  destination: .live))
         }
     }
-
     /// **The** gate-then-tier sequence, with no cycle state touched: the same
     /// ordering serves the live cycle and the snapshot path (T-033), so
     /// "consent is read immediately before every attempt" and "an unanswered
@@ -1623,121 +1833,46 @@ actor LiveTranslationPipeline {
 
     // MARK: - The snapshot path's way in (T-033)
 
-    /// The frozen frame's plan, for a caller that owns its own state — the
-    /// still path (T-033). The *rules* are this actor's (the router, the
-    /// device tier, the gate-then-tier sequence); the *state* is not: nothing
-    /// here reads or writes the cycle, so the stabiliser is not consulted, no
-    /// outcome is recorded on a live region, no key is settled, none of the
-    /// attempt ledgers is touched and no live publication is made.
+    /// The frozen frame's plan — now a thin adapter over `runResolution`, which
+    /// is the one entry point every path that reaches a tier goes through
+    /// (review of #100's mandate).
     ///
-    /// One deliberate difference from the live cycle: the live path publishes
-    /// each stage's answers as they arrive, so a region stops being pending in
-    /// the frame after its answer lands. A frozen frame has one moment to
-    /// render — it is a picture, not a stream — so the plan runs to the end
-    /// and hands back one map. The answers themselves, and the tiers they are
-    /// attributed to, are the same on both paths.
+    /// What belongs to the session and is therefore the pipeline's: the router,
+    /// the device tier, the gate-then-tier sequence, the claim ledger and the one
+    /// terminal writer. A held frame that kept its own copy of any of that is how
+    /// this path came to hand the tier a batch it had already claimed in full,
+    /// fail the surplus with a cloud reason on a tier with no cloud, and never
+    /// store the answers it did get. What belongs to the frame is what it hands
+    /// back: one map of terminal results for the caller that is about to
+    /// re-render one still picture and owns its publication.
     ///
-    /// - Returns: one terminal result per string the plan could answer, keyed
-    ///   by item id. A key that is absent is a string the plan made no claim
-    ///   about (the tier returned nothing for it), which the caller leaves
-    ///   pending — the same honesty the live path keeps. `nil` means the
-    ///   caller must apply nothing at all: the elder's consent question is
-    ///   open, or the session is gone.
+    /// `.capture` urgency, and this is the owner's decision (2026-09-20) rather
+    /// than a derivable rule: a capture is an *ask* — the elder pressed the
+    /// shutter — so the dispatch clock does not pace it, and it is not a reason
+    /// to skip the brain's clock either. A capture that paid a generation per
+    /// press would thrash the model's load every time the elder looked at
+    /// something, and a cloud outage is exactly when they press it repeatedly.
+    /// The strings a held-back generation defers are released, unclaimed, so the
+    /// next capture — or the live tick that follows — asks them; what has already
+    /// been paid for stays paid, so a capture after a live generation carries the
+    /// string to the gate instead of buying the same answer twice.
+    ///
+    /// - Returns: one terminal result per string the plan could answer, keyed by
+    ///   item id. A key that is absent is a string the plan made no claim about
+    ///   (or one whose generation the clock deferred), which the caller leaves
+    ///   pending — the same honesty the live path keeps. `nil` means the caller
+    ///   must apply nothing at all: the plan answered nothing for this frame (the
+    ///   elder's consent question is open over every string the device did not
+    ///   answer, or the session is gone). A frame the device *did* answer keeps
+    ///   those answers even while the question is open — the device owes no
+    ///   consent, and the answer was already paid for.
     func resolveFrozen(_ items: [CloudTranslationTier.Item]) async -> [String: TranslationResult]? {
         guard !isClosed, !items.isEmpty else { return nil }
-
-        var onDeviceFirst: [CloudTranslationTier.Item] = []
-        for item in items where leadingTier(for: item) == .onDevice {
-            onDeviceFirst.append(item)
-        }
-
-        var answers: [String: TranslationResult] = [:]
-
-        // 1. The device leads for its class, by the live cycle's own tier: the
-        //    same model, the same prompt, the same deadline and the same
-        //    timeout record. Its answers are attributed to `.onDeviceBrain`,
-        //    exactly as they are live.
-        let deviceAsked = Set(onDeviceFirst.map(\.id))
-        if !onDeviceFirst.isEmpty {
-            let outcome = await deviceAnswers(onDeviceFirst)
-            for item in onDeviceFirst {
-                guard let translation = outcome?.translations[item.text] else { continue }
-                answers[item.id] = .resolved(originalText: item.text,
-                                             translation: translation,
-                                             tier: .onDeviceBrain)
-            }
-        }
-
-        // 2. The gate leads for the class the device is not proven on — and
-        //    for whatever the device could not answer.
-        let cloudQueue = items.filter { answers[$0.id] == nil }
-        guard !cloudQueue.isEmpty else { return answers }
-
-        var fallback: [(CloudTranslationTier.Item, LiveTranslateError)] = []
-        switch await attemptThroughTheGate(cloudQueue) {
-        case .awaitingDecision:
-            // The prompt is on screen. Nothing is applied and nothing has
-            // failed: the frozen frame keeps showing the original text, which
-            // is the state the open question belongs in.
-            return nil
-
-        case .unavailable(let error):
-            for item in cloudQueue {
-                if deviceAsked.contains(item.id) {
-                    // The device was asked and did not answer, and now the
-                    // cloud cannot run either: both tiers are spent, so the
-                    // honest terminal is this reason rather than a region left
-                    // pending forever.
-                    answers[item.id] = .degraded(originalText: item.text,
-                                                 reason: error.unavailableReason)
-                } else {
-                    fallback.append((item, error))
-                }
-            }
-
-        case .answered(let batch):
-            for item in cloudQueue {
-                let result = batch.result(for: item)
-                switch result.outcome {
-                case .resolved:
-                    answers[item.id] = result
-                case .degraded(_, let reason):
-                    // A failure that never reached the string is the device's
-                    // to answer, unless the device has already had its turn.
-                    if !deviceAsked.contains(item.id),
-                       let error = batch.failures[item.id],
-                       error.leavesTheStringTranslatableOnTheDevice {
-                        fallback.append((item, error))
-                    } else {
-                        answers[item.id] = .degraded(originalText: item.text, reason: reason)
-                    }
-                case .pending:
-                    // No claim, no answer: the string stays pending and stays
-                    // the caller's to show as unresolved.
-                    break
-                }
-            }
-        }
-
-        // 3. What the cloud could not answer comes back to the device rather
-        //    than degrading — the same fallback the live cycle runs, for the
-        //    same reason.
-        if !fallback.isEmpty {
-            let outcome = await deviceAnswers(fallback.map(\.0))
-            for (item, error) in fallback {
-                if let translation = outcome?.translations[item.text] {
-                    answers[item.id] = .resolved(originalText: item.text,
-                                                 translation: translation,
-                                                 tier: .onDeviceBrain)
-                } else {
-                    answers[item.id] = .degraded(originalText: item.text,
-                                                 reason: error.unavailableReason)
-                }
-            }
-        }
-        return answers
+        let answers = await runResolution(ResolutionRequest(items: items,
+                                                            urgency: .capture,
+                                                            destination: .frozen))
+        return answers.isEmpty ? nil : answers
     }
-
     /// The session's next ordering value (AM-6), for a publication this actor
     /// did not build. One counter per session: a frozen frame's publication
     /// and a live cycle's publication can never share a sequence, so a
@@ -1745,39 +1880,6 @@ actor LiveTranslationPipeline {
     func nextPublicationSequence() async -> Int {
         publicationSequence += 1
         return publicationSequence
-    }
-
-    /// Records the tier's answers against the regions that asked.
-    ///
-    /// The tier answers every item it is handed (there is no pending case in a
-    /// `BatchResult`), but the merge is written so that "no answer" is still
-    /// honest: a key the tier made no claim about stays pending and stays
-    /// attemptable, so it is re-tried on a later tick rather than being
-    /// silently dropped.
-    private func settleOrRelease(items: [CloudTranslationTier.Item],
-                                 batch: CloudTranslationTier.BatchResult) {
-        var unresolved: [String] = []
-        var degradedReasons: [TranslationUnavailableReason: Int] = [:]
-
-        for item in items {
-            let result = batch.result(for: item)
-            switch result.outcome {
-            case .pending:
-                unresolved.append(item.id)
-            case .resolved:
-                settledOutcomes[item.id] = result
-            case .degraded(_, let reason):
-                settledOutcomes[item.id] = result
-                degradedReasons[reason, default: 0] += regionCount(forKey: item.id)
-            }
-        }
-
-        attemptKeys.subtract(items.map(\.id))
-        attemptKeys.formUnion(unresolved)
-
-        for (reason, count) in degradedReasons.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
-            events.translationDegraded(reason: reason, regionCount: count)
-        }
     }
 
     /// Writes outcomes onto the regions whose string they belong to.
@@ -1809,20 +1911,101 @@ actor LiveTranslationPipeline {
         }
     }
 
+    /// How many regions are showing a string — and never zero.
+    ///
+    /// The degradation count is the evidence's unit — regions the elder can see
+    /// — but a string can end terminally with no region on screen at all: a held
+    /// frame's answers outlive the picture they came from, and an extract-mode
+    /// tap's gate terminal lands after the block has scrolled away. A count of
+    /// zero would report "nothing degraded" for the very degradation the evidence
+    /// file exists to count; the honest unit is the *string*, counted once when
+    /// nothing on screen is showing it, which is also what makes this the one
+    /// unit both writers agree on (review of #100, finding 3).
+    private func regionCountOrOne(forKey key: String) -> Int {
+        max(1, regionCount(forKey: key))
+    }
+
     private func release(keys: [String]) {
         attemptKeys.subtract(keys)
     }
 
-    /// Records a terminal answer against the strings it answers, so a region
-    /// that later claims one of those strings inherits it instead of asking
-    /// again.
-    private func settle(_ answered: [(CloudTranslationTier.Item, TranslationResult)]) {
-        attemptKeys.subtract(answered.map(\.0.id))
-        for (item, result) in answered { settledOutcomes[item.id] = result }
-        // The cascade's provenance (owner ask, 2026-09-19): which tier
-        // answered, per tier, counts only.
+    /// **The** terminal writer: the one place a string's answer becomes the
+    /// session's answer, and the one place a degradation is emitted.
+    ///
+    /// This replaces three helpers that each wrote a terminal outcome and each
+    /// had a different idea of what to say about it — which is the whole of
+    /// review of #100's findings 3, 4 and 15:
+    ///
+    ///  - `settle` wrote outcomes and said nothing: the right shape for a batch
+    ///    the *device* answered, and the wrong one for every degradation the
+    ///    gate wrote for itself, so those regions degraded silently and the
+    ///    evidence never learned they had;
+    ///  - `settleOrRelease` emitted, but counted `regionCount(forKey:)`, which
+    ///    is 0 for a string that is not on screen — a held frame's answers or an
+    ///    extract-mode tap whose block has scrolled away — so the same outage was
+    ///    reported as "0 regions degraded", or as the cloud tier's own failure
+    ///    count from its internal `reportDegradation`;
+    ///  - `settleDegraded` emitted a second event for a batch whose tier had
+    ///    *already* emitted the same outage through `reportDegradation`, counted
+    ///    in the tier's unit rather than the region's.
+    ///
+    /// One rule from here on, and it is a rule rather than a habit because the
+    /// evidence file is how "which tier failed, how often" is answered: **every
+    /// terminal outcome is written here, and every degradation written here is
+    /// emitted exactly once, counted in regions.** No other code in this
+    /// pipeline emits `translationDegraded` (the cloud tier no longer emits it
+    /// either), so a degradation can be neither double-counted nor silently
+    /// dropped, and the claim ledger cannot disagree with the outcomes it holds.
+    ///
+    /// Callers pass terminal results only — a `.pending` is not an answer the
+    /// session can write, and `commit` filters it out. A string no tier answered
+    /// keeps its claim for the caller's own release, so it is asked again rather
+    /// than settled by a claim nobody made.
+    private func settleTerminal(_ answered: [(CloudTranslationTier.Item, TranslationResult)]) {
+        var reasons: [TranslationUnavailableReason: Int] = [:]
+        var settled: [String] = []
+
+        for (item, result) in answered {
+            if case .pending = result.outcome { continue }
+            // **A string is settled once, and this is what makes that true.**
+            // Two plans can hold the same string at the same time — a held
+            // frame's ask re-dispatched by the prompt and the live cycle's own
+            // carry, say — and the second one to finish arrives here with the
+            // outcome the first one already wrote. Counting it again would put
+            // a second `translation_degraded` on the evidence bus for one
+            // degradation, and one string degraded is one event (review of
+            // #100, finding 3: the double count this pipeline used to have).
+            // The claim is still released: the string has been answered, and
+            // the ledger's job is to stop a *third* attempt, not this one.
+            if settledOutcomes[item.id] == result {
+                attemptKeys.remove(item.id)
+                continue
+            }
+            settledOutcomes[item.id] = result
+            settled.append(item.id)
+            if case .degraded(_, let reason) = result.outcome {
+                reasons[reason, default: 0] += regionCountOrOne(forKey: item.id)
+            }
+        }
+        guard !settled.isEmpty else { return }
+
+        // The ledger transition, in one place: a string this writer settled has
+        // had its attempt answered, so its claim is released here and not by the
+        // caller. (A string the *caller* is still working on re-claims itself by
+        // settling it here; a string no tier answered is never released by this
+        // function at all.)
+        attemptKeys.subtract(settled)
+
+        // The cascade's provenance (owner ask, 2026-09-19): which tier answered,
+        // per tier, counts only. Emitted here so every path that answers a string
+        // publishes the same histogram.
         for (tier, count) in answeredTierCounts(answered) {
             events.translationResolved(tier: tier, origin: .fresh, count: count)
+        }
+        // One event per reason, in a stable order, so two runs of the same scene
+        // produce the same evidence file.
+        for (reason, count) in reasons.sorted(by: { $0.key.rawValue < $1.key.rawValue }) {
+            events.translationDegraded(reason: reason, regionCount: count)
         }
     }
 
@@ -1847,7 +2030,7 @@ actor LiveTranslationPipeline {
         // both callers (a resume, a close) restart the scene, so the next
         // dispatch of these strings plans and pays for them from scratch.
         cloudFailedKeys.removeAll()
-        awaitingDecisionKeys.removeAll()
+        awaitingDecision.removeAll()
     }
 
     private func forget(task token: UUID) {
@@ -1988,15 +2171,42 @@ private final class BrainStageRace: @unchecked Sendable {
 
     private let lock = NSLock()
     private var continuation: CheckedContinuation<LocalBrainTranslationOutcome?, Never>?
+    /// The arrival that came before the wait began: `nil` is "nothing has
+    /// arrived yet", `.some(nil)` is "it was decided with no outcome" (the
+    /// clock or a cancellation), and `.some(.some(outcome))` is the generation.
+    private var arrivedEarly: LocalBrainTranslationOutcome??
 
-    init(_ continuation: CheckedContinuation<LocalBrainTranslationOutcome?, Never>) {
+    /// Begins the wait: takes the continuation, and starts the two arms that
+    /// have not been observed yet. Called synchronously before the suspension,
+    /// so an arrival that already happened resumes `continuation` here.
+    func start(_ continuation: CheckedContinuation<LocalBrainTranslationOutcome?, Never>,
+               after seconds: TimeInterval,
+               awaiting work: Task<LocalBrainTranslationOutcome, Never>) {
+        lock.lock()
+        if let decided = arrivedEarly {
+            arrivedEarly = nil
+            lock.unlock()
+            continuation.resume(returning: decided)
+            return
+        }
         self.continuation = continuation
+        lock.unlock()
+
+        Task {
+            let outcome = await work.value
+            self.finish(with: outcome)
+        }
+        Task {
+            try? await Task.sleep(for: .seconds(seconds))
+            self.finish(with: nil)
+        }
     }
 
     func finish(with outcome: LocalBrainTranslationOutcome?) {
         lock.lock()
         let waiting = continuation
         continuation = nil
+        if waiting == nil, arrivedEarly == nil { arrivedEarly = .some(outcome) }
         lock.unlock()
         waiting?.resume(returning: outcome)
     }
