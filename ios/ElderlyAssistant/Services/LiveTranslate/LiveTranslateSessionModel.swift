@@ -653,6 +653,12 @@ final class LiveTranslateSessionModel: ObservableObject {
         hasStarted = true
         phase = .starting
         observeLifecycle()
+        // [FRESH-SESSION] (owner directive, 2026-09-20: "it's showing cached
+        // content — the cache should be cleared upon each restart.") A
+        // translation cached yesterday must not answer today's scene: each
+        // session starts from an empty persisted layer, and the session's
+        // own resolutions re-fill it as they land.
+        _ = dependencies.cache.removeAll()
 
         let pipeline = LiveTranslationPipeline(
             locale: locale,
