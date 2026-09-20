@@ -567,15 +567,15 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
             // opposite, and the owner's answered-nothing batches were exactly
             // this ambiguity.
             let translations = report.translations
-            // [DEBUG-LOG] (owner directive, 2026-09-20) The exact pairs on
-            // the console's own lane, gated and off for release — the bus
-            // stays content-free; this is for the owner's capture.
+            let durationMs = Self.milliseconds(since: started)
+            // [DEBUG-LOG] (owner directive, 2026-09-20) The exact pairs,
+            // the producing tier and the leg's time, on the console's own
+            // lane — gated and off for release, the bus stays content-free.
             if config.translationDebugLoggingEnabled {
                 for (source, translation) in translations {
-                    print("[translate-debug] brain \(source) -> \(translation)")
+                    print("[translate-debug] local \(source) -> \(translation) [\(durationMs)ms]")
                 }
             }
-            let durationMs = Self.milliseconds(since: started)
             // The counts are about the BATCH THE CALLER HANDED OVER, not about
             // the part that fitted: a bounded batch reports its surplus as
             // unresolved, which is what the caller then sends onward.

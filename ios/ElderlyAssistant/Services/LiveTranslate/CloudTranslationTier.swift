@@ -345,6 +345,17 @@ actor CloudTranslationTier {
                 adopt(outcomes[key], for: key, idsByKey: idsByKey,
                       resolved: &resolved, failures: &failures)
             }
+            // [DEBUG-LOG] (owner directive, 2026-09-20) The exact pairs,
+            // the producing tier and the leg's time — the console's own
+            // lane, gated and off for release.
+            let batchDurationMs = Int(Date().timeIntervalSince(start) * 1000)
+            if config.translationDebugLoggingEnabled {
+                for (target, key) in zip(targets, keys) {
+                    if case .resolved(let translation, _)? = outcomes[key] {
+                        print("[translate-debug] cloud \(target.originalText) -> \(translation) [\(batchDurationMs)ms]")
+                    }
+                }
+            }
             let resolvedForBatch = regionIDs.filter { resolved[$0] != nil }.count
             events.translationBatchResolved(
                 resolvedCount: resolvedForBatch,
