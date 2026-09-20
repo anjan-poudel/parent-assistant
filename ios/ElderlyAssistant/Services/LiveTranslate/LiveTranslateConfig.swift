@@ -1209,6 +1209,21 @@ struct LiveTranslateConfig: Equatable {
     /// Nominal, not frozen: the device spike to come may move it.
     var brainTranslationTimeoutSeconds: TimeInterval = 25
 
+    /// [DYNAMIC-TIMEOUT] (owner directive, 2026-09-20: "make the timeout
+    /// dynamic based on the number of translations, or even better on the
+    /// number of chars.") The flat 25 s bound refused the 8-string dense
+    /// batches the model needed 30–45 s for, while a single short string
+    /// finishes in seconds. The tier's effective timeout is
+    /// `base + perChar × inputCharacters`, clamped to the caller's
+    /// ceiling: small batches get short bounds, dense ones grow into the
+    /// ceiling. The per-char coefficient is the device's measured
+    /// throughput (~4 s per short string ≈ 0.2 s per input character).
+    var brainTranslationBaseTimeoutSeconds: TimeInterval = 8
+    var brainTranslationTimeoutPerCharacterSeconds: TimeInterval = 0.2
+    /// The kill-safe ceiling: the 45 s patient bound was jetsam-killed
+    /// (owner's 10:48 capture, signal 9); 30 s is the working margin.
+    var brainTranslationMaxTimeoutSeconds: TimeInterval = 30
+
     /// [PATIENT-STAGE] (owner directive, 2026-09-20) The tier's bound when
     /// there is NO next tier — the cloud switch off or unreachable. The
     /// standard bound is the fail-fast the cascade needs (the strings go
@@ -1217,15 +1232,11 @@ struct LiveTranslateConfig: Equatable {
     /// later (the owner's screenshot report: every string failed, the
     /// translations were on the way).
     ///
-    /// NEUTRALIZED (owner, 2026-09-20: "translation was working well with
-    /// the local model, now it's all messed up — restore it"). The 45 s
-    /// patient bound held the brain resident a generation too long and the
-    /// device killed the app (owner's 10:48 capture: three
-    /// inference_timeout events, then signal 9 — jetsam). The working
-    /// period's captures show 4–13 s generations, so the standard bound
-    /// was never the problem — the cache wipe was, and that is fixed.
-    /// Set equal to the standard bound: the patient path is behaviourally
-    /// inert until a device-proven bound exists.
+    /// SUPERSEDED as the patient ceiling by [DYNAMIC-TIMEOUT]: the
+    /// no-next-tier ceiling is now `brainTranslationMaxTimeoutSeconds`,
+    /// and the tier's per-batch bound scales with the source text's
+    /// length inside it. Kept so the patient-stage tests' explicit
+    /// configs still read; nothing in the pipeline reads this value.
     var brainTranslationPatientTimeoutSeconds: TimeInterval = 25
 
     /// Grace added to `brainTranslationTimeoutSeconds` to form the pipeline's

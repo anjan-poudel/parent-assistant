@@ -504,12 +504,32 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
         await translate(strings, timeoutSeconds: config.brainTranslationTimeoutSeconds)
     }
 
-    /// [PATIENT-STAGE] The attempt under the pipeline's chosen bound: the
-    /// standard one when the cloud can lead (the strings go onward), the
-    /// patient one when there is no next tier.
+    /// [DYNAMIC-TIMEOUT] (owner directive, 2026-09-20: "a default floor
+    /// and the rest driven by the source text's length.") The effective
+    /// bound for one batch: the floor plus a per-character share of the
+    /// source text, clamped to the caller's ceiling. Pure and static so
+    /// the suites pin it without a model.
+    static func effectiveTimeout(for strings: [String],
+                                 ceiling: TimeInterval,
+                                 config: LiveTranslateConfig) -> TimeInterval {
+        let characters = strings.reduce(0) { $0 + $1.count }
+        let dynamic = config.brainTranslationBaseTimeoutSeconds
+            + Double(characters) * config.brainTranslationTimeoutPerCharacterSeconds
+        return min(ceiling, dynamic)
+    }
+
+    /// [DYNAMIC-TIMEOUT] The attempt under the pipeline's chosen ceiling:
+    /// the standard one when the cloud can lead (the strings go onward),
+    /// the kill-safe maximum when there is no next tier. The effective
+    /// bound is the floor plus the source text's length, clamped to the
+    /// ceiling.
     func translate(_ strings: [String],
                    timeoutSeconds: TimeInterval) async -> LocalBrainTranslationOutcome {
         guard !strings.isEmpty else { return .none }
+
+        let timeout = Self.effectiveTimeout(for: strings,
+                                            ceiling: timeoutSeconds,
+                                            config: config)
 
         #if canImport(LLM)
         guard let modelStore, let modelID = installedModel(),
@@ -576,7 +596,7 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
                                                                           targetLanguage: targetLanguage),
                                                       jsonSchema: Self.jsonSchema,
                                                       modelURL: modelURL,
-                                                      timeout: timeoutSeconds)
+                                                      timeout: timeout)
             let report = Self.report(output,
                                      sources: batch,
                                      targetLanguage: targetLanguage,
