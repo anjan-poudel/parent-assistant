@@ -360,6 +360,37 @@ final class LabelTranslationCacheTests: XCTestCase {
         XCTAssertEqual(curated.origin, .curatedDictionary)
     }
 
+    /// [BRAIN-CACHE] The v1 → v2 migration: a version-1 payload is
+    /// ADOPTED, not discarded — its entries were cloud-produced by
+    /// definition, and the owner's working cache must survive the upgrade
+    /// (the discard shipped first and read as "the cache is messed up"
+    /// on a device that had been serving everything from it). The next
+    /// write persists version 2.
+    func testAVersionOnePayloadIsAdoptedAndServesAsCloudProduced() throws {
+        let v1 = LabelTranslationCache.Persisted(
+            schemaVersion: 1,
+            entries: [LabelTranslationCache.Entry(key: LabelTranslationCache.normalizationKey(
+                                                    text: recognizedText, targetLanguage: .nepali),
+                                                  translation: translationText,
+                                                  lastAccessSequence: 1)])
+        storage.setRaw(try JSONEncoder().encode(v1), forKey: storageKey)
+        let cache = makeCache()
+
+        guard case .success(.some(let hit)) = cache.lookup(text: recognizedText) else {
+            return XCTFail("a version-1 entry must be served after the upgrade")
+        }
+        XCTAssertEqual(hit.translation, translationText)
+        XCTAssertEqual(hit.tier, .cloud,
+                       "v1 had one producer, and the adopted entry says so")
+
+        _ = cache.store(text: "New label", translation: "नयाँ")
+        let persisted = try storedPayload()
+        XCTAssertEqual(persisted.schemaVersion, LabelTranslationCache.Persisted.currentSchemaVersion,
+                       "the first write after adoption persists the current version")
+        XCTAssertEqual(persisted.entries.count, 2,
+                       "the adopted entry survives beside the new one")
+    }
+
     func testAnUnknownSchemaVersionIsTreatedLikeACorruptPayloadAndServesNothingStale() throws {
         // A payload from a future version, carrying an entry that would
         // otherwise be served.

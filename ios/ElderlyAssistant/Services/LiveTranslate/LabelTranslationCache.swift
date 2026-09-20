@@ -120,7 +120,9 @@ final class LabelTranslationCache {
     /// The whole payload under one key (the storage protocol has no key
     /// enumeration).
     struct Persisted: Codable, Equatable {
-        /// Bumped when the entry shape changes; an unknown value is treated
+        /// Bumped when the entry shape changes. Version 1 is ADOPTED
+        /// ([BRAIN-CACHE]: the added field is optional, so a v1 entry
+        /// decodes as cloud-produced); unknown FUTURE values are treated
         /// exactly like a corrupt payload (self-healing: the store re-fills
         /// from new resolutions).
         ///
@@ -312,7 +314,17 @@ final class LabelTranslationCache {
 
         switch storage.read(key: Self.storageKey, type: Persisted.self) {
         case .success(let payload):
-            guard payload.schemaVersion == Persisted.currentSchemaVersion else {
+            // [BRAIN-CACHE] Version 1 payloads are ADOPTED, not discarded:
+            // the entry shape gained one optional field, and a v1 entry
+            // decodes exactly as a cloud-produced one — the only producer
+            // v1 ever had. The next persist writes version 2. Discarding
+            // here was the shipped behaviour and it wiped the owner's
+            // working cache on upgrade — a device that had been serving
+            // every repeated string from the persisted layer read as
+            // "the cache is messed up" while everything re-translated
+            // from scratch. Unknown FUTURE versions keep the discard.
+            guard payload.schemaVersion == 1
+                || payload.schemaVersion == Persisted.currentSchemaVersion else {
                 return discard(reason: .payloadUnreadable)
             }
             index = Dictionary(uniqueKeysWithValues: payload.entries.map { ($0.key, $0) })
