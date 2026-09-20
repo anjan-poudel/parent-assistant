@@ -1488,8 +1488,13 @@ actor LiveTranslationPipeline {
         // bound firing while the model was still producing: every string
         // in the panel failed, and the answers that would have landed a
         // few seconds later were thrown away.
+        // [DYNAMIC-TIMEOUT] The ceiling the tier's per-batch bound is
+        // clamped to: the standard one when the cloud can lead (the
+        // cascade's fail-fast), the kill-safe maximum when there is no
+        // next tier (the owner's patience, inside the 30 s the device
+        // survives).
         let timeout = mayWaitPastTheStageDeadline
-            ? config.brainTranslationPatientTimeoutSeconds
+            ? config.brainTranslationMaxTimeoutSeconds
             : config.brainTranslationTimeoutSeconds
         let stageBound = mayWaitPastTheStageDeadline
             ? timeout + config.brainTranslationStageGraceSeconds
