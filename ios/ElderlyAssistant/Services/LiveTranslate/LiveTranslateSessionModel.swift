@@ -126,6 +126,52 @@ struct LiveTranslateSessionDependencies {
     }
 }
 
+extension LiveTranslateSessionDependencies {
+    /// The point-ask session **this host** runs: the app layer's own
+    /// composition with `autoAnalyzeOnAnchor` turned off (review round 2,
+    /// finding 6).
+    ///
+    /// In live translate the anchored box is the *target* of a question the
+    /// focus capture asks for itself, not the question — and an anchor that
+    /// started PointAsk's own ladder would run (and pay for) a second,
+    /// different answer nobody asked for. The override lives here rather than
+    /// in the app layer's `PointAskConfig.default` because it is this *host*
+    /// that must not double-pay, and because the PointAsk feature's own flow
+    /// (the standalone tap-and-ask surface) still wants the default. The focus
+    /// capture is the consumer of the box this leaves standing: it reads
+    /// `anchoredTarget` and drives the focus flow, which is why the anchor
+    /// must stay quiet here.
+    ///
+    /// The dependencies are a value of `let`s, so the quiet config is a whole
+    /// new value rather than a mutation: the copy keeps every other field the
+    /// app layer chose (the gate, the cache, the client, the engines) and
+    /// changes the one flag this host must not inherit. A named seam rather
+    /// than an inline closure so the rule can be pinned by behaviour — the
+    /// configuration a host hands in is not observable from the model it
+    /// builds, so the test drives this function and watches the anchor.
+    /// Adding a field to the struct without a default breaks this call site on
+    /// purpose — a host that silently dropped one is the failure mode worth
+    /// compiling against.
+    @MainActor
+    static func quietPointAsk(from hosted: PointAskSessionDependencies) -> PointAskSessionModel {
+        var quietConfig = hosted.config
+        quietConfig.autoAnalyzeOnAnchor = false
+        let quiet = PointAskSessionDependencies(locale: hosted.locale,
+                                                consentGate: hosted.consentGate,
+                                                settings: hosted.settings,
+                                                cache: hosted.cache,
+                                                client: hosted.client,
+                                                objectEngine: hosted.objectEngine,
+                                                maskEngine: hosted.maskEngine,
+                                                yoloEngine: hosted.yoloEngine,
+                                                ocrEngine: hosted.ocrEngine,
+                                                observabilityBus: hosted.observabilityBus,
+                                                config: quietConfig,
+                                                speak: hosted.speak)
+        return PointAskSessionModel(dependencies: quiet)
+    }
+}
+
 /// C13's session model: one session's life, from appear to close.
 @MainActor
 final class LiveTranslateSessionModel: ObservableObject {
@@ -159,6 +205,25 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// ever. The picture itself is held here, in memory, and released on thaw
     /// and on close; nothing writes it anywhere (OD-13, NFR-LCT-005).
     @Published private(set) var frozen: LiveTranslateSnapshot?
+
+    /// The focused read, or nil while there is none ([FOCUS-CAPTURE]).
+    ///
+    /// Set by `translateFocusedRegion(box:pixelRect:)` and cleared by a thaw,
+    /// a close and the next focused read. It is a *second* surface rather than
+    /// a mode of `frozen`, and the difference is the elder's intent: a freeze
+    /// says "stop the picture so I can read it", a focused read says "tell me
+    /// about **that**". So it carries its own picture (the crop, not the
+    /// frame), its own rows and its own placement, and holding one does not
+    /// hold the camera — the live cycle keeps running behind it.
+    ///
+    /// Nothing here is persisted: the crop's strings are answered by the
+    /// pipeline in `.focused` mode, whose reads and writes are both told so
+    /// (`CloudTranslationTier.CachePolicy.readOnly` — the tier's adoption write
+    /// and the lookups' own bookkeeping writes, review round 2, finding 8) —
+    /// and this session's own answers live in a `LiveTranslateMemoryCache` that
+    /// goes with the model.
+    @Published private(set) var focusedCapture: LiveTranslateFocusedCapture?
+
     @Published private(set) var phase: Phase = .idle
 
     /// T-008's surface when start ended in a state the elder must act on.
@@ -185,6 +250,12 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// window — including the ones where nothing is ever held.
     @Published private(set) var freezeInProgress = false
 
+    /// Whether a focused read is in flight: true from the tick of the point
+    /// until the crop is held. The same window and the same reason as
+    /// `freezeInProgress` — the tap buys a crop, a pass and a plan, and
+    /// without this flag "working", "slow" and "broken" are one experience.
+    @Published private(set) var focusInProgress = false
+
     /// The FR-LCT-017 preference, as the control renders it.
     @Published private(set) var alwaysShowOriginal: Bool
 
@@ -196,6 +267,42 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// value the session model publishes and the value the gate reads are one
     /// value rather than three that have to be kept in step.
     @Published private(set) var geminiCloudEnabled: Bool
+
+    /// The feature's own master switch, as the Settings leaf renders it and as
+    /// **this session is gated by** (owner directive, 2026-09-21; review
+    /// finding 1).
+    ///
+    /// Read from `LiveTranslateSettings` when the model is built and mirrored
+    /// on every write, like the cloud switch above it, so the value in Settings
+    /// and the value this session opened under are one value.
+    ///
+    /// **This is the switch's reader.** Until this was wired the setting was
+    /// written by the Settings leaf and read by nobody — a master switch that
+    /// gated nothing — so the seam is stated here for the UI half, which is
+    /// Workstream B's:
+    ///
+    ///  - `start()` **refuses to open a session** while this is false: no
+    ///    camera, no detector, no pipeline, no frame loop, and `hasStarted`
+    ///    stays false, so the same model starts cleanly once the switch is
+    ///    turned back on. The session that was never opened is the whole gate
+    ///    on this side.
+    ///  - A surface that says **why** the feature did not open — the Settings
+    ///    leaf's row, and the spoken line that routes the elder to it — is
+    ///    Workstream B's, and it reads this property to decide which surface to
+    ///    draw. No copy is minted here (the string catalog belongs to that
+    ///    workstream), and no `Phase` case is added: `phase` stays `.idle`,
+    ///    which is the state the surface already renders for a session that has
+    ///    not started.
+    ///  - A session that is **already open** is not torn down by a write to
+    ///    this switch: leaving the live surface is a navigation decision the
+    ///    UI owns (`close()` is the call that ends a session). Turning the
+    ///    switch on with a session open but never started needs no more than a
+    ///    second `start()`, which the guard above permits.
+    ///
+    /// It is a *policy*, not consent and not egress: the consent record is
+    /// still required and still enforced per cloud attempt (AM-1), and this
+    /// switch neither creates nor withdraws one.
+    @Published private(set) var liveTranslateEnabled: Bool
 
     /// **Extract mode** (owner verdict, 2026-09-18), as the mode control
     /// renders it: `true` ⇒ the overlay shows the recognized text and no tier
@@ -308,6 +415,13 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// snapshot cannot send, resolve or publish by a rule of its own.
     private var snapshotPath: LiveTranslateSnapshotPath?
 
+    /// The focused read's path, built beside the other two and for the same
+    /// reason: nothing is assembled until the feature is opened. It shares the
+    /// session's detector, cache and live cycle, and holds one of its own —
+    /// the in-memory answer cache, which is the whole of what a focused read
+    /// is allowed to keep.
+    private var focusPath: LiveTranslateFocusCapture?
+
     // MARK: Session state
 
     private var hasStarted = false
@@ -324,11 +438,45 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// can never be taken of a stale buffer.
     private var latestFrame: CameraFrame?
 
+    /// The frame an anchored box was measured against, for a caller that holds
+    /// one (review round 2, finding 5).
+    ///
+    /// The host forwards every delivered frame to the point-ask session, and
+    /// that session anchors its box on the frame it held at the tap — so a
+    /// caller building a focused read from an anchor hands this frame to
+    /// `translateFocusedRegion(box:pixelRect:measuredOn:)`, and the crop comes
+    /// from the picture the rect is a place on rather than from whatever the
+    /// camera has delivered since. When no frame has been delivered (before the
+    /// first tick, after a close) it is nil, and a caller with no frame to name
+    /// passes nothing.
+    var anchoredFrame: CameraFrame? { latestFrame }
+
     /// One freeze's async work: the still pass, the device layers, and (later)
     /// the cloud answers for what the device could not translate. Cancelled
     /// when the elder returns to live or the session closes, so a slow pass
     /// cannot land a frozen frame nobody asked for any more.
     private var snapshotTask: Task<Void, Never>?
+
+    /// One focused read's async work: the crop, the pass over it, the device
+    /// layers and the plan. Cancelled on a thaw and on close for the same
+    /// reason `snapshotTask` is — a slow crop must not land a picture the
+    /// elder has already moved on from — and cancelled on the *next* focused
+    /// read, because two taps on two boxes are one question and its answer,
+    /// not two pictures racing.
+    private var focusTask: Task<Void, Never>?
+
+    /// Which focused read the surface is currently waiting for: the identity
+    /// the newest tap minted, held until that read publishes or gives up
+    /// (review finding 7).
+    ///
+    /// Cancellation is cooperative, so a superseded read still runs to its end
+    /// and still has an outcome and a `focusInProgress` to write. This is the
+    /// value that tells it whether it is still the session's question — the
+    /// same job `snapshotTask`'s identity comparison does for the still path,
+    /// stated as a token because a focused read has no picture to compare
+    /// against until it succeeds. Cleared by the read that owns it, and by
+    /// `returnToLive()`/`close()` when the picture is put down.
+    private var focusToken: UUID?
 
     /// The notice's own dismissal timer — the only task this object owns
     /// besides the frame loop, and the reason a notice needs no tap to go
@@ -381,6 +529,12 @@ final class LiveTranslateSessionModel: ObservableObject {
         // the config's nominal default (off) standing in for a household that
         // has never chosen.
         self.geminiCloudEnabled = dependencies.settings.geminiCloudEnabled
+        // The feature's master switch, from the same store and for the same
+        // reason. Its nominal default is **off**, so a household that has never
+        // chosen does not get the feature by accident — and it is read here
+        // rather than at `start()` so the value the surface renders and the
+        // value the gate reads are one value (review finding 1).
+        self.liveTranslateEnabled = dependencies.settings.liveTranslateEnabled
         self.isExtracting = dependencies.config.extractModeDefault
         self.indicator = CloudActivityIndicatorModel(observabilityBus: dependencies.observabilityBus,
                                                      config: dependencies.config)
@@ -404,7 +558,12 @@ final class LiveTranslateSessionModel: ObservableObject {
         // before the forwarding sinks below: an escaping closure that
         // captures `self` may not be created while a `let` stored property
         // is still uninitialized.
-        self.pointAsk = dependencies.pointAsk.map(PointAskSessionModel.init)
+        //
+        // `autoAnalyzeOnAnchor` is turned **off** for this host (review round
+        // 2, finding 6) — see `LiveTranslateSessionDependencies.quietPointAsk`,
+        // which is where the rule and its reasons live and what the anchor
+        // test drives.
+        self.pointAsk = dependencies.pointAsk.map(LiveTranslateSessionDependencies.quietPointAsk(from:))
 
         // The model is the single observation surface: the consent
         // controller's changes are forwarded, so the view observes one object
@@ -608,7 +767,41 @@ final class LiveTranslateSessionModel: ObservableObject {
         Task { [weak self] in
             await pipeline.retryAwaitingResolution()
             await self?.refreshHeldFrame()
+            await self?.repackFocusedCapture()
         }
+    }
+
+    /// Draws the answers the replay settled onto the focused picture the elder
+    /// is still looking at — the card's half of what `refreshHeldFrame` does
+    /// for a still frame (review round 2, finding 3).
+    ///
+    /// A focused read whose strings reached the consent prompt leaves its card
+    /// saying "translating…", and the replay above is what answers them — into
+    /// the ledger, where nothing rendered them onto the crop. Without this the
+    /// only way to see the answer was to tap again, which re-cropped and re-read
+    /// the page to reach the same ledger: the card unanswerable, and the read
+    /// paid for twice.
+    ///
+    /// Guarded the way the held frame's refresh is, and for the same reason: the
+    /// picture is compared **before and after** the `await`, so a thaw, a second
+    /// tap or a close in between keeps its own picture rather than having this
+    /// one's answers drawn onto it. The publication's sequence goes with the
+    /// image because a re-place (a rotation, a display preference) changes the
+    /// layout the rows were measured against — the same pair `refreshHeldFrame`
+    /// compares. `focusInProgress` is deliberately not consulted: a read still
+    /// in flight is a *newer* tap's, and the sequence guard is what keeps this
+    /// from writing over it.
+    private func repackFocusedCapture() async {
+        guard !isClosed, let path = focusPath, let standing = focusedCapture else { return }
+        let layout = pendingLayout
+        let policy = self.policy
+        guard let updated = await path.updated(standing, layout: layout, policy: policy) else {
+            return
+        }
+        guard !isClosed, let current = focusedCapture,
+              current.image === standing.image,
+              current.publication.sequence == standing.publication.sequence else { return }
+        focusedCapture = updated
     }
 
     /// Draws the answers that arrived for a held frame onto that frame — the
@@ -650,6 +843,17 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// and nothing starts after a close.
     func start() async {
         guard !hasStarted, !isClosed else { return }
+        // **The feature's master switch, first** (review finding 1). Nothing is
+        // built and nothing starts while the household has the feature off: no
+        // pipeline, no snapshot or focus path, no camera request, no detector
+        // and no frame loop. `hasStarted` is deliberately left false, so this
+        // is a deferral rather than a refusal — a session that was never opened
+        // can be started the moment the switch is turned back on, with no new
+        // model and no relaunch. `phase` stays `.idle`, the state the surface
+        // already has for "not started"; the surface that says *why*, and the
+        // spoken line that offers the Settings leaf, are Workstream B's and
+        // read `liveTranslateEnabled` (see that property).
+        guard liveTranslateEnabled else { return }
         hasStarted = true
         phase = .starting
         observeLifecycle()
@@ -714,6 +918,16 @@ final class LiveTranslateSessionModel: ObservableObject {
                                                       cycle: pipeline,
                                                       cache: dependencies.cache,
                                                       locale: locale)
+        // The focused read's path, assembled the same way and sharing the same
+        // three things (detector, cache, live cycle). Its memory cache is its
+        // own and is the only store a focused read may write to, which is what
+        // makes `.focused` mode's `.readOnly` policy safe rather than lossy:
+        // the answers a capture needs again, it already has.
+        self.focusPath = LiveTranslateFocusCapture(recogniser: detector,
+                                                   cycle: pipeline,
+                                                   cache: dependencies.cache,
+                                                   memoryCache: LiveTranslateMemoryCache(config: config),
+                                                   locale: locale)
         switch await camera.start() {
         case .success:
             _ = detector.begin()
@@ -772,6 +986,26 @@ final class LiveTranslateSessionModel: ObservableObject {
         snapshotTask = nil
         frozen = nil
         latestFrame = nil
+        // 1b. And the focused read goes with it, for the same two reasons: the
+        //     picture is a reference held in memory, and a crop that is still
+        //     being read must not land on a model the view has torn down.
+        focusTask?.cancel()
+        focusTask = nil
+        focusedCapture = nil
+        // The token goes with the task: a read already in flight is not this
+        // session's question any more, so it may neither publish a crop nor end
+        // a wait (review finding 7).
+        focusToken = nil
+        focusInProgress = false
+        // 1c. And the focused read's own answers go with it (review round 2,
+        //     finding 7): the memory cache is this session's — it holds the
+        //     strings a crop read and the answers they were given — and a model
+        //     that is closed but still retained must not keep a document's
+        //     contents in memory for the rest of the process. `close()` is the
+        //     one moment the session's answers stop being the session's, which
+        //     is the moment this method was written for and the reason it is no
+        //     longer a method nothing calls.
+        if let cache = focusPath?.memoryCache { await cache.clear() }
         // The picture's correction goes with the picture: a closed model draws
         // no window of a camera that has stopped (see `frameStabilization`).
         frameStabilization = .none
@@ -803,6 +1037,7 @@ final class LiveTranslateSessionModel: ObservableObject {
         await pipeline?.close()
         pipeline = nil
         snapshotPath = nil
+        focusPath = nil
 
         // 3. Speech is drained: nothing the feature queued outlives it.
         speech.close()
@@ -921,11 +1156,24 @@ final class LiveTranslateSessionModel: ObservableObject {
         // Without this the toggle would appear to stop working the moment a
         // picture is frozen, which is exactly the kind of lie about a display
         // preference the feature must not tell.
-        guard let held = frozen else { return }
         let layout = pendingLayout
         let policy = self.policy
-        Task { [weak self] in
-            await self?.rePlaceHeldFrame(held.publication, layout: layout, policy: policy)
+        if let held = frozen {
+            Task { [weak self] in
+                await self?.rePlaceHeldFrame(held.publication, layout: layout, policy: policy)
+            }
+        }
+        // **And a focused read keeps it working too** (review finding 12): the
+        // crop's own callouts are re-measured the same way. The focused read is
+        // the picture the elder *pointed at*, so a toggle that stopped working
+        // there would fail on exactly the surface where reading the original
+        // matters most — and it is the same lie the held frame above is
+        // re-placed to avoid. No pass, no cache read and no request: the
+        // strings are read and answered already.
+        if let capture = focusedCapture {
+            Task { [weak self] in
+                await self?.rePlaceFocusedCapture(capture, layout: layout, policy: policy)
+            }
         }
     }
 
@@ -962,6 +1210,36 @@ final class LiveTranslateSessionModel: ObservableObject {
         let pipeline = self.pipeline
         let resolved = geminiCloudEnabled
         Task { await pipeline?.updateGeminiCloudEnabled(resolved) }
+    }
+
+    /// The feature's master switch, as the Settings leaf writes it (owner
+    /// directive, 2026-09-21; review finding 1).
+    ///
+    /// The same write path shape as the two preferences above — written to the
+    /// store, then read back from it — so the row the elder touched and the
+    /// gate the next session opens behind cannot hold two different answers.
+    /// One setter, one key (`LiveTranslateSettings.setLiveTranslateEnabled`).
+    ///
+    /// What a write does **not** do is end a session that is already running:
+    /// this is a navigation decision the UI owns (Workstream B), and `close()`
+    /// is the call that ends a session. What it does do is decide whether the
+    /// **next** `start()` opens anything at all — and, for a session that is
+    /// open but never started (the switch was off when the surface appeared),
+    /// whether a second `start()` now succeeds.
+    func setLiveTranslateEnabled(_ value: Bool) {
+        guard !isClosed else { return }
+        settings.setLiveTranslateEnabled(value)
+        refreshLiveTranslateEnabled()
+    }
+
+    /// Mirrors the master switch into the model. Nothing is pushed into the
+    /// pipeline, deliberately: unlike the cloud switch, this one is not a
+    /// per-attempt gate but the answer to "is there a session at all", and a
+    /// session that is open already passed it (see `setLiveTranslateEnabled`).
+    /// The value is read back from the setting, not taken from the argument,
+    /// so both write paths land on the same answer.
+    private func refreshLiveTranslateEnabled() {
+        liveTranslateEnabled = settings.liveTranslateEnabled
     }
 
     /// The switch as its row renders it, in the active language — the same
@@ -1079,7 +1357,21 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// the scene had ended — which is what a background pause does claim, and
     /// why that path re-declares what is on screen (FR-LCT-023).
     func returnToLive() {
-        guard !isClosed, frozen != nil else { return }
+        guard !isClosed else { return }
+        // A focused read is a picture the elder put down too, and the live
+        // picture coming back is what they put it down for. Released before
+        // the held-frame guard so a session that has a focused read and no
+        // frozen frame still honours the thaw — the two pictures are
+        // independent, and the elder's "back to the camera" is one gesture.
+        focusTask?.cancel()
+        focusTask = nil
+        focusedCapture = nil
+        // The token goes with the task: a read already in flight is no longer
+        // the session's question, so it may not publish a picture or end a wait
+        // that no longer exists (review finding 7).
+        focusToken = nil
+        focusInProgress = false
+        guard frozen != nil else { return }
         snapshotTask?.cancel()
         snapshotTask = nil
         frozen = nil
@@ -1105,6 +1397,140 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// cannot say "freeze" and act as "thaw".
     func toggleSnapshot() {
         if isFrozen { returnToLive() } else { captureSnapshot() }
+    }
+
+    // MARK: The focused read ([FOCUS-CAPTURE])
+
+    /// The elder pointed at one thing: read **that**, translate it, and hold
+    /// the crop as a picture.
+    ///
+    /// The two parameters are the same target in two coordinate spaces, and
+    /// both are taken because the caller has one and the session has the
+    /// other: `pixelRect` is where the box lands on the frame the camera
+    /// delivered (what the crop stage needs), and `box` is the normalized
+    /// rectangle the elder's tap actually made. A caller that has only the box
+    /// — a recorded anchor restored after a resume, say — passes a null rect
+    /// and the session derives it from the frame's own pixel size, so the two
+    /// can never name different regions.
+    ///
+    /// **`measuredOn` is the frame the rect was measured against** (review
+    /// round 2, finding 5), and it is a parameter rather than an assumption for
+    /// the reason the class of bug it closes exists: a rect is a *place on a
+    /// picture*, so a rect measured against one frame and cropped from another
+    /// is a crop of a region nobody pointed at. A tap makes both in the same
+    /// instant, so a live tap passes nothing and the newest delivered frame is
+    /// the right one; a caller holding a rect from an earlier moment — the
+    /// anchored box a focus tap was made from, a rect restored with a
+    /// publication — passes the frame that rect belongs to, and it is that
+    /// picture that is cropped. `anchoredFrame` is what such a caller hands
+    /// over when the anchor is current.
+    ///
+    /// Unlike `captureSnapshot`, this does **not** hold the camera: the live
+    /// cycle keeps running, the overlay keeps drawing the scene, and the
+    /// focused read lands as its own picture beside it. And unlike a freeze it
+    /// writes nothing to the session's persisted store, reads included — see
+    /// `LiveTranslateFocusCapture` and `CloudTranslationTier.CachePolicy`.
+    ///
+    /// A second call cancels the first: two taps are one question and its
+    /// answer, not two pictures racing for the same surface.
+    func translateFocusedRegion(box: NormalizedBox,
+                                pixelRect: CGRect,
+                                measuredOn anchored: CameraFrame? = nil) {
+        guard !isClosed, phase == .running, focusPath != nil else { return }
+        guard let frame = anchored ?? latestFrame else { return }
+        // The wait starts on the tap's own stack, exactly as the freeze's does,
+        // so the surface's loading state is up in the frame of the tap rather
+        // than one frame late on a fast read and absent on a slow one.
+        focusInProgress = true
+        let layout = pendingLayout
+        let policy = self.policy
+        let rect = Self.pixelRect(for: box, in: frame, fallingBackTo: pixelRect)
+        focusTask?.cancel()
+        // **Which read this is** (review finding 7). A second tap cancels the
+        // first task, but cancellation is cooperative: a read already inside
+        // the crop, the pass or the plan answers whatever it was asked, and it
+        // used to write its `focusedCapture` and clear `focusInProgress` when
+        // it came back — installing a picture the elder had already replaced
+        // and ending the *new* read's wait. The token is this read's identity;
+        // only the read that still holds it may publish or finish the wait.
+        let token = UUID()
+        focusToken = token
+        // The frame the elder pointed at travels with the work, for the same
+        // reason the freeze's does: "that notice", not "whatever the camera
+        // delivered while the tap was being handled".
+        focusTask = Task { [weak self] in
+            await self?.readFocusedRegion(frame,
+                                          pixelRect: rect,
+                                          layout: layout,
+                                          policy: policy,
+                                          token: token)
+        }
+    }
+
+    /// The focused read's work, off the tap's call stack: the crop, one pass
+    /// over it, and the shared plan in `.focused` mode.
+    private func readFocusedRegion(_ frame: CameraFrame,
+                                   pixelRect: CGRect,
+                                   layout: LiveTranslateLayout,
+                                   policy: LiveOverlayPlacement.Policy,
+                                   token: UUID) async {
+        // **Three ways this read may no longer be the live question**, and all
+        // three must leave the surface alone (review finding 7): the session
+        // closed, the *task* was cancelled (a second tap, a thaw, a resume — a
+        // cancelled task is still running and still resolves, because every
+        // await in the path is cooperative), and a newer read has taken the
+        // token. The cancel alone was never enough: the work in flight answers
+        // what it was asked and comes back to a session that has moved on.
+        guard !isClosed, !Task.isCancelled, let path = focusPath, focusToken == token else {
+            finishFocusedRead(token)
+            return
+        }
+        let outcome = await path.capture(in: frame,
+                                         pixelRect: pixelRect,
+                                         layout: layout,
+                                         policy: policy)
+        guard !isClosed, !Task.isCancelled, focusToken == token else {
+            finishFocusedRead(token)
+            return
+        }
+        // A read that failed leaves the *previous* capture standing rather
+        // than blanking the surface: the last thing the session could tell the
+        // elder is still true, and the failure is the detector's own (recorded
+        // as `ocr_pass_failed` by the pass itself). Clearing here would turn
+        // "this crop could not be read" into "the answer you had is gone".
+        if case .success(let capture) = outcome {
+            focusedCapture = capture
+        }
+        finishFocusedRead(token)
+    }
+
+    /// Ends the focus wait — **only if the wait is still this read's**
+    /// (review finding 7). A superseded read that cleared `focusInProgress`
+    /// ended the wait the elder's *newest* tap is still inside, so the surface
+    /// went from "working…" to nothing while the read it should be showing was
+    /// still in flight. The token is cleared with the flag, so the next read
+    /// starts from a state no earlier one can finish.
+    private func finishFocusedRead(_ token: UUID) {
+        guard focusToken == token else { return }
+        focusToken = nil
+        focusInProgress = false
+    }
+
+    /// The pixel rect a box names on a frame. The caller's own rect wins when
+    /// it has one — it was measured against the buffer the crop came from —
+    /// and a null rect is derived from the box and the frame's own pixel size,
+    /// so a restored anchor still crops the region it named.
+    private static func pixelRect(for box: NormalizedBox,
+                                  in frame: CameraFrame,
+                                  fallingBackTo pixelRect: CGRect) -> CGRect {
+        guard pixelRect.isEmpty || pixelRect.isNull else { return pixelRect }
+        let width = CGFloat(CVPixelBufferGetWidth(frame.pixelBuffer))
+        let height = CGFloat(CVPixelBufferGetHeight(frame.pixelBuffer))
+        guard width > 0, height > 0, box.isValid else { return pixelRect }
+        return CGRect(x: box.xMin * width,
+                      y: box.yMin * height,
+                      width: (box.xMax - box.xMin) * width,
+                      height: (box.yMax - box.yMin) * height)
     }
 
     /// The capture's work, off the tap's call stack: the still pass over the
@@ -1169,6 +1595,26 @@ final class LiveTranslateSessionModel: ObservableObject {
                                              framePixelSize: held.framePixelSize)
         guard !isClosed, frozen?.publication.sequence == publication.sequence else { return }
         frozen = held
+    }
+
+    /// Re-measures a packed **focused** capture under a new policy and the
+    /// current geometry — `rePlaceHeldFrame`'s rule for the other picture
+    /// (review finding 12).
+    ///
+    /// The staleness guard is the same shape and on the same field: the crop on
+    /// screen must still be the capture this call was made about, compared by
+    /// its publication's sequence, so a re-measure that lands after a second
+    /// tap — or after a thaw — writes nothing. The picture, its answers and its
+    /// rows' text are untouched; only the geometry is measured again.
+    private func rePlaceFocusedCapture(_ capture: LiveTranslateFocusedCapture,
+                                       layout: LiveTranslateLayout,
+                                       policy: LiveOverlayPlacement.Policy) async {
+        guard !isClosed, let path = focusPath,
+              focusedCapture?.publication.sequence == capture.publication.sequence else { return }
+        let rePlaced = await path.rePlaced(capture, layout: layout, policy: policy)
+        guard !isClosed,
+              focusedCapture?.publication.sequence == capture.publication.sequence else { return }
+        focusedCapture = rePlaced
     }
 
     // MARK: - Speech (C12)

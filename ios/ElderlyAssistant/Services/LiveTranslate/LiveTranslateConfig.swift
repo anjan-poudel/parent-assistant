@@ -1517,6 +1517,51 @@ struct LiveTranslateConfig: Equatable {
     /// expand short source strings).
     var translationMaxLengthAllowance: Int = 64
 
+    // MARK: The feature's master switch (owner directive, 2026-09-21)
+
+    /// Whether live camera translation may run **at all**, before anything else
+    /// about it is asked.
+    ///
+    /// **True, and that is a merge-safety decision rather than a product one**
+    /// (review round 2, finding 1). The reader is the session's door
+    /// (`LiveTranslateSessionModel.start`), the host opens the surface
+    /// unconditionally, and nothing in production writes the key yet — so a
+    /// nominal default of `false` publishes a door that is closed with no copy
+    /// to explain it: the elder opens the feature, `start()` returns before
+    /// anything is built, and the surface falls to black. `true` is also
+    /// exactly what master shipped (the switch is this branch's, and master's
+    /// `start()` opens unconditionally), so a merge changes no device
+    /// behaviour: the feature runs, and the switch is the seam the Settings
+    /// leaf writes the moment it lands.
+    ///
+    /// **Workstream B owns the flip to opt-in**, and it is a copy-and-copy
+    /// decision this side cannot make: the moment the leaf lands the row, the
+    /// "why it is closed" surface and the spoken line that offers Settings,
+    /// this value (or the household's own stored answer) is what the door
+    /// reads. Until then the default is on and the switch is honoured in both
+    /// directions by anyone who writes it — `LiveTranslateSettings.setLiveTranslateEnabled`,
+    /// and the tests that pin the door.
+    ///
+    /// Three things this key is not, mirroring the cloud switch's own list:
+    ///
+    ///  - **It is not consent.** OD-13's consent record is still asked for and
+    ///    still enforced on every cloud attempt (AM-1). This switch gates the
+    ///    *feature*, not egress: turning it on does not create a grant, and
+    ///    turning it off does not withdraw one.
+    ///  - **It is not a budget.** `GeminiCostGovernor`'s soft daily cap is
+    ///    unchanged and still applies (OD7).
+    ///  - **It is not the cloud switch.** The two are independent: the device
+    ///    cascade is a complete answer without egress, so this feature runs
+    ///    with `geminiCloudEnabledDefault` off, and the cloud switch does not
+    ///    turn the feature on.
+    ///
+    /// A *default*, not the persisted state: `LiveTranslateSettings` owns the
+    /// value the household chose, and this is the nominal value an absent key
+    /// reads as — exactly the split `alwaysShowOriginalDefault` and
+    /// `geminiCloudEnabledDefault` use. A stored `false` is an opt-out and
+    /// closes the door; an absent key is the nominal value above.
+    var liveTranslateEnabledDefault: Bool = true
+
     // MARK: Cache
 
     /// Entries kept in the general translation cache before LRU eviction.
@@ -1525,6 +1570,59 @@ struct LiveTranslateConfig: Equatable {
     /// Whether repeated touches of the same cache key within one pass are
     /// coalesced into one write (the overlay renders at the OCR cadence).
     var cacheTouchCoalescing: Bool = true
+
+    // MARK: The focus capture's in-memory cache
+
+    /// How long an in-memory answer stays an answer, in seconds.
+    ///
+    /// Ten minutes is sized against the gesture it serves: an elder who points
+    /// at the same notice twice does it within a breath, and one who comes back
+    /// to it after a cup of tea is asking a *fresh* question about a picture
+    /// that may have changed. The value is a policy about staleness, not a
+    /// resource bound — the cost bound below is that.
+    var memoryCacheTTLSeconds: TimeInterval = 600
+
+    /// How many characters of cached answers the in-memory cache holds before
+    /// the platform evicts, in **characters** — the same unit the feature's
+    /// other bounds are stated in (`brainTranslationMaxCharacters`,
+    /// `cloudBatchMaxCharacters`), and the unit `LiveTranslateMemoryCache`
+    /// charges one entry (`LiveTranslateMemoryCache.cost(of:)`).
+    ///
+    /// 512,000 characters is roughly 400 average Nepali sentences: far more
+    /// than one session's focused reads, and small enough that the cache can
+    /// never be the thing that pressures a 5.5 GB device. Eviction is
+    /// `NSCache`'s (see that type) — this is the bound it evicts against.
+    var memoryCacheMaxCost: Int = 512_000
+
+    /// How many tier calls one **focused** capture's plan may spend.
+    ///
+    /// A crop is a small picture, but "small" is not a bound: a paragraph of
+    /// medical directions can split into a dozen sentences, and the plan that
+    /// resolves them asks the device, then the cloud for whatever the device
+    /// could not answer — in batches. An unbounded capture is a capture that
+    /// can spend an arbitrary number of requests and generations on one tap.
+    ///
+    /// **Two is the mode's own structural maximum, and the default states it**
+    /// (review finding 10). A `.focused` plan routes nothing to the cloud
+    /// first — `leadingTier` answers `.onDevice` for every string in that
+    /// mode — so `cloudFirst` is empty and of the plan's stages exactly two
+    /// can spend a batch: the device's own (stage 2), and the gate for
+    /// whatever the device could not answer (stage 5). The shipped `3` was
+    /// therefore a bound no `.focused` ask could reach, and a cap that cannot
+    /// bind is a rule the next reader has to re-derive to find out it is
+    /// inert. Stating the real maximum leaves the shipped behaviour
+    /// identical and makes this knob what it now is: a **narrowing**. `1`
+    /// keeps a focus on the device (the gate's strings are released
+    /// unclaimed), `0` resolves nothing through the tiers at all. Either way
+    /// the surplus is **released, unclaimed**, exactly as a clock-held batch
+    /// is: the next capture — or the live tick that follows — carries those
+    /// strings, and nothing was paid for twice or dropped.
+    ///
+    /// It does not apply to the live picture or to a still frame (their plans
+    /// run `.cascade`, whose budget is unbounded): the live cadence is already
+    /// bounded by its dispatch clock, and a held frame's refresh is a
+    /// re-render of strings the live cycle is resolving anyway.
+    var focusMaxBatchCalls: Int = 2
 
     // MARK: Disclosure
 

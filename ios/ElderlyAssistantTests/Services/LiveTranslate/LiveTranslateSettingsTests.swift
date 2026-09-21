@@ -99,6 +99,10 @@ final class LiveTranslateSettingsTests: XCTestCase {
     func testThePersistedStoreCarriesOnlyTheBooleanPreference() {
         settings().setAlwaysShowOriginal(true)
         settings().setGeminiCloudEnabled(true)
+        // The feature's own master switch is persisted like the other two, and
+        // it is a boolean too: this walk is what keeps the feature's namespace
+        // to booleans and nothing else.
+        settings().setLiveTranslateEnabled(true)
         // [DEBUG-LOG] The diagnostic switch is persisted like the two
         // preferences, and it is a boolean too: this walk is what keeps the
         // feature's namespace to booleans and nothing else.
@@ -315,6 +319,87 @@ final class LiveTranslateSettingsTests: XCTestCase {
             }
             return (name, value)
         }
+    }
+
+    // MARK: The feature's master switch (owner directive, 2026-09-21)
+
+    /// The merge-safety default, at the store (review round 2, finding 1): a
+    /// household that has never touched the switch reads the config's nominal
+    /// default — **on**, which is exactly what master shipped — rather than a
+    /// second literal. Reading it writes nothing nobody chose; a stored `false`
+    /// is the opt-out, and the round-trip test below is what proves the store
+    /// still decides.
+    func testAnUntouchedFeatureSwitchReadsTheConfigsNominalDefault() {
+        XCTAssertTrue(settings().liveTranslateEnabled,
+                      "the merge-safe default is on until the Settings leaf can offer the choice")
+        XCTAssertEqual(settings().liveTranslateEnabled,
+                       LiveTranslateConfig.default.liveTranslateEnabledDefault,
+                       "an unset switch reads the config, not a second literal")
+        XCTAssertTrue(LiveTranslateConfig.default.liveTranslateEnabledDefault,
+                      "the nominal default is on — the merge-safety decision of review round 2")
+        XCTAssertNil(defaults.object(forKey: LiveTranslateSettings.liveTranslateEnabledKey),
+                     "reading the default must not write a value nobody chose")
+    }
+
+    /// The other direction, and the one that keeps the test above from being a
+    /// pin on a literal: an injected config whose nominal default is off makes
+    /// an untouched switch read off.
+    func testTheFeatureSwitchesDefaultComesFromTheConfigNotASecondLiteral() {
+        var config = LiveTranslateConfig.default
+        config.liveTranslateEnabledDefault = false
+        XCTAssertFalse(settings(config: config).liveTranslateEnabled,
+                       "an unset switch must follow the injected config's nominal default")
+    }
+
+    func testTheFeatureSwitchRoundTripsAcrossASimulatedRelaunch() {
+        settings().setLiveTranslateEnabled(false)
+        XCTAssertFalse(settings().liveTranslateEnabled,
+                       "the opt-out survives a relaunch")
+        XCTAssertEqual(defaults.object(forKey: LiveTranslateSettings.liveTranslateEnabledKey)
+                        as? Bool,
+                       false)
+
+        settings().setLiveTranslateEnabled(true)
+        XCTAssertTrue(settings().liveTranslateEnabled,
+                      "and opting back in persists too")
+    }
+
+    /// Same no-cache property the other preferences have: the next read — the
+    /// next session, the next frame of the Settings leaf — sees the write, so
+    /// no surface can hold a switch value that disagrees with the store. The
+    /// write is the *opt-out* here, so the assertion cannot pass by reading the
+    /// nominal default.
+    func testTheFeatureSwitchChangeIsVisibleOnTheNextReadWithNoRestart() {
+        let live = settings()
+        XCTAssertTrue(live.liveTranslateEnabled)
+        live.liveTranslateEnabled = false
+        XCTAssertFalse(live.liveTranslateEnabled,
+                       "a cached value here would make the switch need a restart")
+    }
+
+    func testTheFeatureSwitchIsReachableThroughTheDeclaredKeyAlone() {
+        defaults.set(true, forKey: LiveTranslateSettings.liveTranslateEnabledKey)
+        XCTAssertTrue(settings().liveTranslateEnabled,
+                      "the switch is reachable by its declared key, not only through the setter")
+        XCTAssertEqual(LiveTranslateSettings.liveTranslateEnabledKey, "livetranslate.enabled")
+    }
+
+    /// Three independent switches. The feature's master switch is not the cloud
+    /// switch and not the display preference: writing one must not move
+    /// another, or the Settings leaf would show a change the elder did not make.
+    func testTheFeatureSwitchMovesNeitherTheCloudSwitchNorTheDisplayPreference() {
+        let live = settings()
+        live.setLiveTranslateEnabled(true)
+        XCTAssertFalse(live.geminiCloudEnabled,
+                       "turning the feature on is not opting into egress")
+        XCTAssertFalse(live.alwaysShowOriginal,
+                       "nor is it a display preference")
+
+        live.setGeminiCloudEnabled(true)
+        XCTAssertTrue(live.liveTranslateEnabled,
+                      "opting into the cloud leaves the feature switch alone")
+        live.setAlwaysShowOriginal(true)
+        XCTAssertTrue(live.liveTranslateEnabled)
     }
 
     // MARK: Disclosure stamp

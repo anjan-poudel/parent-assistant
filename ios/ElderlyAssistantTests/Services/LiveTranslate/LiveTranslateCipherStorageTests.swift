@@ -175,10 +175,20 @@ final class LiveTranslateCipherStorageTests: XCTestCase {
         XCTAssertEqual(box.nonce.withUnsafeBytes { $0.count },
                        LiveTranslateCipherStorage.Envelope.nonceByteCount)
         XCTAssertEqual(box.tag.count, LiveTranslateCipherStorage.Envelope.tagByteCount)
-        XCTAssertEqual(try AES.GCM.open(box,
-                                        using: SymmetricKey(data: try XCTUnwrap(keyStore.bytes)),
-                                        authenticating: Data(storageKey.utf8)),
-                       try JSONEncoder().encode(payload))
+        // Compared as the **decoded value**, not as bytes: two independent
+        // `JSONEncoder().encode` calls on the same value are free to order the
+        // fields differently — Foundation serialises through an unordered
+        // dictionary — and this assertion used to compare them byte-for-byte.
+        // It was therefore a coin flip: a green run had the two encoders
+        // agreeing on order, a red one had them disagreeing over an 82-byte
+        // plaintext that was in fact equal in every field (evidence kept in
+        // the PR). The claim here is "the plaintext is the payload", and the
+        // decoder is what makes that claim, one way or the other.
+        XCTAssertEqual(try JSONDecoder().decode(Payload.self,
+                                                from: try AES.GCM.open(box,
+                                                                       using: SymmetricKey(data: try XCTUnwrap(keyStore.bytes)),
+                                                                       authenticating: Data(storageKey.utf8))),
+                       payload)
 
         // The same value written twice is two different byte strings: a
         // repeated nonce would be a real GCM weakness, and this is what would

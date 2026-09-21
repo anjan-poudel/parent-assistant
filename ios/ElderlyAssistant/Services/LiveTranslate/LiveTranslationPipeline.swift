@@ -173,6 +173,58 @@ enum LiveTranslateCloudAttempt: Equatable {
     case answered(CloudTranslationTier.BatchResult)
 }
 
+/// Which mode a plan is running — the one thing a *mode* changes about the
+/// shared plan, stated once so a second path cannot carry a second copy of it.
+///
+/// The plan (`runResolution`) is deliberately mode-blind about everything else:
+/// the claim ledger, the terminal writer, the one-event-per-degradation rule
+/// and the gate-then-tier ordering are the same whatever the elder was doing
+/// when they asked. Two things genuinely differ, and both are here:
+///
+///  - **who leads.** The cascade routes each string by its own class (the short
+///    forms the device is proven on keep the device in front; the sentence
+///    class leads with the cloud when the cloud can lead). A focused read is a
+///    different question — the elder pointed at one thing and asked about
+///    *that* — and a network round-trip under their finger is the wrong
+///    latency for a targeted ask, so the device leads every string.
+///  - **how much may be spent.** A live tick is one frame of a cadence and a
+///    scene is bounded by what is on screen; a focused read's crop is
+///    whatever the recogniser found in the box the elder drew, which is not
+///    bounded by anything this side of the budget. `focusMaxBatchCalls` caps
+///    the tier batches one capture may spend.
+///
+/// `.cascade` is the default on every entry point, so the live cycle, the held
+/// frame, the prompt's retry and the snapshot path are byte-for-byte the plans
+/// they were before this type existed.
+enum TranslationMode: String, Sendable, Equatable, CaseIterable {
+    /// The shipped routing: per-string, by class.
+    case cascade
+    /// One pointed-at region: the device leads, and the plan's batches are
+    /// capped by `LiveTranslateConfig.focusMaxBatchCalls`.
+    case focused
+
+    /// What this mode may do to the **persisted** store — the one property
+    /// every tier call reads, so a mode cannot be routed as a focus and still
+    /// put the crop on disk (review finding 3).
+    ///
+    /// A focused read answers a question about a picture the elder pointed at
+    /// — a letter, a prescription, a form — and the session's store outlives
+    /// the tap by a day. So a focus reads the store and writes nothing — the
+    /// tier's adoption write **and** the lookups' bookkeeping writes, which
+    /// `LabelTranslationCache` suppresses on this policy's word (review round
+    /// 2, finding 8); every other mode persists, exactly as it always has.
+    /// Declared here rather than spelled at each call site because the gate and
+    /// the brain are two halves of **one** promise: the brain path that stored
+    /// a focus's strings while the cloud path refused to was the same capture
+    /// persisted by a different tier.
+    var cachePolicy: CloudTranslationTier.CachePolicy {
+        switch self {
+        case .cascade: .persist
+        case .focused: .readOnly
+        }
+    }
+}
+
 /// The live cycle, as the snapshot path (T-033) may use it: the two things
 /// that must be *shared* rather than re-created — the gate-then-tier sequence
 /// and the session's ordering counter (AM-6).
@@ -412,18 +464,27 @@ actor LiveTranslationPipeline {
     /// One string waiting on the elder's answer to the consent prompt, and who
     /// raised the question (`awaitingDecision`).
     private struct PendingAsk {
-        let item: CloudTranslationTier.Item
-        /// Whether the ask came from a region on the live picture.
+        /// **The plan's ask, whole** (review round 2, finding 2) — its strings
+        /// in their order, its urgency, its destination, its mode, the frame's
+        /// counts and the epoch the plan was made for. The retry replays it; it
+        /// does not rebuild it from the parts someone remembered.
+        ///
+        /// What this replaced was the hand-picked subset the retry happened to
+        /// need — the item, the mode, the region count — which was correct only
+        /// for the fields somebody had copied. Every field added to a request
+        /// afterwards was silently dropped on this path, and the one the review
+        /// caught is the one that writes to disk: a `.focused` ask whose *mode*
+        /// was rebuilt as the default came back as a `.cascade`'s and stored
+        /// the crop's strings through the very store the focus exists to keep
+        /// them out of. A request carried whole cannot drift, because there is
+        /// nothing to keep in step.
+        let request: ResolutionRequest
+        /// Whether the ask came from a region on the live picture — a property
+        /// of *where* the question was raised and not of the ask, which is why
+        /// it is the one field beside the request. It is the prune's rule: a
+        /// live ask is a claim about a sighting and goes with it, while a held
+        /// frame's ask does not (see `awaitingDecision`).
         let isLive: Bool
-        /// How many regions were showing this string in the picture the ask
-        /// was made over, when that picture was not the live one. A held
-        /// frame's multiplicity rides with its ask so the retry that answers
-        /// the prompt degrades under the count the frame actually showed,
-        /// instead of the scanner's 0 for a string that is not on the live
-        /// picture at all (review: the frozen half of the retry dispatched
-        /// with no counts and undercounted the frame's degradation). `nil` is
-        /// "the live picture", which the scanner can count for itself.
-        let regionsShowing: Int?
     }
 
     // MARK: State (actor-isolated)
@@ -1072,7 +1133,7 @@ actor LiveTranslationPipeline {
             if let existing = outcomes[region.id], existing.isFinal, existing.originalText == region.text {
                 next[region.id] = existing
             } else if let settled = settledOutcomes[key] {
-                next[region.id] = Self.restating(settled, for: region.text)
+                next[region.id] = LiveTranslateCaptureSupport.restating(settled, for: region.text)
             } else {
                 next[region.id] = .pending(region.text)
             }
@@ -1106,29 +1167,12 @@ actor LiveTranslationPipeline {
         LabelTranslationCache.normalizationKey(text: text, targetLanguage: targetLanguage)
     }
 
-    /// The stored answer, restated for the text a region is showing now.
+    /// The stored answer, restated for the text a region is showing now — the
+    /// one rule, shared with the capture paths
+    /// (`LiveTranslateCaptureSupport.restating`). It used to be spelled here
+    /// and in `LiveTranslateFocusCapture`, which is exactly the pair of copies
+    /// review round 2 (finding 7) asked to collapse.
     ///
-    /// The translation is a property of the *string*; the original text is a
-    /// property of the *region*. The two can differ in spelling while
-    /// normalizing identically ("Light" recognized again as "LIGHT"), and a
-    /// result carrying the previous spelling would put the wrong original on
-    /// screen beside the translation — so the answer is carried over and the
-    /// text is the region's own.
-    ///
-    /// A stored entry is terminal by construction, so the pending branch is
-    /// unreachable; it is here because "every case is answered" is the shape
-    /// this function promises and a future caller may not be so lucky.
-    private static func restating(_ result: TranslationResult, for text: String) -> TranslationResult {
-        switch result.outcome {
-        case .pending:
-            return .pending(text)
-        case .resolved(_, let translation, let tier):
-            return .resolved(originalText: text, translation: translation, tier: tier)
-        case .degraded(_, let reason):
-            return .degraded(originalText: text, reason: reason)
-        }
-    }
-
     /// The on-device layers — the curated dictionary and the persisted cache —
     /// answer before anything else is asked.
     ///
@@ -1196,11 +1240,28 @@ actor LiveTranslationPipeline {
     /// has already spent. A string whose only cloud attempt is behind it is not
     /// a sentence-class question any more — it is a string the device owes an
     /// answer to.
-    private func leadingTier(for item: CloudTranslationTier.Item)
+    private func leadingTier(for item: CloudTranslationTier.Item,
+                             mode: TranslationMode = .cascade)
         -> TranslationReliabilityRouter.LeadingTier {
         if cloudFailedKeys.contains(item.id) { return .onDevice }
-        return TranslationReliabilityRouter.leadingTier(for: item.text,
-                                                        cloudAvailable: cloudCanLead)
+        switch mode {
+        case .cascade:
+            return TranslationReliabilityRouter.leadingTier(for: item.text,
+                                                            cloudAvailable: cloudCanLead)
+        case .focused:
+            // A pointed-at read leads with the device whatever the string's
+            // class. The class rule is a statement about what the *model* is
+            // proven on, and it is what the cascade exists for — but it is
+            // also a statement about a scene the elder is living in, where a
+            // sentence worth reading will still be there a second later. A
+            // focused read is an elder pointing at one thing and asking for
+            // it now: the device answers in a generation, the cloud in a
+            // round trip, and the round trip is the wrong answer under their
+            // finger. What the device cannot answer still reaches the cloud
+            // through the ordinary stages behind it — the mode changes who
+            // leads, never who is reachable.
+            return .onDevice
+        }
     }
 
     /// Records that a string's brain generation has been paid for (see
@@ -1278,7 +1339,12 @@ actor LiveTranslationPipeline {
     }
 
     /// One ask for resolution, as the adapters hand it to the plan.
-    private struct ResolutionRequest {
+    ///
+    /// `Equatable` because two recorded asks have to be comparable to be
+    /// replayed as one batch (`isSameBatch(as:)`) — and comparable *whole*,
+    /// which is the point: a request is a value, and a comparison that named a
+    /// subset of its fields would be wrong about every field added later.
+    private struct ResolutionRequest: Equatable {
         /// The strings to resolve, in the order they are to be planned — region
         /// order for a tick (so the same scene produces the same batch and the
         /// bounds are deterministic), the elder's own order for an ask, and the
@@ -1286,6 +1352,10 @@ actor LiveTranslationPipeline {
         var items: [CloudTranslationTier.Item]
         var urgency: ResolutionUrgency
         var destination: ResolutionDestination
+        /// Which routing and which batch budget this ask runs under. Defaulted
+        /// to `.cascade` so every existing construction states the shipped
+        /// behaviour by saying nothing (see `TranslationMode`).
+        var mode: TranslationMode = .cascade
         /// How many regions are showing each string **in the picture this ask
         /// is about**, when that picture is not the live one. A held frame's
         /// regions are not in the stabiliser, so the live scanner answers 0 for
@@ -1300,6 +1370,86 @@ actor LiveTranslationPipeline {
         /// picture down holds none of them (review). Ignored by the live
         /// destination, which holds nothing.
         var frozenEpoch: Int = 0
+        /// Whether this plan's answers belong to a picture the **session** is
+        /// holding, and are therefore kept for it in `heldSettledKeys` until
+        /// it is put down.
+        ///
+        /// True for the still path, whose frame the elder can thaw. **False
+        /// for a focused read**, and that is the whole of review finding 5: a
+        /// focus owns its own picture's lifetime and reads its answers
+        /// straight out of `plan.value`, so a focused plan that held them
+        /// stamped a frame epoch it was not holding — and every key whose
+        /// release sits behind the thaw guard (`discardHeldAnswers`, called
+        /// only by `returnToLive`) would wait for a thaw that never comes,
+        /// leaking the keys and leaving a stale degraded answer sticky for the
+        /// rest of the session. A plan that holds nothing is pruned by
+        /// `reconcile` like any other settlement.
+        var holdsAnswers: Bool = true
+
+        // MARK: Replaying a recorded ask
+
+        /// The same ask with the retry's own urgency: the elder just answered
+        /// the prompt, so both pacing clocks are skipped (see
+        /// `ResolutionUrgency.explicitAsk`, and the retry's note for why that
+        /// is the *one* field the retry owns).
+        ///
+        /// A copy rather than a rebuild. A request reassembled field by field
+        /// is a list of everything someone remembered about the ask, and the
+        /// field nobody remembers is how a `.focused` capture came back from
+        /// the consent retry as a `.cascade` and stored the crop through the
+        /// store the focus exists to keep it out of (review round 2, finding
+        /// 2). Nothing can be forgotten by a copy.
+        func replayed() -> ResolutionRequest {
+            var copy = self
+            copy.urgency = .explicitAsk
+            return copy
+        }
+
+        /// The same ask, owning only these strings — the ledger rule every
+        /// hand-over already applies (`resolveFocused`, `resolveFrozen`,
+        /// `dispatchResolutionNeeds`): a string another plan is working on is
+        /// that plan's to answer, and asking it here pays twice for one answer.
+        ///
+        /// The strings are the group's and the rest of the request is
+        /// untouched, so the counts, the epoch and the mode still describe the
+        /// plan the ask was raised by.
+        func restricting(to items: [CloudTranslationTier.Item]) -> ResolutionRequest {
+            var copy = self
+            copy.items = items
+            return copy
+        }
+
+        /// Whether two recorded asks are the **same batch** — the same ask in
+        /// every respect two plans can differ in — so the strings they hold are
+        /// replayed as the one request the prompt interrupted rather than as
+        /// one request per string.
+        ///
+        /// Compared on copies with the two things that are a *plan's* rather
+        /// than an *ask's* set aside: the strings themselves, and the urgency
+        /// the retry owns (`replayed()`). Written this way rather than as a
+        /// field-by-field comparison on purpose — a hand-written list is a list
+        /// every later field is missing from, and the failure mode of a
+        /// *missing* field here is merging two asks that are not the same one.
+        func isSameBatch(as other: ResolutionRequest) -> Bool {
+            var mine = self
+            var theirs = other
+            mine.items = []
+            theirs.items = []
+            mine.urgency = .explicitAsk
+            theirs.urgency = .explicitAsk
+            return mine == theirs
+        }
+
+        /// This ask with the group's strings appended, each key once and in the
+        /// order the asks were recorded — the order the prompt raised them in.
+        func carrying(_ items: [CloudTranslationTier.Item]) -> ResolutionRequest {
+            var copy = self
+            var seen = Set(copy.items.map(\.id))
+            for item in items where seen.insert(item.id).inserted {
+                copy.items.append(item)
+            }
+            return copy
+        }
     }
 
     /// One plan's identity, and the picture it is answering for.
@@ -1314,19 +1464,32 @@ actor LiveTranslationPipeline {
     private struct PlanContext {
         /// The plan's own token: `claim`/`release` match on it.
         let token: UUID
-        let destination: ResolutionDestination
+        /// **The ask itself**, whole. Every stage reads the field it needs
+        /// through the accessors below rather than through a copy kept beside
+        /// it, so a request can never disagree with the context it runs in; and
+        /// the retry that answers the consent prompt replays this value
+        /// verbatim (`PendingAsk.request`), which is what makes the recorded
+        /// ask and the replayed ask the same ask by construction.
+        let request: ResolutionRequest
+
+        var destination: ResolutionDestination { request.destination }
         /// Regions per string in the picture this ask is about (a held frame's
         /// own multiplicities); empty is the live picture.
-        let regionCounts: [String: Int]
+        var regionCounts: [String: Int] { request.regionCounts }
         /// The frame epoch this plan was made for (see
         /// `ResolutionRequest.frozenEpoch`).
-        let frozenEpoch: Int
+        var frozenEpoch: Int { request.frozenEpoch }
+        /// Whether this plan's answers are held for a picture the session
+        /// holds (see `ResolutionRequest.holdsAnswers`).
+        var holdsAnswers: Bool { request.holdsAnswers }
+        /// Which routing and which batch budget this plan runs under — the
+        /// ask's own, carried so every stage that can spend a batch or route a
+        /// string reads one value (see `TranslationMode`).
+        var mode: TranslationMode { request.mode }
 
         init(token: UUID, request: ResolutionRequest) {
             self.token = token
-            self.destination = request.destination
-            self.regionCounts = request.regionCounts
-            self.frozenEpoch = request.frozenEpoch
+            self.request = request
         }
     }
 
@@ -1518,13 +1681,32 @@ actor LiveTranslationPipeline {
         }
         let mayGenerateNow = maySpendAGeneration(request.urgency, at: moment)
 
+        // The plan's own batch budget, from the ask's mode. A live tick's
+        // plan is bounded by the screen and a held frame's by the strings a
+        // still picture carries, so neither has ever needed a cap. A focused
+        // read has one: its strings are whatever the recogniser found inside
+        // the box the elder drew — a label, a line, or a whole paragraph —
+        // and nothing this side of the budget bounds that. A stage the cap
+        // holds **releases** its strings rather than failing them: the same
+        // deferral the dispatch and brain clocks already use, so the next
+        // capture (or the live tick behind it) carries them and no region is
+        // settled degraded for a reason that is only "we stopped asking".
+        var batchesRemaining = request.mode == .focused
+            ? max(0, config.focusMaxBatchCalls)
+            : Int.max
+        func spendABatch() -> Bool {
+            guard batchesRemaining > 0 else { return false }
+            batchesRemaining -= 1
+            return true
+        }
+
         // The plan (the router): which tier leads each string, decided before
         // anything is claimed, so the batch, its order and the clocks below are
         // all fixed first.
         var onDeviceFirst: [CloudTranslationTier.Item] = []
         var cloudFirst: [CloudTranslationTier.Item] = []
         for item in items {
-            switch leadingTier(for: item) {
+            switch leadingTier(for: item, mode: request.mode) {
             case .onDevice: onDeviceFirst.append(item)
             case .cloud: cloudFirst.append(item)
             }
@@ -1544,9 +1726,9 @@ actor LiveTranslationPipeline {
         //    one twice.
         var carryOnward = onDeviceFirst.filter { brainAttemptedKeys.contains($0.id) }
         let owed = mayGenerateNow ? onDeviceFirst.filter { !brainAttemptedKeys.contains($0.id) } : []
-        if !owed.isEmpty {
+        if !owed.isEmpty, spendABatch() {
             lastBrainAttemptAt = moment
-            let stage = await askTheBrain(owed, by: plan.token)
+            let stage = await askTheBrain(owed, by: plan.token, mode: plan.mode)
             guard !Task.isCancelled, !isClosed else { return answers }
             // The device tier reports no per-answer origin (the persisted cache
             // answers it in `askTheBrain`, which is a local read the histogram
@@ -1554,15 +1736,30 @@ actor LiveTranslationPipeline {
             // reader can see that the emptiness is a decision.
             await commit(stage.answered, to: plan, into: &answers, origins: [:])
             carryOnward += stage.unanswered
+        } else {
+            // Either nothing was owed (the surplus is empty and this is a
+            // no-op) or the plan's budget is spent: released, unclaimed, for
+            // the next plan to carry. Never settled, never failed.
+            release(keys: owed.map(\.id), by: plan.token)
         }
 
         // 3. The class the device is not proven on leads with the gate, and
         //    whatever the gate cannot settle comes back reserved rather than
         //    degraded: that reservation is the whole reason this order is
         //    allowed.
+        //
+        //    **No budget arm.** The gate's own plan is the *second* stage, so
+        //    in every mode the cap can bind it has already bound stage 2 — and
+        //    the class is empty in `.focused`, where the cap applies, so the
+        //    two conditions cannot both be true. The unreachable `else` this
+        //    replaced released strings the budget could never have held back
+        //    (review finding 10); what a plan does not settle is released by
+        //    its own `defer` in every case.
         var reserved: [(CloudTranslationTier.Item, LiveTranslateError)] = []
-        if !cloudFirst.isEmpty {
-            let decision = await gateDecision(for: cloudFirst, reservingFallback: true)
+        if !cloudFirst.isEmpty, spendABatch() {
+            let decision = await gateDecision(for: cloudFirst,
+                                              reservingFallback: true,
+                                              mode: request.mode)
             guard !Task.isCancelled, !isClosed else { return answers }
             await commit(decision.terminal, to: plan, into: &answers,
                          origins: decision.origins,
@@ -1602,9 +1799,16 @@ actor LiveTranslationPipeline {
                 // (review of #100: without the override an extract-mode tap
                 // could strand the only block it ever gets).
                 guard !Task.isCancelled, !isClosed else { return answers }
+                // **No budget arm**, for stage 3's reason: this stage runs
+                // only for strings the *cloud* led with and could not answer,
+                // and `cloudFirst` is empty in `.focused` — the one mode a
+                // budget bounds — so the cap was already satisfied by the time
+                // this guard could refuse anything. The two stages that can
+                // really spend in a focus (2 and 5) are the two that decrement
+                // the budget (review finding 10).
                 if maySpendAGeneration(request.urgency, at: now()) {
                     lastBrainAttemptAt = now()
-                    let stage = await askTheBrain(fresh.map(\.0), by: plan.token)
+                    let stage = await askTheBrain(fresh.map(\.0), by: plan.token, mode: plan.mode)
                     guard !Task.isCancelled, !isClosed else { return answers }
                     await commit(stage.answered, to: plan, into: &answers, origins: [:])
                     // The device had its turn — a generation was paid and did
@@ -1624,14 +1828,25 @@ actor LiveTranslationPipeline {
         }
 
         // 5. Everything the plan put in front of the device-and-then-cloud, and
-        //    did not answer, goes on to the gate in region order.
-        if !carryOnward.isEmpty {
-            let decision = await gateDecision(for: carryOnward, reservingFallback: false)
+        //    did not answer, goes on to the gate in region order. This is the
+        //    **second** of the two stages a `.focused` plan can spend at, which
+        //    is what makes the cap able to bind: a budget of 1 (a narrow,
+        //    device-only focus) is spent in stage 2, and the strings the gate
+        //    would have asked about are released here rather than dropped.
+        if !carryOnward.isEmpty, spendABatch() {
+            let decision = await gateDecision(for: carryOnward,
+                                              reservingFallback: false,
+                                              mode: request.mode)
             guard !Task.isCancelled, !isClosed else { return answers }
             await commit(decision.terminal, to: plan, into: &answers,
                          origins: decision.origins,
                          degradationsAreTheTiersOwn: decision.degradationsAreTheTiersOwn)
             record(awaiting: decision.awaiting, in: plan)
+        } else {
+            // Budget spent, or nothing to carry (a no-op): the strings stay
+            // pending and unclaimed for the next plan, exactly as a
+            // clock-held string does.
+            release(keys: carryOnward.map(\.id), by: plan.token)
         }
 
         // Whatever is left of the strings this plan was handed is released by
@@ -1663,7 +1878,9 @@ actor LiveTranslationPipeline {
     ///   answer — the callers that have a tier behind the device carry those
     ///   onward. The surplus the bound deferred is released here and is in
     ///   neither list.
-    private func askTheBrain(_ items: [CloudTranslationTier.Item], by token: UUID)
+    private func askTheBrain(_ items: [CloudTranslationTier.Item],
+                             by token: UUID,
+                             mode: TranslationMode = .cascade)
         async -> (answered: [(CloudTranslationTier.Item, TranslationResult)],
                   unanswered: [CloudTranslationTier.Item]) {
         guard !items.isEmpty else { return ([], []) }
@@ -1713,7 +1930,18 @@ actor LiveTranslationPipeline {
         // full encrypt-and-atomic-write of the whole payload per string, and
         // the brain answers a whole frame's worth at once
         // (`LabelTranslationCache.storeBatch`).
-        _ = cache.storeBatch(resolutions, targetLanguage: targetLanguage)
+        //
+        // **And only when the ask's mode persists** (review finding 3). The
+        // device leads before the cloud for a focused read, so this path — not
+        // the gate — is the one that would write the crop into the session's
+        // store; a `.focused` plan's strings stay in this run's memory cache
+        // (`LiveTranslateMemoryCache`) and on no disk, which is the promise
+        // `TranslationMode.cachePolicy` states once for both tiers. The store
+        // is still *read* on that path (`deviceAnswers`), so a focus repays
+        // nothing for what the session already knows.
+        if mode.cachePolicy == .persist {
+            _ = cache.storeBatch(resolutions, targetLanguage: targetLanguage)
+        }
         return (answered, unanswered)
     }
 
@@ -1723,28 +1951,23 @@ actor LiveTranslationPipeline {
                         in plan: PlanContext) {
         guard !items.isEmpty else { return }
         release(keys: items.map(\.id), by: plan.token)
-        switch plan.destination {
-        case .live:
-            for item in items {
-                awaitingDecision[item.id] = PendingAsk(item: item,
-                                                       isLive: true,
-                                                       regionsShowing: nil)
-            }
-        case .frozen:
-            // A held frame is a moment, not a stream: this capture's strings
-            // are added to the registry beside any earlier frame's, and beside
-            // the live picture's. **Merged, not replaced** (review): the old
-            // shape wiped every non-live ask before recording this frame's, so
-            // an earlier still whose question was still open lost its ask the
-            // moment the elder captured another one — they answered the prompt
-            // and the frame they had asked about was never retried, because
-            // nothing remembered it had been asked. Both halves go back
-            // together in `retryAwaitingResolution`.
-            for item in items {
-                awaitingDecision[item.id] = PendingAsk(item: item,
-                                                       isLive: false,
-                                                       regionsShowing: plan.regionCounts[item.id])
-            }
+        // A held frame is a moment, not a stream: this capture's strings are
+        // added to the registry beside any earlier frame's, and beside the live
+        // picture's. **Merged, not replaced** (review of #100): the old shape
+        // wiped every non-live ask before recording this frame's, so an earlier
+        // still whose question was still open lost its ask the moment the elder
+        // captured another one — they answered the prompt and the frame they
+        // had asked about was never retried, because nothing remembered it had
+        // been asked. They all go back together in `retryAwaitingResolution`.
+        //
+        // **One field beside the request, and it is the one that is not the
+        // ask's**: where the question was raised, which is the prune's rule
+        // (see `PendingAsk`). The request is the plan's own, whole — its
+        // destination, its mode, the frame's counts and its epoch all travel
+        // with it instead of being re-derived from a hand-picked subset.
+        let isLive = plan.destination == .live
+        for item in items {
+            awaitingDecision[item.id] = PendingAsk(request: plan.request, isLive: isLive)
         }
     }
 
@@ -1797,7 +2020,11 @@ actor LiveTranslationPipeline {
             // **the frame this plan was made for**: a plan that lands after the
             // elder put the picture down holds nothing, so its keys cannot wait
             // for a thaw that has already happened.
-            guard plan.frozenEpoch == heldFrameEpoch else { return }
+            // And **this plan holds at all** (review finding 5): a focused
+            // read's answers are its caller's, read out of `plan.value`, and
+            // holding them stamped a frame epoch the plan is not the owner of
+            // — see `ResolutionRequest.holdsAnswers`.
+            guard plan.holdsAnswers, plan.frozenEpoch == heldFrameEpoch else { return }
             for id in settled {
                 if let result = answers[id] { heldSettledKeys[id] = result }
             }
@@ -1855,8 +2082,9 @@ actor LiveTranslationPipeline {
     ///   device would answer for the elder the very question they are being
     ///   asked) and a string the tier *did* answer, even by degrading it.
     private func gateDecision(for items: [CloudTranslationTier.Item],
-                              reservingFallback: Bool) async -> GateDecision {
-        switch await attemptThroughTheGate(items) {
+                              reservingFallback: Bool,
+                              mode: TranslationMode = .cascade) async -> GateDecision {
+        switch await attemptThroughTheGate(items, mode: mode) {
         case .awaitingDecision:
             // The prompt is on screen. The regions stay pending — not degraded,
             // because nothing has failed and the elder has not answered yet.
@@ -2036,61 +2264,67 @@ actor LiveTranslationPipeline {
         guard !asks.isEmpty else { return }
         awaitingDecision.removeAll()
 
-        let live = asks.values.filter(\.isLive).map(\.item)
-        let frozen = asks.values.filter { !$0.isLive }.map(\.item)
-
-        // One dispatch for the whole interrupted batch: the prompt was raised
-        // for these strings together and its answer releases them together, so
-        // the ask that follows is the one ask the prompt interrupted. A per-key
-        // loop here would turn a five-string question into five single-string
-        // dispatches — five requests behind the batch's one, and with the
-        // explicit path's clocks skipped, nothing to space them out again.
-        if !live.isEmpty {
-            dispatchResolutionNeeds(only: Set(live.map(\.id)))
-        }
-        // The frozen frame's own strings, dispatched as the items they were —
-        // not as keys to be looked up in the live picture, which is where the
-        // old shape lost them. They land on the live destination on purpose: the
-        // frame they were asked over is gone, and the answer still belongs to the
-        // session — a live region showing the same text inherits it, the cache
-        // holds it for the next frame, and nothing is left half-answered.
+        // **The recorded asks, replayed as the asks they were** (review round
+        // 2, finding 2). The registry keys these by string, so the strings one
+        // plan asked about arrive here one entry at a time; they go back as the
+        // *one request* they were asked in, because the prompt was raised for
+        // that batch and its answer releases that batch — a dispatch per key
+        // would turn a five-string question into five requests, and with the
+        // explicit path's clocks skipped, nothing would space them out again.
         //
-        // **Awaited, not started.** The caller that answered the prompt
-        // re-renders the held frame the moment this returns
-        // (`LiveTranslateSessionModel.refreshHeldFrame`), and that render asks
-        // the plan for the frame's answers. A fire-and-forget dispatch here
-        // would have the two plans running at once — the retry's request in
-        // flight, the refresh's hand-over naming the same strings — and the
-        // second one pays for a request the first has already sent. Awaiting
-        // makes the order the review's mandate asks for: the answers are the
-        // session's before the frame is drawn from them, and the refresh finds
-        // them as settled rather than re-asking (step 0 of the plan).
-        if !frozen.isEmpty {
-            // Registered in the session's task tree **and** awaited: the
-            // ordering the contract above needs, with the cancellation a thaw,
-            // a resume or a close must be able to apply. The two halves of the
-            // same retry used to run under different task policies — the live
-            // half through `startResolution`, the frozen half inline — so a
-            // session that ended mid-plan could not stop the frozen one walking
-            // its strings to a tier (review).
-            //
-            // **The counts come with the strings.** A held frame's ask was
-            // raised over a still that is not on the live picture, so the
-            // scanner counts 0 regions for its strings and the degradation
-            // count fell back to the floor of 1 whatever the frame showed
-            // (review finding 6). The ask recorded the frame's own multiplicity
-            // (`PendingAsk.regionsShowing`); the retry hands it back, and it is
-            // the count the terminal writer uses for these strings.
-            var counts: [String: Int] = [:]
-            for ask in asks.values where !ask.isLive {
-                if let showing = ask.regionsShowing { counts[ask.item.id] = showing }
+        // The batch is **read** off the recorded requests rather than rebuilt
+        // from the live picture. That rebuild is where the frozen ask was lost
+        // (a held frame's strings are in no stabiliser) and where a capture's
+        // strings came back as a cascade's — the mode, the counts and the
+        // epoch are the recorded request's and travel with it.
+        var replays: [ResolutionRequest] = []
+        for ask in asks.values {
+            if let index = replays.firstIndex(where: { $0.isSameBatch(as: ask.request) }) {
+                replays[index] = replays[index].carrying(ask.request.items)
+            } else {
+                replays.append(ask.request)
             }
-            let plan = resolutionTask(ResolutionRequest(items: frozen,
-                                                        urgency: .explicitAsk,
-                                                        destination: .live,
-                                                        regionCounts: counts))
-            _ = await plan.value
         }
+
+        // **The destination is the ask's own**, no longer forced onto the live
+        // picture. Forcing it was the old shape's last trace of re-deriving the
+        // ask: the answers of a held frame's question went onto the live
+        // regions, and a focused read's went with them. What both callers
+        // actually read is the ledger — `resolveFrozen` and `resolveFocused`
+        // answer from `settledOutcomes` (step 0), and a live region showing the
+        // same text picks the answer up through the ordinary reconcile. So a
+        // capture's ask stays a capture's: its answers are not held against a
+        // frame it never froze (`holdsAnswers: false`, review finding 5), and a
+        // still's ask keeps the epoch it was made under, which is what holds
+        // its answer for the frame that asked while that frame is still held.
+        //
+        // Every replay is **started before any is awaited**. The replays are
+        // independent — one per recorded request — and a loop that started and
+        // awaited each in turn made the second ask wait out the first's tier
+        // round-trip for nothing (review round 2, finding 7). Awaiting matters
+        // all the same: the caller that answered the prompt re-renders from
+        // these answers the moment this returns
+        // (`LiveTranslateSessionModel.refreshHeldFrame`, and the focused
+        // capture's own re-pack), and a fire-and-forget dispatch here would
+        // have the retry's request in flight while that render's hand-over
+        // named the same strings, paying twice for one answer. The plans are
+        // registered in the session's task tree, so awaiting is also what lets
+        // a thaw, a resume or a close cancel them.
+        var plans: [Task<[String: TranslationResult], Never>] = []
+        for replayed in replays {
+            // The ledger rule every hand-over keeps: a string another plan is
+            // already working on is that plan's to answer, and asking it here
+            // pays twice for one answer. What this drops is not lost — the
+            // owning plan's answer lands in `settledOutcomes`, and the caller
+            // that renders reads it there.
+            let owed = replayed.items.filter { !attemptKeys.contains($0.id) }
+            guard !owed.isEmpty else { continue }
+            // The one field the retry owns is the urgency, and the request
+            // states it itself (`replayed()`); everything else is the recorded
+            // ask's, carried whole.
+            plans.append(resolutionTask(replayed.replayed().restricting(to: owed)))
+        }
+        for plan in plans { _ = await plan.value }
     }
     /// **The** gate-then-tier sequence, with no cycle state touched: the same
     /// ordering serves the live cycle and the snapshot path (T-033), so
@@ -2102,7 +2336,18 @@ actor LiveTranslationPipeline {
     /// gate — no prompt, no in-flight registration, no request — and because a
     /// feature that asked the elder to consent to something the household had
     /// already switched off would be asking a question it would not act on.
-    private func attemptThroughTheGate(_ items: [CloudTranslationTier.Item]) async -> LiveTranslateCloudAttempt {
+    /// `mode` is the ask's own, and it reaches exactly one thing here: the
+    /// store policy the tier runs under. A focused read answers a question
+    /// about a picture the elder pointed at — a letter, a prescription, a
+    /// form — and writing those strings into the session's persisted store
+    /// would put the document's contents on disk for the rest of the day
+    /// because someone held a camera up to it. So the capture reads the store
+    /// and writes nothing, and keeps its own answers in memory instead
+    /// (`LiveTranslateMemoryCache`). Every other mode persists, exactly as it
+    /// always has.
+    private func attemptThroughTheGate(_ items: [CloudTranslationTier.Item],
+                                       mode: TranslationMode = .cascade)
+        async -> LiveTranslateCloudAttempt {
         // The master switch first, and before the gate (owner directive,
         // 2026-09-19): with it off there is no cloud need to detect, so the
         // consent prompt is never presented, no request is ever built, and the
@@ -2119,7 +2364,12 @@ actor LiveTranslationPipeline {
         case .unavailable(let error):
             return .unavailable(error)
         case .proceed:
-            return .answered(await tier.resolve(items: items, targetLanguage: targetLanguage))
+            // The mode's own policy, stated once (`TranslationMode.cachePolicy`)
+            // so this gate and `askTheBrain` cannot disagree about whether a
+            // focus writes to the store (review finding 3).
+            return .answered(await tier.resolve(items: items,
+                                                targetLanguage: targetLanguage,
+                                                cachePolicy: mode.cachePolicy))
         }
     }
 
@@ -2160,24 +2410,101 @@ actor LiveTranslationPipeline {
     ///   consent, and the answer was already paid for.
     func resolveFrozen(_ items: [CloudTranslationTier.Item],
                        regionCounts: [String: Int] = [:]) async -> [String: TranslationResult]? {
+        // The cascade's seating of the one capture plan: the frame's answers
+        // are held for it (`holds: true`), so the next thaw knows which keys
+        // were the picture's to release.
+        await resolveCaptured(items,
+                              mode: .cascade,
+                              regionCounts: regionCounts,
+                              holds: true)
+    }
+
+    /// The focused read's way in: **the same plan**, in the mode the elder's
+    /// ask put it in.
+    ///
+    /// Deliberately not a second plan. Everything that makes a plan correct —
+    /// the claim ledger and its per-plan ownership, the clock prologue, the
+    /// batch bounding with its release, the gate-then-tier ordering, the one
+    /// terminal writer and its one-event-per-degradation rule — is the same
+    /// whether the elder pressed the shutter, tapped a block or pointed at a
+    /// region, and a second copy of any of it is where the two would start to
+    /// disagree. What `mode` changes is on the plan's own terms: who leads
+    /// (`leadingTier`) and how many batches may be spent (`focusMaxBatchCalls`),
+    /// both stated once inside `runResolution`.
+    ///
+    /// The destination is `.frozen`, like the still path's: the caller is about
+    /// to draw one picture of its own, owns that picture's lifetime and its
+    /// publication, and a plan that wrote onto the live regions would put a
+    /// crop's answers on a scene that has moved on. The urgency is `.capture`,
+    /// also like the still path's — the elder acted, so the dispatch clock
+    /// does not pace it, and it is not a reason to skip the brain's clock
+    /// either, because a read that paid a generation per tap would thrash the
+    /// model's load and a cloud outage is exactly when an elder taps
+    /// repeatedly.
+    ///
+    /// - Returns: one terminal result per string the session can answer, keyed
+    ///   by item id — this plan's own answers plus whatever the ledger already
+    ///   held for the rest (review finding 6). `nil` means nothing may be
+    ///   applied at all: the elder's consent question is open (it is their
+    ///   question, and answering it on the device would answer for them the
+    ///   very thing they are being asked), or the session is gone. A key that
+    ///   is absent is a string **nobody** has answered — a generation the clock
+    ///   deferred, or a batch the capture's budget did not spend — which the
+    ///   caller leaves pending, the same honesty the live path keeps.
+    func resolveFocused(_ items: [CloudTranslationTier.Item],
+                        regionCounts: [String: Int] = [:]) async -> [String: TranslationResult]? {
+        // The focused seating of the one capture plan: the mode is fixed here
+        // rather than passed in (review round 2, finding 7 — every caller of
+        // this entry is a focused read, and a parameter with one legal value is
+        // a second place for that value to drift), and the plan **holds
+        // nothing**: a focused read reads its answers straight out of
+        // `plan.value`, so a plan that held them would stamp a frame epoch its
+        // caller does not own, and every key whose release sits behind the thaw
+        // guard would wait for a thaw that never comes (see
+        // `ResolutionRequest.holdsAnswers`, and review finding 5 of the first
+        // round).
+        await resolveCaptured(items,
+                              mode: .focused,
+                              regionCounts: regionCounts,
+                              holds: false)
+    }
+
+    /// The answers the session's ledger already holds for these strings, keyed
+    /// by item id — **and nothing else**: no claim, no plan, no request.
+    ///
+    /// The re-pack's read (`LiveTranslateFocusCapture.updated`): a focused
+    /// card whose strings a later plan settled — the consent replay, the live
+    /// tick behind the crop — renders them without a second crop and without
+    /// paying for the same answer twice (review round 2, finding 3).
+    func settledAnswers(for items: [CloudTranslationTier.Item])
+        async -> [String: TranslationResult] {
+        answersAlreadySettled(items)
+    }
+
+    /// The one capture plan, and the whole of what a still picture and a
+    /// focused crop share (review round 2, finding 7).
+    ///
+    /// The two public entries above are seatings of this: they name the mode
+    /// (`TranslationMode` — who leads, and how many batches may be spent) and
+    /// whether the plan owns its keys for a picture's lifetime (`holds`). The
+    /// bodies were near-identical and had already drifted once — the focused
+    /// half re-read the ledger for keys another plan had answered and the
+    /// frozen half returned `nil`, which is how "everything I asked about was
+    /// another plan's" came to mean "render nothing" for a held frame and
+    /// "render the ledger" for a card (review finding 6 of the first round).
+    /// One body means the next correction lands on both.
+    ///
+    /// What is identical, and is why this is one function: the claim wait (a
+    /// string a live plan is working on is **that plan's** to answer, and this
+    /// caller waits for it rather than paying for the same answer twice), the
+    /// plan's shape (`.capture` urgency, `.frozen` destination — the caller
+    /// draws its own picture and owns that picture's lifetime), the ledger
+    /// re-read, and the one-terminal-writer rule the plan itself keeps.
+    private func resolveCaptured(_ items: [CloudTranslationTier.Item],
+                                 mode: TranslationMode,
+                                 regionCounts: [String: Int],
+                                 holds: Bool) async -> [String: TranslationResult]? {
         guard !isClosed, !items.isEmpty else { return nil }
-        // A string a live plan is already working on is **that plan's** to
-        // answer, and the frame waits for it rather than dropping it. The live
-        // adapter has always filtered its own hand-over against `attemptKeys`;
-        // the frozen half did not, so a refresh could re-ask a string the live
-        // cycle had in flight and pay for the same answer twice (review: the
-        // frozen adapter skipped the live one's claim filter). Dropping those
-        // strings was the first fix for that, and it left the frame showing
-        // "translating…" for its whole life: the live plan settled the string a
-        // moment later, into the live picture, and nothing asked the frame to
-        // render it (review finding 2).
-        //
-        // So the frame waits for the owners. Their answers land in
-        // `settledOutcomes` — and in the live publication — and the plan below
-        // then answers them from that ledger (step 0) without a second payment,
-        // which is what routes a live settlement to the held picture. Bounded
-        // by the same deadlines every plan already has, because the wait is on
-        // plans whose every stage is bounded.
         let claimed = items.filter { attemptKeys.contains($0.id) }
         if !claimed.isEmpty {
             let owners = Set(claimed.compactMap { claimOwner[$0.id] })
@@ -2188,21 +2515,51 @@ actor LiveTranslationPipeline {
             guard !isClosed else { return nil }
         }
         let unclaimed = items.filter { !attemptKeys.contains($0.id) }
-        guard !unclaimed.isEmpty else { return nil }
-        // Registered in the session's task tree **and** awaited — the shape the
-        // prompt's frozen retry uses, for the same two reasons: a thaw, a resume
-        // or a close must be able to stop this plan, and the caller needs the
-        // answers before it draws the frame. The claim and the plan's own
-        // context are `resolutionTask`'s, so this path owns exactly the keys it
-        // claimed (review finding 4) and carries the epoch of the frame it was
-        // made for (review finding 3).
-        let plan = resolutionTask(ResolutionRequest(items: unclaimed,
-                                                    urgency: .capture,
-                                                    destination: .frozen,
-                                                    regionCounts: regionCounts,
-                                                    frozenEpoch: heldFrameEpoch))
-        let answers = await plan.value
+        var answers: [String: TranslationResult] = [:]
+        if !unclaimed.isEmpty {
+            // Registered in the session's task tree **and** awaited: a thaw, a
+            // resume or a close must be able to stop this plan, and the caller
+            // needs the answers before it draws. The claim and the plan's own
+            // context are `resolutionTask`'s, so this path owns exactly the
+            // keys it claimed (review finding 4 of the first round) and carries
+            // the epoch of the frame it was made for (review finding 3) — the
+            // epoch is the held frame's even when `holds` is false, because a
+            // focused plan's keys are released by the ledger prune rather than
+            // by a thaw, and `holdsAnswers: false` is what says so.
+            let plan = resolutionTask(ResolutionRequest(items: unclaimed,
+                                                        urgency: .capture,
+                                                        destination: .frozen,
+                                                        mode: mode,
+                                                        regionCounts: regionCounts,
+                                                        frozenEpoch: heldFrameEpoch,
+                                                        holdsAnswers: holds))
+            answers = await plan.value
+        }
+        // The strings this plan was not handed — the claims the wait above
+        // resolved — are read back from the same ledger step 0 reads: an answer
+        // the session already has is never left unrendered, and a key the
+        // ledger has nothing for stays absent, which the caller leaves pending.
+        // The same honesty the live path keeps. A caller that asked about
+        // nothing but another plan's strings therefore still renders them
+        // rather than nothing.
+        for (key, settled) in answersAlreadySettled(items) where answers[key] == nil {
+            answers[key] = settled
+        }
         return answers.isEmpty ? nil : answers
+    }
+
+    /// The answers the session already holds for these strings, keyed by item
+    /// id — the ledger read `runResolution`'s step 0 makes, exposed so a
+    /// focused read can make it too (review finding 6). One ledger, so a
+    /// focused read and a held frame cannot disagree about what the session
+    /// knows.
+    private func answersAlreadySettled(_ items: [CloudTranslationTier.Item])
+        -> [String: TranslationResult] {
+        var settled: [String: TranslationResult] = [:]
+        for item in items {
+            if let answer = settledOutcomes[item.id] { settled[item.id] = answer }
+        }
+        return settled
     }
 
     /// The elder put the still picture down: the frame's answers go with it.

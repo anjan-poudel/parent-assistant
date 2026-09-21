@@ -270,6 +270,38 @@ final class PointAskSessionModel: ObservableObject {
 
     private var isClosed = false
 
+    // MARK: The anchored target, for a caller that owns the question
+
+    /// The box the elder anchored, in both coordinate spaces, or nil when
+    /// nothing is anchored.
+    ///
+    /// The same two values the analysis path carries, read back out: `box` is
+    /// the normalized rectangle the overlay draws, `pixelRect` is where it
+    /// lands on the frame the camera delivered. A caller that intends to ask
+    /// its own question about the target — rather than let the feature's
+    /// ladder ask it — reads this instead of re-resolving the tap, which is
+    /// what makes `autoAnalyzeOnAnchor = false` a usable mode rather than a
+    /// dead end: the anchor still names exactly the region the elder pointed
+    /// at, in the coordinates the crop stage takes.
+    ///
+    /// Deliberately not a second state store. It reads `phase` and the two
+    /// anchors the analysis already keeps, so it cannot disagree with what is
+    /// drawn or with what an analysis would have read.
+    var anchoredTarget: (box: NormalizedBox, pixelRect: CGRect)? {
+        let box: NormalizedBox
+        switch phase {
+        case .boxAnchored(let anchored, _),
+             .analyzing(let anchored),
+             .answered(let anchored),
+             .failed(let anchored):
+            box = anchored
+        case .awaitingTap:
+            return nil
+        }
+        guard let pixelRect = anchoredPixelRect else { return nil }
+        return (box, pixelRect)
+    }
+
     // MARK: Init
 
     init(dependencies: PointAskSessionDependencies) {
@@ -507,6 +539,20 @@ final class PointAskSessionModel: ObservableObject {
         // prompt instead (first cloud need, proven), so the prompt still
         // precedes any egress and the box never idles waiting for a tap
         // the elder does not know to make.
+        //
+        // [AUTO-ANALYZE] `autoAnalyzeOnAnchor` is the one way out of that,
+        // and it is a *default* because the rule above is right for the
+        // feature's own flow: an elder who tapped something wants to know
+        // what it is. A caller for whom the anchor is a **target** rather
+        // than a question — the live-translate focus capture, where the
+        // elder points and then presses their own control — turns it off, and
+        // the box then simply stays anchored: the phase is left at
+        // `.boxAnchored`, the age-out clock keeps running so the box still
+        // retires on its own, and `anchoredTarget` names the box and its
+        // pixel rect for the caller that intends to do something else with
+        // it. Nothing else changes: the target is resolved, held and
+        // rendered exactly as it is on the analyzing path.
+        guard config.autoAnalyzeOnAnchor else { return }
         guard let frame = anchoredFrame else { return }
         ageOutTask?.cancel()
         ageOutTask = nil

@@ -166,6 +166,57 @@ actor CloudTranslationTier {
         }
     }
 
+    // MARK: - The store policy
+
+    /// Whether a cycle may **write** to the persisted layers — every write the
+    /// cycle can reach, not only the one it makes with an answer in hand.
+    ///
+    /// The read is never in question: the dictionary and the persisted store
+    /// are what make the device's own answers cheap, and a cycle that stopped
+    /// consulting them would pay for a string the session already holds. What
+    /// this policy governs is the other direction — the write — and it governs
+    /// **all** of them (review round 2, finding 8):
+    ///
+    ///  - the adoption write, when the batch's answers are stored (`adopt`);
+    ///  - the LRU touch's payload rewrite, which a cache *hit* used to make —
+    ///    the first read of a stored key in a session rewrote the whole
+    ///    encrypted payload to record the access order;
+    ///  - the load's invalidation rewrite, when a payload's brain answers were
+    ///    produced by a model that is no longer in force.
+    ///
+    /// The last two were reachable under `.readOnly` before this policy was
+    /// threaded into the lookup: they rewrite what the store already held
+    /// rather than adding the capture's contents, but they are still writes on
+    /// a path whose whole promise is that pointing at a letter does not put
+    /// that letter on disk. One write remains on every spelling, deliberately:
+    /// a payload the store cannot decode is discarded (deleted and rebuilt
+    /// empty), because leaving unreadable bytes behind makes every later launch
+    /// pay the same fault, and that write removes content rather than adding
+    /// any.
+    ///
+    /// It exists because one caller answers a question about **a picture the
+    /// elder pointed at** rather than about the scene they are living in: a
+    /// focused read of a letter, a prescription, a form. Persisting its strings
+    /// would put the contents of that document in the session's on-disk store
+    /// for the rest of the day, where nothing the elder did asked for it. So
+    /// that caller runs `.readOnly` and keeps its own answers in memory
+    /// (`LiveTranslateMemoryCache`), which dies with the process.
+    ///
+    /// `.persist` is the shipped behaviour and the default on every entry
+    /// point, so the live cycle, the held frame, the prompt's retry and the
+    /// snapshot path are unchanged by this type existing.
+    enum CachePolicy: Sendable, Equatable {
+        /// Read the persisted layers, and write every answer back — the
+        /// session's own store, the same store a later frame reads.
+        case persist
+        /// Read the persisted layers, and write nothing back: not the answers,
+        /// and not the LRU or invalidation bookkeeping a read would otherwise
+        /// rewrite the payload for. The answers are still resolved and still
+        /// rendered; they simply do not outlive the process. A `[FOCUS]`
+        /// capture is the one caller.
+        case readOnly
+    }
+
     // MARK: - Dependencies
 
     private let cache: LabelTranslationCache
@@ -236,7 +287,15 @@ actor CloudTranslationTier {
     // MARK: - The cycle
 
     /// Resolves every item the caller hands over, terminally.
-    func resolve(items: [Item], targetLanguage: AppLanguage = .nepali) async -> BatchResult {
+    ///
+    /// `cachePolicy` is additive and defaults to the shipped behaviour: every
+    /// existing caller reads and writes the persisted layers exactly as it
+    /// did. `.readOnly` keeps the read and suppresses **every** write this
+    /// path can reach (see `CachePolicy`), which is what a focused capture
+    /// asks for.
+    func resolve(items: [Item],
+                 targetLanguage: AppLanguage = .nepali,
+                 cachePolicy: CachePolicy = .persist) async -> BatchResult {
         guard !items.isEmpty else { return BatchResult(resolved: [:], failures: [:]) }
 
         var resolved: [String: Resolution] = [:]
@@ -244,9 +303,18 @@ actor CloudTranslationTier {
 
         // 1. Validate the need. The dictionary/cache layer answers first, and
         //    a read fault is a miss (self-healing, never elder-facing).
+        //
+        //    The lookup itself is told the policy (review round 2, finding 8):
+        //    a hit's LRU touch and a load's invalidation both rewrite the whole
+        //    encrypted payload, and "the read is kept and the write is
+        //    suppressed" has to be true of this read too — it is the first write
+        //    a capture used to reach, and it was reached before the one this
+        //    policy was written for.
         var candidates: [Item] = []
         for item in items {
-            if case .success(let hit) = cache.lookup(text: item.text, targetLanguage: targetLanguage),
+            if case .success(let hit) = cache.lookup(text: item.text,
+                                                     targetLanguage: targetLanguage,
+                                                     persistingBookkeeping: cachePolicy == .persist),
                let hit {
                 resolved[item.id] = Resolution(translation: hit.translation,
                                                origin: .cache(hit.origin))
@@ -295,6 +363,7 @@ actor CloudTranslationTier {
                                targetByKey: targetByKey,
                                idsByKey: idsByKey,
                                targetLanguage: targetLanguage,
+                               cachePolicy: cachePolicy,
                                dedupedWithinCycle: dedupedCount,
                                resolved: &resolved,
                                failures: &failures)
@@ -333,6 +402,7 @@ actor CloudTranslationTier {
                               targetByKey: [String: Target],
                               idsByKey: [String: [String]],
                               targetLanguage: AppLanguage,
+                              cachePolicy: CachePolicy,
                               dedupedWithinCycle: Int,
                               resolved: inout [String: Resolution],
                               failures: inout [String: LiveTranslateError]) async {
@@ -392,7 +462,9 @@ actor CloudTranslationTier {
 
             let start = Date()
             let regionIDs = keys.flatMap { idsByKey[$0] ?? [] }
-            let outcomes = await runClaimedBatch(targets, targetLanguage: targetLanguage)
+            let outcomes = await runClaimedBatch(targets,
+                                                 targetLanguage: targetLanguage,
+                                                 cachePolicy: cachePolicy)
             for key in keys {
                 adopt(outcomes[key], for: key, idsByKey: idsByKey,
                       resolved: &resolved, failures: &failures)
@@ -481,13 +553,15 @@ actor CloudTranslationTier {
     /// Runs one batch: claim the keys, register the work with the gate, bound
     /// it with the deadline, and release on every exit path.
     private func runClaimedBatch(_ targets: [Target],
-                                 targetLanguage: AppLanguage) async -> [String: KeyOutcome] {
+                                 targetLanguage: AppLanguage,
+                                 cachePolicy: CachePolicy) async -> [String: KeyOutcome] {
         // The task handle is what a revocation cancels, so it exists before the
         // registration and the registration exists before any await.
         let deadline = deadlineDuration
         let task = Task {
             await self.runDeadlineBoundedAttempts(targets,
                                                   targetLanguage: targetLanguage,
+                                                  cachePolicy: cachePolicy,
                                                   deadline: deadline)
         }
         for target in targets { inFlight[target.key] = task }
@@ -510,10 +584,13 @@ actor CloudTranslationTier {
     /// timeout terminates the batch instead of leaving it pending.
     private func runDeadlineBoundedAttempts(_ targets: [Target],
                                             targetLanguage: AppLanguage,
+                                            cachePolicy: CachePolicy,
                                             deadline: Duration) async -> [String: KeyOutcome] {
         await withTaskGroup(of: RaceTick.self) { group in
             group.addTask {
-                .work(await self.attemptSequence(targets, targetLanguage: targetLanguage))
+                .work(await self.attemptSequence(targets,
+                                                 targetLanguage: targetLanguage,
+                                                 cachePolicy: cachePolicy))
             }
             group.addTask { await self.deadlineTick(deadline) }
 
@@ -559,7 +636,8 @@ actor CloudTranslationTier {
     /// Attempts the batch at most `cloudMaxRetries + 1` times, retrying only
     /// what the table allows, and minting a fresh consent proof per attempt.
     private func attemptSequence(_ targets: [Target],
-                                 targetLanguage: AppLanguage) async -> [String: KeyOutcome] {
+                                 targetLanguage: AppLanguage,
+                                 cachePolicy: CachePolicy) async -> [String: KeyOutcome] {
         var attempt = 0
         while true {
             // AM-1: the gate is re-read immediately before **every** attempt,
@@ -582,7 +660,9 @@ actor CloudTranslationTier {
 
             do {
                 let outcome = try await send(targets, targetLanguage: targetLanguage, grant: grant)
-                return adopt(outcome, for: targets, targetLanguage: targetLanguage)
+                return adopt(outcome, for: targets,
+                             targetLanguage: targetLanguage,
+                             cachePolicy: cachePolicy)
             } catch {
                 let failure = Self.classify(error)
 
@@ -634,9 +714,20 @@ actor CloudTranslationTier {
     /// Validated translations become resolutions and are stored; everything
     /// the parser refused becomes a per-region failure (row 19: terminal for
     /// that item only, never retried inside the batch).
+    ///
+    /// The store is what `cachePolicy` governs: under `.readOnly` the batch is
+    /// still resolved and still returned — every region renders exactly as it
+    /// does under `.persist` — and the persisted layers are left untouched, so
+    /// the answers live only as long as the caller holds them (a focused
+    /// capture's own memory, in the shipped case). The read that put this batch
+    /// on the wire happened in `resolve`, above, and is governed too — the
+    /// lookup is told the policy and suppresses its own bookkeeping writes — so
+    /// "read the store, write nothing" is a property of the whole cycle rather
+    /// than of this one call (review round 2, finding 8).
     private func adopt(_ outcome: TranslationResponseParser.Outcome,
                        for targets: [Target],
-                       targetLanguage: AppLanguage) -> [String: KeyOutcome] {
+                       targetLanguage: AppLanguage,
+                       cachePolicy: CachePolicy) -> [String: KeyOutcome] {
         var results: [String: KeyOutcome] = [:]
         // [BATCH-STORE] (review finding on #99, 2026-09-20) The frame's
         // answers are collected and persisted in ONE pass: the per-item
@@ -656,8 +747,17 @@ actor CloudTranslationTier {
             }
         }
         // A store failure is recorded by the cache itself and never changes
-        // the outcome: the translation still renders.
-        _ = cache.storeBatch(resolutions, targetLanguage: targetLanguage)
+        // the outcome: the translation still renders. A `.readOnly` cycle
+        // stores nothing here — the batch is the same, the answers are the
+        // same, and the only difference is that nothing outlives the caller
+        // (see `CachePolicy`, which suppresses the read path's bookkeeping
+        // writes as well as this one).
+        switch cachePolicy {
+        case .persist:
+            _ = cache.storeBatch(resolutions, targetLanguage: targetLanguage)
+        case .readOnly:
+            break
+        }
         // The adopted batch's counts reach the sanitising bus through the
         // caller's `translationBatchResolved`; the console line that mirrored
         // them was removed 2026-09-20 (NFR-LCT-006 — the feature carries no

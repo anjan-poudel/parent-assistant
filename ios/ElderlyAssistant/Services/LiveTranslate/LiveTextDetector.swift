@@ -839,6 +839,48 @@ final class LiveTextDetector {
         await perform(frame, crop: .whole, limit: nil) { .ocr }
     }
 
+    /// **The focused read's way in: one OCR pass over a crop.**
+    ///
+    /// The still entry's twin, over a smaller picture — the lifecycle guard,
+    /// this detector's one serial queue and the one engine, so a crop can never
+    /// race the live cadence's own pass.
+    ///
+    /// Deliberately *not* `perform`: that path exists to map Vision's boxes out
+    /// of a frame's window and to group them into blocks, and a crop has
+    /// neither — its boxes are its own whole coordinate space, and the focused
+    /// read splits the raw strings itself (`LiveTranslateSentenceSplitter`).
+    /// The engine's strings come back as the engine read them, in its order.
+    ///
+    /// The tracking state is dropped **first, and in full** — the engine's
+    /// remembered rectangles *and* the detector's own `rememberedKeys`,
+    /// `blockMembers`, `lastOCRPassAt` and `sceneChanged` (review finding 11,
+    /// see `forgetTrackingForOneOffPass`). Dropping only the rectangles left the
+    /// half-reset the review found: the cadence still believed it had geometry
+    /// to follow, so the live frame after a crop asked Vision to track strings
+    /// the crop had already replaced. The cost is one OCR pass on the live
+    /// cadence's next frame (nothing to track re-anchors by OCR), and it buys a
+    /// live tracker that can never be handed a crop's coordinates.
+    func recognizeCrop(_ pixelBuffer: CVPixelBuffer) async -> Result<[DetectedTextRegion], LiveTranslateError> {
+        guard markPassStarted() else {
+            // `begin()` was never called, or `end()` has already run: reported
+            // rather than run anyway, exactly as the still entry reports it.
+            return .failure(.ocrUnavailable(.requestCreationFailed))
+        }
+        defer { markPassFinished() }
+        return await withCheckedContinuation { continuation in
+            visionQueue.async { [self] in
+                forgetTrackingForOneOffPass()
+                do {
+                    continuation.resume(returning: .success(try engine.recognizeText(in: pixelBuffer)))
+                } catch {
+                    // The pass ran and failed. The caller records it and shows
+                    // the honest failure; the next tap runs a fresh pass.
+                    continuation.resume(returning: .failure(.ocrPassFailed(.requestFailed)))
+                }
+            }
+        }
+    }
+
     /// The one pass implementation both entries share, so "a pass" means one
     /// thing: the lifecycle guard, the serial queue and the pass-kind decision
     /// happen here and nowhere else. `limit` is the pass's block cap, and it is
@@ -1215,6 +1257,44 @@ final class LiveTextDetector {
             return true
         }
         guard changed else { return }
+        engine.forgetRememberedRectangles()
+    }
+
+    /// Drops the live cadence's own text-tracking state for a pass that is
+    /// **not** the live window — the focused read's crop (review finding 11).
+    ///
+    /// `noteCropChange`'s rule, applied to a one-off buffer rather than to a
+    /// moved window, and for the same reason: nothing that follows a crop's
+    /// picture may be reused. The crop recognizes into the same engine, so the
+    /// rectangles it leaves behind are the crop's, and a later tracking pass
+    /// seeded with them would follow boxes of a buffer this detector is no
+    /// longer reading. The rectangles were the *only* state this entry used to
+    /// drop, which is the half-reset the review found: `rememberedKeys` still
+    /// named strings the crop had replaced, so `passKind` answered `.tracking`
+    /// on the live cadence's very next frame and asked Vision to follow geometry
+    /// that no longer existed; `lastOCRPassAt` still anchored the sample
+    /// interval to the pass *before* the crop; and `sceneChanged` still claimed
+    /// the scene was the one the remembered keys were read from.
+    ///
+    /// So the detector's own text state goes with the rectangles — the keys, the
+    /// blocks grouped under them, the OCR anchor and the scene flag — and the
+    /// live window's next pass is an OCR pass that re-anchors on recognized
+    /// text. That single re-anchoring pass is the documented cost of a tracker
+    /// that has lost its anchors (FR-LCT-004), and it is the same cost
+    /// `noteCropChange` pays.
+    ///
+    /// **The object cache stays.** Unlike a pan, a crop does not move the live
+    /// window: the cached objects are geometry of the window this detector is
+    /// still reading, the crop pass does not write them, and dropping them would
+    /// make the live picture's panels wait on a detection pass for a window that
+    /// never changed.
+    private func forgetTrackingForOneOffPass() {
+        withLock {
+            rememberedKeys = []
+            blockMembers = [:]
+            lastOCRPassAt = nil
+            sceneChanged = true
+        }
         engine.forgetRememberedRectangles()
     }
 

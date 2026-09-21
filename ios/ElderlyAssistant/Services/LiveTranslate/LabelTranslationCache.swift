@@ -251,22 +251,42 @@ final class LabelTranslationCache {
     /// it as a miss (the string simply goes on to the next tier), and every
     /// later lookup answers from the empty index. No cache failure is ever an
     /// elder-facing error.
-    func lookup(text: String, targetLanguage: AppLanguage = .nepali) -> Result<Hit?, LiveTranslateError> {
+    ///
+    /// `persistingBookkeeping` is the **capture paths'** spelling (review round
+    /// 2, finding 8): a read that promised to write nothing does not write. It
+    /// suppresses the two writes a read could reach — the LRU touch's payload
+    /// rewrite and the load's invalidation rewrite — both of which rewrite what
+    /// the store already held rather than adding anything, and both of which
+    /// used to happen on a path whose whole point was that pointing at a letter
+    /// does not put its contents on disk. The touch is still recorded in memory
+    /// (this process's LRU order is unchanged) and the drop is still carried to
+    /// the next write by the pending-invalidation flag, so the only thing
+    /// suppressed is the I/O.
+    ///
+    /// One write remains reachable, on every spelling and deliberately: a
+    /// payload the store cannot decode is **discarded** — the bytes are deleted
+    /// and the index rebuilt empty. Leaving unreadable bytes in place would make
+    /// every later launch pay the same fault, and that write removes content
+    /// rather than adding any.
+    func lookup(text: String,
+                targetLanguage: AppLanguage = .nepali,
+                persistingBookkeeping: Bool = true) -> Result<Hit?, LiveTranslateError> {
         let key = Self.normalizationKey(text: text, targetLanguage: targetLanguage)
         return withLock {
             if let curated = curatedTranslation(forKey: key) {
                 events.cacheHit(origin: Origin.curatedDictionary.eventOrigin, count: 1)
                 return .success(Hit(translation: curated, origin: .curatedDictionary))
             }
-            // **This is deliberately the persisting spelling** (review finding
-            // B6 asked for `false` here and must not have it): the drop a load
-            // makes has to become a fact about the payload, or every launch
-            // recomputes it and reports the same eviction again — an event
-            // describing a change that is not happening again. The write is not
-            // a per-read cost either: `loadIfNeeded` runs once per instance and
-            // persists only when it actually dropped something, which is once
-            // per producer change.
-            if let failure = loadIfNeeded() {
+            // **This is deliberately the persisting spelling for a reading
+            // caller** (review finding B6 asked for `false` here and must not
+            // have it): the drop a load makes has to become a fact about the
+            // payload, or every launch recomputes it and reports the same
+            // eviction again — an event describing a change that is not
+            // happening again. The write is not a per-read cost either:
+            // `loadIfNeeded` runs once per instance and persists only when it
+            // actually dropped something, which is once per producer change.
+            // A caller that may not write asks for the other spelling above.
+            if let failure = loadIfNeeded(persistingInvalidation: persistingBookkeeping) {
                 return .failure(.cacheReadFailed(failure))
             }
             guard let entry = index[key] else {
@@ -277,7 +297,7 @@ final class LabelTranslationCache {
                 // silent, the hit still announces itself.
                 return .success(nil)
             }
-            touch(key: key)
+            touch(key: key, persisting: persistingBookkeeping)
             events.cacheHit(origin: Origin.persistedLayer.eventOrigin, count: 1)
             // [BRAIN-CACHE] The producing tier rides with the entry; a
             // token this store does not know (a future tier) reads as the
@@ -581,7 +601,15 @@ final class LabelTranslationCache {
     /// when coalescing is on, because the overlay renders at the OCR cadence
     /// and rewriting the whole payload per frame would be a real thermal and
     /// battery cost (NFR-LCT-002).
-    private func touch(key: String) {
+    ///
+    /// `persisting: false` is the capture paths' spelling (review round 2,
+    /// finding 8): the touch is recorded — the entry's access sequence moves
+    /// exactly as it does for any other reader, so this process's LRU order is
+    /// the same — and the payload is left alone. The key is deliberately **not**
+    /// marked as touched, so a later persisting read of the same key still
+    /// writes the new order once, the way the failure branch below leaves the
+    /// key for a retry.
+    private func touch(key: String, persisting: Bool = true) {
         if config.cacheTouchCoalescing, touchedThisSession.contains(key) { return }
         // The entry is mutated in place rather than rebuilt from a
         // `translation` argument: the previous spelling constructed a fresh
@@ -593,6 +621,7 @@ final class LabelTranslationCache {
         entry.lastAccessSequence = nextSequence
         index[key] = entry
         nextSequence += 1
+        guard persisting else { return }
         guard let failure = persist() else {
             touchedThisSession.insert(key)
             return

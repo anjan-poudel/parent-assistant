@@ -77,6 +77,27 @@ struct PointAskConfig: Equatable {
     /// after 5 s without chip tap").
     var boxAgeOutSeconds: TimeInterval = 5
 
+    /// Whether anchoring a box immediately starts the answer's work.
+    ///
+    /// **True** is the shipped behaviour and the design's (§4: tap → box →
+    /// answer). It says the anchor *is* the question — an elder who tapped
+    /// something wants to know what it is, and a second confirming tap would
+    /// be the feature asking them to ask twice.
+    ///
+    /// **False** is the opt-out a caller takes when the anchor is not the
+    /// question. The live-translate focus capture is that caller: there the
+    /// box is the *target*, the elder's question is asked by the control they
+    /// press afterwards, and starting the pipeline's own ladder on the anchor
+    /// would run a second, different answer's work for a question nobody
+    /// asked — and pay for it. With the flag false the anchor still lands,
+    /// still stays `.boxAnchored`, and `PointAskSessionModel.anchoredTarget`
+    /// still names the box, so a caller can read the target and do its own
+    /// thing with it.
+    ///
+    /// A *default*, not the persisted state: this is an operational constant
+    /// of the feature, and the household has no preference about it.
+    var autoAnalyzeOnAnchor: Bool = true
+
     // MARK: Target resolution
 
     /// How long a saliency pass's boxes are reused before the next tap
