@@ -299,6 +299,84 @@ final class TranslateTestModelTests: XCTestCase {
                        "an empty ladder leaves the cloud as the only row there is")
     }
 
+    /// …and "can run" includes the device-class verdict, not just the file
+    /// (2026-09-21 review round 2).
+    ///
+    /// An installed rung this phone REFUSES is not a runnable one: the tier's
+    /// resolution walks past it, and the screen has to open on the rung the
+    /// pipeline would actually pick. The installed test alone put the opening
+    /// row on the refused rung — where the first attempt can only answer
+    /// `.modelUnavailable`, and the install card is hidden because there is
+    /// nothing to download.
+    func testDefaultSelectionSkipsRungsTheDeviceRefuses() {
+        let options = TranslateTestModel.options(
+            from: makeSource(ladder: [Self.head, Self.fallback],
+                             installed: [Self.head, Self.fallback],
+                             unavailable: [Self.head]))
+
+        XCTAssertEqual(TranslateTestModel.defaultSelection(options: options), .model(Self.fallback),
+                       "the installed rung the device refuses is not a runnable one")
+
+        // The refusal is the only thing standing in the way: drop it and the
+        // same ladder opens on the same first row as before.
+        let permitted = TranslateTestModel.options(
+            from: makeSource(ladder: [Self.head, Self.fallback],
+                             installed: [Self.head, Self.fallback]))
+        XCTAssertEqual(TranslateTestModel.defaultSelection(options: permitted), .model(Self.head))
+    }
+
+    /// The install card offers a download only for the models the catalog
+    /// PUBLISHES (2026-09-21 review round 2).
+    ///
+    /// A ladder rung is what the tier will TRY, not what this build hands
+    /// out: the round-4 Q8 ceiling and the superseded quants sit on the
+    /// ladder so a device that sideloaded them keeps working, and the
+    /// AI-models screen deliberately never offers them. A card that drew its
+    /// management row for every catalog entry made this dev screen the one
+    /// place in the app offering those downloads — with a Delete beside them
+    /// for an artifact it neither installed nor can fetch.
+    ///
+    /// The published head IS offered, which is what keeps this from being a
+    /// card that offers nothing at all.
+    func testOnlyCatalogPublishedModelsGetADownloadRow() {
+        let published = ModelCatalog.nmtEnNeQwen17bR4Q6
+        XCTAssertNotNil(TranslateTestModel.offeredEntry(for: published),
+                        "the ship quant is what the household downloads — the row must be drawn for it")
+        XCTAssertEqual(TranslateTestModel.offeredEntry(for: published)?.id, published)
+
+        // Carried, never offered: an entry in the catalog (so it has a
+        // management row SOMEWHERE, on the AI-models screen) that this build
+        // publishes no download for.
+        let sideloadOnly = ModelCatalog.nmtEnNeQwen17bR4Q8
+        XCTAssertNotNil(ModelCatalog.entry(for: sideloadOnly),
+                        "the fixture must be an entry the catalog carries, or it tests the wrong branch")
+        XCTAssertNil(TranslateTestModel.offeredEntry(for: sideloadOnly),
+                     "sideload-only rungs are not this screen's to offer")
+        XCTAssertEqual(TranslateTestModel.unofferedInstallNoteKey(for: sideloadOnly),
+                       "settings.translateTest.install.sideloadOnly")
+
+        // Not carried at all: a catalog swap mid-flight, which is a different
+        // fact and a different sentence.
+        let unknown = ModelID("nmt-not-in-this-build")
+        XCTAssertNil(TranslateTestModel.offeredEntry(for: unknown))
+        XCTAssertEqual(TranslateTestModel.unofferedInstallNoteKey(for: unknown),
+                       "settings.translateTest.install.unknown")
+    }
+
+    /// Every row this screen offers is one the AI-models screen offers too —
+    /// asked of the catalog rather than restated, so the two surfaces cannot
+    /// drift into disagreeing about what a household may fetch.
+    func testTheOfferedRowComesFromTheCatalogssOwnOfferList() {
+        let offered = ModelCatalog.availableTranslationEntries.compactMap {
+            TranslateTestModel.offeredEntry(for: $0.id)
+        }
+
+        XCTAssertEqual(offered.map(\.id), ModelCatalog.availableTranslationEntries.map(\.id),
+                       "the same list, in the same order — one is derived from the other")
+        XCTAssertFalse(offered.isEmpty,
+                       "an empty offer list would make the card a dead end on every model")
+    }
+
     /// The screen opens on the model its ladder can run — and the rows it
     /// draws agree with the readiness line under them, because one call
     /// refreshes both.
@@ -1023,16 +1101,29 @@ final class TranslateTestEngineAdapterTests: XCTestCase {
         let brain = FakeBrain(outcome: LocalBrainTranslationOutcome(translations: ["hello": "नमस्ते"],
                                                                     durationMs: 1_400,
                                                                     loadDurationMs: 1_100))
-        let engine = LocalBrainProbeEngine(brain: brain,
-                                           model: ModelID("named"),
-                                           isInstalled: { _ in true },
-                                           unavailabilityReason: { _ in nil },
-                                           config: config())
+        // A scripted clock, because the split is the assertion and a split
+        // needs a total this suite chose. Against the wall clock the total
+        // was "however long the machine took between two reads": usually
+        // zero, occasionally one millisecond, which failed the equality
+        // below on a loaded host — a flake in the harness rather than in the
+        // split ([MODEL-SWITCH], 2026-09-21 review round 2).
+        var reads = 0
+        let engine = LocalBrainProbeEngine(
+            brain: brain,
+            model: ModelID("named"),
+            isInstalled: { _ in true },
+            unavailabilityReason: { _ in nil },
+            config: config(),
+            now: {
+                reads += 1
+                return Date(timeIntervalSince1970: reads == 1 ? 0 : 0.25)
+            })
 
         let outcome = await engine.probe("hello")
 
         XCTAssertEqual(outcome.loadMs, 1_100, "the model's own load, on the card beside the wait")
-        XCTAssertEqual(outcome.latencyMs, 0)
+        XCTAssertEqual(outcome.latencyMs, 250,
+                       "the whole wait, load included: the load row is a second reading of it, not a deduction from it")
     }
 
     /// A tier that measured no load reports `nil`, never a made-up zero: a
@@ -1133,6 +1224,110 @@ final class TranslateTestEngineAdapterTests: XCTestCase {
         // key" is advice for a door that is still locked.
         let readiness = await engine.readiness()
         XCTAssertEqual(readiness, .cloudDisabled)
+    }
+
+    // MARK: - Production wiring
+
+    /// The ladder the coordinator hands the dropdown: the config's
+    /// TRANSLATION rungs, and not the assistant brains in its tail.
+    ///
+    /// `AppCoordinator.makeTranslateTestDependencies` builds the rows with one
+    /// call — `LocalBrainTranslationTier.translationModelIDs(from: config
+    /// .brainTranslationModelIDs)` — and this drives that call against the
+    /// SHIPPED default ladder, which really is two intent brains longer than
+    /// its translation rungs. So the filter is load-bearing rather than
+    /// decorative: without it the picker offers rows for artifacts that
+    /// answer the intent schema, not `{"translations":[…]}` ([MODEL-SWITCH],
+    /// 2026-09-21 review round 2).
+    func testTheProductionLadderDropsTheIntentBrainTail() {
+        let ladder = LiveTranslateConfig.default.brainTranslationModelIDs
+        let rungs = LocalBrainTranslationTier.translationModelIDs(from: ladder)
+
+        XCTAssertTrue(ladder.contains(ModelCatalog.intentQwen4BS43),
+                      "the premise: the shipped ladder's tail carries an assistant brain")
+        XCTAssertTrue(ladder.contains(ModelCatalog.intentQwen4BSlotCanon))
+
+        XCTAssertTrue(rungs.allSatisfy(ModelCatalog.isTranslationModel),
+                      "every row the screen may draw is a translation artifact")
+        XCTAssertFalse(rungs.contains(ModelCatalog.intentQwen4BS43),
+                       "offering this would send a translation prompt to a slot-filling brain")
+        XCTAssertFalse(rungs.contains(ModelCatalog.intentQwen4BSlotCanon))
+        XCTAssertEqual(rungs.first, ladder.first,
+                       "the head survives the filter — the ship quant is the row this screen exists to measure")
+        XCTAssertEqual(rungs.count, ladder.count - 2, "and the filter drops nothing else")
+    }
+
+    /// `makeEngines()` over a REAL store: one engine per rung, none for the
+    /// intent brains, and an `isInstalled` that actually reads the disk.
+    ///
+    /// This is the half a fake cannot stand in for. The row marker, the
+    /// readiness line and the install card all hang on the closure the
+    /// coordinator builds (`modelStore.path(for:)` — the question the tier's
+    /// own run gate asks), so the wiring is driven here with exactly one rung
+    /// staged on a temporary root: the staged rung must read ready, and a rung
+    /// with nothing on disk must report the download the card offers.
+    ///
+    /// The source is spelled the way the coordinator spells it rather than
+    /// approximated, because a test that invents its own closure pins the
+    /// screen's reading of a source that production does not build.
+    @MainActor
+    func testTheProductionDependenciesBuildAnEnginePerRungAndReadTheDisk() async throws {
+        let config = LiveTranslateConfig.default
+        let ladder = LocalBrainTranslationTier.translationModelIDs(from: config.brainTranslationModelIDs)
+        let installed = try XCTUnwrap(ladder.first, "the fixture stages the head rung")
+        let absent = ModelCatalog.nmtEnNeQwen17bR2bQ8
+        XCTAssertTrue(ladder.contains(absent), "the other half of the fixture must be a rung of this ladder")
+
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("translate-test-wiring-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try ModelStore(observabilityBus: NullObservabilityBus(),
+                                   rootDirectoryOverride: root,
+                                   checksumPolicy: .skip)
+        try Data("not a real model".utf8).write(to: try store.stagingURL(for: installed))
+        _ = try store.finalize(installed)
+
+        let bus = NullObservabilityBus()
+        let storage = LabelTranslationCacheTestStorage()
+        let dependencies = TranslateTestDependencies(
+            cache: LabelTranslationCache(storage: LabelTranslationCacheTestStorage(),
+                                         config: config,
+                                         observabilityBus: bus),
+            consentGate: LiveTranslateConsentGate(storage: storage, config: config, observabilityBus: bus),
+            costGovernor: GeminiCostGovernor(storage: storage, observabilityBus: bus),
+            client: GeminiClient(configStore: GeminiConfigStore(storage: storage), observabilityBus: bus),
+            observabilityBus: bus,
+            modelStore: store,
+            modelSource: TranslateTestModelSource(
+                ladder: ladder,
+                displayName: { ModelCatalog.entry(for: $0)?.displayName(locale: Locale(identifier: "en")) ?? $0.rawValue },
+                // The coordinator's own predicate: `path(for:)`, non-nil only
+                // for a catalog entry whose file is on disk.
+                isInstalled: { store.path(for: $0) != nil },
+                unavailabilityReason: { id in
+                    guard let entry = ModelCatalog.entry(for: id) else { return nil }
+                    return ModelLifecycleManager.shared.availability(of: entry).reason
+                }),
+            isProviderConfigured: { false },
+            isCloudEnabled: { false },
+            startCapture: { _ in },
+            cancelCapture: {})
+        let built = dependencies.makeEngines()
+
+        XCTAssertEqual(Set(built.engines.keys),
+                       Set(ladder.map { TranslateTestSelection.model($0) } + [.gemini]),
+                       "one engine per rung, plus the cloud — and none for a rung the tier filtered out")
+        XCTAssertNil(built.engines[.model(ModelCatalog.intentQwen4BS43)],
+                     "an engine here would be a row that sends an intent brain a translation prompt")
+
+        let ready = await built.engines[.model(installed)]?.readiness()
+        XCTAssertEqual(ready, .ready, "the staged artifact is the run gate's own answer: on disk")
+        let missing = await built.engines[.model(absent)]?.readiness()
+        XCTAssertEqual(missing, .modelMissing, "and this rung offers a download instead of a spinner")
+        XCTAssertEqual(TranslateTestModel.unofferedInstallNoteKey(for: absent),
+                       "settings.translateTest.install.sideloadOnly",
+                       "a rung the catalog does not PUBLISH gets the sentence, never a management row")
     }
 }
 

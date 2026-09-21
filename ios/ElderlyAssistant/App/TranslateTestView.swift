@@ -342,13 +342,17 @@ private struct TranslateTestControlsCard: View {
                             model.selectedModelName ?? "")
         case .modelUnavailable(let reason):
             // Installed and still refused: the ledger's own sentence for
-            // why (`ModelUnavailabilityReason.localizationKey` — the same
-            // strings the Settings rows show), so this screen cannot
-            // describe a device-class refusal in its own words.
+            // why, composed by the SHARED helper the Settings rows use
+            // (`AIModelsSettingsView.unavailableNote`) rather than by a
+            // second lookup here. That helper is not a convenience: it falls
+            // back to the policy's English copy when the language has no row
+            // in the string table, so a missing localization degrades to a
+            // true sentence instead of printing the raw key
+            // ([MODEL-SWITCH], 2026-09-21 review round 2).
             return L10n.fmt("settings.translateTest.readiness.modelUnavailable",
                             locale: locale,
                             model.selectedModelName ?? "",
-                            L10n.str(reason.localizationKey, locale: locale))
+                            AIModelsSettingsView.unavailableNote(reason, locale: locale))
         case .providerKeyMissing:
             return L10n.str("settings.translateTest.readiness.providerKeyMissing", locale: locale)
         case .cloudDisabled:
@@ -425,9 +429,16 @@ private struct TranslateTestResultCard: View {
                 // and the second does not — with the idle unload at five
                 // seconds, that is a fact about the timer rather than about
                 // the weights, and this comparison exists for the weights.
-                // The decode figure is the latency above minus this one, and
-                // it is `nil` (nothing drawn) for a fake, for the cloud, and
-                // for any run whose handle was already resident.
+                // The decode figure is the latency above minus this one.
+                //
+                // `nil` means NOTHING MEASURED IT — a fake brain, the cloud,
+                // any path that never reached a generation — and only then is
+                // no row drawn. A handle that was already resident reports a
+                // measured `0`, and the row is drawn with it: "0" is the
+                // reading that says this run paid no page-in, which is a
+                // different fact from "nobody looked" ([MODEL-SWITCH],
+                // 2026-09-21 review round 2 — this comment used to claim the
+                // resident case was `nil` too, which the generator never did).
                 if let loadMs = outcome.loadMs {
                     fact(L10n.str("settings.translateTest.result.modelLoad", locale: locale),
                          String(loadMs))
@@ -498,6 +509,14 @@ private struct TranslateTestResultCard: View {
 /// ONE value in, not two ([MODEL-SWITCH], 2026-09-21 review): the row carries
 /// its own name, so the header and the management row below it cannot
 /// describe different models.
+///
+/// **Offered, not merely carried** (2026-09-21 review round 2): the
+/// management row is drawn only for an entry the catalog publishes for
+/// download (`TranslateTestModel.offeredEntry(for:)`). A ladder rung the
+/// catalog carries but never offers — the round-4 Q8 ceiling, the superseded
+/// quants — gets a sentence instead, because a `ModelManagementRow` there
+/// would put a Delete on an artifact this screen did not install and a
+/// Download on one no release server is carrying.
 private struct TranslateTestInstallCard: View {
     @EnvironmentObject private var coordinator: AppCoordinator
     /// The selected row. Non-optional, because the view only draws this card
@@ -512,7 +531,7 @@ private struct TranslateTestInstallCard: View {
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
                 .foregroundStyle(DesignTokens.textPrimary)
 
-            if let entry = ModelCatalog.entry(for: option.id) {
+            if let entry = TranslateTestModel.offeredEntry(for: option.id) {
                 ModelManagementRow(
                     entry: entry,
                     state: downloadState(for: entry.id),
@@ -530,12 +549,21 @@ private struct TranslateTestInstallCard: View {
                     }
                 )
             } else {
-                // A ladder entry with no catalog entry cannot be downloaded
-                // by this build — the id came from the config, not from the
-                // catalog (a catalog swap mid-flight is exactly this case).
-                // Saying so is the honest answer; drawing a row would need an
-                // entry that does not exist.
-                Text(L10n.str("settings.translateTest.install.unknown", locale: locale))
+                // Not offered, and there are two reasons — the sentence says
+                // which, because the household's next move differs.
+                //
+                // [MODEL-SWITCH] (2026-09-21 review round 2) A ladder entry
+                // with no catalog entry cannot be downloaded by this build:
+                // the id came from the config, not from the catalog (a
+                // catalog swap mid-flight is exactly this case). And an entry
+                // the catalog carries but does not PUBLISH — the round-4 Q8
+                // ceiling, the superseded quants — is one this build never
+                // offers, so this card must not become the app's one place
+                // that offers it: `ModelManagementRow` would bring a Delete
+                // for an artifact this screen did not install and cannot
+                // fetch, and the honest answer is the sentence, not the row.
+                Text(L10n.str(TranslateTestModel.unofferedInstallNoteKey(for: option.id),
+                              locale: locale))
                     .font(.system(size: DesignTokens.minCaptionPointSize))
                     .foregroundStyle(DesignTokens.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)

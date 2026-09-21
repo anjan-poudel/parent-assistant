@@ -281,18 +281,28 @@ final class TranslateTestModel: ObservableObject {
 
     /// The row the screen opens on.
     ///
-    /// The first INSTALLED model — asked through the TIER'S own resolution
-    /// rule (`LocalBrainTranslationTier.resolvedModel(in:isAvailable:)`, the
-    /// function `installedModel()` is built from) rather than through a
-    /// second "first where installed" spelled here, so the row this screen
-    /// opens on is the rung the pipeline would itself pick
-    /// ([MODEL-SWITCH], 2026-09-21 review). Failing that, the first row at
-    /// all: an uninstalled model is a valid selection whose card offers that
-    /// model's download, which is a better opening screen than a cloud path
-    /// the household may have switched off.
+    /// The first model the device can actually **run** — asked through the
+    /// TIER'S own resolution rule (`LocalBrainTranslationTier
+    /// .resolvedModel(in:isAvailable:)`, the function `installedModel()` is
+    /// built from) rather than through a second "first where installed"
+    /// spelled here, so the row this screen opens on is the rung the
+    /// pipeline would itself pick ([MODEL-SWITCH], 2026-09-21 review).
+    ///
+    /// **"Runnable" is two questions, not one** (2026-09-21 review round 2):
+    /// the artifact is on the device AND the device class does not refuse it.
+    /// The installed test alone put the opening row on a rung this phone
+    /// cannot run — the screen would open on a model whose first attempt could
+    /// only answer `.modelUnavailable`, with the download card hidden (there
+    /// is nothing to download) and no way forward but a manual pick. The
+    /// tier's own resolution skips those rungs; this is that skip rule.
+    ///
+    /// Failing that, the first row at all: an uninstalled model is a valid
+    /// selection whose card offers that model's download, which is a better
+    /// opening screen than a cloud path the household may have switched off.
     static func defaultSelection(options: [TranslateTestModelOption]) -> TranslateTestSelection {
         let resolved = LocalBrainTranslationTier.resolvedModel(in: options.map(\.id)) { id in
-            options.first { $0.id == id }?.isInstalled ?? false
+            guard let option = options.first(where: { $0.id == id }) else { return false }
+            return option.isInstalled && !option.isUnavailable
         }
         return resolved.map { .model($0) }
             ?? options.first.map { .model($0.id) }
@@ -307,9 +317,17 @@ final class TranslateTestModel: ObservableObject {
         return modelOptions.first { $0.id == id }
     }
 
-    /// The name to print for the selected model: the catalog's, when the
-    /// source has a row for it, and the raw id when it does not (a ladder
-    /// entry this build's catalog does not carry).
+    /// The name to print for the selected model: the row's, when the source
+    /// has one, and the raw id when it does not.
+    ///
+    /// The raw-id half is a contract for a hand-built source rather than a
+    /// case production reaches ([MODEL-SWITCH], 2026-09-21 review round 2):
+    /// the ladder is filtered by catalogue membership
+    /// (`LocalBrainTranslationTier.translationModelIDs(from:)` is a
+    /// `ModelCatalog.isTranslationModel` filter), so every rung the screen
+    /// draws has an entry and a name. It is kept because the rows are a
+    /// caller's to build — the same reason `TranslateTestModelSource
+    /// .displayName` keeps its fallback.
     ///
     /// `nil` exactly when the selection is not a model ([MODEL-SWITCH],
     /// 2026-09-21 review). It used to be `""` for Gemini, which is a name
@@ -335,10 +353,12 @@ final class TranslateTestModel: ObservableObject {
     /// row can no longer claim to be ready.
     ///
     /// The raw-id fallback is this screen's own: the shared composer takes a
-    /// catalog entry, and a ladder id this build does not carry has none.
+    /// catalog entry, and a row for an id this build does not carry has none.
     /// Showing the id is the honest answer for a dev screen, and it keeps
-    /// the row selectable — the download it would offer is simply absent,
-    /// because there is nothing to download.
+    /// the row selectable. Unreachable through the production ladder, which
+    /// is filtered by catalogue membership (see `selectedModelName`) — it is
+    /// kept for the same reason: the rows are a caller's to build, and the
+    /// test that pins it builds exactly that caller.
     ///
     /// Memoized per (model, state, locale): the picker asks for every row on
     /// every redraw, and each compose is a catalog lookup plus a localization
@@ -625,6 +645,41 @@ final class TranslateTestModel: ObservableObject {
     /// so the rule is pinned by a test rather than by inspection.
     static func completedInstalls(in states: [ModelID: ModelDownloadState]) -> Set<ModelID> {
         Set(states.compactMap { entry in entry.value == .completed ? entry.key : nil })
+    }
+
+    /// The catalog entry this screen may OFFER as a download for `id`, or
+    /// `nil` when it may not ([MODEL-SWITCH], 2026-09-21 review round 2).
+    ///
+    /// **The offer is the catalog's, not the ladder's.** A ladder rung is a
+    /// model the TIER will try; it is not a promise that this build publishes
+    /// the artifact for download, and several rungs exist precisely so a
+    /// device that sideloaded them keeps working (the round-4 Q8 ceiling, the
+    /// superseded quants). This screen used to draw a full management row —
+    /// Download, Cancel, **Delete** — for every rung the catalog happened to
+    /// carry, which made it the one place in the app offering an in-app
+    /// download for models the AI-models screen deliberately never offers.
+    ///
+    /// So the list is `ModelCatalog.availableTranslationEntries`: the SAME
+    /// list the Settings translation section's own download row draws from,
+    /// asked rather than re-spelled, so the two surfaces cannot disagree
+    /// about what a household may fetch.
+    static func offeredEntry(for id: ModelID) -> ModelCatalogEntry? {
+        ModelCatalog.availableTranslationEntries.first { $0.id == id }
+    }
+
+    /// The sentence for a rung this screen cannot offer — one of the two
+    /// cases the catalog leaves, keyed by which one it is.
+    ///
+    /// An id no entry carries at all (a catalog swap mid-flight) and an
+    /// artifact this build carries but does not publish (sideload-only) are
+    /// different facts, and the household's next action differs: nothing can
+    /// be installed for the first, and the file must be put on the device by
+    /// hand for the second. Pure and static so both halves are pinned by a
+    /// test rather than by inspection.
+    static func unofferedInstallNoteKey(for id: ModelID) -> String {
+        ModelCatalog.entry(for: id) == nil
+            ? "settings.translateTest.install.unknown"
+            : "settings.translateTest.install.sideloadOnly"
     }
 
     // MARK: - Teardown

@@ -12771,6 +12771,13 @@
         "ne": { "stringUnit": { "state": "translated", "value": "यो बिल्डमा यो मोडेलको क्याटलग प्रविष्टि छैन, त्यसैले यहाँ डाउनलोड गर्न सकिँदैन।" } }
       }
     },
+    "settings.translateTest.install.sideloadOnly": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "This build does not offer this model for download. Put the file on the phone directly to use it." } },
+        "ne": { "stringUnit": { "state": "translated", "value": "यो बिल्डले यो मोडेल डाउनलोडका लागि उपलब्ध गराउँदैन। प्रयोग गर्न फाइल सिधै फोनमा राख्नुहोस्।" } }
+      }
+    },
     "settings.schemeProbe.title": {
       "extractionState": "manual",
       "localizations": {

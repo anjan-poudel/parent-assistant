@@ -69,24 +69,24 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         func generate(prompt: String,
                       jsonSchema: String,
                       modelURL: URL,
-                      timeout: TimeInterval) async throws -> String {
+                      timeout: TimeInterval) async throws -> BrainGenerationOutput {
             prompts.append(prompt)
             timeouts.append(timeout)
             modelURLs.append(modelURL)
             if let failure { throw failure }
             if let runtimeError { throw runtimeError }
-            return output
+            // The measurement rides with the answer it belongs to
+            // ([MODEL-SWITCH], 2026-09-21 review round 2).
+            return BrainGenerationOutput(text: output, loadMs: loadDurationMs)
         }
 
         func isHoldingHandle() async -> Bool { holdingHandle }
 
-        /// What the runtime measured for the load inside the last generation
-        /// — `nil` (the default) is "nothing measured", the answer every
+        /// What the runtime measured for the load inside that generation —
+        /// `nil` (the default) is "nothing measured", the answer every
         /// hand-written fake honestly gives. Set by the tests that make a
         /// claim about the split between the load and the decode.
         var loadDurationMs: Int?
-
-        func loadDurationMsOfLastGeneration() async -> Int? { loadDurationMs }
 
         func release() async { releaseCount += 1 }
     }
@@ -1375,14 +1375,14 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         XCTAssertNil(box.heldModelURL, "the URL goes with the handle it named")
 
         box.store("a handle", url: url)
-        box.beginDecode()
+        box.beginDecode("a handle")
         XCTAssertEqual(box.releaseForWarden(), .refused(.inUse),
                        "an inference is running on it")
         XCTAssertTrue(box.isHoldingHandle,
                       "a refusal is not a partial drop: the handle is still there")
         XCTAssertEqual(box.currentHandle as? String, "a handle")
 
-        box.endDecode()
+        box.endDecode("a handle")
         XCTAssertEqual(box.releaseForWarden(), .released,
                        "the lease is held for the decode and released after it")
     }
@@ -1412,6 +1412,76 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         XCTAssertNil(box.currentHandle)
         XCTAssertNil(box.heldModelURL, "a drop is not a partial one: both halves go")
         XCTAssertFalse(box.isHoldingHandle)
+    }
+
+    /// [MODEL-SWITCH] A decode that outlives its handle stays reachable
+    /// (2026-09-21 review round 2).
+    ///
+    /// The switch drops the box's handle while an earlier decode may still be
+    /// unwinding on that runtime: the loop is synchronous and
+    /// non-cancellable, so `stop` shortens it but does not end it. Before
+    /// this fix the runtime went with the drop — nothing could stop it, and
+    /// the generator had already told the ledger its bytes were back while
+    /// the model was still in memory. The box's half is what a suite can hold
+    /// without a GGUF: the runtime stays referenced, and reachable for a
+    /// stop, until its decode ends.
+    func testASupersededDecodeStaysReachableUntilItEnds() {
+        let box = TranslateBrainHandleSlot()
+        box.store("old handle", url: URL(fileURLWithPath: "/tmp/old-model.gguf"))
+        box.beginDecode("old handle")
+
+        box.drop()
+
+        XCTAssertFalse(box.isHoldingHandle, "the box's reference is gone: the switch moved on")
+        XCTAssertTrue(box.isDecoding, "…but the runtime is still decoding on that model")
+        XCTAssertTrue(box.runtimesToInterrupt.contains { ($0 as? String) == "old handle" },
+                      "a stop can still reach it — the superseded decode is the one nobody else can stop")
+
+        box.endDecode("old handle")
+
+        XCTAssertFalse(box.isDecoding, "the decode is over, so its bytes may be retired")
+        XCTAssertFalse(box.runtimesToInterrupt.contains { ($0 as? String) == "old handle" },
+                       "…and the box stops holding a runtime it no longer runs")
+    }
+
+    /// [MODEL-SWITCH] The ledger's release waits for a superseded decode
+    /// (2026-09-21 review round 2) — the other half of the test above.
+    ///
+    /// Dropping the box's handle is not the moment the old model leaves
+    /// memory: the runtime is still decoding, and the box still references
+    /// it. Retiring the tier's row at the drop is how a switch ends up with
+    /// two models resident while the ledger books one — the arithmetic the
+    /// next load then reserves against.
+    ///
+    /// Driven without a GGUF, like the residency tests beside it: the two
+    /// calls a switch makes are `slot.drop()` and the settle, and both are
+    /// reachable here through `release()`.
+    func testTheLedgerKeepsTheBytesUntilASupersededDecodeEnds() async {
+        let ledger = ModelLifecycleManager(
+            probe: ScriptedProbe(),
+            budgetOverrideBytes: ModelLifecycleBudget.standardModelsBudgetBytes)
+        let generator = LlamaBrainTextGenerator(config: config, lifecycle: ledger)
+        // The shipped registration's owner IS the box (that is what makes the
+        // tier's own releases owner-scoped), so the fixture registers the
+        // same way rather than approximating it with a separate object.
+        ledger.register(slot: .translateBrain, modelID: Self.modelID, owner: generator.slot,
+                        priority: ReservationPurpose.liveTranslate.priority,
+                        resident: generator.slot) {}
+        generator.slot.store("a handle", url: URL(fileURLWithPath: "/tmp/not-a-real-model.gguf"))
+        ledger.didLoad(.translateBrain, owner: generator.slot)
+        generator.slot.beginDecode("a handle")
+
+        await generator.release()
+
+        XCTAssertFalse(generator.slot.isHoldingHandle, "the switch dropped the box's handle")
+        XCTAssertTrue(ledger.isResident(.translateBrain),
+                      "…and the model is STILL resident: a decode is running on it")
+
+        generator.slot.endDecode("a handle")
+        await generator.release()
+
+        XCTAssertFalse(ledger.isResident(.translateBrain),
+                       "the decode ended: the bytes are back, and only now is the row retired")
     }
 
     /// The two rows are distinct positions: registering the tier's does not
@@ -2289,7 +2359,7 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         let box = TranslateBrainHandleSlot()
         box.setOffloadHandler { notices.record(.offloadedForVoiceTurn) }
         box.store("a handle", url: URL(fileURLWithPath: "/tmp/not-a-real-model.gguf"))
-        box.beginDecode()
+        box.beginDecode("a handle")
 
         XCTAssertEqual(box.releaseForWarden(), .refused(.inUse))
         XCTAssertTrue(notices.notices.isEmpty,

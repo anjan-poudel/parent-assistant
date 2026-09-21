@@ -129,28 +129,25 @@ protocol LocalBrainTranslating: Sendable {
     /// resolution. `nil` means the caller had none, reported exactly as a
     /// resolution failure always was.
     ///
-    /// Additive (2026-09-21, the translate-test screen's model picker): it is
-    /// a requirement with a DEFAULT, the same shape `isHoldingHandle` and
-    /// `loadDurationMsOfLastGeneration` use, rather than the one-method
-    /// protocol (`LocalBrainModelTier`) this screen used to carry. That
-    /// protocol was a second statement of a capability the tier already has,
-    /// and it narrowed the screen's `brain` to it — so a conformer that
-    /// implemented only the pipeline's method could be handed to the screen
-    /// and silently answer with the ladder's model under another row's name.
-    /// One protocol cannot be wired that way.
+    /// Additive (2026-09-21, the translate-test screen's model picker), and
+    /// **a requirement without a default** ([MODEL-SWITCH], 2026-09-21
+    /// review round 2). It was briefly a requirement with a default that
+    /// forwarded to the ladder model, which is the one thing a NAMED attempt
+    /// must never do: a conformer that did not implement it would answer a
+    /// caller who asked for the Q8 with whatever its own resolution picked,
+    /// under the Q8's row. Whatever a conformer does here, it has to SAY so —
+    /// a brain with one model in it writes that sentence in its own body
+    /// (see the test harness's `RecordingBrain`), which is the whole point of
+    /// the requirement being explicit.
+    ///
+    /// The shipped tier is the only production conformer, and its body is the
+    /// real named attempt (ladder membership + build classification checked
+    /// before anything runs).
     func translate(_ strings: [String], using model: ModelID?) async -> LocalBrainTranslationOutcome
 }
 
 extension LocalBrainTranslating {
     func release() async {}
-
-    /// The honest spelling of "this brain does not distinguish models": it
-    /// runs its own resolution, which is what it would do for any caller.
-    /// The shipped tier overrides this with the real named attempt, and it is
-    /// the only conformer a surface that names a model is wired to.
-    func translate(_ strings: [String], using model: ModelID?) async -> LocalBrainTranslationOutcome {
-        await translate(strings)
-    }
 }
 
 extension LocalBrainTranslationTier {
@@ -191,8 +188,17 @@ struct LocalBrainTranslationOutcome: Equatable {
 
     /// [MODEL-SWITCH] (2026-09-21) How much of `durationMs` was the handle
     /// load rather than the decode, when the generator measures the split —
-    /// `nil` for a generator that does not (every fake, and every path that
-    /// never reached a generation).
+    /// `nil` for a generator that does not (every hand-written fake, and
+    /// every path that never reached a generation).
+    ///
+    /// **Two spellings, two different facts.** `0` is a measurement: the
+    /// handle was already resident, so nothing paged in and nothing was
+    /// evicted. `nil` is the absence of one. The measurement is THIS
+    /// attempt's own — it arrives with the generation it belongs to, so an
+    /// overlapping attempt cannot overwrite it ([MODEL-SWITCH], 2026-09-21
+    /// review round 2). It also covers the previous model's eviction when the
+    /// attempt switched rows: the window opens before the old handle is
+    /// dropped, because that free is part of what a switch costs.
     ///
     /// **Additive, and deliberately not folded into `durationMs`.** The
     /// event's `durationMs` is production telemetry and keeps meaning what it
@@ -333,12 +339,22 @@ enum LocalBrainWardenNotice: String, Equatable, CaseIterable, Sendable {
 /// timeout-to-fallback contract are all exercised without a model on disk, and
 /// the llama.cpp call is the only thing a fake replaces.
 protocol BrainTextGenerating: Sendable {
-    /// One grammar-constrained generation. Throws `BrainGenerationFailure` on
-    /// every failure this tier reports, and must not outlive `timeout`.
+    /// One grammar-constrained generation, with the measurement the tier
+    /// reports beside it. Throws `BrainGenerationFailure` on every failure
+    /// this tier reports, and must not outlive `timeout`.
+    ///
+    /// **The load travels with the answer** ([MODEL-SWITCH], 2026-09-21
+    /// review round 2). It used to be a per-generator "last load" the tier
+    /// read after the call (`loadDurationMsOfLastGeneration`), which is a
+    /// last-writer-wins cell: an attempt that overlaps another can have its
+    /// measurement overwritten before it reads it, and the two attempts can
+    /// be loading different models. Handing the number back with the text it
+    /// belongs to makes the pairing a fact about one call instead of a race
+    /// between two.
     func generate(prompt: String,
                   jsonSchema: String,
                   modelURL: URL,
-                  timeout: TimeInterval) async throws -> String
+                  timeout: TimeInterval) async throws -> BrainGenerationOutput
 
     /// Drops the resident handle, if one is held.
     func release() async
@@ -353,29 +369,6 @@ protocol BrainTextGenerating: Sendable {
     /// would happen), so the default is the conservative half for a fake and
     /// the honest one for a runtime that has not been asked.
     func isHoldingHandle() async -> Bool
-
-    /// [MODEL-SWITCH] (2026-09-21) How much of the LAST `generate` call's
-    /// wall time went on getting its handle ready, in milliseconds — `0` when
-    /// the handle was already resident, and `nil` for a generator that does
-    /// not measure the split.
-    ///
-    /// **Why the split exists.** The translate-test screen compares models
-    /// against each other, and a number that includes a 2.5 GB page-in is not
-    /// that comparison: with the idle timer at five seconds
-    /// (`brainTranslationIdleUnloadSeconds`), the first run after switching
-    /// rows pays the load and the second does not, so the same model reads as
-    /// tens of seconds and then as a few hundred milliseconds. That is a fact
-    /// about the idle timer, not about the model, and the screen's whole
-    /// question is the model. The load still runs INSIDE `generate`'s own
-    /// deadline — that contract is `run`'s and it does not move; this only
-    /// says how much of the total it was, so the caller can subtract it from
-    /// the headline and still show the wait beside it.
-    ///
-    /// A requirement with a default rather than a new parameter on
-    /// `generate`, for the same reason `isHoldingHandle` is one: every fake
-    /// in the suites keeps compiling and honestly answers "not measured"
-    /// (`nil`), while the runtime that does the paging reports the number.
-    func loadDurationMsOfLastGeneration() async -> Int?
 
     /// Told when the warden takes the resident handle away on a path the tier
     /// did not ask for — the preemption ask, or the registered release path
@@ -393,11 +386,26 @@ protocol BrainTextGenerating: Sendable {
 extension BrainTextGenerating {
     func release() async {}
     func isHoldingHandle() async -> Bool { false }
-    /// "Not measured" — see the requirement's doc. Every fake answers this,
-    /// and the tier passes it through as `nil` rather than inventing a `0`
-    /// (a zero would claim the handle was already resident).
-    func loadDurationMsOfLastGeneration() async -> Int? { nil }
     func setWardenOffloadHandler(_ handler: (@Sendable () -> Void)?) {}
+}
+
+/// One generation's answer, and how much of that call went on getting its
+/// handle ready.
+///
+/// [MODEL-SWITCH] (2026-09-21 review round 2) The measurement rides with the
+/// text rather than being parked on the generator: see `generate`'s doc.
+struct BrainGenerationOutput: Equatable, Sendable {
+    /// What the model answered.
+    let text: String
+    /// Milliseconds spent getting the handle ready inside this call —
+    /// `nil` for a generator that does not measure the split, and `0` for a
+    /// handle that was already resident (see `loadHandle`).
+    let loadMs: Int?
+
+    init(text: String, loadMs: Int? = nil) {
+        self.text = text
+        self.loadMs = loadMs
+    }
 }
 
 /// Why a generation did not produce an answer. Mapped 1:1 onto
@@ -743,12 +751,12 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
         inFlightStrings = batch.count
         defer { inFlightStrings = 0 }
         do {
-            let output = try await generator.generate(prompt: Self.prompt(for: batch,
-                                                                          targetLanguage: targetLanguage),
-                                                      jsonSchema: Self.jsonSchema,
-                                                      modelURL: modelURL,
-                                                      timeout: timeout)
-            let report = Self.report(output,
+            let generation = try await generator.generate(prompt: Self.prompt(for: batch,
+                                                                              targetLanguage: targetLanguage),
+                                                          jsonSchema: Self.jsonSchema,
+                                                          modelURL: modelURL,
+                                                          timeout: timeout)
+            let report = Self.report(generation.text,
                                      sources: batch,
                                      targetLanguage: targetLanguage,
                                      config: config)
@@ -785,8 +793,10 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
                                          durationMs: durationMs,
                                          generation: report.reading)
             // [MODEL-SWITCH] (2026-09-21 review) How much of `durationMs` was
-            // getting the handle ready, asked of the generator that did the
-            // paging. `nil` for a fake (nothing measured) — never a made-up
+            // getting the handle ready, read off THIS generation's own output
+            // rather than off the generator's last-writer cell (review round
+            // 2: two overlapping attempts can be loading two different
+            // models). `nil` for a fake (nothing measured) — never a made-up
             // zero, which would claim a resident handle. The event above
             // keeps the whole attempt: telemetry has always meant the attempt
             // including its load, and the load still runs inside the
@@ -794,7 +804,7 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
             // needs to compare models rather than idle timers.
             return LocalBrainTranslationOutcome(translations: translations,
                                                 durationMs: durationMs,
-                                                loadDurationMs: await generator.loadDurationMsOfLastGeneration())
+                                                loadDurationMs: generation.loadMs)
         } catch let failure as BrainGenerationFailure {
             events.brainTranslationUnavailable(Self.reason(for: failure),
                                                stage: Self.stage(for: failure))
@@ -1394,6 +1404,16 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
 /// momentarily low by that one handle for exactly as long as the decode it
 /// already bounded takes to stop.
 ///
+/// **The superseded decode.** [MODEL-SWITCH] (2026-09-21 review round 2) A
+/// model switch drops the box's handle while an earlier decode may still be
+/// unwinding on it — the runtime's loop is synchronous and non-cancellable,
+/// so a stop shortens it but does not end it. The box keeps that runtime
+/// referenced (`decodingHandles`) until its decode ends, so `stopDecode` can
+/// still reach it, and the generator holds the LEDGER's release until the
+/// same moment (`retireResidencyIfIdle`): the bytes really are still resident,
+/// and booking them back early is how a switch ends up with two models in
+/// memory and one model's worth of accounting.
+///
 /// It conforms to `ModelResident` and **must not re-enter the manager**: the
 /// manager's lock is non-recursive, and `releaseForWarden` runs outside it.
 /// Nothing here calls back into `lifecycle` — the tier does that itself, from
@@ -1510,16 +1530,69 @@ final class TranslateBrainHandleSlot: ModelResident, @unchecked Sendable {
         return true
     }
 
-    func beginDecode() {
+    /// The runtimes a decode is running on, by reference.
+    ///
+    /// [MODEL-SWITCH] (2026-09-21 review round 2) The box's `handle` is what
+    /// `stopDecode` reads, and a switch DROPS it — so a decode still
+    /// unwinding on the old handle used to become unreachable the instant the
+    /// next model's load began: nothing could stop it, and the ledger had
+    /// already been told its bytes were back while the runtime was still
+    /// resident. These references are the fix's other half: the box keeps a
+    /// runtime alive and reachable for exactly as long as a decode is running
+    /// on it, whether or not it is still the box's current handle.
+    private var decodingHandles: [Any] = []
+
+    func beginDecode(_ handle: Any) {
         lock.lock()
         defer { lock.unlock() }
         decodeDepth += 1
+        decodingHandles.append(handle)
     }
 
-    func endDecode() {
+    /// Ends the decode that was running on `handle`. Paired with
+    /// `beginDecode(_:)` across a `defer`, so the reference goes even when
+    /// the decode threw.
+    func endDecode(_ handle: Any) {
         lock.lock()
         defer { lock.unlock() }
         decodeDepth = max(0, decodeDepth - 1)
+        if let index = decodingHandles.lastIndex(where: { Self.isSameRuntime($0, handle) }) {
+            decodingHandles.remove(at: index)
+        } else if !decodingHandles.isEmpty {
+            // Identity is unavailable (a test double holding a plain value),
+            // so the decode that just ended is taken to be the most recently
+            // opened one — the LIFO order a `defer` produces.
+            decodingHandles.removeLast()
+        }
+    }
+
+    /// Whether a decode is in flight on anything this box handed out.
+    var isDecoding: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return decodeDepth > 0
+    }
+
+    /// Every runtime a stop should reach: the current handle, plus any
+    /// runtime a decode is still running on after its handle was superseded
+    /// by a model switch.
+    ///
+    /// A superseded decode is precisely the one nobody else can stop — its
+    /// box reference is gone, so `currentHandle` no longer names it.
+    var runtimesToInterrupt: [Any] {
+        lock.lock()
+        defer { lock.unlock() }
+        var all: [Any] = []
+        if let handle { all.append(handle) }
+        all.append(contentsOf: decodingHandles)
+        return all
+    }
+
+    /// Identity for class-backed runtimes (always the case in production:
+    /// `LLM`), and `false` for the plain values a test double stores.
+    private static func isSameRuntime(_ lhs: Any, _ rhs: Any) -> Bool {
+        guard let left = lhs as? AnyObject, let right = rhs as? AnyObject else { return false }
+        return left === right
     }
 
     // MARK: ModelResident
@@ -1636,13 +1709,6 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
     nonisolated let slot = TranslateBrainHandleSlot()
     private var lastUse: Date?
 
-    /// [MODEL-SWITCH] (2026-09-21 review) How long the last handle load took,
-    /// in milliseconds — `0` when the requested model was already resident.
-    ///
-    /// Written by `loadHandle` on every path through it and read only after a
-    /// generation that succeeded, so a number here is never a leftover from
-    /// an attempt the caller gave up on.
-    private var lastLoadMs: Int?
     /// The armed idle release, if one is. Cancelled and re-armed by every use,
     /// so the handle's lifetime is measured from the last batch and not from
     /// the first.
@@ -1664,7 +1730,7 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
     func generate(prompt: String,
                   jsonSchema: String,
                   modelURL: URL,
-                  timeout: TimeInterval) async throws -> String {
+                  timeout: TimeInterval) async throws -> BrainGenerationOutput {
         #if canImport(LLM)
         defer {
             lastUse = Date()
@@ -1681,13 +1747,6 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
     }
 
     func isHoldingHandle() async -> Bool { slot.isHoldingHandle }
-
-    /// The tier's question about the split (see
-    /// `BrainTextGenerating.loadDurationMsOfLastGeneration`), answered from
-    /// the measurement `loadHandle` records. Outside `#if canImport(LLM)`,
-    /// like `isHoldingHandle`: the requirement exists on every build, and on
-    /// one without the runtime no generation reaches the read.
-    func loadDurationMsOfLastGeneration() async -> Int? { lastLoadMs }
 
     /// `nonisolated` so it can satisfy `BrainTextGenerating`'s synchronous
     /// requirement: the warden asks from its own reservation path and must
@@ -1734,7 +1793,8 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
         dropHandle()
     }
 
-    /// Drops the handle and tells the ledger its bytes are back.
+    /// Drops the handle and tells the ledger its bytes are back — once they
+    /// actually are.
     ///
     /// `didUnload` is owner-scoped on the slot's `TranslateBrainHandleSlot`,
     /// which is the object the registration was made with — so a
@@ -1747,8 +1807,38 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
     /// with nothing in it.
     private func dropHandle() {
         slot.drop()
-        lifecycle.didUnload(.translateBrain, owner: slot)
+        retireResidencyIfIdle()
         lastUse = nil
+    }
+
+    /// Tells the ledger the tier's bytes are back — but only once nothing can
+    /// still be holding a runtime.
+    ///
+    /// [MODEL-SWITCH] (2026-09-21 review round 2) **The switch's own rule.**
+    /// A model switch drops the box's handle while a superseded decode may
+    /// still be unwinding on the old runtime (synchronous, non-cancellable
+    /// loop: `stop` shortens it, it does not end it). Those bytes are still
+    /// resident — the box keeps the reference (`decodingHandles`) precisely
+    /// because they are — so retiring the row here and now would book back
+    /// memory the device is still holding, and the next load would reserve
+    /// against a budget that believes one model is in memory while two are.
+    /// The release waits for the last decode to end (`settleDecodeEnded`),
+    /// which is the moment the claim becomes true.
+    private func retireResidencyIfIdle() {
+        guard !slot.isHoldingHandle, !slot.isDecoding else { return }
+        lifecycle.didUnload(.translateBrain, owner: slot)
+    }
+
+    /// A decode ended: if it was the last thing holding a runtime, the row's
+    /// bytes are retired now. See `retireResidencyIfIdle`.
+    ///
+    /// Called from the decode's own `defer`, which is not on this actor, so
+    /// it hops. The hop can land after a later attempt has already started
+    /// using the handle again — `retireResidencyIfIdle` reads the box at that
+    /// moment and declines, which is exactly right: the row is in use, and
+    /// nothing may take its bytes back.
+    private func settleDecodeEnded() {
+        retireResidencyIfIdle()
     }
 
 
@@ -1798,13 +1888,14 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
     /// merely around the construction — because that is the interval a warden
     /// could previously mis-read. It is closed by a `defer`, so no exit leaks
     /// it.
-    private func loadHandle(modelURL: URL) throws -> LLM {
+    private func loadHandle(modelURL: URL) throws -> (handle: LLM, loadMs: Int) {
         if let existing = slot.currentHandle as? LLM,
            slot.heldModelURL == modelURL {
             // Resident, and the one that was asked for: nothing is paged in,
-            // and the measured load is a truthful zero.
-            lastLoadMs = 0
-            return existing
+            // and the measured load is a truthful zero — a MEASUREMENT, not
+            // the absence of one (`LocalBrainTranslationOutcome.loadDurationMs`
+            // carries the distinction).
+            return (existing, 0)
         }
 
         // [MODEL-SWITCH] (2026-09-21 review) The handle in the slot is a
@@ -1816,37 +1907,47 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
         // new load reserved against the budget.
         //
         // `dropHandle` is the release this generator makes for itself:
-        // `slot.drop()` clears the box and `lifecycle.didUnload` retires the
-        // bytes from the resident total, owner-scoped on the slot so this can
-        // only clear the residency this generator owns. The reserve below
-        // therefore asks for the new model against a budget that already has
-        // the previous one back.
+        // `slot.drop()` clears the box and, when no decode still holds the
+        // old runtime, `lifecycle.didUnload` retires the bytes from the
+        // resident total — owner-scoped on the slot, so this can only clear
+        // the residency this generator owns. The reserve below therefore asks
+        // for the new model against a budget that has the previous one back,
+        // or — the case a superseded decode creates — against one that still
+        // counts it, which is the truth about the device and may be a refusal
+        // this load has to take. Both are honest; the undercount was not.
         //
+        // [MODEL-SWITCH] The measurement window opens HERE, before the drop
+        // below (review round 2): the eviction of the previous model — the
+        // free, and the reserve's own sweep of everyone else's evictables —
+        // is part of what a switch costs, and a window that opened after it
+        // reported a switch's load as though the old model had vanished for
+        // free. Everything to the `return created` below is "getting a handle
+        // ready", and the decode that follows it is not.
+        let loadStarted = Date()
+
         // What it costs: if that reserve is then refused, the next batch
         // reloads, where before it would have found the previous model still
         // resident. That is the honest trade — the previous model is not the
         // one the caller asked for, and holding two translation models in
         // memory to save a reload nobody asked for is the failure this fixes.
         //
-        // A decode still in flight on the old handle is not interrupted here:
-        // the box keeps the runtime alive for whoever holds it (`run`'s local
-        // `llm`), so those bytes go when that decode ends. Nothing can end it
-        // sooner, and nothing needs to — this actor runs one generation at a
-        // time.
+        // **A decode still in flight on the old handle** ([MODEL-SWITCH],
+        // 2026-09-21 review round 2 — the version of this comment before it
+        // claimed "nothing needs to end it sooner", and that was the bug).
+        // The runtime's loop is synchronous and non-cancellable, so a decode
+        // can outlive its box reference: it is stopped here first (it belongs
+        // to an attempt that has been superseded, and letting it keep the
+        // runtime busy while the new model pages in is the shape that gets
+        // the app killed), and the LEDGER's release is deferred until it
+        // really ends (`retireResidencyIfIdle`). Stopping is a request, not a
+        // join — the loop ends when it reaches its next token — which is
+        // exactly why the bytes cannot be booked back here.
         if slot.isHoldingHandle {
+            stopDecode()
             dropHandle()
         }
 
         let modelID = Self.modelID(forURL: modelURL)
-
-        // [MODEL-SWITCH] The measurement window opens here: everything to the
-        // `return created` below is "getting a handle ready", and the decode
-        // that follows it is not. The `defer` covers every exit — a refusal, an
-        // abandon, a construction failure — because only a successful
-        // generation ever reads it, and a stale number is worse than a fresh
-        // one.
-        let loadStarted = Date()
-        defer { lastLoadMs = Int(Date().timeIntervalSince(loadStarted) * 1_000) }
 
         slot.beginLoad()
         defer { slot.endLoad() }
@@ -2038,7 +2139,10 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
             lifecycle.commit(reservation)
         }
         committed = true
-        return created
+        // The measurement closes here: everything since `loadStarted` —
+        // the old model's eviction, the reserve's sweep, the page-in — was
+        // "getting a handle ready", and the decode that follows is not.
+        return (created, Int(Date().timeIntervalSince(loadStarted) * 1_000))
     }
 
     /// [PRESSURE-SAFE LOAD] The two signals a load must stand down for, taken.
@@ -2145,11 +2249,12 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
     private func run(modelURL: URL,
                      prompt: String,
                      jsonSchema: String,
-                     timeout: TimeInterval) async throws -> String {
+                     timeout: TimeInterval) async throws -> BrainGenerationOutput {
         do {
-            return try await withThrowingTaskGroup(of: String.self) { group in
+            return try await withThrowingTaskGroup(of: BrainGenerationOutput.self) { group in
                 group.addTask { [self] in
-                    let llm = try await loadHandle(modelURL: modelURL)
+                    let loaded = try await loadHandle(modelURL: modelURL)
+                    let llm = loaded.handle
                     // A deadline that fired while the (synchronous, and so
                     // uninterruptible) load was running must not be followed
                     // by a decode nobody is waiting for: the bytes would be
@@ -2169,10 +2274,23 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
                     // the contract's deferred free is what makes even a
                     // forced drop of the box's reference safe (the local
                     // `llm` keeps the runtime alive until this returns).
-                    slot.beginDecode()
-                    defer { slot.endDecode() }
-                    return try await llm.core.generateWithConstraints(from: prompt,
-                                                                     jsonSchema: jsonSchema)
+                    //
+                    // [MODEL-SWITCH] The runtime is handed to the box with
+                    // the lease (review round 2), so a switch that drops the
+                    // box's handle while this decode unwinds can still stop
+                    // it, and the ledger's release waits for the same moment.
+                    // The settle hops because this closure is not on the
+                    // actor: it runs when the decode is genuinely over, which
+                    // is the first instant the old bytes may be booked back.
+                    slot.beginDecode(llm)
+                    defer {
+                        slot.endDecode(llm)
+                        Task { await self.settleDecodeEnded() }
+                    }
+                    return BrainGenerationOutput(
+                        text: try await llm.core.generateWithConstraints(from: prompt,
+                                                                         jsonSchema: jsonSchema),
+                        loadMs: loaded.loadMs)
                 }
                 group.addTask {
                     try await Task.sleep(for: .seconds(timeout))
@@ -2198,16 +2316,28 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
         }
     }
 
-    /// Stops the decode in flight on the resident handle, if there is one.
+    /// Stops every decode in flight: the box's current handle, and any
+    /// runtime a decode is still unwinding on after its handle was dropped.
     /// Safe with nothing in flight, and with no handle at all.
     ///
-    /// Reads the handle through the box rather than a stored property: the
-    /// warden can drop the box's reference out from under this actor
+    /// Reads through the box rather than a stored property: the warden can
+    /// drop the box's reference out from under this actor
     /// (`TranslateBrainHandleSlot.releaseForWarden`, or its force fallback),
     /// so the only safe way to ask "is there a live runtime to interrupt?" is
     /// the box's own locked read.
+    ///
+    /// **Why it is a sweep and not one handle** [MODEL-SWITCH], 2026-09-21
+    /// review round 2: after a switch, the runtime this call is aimed at may
+    /// no longer be the box's `currentHandle` — the switch dropped it and
+    /// moved on to another model — so a stop that read only the current
+    /// handle would leave the superseded decode running, which is exactly the
+    /// runtime that most needs interrupting (nobody is waiting for it, and it
+    /// keeps the old model's bytes alive). Stopping a runtime that has
+    /// already finished is a no-op, so a stale reference costs nothing.
     private func stopDecode() {
-        (slot.currentHandle as? LLM)?.stop()
+        for runtime in slot.runtimesToInterrupt {
+            (runtime as? LLM)?.stop()
+        }
     }
 
     #endif

@@ -54,9 +54,18 @@ enum TranslateTestSelection: Hashable {
 
 /// What an engine would need before it can answer, in the screen's terms.
 ///
-/// Deliberately three cases and no associated payload: the screen resolves
-/// WHICH download to offer from the selection itself, so this type stays
-/// comparable in a test with no catalog fixture.
+/// Five cases, and no associated payload beyond the refusal's own reason
+/// token: the screen resolves WHICH download to offer from the selection
+/// itself, so this type stays comparable in a test with no catalog fixture.
+///
+/// It was three (`ready`, `modelMissing`, `providerKeyMissing`) until the
+/// 2026-09-21 review, which is why the doc used to say three. Each split
+/// since is a pair with OPPOSITE fixes, which is the test for whether a case
+/// is its own: `modelUnavailable` is "this phone cannot run it" where
+/// `modelMissing` is "install it", and `cloudDisabled` is "someone shut the
+/// cloud off" where `providerKeyMissing` is "enter a key". A screen that
+/// folded either pair together would tell the household to do the one thing
+/// that cannot help.
 enum TranslateEngineReadiness: Equatable {
     /// The engine can run right now.
     case ready
@@ -235,12 +244,21 @@ extension CloudTranslationTier: CloudProbeTier {}
 // (2026-09-21 review) Tier 1 used to be reached through a second protocol
 // declared here — `LocalBrainModelTier`, one method wide, the named attempt.
 // It is gone, and the comment it carried is worth keeping: the requirement
-// now lives on the pipeline's own seam as an additive, DEFAULTED member
+// now lives on the pipeline's own seam as an additive member
 // (`LocalBrainTranslating.translate(_:using:)`), so there is one statement
 // of the capability rather than two, and the screen's `brain` is typed by
-// the same protocol the camera drives. A conformer that does not
-// distinguish models gets the default, which runs its own resolution —
-// the honest answer for a brain whose world has one model in it.
+// the same protocol the camera drives.
+//
+// **A requirement, not a defaulted convenience** (2026-09-21 review round
+// 2). It was declared with a default implementation that forwarded to the
+// unnamed call, on the reasoning that a brain whose world holds one model
+// could answer honestly by resolving it itself. The reasoning is sound for
+// such a brain and wrong for this screen: a conformer that never learned to
+// distinguish models would answer a caller who asked for the Q8 out of its
+// OWN resolution, under the Q8's row — a comparison the screen exists to
+// make, silently measuring a different artifact. So the default is gone and
+// every conformer states what it does with a name; `LocalBrainProbeEngine`
+// below is the caller that depends on it.
 
 // MARK: - Tier 1 (on-device brain)
 
@@ -486,15 +504,31 @@ struct TranslateTestModelSource {
     ///
     /// Still read from the CONFIG rather than from a list of ids spelled
     /// here, so a catalog swap that adds, retires or reorders translation
-    /// models changes this dropdown without a line of this screen changing:
-    /// the names come from whatever the catalog holds, and an id the catalog
-    /// does not carry yet is still offered, under its own raw name.
+    /// models changes this dropdown without a line of this screen changing.
+    ///
+    /// **Every rung here is a catalog entry, and always was**
+    /// (2026-09-21 review round 2). The rule above — `translationModelIDs
+    /// (from:)` — is `ladder.filter { ModelCatalog.isTranslationModel($0) }`,
+    /// and that predicate is membership in `allTranslationEntries`, so the
+    /// filtered list is a subset of the catalog BY CONSTRUCTION. The earlier
+    /// version of this doc promised something else — "an id the catalog does
+    /// not carry yet is still offered, under its own raw name" — and the
+    /// promise is what was wrong, not the code: there is no rung this screen
+    /// can draw that has no name to draw it with. The raw-id branches
+    /// downstream of this (`displayName`'s fallback, `selectedModelName`'s)
+    /// are therefore unreachable through production wiring and kept only as
+    /// the contract of a hand-built source — see their own notes.
     let ladder: [ModelID]
     /// The catalog's display name for a model, or the id itself when the
-    /// catalog has no entry for it. A ladder mid-swap can name a model this
-    /// build does not carry; showing the raw id is the honest answer for a
-    /// dev screen, and it keeps the row selectable — the download it offers
-    /// is simply absent, because there is nothing to download.
+    /// catalog has no entry for it.
+    ///
+    /// The fallback is DEAD through production wiring (see `ladder`): the
+    /// ladder is filtered by catalogue membership, and the coordinator's own
+    /// closure (`AppCoordinator.makeTranslateTestDependencies`) reads the
+    /// entry for the name. It survives because this is a closure the type
+    /// does not own — a suite can hand one that answers `nil` for a name, and
+    /// a row with no name would be a row with a blank label. Showing the raw
+    /// id is the honest answer in that case, and it keeps the row selectable.
     let displayName: (ModelID) -> String
     /// Whether the model can run now: the question the tier's own run gate
     /// asks (`ModelStore.path(for:)`). The ONE predicate — see
