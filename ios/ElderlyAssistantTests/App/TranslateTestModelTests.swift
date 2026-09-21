@@ -914,8 +914,14 @@ final class TranslateTestEngineAdapterTests: XCTestCase {
             self.batch = batch
         }
 
+        /// The protocol's own requirement, `cachePolicy` included: the 2-arg
+        /// form is a convenience on the protocol extension, NOT a
+        /// requirement, so a conformer that implements only that does not
+        /// conform. The batch here is scripted, so the policy is not what
+        /// this fake answers with — it counts the ask and returns it.
         func resolve(items: [CloudTranslationTier.Item],
-                     targetLanguage: AppLanguage) async -> CloudTranslationTier.BatchResult {
+                     targetLanguage: AppLanguage,
+                     cachePolicy: CloudTranslationTier.CachePolicy) async -> CloudTranslationTier.BatchResult {
             resolveCount += 1
             return batch
         }
