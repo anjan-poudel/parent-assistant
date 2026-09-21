@@ -62,6 +62,14 @@ let package = Package(
             dependencies: ["llama", "LlamaChat", "LLMMacros"],
             path: "Sources/LLM"
         ),
+        // The tests directory was previously dormant: there was no test target, so
+        // `swift test` built nothing and the UTF-8 carry regression below could not
+        // be run at all.
+        .testTarget(
+            name: "LLMTests",
+            dependencies: ["LLM"],
+            path: "Tests/LLMTests"
+        ),
     ],
     cxxLanguageStandard: .cxx17
 )
