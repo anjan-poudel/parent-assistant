@@ -12541,18 +12541,11 @@
         "ne": { "stringUnit": { "state": "translated", "value": "विकासकर्ता उपकरण। यसले वास्तविक अनुवाद इन्जिन चलाउँछ — क्लाउड इन्जिनले क्यामेराको जस्तै सहमति ढोका पालन गर्छ।" } }
       }
     },
-    "settings.translateTest.engine.label": {
+    "settings.translateTest.model.label": {
       "extractionState": "manual",
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Engine" } },
-        "ne": { "stringUnit": { "state": "translated", "value": "इन्जिन" } }
-      }
-    },
-    "settings.translateTest.engine.local": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Local" } },
-        "ne": { "stringUnit": { "state": "translated", "value": "लोकल" } }
+        "en": { "stringUnit": { "state": "translated", "value": "Model" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "मोडेल" } }
       }
     },
     "settings.translateTest.engine.gemini": {
@@ -12691,8 +12684,8 @@
     "settings.translateTest.readiness.modelMissing": {
       "extractionState": "manual",
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "No translation model is installed on this device." } },
-        "ne": { "stringUnit": { "state": "translated", "value": "यो यन्त्रमा अनुवाद मोडेल स्थापना गरिएको छैन।" } }
+        "en": { "stringUnit": { "state": "translated", "value": "The model “%@” is not installed on this device." } },
+        "ne": { "stringUnit": { "state": "translated", "value": "“%@” मोडेल यो यन्त्रमा स्थापना गरिएको छैन।" } }
       }
     },
     "settings.translateTest.readiness.providerKeyMissing": {
@@ -12712,8 +12705,15 @@
     "settings.translateTest.install.section": {
       "extractionState": "manual",
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Translation model" } },
-        "ne": { "stringUnit": { "state": "translated", "value": "अनुवाद मोडेल" } }
+        "en": { "stringUnit": { "state": "translated", "value": "Download “%@”" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "“%@” डाउनलोड गर्नुहोस्" } }
+      }
+    },
+    "settings.translateTest.install.unknown": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "This build carries no catalog entry for this model, so it cannot be downloaded here." } },
+        "ne": { "stringUnit": { "state": "translated", "value": "यो बिल्डमा यो मोडेलको क्याटलग प्रविष्टि छैन, त्यसैले यहाँ डाउनलोड गर्न सकिँदैन।" } }
       }
     },
     "settings.schemeProbe.title": {

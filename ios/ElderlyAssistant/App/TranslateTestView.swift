@@ -82,12 +82,21 @@ private struct TranslateTestBody: View {
                 TranslateTestCloudIndicatorRow(indicator: indicator, locale: locale)
             }
 
-            if model.readiness == .modelMissing, model.selectedEngine == .local {
-                TranslateTestInstallCard(downloads: downloads, locale: locale)
+            // The selected model's own download row, and only that one: the
+            // row's job here is to install the model the picker is pointing
+            // at, so a list of every translation artifact would be furniture
+            // that does not answer the question the screen is asking.
+            if model.readiness == .modelMissing {
+                TranslateTestInstallCard(option: model.selectedModelOption,
+                                         name: model.selectedModelName,
+                                         downloads: downloads,
+                                         locale: locale)
             }
 
             if let outcome = model.outcome {
-                TranslateTestResultCard(outcome: outcome, locale: locale)
+                TranslateTestResultCard(outcome: outcome,
+                                        modelID: model.selection.modelID,
+                                        locale: locale)
             }
 
             Text(L10n.str("settings.translateTest.note", locale: locale))
@@ -231,17 +240,33 @@ private struct TranslateTestControlsCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(L10n.str("settings.translateTest.engine.label", locale: locale))
+            Text(L10n.str("settings.translateTest.model.label", locale: locale))
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
                 .foregroundStyle(DesignTokens.textPrimary)
 
-            Picker(L10n.str("settings.translateTest.engine.label", locale: locale),
-                   selection: $model.selectedEngine) {
-                ForEach(TranslateTestEngine.allCases) { engine in
-                    Text(L10n.str(engine.titleKey, locale: locale)).tag(engine)
+            // A MENU picker, not a segmented control: the rows are model
+            // names ("Nepali translation — Qwen 1.7B (round 4)") plus a
+            // state suffix, and a segmented control would either truncate
+            // them or push the cloud row off screen. It is also the shape
+            // the AI-models pickers already use for the same kind of row
+            // (`AIModelsSettingsView`).
+            //
+            // A model that is NOT installed is deliberately selectable, not
+            // `.disabled`: choosing it is how the person gets that model's
+            // download row. Disabling it would make the honest affordance
+            // unreachable — the only way to install the thing you picked.
+            Picker(L10n.str("settings.translateTest.model.label", locale: locale),
+                   selection: $model.selection) {
+                ForEach(model.modelOptions) { option in
+                    Text(TranslateTestModel.optionLabel(option, locale: locale))
+                        .tag(TranslateTestSelection.model(option.id))
                 }
+                Text(L10n.str("settings.translateTest.engine.gemini", locale: locale))
+                    .tag(TranslateTestSelection.gemini)
             }
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
+            .tint(DesignTokens.accent)
+            .frame(minHeight: DesignTokens.minTapTargetSize)
 
             Text(readinessLine)
                 .font(.system(size: DesignTokens.minCaptionPointSize))
@@ -303,7 +328,13 @@ private struct TranslateTestControlsCard: View {
         case .ready:
             return L10n.str("settings.translateTest.readiness.ready", locale: locale)
         case .modelMissing:
-            return L10n.str("settings.translateTest.readiness.modelMissing", locale: locale)
+            // The model is NAMED, because the screen now offers several:
+            // "no translation model is installed" was true enough when
+            // there was one, and would be false on a device that has the
+            // head and not the row the picker is pointing at.
+            return L10n.fmt("settings.translateTest.readiness.modelMissing",
+                            locale: locale,
+                            model.selectedModelName)
         case .providerKeyMissing:
             return L10n.str("settings.translateTest.readiness.providerKeyMissing", locale: locale)
         case .cloudDisabled:
@@ -321,6 +352,15 @@ private struct TranslateTestControlsCard: View {
 /// sentence would be a lossy copy of the token it is standing in for.
 private struct TranslateTestResultCard: View {
     let outcome: TranslateProbeOutcome
+    /// The model row this answer came from, raw id and `nil` for the cloud.
+    ///
+    /// The ID rather than the display name, following this card's own rule:
+    /// everything here is the vocabulary the logs use (`onDeviceBrain`,
+    /// `resident_brain`, the latency), and with several models in the
+    /// dropdown the id is the fact that says which weights answered. Safe to
+    /// read off the live selection because any selection change clears the
+    /// outcome — a card can only ever describe the row it was produced for.
+    let modelID: ModelID?
     let locale: Locale
 
     private var result: TranslationResult { outcome.result }
@@ -342,6 +382,14 @@ private struct TranslateTestResultCard: View {
                 .font(.system(size: DesignTokens.minBodyPointSize))
                 .foregroundStyle(DesignTokens.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            // Which row was asked. On its own line because the ids are long,
+            // and above the tier because it is the more specific fact — the
+            // tier says which path ran, this says which weights it ran.
+            if let modelID {
+                fact(L10n.str("settings.translateTest.model.label", locale: locale),
+                     modelID.rawValue)
+            }
 
             HStack(spacing: 16) {
                 fact(L10n.str("settings.translateTest.result.tier", locale: locale),
@@ -398,7 +446,7 @@ private struct TranslateTestResultCard: View {
 
 // MARK: - Install affordance
 
-/// Shown instead of the run button when tier 1 has no model on this device.
+/// Shown instead of the run button when the SELECTED model is not installed.
 ///
 /// This is the "degrade honestly" requirement made visible: without it the
 /// local engine would offer a button whose only possible outcome is a
@@ -406,18 +454,31 @@ private struct TranslateTestResultCard: View {
 /// It reuses `ModelManagementRow` — the SAME row the hidden AI-models screen
 /// uses for this artifact — rather than a second download UI that could
 /// disagree with the first about sizes, states or the class verdict.
+///
+/// One row, for the selected entry, rather than the list of translation
+/// artifacts this card used to draw: the model picker now names which one
+/// the person wants, so the affordance is that model's download and nothing
+/// else. The list form would also have been dishonest for the ladder's tail,
+/// whose members are the assistant's own brains (`availableTranslationEntries`
+/// carries only the translation head) — a row there would have offered to
+/// install something the picker is not pointing at.
 private struct TranslateTestInstallCard: View {
     @EnvironmentObject private var coordinator: AppCoordinator
+    /// The selected row, or `nil` when the source listed no option for it —
+    /// a ladder id this build's catalog does not carry.
+    let option: TranslateTestModelOption?
+    /// The name to show in the header, whatever the catalog knows.
+    let name: String
     let downloads: ModelDownloadService
     let locale: Locale
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(L10n.str("settings.translateTest.install.section", locale: locale))
+            Text(L10n.fmt("settings.translateTest.install.section", locale: locale, name))
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
                 .foregroundStyle(DesignTokens.textPrimary)
 
-            ForEach(ModelCatalog.availableTranslationEntries, id: \.id) { entry in
+            if let option, let entry = ModelCatalog.entry(for: option.id) {
                 ModelManagementRow(
                     entry: entry,
                     state: downloadState(for: entry.id),
@@ -434,6 +495,16 @@ private struct TranslateTestInstallCard: View {
                         downloads.reset(entry.id)
                     }
                 )
+            } else {
+                // A ladder entry with no catalog entry cannot be downloaded
+                // by this build — the id came from the config, not from the
+                // catalog (a catalog swap mid-flight is exactly this case).
+                // Saying so is the honest answer; drawing a row would need an
+                // entry that does not exist.
+                Text(L10n.str("settings.translateTest.install.unknown", locale: locale))
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundStyle(DesignTokens.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(16)

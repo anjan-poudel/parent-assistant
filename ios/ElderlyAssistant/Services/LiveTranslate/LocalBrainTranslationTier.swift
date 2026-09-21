@@ -504,6 +504,37 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
 
     func translate(_ strings: [String]) async -> LocalBrainTranslationOutcome {
         guard !strings.isEmpty else { return .none }
+        // The ladder's own answer: the first entry that is installed and
+        // complete. This is the pipeline's path and it is unchanged — the
+        // method below is the same body with the model named instead of
+        // resolved.
+        return await translate(strings, using: installedModel())
+    }
+
+    /// The same attempt, for one **named** model rather than the ladder's
+    /// first installed one.
+    ///
+    /// Additive (2026-09-21, the translate-test screen's model picker): the
+    /// pipeline's entry point above calls this with exactly the model it
+    /// resolved for itself a moment earlier, so `translate(_:)` behaves as it
+    /// always has — same gate order, same events, same reasons, same
+    /// outcome. Nothing in the tier's contract moved; this only lets a caller
+    /// that already knows which model it wants ask for it.
+    ///
+    /// `nil` means the caller had none (the ladder is empty, or nothing on it
+    /// is installed), and is reported exactly as the ladder-resolution
+    /// failure always was: `.modelNotInstalled` at the availability stage.
+    ///
+    /// **The named model is not re-checked against `brainTranslationModelIDs`.**
+    /// Membership is the picker's rule, and it is the right one there — the
+    /// screen offers the ladder and nothing else. Here the proof of "may
+    /// this run" is the store's own (`path(for:)`, which is nil unless the
+    /// artifact and its dependencies are on disk), and a second membership
+    /// test would only add a refusal with no honest token to name it: the
+    /// taxonomy has no "not in the ladder" reason, because until now no
+    /// caller could name a model the ladder did not.
+    func translate(_ strings: [String], using model: ModelID?) async -> LocalBrainTranslationOutcome {
+        guard !strings.isEmpty else { return .none }
 
         // [DYNAMIC-TIMEOUT] (owner directive, 2026-09-20, re-landed on the
         // owner's 21:16/21:18 captures: the flat 25 s bound refused the
@@ -515,7 +546,7 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
         let timeout = Self.effectiveTimeout(for: strings, config: config)
 
         #if canImport(LLM)
-        guard let modelStore, let modelID = installedModel(),
+        guard let modelStore, let modelID = model,
               let modelURL = modelStore.path(for: modelID) else {
             // No store, no catalogue entry, or no installed artifact: the tier
             // is skipped and says so. The strings fall through untouched.
@@ -630,7 +661,7 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
             return .none
         }
         #else
-        _ = strings
+        _ = (strings, model)
         // Built without the llama.cpp runtime: no model can be run, whatever is
         // on disk. Recorded once per sighting by the caller's claim, not once
         // per frame.

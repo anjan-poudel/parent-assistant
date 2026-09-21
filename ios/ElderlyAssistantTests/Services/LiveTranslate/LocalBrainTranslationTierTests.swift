@@ -60,6 +60,11 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         private(set) var prompts: [String] = []
         private(set) var timeouts: [TimeInterval] = []
         private(set) var releaseCount = 0
+        /// Which artifact each generation was run against. Recorded since
+        /// [TRANSLATE-TEST] because the tier can now be asked for a NAMED
+        /// model, and "the model it ran is the model it was told to run" is
+        /// a claim about this URL rather than about the tier's return value.
+        private(set) var modelURLs: [URL] = []
 
         func generate(prompt: String,
                       jsonSchema: String,
@@ -67,6 +72,7 @@ final class LocalBrainTranslationTierTests: XCTestCase {
                       timeout: TimeInterval) async throws -> String {
             prompts.append(prompt)
             timeouts.append(timeout)
+            modelURLs.append(modelURL)
             if let failure { throw failure }
             if let runtimeError { throw runtimeError }
             return output
@@ -282,6 +288,90 @@ final class LocalBrainTranslationTierTests: XCTestCase {
 
         let model = await tier.installedModel()
         XCTAssertEqual(model, preferred, "the preference list is an order, not a set")
+    }
+
+    /// [TRANSLATE-TEST] The additive named-model overload: a caller that
+    /// names a model gets THAT model, even when the ladder would have picked
+    /// another one — and the pipeline's own call still resolves the ladder,
+    /// unchanged. Both halves in one test because they are one claim: the
+    /// overload is additive only if the no-argument entry point behaves
+    /// exactly as it did before it existed.
+    func testANamedModelRunsAndTheLaddlersOwnCallIsUnchanged() async throws {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        // Two models on the device, the ladder's head among them: with only
+        // one installed the two paths would agree by accident.
+        let head = ModelCatalog.intentQwen4BSlotCanon
+        let other = Self.modelID
+        let store = try makeStore(root: root, serving: [head, other], installed: [head, other])
+
+        var config = LiveTranslateConfig.default
+        config.brainTranslationModelIDs = [head, other]
+        let namedGenerator = ScriptedGenerator()
+        namedGenerator.output = answer([brainAnswer])
+        let namedTier = LocalBrainTranslationTier(config: config,
+                                                  modelStore: store,
+                                                  events: LiveTranslateEvents(bus: LiveTranslateSanitisingBus(),
+                                                                              config: config),
+                                                  generator: namedGenerator,
+                                                  memory: ScriptedProbe(),
+                                                  ledger: ModelLifecycleManager(probe: ScriptedProbe()))
+
+        let named = await namedTier.translate([brainText], using: other)
+
+        XCTAssertEqual(named.translations, [brainText: brainAnswer])
+        XCTAssertEqual(try XCTUnwrap(namedGenerator.modelURLs.last).lastPathComponent,
+                       "\(other)-q4_k_m.gguf",
+                       "the NAMED model is the one the generation runs against")
+
+        // And the ladder's own answer is untouched: the head is still what
+        // the pipeline's no-argument call resolves — and runs. A second tier
+        // over the same store, because the first one's load may have left a
+        // resident brain in the ledger, and the gate that refuses a load on
+        // top of one is a different rule than the one under test here.
+        let ladderGenerator = ScriptedGenerator()
+        ladderGenerator.output = answer([brainAnswer])
+        let ladderTier = LocalBrainTranslationTier(config: config,
+                                                   modelStore: store,
+                                                   events: LiveTranslateEvents(bus: LiveTranslateSanitisingBus(),
+                                                                               config: config),
+                                                   generator: ladderGenerator,
+                                                   memory: ScriptedProbe(),
+                                                   ledger: ModelLifecycleManager(probe: ScriptedProbe()))
+
+        let resolved = await ladderTier.installedModel()
+        XCTAssertEqual(resolved, head, "the preference order still decides for the pipeline")
+        _ = await ladderTier.translate([brainText])
+        XCTAssertEqual(try XCTUnwrap(ladderGenerator.modelURLs.last).lastPathComponent,
+                       "\(head)-q4_k_m.gguf")
+    }
+
+    /// A named model that is not on the device is reported exactly as the
+    /// ladder-resolution failure always was: the same reason, the same
+    /// stage, nothing generated.
+    func testANamedModelThatIsNotInstalledIsReportedAsAMissingModel() async throws {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let absent = Self.modelID
+        let bus = LiveTranslateSanitisingBus()
+        // Served by the catalog, absent from the device — the shape a
+        // download row exists for.
+        let store = try makeStore(root: root, serving: [absent], installed: [])
+        let generator = ScriptedGenerator()
+        let tier = LocalBrainTranslationTier(config: config,
+                                             modelStore: store,
+                                             events: LiveTranslateEvents(bus: bus, config: config),
+                                             generator: generator,
+                                             memory: ScriptedProbe(),
+                                             ledger: ModelLifecycleManager(probe: ScriptedProbe()))
+
+        let outcome = await tier.translate([brainText], using: absent)
+
+        XCTAssertEqual(outcome, .none)
+        XCTAssertTrue(generator.prompts.isEmpty, "an absent model is not attempted")
+        let event = bus.events(named: "brain_translation_unavailable").first
+        XCTAssertEqual(event?.metadata["reason"], "model_not_installed")
+        XCTAssertEqual(event?.metadata["failureStage"], "availability")
     }
 
     func testNoInstalledModelIsReportedAndNothingIsGenerated() async throws {

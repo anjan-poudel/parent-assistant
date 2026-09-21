@@ -6,7 +6,7 @@ import Foundation
 // household can otherwise only infer: "what does each engine actually say
 // for the text I type, and what did it cost me in time?" The two engines
 // are the SHIPPED ones — tier 1 (`LocalBrainTranslationTier`, the
-// installed on-device brain) and tier 2 (`CloudTranslationTier`, the
+// on-device brain) and tier 2 (`CloudTranslationTier`, the
 // consent-gated Gemini path) — consumed through the seam below and never
 // reimplemented. Nothing in this file changes what production does; it
 // reads the same actors the camera session reads.
@@ -14,9 +14,9 @@ import Foundation
 // Why a seam at all, when both tiers are concrete: the screen's view model
 // has to be testable with no model on disk, no network and no consent
 // record (the same reason `LocalBrainTranslating` exists for the pipeline,
-// and `LiveTranslateSessionTestHarness` for the session). The protocol is
-// two methods wide and exists only for THIS screen's tests — it is not a
-// second tier abstraction and must not grow into one.
+// and `LiveTranslateSessionTestHarness` for the session). The protocols
+// here are one or two methods wide and exist only for THIS screen's tests —
+// they are not a second tier abstraction and must not grow into one.
 //
 // The cloud path's consent gate is not consulted here on purpose. The gate
 // is enforced INSIDE `CloudTranslationTier.resolve` (`gate.authorize()`,
@@ -25,31 +25,46 @@ import Foundation
 // bypass because it adds no path: the only way it reaches Gemini is the
 // tier that already asks.
 
-/// Which engine the screen asks. Raw value drives both the L10n key
-/// (`settings.translateTest.engine.<rawValue>`) and the segmented picker's
-/// identity, so a third engine cannot be added without a visible title.
-enum TranslateTestEngine: String, CaseIterable, Identifiable {
-    /// Tier 1 — the on-device brain. Local, consent-free, never sent.
-    case local
-    /// Tier 2 — the consent-gated cloud tier.
+/// One row of the screen's model dropdown: a ladder model, or the cloud.
+///
+/// The local side names a MODEL rather than an engine (2026-09-21). "Local"
+/// used to mean "whatever tier 1 would pick", which is the ladder's first
+/// installed entry — a fine default and a poor instrument: the ladder holds
+/// several quants and a superseded head, and the question this screen gets
+/// asked is precisely which of them answers, and how well. So the screen
+/// offers the ladder, one row per model, and Gemini beside it.
+enum TranslateTestSelection: Hashable, Identifiable {
+    /// Tier 1, run against THIS model — installed or not. A model that is
+    /// not installed is a valid selection: the screen shows its download
+    /// row rather than a run button that could only refuse.
+    case model(ModelID)
+    /// Tier 2, the consent-gated cloud path.
     case gemini
 
-    var id: String { rawValue }
+    var id: String {
+        switch self {
+        case .model(let id): return "model:\(id.rawValue)"
+        case .gemini: return "gemini"
+        }
+    }
 
-    var titleKey: String { "settings.translateTest.engine.\(rawValue)" }
+    /// The model this selection names, or `nil` for the cloud.
+    var modelID: ModelID? {
+        guard case .model(let id) = self else { return nil }
+        return id
+    }
 }
 
 /// What an engine would need before it can answer, in the screen's terms.
 ///
 /// Deliberately three cases and no associated payload: the screen resolves
-/// WHICH download to offer from `ModelCatalog.availableTranslationEntries`
-/// at the point it draws the button, so this type stays comparable in a
-/// test with no catalog fixture.
+/// WHICH download to offer from the selection itself, so this type stays
+/// comparable in a test with no catalog fixture.
 enum TranslateEngineReadiness: Equatable {
     /// The engine can run right now.
     case ready
-    /// Tier 1 has no installed translation brain. The screen offers the
-    /// catalog's download instead of a spinner that would never resolve.
+    /// The selected model is not installed. The screen offers that entry's
+    /// download row instead of a spinner that would never resolve.
     case modelMissing
     /// Tier 2 has no provider key on this device, so nothing could be sent
     /// even with consent.
@@ -161,7 +176,7 @@ protocol TranslateProbeEngine {
     func readiness() async -> TranslateEngineReadiness
 }
 
-/// The one method this screen asks of the cloud tier.
+/// The two methods this screen asks of the cloud tier.
 ///
 /// Declared here so `CloudProbeEngine` can be tested against a scripted
 /// batch — the provenance and refusal branches below are the ones a live
@@ -182,22 +197,52 @@ protocol CloudProbeTier: Sendable {
 
 extension CloudTranslationTier: CloudProbeTier {}
 
+/// The one method this screen asks of tier 1: run THIS model.
+///
+/// A second protocol rather than a requirement added to
+/// `LocalBrainTranslating`, and the reason is the pipeline's: that protocol
+/// is the camera's contract — "translate the strings with the brain the
+/// ladder picks" — and every conformer in the app and in other suites'
+/// fixtures would inherit a parameter their world has no meaning for. The
+/// tier itself gains the capability additively
+/// (`LocalBrainTranslationTier.translate(_:using:)`, whose no-argument form
+/// still resolves the ladder exactly as before); this is the seam through
+/// which the screen calls it, and through which a test scripts it.
+protocol LocalBrainModelTier: Sendable {
+    /// `nil` means "the ladder had none", reported exactly as the
+    /// ladder-resolution failure always was.
+    func translate(_ strings: [String], using model: ModelID?) async -> LocalBrainTranslationOutcome
+}
+
+extension LocalBrainTranslationTier: LocalBrainModelTier {}
+
 // MARK: - Tier 1 (on-device brain)
 
-/// The on-device path, over the shipped tier 1.
+/// The on-device path, over the shipped tier 1, bound to ONE model.
 ///
 /// The install question arrives as a closure rather than a `ModelStore` so
 /// this adapter owns no store and a test can answer it without one — the
 /// same shape the tier itself uses (`modelStore: ModelStore?`, "a tier
-/// without one reports itself unavailable, honestly"). It is fed by the
-/// tier's own `installedModel()` (see `makeEngines`), not by a second walk
-/// of `brainTranslationModelIDs`, so the two cannot disagree about which
-/// file counts as installed.
+/// without one reports itself unavailable, honestly"). Production supplies
+/// the tier's own predicate (`ModelStore.isAvailable`, the question
+/// `installedModel()` asks of every rung), so this engine's readiness is the
+/// tier's own answer about the model it names rather than a second opinion
+/// about the same file.
+///
+/// One engine per ladder model, all sharing the ONE tier instance the
+/// coordinator owns. That sharing is the shipped shape, not a shortcut: the
+/// tier holds a single resident handle and keys it by model URL, so
+/// switching models reloads the handle and switching back reloads it again
+/// — which is what the device would do in production, and what the screen
+/// should therefore be measuring.
 struct LocalBrainProbeEngine: TranslateProbeEngine {
-    let brain: any LocalBrainTranslating
-    /// The tier's own answer to "which catalogue entry will run", `nil` when
-    /// none will. Async because the tier is an actor: the ask hops to it.
-    let installedModel: () async -> ModelID?
+    let brain: any LocalBrainModelTier
+    /// The model this engine runs. Named, never resolved: the ladder's own
+    /// preference is the tier's business, and this screen exists to ask what
+    /// a specific model says.
+    let model: ModelID
+    /// Whether that model can run now (see the type's note).
+    let isInstalled: (ModelID) -> Bool
     /// The tier's config, for its batch bound. Needed because the bound —
     /// not the tier's return value — is what says whether a string was ever
     /// handed to the brain (see `LocalBrainDisposition`).
@@ -208,7 +253,7 @@ struct LocalBrainProbeEngine: TranslateProbeEngine {
     var now: () -> Date = { Date() }
 
     func readiness() async -> TranslateEngineReadiness {
-        await installedModel() != nil ? .ready : .modelMissing
+        isInstalled(model) ? .ready : .modelMissing
     }
 
     func probe(_ text: String) async -> TranslateProbeOutcome {
@@ -226,7 +271,7 @@ struct LocalBrainProbeEngine: TranslateProbeEngine {
         }
 
         let started = now()
-        let outcome = await brain.translate([text])
+        let outcome = await brain.translate([text], using: model)
         let latencyMs = Int(now().timeIntervalSince(started) * 1000)
 
         // A string the attempt did not answer is ABSENT from `translations`
@@ -338,9 +383,50 @@ struct CloudProbeEngine: TranslateProbeEngine {
     }
 }
 
+// MARK: - The ladder, as the dropdown needs it
+
+/// One row of the model dropdown, as the screen draws it.
+struct TranslateTestModelOption: Identifiable, Equatable {
+    /// The model this row selects.
+    let id: ModelID
+    /// The catalog's name for it — or the raw id when the catalog has none
+    /// (see `TranslateTestModelSource.displayName`).
+    let displayName: String
+    /// Whether the row can be run now, or has to offer its download first.
+    let isInstalled: Bool
+}
+
+/// What the dropdown needs to know about the ladder and the device.
+///
+/// Closures rather than the catalog, the store and the download service
+/// themselves, for the same reason the rest of this file takes closures: the
+/// view model has to be testable with no catalog, no store and no file on
+/// disk. It also has to stay LIVE — a download can finish while the screen
+/// is open, and "is this installed" is a question about the device, not a
+/// value captured when the screen was built.
+struct TranslateTestModelSource {
+    /// The ladder, in the order the tier itself would try it
+    /// (`LiveTranslateConfig.brainTranslationModelIDs`), deduplicated.
+    ///
+    /// Read from the config rather than from a list of ids spelled here, so
+    /// a catalog swap that adds, retires or reorders translation models
+    /// changes this dropdown without a line of this screen changing: the
+    /// names come from whatever the catalog holds, and an id the catalog
+    /// does not carry yet is still offered, under its own raw name.
+    let ladder: [ModelID]
+    /// The catalog's display name for a model, or the id itself when the
+    /// catalog has no entry for it. A ladder mid-swap can name a model this
+    /// build does not carry; showing the raw id is the honest answer for a
+    /// dev screen, and it keeps the row selectable — the download it offers
+    /// is simply absent, because there is nothing to download.
+    let displayName: (ModelID) -> String
+    /// Whether the model can run now.
+    let isInstalled: (ModelID) -> Bool
+}
+
 // MARK: - Production wiring
 
-/// The two engines the screen asks, plus the indicator that belongs to them.
+/// The engines the screen asks, plus the indicator that belongs to them.
 ///
 /// The indicator travels WITH the engines because it is built from the same
 /// tier: production gives the tier the session's indicator, and this screen
@@ -350,7 +436,7 @@ struct CloudProbeEngine: TranslateProbeEngine {
 /// exempt from that rule).
 @MainActor
 struct TranslateTestEngines {
-    let engines: [TranslateTestEngine: any TranslateProbeEngine]
+    let engines: [TranslateTestSelection: any TranslateProbeEngine]
     let cloudIndicator: CloudActivityIndicatorModel
 }
 
@@ -373,6 +459,8 @@ struct TranslateTestDependencies {
     /// it, so this is passed through rather than emulated: a store that is
     /// present here is the same store `ModelStore.isAvailable` was asked.
     let modelStore: ModelStore?
+    /// The ladder and the two questions the dropdown asks about it.
+    let modelSource: TranslateTestModelSource
     /// "Is a Gemini key configured".
     let isProviderConfigured: () -> Bool
     /// "Is the household's cloud master switch on". Read live from the same
@@ -406,8 +494,8 @@ struct TranslateTestDependencies {
     /// own default so the two cannot disagree about the direction.
     var targetLanguage: AppLanguage = LiveTranslationPipeline.defaultTargetLanguage
 
-    /// Builds the two engines, once per screen. The indicator is this
-    /// screen's own (the tier moves a counter; production gives it the
+    /// Builds one engine per dropdown row, once per screen. The indicator is
+    /// this screen's own (the tier moves a counter; production gives it the
     /// session's, and this screen has no session).
     ///
     /// `@MainActor` because the indicator it builds is — `@Observable`
@@ -422,33 +510,31 @@ struct TranslateTestDependencies {
         // is what makes the cloud latency on screen an honest one.
         let indicator = CloudActivityIndicatorModel(observabilityBus: observabilityBus,
                                                     config: config)
+        // ONE tier for the whole ladder, with one resident handle inside it
+        // (see `LocalBrainProbeEngine`). A tier per model would hold a 2–3 GB
+        // handle per row and blow the device on the second one.
         let brain = LocalBrainTranslationTier(config: config,
                                               modelStore: modelStore,
                                               events: LiveTranslateEvents(bus: observabilityBus,
                                                                           config: config),
                                               targetLanguage: targetLanguage)
-        // The readiness question is the tier's OWN, asked of the tier
-        // itself (`installedModel()`: the first of
-        // `brainTranslationModelIDs` that is installed *and complete*).
-        // Re-spelling the walk here would let the two drift, and a screen
-        // that says "ready" for a brain the tier then refuses is worse than
-        // one that says nothing.
-        return TranslateTestEngines(
-            engines: [
-                .local: LocalBrainProbeEngine(brain: brain,
-                                              installedModel: { await brain.installedModel() },
-                                              config: config),
-                .gemini: CloudProbeEngine(tier: CloudTranslationTier(cache: cache,
-                                                                     consentGate: consentGate,
-                                                                     costGovernor: costGovernor,
-                                                                     client: client,
-                                                                     config: config,
-                                                                     observabilityBus: observabilityBus,
-                                                                     indicator: indicator),
-                                          targetLanguage: targetLanguage,
-                                          isProviderConfigured: isProviderConfigured,
-                                          isCloudEnabled: isCloudEnabled),
-            ],
-            cloudIndicator: indicator)
+        var engines: [TranslateTestSelection: any TranslateProbeEngine] = [:]
+        for id in modelSource.ladder {
+            engines[.model(id)] = LocalBrainProbeEngine(brain: brain,
+                                                        model: id,
+                                                        isInstalled: modelSource.isInstalled,
+                                                        config: config)
+        }
+        engines[.gemini] = CloudProbeEngine(tier: CloudTranslationTier(cache: cache,
+                                                                       consentGate: consentGate,
+                                                                       costGovernor: costGovernor,
+                                                                       client: client,
+                                                                       config: config,
+                                                                       observabilityBus: observabilityBus,
+                                                                       indicator: indicator),
+                                            targetLanguage: targetLanguage,
+                                            isProviderConfigured: isProviderConfigured,
+                                            isCloudEnabled: isCloudEnabled)
+        return TranslateTestEngines(engines: engines, cloudIndicator: indicator)
     }
 }

@@ -2089,6 +2089,12 @@ final class AppCoordinator: ObservableObject {
         // Settings leaf writes through, so the switch read here is the
         // switch the household set.
         let settings = LiveTranslateSettings()
+        // The dropdown's ladder, read from the SAME config the tiers are
+        // given below — one instance read twice rather than two constants
+        // free to drift apart. The screen never spells a model id, so a
+        // catalog swap that reorders or retires translation models changes
+        // what it offers without a line of it changing.
+        let config = LiveTranslateConfig.default
         return TranslateTestDependencies(
             cache: labelTranslationCache,
             consentGate: liveTranslateConsentGate,
@@ -2096,6 +2102,29 @@ final class AppCoordinator: ObservableObject {
             client: geminiClient,
             observabilityBus: observabilityBus,
             modelStore: modelStore,
+            modelSource: TranslateTestModelSource(
+                ladder: config.brainTranslationModelIDs,
+                // The catalog's localized name; the raw id when this build
+                // carries no entry for it (a config ahead of the catalog is
+                // exactly what a mid-swap ladder looks like). The locale is
+                // read per call rather than captured, so a language change
+                // is reflected the next time the menu is drawn.
+                displayName: { [weak self] id in
+                    let locale = self?.activeLocale ?? Locale(identifier: "en")
+                    return ModelCatalog.entry(for: id)?.displayName(locale: locale) ?? id.rawValue
+                },
+                // The tier's OWN predicate: `installedModel()` walks the
+                // ladder asking exactly this question
+                // (`ModelStore.isAvailable`), so a row marked installed is a
+                // row the tier would actually resolve and run — the marker
+                // and the readiness line read from one source, which is why
+                // the picker cannot offer a model the engine would refuse.
+                // It is also stricter than "the file is there": a model
+                // whose declared dependency is missing is not runnable, and
+                // this says so before the tap rather than after it.
+                isInstalled: { [weak self] id in
+                    self?.modelStore.isAvailable(id) ?? false
+                }),
             isProviderConfigured: { [weak self] in
                 self?.geminiConfigStore.isConfigured ?? false
             },
@@ -2114,7 +2143,7 @@ final class AppCoordinator: ObservableObject {
             cancelCapture: { [weak self] in
                 self?.cancelSearchPhraseCapture()
             },
-            config: LiveTranslateConfig.default,
+            config: config,
             targetLanguage: LiveTranslationPipeline.defaultTargetLanguage)
     }
 
