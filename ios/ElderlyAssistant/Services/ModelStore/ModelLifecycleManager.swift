@@ -758,12 +758,6 @@ final class ModelLifecycleManager {
 
         var victims: [ModelSlot] = []
         var preemptions: [PreemptionRecord] = []
-        /// Slots whose bytes the warden must not take: their owner refused
-        /// and the release contract does not permit overruling it. They are
-        /// excluded from the rebuilt victim order, which is the whole
-        /// difference between "the refusal was heard" and "the refusal was
-        /// logged".
-        var withheld: Set<ModelSlot> = []
         var denial: ReservationDenial?
         var soloOverBudget = false
         var budgetUsed: UInt64 = 0
@@ -801,135 +795,21 @@ final class ModelLifecycleManager {
             // not a minute in which one more will be the last.
             denial = guarded
         } else {
-            let deviceClass = currentDeviceClassLocked()
-            // See `ModelLoadRequest.replacesSlotContents`: a replacing load
-            // excludes the slot's own residency (one position being
-            // refilled); a peer load does not (the bytes are additive).
-            let residentLive = request.replacesSlotContents
-                ? residentLiveBytesLocked(excluding: request.slot)
-                : residentLiveBytesLocked()
-            transientLive = transientLiveBytesLocked()
-            excluding = request.replacesSlotContents ? request.slot : nil
-            // Two budgets, and the difference between them is the owner's
-            // directive of 2026-09-19: "ModelWarden should UNLOAD other
-            // models and load the translation model."
-            //
-            //  - `sessionBudget` is what `effectiveBudgetBytes` says *right
-            //    now*: the class cap lowered by a tight probe reading. It is
-            //    the right bound for a load whose bytes are purely additive
-            //    to everyone else's, and it is what this manager has always
-            //    judged.
-            //  - `classBudget` is the promise the device class itself makes
-            //    — 3.2 GB on the 6 GB phones. It is the bound a foreground
-            //    translation load is judged against, because that load's own
-            //    victims are exactly the room it needs.
-            //
-            // The Q8 translation head is 2.63 GB live against a 3.2 GB class
-            // budget. A probe reading that put the session budget below it
-            // made the tier's own load `over_budget_alone`, and the refusal
-            // is what turned on-device translation into cloud-only. The
-            // escape is bounded twice over, and neither bound is a hope:
-            //
-            //  - `incoming.liveBytes <= classBudget` — a model over the CLASS
-            //    budget is over it whatever is evicted, so the 4B on a
-            //    standard phone still meets `.overBudgetAlone` below.
-            //  - phase 3, which re-probes after the eviction and refuses on
-            //    `insufficientHeadroom` if the hard bytes are not really
-            //    there. That check is what decides whether an allocation
-            //    lands; the budget only decides whose bytes are spent first.
-            //
-            // `budgetOverrideBytes` pins both, so every test that fixes the
-            // budget keeps the arithmetic it was written against.
-            let sessionBudget = sessionBudgetLocked(deviceClass: deviceClass,
-                                                    residentLiveBytes: residentLive)
-            // [CAMERA-BUDGET] The escape hatch's bound is the CLASS budget —
-            // the device class's own promise, which the session profile must
-            // NOT lower. Lowering it here was the review's finding: on a
-            // standard phone both budgets became 2.1 GB, the tier's own model
-            // (2.63 GB live) exceeded both, and the escape hatch that exists
-            // so the household's chosen brain is never unloadable refused the
-            // translation model for the whole camera session —
-            // `over_budget_alone`, on-device translation dead, the opposite of
-            // what the profile was added for.
-            //
-            // The profile still does its job: `sessionBudget` above is the
-            // bound every additive load is judged against, and the escaping
-            // load's victim plan plus phase 3's re-probe still decide whether
-            // the bytes are really there.
-            let classBudget = unprofiledClassBudgetLocked(deviceClass: deviceClass)
-            let budget = request.purpose.mayEvictPastTheSessionBudget
-                && incoming.liveBytes <= classBudget
-                ? classBudget
-                : sessionBudget
-            budgetUsed = budget
-
-            let plan = planVictimsLocked(excluding: excluding,
-                                         residentLive: residentLive,
-                                         transientLive: transientLive,
-                                         incomingLiveBytes: incoming.liveBytes,
-                                         budget: budget,
-                                         priority: request.priority,
-                                         now: now,
-                                         config: config,
-                                         withheld: [])
+            // Phase 1 — the budget this request is judged by and the victims
+            // that close the gap, both decided under the lock we already
+            // hold. Shared verbatim with `makeRoom`, which runs the same
+            // walk without going on to take a permit.
+            let plan = planLoadLocked(request,
+                                      incoming: incoming,
+                                      now: now,
+                                      config: config)
             victims = plan.victims
-            for victim in victims {
-                // Marking non-resident here (rather than after the unload)
-                // keeps the arithmetic honest even though the owner's free
-                // may land later, keeps a second concurrent gate from
-                // evicting the same slot twice, and — Step 2 — is what the
-                // rebuilt victim order reads if an owner below refuses.
-                //
-                // The thrash counter is deliberately NOT bumped here: this
-                // list can still lose members to a refusal below, and an
-                // eviction that never happened must not count toward a
-                // quarantine. The count is taken once, on the final list.
-                markNonResidentLocked(victim)
-            }
             residentAfterFirstPlan = plan.residentLive
-
-            if !plan.fits {
-                if incoming.liveBytes > budget {
-                    // Over budget **on its own**: nothing eviction can do,
-                    // because the walk above has already taken every victim
-                    // it is allowed to. For a purpose that may evict past the
-                    // session budget this branch is now reachable only when
-                    // the model is over the CLASS budget — `budget` above is
-                    // the class cap for such a request — which is the pinned
-                    // half of the owner's directive: the 4B on a standard
-                    // phone stays refused. A foreground translation load
-                    // inside its class budget does not arrive here; it evicts
-                    // and admits.
-                    if request.replacesSlotContents && request.slot.admitsSoloOverBudget {
-                        // Over budget on its own. Nothing we can evict
-                        // changes that, and refusing would make the app's
-                        // own default brain unloadable — admit it and
-                        // announce the fact.
-                        soloOverBudget = true
-                    } else {
-                        // No escape hatch to invoke. Either a PEER load —
-                        // a second copy of something the device already
-                        // cannot hold beside its neighbours, which the user
-                        // did not ask for — or a replacing load on a
-                        // position whose artifact the app can live without
-                        // (`ModelSlot.admitsSoloOverBudget`), where the
-                        // feature's own fallback is a working answer.
-                        denial = .overBudgetAlone(liveBytes: incoming.liveBytes,
-                                                  budgetBytes: budget)
-                    }
-                } else {
-                    // It fits alone, but unevictable bytes are in the way:
-                    // a resident is pinned (an inference is in flight), is
-                    // not idle-evictable, or is being spared by the thrash
-                    // guard. Admitting here would cross the budget
-                    // silently, which is the one thing this whole mechanism
-                    // exists to prevent — so refuse instead.
-                    denial = budgetDenialLocked(victims: victims,
-                                                slot: request.slot,
-                                                now: now,
-                                                config: config)
-                }
-            }
+            transientLive = plan.transientLive
+            excluding = plan.excluding
+            budgetUsed = plan.budget
+            denial = plan.denial
+            soloOverBudget = plan.soloOverBudget
         }
         lock.unlock()
 
@@ -941,102 +821,24 @@ final class ModelLifecycleManager {
             }
         }
 
-        // ---- Phase 2b — [MODEL-WARDEN] Step 2: ask before taking.
-        //
-        // The victims above are already marked non-resident, so a concurrent
-        // gate sees them gone exactly as it did before Step 2. What is new
-        // is that the ones whose owner registered as a `ModelResident` — and
-        // whose priority is below the request's — get a say first. The ask
-        // is outside the lock because a resident that called back in would
-        // deadlock on the non-recursive lock, and the answer is what decides
-        // whether the registered release closure is invoked unconditionally
-        // (`.budget`) or only where the contract allows (`PreemptionOutcome`).
-        //
-        // A `.safetyCritical` request never asks: there is nothing above it
-        // on the ladder, so `askableVictims` returns nothing for it and the
-        // victims go through the Step 1 path unchanged.
-        if denial == nil {
-            let askable = askableVictims(victims: victims,
-                                         above: request.priority)
-            for (slot, resident) in askable {
-                let outcome = resolvePreemption(slot: slot,
-                                                resident: resident,
-                                                now: now,
-                                                config: config)
-                preemptions.append(PreemptionRecord(slot: slot, outcome: outcome))
-                if emittingEvents {
-                    onEvent?(.preempted(slot: slot, outcome: outcome))
-                }
-                if !outcome.reclaimed { withheld.insert(slot) }
-            }
-        }
-
-        // ---- Phase 2c — rebuild the victims around what was refused.
-        //
-        // Only the refusals that could not be forced change anything, and
-        // when there are none this block is skipped entirely: the common path
-        // asks nothing, rebuilds nothing, and pays one lock acquisition at
-        // the end for the thrash count.
-        //
-        // One bound worth naming: the ask happens once per reservation,
-        // against the FIRST plan's victim list. A slot that only becomes a
-        // victim because a refusal pushed the order past it is evicted the
-        // Step 1 way, without being asked — which is exactly where it would
-        // have gone without Step 2, and the alternative (an ask-loop that
-        // can cascade) buys a rarer guarantee at the cost of a path with no
-        // fixed number of lock acquisitions.
-        if !withheld.isEmpty {
-            lock.lock()
-            var withheldLive: UInt64 = 0
-            for slot in withheld {
-                // The warden is giving the bytes back to the ledger,
-                // because it did not get them. Leaving them marked
-                // non-resident would be the ledger counting memory it was
-                // just told it cannot have.
-                markResidentLocked(slot)
-                withheldLive += entries[slot]?.footprint.liveBytes ?? 0
-            }
-            let rebuilt = planVictimsLocked(excluding: excluding,
-                                            residentLive: residentAfterFirstPlan + withheldLive,
-                                            transientLive: transientLive,
-                                            incomingLiveBytes: incoming.liveBytes,
-                                            budget: budgetUsed,
-                                            priority: request.priority,
-                                            now: now,
-                                            config: config,
-                                            withheld: withheld)
-            victims += rebuilt.victims
-            for victim in rebuilt.victims {
-                markNonResidentLocked(victim)
-            }
-            // The first plan's victims included the refusals. They are not
-            // victims any more: the registered release closure is exactly
-            // what the owner just declined to have called, and Step 1's
-            // unconditional path is what this protocol exists to replace.
-            victims.removeAll { withheld.contains($0) }
-            if !rebuilt.fits {
-                denial = budgetDenialLocked(victims: victims,
-                                            slot: request.slot,
-                                            now: now,
-                                            config: config)
-            }
-            lock.unlock()
-        }
-
-        // The thrash count, taken once on the final list — see the note in
-        // phase 1. `withheld` slots are not in `victims` any more, so a
-        // refusal is never counted as an eviction.
-        lock.lock()
-        for victim in victims {
-            noteLoadDrivenEvictionLocked(victim, now: now, config: config)
-        }
-        lock.unlock()
-
-        let handled: Set<ModelSlot> = Set(preemptions.filter { $0.outcome.reclaimed }
-            .map(\.slot))
-        for victim in victims where !handled.contains(victim) {
-            performEviction(victim, reason: .budget)
-        }
+        // Phases 2b to 2d — ask, rebuild around the refusals, unload — shared
+        // verbatim with `makeRoom`. The permit path and the room-making path
+        // differ in exactly one place (whether a permit is granted), so the
+        // eviction itself is one implementation, not two.
+        let reclaimed = reclaimVictimsForLoad(victims,
+                                              residentAfterFirstPlan: residentAfterFirstPlan,
+                                              initialDenial: denial,
+                                              request: request,
+                                              excluding: excluding,
+                                              transientLive: transientLive,
+                                              budget: budgetUsed,
+                                              incomingLiveBytes: incoming.liveBytes,
+                                              now: now,
+                                              config: config,
+                                              emittingEvents: emittingEvents)
+        victims = reclaimed.victims
+        denial = reclaimed.denial
+        preemptions = reclaimed.preemptions
 
         if let denial {
             if emittingEvents {
@@ -1140,6 +942,406 @@ final class ModelLifecycleManager {
                                isLargeLoad: reservation.isLargeLoad))
         }
         return .success(reservation)
+    }
+
+    // MARK: - [DEVSCREEN-EVICT] Making room without taking a permit
+
+    /// Unload whatever the warden's own admission walk would have to unload
+    /// for `request` to fit — and grant nothing.
+    ///
+    /// This is the translation test screen's escape hatch, and it exists
+    /// because that screen's load gate refuses *before* the reservation path
+    /// is ever reached: `LocalBrainTranslationTier.deferralForLoad` judges the
+    /// incoming model against the class/headroom rules first, so a model the
+    /// warden would happily have made room for (the live tier's own
+    /// `mayEvictPastTheSessionBudget` path) never gets the chance. The gate is
+    /// right to refuse on its own terms — it cannot know what is evictable —
+    /// so the fix is to *ask the warden*, which is this method.
+    ///
+    /// What it is NOT: a second eviction mechanism. Phase 1 and phases 2b–2d
+    /// of `reserveInternal` are extracted as `planLoadLocked` and
+    /// `reclaimVictimsForLoad` and this method calls both — the same budget
+    /// rule, the same `loadEvictionOrderLocked` priority ladder, the same
+    /// `askableVictims` preemption ask (a `ModelResident` that refuses is
+    /// respected here exactly as it is there), the same `performEviction` with
+    /// reason `.budget`, and the same thrash count. If the warden's eviction
+    /// behaviour is ever changed, it changes here in the same commit.
+    ///
+    /// What it deliberately skips, and why each is safe:
+    ///
+    ///  - The duplicate/serial/rate-limit checks. Those decide whether a
+    ///    *permit* may be granted; they do not decide what fits. A slot
+    ///    already reserved refuses the load that follows this call on its own
+    ///    (`alreadyReserved`), and the bytes it is holding are in
+    ///    `residentLive` either way.
+    ///  - Phase 3's hard headroom re-probe. It is the *permit's* last gate,
+    ///    and the caller here re-runs its own probe after this returns; a
+    ///    probe taken here would be a second opinion about a moment that has
+    ///    already passed.
+    ///  - The `reserved` / `reservationDenied` / `reservationAbandoned`
+    ///    events. Nothing was reserved and nothing was denied. The events
+    ///    that describe what this did — `preempted` and `evicted` — are
+    ///    emitted exactly as the permit path emits them, because they
+    ///    describe real unloads that a capture must be able to count.
+    ///
+    /// An eviction marks slots non-resident here even though the owner's
+    /// actual free may land later, exactly as phase 1 does on the permit
+    /// path: a second concurrent gate must not evict the same slot twice.
+    ///
+    /// - Parameter request: the load to make room for. Its `priority` and
+    ///   `purpose` select the ladder and the budget, so it must be the request
+    ///   the caller is about to attempt — a `.liveTranslate` translation load
+    ///   is judged against the class budget, and that is the whole point.
+    /// - Returns: the slots unloaded, in the order they were taken. Empty when
+    ///   nothing fits the incoming model even after emptying the evictable
+    ///   ledger (`overBudgetAlone` in the permit path's vocabulary) or when
+    ///   there was nothing to unload. **Empty does not mean "room was made"**:
+    ///   callers re-check their own gate afterwards, which is where a
+    ///   headroom refusal that survives the eviction is caught.
+    @discardableResult
+    func makeRoom(for request: ModelLoadRequest) -> [ModelSlot] {
+        let incoming = ModelLifecycleInventory.footprint(for: request.slot,
+                                                         modelID: request.modelID)
+        let config = wardenConfig
+        let now = clock()
+
+        // Phase 1 under the lock, and — unlike the permit path — an undo.
+        // A plan that does not fit has evicted for nothing, and `planLoadLocked`
+        // has already marked its victims non-resident; leaving them that way
+        // would be the ledger forgetting memory that is still allocated.
+        var plan: LoadVictimPlan?
+        lock.lock()
+        pruneDeadOwnersLocked()
+        let decided = planLoadLocked(request,
+                                     incoming: incoming,
+                                     now: now,
+                                     config: config)
+        if decided.fits {
+            plan = decided
+        } else {
+            for victim in decided.victims {
+                markResidentLocked(victim)
+            }
+        }
+        lock.unlock()
+
+        guard let plan else { return [] }
+
+        let reclaimed = reclaimVictimsForLoad(plan.victims,
+                                              residentAfterFirstPlan: plan.residentLive,
+                                              initialDenial: plan.denial,
+                                              request: request,
+                                              excluding: plan.excluding,
+                                              transientLive: plan.transientLive,
+                                              budget: plan.budget,
+                                              incomingLiveBytes: incoming.liveBytes,
+                                              now: now,
+                                              config: config,
+                                              emittingEvents: true)
+        return reclaimed.victims
+    }
+
+    /// Everything phase 1 of the admission walk decides, in one value.
+    ///
+    /// A struct rather than a tuple because it is read by two callers across
+    /// two methods and one of its fields (`fits`) is meaningful on its own:
+    /// `reserveInternal` turns a non-fitting plan into a denial, and
+    /// `makeRoom` turns it into "nothing to do, put the bytes back".
+    private struct LoadVictimPlan {
+        /// The slots to unload, already marked non-resident in the ledger.
+        var victims: [ModelSlot] = []
+        /// `residentLive` as the first plan left it — the arithmetic the
+        /// rebuilt walk in phase 2c starts from.
+        var residentLive: UInt64 = 0
+        /// Bytes held by in-flight reservations, which no eviction reclaims.
+        var transientLive: UInt64 = 0
+        /// The slot whose own residency is excluded from the arithmetic,
+        /// for a replacing load.
+        var excluding: ModelSlot?
+        /// The budget this request was judged against (class or session —
+        /// see the comment in `planLoadLocked`).
+        var budget: UInt64 = 0
+        /// The refusal phase 1 already implies, if any.
+        var denial: ReservationDenial?
+        /// Whether the incoming model and the evictable residents fit.
+        var fits = false
+        /// A replacing load on a solo-over-budget position, admitted over the
+        /// budget rather than refused.
+        var soloOverBudget = false
+    }
+
+    /// Phase 1 of the admission walk. **Caller holds the lock.**
+    ///
+    /// Extracted from `reserveInternal` unchanged, comments and all, so that
+    /// `makeRoom` decides which bytes would have to move using the same
+    /// arithmetic the permit path uses. Marks the chosen victims
+    /// non-resident; it does not unload them (that is phases 2b–2d, outside
+    /// the lock).
+    private func planLoadLocked(_ request: ModelLoadRequest,
+                                incoming: ModelFootprint,
+                                now: Date,
+                                config: ModelWardenConfig) -> LoadVictimPlan {
+        var plan = LoadVictimPlan()
+        let deviceClass = currentDeviceClassLocked()
+        // See `ModelLoadRequest.replacesSlotContents`: a replacing load
+        // excludes the slot's own residency (one position being
+        // refilled); a peer load does not (the bytes are additive).
+        let residentLive = request.replacesSlotContents
+            ? residentLiveBytesLocked(excluding: request.slot)
+            : residentLiveBytesLocked()
+        plan.transientLive = transientLiveBytesLocked()
+        plan.excluding = request.replacesSlotContents ? request.slot : nil
+        // Two budgets, and the difference between them is the owner's
+        // directive of 2026-09-19: "ModelWarden should UNLOAD other
+        // models and load the translation model."
+        //
+        //  - `sessionBudget` is what `effectiveBudgetBytes` says *right
+        //    now*: the class cap lowered by a tight probe reading. It is
+        //    the right bound for a load whose bytes are purely additive
+        //    to everyone else's, and it is what this manager has always
+        //    judged.
+        //  - `classBudget` is the promise the device class itself makes
+        //    — 3.2 GB on the 6 GB phones. It is the bound a foreground
+        //    translation load is judged against, because that load's own
+        //    victims are exactly the room it needs.
+        //
+        // The Q8 translation head is 2.63 GB live against a 3.2 GB class
+        // budget. A probe reading that put the session budget below it
+        // made the tier's own load `over_budget_alone`, and the refusal
+        // is what turned on-device translation into cloud-only. The
+        // escape is bounded twice over, and neither bound is a hope:
+        //
+        //  - `incoming.liveBytes <= classBudget` — a model over the CLASS
+        //    budget is over it whatever is evicted, so the 4B on a
+        //    standard phone still meets `.overBudgetAlone` below.
+        //  - phase 3, which re-probes after the eviction and refuses on
+        //    `insufficientHeadroom` if the hard bytes are not really
+        //    there. That check is what decides whether an allocation
+        //    lands; the budget only decides whose bytes are spent first.
+        //
+        // `budgetOverrideBytes` pins both, so every test that fixes the
+        // budget keeps the arithmetic it was written against.
+        let sessionBudget = sessionBudgetLocked(deviceClass: deviceClass,
+                                                residentLiveBytes: residentLive)
+        // [CAMERA-BUDGET] The escape hatch's bound is the CLASS budget —
+        // the device class's own promise, which the session profile must
+        // NOT lower. Lowering it here was the review's finding: on a
+        // standard phone both budgets became 2.1 GB, the tier's own model
+        // (2.63 GB live) exceeded both, and the escape hatch that exists
+        // so the household's chosen brain is never unloadable refused the
+        // translation model for the whole camera session —
+        // `over_budget_alone`, on-device translation dead, the opposite of
+        // what the profile was added for.
+        //
+        // The profile still does its job: `sessionBudget` above is the
+        // bound every additive load is judged against, and the escaping
+        // load's victim plan plus phase 3's re-probe still decide whether
+        // the bytes are really there.
+        let classBudget = unprofiledClassBudgetLocked(deviceClass: deviceClass)
+        let budget = request.purpose.mayEvictPastTheSessionBudget
+            && incoming.liveBytes <= classBudget
+            ? classBudget
+            : sessionBudget
+        plan.budget = budget
+
+        let walk = planVictimsLocked(excluding: plan.excluding,
+                                     residentLive: residentLive,
+                                     transientLive: plan.transientLive,
+                                     incomingLiveBytes: incoming.liveBytes,
+                                     budget: budget,
+                                     priority: request.priority,
+                                     now: now,
+                                     config: config,
+                                     withheld: [])
+        plan.victims = walk.victims
+        for victim in walk.victims {
+            // Marking non-resident here (rather than after the unload)
+            // keeps the arithmetic honest even though the owner's free
+            // may land later, keeps a second concurrent gate from
+            // evicting the same slot twice, and — Step 2 — is what the
+            // rebuilt victim order reads if an owner below refuses.
+            //
+            // The thrash counter is deliberately NOT bumped here: this
+            // list can still lose members to a refusal below, and an
+            // eviction that never happened must not count toward a
+            // quarantine. The count is taken once, on the final list.
+            markNonResidentLocked(victim)
+        }
+        plan.residentLive = walk.residentLive
+        plan.fits = walk.fits
+
+        if !walk.fits {
+            if incoming.liveBytes > budget {
+                // Over budget **on its own**: nothing eviction can do,
+                // because the walk above has already taken every victim
+                // it is allowed to. For a purpose that may evict past the
+                // session budget this branch is now reachable only when
+                // the model is over the CLASS budget — `budget` above is
+                // the class cap for such a request — which is the pinned
+                // half of the owner's directive: the 4B on a standard
+                // phone stays refused. A foreground translation load
+                // inside its class budget does not arrive here; it evicts
+                // and admits.
+                if request.replacesSlotContents && request.slot.admitsSoloOverBudget {
+                    // Over budget on its own. Nothing we can evict
+                    // changes that, and refusing would make the app's
+                    // own default brain unloadable — admit it and
+                    // announce the fact.
+                    plan.soloOverBudget = true
+                } else {
+                    // No escape hatch to invoke. Either a PEER load —
+                    // a second copy of something the device already
+                    // cannot hold beside its neighbours, which the user
+                    // did not ask for — or a replacing load on a
+                    // position whose artifact the app can live without
+                    // (`ModelSlot.admitsSoloOverBudget`), where the
+                    // feature's own fallback is a working answer.
+                    plan.denial = .overBudgetAlone(liveBytes: incoming.liveBytes,
+                                                   budgetBytes: budget)
+                }
+            } else {
+                // It fits alone, but unevictable bytes are in the way:
+                // a resident is pinned (an inference is in flight), is
+                // not idle-evictable, or is being spared by the thrash
+                // guard. Admitting here would cross the budget
+                // silently, which is the one thing this whole mechanism
+                // exists to prevent — so refuse instead.
+                plan.denial = budgetDenialLocked(victims: plan.victims,
+                                                 slot: request.slot,
+                                                 now: now,
+                                                 config: config)
+            }
+        }
+        return plan
+    }
+
+    /// Phases 2b–2d of the admission walk — the preemption ask, the rebuild
+    /// around what was refused, and the unloads. **Caller holds no lock.**
+    ///
+    /// Extracted from `reserveInternal` unchanged, comments and all. The
+    /// returned `denial` is the caller's to interpret: `reserveInternal`
+    /// fails on it, `makeRoom` ignores it (its caller re-checks its own gate
+    /// instead).
+    private func reclaimVictimsForLoad(_ initialVictims: [ModelSlot],
+                                       residentAfterFirstPlan: UInt64,
+                                       initialDenial: ReservationDenial?,
+                                       request: ModelLoadRequest,
+                                       excluding: ModelSlot?,
+                                       transientLive: UInt64,
+                                       budget: UInt64,
+                                       incomingLiveBytes: UInt64,
+                                       now: Date,
+                                       config: ModelWardenConfig,
+                                       emittingEvents: Bool)
+    -> (victims: [ModelSlot], denial: ReservationDenial?, preemptions: [PreemptionRecord]) {
+        var victims = initialVictims
+        var preemptions: [PreemptionRecord] = []
+        /// Slots whose bytes the warden must not take: their owner refused
+        /// and the release contract does not permit overruling it. They are
+        /// excluded from the rebuilt victim order, which is the whole
+        /// difference between "the refusal was heard" and "the refusal was
+        /// logged".
+        var withheld: Set<ModelSlot> = []
+        var denial = initialDenial
+
+        // ---- Phase 2b — [MODEL-WARDEN] Step 2: ask before taking.
+        //
+        // The victims above are already marked non-resident, so a concurrent
+        // gate sees them gone exactly as it did before Step 2. What is new
+        // is that the ones whose owner registered as a `ModelResident` — and
+        // whose priority is below the request's — get a say first. The ask
+        // is outside the lock because a resident that called back in would
+        // deadlock on the non-recursive lock, and the answer is what decides
+        // whether the registered release closure is invoked unconditionally
+        // (`.budget`) or only where the contract allows (`PreemptionOutcome`).
+        //
+        // A `.safetyCritical` request never asks: there is nothing above it
+        // on the ladder, so `askableVictims` returns nothing for it and the
+        // victims go through the Step 1 path unchanged.
+        if denial == nil {
+            let askable = askableVictims(victims: victims,
+                                         above: request.priority)
+            for (slot, resident) in askable {
+                let outcome = resolvePreemption(slot: slot,
+                                                resident: resident,
+                                                now: now,
+                                                config: config)
+                preemptions.append(PreemptionRecord(slot: slot, outcome: outcome))
+                if emittingEvents {
+                    onEvent?(.preempted(slot: slot, outcome: outcome))
+                }
+                if !outcome.reclaimed { withheld.insert(slot) }
+            }
+        }
+
+        // ---- Phase 2c — rebuild the victims around what was refused.
+        //
+        // Only the refusals that could not be forced change anything, and
+        // when there are none this block is skipped entirely: the common path
+        // asks nothing, rebuilds nothing, and pays one lock acquisition at
+        // the end for the thrash count.
+        //
+        // One bound worth naming: the ask happens once per reservation,
+        // against the FIRST plan's victim list. A slot that only becomes a
+        // victim because a refusal pushed the order past it is evicted the
+        // Step 1 way, without being asked — which is exactly where it would
+        // have gone without Step 2, and the alternative (an ask-loop that
+        // can cascade) buys a rarer guarantee at the cost of a path with no
+        // fixed number of lock acquisitions.
+        if !withheld.isEmpty {
+            lock.lock()
+            var withheldLive: UInt64 = 0
+            for slot in withheld {
+                // The warden is giving the bytes back to the ledger,
+                // because it did not get them. Leaving them marked
+                // non-resident would be the ledger counting memory it was
+                // just told it cannot have.
+                markResidentLocked(slot)
+                withheldLive += entries[slot]?.footprint.liveBytes ?? 0
+            }
+            let rebuilt = planVictimsLocked(excluding: excluding,
+                                            residentLive: residentAfterFirstPlan + withheldLive,
+                                            transientLive: transientLive,
+                                            incomingLiveBytes: incomingLiveBytes,
+                                            budget: budget,
+                                            priority: request.priority,
+                                            now: now,
+                                            config: config,
+                                            withheld: withheld)
+            victims += rebuilt.victims
+            for victim in rebuilt.victims {
+                markNonResidentLocked(victim)
+            }
+            // The first plan's victims included the refusals. They are not
+            // victims any more: the registered release closure is exactly
+            // what the owner just declined to have called, and Step 1's
+            // unconditional path is what this protocol exists to replace.
+            victims.removeAll { withheld.contains($0) }
+            if !rebuilt.fits {
+                denial = budgetDenialLocked(victims: victims,
+                                            slot: request.slot,
+                                            now: now,
+                                            config: config)
+            }
+            lock.unlock()
+        }
+
+        // The thrash count, taken once on the final list — see the note in
+        // phase 1. `withheld` slots are not in `victims` any more, so a
+        // refusal is never counted as an eviction.
+        lock.lock()
+        for victim in victims {
+            noteLoadDrivenEvictionLocked(victim, now: now, config: config)
+        }
+        lock.unlock()
+
+        let handled: Set<ModelSlot> = Set(preemptions.filter { $0.outcome.reclaimed }
+            .map(\.slot))
+        for victim in victims where !handled.contains(victim) {
+            performEviction(victim, reason: .budget)
+        }
+
+        return (victims, denial, preemptions)
     }
 
     /// The model is in memory. Retires the reservation; it does **not**

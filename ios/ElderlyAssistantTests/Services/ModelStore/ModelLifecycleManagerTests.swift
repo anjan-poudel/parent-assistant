@@ -1933,6 +1933,147 @@ final class ModelLifecycleManagerTests: XCTestCase {
         }
     }
 
+    // MARK: - [DEVSCREEN-EVICT] Making room without taking a permit
+
+    /// `makeRoom` is the translate-test screen's escape hatch: the same
+    /// eviction the reservation above performs, performed for a caller that
+    /// is NOT about to be handed a permit.
+    ///
+    /// The screen's load gate refuses before the reservation path is ever
+    /// reached, so a model the warden would happily make room for is refused
+    /// by a gate that cannot know what is evictable. This is the warden's
+    /// answer, and the two facts pinned here are the ones that make it usable
+    /// there: the warm background STT is really unloaded, and **nothing is
+    /// reserved** — the load that follows must still be admitted.
+    func testMakeRoomUnloadsTheWarmSTTAndGrantsNoPermit() {
+        // 6 GB physical → `.standard` → the 3.2 GB class budget; 1.5 GB of
+        // headroom with a warm 1 GB STT beside it: the owner's device.
+        probe.availableProcessMemoryBytes = 1_500_000_000
+        let manager = makeUnpinnedManager()
+        var events: [ModelLifecycleEvent] = []
+        manager.onEvent = { events.append($0) }
+
+        let warmOwner = FakeOwner()
+        load(.speechToText, modelID: sttQ8, owner: warmOwner, on: manager,
+             priority: .background)
+
+        let ask = request(.translateBrain, modelID: translateQ8,
+                          owner: nil, purpose: .liveTranslate)
+        let evicted = manager.makeRoom(for: ask)
+
+        XCTAssertEqual(evicted, [.speechToText],
+                       "the warden's own victim walk, over the same ladder "
+                       + "`reserve` uses: the warm background resident is what "
+                       + "makes the room")
+        XCTAssertEqual(warmOwner.unloadCount, 1, "the STT is really unloaded")
+        XCTAssertFalse(manager.isResident(.speechToText))
+        XCTAssertTrue(events.contains(.evicted(slot: .speechToText, reason: .budget)),
+                      "a real unload is reported as one, so a capture that saw "
+                      + "the resident disappear has the event that says why")
+
+        // THE claim that separates this from `reserve`: no permit was taken.
+        XCTAssertTrue(events.filter {
+            if case .reserved = $0 { return true }
+            return false
+        }.isEmpty, "making room is not a reservation")
+
+        guard let reservation = reserveOrFail(manager, ask) else { return }
+        XCTAssertFalse(reservation.evicted.contains(.speechToText),
+                       "the bytes were already free: the load the screen is "
+                       + "about to attempt is admitted without a second eviction")
+    }
+
+    /// A model over the **class** budget is over it whatever is evicted, and
+    /// `makeRoom` must not spend the residents finding that out.
+    ///
+    /// This is the ledger-integrity half: phase 1 marks its victims
+    /// non-resident before anyone knows whether the plan fits, and a caller
+    /// that walks away from a hopeless plan has to put them back — otherwise
+    /// the warden would be under-counting memory that is still allocated, and
+    /// the next load would be admitted into bytes that are not there.
+    func testMakeRoomSpendsNothingOnAModelThatCannotFitAtAll() {
+        let manager = makeUnpinnedManager()   // default probe: 3.4 GB free
+        XCTAssertGreaterThan(footprint(.translateBrain, brain4B),
+                             ModelLifecycleBudget.standardModelsBudgetBytes,
+                             "the 4B must be over the 3.2 GB class budget for "
+                             + "this case to mean anything")
+
+        let warmOwner = FakeOwner()
+        load(.speechToText, modelID: sttQ8, owner: warmOwner, on: manager,
+             priority: .background)
+        var events: [ModelLifecycleEvent] = []
+        manager.onEvent = { events.append($0) }
+
+        let evicted = manager.makeRoom(for: request(.translateBrain,
+                                                    modelID: brain4B,
+                                                    owner: nil,
+                                                    purpose: .liveTranslate))
+
+        XCTAssertTrue(evicted.isEmpty,
+                      "eviction cannot shrink a model below its own bytes")
+        XCTAssertEqual(warmOwner.unloadCount, 0,
+                       "a hopeless plan must not cost the device its residents")
+        XCTAssertTrue(manager.isResident(.speechToText),
+                      "…and must leave the ledger exactly as it found it")
+        XCTAssertTrue(events.isEmpty, "nothing was unloaded, so nothing is reported")
+    }
+
+    /// The preemption ask is part of the walk `makeRoom` reuses, and a
+    /// refusal the release contract does not permit forcing is honoured here
+    /// exactly as it is on the reservation path.
+    ///
+    /// whisper.cpp's STT registers `perAttemptContext` — `whisper_free` under
+    /// a running `whisper_full` crashes — so its owner's "no" is a fact about
+    /// the runtime, not a preference, and a room-making pass that overruled
+    /// it would take the household's recogniser with it.
+    func testMakeRoomStopsAtAResidentsRefusal() {
+        probe.availableProcessMemoryBytes = 1_500_000_000
+        let manager = makeUnpinnedManager()
+
+        let sttOwner = FakeOwner()
+        let resident = FakeResident()
+        resident.ack = .refused(.inUse)
+        manager.register(slot: .speechToText,
+                         modelID: ModelCatalog.whisperMediumFinetunedNepali,
+                         owner: sttOwner,
+                         evictable: true,
+                         priority: .background,
+                         resident: resident) { [weak sttOwner] in
+            sttOwner?.unload()
+        }
+        manager.didLoad(.speechToText, owner: sttOwner)
+
+        let evicted = manager.makeRoom(for: request(.translateBrain,
+                                                    modelID: translateQ8,
+                                                    owner: nil,
+                                                    purpose: .liveTranslate))
+
+        XCTAssertEqual(resident.askCount, 1, "the warden asks, not only takes")
+        XCTAssertTrue(evicted.isEmpty,
+                      "the refusal is heard: nothing is unloaded over it")
+        XCTAssertEqual(sttOwner.unloadCount, 0,
+                       "the registered release path is not invoked on a refusal "
+                       + "the contract forbids forcing")
+        XCTAssertTrue(manager.isResident(.speechToText),
+                      "the bytes stayed where they were, and the ledger says so")
+    }
+
+    /// Nothing in the way: an incoming model that fits beside every resident
+    /// costs nothing, and no event claims otherwise.
+    func testMakeRoomWithNothingInTheWayTakesNothing() {
+        let manager = makeUnpinnedManager()
+        var events: [ModelLifecycleEvent] = []
+        manager.onEvent = { events.append($0) }
+
+        let evicted = manager.makeRoom(for: request(.translateBrain,
+                                                    modelID: translateQ8,
+                                                    owner: nil,
+                                                    purpose: .liveTranslate))
+
+        XCTAssertTrue(evicted.isEmpty)
+        XCTAssertTrue(events.isEmpty)
+    }
+
     // MARK: - [CAMERA-BUDGET] The ownership rule in both directions (B4)
 
     /// The ownership rule was enforced on `clear` only, so a second session

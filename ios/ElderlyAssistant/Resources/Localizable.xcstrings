@@ -12725,6 +12725,20 @@
         "ne": { "stringUnit": { "state": "translated", "value": "यन्त्र व्यस्त, प्रयास गरिएन — %@" } }
       }
     },
+    "settings.translateTest.result.evictedForRoom": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Evicted to run" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "चलाउन हटाइयो" } }
+      }
+    },
+    "settings.translateTest.result.evictedThenRefused": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "freed %@, still not attempted — %@" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "ठाउँ खाली गरियो (%@), तैपनि प्रयास गरिएन — %@" } }
+      }
+    },
     "settings.translateTest.result.modelLoad": {
       "extractionState": "manual",
       "localizations": {

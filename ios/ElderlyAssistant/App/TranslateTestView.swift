@@ -460,13 +460,28 @@ private struct TranslateTestResultCard: View {
                      origin.rawValue)
             }
 
+            // [DEVSCREEN-EVICT] What the warden unloaded so this run could
+            // load its model — the price the bypass paid, on the card of the
+            // run that paid it. Drawn on BOTH endings, which is the point: a
+            // run that then answered shows what the answer cost, and a run
+            // that was still refused shows that the device was emptied for
+            // nothing (the sentence below says so, and this row is which
+            // residents went). Rendered as the slots' own tokens, like every
+            // other value on this card, because they are the same vocabulary
+            // as the `evicted` events in the log beside it.
+            if !outcome.evictedForRoom.isEmpty {
+                fact(L10n.str("settings.translateTest.result.evictedForRoom", locale: locale),
+                     outcome.evictedForRoom.map(\.rawValue).joined(separator: ", "))
+            }
+
             // Tier 1's own account of the string: whether the brain was asked
             // at all, and what the tier said when it declined. `noTierResolved`
             // above says "nothing was translated"; this says which of the three
             // quite different things produced that.
             if let disposition = outcome.localDisposition {
                 fact(L10n.str("settings.translateTest.result.tier1", locale: locale),
-                     disposition.caption(locale: locale))
+                     disposition.caption(locale: locale,
+                                         evictedForRoom: outcome.evictedForRoom))
             }
         }
         .padding(16)
