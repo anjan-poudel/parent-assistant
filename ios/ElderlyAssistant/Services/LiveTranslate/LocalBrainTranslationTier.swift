@@ -124,10 +124,33 @@ protocol LocalBrainTranslating: Sendable {
     /// so a closed session leaves no model parked in memory. A no-op for a
     /// brain that holds nothing.
     func release() async
+
+    /// The same attempt, for one NAMED model rather than this brain's own
+    /// resolution. `nil` means the caller had none, reported exactly as a
+    /// resolution failure always was.
+    ///
+    /// Additive (2026-09-21, the translate-test screen's model picker): it is
+    /// a requirement with a DEFAULT, the same shape `isHoldingHandle` and
+    /// `loadDurationMsOfLastGeneration` use, rather than the one-method
+    /// protocol (`LocalBrainModelTier`) this screen used to carry. That
+    /// protocol was a second statement of a capability the tier already has,
+    /// and it narrowed the screen's `brain` to it — so a conformer that
+    /// implemented only the pipeline's method could be handed to the screen
+    /// and silently answer with the ladder's model under another row's name.
+    /// One protocol cannot be wired that way.
+    func translate(_ strings: [String], using model: ModelID?) async -> LocalBrainTranslationOutcome
 }
 
 extension LocalBrainTranslating {
     func release() async {}
+
+    /// The honest spelling of "this brain does not distinguish models": it
+    /// runs its own resolution, which is what it would do for any caller.
+    /// The shipped tier overrides this with the real named attempt, and it is
+    /// the only conformer a surface that names a model is wired to.
+    func translate(_ strings: [String], using model: ModelID?) async -> LocalBrainTranslationOutcome {
+        await translate(strings)
+    }
 }
 
 extension LocalBrainTranslationTier {
@@ -165,6 +188,21 @@ struct LocalBrainTranslationOutcome: Equatable {
     /// (`translations:durationMs:`) is still the whole initializer and the
     /// tier's own tests keep constructing outcomes without one.
     var deferral: LocalBrainDeferral? = nil
+
+    /// [MODEL-SWITCH] (2026-09-21) How much of `durationMs` was the handle
+    /// load rather than the decode, when the generator measures the split —
+    /// `nil` for a generator that does not (every fake, and every path that
+    /// never reached a generation).
+    ///
+    /// **Additive, and deliberately not folded into `durationMs`.** The
+    /// event's `durationMs` is production telemetry and keeps meaning what it
+    /// has always meant (the whole attempt, load included — the deadline
+    /// covers the load, `run`'s doc). This field is for the caller whose
+    /// question is about the MODEL: the translate-test screen comparing
+    /// quants, where a first run that paid a 2.5 GB page-in and a second that
+    /// did not are two different numbers for the same model. The load is not
+    /// hidden — it is reported, separately, and the screen shows both.
+    var loadDurationMs: Int? = nil
 
     static let none = LocalBrainTranslationOutcome(translations: [:], durationMs: 0)
 }
@@ -316,6 +354,29 @@ protocol BrainTextGenerating: Sendable {
     /// the honest one for a runtime that has not been asked.
     func isHoldingHandle() async -> Bool
 
+    /// [MODEL-SWITCH] (2026-09-21) How much of the LAST `generate` call's
+    /// wall time went on getting its handle ready, in milliseconds — `0` when
+    /// the handle was already resident, and `nil` for a generator that does
+    /// not measure the split.
+    ///
+    /// **Why the split exists.** The translate-test screen compares models
+    /// against each other, and a number that includes a 2.5 GB page-in is not
+    /// that comparison: with the idle timer at five seconds
+    /// (`brainTranslationIdleUnloadSeconds`), the first run after switching
+    /// rows pays the load and the second does not, so the same model reads as
+    /// tens of seconds and then as a few hundred milliseconds. That is a fact
+    /// about the idle timer, not about the model, and the screen's whole
+    /// question is the model. The load still runs INSIDE `generate`'s own
+    /// deadline — that contract is `run`'s and it does not move; this only
+    /// says how much of the total it was, so the caller can subtract it from
+    /// the headline and still show the wait beside it.
+    ///
+    /// A requirement with a default rather than a new parameter on
+    /// `generate`, for the same reason `isHoldingHandle` is one: every fake
+    /// in the suites keeps compiling and honestly answers "not measured"
+    /// (`nil`), while the runtime that does the paging reports the number.
+    func loadDurationMsOfLastGeneration() async -> Int?
+
     /// Told when the warden takes the resident handle away on a path the tier
     /// did not ask for — the preemption ask, or the registered release path
     /// when that ask was refused and overruled.
@@ -332,6 +393,10 @@ protocol BrainTextGenerating: Sendable {
 extension BrainTextGenerating {
     func release() async {}
     func isHoldingHandle() async -> Bool { false }
+    /// "Not measured" — see the requirement's doc. Every fake answers this,
+    /// and the tier passes it through as `nil` rather than inventing a `0`
+    /// (a zero would claim the handle was already resident).
+    func loadDurationMsOfLastGeneration() async -> Int? { nil }
     func setWardenOffloadHandler(_ handler: (@Sendable () -> Void)?) {}
 }
 
@@ -495,45 +560,103 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
     /// its own vocabulary, so an installed file is a runnable one, which is
     /// the same check the app's other on-device brains make
     /// (`LocalIntentInterpreter.isAvailable`).
+    /// **Two predicates, one answer** — the other half of the review note
+    /// above. `attempt` runs on `path(for:)` (the artifact is on disk); this
+    /// resolution asks `isAvailable` (the artifact *and* every dependency the
+    /// catalog declares). Every ladder entry is a `.llamaBase` with
+    /// `dependsOn: nil`, so the two agree on all of them — which is why the
+    /// screen can honestly use one of them for its rows and still be showing
+    /// what the run gate would say. They would diverge only for a rung with a
+    /// dependency, and none exists.
     func installedModel() -> ModelID? {
         guard let modelStore else { return nil }
-        return config.brainTranslationModelIDs.first { modelStore.isAvailable($0) }
+        return Self.resolvedModel(in: config.brainTranslationModelIDs) { modelStore.isAvailable($0) }
+    }
+
+    /// The ladder's own resolution rule, over an explicit list and an
+    /// explicit store question: **the first rung the device can run**.
+    ///
+    /// Extracted (2026-09-21 review) so the one screen that OPENS on a row —
+    /// the translate-test picker — resolves the way this tier does rather
+    /// than re-spelling "first installed" as a second rule that could drift
+    /// from it. This passes the config's ladder; the screen passes the rows
+    /// it draws.
+    static func resolvedModel(in ladder: [ModelID], isAvailable: (ModelID) -> Bool) -> ModelID? {
+        ladder.first { isAvailable($0) }
     }
 
     // MARK: The attempt
 
     func translate(_ strings: [String]) async -> LocalBrainTranslationOutcome {
-        guard !strings.isEmpty else { return .none }
         // The ladder's own answer: the first entry that is installed and
-        // complete. This is the pipeline's path and it is unchanged — the
-        // method below is the same body with the model named instead of
-        // resolved.
-        return await translate(strings, using: installedModel())
+        // complete. This is the pipeline's path and it is unchanged.
+        //
+        // `mustBeATranslationModel: false`, and that is the whole reason the
+        // parameter exists: the ladder's resolution is ALLOWED to land on the
+        // fallback tail (the config says so in place), and the devices that
+        // tail serves have no other translation model. Refusing there would
+        // take the tier away from exactly those devices. The kind check
+        // belongs to the path where a caller NAMED something.
+        await attempt(strings, model: installedModel(), mustBeATranslationModel: false)
     }
 
     /// The same attempt, for one **named** model rather than the ladder's
     /// first installed one.
     ///
-    /// Additive (2026-09-21, the translate-test screen's model picker): the
-    /// pipeline's entry point above calls this with exactly the model it
-    /// resolved for itself a moment earlier, so `translate(_:)` behaves as it
-    /// always has — same gate order, same events, same reasons, same
-    /// outcome. Nothing in the tier's contract moved; this only lets a caller
-    /// that already knows which model it wants ask for it.
+    /// Additive (2026-09-21, the translate-test screen's model picker): a
+    /// caller that already knows which model it wants gets the identical
+    /// attempt — same gate order, same events, same reasons, same outcome —
+    /// run against that artifact instead of the resolved one.
     ///
     /// `nil` means the caller had none (the ladder is empty, or nothing on it
     /// is installed), and is reported exactly as the ladder-resolution
     /// failure always was: `.modelNotInstalled` at the availability stage.
     ///
-    /// **The named model is not re-checked against `brainTranslationModelIDs`.**
-    /// Membership is the picker's rule, and it is the right one there — the
-    /// screen offers the ladder and nothing else. Here the proof of "may
-    /// this run" is the store's own (`path(for:)`, which is nil unless the
-    /// artifact and its dependencies are on disk), and a second membership
-    /// test would only add a refusal with no honest token to name it: the
-    /// taxonomy has no "not in the ladder" reason, because until now no
-    /// caller could name a model the ladder did not.
+    /// **The name is checked before anything runs** ([MODEL-KIND], the
+    /// 2026-09-21 review): it must be one of THIS config's translation rungs
+    /// *and* a model the build classifies as a translation model — the same
+    /// two conditions that decide which rows a picker may offer, asked of the
+    /// same predicate (`isRunnableTranslationModel`), so a row can never be
+    /// offered and then refused. A name failing either is reported as
+    /// `.notATranslationModel` at the availability stage.
+    ///
+    /// Why that check cannot simply be "is it on the ladder": the ladder's
+    /// tail is the assistant's own intent brains (the config says so in
+    /// place). Naming one would send a translation prompt — and its
+    /// `{"translations":[…]}` schema — to a slot-filling brain, and would put
+    /// a translation row in front of an artifact the brain section manages.
+    /// Only a NAMED model can be wrong, so only this path checks.
     func translate(_ strings: [String], using model: ModelID?) async -> LocalBrainTranslationOutcome {
+        await attempt(strings, model: model, mustBeATranslationModel: true)
+    }
+
+    /// Which of `ladder`'s rungs a caller may NAME — the rows a picker is
+    /// entitled to offer, in ladder order.
+    ///
+    /// The tier's own notion, asked of the tier rather than re-derived by the
+    /// screen: `installedModel()` and this both read
+    /// `config.brainTranslationModelIDs`, and a picker building its own list
+    /// from the catalogue is what drifted (the catalogue's translation list
+    /// was missing its own head). Order is the ladder's, so a picker's first
+    /// row is the model the pipeline would resolve for itself.
+    static func translationModelIDs(from ladder: [ModelID]) -> [ModelID] {
+        ladder.filter { ModelCatalog.isTranslationModel($0) }
+    }
+
+    /// Whether `id` may be named to `translate(_:using:)` against `ladder`.
+    ///
+    /// One predicate for both sides of the contract — the refusal below and
+    /// every picker that asks what to offer — so the two cannot disagree
+    /// about which models are runnable translations.
+    static func isRunnableTranslationModel(_ id: ModelID, ladder: [ModelID]) -> Bool {
+        translationModelIDs(from: ladder).contains(id)
+    }
+
+    /// The attempt itself, with the ladder-versus-name difference lifted out:
+    /// the two entry points above differ only in where the model came from.
+    private func attempt(_ strings: [String],
+                         model: ModelID?,
+                         mustBeATranslationModel: Bool) async -> LocalBrainTranslationOutcome {
         guard !strings.isEmpty else { return .none }
 
         // [DYNAMIC-TIMEOUT] (owner directive, 2026-09-20, re-landed on the
@@ -552,6 +675,20 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
             // is skipped and says so. The strings fall through untouched.
             events.brainTranslationUnavailable(modelStore == nil ? .runtimeMissing : .modelNotInstalled,
                                                stage: .availability)
+            return .none
+        }
+
+        // [MODEL-KIND] (2026-09-21 review) The NAMED path only: a caller may
+        // ask for a model this tier must not translate with — anything off
+        // the ladder, and the ladder's own fallback tail however it got
+        // named. Checked AFTER the store guard above so the reason is the
+        // first thing actually wrong: a build without the runtime hears
+        // `runtime_missing`, a device without the artifact hears
+        // `model_not_installed`, and only a model that is genuinely there and
+        // genuinely wrong for this asks hears `not_a_translation_model`.
+        if mustBeATranslationModel,
+           !Self.isRunnableTranslationModel(modelID, ladder: config.brainTranslationModelIDs) {
+            events.brainTranslationUnavailable(.notATranslationModel, stage: .availability)
             return .none
         }
 
@@ -647,8 +784,17 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
                                          unresolvedCount: strings.count - translations.count,
                                          durationMs: durationMs,
                                          generation: report.reading)
+            // [MODEL-SWITCH] (2026-09-21 review) How much of `durationMs` was
+            // getting the handle ready, asked of the generator that did the
+            // paging. `nil` for a fake (nothing measured) — never a made-up
+            // zero, which would claim a resident handle. The event above
+            // keeps the whole attempt: telemetry has always meant the attempt
+            // including its load, and the load still runs inside the
+            // generation's deadline. This is the additive fact the screen
+            // needs to compare models rather than idle timers.
             return LocalBrainTranslationOutcome(translations: translations,
-                                                durationMs: durationMs)
+                                                durationMs: durationMs,
+                                                loadDurationMs: await generator.loadDurationMsOfLastGeneration())
         } catch let failure as BrainGenerationFailure {
             events.brainTranslationUnavailable(Self.reason(for: failure),
                                                stage: Self.stage(for: failure))
@@ -1489,6 +1635,14 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
     /// the real box without a model on disk or a llama runtime.
     nonisolated let slot = TranslateBrainHandleSlot()
     private var lastUse: Date?
+
+    /// [MODEL-SWITCH] (2026-09-21 review) How long the last handle load took,
+    /// in milliseconds — `0` when the requested model was already resident.
+    ///
+    /// Written by `loadHandle` on every path through it and read only after a
+    /// generation that succeeded, so a number here is never a leftover from
+    /// an attempt the caller gave up on.
+    private var lastLoadMs: Int?
     /// The armed idle release, if one is. Cancelled and re-armed by every use,
     /// so the handle's lifetime is measured from the last batch and not from
     /// the first.
@@ -1527,6 +1681,13 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
     }
 
     func isHoldingHandle() async -> Bool { slot.isHoldingHandle }
+
+    /// The tier's question about the split (see
+    /// `BrainTextGenerating.loadDurationMsOfLastGeneration`), answered from
+    /// the measurement `loadHandle` records. Outside `#if canImport(LLM)`,
+    /// like `isHoldingHandle`: the requirement exists on every build, and on
+    /// one without the runtime no generation reaches the read.
+    func loadDurationMsOfLastGeneration() async -> Int? { lastLoadMs }
 
     /// `nonisolated` so it can satisfy `BrainTextGenerating`'s synchronous
     /// requirement: the warden asks from its own reservation path and must
@@ -1639,9 +1800,53 @@ actor LlamaBrainTextGenerator: BrainTextGenerating {
     /// it.
     private func loadHandle(modelURL: URL) throws -> LLM {
         if let existing = slot.currentHandle as? LLM,
-           slot.heldModelURL == modelURL { return existing }
+           slot.heldModelURL == modelURL {
+            // Resident, and the one that was asked for: nothing is paged in,
+            // and the measured load is a truthful zero.
+            lastLoadMs = 0
+            return existing
+        }
+
+        // [MODEL-SWITCH] (2026-09-21 review) The handle in the slot is a
+        // DIFFERENT model, or there is none. Drop it BEFORE the new one is
+        // constructed, or the two live at once: `LLM.init` pages in the whole
+        // artifact, so a switch used to hold the old model's bytes while the
+        // new model's came in on top of them — and the ledger had the same
+        // hole, because nothing had said the old bytes were back before the
+        // new load reserved against the budget.
+        //
+        // `dropHandle` is the release this generator makes for itself:
+        // `slot.drop()` clears the box and `lifecycle.didUnload` retires the
+        // bytes from the resident total, owner-scoped on the slot so this can
+        // only clear the residency this generator owns. The reserve below
+        // therefore asks for the new model against a budget that already has
+        // the previous one back.
+        //
+        // What it costs: if that reserve is then refused, the next batch
+        // reloads, where before it would have found the previous model still
+        // resident. That is the honest trade — the previous model is not the
+        // one the caller asked for, and holding two translation models in
+        // memory to save a reload nobody asked for is the failure this fixes.
+        //
+        // A decode still in flight on the old handle is not interrupted here:
+        // the box keeps the runtime alive for whoever holds it (`run`'s local
+        // `llm`), so those bytes go when that decode ends. Nothing can end it
+        // sooner, and nothing needs to — this actor runs one generation at a
+        // time.
+        if slot.isHoldingHandle {
+            dropHandle()
+        }
 
         let modelID = Self.modelID(forURL: modelURL)
+
+        // [MODEL-SWITCH] The measurement window opens here: everything to the
+        // `return created` below is "getting a handle ready", and the decode
+        // that follows it is not. The `defer` covers every exit — a refusal, an
+        // abandon, a construction failure — because only a successful
+        // generation ever reads it, and a stale number is worse than a fresh
+        // one.
+        let loadStarted = Date()
+        defer { lastLoadMs = Int(Date().timeIntervalSince(loadStarted) * 1_000) }
 
         slot.beginLoad()
         defer { slot.endLoad() }

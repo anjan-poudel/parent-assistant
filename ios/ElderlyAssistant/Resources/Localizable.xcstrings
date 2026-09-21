@@ -9569,6 +9569,40 @@
         }
       }
     },
+    "model.name.intent-ne-qwen4b-s43-q4km": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Brain — Qwen 4B · intent fine-tune (slim, seed 43, superseded)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "दिमाग — Qwen ४B · इन्टेन्ट फाइन-ट्युन (स्लिम, seed ४३, पुरानो)"
+          }
+        }
+      }
+    },
+    "model.name.intent-ne-qwen4b-slotcanon-q4km": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Brain — Qwen 4B · Nepali (gate-passing)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "दिमाग — Qwen ४B · नेपाली (गेट पास)"
+          }
+        }
+      }
+    },
     "model.name.llama-3.2-1b-instruct-q4km": {
       "extractionState": "manual",
       "localizations": {
@@ -12667,6 +12701,20 @@
         "ne": { "stringUnit": { "state": "translated", "value": "तह १" } }
       }
     },
+    "settings.translateTest.result.busy": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "device busy, not attempted — %@" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "यन्त्र व्यस्त, प्रयास गरिएन — %@" } }
+      }
+    },
+    "settings.translateTest.result.modelLoad": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Model load (ms)" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "मोडेल लोड (ms)" } }
+      }
+    },
     "settings.translateTest.readiness.checking": {
       "extractionState": "manual",
       "localizations": {
@@ -12700,6 +12748,13 @@
       "localizations": {
         "en": { "stringUnit": { "state": "translated", "value": "The cloud translation switch is off in Settings." } },
         "ne": { "stringUnit": { "state": "translated", "value": "सेटिङमा क्लाउड अनुवाद स्विच बन्द छ।" } }
+      }
+    },
+    "settings.translateTest.readiness.modelUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "“%@” cannot run on this device: %@" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "“%@” यो यन्त्रमा चल्न सक्दैन: %@" } }
       }
     },
     "settings.translateTest.install.section": {

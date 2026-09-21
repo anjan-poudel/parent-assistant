@@ -2103,7 +2103,15 @@ final class AppCoordinator: ObservableObject {
             observabilityBus: observabilityBus,
             modelStore: modelStore,
             modelSource: TranslateTestModelSource(
-                ladder: config.brainTranslationModelIDs,
+                // The TRANSLATION rungs of the ladder, by the tier's own rule
+                // ([MODEL-SWITCH], 2026-09-21 review): the config's ladder
+                // carries the assistant's intent brains in its tail as
+                // fallbacks for the tier's own resolution, and a picker that
+                // offered them would send a translation prompt to a
+                // slot-filling brain. Asked of the tier rather than filtered
+                // here, so the rows the screen offers and the names the tier
+                // refuses are one predicate.
+                ladder: LocalBrainTranslationTier.translationModelIDs(from: config.brainTranslationModelIDs),
                 // The catalog's localized name; the raw id when this build
                 // carries no entry for it (a config ahead of the catalog is
                 // exactly what a mid-swap ladder looks like). The locale is
@@ -2113,17 +2121,26 @@ final class AppCoordinator: ObservableObject {
                     let locale = self?.activeLocale ?? Locale(identifier: "en")
                     return ModelCatalog.entry(for: id)?.displayName(locale: locale) ?? id.rawValue
                 },
-                // The tier's OWN predicate: `installedModel()` walks the
-                // ladder asking exactly this question
-                // (`ModelStore.isAvailable`), so a row marked installed is a
-                // row the tier would actually resolve and run — the marker
-                // and the readiness line read from one source, which is why
-                // the picker cannot offer a model the engine would refuse.
-                // It is also stricter than "the file is there": a model
-                // whose declared dependency is missing is not runnable, and
-                // this says so before the tap rather than after it.
+                // The tier's RUN GATE's question, and the screen's ONE
+                // predicate ([MODEL-SWITCH], 2026-09-21 review): `attempt`
+                // resolves `modelStore.path(for:)` — non-nil only when the
+                // artifact is on disk — so the row's marker, the readiness
+                // line and the install card all answer it the way a run
+                // would. (`installedModel()` asks `isAvailable`, the file
+                // plus its declared dependencies; every ladder entry is a
+                // `.llamaBase` with no dependencies, so the two agree on all
+                // of them — and where they could differ, this is the one the
+                // run would use.)
                 isInstalled: { [weak self] id in
-                    self?.modelStore.isAvailable(id) ?? false
+                    self?.modelStore.path(for: id) != nil
+                },
+                // The warden's verdict, asked of the same manager the
+                // AI-models rows ask: a model this device class refuses is
+                // not "Ready" here either, and the reason token is the one
+                // the ledger and the Settings row use.
+                unavailabilityReason: { id in
+                    guard let entry = ModelCatalog.entry(for: id) else { return nil }
+                    return ModelLifecycleManager.shared.availability(of: entry).reason
                 }),
             isProviderConfigured: { [weak self] in
                 self?.geminiConfigStore.isConfigured ?? false

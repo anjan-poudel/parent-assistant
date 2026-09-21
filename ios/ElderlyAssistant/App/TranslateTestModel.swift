@@ -96,6 +96,16 @@ final class TranslateTestModel: ObservableObject {
     @Published var selection: TranslateTestSelection = .gemini {
         didSet {
             guard oldValue != selection else { return }
+            // The OPENING row is not a switch. `selection` carries an initial
+            // value AND an observer, so assigning it from an initializer (or
+            // from `configure`) goes through a real setter and fires this —
+            // verified against swiftc, because the language's "observers do
+            // not run during initialization" rule does not cover a property
+            // whose storage the wrapper already owns. Left unguarded that
+            // spawned a readiness task nobody asked for, from the screen's
+            // own construction, and gave `configure` a second walk of the
+            // ladder beside the one its caller makes.
+            guard !isChoosingOpeningRow else { return }
             // A run in flight asked the OLD engine. Its answer would arrive
             // to find the cards cleared for the new one and would be read as
             // the new engine's — the one mislabelling this screen must not
@@ -176,6 +186,17 @@ final class TranslateTestModel: ObservableObject {
     /// says so (and only then can a coordinator forward it on).
     private var startCapture: (@escaping (Result<String, SearchPhraseCapture.Failure>) -> Void) -> Void = { _ in }
     private var cancelCapture: () -> Void = {}
+    /// True while the screen's OPENING row is being assigned — from the
+    /// initializer, or from `configure`. The observer above does nothing for
+    /// either: the transient state is already at its opening values, and the
+    /// caller that configures the screen asks for readiness itself. See the
+    /// observer's note.
+    private var isChoosingOpeningRow = true
+    /// A row's composed label, keyed by model, state and locale. The picker
+    /// asks for every visible row on every redraw, and composing one is a
+    /// catalog lookup plus a localization scan; the answer changes only when
+    /// the rows are rebuilt, which is what empties this.
+    private var labelCache: [String: String] = [:]
     /// The in-flight run, so a second tap supersedes the first instead of
     /// racing it: two results arriving out of order would show the slower
     /// engine's answer.
@@ -196,12 +217,13 @@ final class TranslateTestModel: ObservableObject {
         self.engines = engines
         self.modelSource = modelSource
         // The same opening rule `configure` applies, so a suite that injects
-        // a source drives the screen it will actually see. `selection`'s
-        // observer does not fire from an initializer, which is what makes
-        // this assignment the opening value rather than a switch.
-        let options = modelSource.map(Self.options(from:)) ?? []
-        self.modelOptions = options
-        self.selection = Self.defaultSelection(options: options)
+        // a source drives the screen it will actually see — assigned with the
+        // flag up, because the observer DOES fire from an initializer here
+        // (see its note), and a switch it did not ask for is a readiness walk
+        // the caller never made.
+        self.modelOptions = modelSource.map(Self.options(from:)) ?? []
+        self.selection = Self.defaultSelection(options: self.modelOptions)
+        self.isChoosingOpeningRow = false
         self.startCapture = startCapture
         self.cancelCapture = cancelCapture
     }
@@ -218,16 +240,22 @@ final class TranslateTestModel: ObservableObject {
         engines = built.engines
         cloudIndicator = built.cloudIndicator
         modelSource = dependencies.modelSource
-        modelOptions = Self.options(from: dependencies.modelSource)
         startCapture = dependencies.startCapture
         cancelCapture = dependencies.cancelCapture
+        // The rows, ONCE, through the one walk — the init's copy and this one
+        // used to be joined by a third from `refreshReadiness`, which the
+        // caller makes a moment later anyway.
+        refreshModelOptions()
         // The opening row: the first model the device can actually run,
         // falling back to the first ladder entry (which offers its download)
-        // and then to Gemini. Assigning the value the placeholder already
-        // holds is a no-op — its observer guards on that — so a device with
-        // no cloud at all starts on a model rather than on a card that would
-        // have to explain itself.
-        selection = Self.defaultSelection(options: modelOptions)
+        // and then to Gemini. Assigned with the flag up, so it is the opening
+        // value rather than a switch — the caller's own `refreshReadiness()`
+        // is this screen's ask on appearing, and a second one spawned here
+        // would be two walks of the same ladder for one appearance.
+        let opening = Self.defaultSelection(options: modelOptions)
+        isChoosingOpeningRow = true
+        selection = opening
+        isChoosingOpeningRow = false
     }
 
     // MARK: - The dropdown
@@ -246,20 +274,27 @@ final class TranslateTestModel: ObservableObject {
             guard seen.insert(id).inserted else { return nil }
             return TranslateTestModelOption(id: id,
                                             displayName: source.displayName(id),
-                                            isInstalled: source.isInstalled(id))
+                                            isInstalled: source.isInstalled(id),
+                                            isUnavailable: source.unavailabilityReason(id) != nil)
         }
     }
 
     /// The row the screen opens on.
     ///
-    /// The first INSTALLED model, because that is the answer the shipped
-    /// ladder would give (`installedModel()` resolves the same way) and the
-    /// opening state should be the one that can run. Failing that, the first
-    /// row at all: an uninstalled model is a valid selection whose card
-    /// offers that model's download, which is a better opening screen than a
-    /// cloud path the household may have switched off.
+    /// The first INSTALLED model — asked through the TIER'S own resolution
+    /// rule (`LocalBrainTranslationTier.resolvedModel(in:isAvailable:)`, the
+    /// function `installedModel()` is built from) rather than through a
+    /// second "first where installed" spelled here, so the row this screen
+    /// opens on is the rung the pipeline would itself pick
+    /// ([MODEL-SWITCH], 2026-09-21 review). Failing that, the first row at
+    /// all: an uninstalled model is a valid selection whose card offers that
+    /// model's download, which is a better opening screen than a cloud path
+    /// the household may have switched off.
     static func defaultSelection(options: [TranslateTestModelOption]) -> TranslateTestSelection {
-        options.first(where: \.isInstalled).map { .model($0.id) }
+        let resolved = LocalBrainTranslationTier.resolvedModel(in: options.map(\.id)) { id in
+            options.first { $0.id == id }?.isInstalled ?? false
+        }
+        return resolved.map { .model($0) }
             ?? options.first.map { .model($0.id) }
             ?? .gemini
     }
@@ -274,24 +309,54 @@ final class TranslateTestModel: ObservableObject {
 
     /// The name to print for the selected model: the catalog's, when the
     /// source has a row for it, and the raw id when it does not (a ladder
-    /// entry this build's catalog does not carry). Empty only for Gemini,
-    /// which no caller of this asks about — the readiness line names a model
-    /// exactly when the selection IS one.
-    var selectedModelName: String {
-        selectedModelOption?.displayName ?? selection.modelID?.rawValue ?? ""
+    /// entry this build's catalog does not carry).
+    ///
+    /// `nil` exactly when the selection is not a model ([MODEL-SWITCH],
+    /// 2026-09-21 review). It used to be `""` for Gemini, which is a name
+    /// that reads as a missing one — and the callers that were supposed to
+    /// be guarded by "nobody asks about Gemini" were not checked by the
+    /// compiler. An optional makes every caller decide what a model-less
+    /// row means.
+    var selectedModelName: String? {
+        guard let option = selectedModelOption else { return selection.modelID?.rawValue }
+        return option.displayName
     }
 
-    /// A dropdown row's text: the catalog's name for the model, then the
-    /// same marker the AI-models pickers append — composed from the two
-    /// shared keys (`model.ready`, `model.notDownloaded`) rather than from
-    /// copy written here, so "installed" means the same thing on every
-    /// screen that says it. Pure and static so both halves are pinned by a
-    /// test, the states included: a row marked "Ready" for a model this
-    /// device cannot run is the one lie this dropdown must not tell.
-    static func optionLabel(_ option: TranslateTestModelOption, locale: Locale) -> String {
-        let marker = L10n.str(option.isInstalled ? "model.ready" : "model.notDownloaded",
-                              locale: locale)
-        return "\(option.displayName) — \(marker)"
+    /// A dropdown row's text, composed by the SAME function the AI-models
+    /// pickers use (`AIModelsSettingsView.sttOptionLabel`) rather than by a
+    /// copy of it written here.
+    ///
+    /// [MODEL-SWITCH] (2026-09-21 review): the copy had drifted — it always
+    /// appended a state marker, so an installed row said "Ready" and a row
+    /// the DEVICE CLASS refuses said "Ready" too, while the settings row for
+    /// the same artifact said "not for this phone". One composer means
+    /// "installed" and "this phone cannot run it" mean the same thing on
+    /// every screen that says them, and the warden's marker is why a refused
+    /// row can no longer claim to be ready.
+    ///
+    /// The raw-id fallback is this screen's own: the shared composer takes a
+    /// catalog entry, and a ladder id this build does not carry has none.
+    /// Showing the id is the honest answer for a dev screen, and it keeps
+    /// the row selectable — the download it would offer is simply absent,
+    /// because there is nothing to download.
+    ///
+    /// Memoized per (model, state, locale): the picker asks for every row on
+    /// every redraw, and each compose is a catalog lookup plus a localization
+    /// scan for an answer that can only change when the rows are rebuilt.
+    func label(for option: TranslateTestModelOption, locale: Locale) -> String {
+        let key = "\(option.id.rawValue)|\(option.isInstalled)|\(option.isUnavailable)|\(locale.identifier)"
+        if let cached = labelCache[key] { return cached }
+        let label: String
+        if let entry = ModelCatalog.entry(for: option.id) {
+            label = AIModelsSettingsView.sttOptionLabel(entry: entry,
+                                                        downloaded: option.isInstalled,
+                                                        unavailable: option.isUnavailable,
+                                                        locale: locale)
+        } else {
+            label = option.displayName
+        }
+        labelCache[key] = label
+        return label
     }
 
     // MARK: - Running a translation
@@ -337,11 +402,18 @@ final class TranslateTestModel: ObservableObject {
     /// Re-reads the install state behind every row. Cheap (one store query
     /// per ladder entry, and the ladder is a handful), and published only on
     /// a real change so a readiness re-ask cannot spin the view.
+    ///
+    /// **The one walk** ([MODEL-SWITCH], 2026-09-21 review): the initializer,
+    /// `configure` and every readiness refresh all come through here — they
+    /// each used to rebuild the rows for themselves, which is three walks of
+    /// the same ladder for one appearance. The label cache is emptied with
+    /// the rows, because a label is a fact about a row's state.
     private func refreshModelOptions() {
         guard let source = modelSource else { return }
         let next = Self.options(from: source)
         guard next != modelOptions else { return }
         modelOptions = next
+        labelCache.removeAll(keepingCapacity: true)
     }
 
     /// Runs one translation through the selected engine.

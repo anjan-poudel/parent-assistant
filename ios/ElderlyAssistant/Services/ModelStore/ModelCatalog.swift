@@ -1805,6 +1805,19 @@ enum ModelCatalog {
     /// two cards is deletable from one while the other still shows it installed.
     /// Derived from the ids rather than kept as a parallel hand-list, so a
     /// future quant cannot be added to the catalog and forgotten here.
+    ///
+    /// [MODEL-KIND] (2026-09-21) The **head leads it**, and that is a fix
+    /// rather than a style choice: a round-4 export became the tier's head
+    /// without being added here, so the list that exists to say "this is a
+    /// translation artifact" called the head a BRAIN — `brainEntries` below is
+    /// derived by subtraction, so the head was offered a second row on the
+    /// brain card (the two-places hazard this list's own doc forbids), and a
+    /// picker that filters the ladder by translation-kind lost the head
+    /// entirely. The round-4 verdict has since moved the head from the Q5 to
+    /// the Q6_K (2026-09-21), which is the same trap one export later:
+    /// `testEveryTranslationArtifactIsClassifiedAsOne` therefore holds the
+    /// whole filename family to this list, so the next head cannot be
+    /// forgotten the same way.
     static let allTranslationEntries: [ModelCatalogEntry] = [
         nmtEnNeQwen17bR4Q6,
         nmtEnNeQwen17bR4Q8,
@@ -1814,6 +1827,25 @@ enum ModelCatalog {
         nmtEnNeQwen17bR2bQ8,
         nmtEnNeQwen17bR2bQ4
     ].compactMap { entry(for: $0) }
+
+    /// Whether this build classifies `id` as a TRANSLATION model — one of the
+    /// artifacts that answer the tier's `{"translations":[…]}` contract, as
+    /// opposed to an assistant brain that fills slots.
+    ///
+    /// The classification is `allTranslationEntries`, and it is asked through
+    /// this function rather than by spelling the list again, because the two
+    /// questions that need it — "may the tier run this when a caller NAMES
+    /// it" (`LocalBrainTranslationTier`), and "which rows may the picker
+    /// offer" (the translate-test screen) — must not be able to disagree
+    /// about which artifacts are translations.
+    ///
+    /// The filename family is the invariant behind the list
+    /// (`translate-en-ne-qwen17b-*.gguf`), and the test named above holds the
+    /// two together, so a new export that is not added here fails a test
+    /// rather than quietly changing the answer to this question.
+    static func isTranslationModel(_ id: ModelID) -> Bool {
+        allTranslationEntries.contains { $0.id == id }
+    }
 
     /// The brain artifacts proper: every `.llamaBase` entry that is not a
     /// translation model. This is the pool the brain section's

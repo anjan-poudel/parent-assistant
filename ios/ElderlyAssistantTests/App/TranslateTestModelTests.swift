@@ -21,24 +21,57 @@ final class TranslateTestModelTests: XCTestCase {
 
     // MARK: - Fakes
 
+    /// A gate a test can hold one answer behind.
+    ///
+    /// **A QUEUE of continuations, not one** (2026-09-21 review). The single
+    /// optional this used to be resumed only the first parker: a second call
+    /// that arrived while the gate was shut overwrote the stored continuation
+    /// and left that waiter suspended forever — a leak that shows up as a
+    /// suite that hangs rather than as a test that fails. The array is the
+    /// repo's own shape for this (`TransportLatch` in
+    /// `CloudTranslationTierTests`), with the same fast-path: a waiter that
+    /// arrives after the release never parks at all.
+    private final class Latch {
+        private var isOpen = false
+        private var waiters: [CheckedContinuation<Void, Never>] = []
+
+        var isWaiting: Bool { !waiters.isEmpty }
+
+        func wait() async {
+            if isOpen { return }
+            await withCheckedContinuation { waiters.append($0) }
+        }
+
+        func open() {
+            isOpen = true
+            let pending = waiters
+            waiters.removeAll()
+            for waiter in pending { waiter.resume() }
+        }
+    }
+
     private final class FakeProbeEngine: TranslateProbeEngine {
         var readinessValue: TranslateEngineReadiness
         var outcome: TranslateProbeOutcome
         private(set) var probed: [String] = []
+        /// How many times readiness was asked. The count is what makes "the
+        /// screen does not start a walk of its own" an assertion rather than
+        /// an inspection.
+        private(set) var readinessCount = 0
 
         /// When true, `readiness()` parks until `release()` — the seam a
         /// test uses to hold one engine's answer in flight while the picker
         /// moves to another row.
         var holdsReadiness = false
-        private var waiter: CheckedContinuation<Void, Never>?
-        var isWaitingForRelease: Bool { waiter != nil }
+        private let readinessLatch = Latch()
+        var isWaitingForRelease: Bool { readinessLatch.isWaiting }
 
         /// And the same for a RUN: `probe` parks until `releaseProbe()`, so
         /// a test can move the picker while an answer is genuinely on its
         /// way rather than after it has already landed.
         var holdsProbe = false
-        private var probeWaiter: CheckedContinuation<Void, Never>?
-        var isProbeWaiting: Bool { probeWaiter != nil }
+        private let probeLatch = Latch()
+        var isProbeWaiting: Bool { probeLatch.isWaiting }
 
         init(readiness: TranslateEngineReadiness = .ready,
              outcome: TranslateProbeOutcome = .resolved("hello", "नमस्ते", tier: .onDeviceBrain, latencyMs: 12)) {
@@ -47,26 +80,21 @@ final class TranslateTestModelTests: XCTestCase {
         }
 
         func readiness() async -> TranslateEngineReadiness {
+            readinessCount += 1
             if holdsReadiness {
-                await withCheckedContinuation { waiter = $0 }
+                await readinessLatch.wait()
             }
             return readinessValue
         }
 
-        func release() {
-            waiter?.resume()
-            waiter = nil
-        }
+        func release() { readinessLatch.open() }
 
-        func releaseProbe() {
-            probeWaiter?.resume()
-            probeWaiter = nil
-        }
+        func releaseProbe() { probeLatch.open() }
 
         func probe(_ text: String) async -> TranslateProbeOutcome {
             probed.append(text)
             if holdsProbe {
-                await withCheckedContinuation { probeWaiter = $0 }
+                await probeLatch.wait()
             }
             return outcome
         }
@@ -91,6 +119,26 @@ final class TranslateTestModelTests: XCTestCase {
         }
     }
 
+    // MARK: - Waiting
+
+    /// Polls `condition` on the main actor until it holds, or fails the test.
+    ///
+    /// The repo's own idiom (`CalendarShareSettingsSeamTests`, in this same
+    /// folder): the fakes park on continuations that are resumed from other
+    /// tasks, so a bare `while` loop that spins is a suite that hangs instead
+    /// of a test that fails when the thing it waits for never happens.
+    @MainActor
+    private func waitUntil(_ what: String, timeout: TimeInterval = 5,
+                           file: StaticString = #filePath, line: UInt = #line,
+                           _ condition: () -> Bool) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if condition() { return }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        XCTFail("timed out waiting for \(what)", file: file, line: line)
+    }
+
     // MARK: - Fixtures
 
     /// A ladder of three ids with no relationship to the real catalog: the
@@ -102,6 +150,7 @@ final class TranslateTestModelTests: XCTestCase {
 
     private func makeSource(ladder: [ModelID] = [head, fallback],
                             installed: Set<ModelID> = [],
+                            unavailable: Set<ModelID> = [],
                             names: [ModelID: String] = [:]) -> TranslateTestModelSource {
         TranslateTestModelSource(ladder: ladder,
                                  // The coordinator's own rule (catalog name,
@@ -110,7 +159,11 @@ final class TranslateTestModelTests: XCTestCase {
                                  // is itself the mid-swap case the fallback
                                  // exists for.
                                  displayName: { names[$0] ?? $0.rawValue },
-                                 isInstalled: { installed.contains($0) })
+                                 isInstalled: { installed.contains($0) },
+                                 // The ledger's verdict as the coordinator
+                                 // gives it: a reason token for the models
+                                 // this device class refuses.
+                                 unavailabilityReason: { unavailable.contains($0) ? .overClassBudget : nil })
     }
 
     /// The common fixture: a ladder with `head` installed and a fake engine
@@ -121,6 +174,7 @@ final class TranslateTestModelTests: XCTestCase {
                            gemini: FakeProbeEngine = FakeProbeEngine(),
                            ladder: [ModelID] = [head, fallback],
                            installed: Set<ModelID> = [head],
+                           unavailable: Set<ModelID> = [],
                            names: [ModelID: String] = [:],
                            capture: FakeCapture = FakeCapture())
         -> (model: TranslateTestModel, capture: FakeCapture) {
@@ -132,6 +186,7 @@ final class TranslateTestModelTests: XCTestCase {
         let model = TranslateTestModel(engines: engines,
                                        modelSource: makeSource(ladder: ladder,
                                                                installed: installed,
+                                                               unavailable: unavailable,
                                                                names: names),
                                        startCapture: { capture.start($0) },
                                        cancelCapture: { capture.cancel() })
@@ -147,6 +202,7 @@ final class TranslateTestModelTests: XCTestCase {
         let options = TranslateTestModel.options(
             from: makeSource(ladder: [Self.head, Self.fallback, Self.third],
                              installed: [Self.fallback],
+                             unavailable: [Self.third],
                              names: [Self.head: "Head model", Self.fallback: "Fallback model"]))
 
         XCTAssertEqual(options.map(\.id), [Self.head, Self.fallback, Self.third],
@@ -155,6 +211,67 @@ final class TranslateTestModelTests: XCTestCase {
                        "the catalog's name when there is one, the raw id when there is not")
         XCTAssertEqual(options.map(\.isInstalled), [false, true, false],
                        "the state is read per row, not once for the ladder")
+        XCTAssertEqual(options.map(\.isUnavailable), [false, false, true],
+                       "the ledger's verdict is a second fact, read per row: a model can be on the device and still refused")
+    }
+
+    /// The warden's verdict reaches the row's LABEL, which is the whole point
+    /// of consulting it ([MODEL-SWITCH], 2026-09-21 review): a refused model
+    /// that wore the installed row's label would offer a button whose only
+    /// outcome is a refusal.
+    func testARowTheWardenRefusesDoesNotWearTheInstalledLabel() {
+        let locale = Locale(identifier: "en")
+        let id = ModelCatalog.nmtEnNeQwen17bR4Q5
+        let model = TranslateTestModel()
+        let name = ModelCatalog.entry(for: id)?.displayName(locale: locale) ?? ""
+
+        let installed = TranslateTestModelOption(id: id, displayName: name,
+                                                 isInstalled: true, isUnavailable: false)
+        let refused = TranslateTestModelOption(id: id, displayName: name,
+                                               isInstalled: true, isUnavailable: true)
+
+        XCTAssertEqual(model.label(for: installed, locale: locale), name,
+                       "an installed, admitted model is its plain name — the composer's own rule")
+        XCTAssertNotEqual(model.label(for: refused, locale: locale), name,
+                          "a model this device class refuses must not read as ready")
+        XCTAssertTrue(model.label(for: refused, locale: locale)
+            .contains(L10n.str("model.unavailable.marker", locale: locale)),
+                      model.label(for: refused, locale: locale))
+    }
+
+    /// The rows are labelled by the SHARED AI-models composer rather than by
+    /// a copy of it, and localized: the two states it distinguishes, plus
+    /// the localization rule the 2026-09-21 review found broken (no row may
+    /// render an English catalog literal on a Nepali build).
+    func testTheRowLabelIsTheSharedComposersWordsInTheScreensLanguage() {
+        let en = Locale(identifier: "en")
+        let ne = Locale(identifier: "ne")
+        let id = ModelCatalog.nmtEnNeQwen17bR4Q5
+        guard let entry = ModelCatalog.entry(for: id) else {
+            return XCTFail("the fixture names a model the catalog must carry")
+        }
+        let model = TranslateTestModel()
+        let installed = TranslateTestModelOption(id: id, displayName: "raw",
+                                                 isInstalled: true, isUnavailable: false)
+        let absent = TranslateTestModelOption(id: id, displayName: "raw",
+                                              isInstalled: false, isUnavailable: false)
+
+        XCTAssertEqual(model.label(for: installed, locale: en), entry.displayName(locale: en))
+        XCTAssertEqual(model.label(for: absent, locale: en),
+                       "\(entry.displayName(locale: en)) — \(L10n.str("model.notDownloaded", locale: en))",
+                       "the same two states the AI-models pickers mark, in the app's own words")
+
+        // A Nepali build: the catalog's ne name, not its English one.
+        XCTAssertEqual(model.label(for: installed, locale: ne), entry.displayName(locale: ne))
+        XCTAssertNotEqual(model.label(for: installed, locale: ne), entry.displayName(locale: en),
+                          "a Nepali screen must not print the English catalog literal")
+
+        // A ladder id this build's catalog does not carry — the mid-swap
+        // case — is still named by the id rather than by nothing.
+        let unknown = TranslateTestModelOption(id: ModelID("nmt-not-in-this-build"),
+                                               displayName: "nmt-not-in-this-build",
+                                               isInstalled: false, isUnavailable: false)
+        XCTAssertEqual(model.label(for: unknown, locale: en), "nmt-not-in-this-build")
     }
 
     /// A ladder that lists one model twice — a config mistake, but one the
@@ -182,32 +299,6 @@ final class TranslateTestModelTests: XCTestCase {
                        "an empty ladder leaves the cloud as the only row there is")
     }
 
-    /// The two states are marked with the app's own vocabulary — the keys
-    /// the AI-models pickers use — and a model with no row (the mid-swap
-    /// ladder) still gets an honest name out of the raw id.
-    func testOptionLabelMarksBothStatesInTheAppsOwnWords() {
-        let en = Locale(identifier: "en")
-        let installed = TranslateTestModelOption(id: Self.head,
-                                                 displayName: "Head model",
-                                                 isInstalled: true)
-        let absent = TranslateTestModelOption(id: Self.fallback,
-                                              displayName: "Fallback model",
-                                              isInstalled: false)
-
-        let readyLabel = TranslateTestModel.optionLabel(installed, locale: en)
-        XCTAssertTrue(readyLabel.contains("Head model"), readyLabel)
-        XCTAssertEqual(readyLabel, "Head model — \(L10n.str("model.ready", locale: en))",
-                       "the marker is the app's own 'ready' string, not copy of this screen's")
-        XCTAssertTrue(readyLabel.lowercased().contains("ready"), readyLabel)
-
-        let absentLabel = TranslateTestModel.optionLabel(absent, locale: en)
-        XCTAssertTrue(absentLabel.contains("Fallback model"), absentLabel)
-        XCTAssertEqual(absentLabel, "Fallback model — \(L10n.str("model.notDownloaded", locale: en))")
-        XCTAssertTrue(absentLabel.lowercased().contains("not downloaded"), absentLabel)
-        XCTAssertNotEqual(readyLabel, absentLabel,
-                          "the two states must not read the same, or the marker is decoration")
-    }
-
     /// The screen opens on the model its ladder can run — and the rows it
     /// draws agree with the readiness line under them, because one call
     /// refreshes both.
@@ -224,7 +315,8 @@ final class TranslateTestModelTests: XCTestCase {
         var installed: Set<ModelID> = []
         let source = TranslateTestModelSource(ladder: [Self.head],
                                               displayName: { $0.rawValue },
-                                              isInstalled: { installed.contains($0) })
+                                              isInstalled: { installed.contains($0) },
+                                              unavailabilityReason: { _ in nil })
         let engine = FakeProbeEngine(readiness: .modelMissing)
         let model = TranslateTestModel(engines: [.model(Self.head): engine], modelSource: source)
         model.inputText = "hello"
@@ -261,13 +353,38 @@ final class TranslateTestModelTests: XCTestCase {
     }
 
     /// Gemini is not a model row: it has no install state to read and no
-    /// name from the ladder.
+    /// name from the ladder — and "no name" is `nil` rather than an empty
+    /// string, so a caller that went on to print it has to decide what a
+    /// model-less row means ([MODEL-SWITCH], 2026-09-21 review).
     func testGeminiHasNoModelRow() {
         let (model, _) = makeModel()
         model.selection = .gemini
         XCTAssertNil(model.selectedModelOption)
-        XCTAssertTrue(model.selectedModelName.isEmpty)
+        XCTAssertNil(model.selectedModelName)
+        XCTAssertNil(model.selection.modelID, "the cloud names no model, which is what guards the callers")
     }
+
+    /// Opening the screen is not a picker move: the construction assigns the
+    /// opening row, and that assignment must not trip `selection`'s observer
+    /// into a readiness walk the caller never asked for
+    /// ([MODEL-SWITCH], 2026-09-21 review — the observer DOES fire from an
+    /// initializer, because `selection` is a `@Published` property with an
+    /// initial value, so the assignment goes through a real setter).
+    ///
+    /// Observed through the count of asks: a walk spawned by the initializer
+    /// lands on this engine a moment later.
+    func testOpeningTheScreenStartsNoReadinessWalkOfItsOwn() async {
+        let head = FakeProbeEngine()
+        _ = makeModel(headEngine: head)
+
+        // Long enough for a task the constructor spawned to have run: the
+        // assertion is that nothing arrives, so it needs a settle window
+        // rather than an await.
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        XCTAssertEqual(head.readinessCount, 0,
+                       "the opening row is a value, not a switch — the caller does the asking")
+    }
+
 
     // MARK: - Running
 
@@ -378,7 +495,9 @@ final class TranslateTestModelTests: XCTestCase {
         // flight, rather than already returned, when the selection moves.
         head.holdsProbe = true
         let inFlight = Task { await model.run() }
-        while !head.isProbeWaiting { await Task.yield() }
+        // Bounded (2026-09-21 review): a `while !isProbeWaiting { yield() }`
+        // spin does not fail when the run never starts — it hangs the suite.
+        await waitUntil("the run to be in flight") { head.isProbeWaiting }
 
         model.selection = .model(Self.fallback)
         head.releaseProbe()
@@ -455,7 +574,7 @@ final class TranslateTestModelTests: XCTestCase {
         head.holdsReadiness = true
         model.selection = .model(Self.head)
         let pending = Task { await model.refreshReadiness() }
-        while !head.isWaitingForRelease { await Task.yield() }
+        await waitUntil("the readiness answer to be in flight") { head.isWaitingForRelease }
 
         model.selection = .gemini
         await model.refreshReadiness()
@@ -493,6 +612,24 @@ final class TranslateTestModelTests: XCTestCase {
         XCTAssertEqual(dispositions.map(\.token),
                        ["never_attempted", "attempted_without_answer", "resident_brain"],
                        "every disposition prints a token, and only a deferral borrows the tier's")
+    }
+
+    /// A deferral is the DEVICE's doing, not the model's ([MODEL-SWITCH],
+    /// 2026-09-21 review). On a normal device the intent brain is resident,
+    /// so every row reports `deferred(resident_brain)` at 0 ms; a bare token
+    /// beside a zero reads as a model that failed to answer. The caption
+    /// says what happened in words, and keeps the token for the log.
+    func testADeferralReadsAsTheDeviceBeingBusy() {
+        let en = Locale(identifier: "en")
+        let caption = LocalBrainDisposition.deferred(.residentBrain).caption(locale: en)
+
+        XCTAssertTrue(caption.contains("device busy"), caption)
+        XCTAssertTrue(caption.contains("resident_brain"), "the token stays — the log speaks it")
+        XCTAssertFalse(LocalBrainDisposition.neverAttempted.caption(locale: en).contains("device busy"),
+                       "only the deferrals are the device's fault")
+        XCTAssertEqual(LocalBrainDisposition.attemptedWithoutAnswer.caption(locale: en),
+                       "attempted_without_answer",
+                       "an attempt that answered nothing is the model's business, token unchanged")
     }
 
     /// The coalescing key for the readiness re-ask: the service republishes
@@ -651,13 +788,25 @@ final class TranslateTestEngineAdapterTests: XCTestCase {
     /// Stands in for tier 1. Records which model it was asked to run beside
     /// the strings, so "the model that ran is the model that was named" is
     /// an assertion rather than an assumption.
-    private final class FakeBrain: LocalBrainModelTier, @unchecked Sendable {
+    ///
+    /// It conforms to the PIPELINE's own seam ([MODEL-SWITCH], 2026-09-21
+    /// review): the screen used to declare a narrower one-method protocol of
+    /// its own, which is how a conformer of this shape could be handed to a
+    /// screen that names models and quietly answer with its own.
+    private final class FakeBrain: LocalBrainTranslating, @unchecked Sendable {
         var outcome: LocalBrainTranslationOutcome
         private(set) var asked: [ModelID?] = []
         private(set) var askedStrings: [[String]] = []
 
         init(outcome: LocalBrainTranslationOutcome = .none) {
             self.outcome = outcome
+        }
+
+        /// The pipeline's own method. This fake is never driven through it —
+        /// the screen always names a model — but it is a requirement of the
+        /// seam, and answering with the same script is the honest stand-in.
+        func translate(_ strings: [String]) async -> LocalBrainTranslationOutcome {
+            await translate(strings, using: nil)
         }
 
         func translate(_ strings: [String], using model: ModelID?) async -> LocalBrainTranslationOutcome {
@@ -712,6 +861,7 @@ final class TranslateTestEngineAdapterTests: XCTestCase {
             brain: brain,
             model: ModelID("chosen"),
             isInstalled: { _ in true },
+            unavailabilityReason: { _ in nil },
             config: config(),
             now: {
                 reads += 1
@@ -741,6 +891,7 @@ final class TranslateTestEngineAdapterTests: XCTestCase {
         let engine = LocalBrainProbeEngine(brain: brain,
                                            model: ModelID("second-rung"),
                                            isInstalled: { _ in true },
+                                           unavailabilityReason: { _ in nil },
                                            config: config())
 
         _ = await engine.probe("hello")
@@ -758,6 +909,7 @@ final class TranslateTestEngineAdapterTests: XCTestCase {
         let engine = LocalBrainProbeEngine(brain: brain,
                                            model: installed,
                                            isInstalled: { $0 == installed },
+                                           unavailabilityReason: { _ in nil },
                                            config: config())
 
         let ready = await engine.readiness()
@@ -766,6 +918,7 @@ final class TranslateTestEngineAdapterTests: XCTestCase {
         let absent = LocalBrainProbeEngine(brain: brain,
                                            model: ModelID("absent"),
                                            isInstalled: { $0 == installed },
+                                           unavailabilityReason: { _ in nil },
                                            config: config())
         let missing = await absent.readiness()
         XCTAssertEqual(missing, .modelMissing,
@@ -779,6 +932,7 @@ final class TranslateTestEngineAdapterTests: XCTestCase {
         let engine = LocalBrainProbeEngine(brain: brain,
                                            model: ModelID("named"),
                                            isInstalled: { _ in false },
+                                           unavailabilityReason: { _ in nil },
                                            config: config())
 
         let outcome = await engine.probe("hello")
@@ -800,6 +954,7 @@ final class TranslateTestEngineAdapterTests: XCTestCase {
         let engine = LocalBrainProbeEngine(brain: brain,
                                            model: ModelID("named"),
                                            isInstalled: { _ in true },
+                                           unavailabilityReason: { _ in nil },
                                            config: config())
 
         let outcome = await engine.probe("hello")
@@ -816,6 +971,7 @@ final class TranslateTestEngineAdapterTests: XCTestCase {
         let engine = LocalBrainProbeEngine(brain: brain,
                                            model: ModelID("named"),
                                            isInstalled: { _ in true },
+                                           unavailabilityReason: { _ in nil },
                                            config: config(maxCharacters: 4))
 
         let outcome = await engine.probe("a string far longer than four characters")
@@ -824,6 +980,75 @@ final class TranslateTestEngineAdapterTests: XCTestCase {
         XCTAssertEqual(outcome.latencyMs, 0, "nothing ran, so nothing took time")
         XCTAssertTrue(brain.asked.isEmpty, "the bound is checked before the brain is touched")
         XCTAssertEqual(outcome.result.degraded, true)
+    }
+
+    /// On disk is not runnable. A model the ledger refuses by device class
+    /// used to read "Ready" here, offering a button whose only possible
+    /// outcome was the refusal this screen now shows up front ([MODEL-KIND]
+    /// / [MODEL-SWITCH], 2026-09-21 review).
+    func testLocalAdapterReportsTheLedgersRefusalInsteadOfReady() async {
+        let engine = LocalBrainProbeEngine(brain: FakeBrain(),
+                                           model: ModelID("refused"),
+                                           isInstalled: { _ in true },
+                                           unavailabilityReason: { _ in .overClassBudget },
+                                           config: config())
+
+        let readiness = await engine.readiness()
+
+        XCTAssertEqual(readiness, .modelUnavailable(reason: .overClassBudget))
+        XCTAssertNotEqual(readiness, .ready, "installed is not the same question as admitted")
+    }
+
+    /// And the store's answer is asked first: for a model that is not on the
+    /// device the more useful sentence is the download row, not the class
+    /// verdict the ledger would give the entry it has never seen installed.
+    func testLocalAdapterPrefersTheInstallAnswerOverTheLedgersVerdict() async {
+        let engine = LocalBrainProbeEngine(brain: FakeBrain(),
+                                           model: ModelID("absent"),
+                                           isInstalled: { _ in false },
+                                           unavailabilityReason: { _ in .deviceTooSmall },
+                                           config: config())
+
+        let readiness = await engine.readiness()
+
+        XCTAssertEqual(readiness, .modelMissing, "install it — the class verdict is for models you have")
+    }
+
+    /// The wait the card shows includes the model load, so the load is
+    /// reported as its own number instead of being hidden inside the total
+    /// ([MODEL-SWITCH], 2026-09-21 review): swapping models before every
+    /// probe is exactly what this screen asks the owner to do, and a reload
+    /// folded into the latency makes the A/B comparison a lie.
+    func testLocalAdapterCarriesTheLoadShareOfTheWait() async {
+        let brain = FakeBrain(outcome: LocalBrainTranslationOutcome(translations: ["hello": "नमस्ते"],
+                                                                    durationMs: 1_400,
+                                                                    loadDurationMs: 1_100))
+        let engine = LocalBrainProbeEngine(brain: brain,
+                                           model: ModelID("named"),
+                                           isInstalled: { _ in true },
+                                           unavailabilityReason: { _ in nil },
+                                           config: config())
+
+        let outcome = await engine.probe("hello")
+
+        XCTAssertEqual(outcome.loadMs, 1_100, "the model's own load, on the card beside the wait")
+        XCTAssertEqual(outcome.latencyMs, 0)
+    }
+
+    /// A tier that measured no load reports `nil`, never a made-up zero: a
+    /// zero on this row would read as "this model needed no loading".
+    func testLocalAdapterLeavesTheLoadShareAbsentWhenNothingMeasuredIt() async {
+        let brain = FakeBrain(outcome: LocalBrainTranslationOutcome(translations: ["hello": "नमस्ते"],
+                                                                    durationMs: 12))
+        let engine = LocalBrainProbeEngine(brain: brain,
+                                           model: ModelID("named"),
+                                           isInstalled: { _ in true },
+                                           unavailabilityReason: { _ in nil },
+                                           config: config())
+
+        let outcome = await engine.probe("hello")
+
+        XCTAssertNil(outcome.loadMs)
     }
 
     // MARK: - Tier 2

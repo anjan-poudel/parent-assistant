@@ -33,7 +33,7 @@ import Foundation
 /// several quants and a superseded head, and the question this screen gets
 /// asked is precisely which of them answers, and how well. So the screen
 /// offers the ladder, one row per model, and Gemini beside it.
-enum TranslateTestSelection: Hashable, Identifiable {
+enum TranslateTestSelection: Hashable {
     /// Tier 1, run against THIS model — installed or not. A model that is
     /// not installed is a valid selection: the screen shows its download
     /// row rather than a run button that could only refuse.
@@ -41,14 +41,11 @@ enum TranslateTestSelection: Hashable, Identifiable {
     /// Tier 2, the consent-gated cloud path.
     case gemini
 
-    var id: String {
-        switch self {
-        case .model(let id): return "model:\(id.rawValue)"
-        case .gemini: return "gemini"
-        }
-    }
-
     /// The model this selection names, or `nil` for the cloud.
+    ///
+    /// The one answer to "is this row a model": the card and the readiness
+    /// line are gated on it rather than on a sentinel name, so the cloud can
+    /// never be described in a model's terms.
     var modelID: ModelID? {
         guard case .model(let id) = self else { return nil }
         return id
@@ -66,6 +63,15 @@ enum TranslateEngineReadiness: Equatable {
     /// The selected model is not installed. The screen offers that entry's
     /// download row instead of a spinner that would never resolve.
     case modelMissing
+    /// The model IS on disk and this device class still refuses it — the
+    /// ledger's verdict, carried with its own reason.
+    ///
+    /// [MODEL-SWITCH] (2026-09-21 review) Its own case rather than a second
+    /// spelling of `modelMissing`: the two have opposite fixes (install it
+    /// vs. this phone cannot run it), and a screen that called a refused but
+    /// installed model "Ready" — which is what the readiness line did before
+    /// this — offers a button whose only outcome is a refusal.
+    case modelUnavailable(reason: ModelUnavailabilityReason)
     /// Tier 2 has no provider key on this device, so nothing could be sent
     /// even with consent.
     case providerKeyMissing
@@ -116,6 +122,20 @@ enum LocalBrainDisposition: Equatable {
         case .deferred(let deferral): return deferral.eventToken
         }
     }
+
+    /// The card's value for this disposition: the token, prefixed by the one
+    /// sentence a deferral needs and nothing else does.
+    ///
+    /// [MODEL-SWITCH] (2026-09-21 review) A device that declined reports the
+    /// same empty outcome as a model that ran and had nothing to say, and on
+    /// the normal device state — the intent brain resident — that is EVERY
+    /// row, at 0 ms. A bare `resident_brain` reads as the model failing.
+    /// "Device busy, not attempted" is what actually happened, and the token
+    /// stays beside it because the log will use it.
+    func caption(locale: Locale) -> String {
+        guard case .deferred = self else { return token }
+        return L10n.fmt("settings.translateTest.result.busy", locale: locale, token)
+    }
 }
 
 extension LocalBrainDeferral {
@@ -139,6 +159,21 @@ extension LocalBrainDeferral {
 struct TranslateProbeOutcome: Equatable {
     let result: TranslationResult
     let latencyMs: Int
+
+    /// Tier 1 only: how much of `latencyMs` went on getting the model's
+    /// handle ready, in milliseconds — `nil` when nothing measured it (the
+    /// cloud path, and any generator that does not report the split).
+    ///
+    /// **Why it is beside the latency rather than subtracted from it.** The
+    /// comparison this screen exists for is between MODELS, and a total that
+    /// includes a 2.5 GB page-in is not a fact about the model: with the
+    /// idle unload at five seconds, the first run on a row pays the load and
+    /// the second does not, so the same weights read as 12 s and then as
+    /// 400 ms. The headline stays the wall clock — that is what the person
+    /// waited, and hiding it would be the other lie — and the card prints
+    /// this share beside it, so the decode-only figure is on screen for
+    /// every reader who wants the comparison.
+    var loadMs: Int? = nil
 
     /// Tier 1 only: what the tier did with the string, when it did not
     /// translate it. `nil` when the brain answered (and for the cloud path,
@@ -176,7 +211,7 @@ protocol TranslateProbeEngine {
     func readiness() async -> TranslateEngineReadiness
 }
 
-/// The two methods this screen asks of the cloud tier.
+/// The one method this screen asks of the cloud tier.
 ///
 /// Declared here so `CloudProbeEngine` can be tested against a scripted
 /// batch — the provenance and refusal branches below are the ones a live
@@ -197,24 +232,15 @@ protocol CloudProbeTier: Sendable {
 
 extension CloudTranslationTier: CloudProbeTier {}
 
-/// The one method this screen asks of tier 1: run THIS model.
-///
-/// A second protocol rather than a requirement added to
-/// `LocalBrainTranslating`, and the reason is the pipeline's: that protocol
-/// is the camera's contract — "translate the strings with the brain the
-/// ladder picks" — and every conformer in the app and in other suites'
-/// fixtures would inherit a parameter their world has no meaning for. The
-/// tier itself gains the capability additively
-/// (`LocalBrainTranslationTier.translate(_:using:)`, whose no-argument form
-/// still resolves the ladder exactly as before); this is the seam through
-/// which the screen calls it, and through which a test scripts it.
-protocol LocalBrainModelTier: Sendable {
-    /// `nil` means "the ladder had none", reported exactly as the
-    /// ladder-resolution failure always was.
-    func translate(_ strings: [String], using model: ModelID?) async -> LocalBrainTranslationOutcome
-}
-
-extension LocalBrainTranslationTier: LocalBrainModelTier {}
+// (2026-09-21 review) Tier 1 used to be reached through a second protocol
+// declared here — `LocalBrainModelTier`, one method wide, the named attempt.
+// It is gone, and the comment it carried is worth keeping: the requirement
+// now lives on the pipeline's own seam as an additive, DEFAULTED member
+// (`LocalBrainTranslating.translate(_:using:)`), so there is one statement
+// of the capability rather than two, and the screen's `brain` is typed by
+// the same protocol the camera drives. A conformer that does not
+// distinguish models gets the default, which runs its own resolution —
+// the honest answer for a brain whose world has one model in it.
 
 // MARK: - Tier 1 (on-device brain)
 
@@ -223,11 +249,15 @@ extension LocalBrainTranslationTier: LocalBrainModelTier {}
 /// The install question arrives as a closure rather than a `ModelStore` so
 /// this adapter owns no store and a test can answer it without one — the
 /// same shape the tier itself uses (`modelStore: ModelStore?`, "a tier
-/// without one reports itself unavailable, honestly"). Production supplies
-/// the tier's own predicate (`ModelStore.isAvailable`, the question
-/// `installedModel()` asks of every rung), so this engine's readiness is the
-/// tier's own answer about the model it names rather than a second opinion
-/// about the same file.
+/// without one reports itself unavailable, honestly").
+///
+/// **[MODEL-SWITCH] One predicate, asked twice** (2026-09-21 review). It is
+/// the question the tier's own RUN GATE asks — `ModelStore.path(for:)`,
+/// non-nil only when the artifact is on disk (`attempt`'s guard) — so the
+/// row's marker, this engine's readiness and the install card all say what
+/// the run would actually do. The screen previously answered it three ways
+/// (`isAvailable`, `path(for:)`, `isInstalled(entry)`), which is three ways
+/// to disagree on screen about one file.
 ///
 /// One engine per ladder model, all sharing the ONE tier instance the
 /// coordinator owns. That sharing is the shipped shape, not a shortcut: the
@@ -236,13 +266,25 @@ extension LocalBrainTranslationTier: LocalBrainModelTier {}
 /// — which is what the device would do in production, and what the screen
 /// should therefore be measuring.
 struct LocalBrainProbeEngine: TranslateProbeEngine {
-    let brain: any LocalBrainModelTier
+    /// The pipeline's own seam, which carries the named attempt
+    /// (`LocalBrainTranslating.translate(_:using:)`) — the same protocol the
+    /// camera drives, so nothing about this screen can narrow it.
+    let brain: any LocalBrainTranslating
     /// The model this engine runs. Named, never resolved: the ladder's own
     /// preference is the tier's business, and this screen exists to ask what
     /// a specific model says.
     let model: ModelID
     /// Whether that model can run now (see the type's note).
     let isInstalled: (ModelID) -> Bool
+    /// What the ledger says about a model the store HAS: the reason token it
+    /// would refuse to admit it for, or `nil` when it would admit it.
+    ///
+    /// Asked because "on disk" is not "runnable": the warden refuses some
+    /// models by device class, and a row that said "Ready" for one of those
+    /// would offer a button whose only outcome is a refusal. `nil` rather
+    /// than a `Bool` because the refusal's own sentence is what the screen
+    /// shows.
+    let unavailabilityReason: (ModelID) -> ModelUnavailabilityReason?
     /// The tier's config, for its batch bound. Needed because the bound —
     /// not the tier's return value — is what says whether a string was ever
     /// handed to the brain (see `LocalBrainDisposition`).
@@ -253,7 +295,15 @@ struct LocalBrainProbeEngine: TranslateProbeEngine {
     var now: () -> Date = { Date() }
 
     func readiness() async -> TranslateEngineReadiness {
-        isInstalled(model) ? .ready : .modelMissing
+        // The store's answer first: a model that is not on disk has a more
+        // useful thing to say than its class verdict (its download row).
+        guard isInstalled(model) else { return .modelMissing }
+        // Then the ledger's, which is the question this screen used to skip:
+        // an installed model the device class refuses is not ready, and
+        // saying so is the difference between "install it" and "this phone
+        // cannot run it".
+        if let reason = unavailabilityReason(model) { return .modelUnavailable(reason: reason) }
+        return .ready
     }
 
     func probe(_ text: String) async -> TranslateProbeOutcome {
@@ -294,6 +344,12 @@ struct LocalBrainProbeEngine: TranslateProbeEngine {
         }
         return TranslateProbeOutcome(result: result,
                                      latencyMs: latencyMs,
+                                     // The tier's own split of that wait,
+                                     // when its generator measured one —
+                                     // `nil` for a fake, for the cloud, and
+                                     // for any path that never reached a
+                                     // generation.
+                                     loadMs: outcome.loadDurationMs,
                                      localDisposition: disposition)
     }
 }
@@ -389,11 +445,20 @@ struct CloudProbeEngine: TranslateProbeEngine {
 struct TranslateTestModelOption: Identifiable, Equatable {
     /// The model this row selects.
     let id: ModelID
-    /// The catalog's name for it — or the raw id when the catalog has none
-    /// (see `TranslateTestModelSource.displayName`).
+    /// The name to print when this build's catalog carries no entry for
+    /// `id` (a catalog swap mid-flight). The label itself is composed by the
+    /// SHARED AI-models composer — see `TranslateTestModel.label(for:locale:)`
+    /// — so this is a fallback and never a second name.
     let displayName: String
-    /// Whether the row can be run now, or has to offer its download first.
+    /// Whether the tier's run gate would accept this model right now — the
+    /// ONE predicate (`LocalBrainProbeEngine`'s note): the row's marker, the
+    /// readiness line and the install card all read this, so the screen
+    /// cannot say "not downloaded" in the picker and "Ready" in the row.
     let isInstalled: Bool
+    /// Whether the ledger refuses it on this device class. Independent of
+    /// `isInstalled`: a model can be on disk and still refused, and the row
+    /// has to be able to say so.
+    let isUnavailable: Bool
 }
 
 /// What the dropdown needs to know about the ladder and the device.
@@ -405,13 +470,24 @@ struct TranslateTestModelOption: Identifiable, Equatable {
 /// is open, and "is this installed" is a question about the device, not a
 /// value captured when the screen was built.
 struct TranslateTestModelSource {
-    /// The ladder, in the order the tier itself would try it
-    /// (`LiveTranslateConfig.brainTranslationModelIDs`), deduplicated.
+    /// The ladder's TRANSLATION rungs, in the order the tier itself would
+    /// try them.
     ///
-    /// Read from the config rather than from a list of ids spelled here, so
-    /// a catalog swap that adds, retires or reorders translation models
-    /// changes this dropdown without a line of this screen changing: the
-    /// names come from whatever the catalog holds, and an id the catalog
+    /// Built by the tier's own rule — `LocalBrainTranslationTier
+    /// .translationModelIDs(from: config.brainTranslationModelIDs)` — rather
+    /// than by a list of ids spelled here or by the catalogue's own
+    /// translation list ([MODEL-SWITCH], 2026-09-21 review). The ladder
+    /// carries the assistant's intent brains in its tail as fallbacks for
+    /// its own resolution; a picker that offered them would send a
+    /// translation prompt to a slot-filling brain and would offer Delete for
+    /// an artifact the brain section manages. The tier is the one place that
+    /// knows which rungs are translations, and its refusal and this list are
+    /// the same predicate, so a row cannot be offered and then refused.
+    ///
+    /// Still read from the CONFIG rather than from a list of ids spelled
+    /// here, so a catalog swap that adds, retires or reorders translation
+    /// models changes this dropdown without a line of this screen changing:
+    /// the names come from whatever the catalog holds, and an id the catalog
     /// does not carry yet is still offered, under its own raw name.
     let ladder: [ModelID]
     /// The catalog's display name for a model, or the id itself when the
@@ -420,8 +496,18 @@ struct TranslateTestModelSource {
     /// dev screen, and it keeps the row selectable — the download it offers
     /// is simply absent, because there is nothing to download.
     let displayName: (ModelID) -> String
-    /// Whether the model can run now.
+    /// Whether the model can run now: the question the tier's own run gate
+    /// asks (`ModelStore.path(for:)`). The ONE predicate — see
+    /// `LocalBrainProbeEngine`'s note.
     let isInstalled: (ModelID) -> Bool
+    /// What the ledger says about a model the store has: the reason it would
+    /// refuse to admit it, or `nil` when it would.
+    ///
+    /// Asked of the same manager the AI-models rows ask
+    /// (`ModelLifecycleManager.availability(of:)`), so a row this screen
+    /// marks "not for this phone" is marked that way for the same reason,
+    /// with the same reason token, as the row in Settings.
+    let unavailabilityReason: (ModelID) -> ModelUnavailabilityReason?
 }
 
 // MARK: - Production wiring
@@ -523,6 +609,7 @@ struct TranslateTestDependencies {
             engines[.model(id)] = LocalBrainProbeEngine(brain: brain,
                                                         model: id,
                                                         isInstalled: modelSource.isInstalled,
+                                                        unavailabilityReason: modelSource.unavailabilityReason,
                                                         config: config)
         }
         engines[.gemini] = CloudProbeEngine(tier: CloudTranslationTier(cache: cache,

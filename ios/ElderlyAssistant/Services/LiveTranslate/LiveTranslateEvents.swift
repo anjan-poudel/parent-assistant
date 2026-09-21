@@ -61,6 +61,21 @@ enum LiveTranslateResolutionOrigin: String, Equatable, CaseIterable {
 enum LiveTranslateBrainUnavailableReason: String, Equatable, CaseIterable {
     /// No translation model is installed on this device.
     case modelNotInstalled = "model_not_installed"
+    /// [MODEL-KIND] (2026-09-21) The caller NAMED a model this tier may not
+    /// run for a translation: it is not one of the ladder's translation
+    /// rungs (the assistant's own intent brains live in
+    /// `brainTranslationModelIDs` as fallbacks for the ladder's own
+    /// resolution, and a picker that offered them would send the translation
+    /// prompt — and its `{"translations":[…]}` schema — to a slot-filling
+    /// brain, and would offer Delete for an artifact the brain section
+    /// manages).
+    ///
+    /// Only ever produced by the NAMED path. The ladder's own resolution may
+    /// legitimately land on a fallback brain — that is what the tail of the
+    /// list is FOR, and the devices it serves have no other translation
+    /// model — so refusing there would remove the tier from exactly those
+    /// devices.
+    case notATranslationModel = "not_a_translation_model"
     /// The on-device LLM runtime (or the model store that fronts it) is not
     /// available in this build.
     case runtimeMissing = "runtime_missing"

@@ -80,6 +80,14 @@ final class LocalBrainTranslationTierTests: XCTestCase {
 
         func isHoldingHandle() async -> Bool { holdingHandle }
 
+        /// What the runtime measured for the load inside the last generation
+        /// — `nil` (the default) is "nothing measured", the answer every
+        /// hand-written fake honestly gives. Set by the tests that make a
+        /// claim about the split between the load and the decode.
+        var loadDurationMs: Int?
+
+        func loadDurationMsOfLastGeneration() async -> Int? { loadDurationMs }
+
         func release() async { releaseCount += 1 }
     }
 
@@ -299,10 +307,17 @@ final class LocalBrainTranslationTierTests: XCTestCase {
     func testANamedModelRunsAndTheLaddlersOwnCallIsUnchanged() async throws {
         let root = makeRoot()
         defer { try? FileManager.default.removeItem(at: root) }
-        // Two models on the device, the ladder's head among them: with only
-        // one installed the two paths would agree by accident.
-        let head = ModelCatalog.intentQwen4BSlotCanon
-        let other = Self.modelID
+        // Two TRANSLATION models on the device, the ladder's head among them:
+        // with only one installed the two paths would agree by accident.
+        //
+        // Translation models rather than the intent brains this used to name
+        // (2026-09-21 review): the named path now refuses a model that is not
+        // one of this config's translation rungs, because a translation prompt
+        // sent to a slot-filling brain is exactly the mistake naming makes
+        // possible. The rule that used to make this fixture arbitrary is
+        // `testTheNamedPathRefusesAModelThisTierDoesNotTranslateWith`.
+        let head = ModelCatalog.nmtEnNeQwen17bR4Q5
+        let other = ModelCatalog.nmtEnNeQwen17bR3Q4
         let store = try makeStore(root: root, serving: [head, other], installed: [head, other])
 
         var config = LiveTranslateConfig.default
@@ -372,6 +387,106 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         let event = bus.events(named: "brain_translation_unavailable").first
         XCTAssertEqual(event?.metadata["reason"], "model_not_installed")
         XCTAssertEqual(event?.metadata["failureStage"], "availability")
+    }
+
+    /// [MODEL-KIND] The NAMED path refuses a model this tier does not
+    /// translate with, however it got named (2026-09-21 review). Two ways to
+    /// fail one question — the ladder's fallback tail (a brain entry that is
+    /// NOT a translation model) and a model off this tier's ladder entirely —
+    /// and both refuse BEFORE a byte is paged in, so a screen that offered
+    /// such a row cannot spend 4 GB discovering it.
+    func testTheNamedPathRefusesAModelThisTierDoesNotTranslateWith() async throws {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        // Served and installed, both of them: neither refusal below is the
+        // store's answer, which is the point — "installed" is not "runnable
+        // by this tier".
+        let fallbackBrain = Self.modelID
+        let offLadder = ModelCatalog.nmtEnNeQwen17bR4Q5
+        let store = try makeStore(root: root,
+                                  serving: [fallbackBrain, offLadder],
+                                  installed: [fallbackBrain, offLadder])
+
+        var config = LiveTranslateConfig.default
+        // The ladder as a device that has the fallback tail and nothing else
+        // would spell it: the brain entry is ON this list, which is exactly
+        // why membership alone is not the check.
+        config.brainTranslationModelIDs = [fallbackBrain]
+        let bus = LiveTranslateSanitisingBus()
+        let generator = ScriptedGenerator()
+        let tier = LocalBrainTranslationTier(config: config,
+                                             modelStore: store,
+                                             events: LiveTranslateEvents(bus: bus, config: config),
+                                             generator: generator,
+                                             memory: ScriptedProbe(),
+                                             ledger: ModelLifecycleManager(probe: ScriptedProbe()))
+
+        let brain = await tier.translate([brainText], using: fallbackBrain)
+        XCTAssertEqual(brain, .none, "an intent brain is not a translation model, on the ladder or not")
+        XCTAssertTrue(generator.prompts.isEmpty, "refused before the load, not after")
+
+        let off = await tier.translate([brainText], using: offLadder)
+        XCTAssertEqual(off, .none, "a translation model this tier's ladder does not carry")
+
+        let reasons = bus.events(named: "brain_translation_unavailable")
+            .compactMap { $0.metadata["reason"] }
+        XCTAssertEqual(reasons, ["not_a_translation_model", "not_a_translation_model"])
+        XCTAssertEqual(bus.events(named: "brain_translation_unavailable")
+                        .map { $0.metadata["failureStage"] } ?? [],
+                       ["availability", "availability"],
+                       "the reason is the first thing actually wrong: the model IS on the device")
+    }
+
+    /// …and the LADDER path is deliberately not checked (2026-09-21 review).
+    /// A device whose ladder resolves to its fallback tail legitimately runs
+    /// that brain — it is the only tier 1 it has — so refusing there would
+    /// take the feature away from exactly the devices the tail exists for.
+    /// The refusal is a rule about NAMING a model, not about running one.
+    func testTheLadderPathStillRunsTheFallbackBrainItResolved() async throws {
+        try await withTier { tier, generator, bus in
+            generator.output = self.answer([self.brainAnswer])
+
+            let outcome = await tier.translate([self.brainText])
+
+            XCTAssertEqual(outcome.translations, [self.brainText: self.brainAnswer])
+            XCTAssertTrue(bus.events(named: "brain_translation_unavailable").isEmpty,
+                          "the tier's own resolution is not a refusal")
+        }
+    }
+
+    /// [MODEL-SWITCH] The load is reported BESIDE the wait, never instead of
+    /// it (2026-09-21 review): the headline stays the whole attempt — that is
+    /// what the event has always meant and what the deadline bounds — and the
+    /// load's share is the additive number a model-to-model comparison needs.
+    /// Without it, the first probe of a model reads as tens of seconds and
+    /// the second as a few hundred milliseconds, and the screen has been
+    /// asked to call the difference a fact about the MODELS.
+    func testTheLoadShareIsReportedBesideTheWholeWait() async throws {
+        try await withTier { tier, generator, bus in
+            generator.output = self.answer([self.brainAnswer])
+            generator.loadDurationMs = 1_100
+
+            let outcome = await tier.translate([self.brainText])
+
+            XCTAssertEqual(outcome.translations, [self.brainText: self.brainAnswer])
+            XCTAssertEqual(outcome.loadDurationMs, 1_100, "the generation's own load, passed through")
+            let event = self.batchEvent(bus)
+            XCTAssertEqual(event?.metadata["durationMs"], "\(outcome.durationMs)",
+                           "the batch event keeps the whole attempt, load included")
+        }
+    }
+
+    /// A generator that measured nothing reports `nil`, never a made-up zero:
+    /// a zero here reads as "this model needed no loading", which is a claim
+    /// no fake is in a position to make (2026-09-21 review).
+    func testAGeneratorThatMeasuredNoLoadReportsNone() async throws {
+        try await withTier { tier, generator, _ in
+            generator.output = self.answer([self.brainText])
+
+            let outcome = await tier.translate([self.brainText])
+
+            XCTAssertNil(outcome.loadDurationMs)
+        }
     }
 
     func testNoInstalledModelIsReportedAndNothingIsGenerated() async throws {
@@ -1270,6 +1385,33 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         box.endDecode()
         XCTAssertEqual(box.releaseForWarden(), .released,
                        "the lease is held for the decode and released after it")
+    }
+
+    /// One handle at a time, by construction ([MODEL-SWITCH], 2026-09-21
+    /// review). The switch's own fix is an ORDERING inside `loadHandle`, and
+    /// that method is `#if canImport(LLM)` — it needs a real GGUF to run, the
+    /// same limit the residency test above records. What a suite can hold is
+    /// the property the ordering leans on: a second `store` REPLACES the
+    /// first handle and its URL rather than joining it, and `drop` clears
+    /// both halves together. If the box could hold two, dropping before
+    /// loading would not be enough to stop a switch double-residing.
+    func testAHandleSlotHoldsOneModelAtATime() {
+        let box = TranslateBrainHandleSlot()
+        let first = URL(fileURLWithPath: "/tmp/\(Self.modelID)-q4_k_m.gguf")
+        let second = URL(fileURLWithPath: "/tmp/\(ModelCatalog.nmtEnNeQwen17bR4Q5)-q4_k_m.gguf")
+
+        box.store("first handle", url: first)
+        box.store("second handle", url: second)
+
+        XCTAssertEqual(box.currentHandle as? String, "second handle",
+                       "the box keeps one handle, so the old model's bytes are not held here")
+        XCTAssertEqual(box.heldModelURL, second,
+                       "…and the URL travels with the handle it names, never orphaned")
+
+        box.drop()
+        XCTAssertNil(box.currentHandle)
+        XCTAssertNil(box.heldModelURL, "a drop is not a partial one: both halves go")
+        XCTAssertFalse(box.isHoldingHandle)
     }
 
     /// The two rows are distinct positions: registering the tier's does not

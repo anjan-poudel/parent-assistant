@@ -86,11 +86,12 @@ private struct TranslateTestBody: View {
             // row's job here is to install the model the picker is pointing
             // at, so a list of every translation artifact would be furniture
             // that does not answer the question the screen is asking.
-            if model.readiness == .modelMissing {
-                TranslateTestInstallCard(option: model.selectedModelOption,
-                                         name: model.selectedModelName,
-                                         downloads: downloads,
-                                         locale: locale)
+            // Gated on the row existing as well as on the readiness, and
+            // passed as ONE value ([MODEL-SWITCH], 2026-09-21 review): the
+            // card reads the name and the state off the row, so there is no
+            // second name parameter that could disagree with it.
+            if model.readiness == .modelMissing, let option = model.selectedModelOption {
+                TranslateTestInstallCard(option: option, downloads: downloads, locale: locale)
             }
 
             if let outcome = model.outcome {
@@ -258,7 +259,7 @@ private struct TranslateTestControlsCard: View {
             Picker(L10n.str("settings.translateTest.model.label", locale: locale),
                    selection: $model.selection) {
                 ForEach(model.modelOptions) { option in
-                    Text(TranslateTestModel.optionLabel(option, locale: locale))
+                    Text(model.label(for: option, locale: locale))
                         .tag(TranslateTestSelection.model(option.id))
                 }
                 Text(L10n.str("settings.translateTest.engine.gemini", locale: locale))
@@ -309,7 +310,7 @@ private struct TranslateTestControlsCard: View {
             return DesignTokens.stateSpeaking
         case .none:
             return DesignTokens.textSecondary
-        case .modelMissing, .providerKeyMissing, .cloudDisabled:
+        case .modelMissing, .modelUnavailable, .providerKeyMissing, .cloudDisabled:
             return DesignTokens.stateError
         }
     }
@@ -331,10 +332,23 @@ private struct TranslateTestControlsCard: View {
             // The model is NAMED, because the screen now offers several:
             // "no translation model is installed" was true enough when
             // there was one, and would be false on a device that has the
-            // head and not the row the picker is pointing at.
+            // head and not the row the picker is pointing at. The name is
+            // optional now, and `.modelMissing` can only come from a row the
+            // selection NAMES — but a source that stopped listing it has no
+            // name to give, and the line still has to say something, so the
+            // raw id stands in.
             return L10n.fmt("settings.translateTest.readiness.modelMissing",
                             locale: locale,
-                            model.selectedModelName)
+                            model.selectedModelName ?? "")
+        case .modelUnavailable(let reason):
+            // Installed and still refused: the ledger's own sentence for
+            // why (`ModelUnavailabilityReason.localizationKey` — the same
+            // strings the Settings rows show), so this screen cannot
+            // describe a device-class refusal in its own words.
+            return L10n.fmt("settings.translateTest.readiness.modelUnavailable",
+                            locale: locale,
+                            model.selectedModelName ?? "",
+                            L10n.str(reason.localizationKey, locale: locale))
         case .providerKeyMissing:
             return L10n.str("settings.translateTest.readiness.providerKeyMissing", locale: locale)
         case .cloudDisabled:
@@ -350,6 +364,12 @@ private struct TranslateTestControlsCard: View {
 /// tokens (`onDeviceBrain`, `412`, `consentNotGranted`) rather than as
 /// translated prose — this is a developer's instrument, and a pretty
 /// sentence would be a lossy copy of the token it is standing in for.
+///
+/// The one exception is a DEFERRAL (`LocalBrainDisposition.caption`): a
+/// device that declined and a model that ran and said nothing produce the
+/// same empty outcome and the same 0 ms, and on a device with the assistant
+/// brain resident that is every row. The token stays, with the sentence that
+/// says which kind of fact it is in front of it.
 private struct TranslateTestResultCard: View {
     let outcome: TranslateProbeOutcome
     /// The model row this answer came from, raw id and `nil` for the cloud.
@@ -400,6 +420,18 @@ private struct TranslateTestResultCard: View {
                 // second key to keep in step.
                 fact(L10n.str("settings.translateTest.result.latency", locale: locale),
                      String(outcome.latencyMs))
+                // [MODEL-SWITCH] The wait's own split, when the generator
+                // measured one. A first run on a row pays the model's page-in
+                // and the second does not — with the idle unload at five
+                // seconds, that is a fact about the timer rather than about
+                // the weights, and this comparison exists for the weights.
+                // The decode figure is the latency above minus this one, and
+                // it is `nil` (nothing drawn) for a fake, for the cloud, and
+                // for any run whose handle was already resident.
+                if let loadMs = outcome.loadMs {
+                    fact(L10n.str("settings.translateTest.result.modelLoad", locale: locale),
+                         String(loadMs))
+                }
             }
 
             if let reason = result.degradedReason {
@@ -423,7 +455,7 @@ private struct TranslateTestResultCard: View {
             // quite different things produced that.
             if let disposition = outcome.localDisposition {
                 fact(L10n.str("settings.translateTest.result.tier1", locale: locale),
-                     disposition.token)
+                     disposition.caption(locale: locale))
             }
         }
         .padding(16)
@@ -458,27 +490,29 @@ private struct TranslateTestResultCard: View {
 /// One row, for the selected entry, rather than the list of translation
 /// artifacts this card used to draw: the model picker now names which one
 /// the person wants, so the affordance is that model's download and nothing
-/// else. The list form would also have been dishonest for the ladder's tail,
-/// whose members are the assistant's own brains (`availableTranslationEntries`
-/// carries only the translation head) — a row there would have offered to
-/// install something the picker is not pointing at.
+/// else. The list form would also have offered rows the picker cannot point
+/// at — the ladder's tail, whose members are the assistant's own brains, is
+/// filtered out of the dropdown by the tier's own rule
+/// (`LocalBrainTranslationTier.translationModelIDs(from:)`).
+///
+/// ONE value in, not two ([MODEL-SWITCH], 2026-09-21 review): the row carries
+/// its own name, so the header and the management row below it cannot
+/// describe different models.
 private struct TranslateTestInstallCard: View {
     @EnvironmentObject private var coordinator: AppCoordinator
-    /// The selected row, or `nil` when the source listed no option for it —
-    /// a ladder id this build's catalog does not carry.
-    let option: TranslateTestModelOption?
-    /// The name to show in the header, whatever the catalog knows.
-    let name: String
+    /// The selected row. Non-optional, because the view only draws this card
+    /// for a row the source lists — see `TranslateTestBody`.
+    let option: TranslateTestModelOption
     let downloads: ModelDownloadService
     let locale: Locale
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(L10n.fmt("settings.translateTest.install.section", locale: locale, name))
+            Text(L10n.fmt("settings.translateTest.install.section", locale: locale, option.displayName))
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
                 .foregroundStyle(DesignTokens.textPrimary)
 
-            if let option, let entry = ModelCatalog.entry(for: option.id) {
+            if let entry = ModelCatalog.entry(for: option.id) {
                 ModelManagementRow(
                     entry: entry,
                     state: downloadState(for: entry.id),
