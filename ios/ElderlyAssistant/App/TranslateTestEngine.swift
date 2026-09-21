@@ -141,9 +141,25 @@ enum LocalBrainDisposition: Equatable {
     /// row, at 0 ms. A bare `resident_brain` reads as the model failing.
     /// "Device busy, not attempted" is what actually happened, and the token
     /// stays beside it because the log will use it.
-    func caption(locale: Locale) -> String {
+    ///
+    /// [DEVSCREEN-EVICT] `evictedForRoom` changes which sentence is true, and
+    /// it is the difference between two opposite findings. With nothing
+    /// evicted, "device busy" is the whole story: something else was using
+    /// the memory and this run did not ask it to move. With something
+    /// evicted, the memory WAS freed and the model still could not run —
+    /// "device busy" would then read as an ordinary refusal and hide the fact
+    /// that the device has just been emptied and still cannot hold the
+    /// model. The tokens of what left are in the sentence, because they are
+    /// the same vocabulary as the `evicted` events.
+    func caption(locale: Locale, evictedForRoom: [ModelSlot] = []) -> String {
         guard case .deferred = self else { return token }
-        return L10n.fmt("settings.translateTest.result.busy", locale: locale, token)
+        guard !evictedForRoom.isEmpty else {
+            return L10n.fmt("settings.translateTest.result.busy", locale: locale, token)
+        }
+        return L10n.fmt("settings.translateTest.result.evictedThenRefused",
+                        locale: locale,
+                        evictedForRoom.map(\.rawValue).joined(separator: ", "),
+                        token)
     }
 }
 
@@ -198,6 +214,18 @@ struct TranslateProbeOutcome: Equatable {
     /// millisecond, which would make the latency this screen exists to
     /// compare a lie.
     var cloudOrigin: LiveTranslateResolutionOrigin? = nil
+
+    /// Tier 1 only: the residents the warden unloaded so this attempt could
+    /// load its model — empty whenever nothing was evicted, which is every
+    /// run with the bypass off.
+    ///
+    /// [DEVSCREEN-EVICT] The screen's own record of what the bypass COSTS,
+    /// on the card of the run that spent it. It is drawn on both endings: a
+    /// run that then answered (the price of the answer) and a run that was
+    /// still refused (`caption` reads it to say so). A `var` with a default,
+    /// like the fields above, so the shipped initializer shape — and every
+    /// fake in the suites — keeps compiling unchanged.
+    var evictedForRoom: [ModelSlot] = []
 }
 
 /// One attempt at one string. Two methods, because the screen has exactly
@@ -375,7 +403,13 @@ struct LocalBrainProbeEngine: TranslateProbeEngine {
                                      // for any path that never reached a
                                      // generation.
                                      loadMs: outcome.loadDurationMs,
-                                     localDisposition: disposition)
+                                     localDisposition: disposition,
+                                     // [DEVSCREEN-EVICT] What the tier had to
+                                     // unload first, when the bypass let it:
+                                     // empty on every run that did not evict,
+                                     // and carried whether or not the string
+                                     // was answered.
+                                     evictedForRoom: outcome.evictedForRoom)
     }
 }
 
@@ -640,11 +674,26 @@ struct TranslateTestDependencies {
         // ONE tier for the whole ladder, with one resident handle inside it
         // (see `LocalBrainProbeEngine`). A tier per model would hold a 2–3 GB
         // handle per row and blow the device on the second one.
-        let brain = LocalBrainTranslationTier(config: config,
-                                              modelStore: modelStore,
-                                              events: LiveTranslateEvents(bus: observabilityBus,
-                                                                          config: config),
-                                              targetLanguage: targetLanguage)
+        //
+        // [DEVSCREEN-EVICT] `makesRoomForLoads` is the screen's ONE
+        // production-visible difference, and it is the persisted download
+        // bypass read live: with the switch on, a refusal that is about the
+        // device's other residents is answered by having the warden unload
+        // them (see `LocalBrainTranslationTier.gateForLoad`), which is what
+        // makes the Q8 measurable on a phone whose warm STT is holding the
+        // bytes. Read through the same key the download path reads, so the
+        // switch the developer turned on for the DOWNLOAD is the switch that
+        // governs the LOAD — one toggle, one meaning.
+        //
+        // Read at each gate rather than captured now, so flipping the switch
+        // in the technical sheet takes effect on the next tap instead of the
+        // next screen. This is the only construction site that passes it.
+        let brain = LocalBrainTranslationTier(
+            config: config,
+            modelStore: modelStore,
+            events: LiveTranslateEvents(bus: observabilityBus, config: config),
+            targetLanguage: targetLanguage,
+            makesRoomForLoads: { ModelDownloadDebugSettings.ignoresFitPolicy() })
         var engines: [TranslateTestSelection: any TranslateProbeEngine] = [:]
         for id in modelSource.ladder {
             engines[.model(id)] = LocalBrainProbeEngine(brain: brain,

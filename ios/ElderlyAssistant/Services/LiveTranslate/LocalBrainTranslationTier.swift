@@ -210,6 +210,23 @@ struct LocalBrainTranslationOutcome: Equatable {
     /// hidden — it is reported, separately, and the screen shows both.
     var loadDurationMs: Int? = nil
 
+    /// [DEVSCREEN-EVICT] (2026-09-21) What the warden had to unload to let
+    /// this attempt reach its load — empty on every path that did not evict,
+    /// which is every production path.
+    ///
+    /// **Evidence, not a branch**, like `deferral` above: the caller's next
+    /// tier is chosen the same way whether the STT was warm or not. It is
+    /// here because the screen that turns the bypass on has to be able to
+    /// say what the bypass cost, and because a refusal that survives an
+    /// eviction is a different fact from one that never tried — "the model
+    /// does not fit even with the device to itself" is the finding, and
+    /// without this field it would read as an ordinary busy device.
+    ///
+    /// A `var` with a default rather than a `let`, for the same reason
+    /// `deferral` is: the shipped initializer shape stays the whole
+    /// initializer.
+    var evictedForRoom: [ModelSlot] = []
+
     static let none = LocalBrainTranslationOutcome(translations: [:], durationMs: 0)
 }
 
@@ -495,6 +512,17 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
     /// without this tier claiming anything.
     private let ledger: ModelLifecycleManager
 
+    /// [DEVSCREEN-EVICT] Whether a refusal that is about *other residents*
+    /// may be answered by having the warden unload them — the translate-test
+    /// screen's persisted bypass toggle, read live at each gate so the
+    /// owner can flip it without rebuilding the tier.
+    ///
+    /// A closure, not a Bool, for exactly that reason; and `false` by
+    /// default, which is every production construction site. The pipeline
+    /// does not evict the household's voice brain to translate a sign, and
+    /// nothing here changes that unless the screen says so.
+    private let makesRoomForLoads: @Sendable () -> Bool
+
     /// Where the two warden notices go, if anything is listening. A sink
     /// rather than a return value because both moments happen *during* an
     /// attempt — a load that is running, a handle that was just taken — and
@@ -522,6 +550,7 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
          targetLanguage: AppLanguage = LiveTranslationPipeline.defaultTargetLanguage,
          memory: MemoryProbing = SystemMemoryProbe(),
          ledger: ModelLifecycleManager = .shared,
+         makesRoomForLoads: @escaping @Sendable () -> Bool = { false },
          onWardenNotice: (@Sendable (LocalBrainWardenNotice) -> Void)? = nil) {
         self.config = config
         self.modelStore = modelStore
@@ -531,6 +560,7 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
         self.targetLanguage = targetLanguage
         self.memory = memory
         self.ledger = ledger
+        self.makesRoomForLoads = makesRoomForLoads
         self.noticeSink = onWardenNotice
         // The warden can take the handle at any moment, so the wiring is
         // done here rather than at the first load: an offload that beats the
@@ -704,18 +734,28 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
         // of the method because it is a gate on a *load*: there is nothing to
         // refuse until a model has been found to load, and a device whose
         // brain is missing has a more honest reason to report than its memory.
-        if let deferral = await deferralForLoad(of: modelID) {
+        // [DEVSCREEN-EVICT] The gate, through the one wrapper that may make
+        // room for the load first. With the bypass off — production — this
+        // is `deferralForLoad`'s answer and nothing else happens.
+        let gate = await gateForLoad(of: modelID)
+        if let deferral = gate.deferral {
             // The batch event, not the unavailable event: nothing was
             // unavailable. The model is on disk and the runtime is linked —
             // this batch is simply not the one to spend 2.5 GB on, and the
             // strings are untouched for the tier behind this one.
+            //
+            // A refusal that got here *through an eviction* reports
+            // `evictedForRoom` below: the warden has already unloaded a
+            // resident, and the honest reading of this outcome is "the model
+            // does not fit even now", not "the device was busy".
             events.brainTranslationBatch(resolvedCount: 0,
                                          unresolvedCount: strings.count,
                                          durationMs: 0,
                                          deferral: deferral.eventReason)
             return LocalBrainTranslationOutcome(translations: [:],
                                                 durationMs: 0,
-                                                deferral: deferral)
+                                                deferral: deferral,
+                                                evictedForRoom: gate.evicted)
         }
 
         let batch = boundedBatch(strings)
@@ -804,7 +844,8 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
             // needs to compare models rather than idle timers.
             return LocalBrainTranslationOutcome(translations: translations,
                                                 durationMs: durationMs,
-                                                loadDurationMs: generation.loadMs)
+                                                loadDurationMs: generation.loadMs,
+                                                evictedForRoom: gate.evicted)
         } catch let failure as BrainGenerationFailure {
             events.brainTranslationUnavailable(Self.reason(for: failure),
                                                stage: Self.stage(for: failure))
@@ -878,6 +919,12 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
     /// ask was refused mid-decode, or the slot was spared a force) means the
     /// load has already happened; refusing the *decode* then would cost an
     /// answer without returning a byte.
+    ///
+    /// **[DEVSCREEN-EVICT] This method is the pure gate and knows nothing
+    /// about the translate-test screen's bypass.** The pass that may unload a
+    /// resident and re-ask wraps it (`gateForLoad`); keeping the two apart is
+    /// what lets a test pin this gate's answers with the bypass in either
+    /// position, and what keeps production's call graph this method alone.
     private func deferralForLoad(of modelID: ModelID) async -> LocalBrainDeferral? {
         if config.brainTranslationDefersToResidentBrain,
            ledger.isResident(.brain) || ledger.isResident(.intentBrain) {
@@ -896,6 +943,90 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
         let available = Double(memory.availableProcessMemoryBytes)
         guard available < required else { return nil }
         return .insufficientHeadroom(requiredBytes: required, availableBytes: available)
+    }
+
+    /// [DEVSCREEN-EVICT] The gate, plus the one pass that may get past it.
+    ///
+    /// Production asks `deferralForLoad` and stops there: this wrapper is
+    /// that answer verbatim whenever `makesRoomForLoads()` is false, which is
+    /// every construction site except the translate-test screen's.
+    ///
+    /// With the bypass on, two of the four refusals get one more question
+    /// asked before they stand. Both are refusals *about other residents*
+    /// (`isAboutOtherResidents`): the voice pipeline's warm brain, and the
+    /// headroom arithmetic the presence of that brain's bytes is what
+    /// depresses. The question is the warden's own —
+    /// `ModelLifecycleManager.makeRoom(for:)`, which runs the identical
+    /// victim walk a reservation runs — and what it unloads is reported
+    /// back on the outcome so the screen can say what the attempt cost.
+    ///
+    /// **The gate is then re-asked, and its second answer is the one
+    /// reported.** Evicting the STT can leave the arithmetic still short —
+    /// the model genuinely does not fit on this device, alone or not — and
+    /// that refusal is a finding rather than a busy moment. Returning the
+    /// first answer instead would make the two indistinguishable.
+    ///
+    /// The pressure rule is asked first on the second pass too, because a
+    /// kernel out of pages does not become a kernel with pages the moment a
+    /// resident is let go.
+    private func gateForLoad(of modelID: ModelID) async -> LoadGate {
+        let first = await deferralForLoad(of: modelID)
+        guard let first, makesRoomForLoads(), Self.isAboutOtherResidents(first) else {
+            return LoadGate(deferral: first, evicted: [])
+        }
+
+        // `.translateBrain` and `.liveTranslate`, because that is the load
+        // the gate is standing in front of: `LlamaBrainTextGenerator.loadHandle`
+        // will reserve exactly this, and the warden has to be asked about the
+        // same position or its answer would be about a different request.
+        //
+        // No `owner`: this walk takes no permit, so there is nothing for the
+        // dead-owner reaper to notice and nothing to hand back.
+        let evicted = ledger.makeRoom(for: ModelLoadRequest(slot: .translateBrain,
+                                                            modelID: modelID,
+                                                            purpose: .liveTranslate,
+                                                            replacesSlotContents: true))
+        guard !evicted.isEmpty else { return LoadGate(deferral: first, evicted: []) }
+        return LoadGate(deferral: await deferralForLoad(of: modelID), evicted: evicted)
+    }
+
+    /// [DEVSCREEN-EVICT] Whether this refusal is about the device's other
+    /// residents — and so may be answered by unloading them — or about
+    /// something the bypass must not touch.
+    ///
+    ///  - `.residentBrain` — the warm voice brain. The warden's own
+    ///    `.liveTranslate` walk is entitled to evict it, and does so in the
+    ///    same order it always uses.
+    ///  - `.insufficientHeadroom` — the app's ceiling reading, which is
+    ///    exactly what an eviction changes. Re-asked after the pass, so a
+    ///    model that does not fit even with the device to itself is still
+    ///    refused, with its numbers.
+    ///
+    /// The rest keep their meaning:
+    ///
+    ///  - `.memoryPressure` and `.recentCriticalPressure` ([PRESSURE-SAFE
+    ///    LOAD]) are about the kernel's free pages. Evicting a resident does
+    ///    not answer them, and the 2026-09-19 device death is not a thing a
+    ///    debug toggle gets to re-argue.
+    ///  - `.releaseRequestedDuringLoad` is produced by the load path, never
+    ///    by the pre-attempt gate this wrapper sits on.
+    static func isAboutOtherResidents(_ deferral: LocalBrainDeferral) -> Bool {
+        switch deferral {
+        case .residentBrain, .insufficientHeadroom:
+            return true
+        case .memoryPressure, .recentCriticalPressure, .releaseRequestedDuringLoad:
+            return false
+        }
+    }
+
+    /// [DEVSCREEN-EVICT] What `gateForLoad` decided, and what it cost.
+    private struct LoadGate {
+        /// Non-nil when the batch must not be attempted.
+        let deferral: LocalBrainDeferral?
+        /// The residents the warden unloaded on the way to that answer.
+        /// Empty whenever nothing was evicted — every production path, and
+        /// every refusal the bypass is not allowed to answer.
+        let evicted: [ModelSlot]
     }
 
     /// [PRESSURE-SAFE LOAD] The kernel's half of the gate, as a pure function

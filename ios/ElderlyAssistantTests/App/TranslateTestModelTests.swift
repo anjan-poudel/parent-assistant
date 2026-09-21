@@ -757,6 +757,35 @@ final class TranslateTestModelTests: XCTestCase {
                        "an attempt that answered nothing is the model's business, token unchanged")
     }
 
+    /// [DEVSCREEN-EVICT] A refusal that survived an eviction is a different
+    /// finding from a busy device, and the sentence has to say which.
+    ///
+    /// The whole purpose of the bypass is to answer "the device was busy" —
+    /// so a card that said it *after* the warden had unloaded the resident
+    /// would report the one thing that is now false. The tokens of what left
+    /// stay in the sentence (they are the log's own vocabulary), and the
+    /// ordinary busy caption keeps its exact wording when nothing was spent.
+    func testARefusalAfterAnEvictionReadsAsTheModelNotFitting() {
+        let en = Locale(identifier: "en")
+        let deferral = LocalBrainDeferral.insufficientHeadroom(requiredBytes: 900,
+                                                               availableBytes: 400)
+        let spent = LocalBrainDisposition.deferred(deferral)
+            .caption(locale: en, evictedForRoom: [.speechToText])
+
+        XCTAssertTrue(spent.contains("speechToText"), spent)
+        XCTAssertTrue(spent.contains("insufficient_headroom"), "the token stays — the log speaks it")
+        XCTAssertFalse(spent.contains("device busy"),
+                       "the device was emptied for this run: the busy sentence "
+                       + "is the one fact that is now false")
+
+        let spent2 = LocalBrainDisposition.deferred(deferral).caption(locale: en)
+        XCTAssertEqual(spent2,
+                       LocalBrainDisposition.deferred(deferral)
+                        .caption(locale: en, evictedForRoom: []),
+                       "the empty case is byte-for-byte what shipped")
+        XCTAssertTrue(spent2.contains("device busy"))
+    }
+
     /// The coalescing key for the readiness re-ask: the service republishes
     /// `states` on every progress chunk, and only a finished install can
     /// change the answer.
@@ -1029,6 +1058,54 @@ final class TranslateTestEngineAdapterTests: XCTestCase {
 
         XCTAssertEqual(brain.asked, [ModelID("second-rung")],
                        "the named model, not the ladder's first installed entry")
+    }
+
+    /// [DEVSCREEN-EVICT] What the bypass spent, on the card of the run that
+    /// spent it — on BOTH endings.
+    ///
+    /// The screen turns the toggle on to make a model runnable, so the run
+    /// that then answers has to be able to say what it cost (`speechToText`),
+    /// and the run that is still refused has to be able to say that the
+    /// device was emptied for nothing. Neither fact is in the tier's
+    /// `deferral` or in `localDisposition`, so the adapter is where they must
+    /// survive or be lost.
+    func testTheProbeCarriesWhatTheTierEvictedToRun() async {
+        let spent = LocalBrainTranslationOutcome(
+            translations: [:],
+            durationMs: 0,
+            deferral: .insufficientHeadroom(requiredBytes: 900, availableBytes: 400),
+            evictedForRoom: [.speechToText])
+        let refused = LocalBrainProbeEngine(brain: FakeBrain(outcome: spent),
+                                            model: ModelID("chosen"),
+                                            isInstalled: { _ in true },
+                                            unavailabilityReason: { _ in nil },
+                                            config: config())
+
+        let refusedOutcome = await refused.probe("hello")
+
+        XCTAssertEqual(refusedOutcome.evictedForRoom, [.speechToText],
+                       "the device was emptied and the model still did not fit: "
+                       + "the card has to be able to say so")
+        XCTAssertEqual(refusedOutcome.localDisposition?.token, "insufficient_headroom")
+
+        // …and the other ending: the eviction bought an answer.
+        let answered = LocalBrainProbeEngine(
+            brain: FakeBrain(outcome: LocalBrainTranslationOutcome(
+                translations: ["hello": "नमस्ते"],
+                durationMs: 5,
+                evictedForRoom: [.speechToText])),
+            model: ModelID("chosen"),
+            isInstalled: { _ in true },
+            unavailabilityReason: { _ in nil },
+            config: config())
+
+        let answeredOutcome = await answered.probe("hello")
+
+        XCTAssertEqual(answeredOutcome.result.text, "नमस्ते")
+        XCTAssertEqual(answeredOutcome.evictedForRoom, [.speechToText],
+                       "an answer that cost the household its warm STT is still "
+                       + "an answer that cost it")
+        XCTAssertNil(answeredOutcome.localDisposition)
     }
 
     /// Readiness is a fact about THIS model: the same adapter over the same
