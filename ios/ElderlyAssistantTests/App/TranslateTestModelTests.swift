@@ -372,6 +372,44 @@ final class TranslateTestModelTests: XCTestCase {
                        "settings.translateTest.install.unknown")
     }
 
+    /// [DEVSCREEN-DOWNLOAD] The install card's bypass caption, both halves.
+    ///
+    /// This screen is the one surface whose download exists to run models the
+    /// device-class policy refuses, and the way past the refusal is the
+    /// persisted switch in the technical sheet
+    /// (`ModelDownloadDebugSettings.ignoreFitPolicyKey`). A developer staring
+    /// at that refusal has to be told where the switch is, or the Download
+    /// button reads as broken.
+    ///
+    /// Silent when the switch is already ON — the download will simply work —
+    /// and silent when the class allows the model, because then there is no
+    /// policy to step around. Both silent halves are what a caption that
+    /// always rendered its sentence would get wrong.
+    ///
+    /// The behavioral halves live where the behavior does: the service
+    /// refuses with the switch off and installs with it on, pinned in
+    /// `MultipartDownloadTests`.
+    func testTheInstallCardNamesThePolicyBlockOnlyWhileTheBypassIsOff() {
+        let refused = ModelAvailability.unavailable(reason: .requiresEvictingWarmSTT)
+        XCTAssertEqual(
+            TranslateTestModel.policyBlockedInstallNoteKey(availability: refused,
+                                                            bypassEnabled: false),
+            "settings.translateTest.install.policyBlocked",
+            "a refused model with the switch off is the one case with something to say")
+
+        XCTAssertNil(TranslateTestModel.policyBlockedInstallNoteKey(availability: refused,
+                                                                    bypassEnabled: true),
+                     "with the switch on the download works — nothing to explain")
+        XCTAssertNil(TranslateTestModel.policyBlockedInstallNoteKey(availability: .available,
+                                                                    bypassEnabled: false),
+                     "an allowed model is not policy-blocked")
+        XCTAssertNil(
+            TranslateTestModel.policyBlockedInstallNoteKey(
+                availability: .unavailable(reason: .overClassBudget),
+                bypassEnabled: true),
+            "the caption answers the switch, not which reason refused")
+    }
+
     /// Every row this screen offers is one the AI-models screen offers too —
     /// asked of the catalog rather than restated, so the two surfaces cannot
     /// drift into disagreeing about what a household may fetch.
@@ -914,8 +952,14 @@ final class TranslateTestEngineAdapterTests: XCTestCase {
             self.batch = batch
         }
 
+        /// The protocol's own requirement, `cachePolicy` included: the 2-arg
+        /// form is a convenience on the protocol extension, NOT a
+        /// requirement, so a conformer that implements only that does not
+        /// conform. The batch here is scripted, so the policy is not what
+        /// this fake answers with — it counts the ask and returns it.
         func resolve(items: [CloudTranslationTier.Item],
-                     targetLanguage: AppLanguage) async -> CloudTranslationTier.BatchResult {
+                     targetLanguage: AppLanguage,
+                     cachePolicy: CloudTranslationTier.CachePolicy) async -> CloudTranslationTier.BatchResult {
             resolveCount += 1
             return batch
         }

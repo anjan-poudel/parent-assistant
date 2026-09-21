@@ -519,6 +519,13 @@ private struct TranslateTestResultCard: View {
 /// Download on one no release server is carrying.
 private struct TranslateTestInstallCard: View {
     @EnvironmentObject private var coordinator: AppCoordinator
+    /// [DEVSCREEN-DOWNLOAD] The persisted bypass switch, read here for the
+    /// CAPTION only — the download itself reads the same key inside
+    /// `ModelDownloadService.start`. `@AppStorage` rather than a plain read
+    /// so the sentence follows the switch: a developer who turns it on in
+    /// the technical sheet and comes back must not be told to turn it on.
+    @AppStorage(ModelDownloadDebugSettings.ignoreFitPolicyKey)
+    private var ignoresFitPolicy = false
     /// The selected row. Non-optional, because the view only draws this card
     /// for a row the source lists — see `TranslateTestBody`.
     let option: TranslateTestModelOption
@@ -541,6 +548,11 @@ private struct TranslateTestInstallCard: View {
                     unavailableReason: ModelLifecycleManager.shared.availability(of: entry).reason,
                     downloadsWhileUnavailable: true,
                     showsArtifactSize: true,
+                    // No bypass is passed here: the warden's verdict is read
+                    // inside `ModelDownloadService.start`, which honours the
+                    // persisted [DEVSCREEN-DOWNLOAD] switch itself. This card
+                    // only has to SAY when that switch is the thing standing
+                    // between the developer and the model (below).
                     onStart: { downloads.start(entry.id) },
                     onCancel: { downloads.cancel(entry.id) },
                     onDelete: {
@@ -548,6 +560,24 @@ private struct TranslateTestInstallCard: View {
                         downloads.reset(entry.id)
                     }
                 )
+
+                // [DEVSCREEN-DOWNLOAD] The one thing this card must say that
+                // the row above cannot: when the model this developer picked
+                // is refused by the device-class policy AND the bypass switch
+                // is off, the Download button's only possible outcome is
+                // `download_policy_rejected`. The row's own `unavailableNote`
+                // explains that the model does not fit; this sentence says how
+                // a developer gets to run it anyway. `@AppStorage` above is
+                // the same key the sheet's switch writes, so flipping it
+                // there is enough — no relaunch, and no second copy to drift.
+                if let noteKey = TranslateTestModel.policyBlockedInstallNoteKey(
+                    availability: ModelLifecycleManager.shared.availability(of: entry),
+                    bypassEnabled: ignoresFitPolicy) {
+                    Text(L10n.str(noteKey, locale: locale))
+                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .foregroundStyle(DesignTokens.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             } else {
                 // Not offered, and there are two reasons — the sentence says
                 // which, because the household's next move differs.

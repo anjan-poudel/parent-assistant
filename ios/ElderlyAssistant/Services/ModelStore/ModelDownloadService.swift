@@ -58,6 +58,17 @@ final class ModelDownloadService: NSObject, ObservableObject {
     /// ledger (the download tests and the encoder spike installer construct it
     /// directly). Production wires `ModelLifecycleManager.shared`.
     private let availabilityProvider: (ModelCatalogEntry) -> ModelAvailability
+    /// [DEVSCREEN-DOWNLOAD] Whether the class verdict above may be skipped
+    /// for a download — the persisted debug switch the hidden translation
+    /// test screen needs, read at each `start` (never cached, so flipping it
+    /// takes effect on the next tap).
+    ///
+    /// Injected for the same reason `availableBytesProvider` is, and it
+    /// defaults to the production reader (`ModelDownloadDebugSettings`),
+    /// which answers FALSE until a developer persists the switch — so a
+    /// service built without this argument behaves exactly as it did before
+    /// the switch existed.
+    private let ignoresFitPolicy: () -> Bool
     private var tasks: [ModelID: URLSessionDownloadTask] = [:]
     /// Multipart downloads in flight, keyed by model. A multipart model
     /// has NO entry in `tasks` — its parts are owned by the runner, which
@@ -88,10 +99,14 @@ final class ModelDownloadService: NSObject, ObservableObject {
          observabilityBus: ObservabilityBus,
          sessionFactory: (() -> URLSession)? = nil,
          availableBytesProvider: (() -> Int64?)? = nil,
-         availabilityProvider: ((ModelCatalogEntry) -> ModelAvailability)? = nil) {
+         availabilityProvider: ((ModelCatalogEntry) -> ModelAvailability)? = nil,
+         ignoresFitPolicy: (() -> Bool)? = nil) {
         self.store = store
         self.observabilityBus = observabilityBus
         self.availabilityProvider = availabilityProvider ?? { _ in .available }
+        self.ignoresFitPolicy = ignoresFitPolicy ?? {
+            ModelDownloadDebugSettings.ignoresFitPolicy()
+        }
         self.sessionFactory = sessionFactory ?? {
             let config = URLSessionConfiguration.default
             config.waitsForConnectivity = true
@@ -130,6 +145,20 @@ final class ModelDownloadService: NSObject, ObservableObject {
     /// warden gate below. Every other caller — the automatic brain download,
     /// the Settings rows, the STT restore, the spike installer — leaves it
     /// false, and the warden then stops the download before a byte moves.
+    ///
+    /// The second carve-out is not a parameter at all: it is the persisted
+    /// [DEVSCREEN-DOWNLOAD] switch (`ignoresFitPolicy`, read per call from
+    /// `ModelDownloadDebugSettings` and injected at init). It exists for the
+    /// hidden translation test screen, whose whole reason to be is to run
+    /// the A/B on models the warden's policy refuses on this device class
+    /// (`requiresEvictingWarmSTT`, `overClassBudget`) — a policy that cannot
+    /// be stepped around makes the screen useless for exactly the models it
+    /// is there to measure. It skips ONLY the class-budget verdict below:
+    /// the size cap, the disk guard, the RAM floor and the iOS tier are
+    /// resource and platform facts, not policy, and every one of them still
+    /// applies. The switch is OFF until a developer persists it, so the
+    /// Settings rows and the automatic downloads keep the warden's answer
+    /// unchanged.
     func start(_ entry: ModelCatalogEntry, deliveringStoredPreference: Bool = false) {
         let id = entry.id
         if case .downloading = states[id] ?? .notStarted { return }
@@ -175,7 +204,14 @@ final class ModelDownloadService: NSObject, ObservableObject {
         // guard so the established precedence is unchanged, and it is the
         // same ledger question the Settings rows are rendered from, so a row
         // and its Download button cannot disagree.
-        if !deliveringStoredPreference {
+        //
+        // Two carve-outs, both narrow and both named: a preference the
+        // household stored itself (`deliveringStoredPreference`) and the
+        // developer tool's A/B (`ignoresFitPolicy`, the persisted debug
+        // switch — see the parameter's doc). Neither one relaxes any guard
+        // above or below this block: they skip the class verdict and nothing
+        // else.
+        if !deliveringStoredPreference, !ignoresFitPolicy() {
             let verdict = availabilityProvider(entry)
             if let reason = verdict.reason {
                 update(id, .failed(reason: Self.refusalSentence(reason)))

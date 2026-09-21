@@ -12795,6 +12795,23 @@
         "ne": { "stringUnit": { "state": "translated", "value": "यो बिल्डले यो मोडेल डाउनलोडका लागि उपलब्ध गराउँदैन। प्रयोग गर्न फाइल सिधै फोनमा राख्नुहोस्।" } }
       }
     },
+    "settings.translateTest.install.policyBlocked": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Policy blocks this download — enable the bypass in the technical sheet."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "नीतिले यो डाउनलोड रोक्छ — प्राविधिक शीटमा बाइपास सक्रिय गर्नुहोस्।"
+          }
+        }
+      }
+    },
     "settings.schemeProbe.title": {
       "extractionState": "manual",
       "localizations": {
@@ -15037,6 +15054,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "यी प्राविधिक सेटिङ हुन्। परिवारको कुनै सदस्यले जुनसुकै बेला बदल्न सक्नुहुन्छ।"
+          }
+        }
+      }
+    },
+    "settings.hidden.ignoreFitPolicy.label": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Ignore the model-fit policy for downloads"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "डाउनलोडका लागि मोडेल-फिट नीति बेवास्ता गर्नुहोस्"
+          }
+        }
+      }
+    },
+    "settings.hidden.ignoreFitPolicy.hint": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Developer tool: a download starts even when this device class refuses the model. Disk, memory and iOS gates still apply."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "विकासकर्ता उपकरण: यो यन्त्र वर्गले मोडेल अस्वीकार गरे पनि डाउनलोड सुरु हुन्छ। डिस्क, मेमोरी र iOS गेटहरू लागू रहन्छन्।"
           }
         }
       }
