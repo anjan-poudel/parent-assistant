@@ -684,6 +684,32 @@ final class TranslateTestModel: ObservableObject {
             : "settings.translateTest.install.sideloadOnly"
     }
 
+    /// [DEVSCREEN-DOWNLOAD] The note the install card shows when the warden
+    /// would refuse this artifact AND the debug bypass is off — `nil` when
+    /// there is nothing to say.
+    ///
+    /// This screen is a developer tool: it exists to run the A/B on models
+    /// the device-class policy refuses (`.requiresEvictingWarmSTT`,
+    /// `.overClassBudget`), so its download button must not be a dead end
+    /// whose only outcome is `download_policy_rejected`. The way out is the
+    /// persisted switch in the technical sheet
+    /// (`ModelDownloadDebugSettings.ignoreFitPolicyKey`, read by
+    /// `ModelDownloadService`), and a developer staring at a refused model
+    /// needs to be told that — the row's own `unavailableNote` says the
+    /// model does not fit, not how to proceed.
+    ///
+    /// Silent when the bypass is already on (the download will just work)
+    /// and silent when the class allows the model (there is no policy to
+    /// step around). Pure and static so both halves are pinned by a test
+    /// rather than by inspection — the same reason `offeredEntry(for:)` and
+    /// `offersDownloadButton` live outside their views.
+    static func policyBlockedInstallNoteKey(availability: ModelAvailability,
+                                            bypassEnabled: Bool) -> String? {
+        availability.reason != nil && !bypassEnabled
+            ? "settings.translateTest.install.policyBlocked"
+            : nil
+    }
+
     // MARK: - Teardown
 
     /// The screen went away: stop listening and drop the in-flight run.

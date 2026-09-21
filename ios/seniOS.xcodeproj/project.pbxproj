@@ -257,6 +257,7 @@
 		58A4B3B234A2D554FF19CA71 /* TranscriptSanityGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 690C3B5217EF328191AB0323 /* TranscriptSanityGuardTests.swift */; };
 		58DF6CE40BB1A01A36BE5A1E /* SpeakerVerifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E95913B68DEE4BA9BC8F40CD /* SpeakerVerifierTests.swift */; };
 		590DDB85C665FBC890EF94D1 /* WeatherTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DC3D410769D72795295E8FC /* WeatherTool.swift */; };
+		5944FA49D38AF98DBEA7531E /* ModelDownloadDebugSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25EB3058A3FF1A3ED599A472 /* ModelDownloadDebugSettings.swift */; };
 		599EE5452D13CC056EB29D1C /* GeminiClient+Translate.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5821A5A98E36EB0EB637C22 /* GeminiClient+Translate.swift */; };
 		5BB4EA61FBA30166537DE5FF /* VariantTables in Resources */ = {isa = PBXBuildFile; fileRef = 38CF3FA8D07BC0910C5B6D5C /* VariantTables */; };
 		5C01D6D5AC78890FA6FB08E2 /* RoutineVisualAidFireHandlerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EE637D5C9FBC98FEF91A10B /* RoutineVisualAidFireHandlerTests.swift */; };
@@ -873,6 +874,7 @@
 		227923B3238044CF61D063F1 /* LlamaCommandInterpreter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LlamaCommandInterpreter.swift; sourceTree = "<group>"; };
 		23564CD4C6A81A44380352B5 /* MFCCSpeakerEmbedder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MFCCSpeakerEmbedder.swift; sourceTree = "<group>"; };
 		25D960115E1EE4B691893FAB /* TranslateTestModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslateTestModel.swift; sourceTree = "<group>"; };
+		25EB3058A3FF1A3ED599A472 /* ModelDownloadDebugSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloadDebugSettings.swift; sourceTree = "<group>"; };
 		2627CAEAB86588DE8701C8A4 /* CalendarShareSettingsSeamTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarShareSettingsSeamTests.swift; sourceTree = "<group>"; };
 		2635340C10BBF8F75E445C53 /* XlmrUnigramTokenizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XlmrUnigramTokenizerTests.swift; sourceTree = "<group>"; };
 		269C71573D21DF9EAFB68405 /* TithiCalculatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TithiCalculatorTests.swift; sourceTree = "<group>"; };
@@ -2027,6 +2029,7 @@
 				09B5AAC1F6DDC089D9784DD6 /* ModelBudgetPolicy.swift */,
 				553B22C3EBAF6EEA126300DA /* ModelCatalog.swift */,
 				B95880A8813CADEBDD433521 /* ModelCostModel.swift */,
+				25EB3058A3FF1A3ED599A472 /* ModelDownloadDebugSettings.swift */,
 				A8C1DB7B5C44FC3D35F4890B /* ModelDownloadService.swift */,
 				313369B48446E5D7804B0F6B /* ModelLifecycle.swift */,
 				5B767D371B02413E82A010AB /* ModelLifecycleManager.swift */,
@@ -3212,6 +3215,7 @@
 				0339542A03F11A28576476ED /* ModelBudgetPolicy.swift in Sources */,
 				D0793871C836D0C5BA592E8B /* ModelCatalog.swift in Sources */,
 				FFA47B34B6817B5F7243851D /* ModelCostModel.swift in Sources */,
+				5944FA49D38AF98DBEA7531E /* ModelDownloadDebugSettings.swift in Sources */,
 				F3A283FFFFC675ABC0CEA61D /* ModelDownloadService.swift in Sources */,
 				DDA06859C666CDA36595CEFF /* ModelLifecycle.swift in Sources */,
 				F0469EB207A6F38D02192824 /* ModelLifecycleManager.swift in Sources */,

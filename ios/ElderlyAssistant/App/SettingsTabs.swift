@@ -432,6 +432,13 @@ struct SettingsDestinationView: View {
 /// tab they did not choose.
 struct HiddenSettingsSheet: View {
     @EnvironmentObject private var coordinator: AppCoordinator
+    /// [DEVSCREEN-DOWNLOAD] The persisted bypass switch
+    /// (`ModelDownloadDebugSettings`). `@AppStorage` writes the same
+    /// `UserDefaults` key `ModelDownloadService` reads per download, so the
+    /// toggle IS the behaviour — there is no second copy to fall out of
+    /// step. Default OFF: an untouched install never bypasses the policy.
+    @AppStorage(ModelDownloadDebugSettings.ignoreFitPolicyKey)
+    private var ignoreFitPolicyForDownloads = false
 
     var body: some View {
         NavigationStack {
@@ -479,6 +486,34 @@ struct HiddenSettingsSheet: View {
                                           titleKey: "settings.translateTest.title")
                     }
                     .buttonStyle(.plain)
+
+                    // [DEVSCREEN-DOWNLOAD] (2026-09-21) The switch the
+                    // translation comparison screen's Download button needs
+                    // when the warden's device-class policy refuses the very
+                    // model that screen is there to A/B: a policy that cannot
+                    // be stepped around makes it useless for exactly the
+                    // models it exists to measure.
+                    //
+                    // It sits here, in the sheet a household never opens, and
+                    // it is OFF until someone persists it — the bypass is a
+                    // developer's deliberate choice for as long as an A/B
+                    // runs, never a shipped behaviour. It bypasses POLICY
+                    // only: the size cap, disk, RAM and iOS gates still
+                    // refuse a download with it on.
+                    VStack(alignment: .leading, spacing: 8) {
+                        Toggle(isOn: $ignoreFitPolicyForDownloads) {
+                            Text("settings.hidden.ignoreFitPolicy.label")
+                                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                                .foregroundStyle(DesignTokens.textPrimary)
+                        }
+                        .tint(DesignTokens.accent)
+                        .frame(minHeight: DesignTokens.minTapTargetSize)
+                        Text("settings.hidden.ignoreFitPolicy.hint")
+                            .font(.system(size: DesignTokens.minCaptionPointSize))
+                            .foregroundStyle(DesignTokens.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
                     Text("settings.hidden.note")
                         .font(.system(size: DesignTokens.minCaptionPointSize))
