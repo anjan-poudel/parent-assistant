@@ -1271,8 +1271,24 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: nmtEnNeQwen17bR4Q8,
             kind: .llamaBase,
-            // Round-4 quality ceiling (Q8_0), SIDELOAD-ONLY: never offered as
-            // a download row (`availableTranslationEntries` is the head alone).
+            // Round-4 quality ceiling (Q8_0), normally SIDELOAD-ONLY: never
+            // offered as a download row (`availableTranslationEntries` is the
+            // head alone).
+            //
+            // TEMPORARY OFFER for the Q6-vs-Q8 ARM-kernel A/B — revert after
+            // the verdict. For the duration of that run this entry IS a member
+            // of `availableTranslationEntries`, which is the only reason the
+            // Settings translation row and the translate-test install card can
+            // fetch it at all (the card reads that list — #117). The A/B is a
+            // same-device, same-kernel comparison against the Q6_K head, so
+            // both quants have to be downloadable in one build. Nothing else
+            // about the entry moves: its ladder position, its floor and its
+            // bytes are the ship artifacts' and change with the verdict, not
+            // with the offer. The `displayName` below keeps its ", sideload"
+            // suffix for the same reason — renaming it is copy work that would
+            // have to be reverted too, and "R4 Q8" is what distinguishes the
+            // row on the device.
+            //
             // 1_834_426_080 B is over the 1.5 GB "1.7B" rung, so it takes the
             // 3B rung's 800 MB overhead → 2_634_426_080 B live — the same
             // arithmetic, and the same three verdicts, as the round-2b Q8 this
@@ -1748,6 +1764,15 @@ enum ModelCatalog {
     /// offers as their OWN download row — the live-translate tier's head,
     /// and nothing else.
     ///
+    /// **TEMPORARY OFFER for the Q6-vs-Q8 ARM-kernel A/B — revert after the
+    /// verdict.** The round-4 Q8_0 is a member of this list for the duration
+    /// of that A/B and for no other reason, so a device can download both
+    /// quants from one build and compare them on the same kernel. This is the
+    /// single exception to the "head alone" rule the paragraphs below argue
+    /// for; every "never offered" sentence in this file (and the ones in
+    /// `LiveTranslateConfigTests` about the Q8 ceiling) describes the state
+    /// this list returns to when the second id is deleted.
+    ///
     /// A third list rather than a member of either above, because the tier's
     /// model is a different KIND of row from a picker's:
     ///   · not in `availableBrainEntries` — the picker hot-swaps
@@ -1780,17 +1805,27 @@ enum ModelCatalog {
     /// demotion in the tier list can never leave the offered row fetching a
     /// quant the gate already refused.
     ///
-    /// Still ONE row, and still the head only: the round-4 Q8 ceiling, the
+    /// Normally ONE row — the head only: the round-4 Q8 ceiling, the
     /// superseded round-4 Q5, and the round-3/round-2b artifacts are
     /// alternates, not choices the household should have to make. They stay
     /// resolvable in the tier list and deletable from `all`, which is where a
-    /// leftover installation surfaces.
+    /// leftover installation surfaces. The [TEMPORARY] block at the top is the
+    /// one exception, and it is a device A/B rather than a product decision.
+    ///
+    /// Adding the Q8 does not double-render an installed one: `managedRows`
+    /// subtracts the offered set from its installed leftovers, so a device
+    /// that already sideloaded the ceiling sees it once, as an offered row it
+    /// can finally Delete without sideloading it by hand.
     ///
     /// [HOSTING — VERIFIED] The Q6_K artifact is live on release **v20**
     /// (sha256 `9ed3fccea39b5a1ebe671e2cdad92b635497b983c2d73f8f4a61cd6a174e045e`,
     /// 1,417,754,336 B), so the row's Download resolves on a device.
     static let availableTranslationEntries: [ModelCatalogEntry] =
-        [nmtEnNeQwen17bR4Q6].compactMap { entry(for: $0) }
+        // TEMPORARY OFFER (Q6-vs-Q8 ARM-kernel A/B, revert after the verdict):
+        // the Q8_0 rides beside the head so the Settings row and the
+        // translate-test install card can both fetch it. Deleting this second
+        // id is the revert; the head must stay first.
+        [nmtEnNeQwen17bR4Q6, nmtEnNeQwen17bR4Q8].compactMap { entry(for: $0) }
 
     /// **Every** translation artifact in the catalog, offered or not: the ship
     /// quant the translation section offers, the round-4 Q8 ceiling, the

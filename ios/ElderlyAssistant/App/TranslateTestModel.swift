@@ -653,8 +653,10 @@ final class TranslateTestModel: ObservableObject {
     /// **The offer is the catalog's, not the ladder's.** A ladder rung is a
     /// model the TIER will try; it is not a promise that this build publishes
     /// the artifact for download, and several rungs exist precisely so a
-    /// device that sideloaded them keeps working (the round-4 Q8 ceiling, the
-    /// superseded quants). This screen used to draw a full management row —
+    /// device that sideloaded them keeps working (the superseded quants —
+    /// and the round-4 Q8 ceiling, which is a TEMPORARY member of that offer
+    /// list for the Q6-vs-Q8 ARM-kernel A/B and so has a row here until the
+    /// offer is reverted). This screen used to draw a full management row —
     /// Download, Cancel, **Delete** — for every rung the catalog happened to
     /// carry, which made it the one place in the app offering an in-app
     /// download for models the AI-models screen deliberately never offers.

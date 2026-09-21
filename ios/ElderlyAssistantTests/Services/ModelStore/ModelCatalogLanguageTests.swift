@@ -89,10 +89,18 @@ final class ModelCatalogLanguageTests: XCTestCase {
     /// tier does not lead with — the download would land and change nothing.
     /// The fallbacks behind the head are deliberately NOT offered: they are
     /// assistant brains with rows of their own in the brain section.
+    ///
+    /// [TEMPORARY OFFER] (Q6-vs-Q8 ARM-kernel A/B) One entry is a second row
+    /// for the duration of that run — the round-4 Q8_0 — so a single build can
+    /// fetch both quants for a same-device comparison. The revert is deleting
+    /// it from the catalog's list; the expectation below is the only assertion
+    /// that has to move with it.
     func testTheOfferedTranslationRowsAreExactlyTheTiersHead() {
         let offered = ModelCatalog.availableTranslationEntries.map(\.id)
-        XCTAssertEqual(offered, [ModelCatalog.nmtEnNeQwen17bR4Q6],
-                       "the section offers the tier's shipped head, alone")
+        XCTAssertEqual(offered, [ModelCatalog.nmtEnNeQwen17bR4Q6,
+                                 ModelCatalog.nmtEnNeQwen17bR4Q8],
+                       "the tier's shipped head, plus the temporary A/B offer "
+                       + "riding behind it")
         // Round 4 (2026-09-21) re-decided which artifact that head is: the
         // round-4 Q5 failed the S11 gate under the shipped prompt and the
         // verdict promoted the Q6_K. The row moved with the verdict, which is
