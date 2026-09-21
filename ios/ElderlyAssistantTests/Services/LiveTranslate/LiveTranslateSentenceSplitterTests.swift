@@ -207,6 +207,109 @@ final class LiveTranslateSentenceSplitterTests: XCTestCase {
                        ["।", "॥", ".", "!", "?"])
     }
 
+    // MARK: - The period's other jobs (review finding 9)
+
+    func testAPeriodBetweenDigitsIsDecimalAndNeverABoundary() {
+        // The crop this matters on: a prescription's times and doses. Breaking
+        // here handed the tiers "8." and "30" — two strings, two ids, two cache
+        // keys, and a number cut in half.
+        XCTAssertEqual(LiveTranslateSentenceSplitter.deterministicSentences(in: "8.30 बजे खानु। अब"),
+                       ["8.30 बजे खानु।", "अब"])
+        XCTAssertEqual(LiveTranslateSentenceSplitter.deterministicSentences(in: "1.5 mg twice. Now"),
+                       ["1.5 mg twice.", "Now"])
+        // A leading dot is the same shape: nothing on the near side, a digit on
+        // the far one.
+        XCTAssertEqual(LiveTranslateSentenceSplitter.deterministicSentences(in: ".5 mg. Then"),
+                       [".5 mg.", "Then"])
+    }
+
+    func testATrailingPeriodAfterANumberStillEndsASentence() {
+        // The other half of the rule: a period that follows a number is a
+        // decimal only when a *digit* is across it. A rule that refused every
+        // digit-adjacent period would join these two sentences, and joining is
+        // the failure the fallback exists to fix.
+        XCTAssertEqual(LiveTranslateSentenceSplitter.deterministicSentences(in: "It was 2024. Then we left."),
+                       ["It was 2024.", "Then we left."])
+    }
+
+    func testAnAbbreviationsOwnPeriodIsNotABoundary() {
+        XCTAssertEqual(LiveTranslateSentenceSplitter.deterministicSentences(in: "Dr. Sharma arrived. He sat"),
+                       ["Dr. Sharma arrived.", "He sat"])
+        XCTAssertEqual(LiveTranslateSentenceSplitter.deterministicSentences(in: "Rs. 250 for the visit. Pay at the desk"),
+                       ["Rs. 250 for the visit.", "Pay at the desk"])
+        XCTAssertEqual(LiveTranslateSentenceSplitter.deterministicSentences(in: "Take it etc. after food. Then rest"),
+                       ["Take it etc. after food.", "Then rest"])
+    }
+
+    func testADotInsideATokenIsNotABoundary() {
+        // A closed-up initial: a letter immediately on both sides of the dot is
+        // one token, not a sentence end.
+        XCTAssertEqual(LiveTranslateSentenceSplitter.deterministicSentences(in: "J.Sharma arrived. He sat"),
+                       ["J.Sharma arrived.", "He sat"])
+        XCTAssertEqual(LiveTranslateSentenceSplitter.deterministicSentences(in: "Take it e.g. after food. Then rest"),
+                       ["Take it e.g. after food.", "Then rest"])
+        // A multi-dot acronym's *inner* dots are in-word by the same rule; the
+        // dot that closes it follows a letter and stands before a space, which
+        // is the shape of a sentence end. The rules do not know the acronym —
+        // and reading every such dot as in-word would join two real sentences
+        // ("…in the U.S.A. Then we left."), which is the worse failure. Pinned
+        // so the limit is a decision rather than a surprise.
+        XCTAssertEqual(LiveTranslateSentenceSplitter.deterministicSentences(in: "The U.S.A. office is shut. Go tomorrow"),
+                       ["The U.S.A.", "office is shut.", "Go tomorrow"])
+    }
+
+    func testAnInitialDoesNotSplitAName() {
+        // A single letter before the dot is read as an initial. On the forms
+        // this path reads that is far more common than a one-letter word ending
+        // a sentence — and a name cut in half is the worse failure of the two.
+        XCTAssertEqual(LiveTranslateSentenceSplitter.deterministicSentences(in: "J. Sharma arrived. He sat"),
+                       ["J. Sharma arrived.", "He sat"])
+    }
+
+    func testARepeatedDotIsOneTerminator() {
+        XCTAssertEqual(LiveTranslateSentenceSplitter.deterministicSentences(in: "Wait.. then go. Done"),
+                       ["Wait.. then go.", "Done"])
+        XCTAssertEqual(LiveTranslateSentenceSplitter.deterministicSentences(in: "Hmm... not now. Later"),
+                       ["Hmm... not now.", "Later"])
+    }
+
+    func testTheDandaAndTheExclamationMarksAreAlwaysBoundaries() {
+        // The period is the only mark whose job is ambiguous: nothing else in
+        // the terminator set is used for anything but ending a sentence, so
+        // nothing else may be second-guessed.
+        XCTAssertEqual(LiveTranslateSentenceSplitter.deterministicSentences(in: "8.30 बजे। अब"),
+                       ["8.30 बजे।", "अब"])
+        XCTAssertEqual(LiveTranslateSentenceSplitter.deterministicSentences(in: "No. 5 गेट! अब?"),
+                       ["No.", "5 गेट!", "अब?"])
+    }
+
+    func testNeitherStageHandsATierTheHalvesOfATimeOrAName() {
+        let text = "Dr. Sharma को घर 8.30 बजे जानुहोस्। फेरि आउनुहोस्।"
+        // The fallback is the stage whose rules changed, so it is asserted
+        // exactly; the two-stage entry is asserted on the property that must
+        // hold whichever stage ran.
+        XCTAssertEqual(LiveTranslateSentenceSplitter.deterministicSentences(in: text),
+                       ["Dr. Sharma को घर 8.30 बजे जानुहोस्।", "फेरि आउनुहोस्।"])
+
+        let pieces = LiveTranslateSentenceSplitter.sentences(in: text, minimumFallbackLength: 0)
+        XCTAssertFalse(pieces.contains("8."), "a time is not two strings")
+        XCTAssertFalse(pieces.contains("30"))
+        XCTAssertFalse(pieces.contains { $0.hasSuffix("Dr.") }, "a name is not a sentence")
+        XCTAssertPiecesCarryTheWholeString(pieces, text)
+    }
+
+    func testTheAbbreviationListIsTheCloseableOneTheDocNames() {
+        // The list is short on purpose — every entry is a token that is never a
+        // sentence's last word on its own, because suppressing a real break
+        // joins two sentences. Pinned so growing it (or a later "just suppress
+        // every dot" change) has to come past this test.
+        XCTAssertEqual(LiveTranslateSentenceSplitter.abbreviations,
+                       ["dr", "mr", "mrs", "ms", "prof", "sr", "jr", "vs", "etc", "eg", "ie",
+                        "rs", "approx", "fig", "dept", "govt", "ltd", "pvt"])
+        XCTAssertFalse(LiveTranslateSentenceSplitter.abbreviations.contains("no"),
+                       "a token that can end a sentence does not belong here")
+    }
+
     // MARK: - Why this is not the normalizer
 
     func testTheNormalizerStripsTheDandaThisSplitterSplitsOn() {

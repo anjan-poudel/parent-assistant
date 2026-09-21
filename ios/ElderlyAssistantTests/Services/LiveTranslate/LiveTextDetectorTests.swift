@@ -895,6 +895,47 @@ final class LiveTextDetectorTests: XCTestCase {
                        "…and it is the union of the members that were followed")
         XCTAssertEqual(tracked?.yMax ?? -1, 0.50, accuracy: 0.0001)
     }
+
+    // MARK: Scenario: a crop is a one-off pass, not a sighting
+
+    /// Review finding 11 — the one-off crop resets the detector's own tracking
+    /// state and not only the engine's rectangles.
+    ///
+    /// The crop's pass is not a sighting of the live scene: it reads a box the
+    /// elder drew, and nothing about it may anchor the live cadence. Resetting
+    /// only the engine's rectangles left the other half standing —
+    /// `lastOCRPassAt` still timed the sample interval from the pass *before*
+    /// the crop and `rememberedKeys` still named strings the crop replaced — so
+    /// the very next live frame was handed to the *tracker* for geometry that
+    /// no longer existed. One crop cost the live picture an interval with
+    /// nothing on it. The observable here is the pass kind the detector picks
+    /// for the frame after a crop.
+    func testACropEndsTheTrackingWindowInsteadOfLeavingItHalfReset() async throws {
+        engine.regions = [region("Exit"), region("Push", y: 0.6)]
+        engine.trackedBoxes = ["Exit": box(0.25), "Push": box(0.55)]
+        let detector = makeDetector()
+        XCTAssertTrue(detector.begin().isSuccess)
+
+        // A live pass, so the detector has just read the scene and would
+        // otherwise track it for the rest of the sample interval.
+        _ = await detector.recognize(try frame(luma: 0))
+        XCTAssertEqual(engine.recognizeCallCount, 1)
+
+        // The elder's crop: one pass over the box they pointed at.
+        let cropped = await detector.recognizeCrop(try frame(luma: 90).pixelBuffer)
+        guard case .success = cropped else { return XCTFail("the crop must read: \(cropped)") }
+        XCTAssertEqual(engine.forgetCallCount, 1,
+                       "the engine is told its rectangles describe a picture that is gone")
+
+        // The live cadence resumes. It is still inside the sample interval, so
+        // a half-reset detector tracks; a reset one reads.
+        _ = await detector.recognize(try frame(luma: 180))
+        XCTAssertEqual(engine.trackCallCount, 0,
+                       "the frame after a crop must be read, not tracked over "
+                       + "rectangles the crop already replaced")
+        XCTAssertEqual(engine.recognizeCallCount, 3,
+                       "the crop's own pass and the live pass after it are OCR passes")
+    }
 }
 
 // MARK: - The shipped engine, on a rendered frame

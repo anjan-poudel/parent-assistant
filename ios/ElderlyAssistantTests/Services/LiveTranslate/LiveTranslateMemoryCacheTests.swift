@@ -141,6 +141,25 @@ final class LiveTranslateMemoryCacheTests: XCTestCase {
         XCTAssertEqual(hit, resolved("Light", "बत्ती"))
     }
 
+    func testAReadDoesNotMoveTheExpiryItRead() async {
+        // Review finding 8's other half: a lookup is a read, not a use. Were it
+        // to re-arm the entry, a string the elder keeps pointing at — the
+        // notice they are reading line by line — would never expire.
+        let clock = TestClock()
+        let cache = makeCache(ttl: 600, clock: clock)
+        await cache.store(resolved("Light", "बत्ती"), forKey: "light|ne")
+
+        clock.advance(500)
+        let inside = await cache.lookup("light|ne")
+        XCTAssertEqual(inside, resolved("Light", "बत्ती"))
+
+        // At 600 s the entry is at the bound its own insertion set — not one
+        // the read restarted.
+        clock.advance(100)
+        let miss = await cache.lookup("light|ne")
+        XCTAssertNil(miss, "the read must not have re-armed the entry")
+    }
+
     func testEachEntryCarriesItsOwnInsertionMoment() async {
         let clock = TestClock()
         let cache = makeCache(ttl: 600, clock: clock)
@@ -174,14 +193,36 @@ final class LiveTranslateMemoryCacheTests: XCTestCase {
         XCTAssertEqual(hit, .pending("Light"))
     }
 
-    func testADegradedAnswerRoundTripsWithItsReason() async {
+    func testADegradedAnswerIsRefusedByTheStore() async {
+        // Review finding 8. A failure is not an answer, and the TTL is ten
+        // minutes: storing one made a transient outage look permanent — every
+        // re-tap inside the window read the same failure back, and with the
+        // read re-arming the entry each time, a string the elder kept pointing
+        // at never expired at all. The type's rule is now that only terminal,
+        // resolved answers are remembered.
         let clock = TestClock()
         let cache = makeCache(clock: clock)
 
-        await cache.store(.degraded(originalText: "Light", reason: .noTierResolved), forKey: "light|ne")
+        await cache.store(.degraded(originalText: "Light", reason: .noTierResolved),
+                          forKey: "light|ne")
+
+        let miss = await cache.lookup("light|ne")
+        XCTAssertNil(miss, "the next tap must be allowed to ask again")
+    }
+
+    func testADegradedAnswerCannotDisplaceAResolvedOne() async {
+        // The refusal is a policy about *what* is stored, so it also protects
+        // the entry already there: a string that resolved on a previous tap is
+        // not overwritten by a later failure for the same string.
+        let clock = TestClock()
+        let cache = makeCache(clock: clock)
+        await cache.store(resolved("Light", "बत्ती"), forKey: "light|ne")
+
+        await cache.store(.degraded(originalText: "Light", reason: .noTierResolved),
+                          forKey: "light|ne")
 
         let hit = await cache.lookup("light|ne")
-        XCTAssertEqual(hit, .degraded(originalText: "Light", reason: .noTierResolved))
+        XCTAssertEqual(hit, resolved("Light", "बत्ती"))
     }
 
     // MARK: - Cost

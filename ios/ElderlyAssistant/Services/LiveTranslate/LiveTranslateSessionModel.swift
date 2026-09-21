@@ -220,6 +220,42 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// value rather than three that have to be kept in step.
     @Published private(set) var geminiCloudEnabled: Bool
 
+    /// The feature's own master switch, as the Settings leaf renders it and as
+    /// **this session is gated by** (owner directive, 2026-09-21; review
+    /// finding 1).
+    ///
+    /// Read from `LiveTranslateSettings` when the model is built and mirrored
+    /// on every write, like the cloud switch above it, so the value in Settings
+    /// and the value this session opened under are one value.
+    ///
+    /// **This is the switch's reader.** Until this was wired the setting was
+    /// written by the Settings leaf and read by nobody — a master switch that
+    /// gated nothing — so the seam is stated here for the UI half, which is
+    /// Workstream B's:
+    ///
+    ///  - `start()` **refuses to open a session** while this is false: no
+    ///    camera, no detector, no pipeline, no frame loop, and `hasStarted`
+    ///    stays false, so the same model starts cleanly once the switch is
+    ///    turned back on. The session that was never opened is the whole gate
+    ///    on this side.
+    ///  - A surface that says **why** the feature did not open — the Settings
+    ///    leaf's row, and the spoken line that routes the elder to it — is
+    ///    Workstream B's, and it reads this property to decide which surface to
+    ///    draw. No copy is minted here (the string catalog belongs to that
+    ///    workstream), and no `Phase` case is added: `phase` stays `.idle`,
+    ///    which is the state the surface already renders for a session that has
+    ///    not started.
+    ///  - A session that is **already open** is not torn down by a write to
+    ///    this switch: leaving the live surface is a navigation decision the
+    ///    UI owns (`close()` is the call that ends a session). Turning the
+    ///    switch on with a session open but never started needs no more than a
+    ///    second `start()`, which the guard above permits.
+    ///
+    /// It is a *policy*, not consent and not egress: the consent record is
+    /// still required and still enforced per cloud attempt (AM-1), and this
+    /// switch neither creates nor withdraws one.
+    @Published private(set) var liveTranslateEnabled: Bool
+
     /// **Extract mode** (owner verdict, 2026-09-18), as the mode control
     /// renders it: `true` ⇒ the overlay shows the recognized text and no tier
     /// runs until a block is asked for; `false` ⇒ the translated view.
@@ -368,6 +404,19 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// not two pictures racing.
     private var focusTask: Task<Void, Never>?
 
+    /// Which focused read the surface is currently waiting for: the identity
+    /// the newest tap minted, held until that read publishes or gives up
+    /// (review finding 7).
+    ///
+    /// Cancellation is cooperative, so a superseded read still runs to its end
+    /// and still has an outcome and a `focusInProgress` to write. This is the
+    /// value that tells it whether it is still the session's question — the
+    /// same job `snapshotTask`'s identity comparison does for the still path,
+    /// stated as a token because a focused read has no picture to compare
+    /// against until it succeeds. Cleared by the read that owns it, and by
+    /// `returnToLive()`/`close()` when the picture is put down.
+    private var focusToken: UUID?
+
     /// The notice's own dismissal timer — the only task this object owns
     /// besides the frame loop, and the reason a notice needs no tap to go
     /// away. Replaced (and the previous one cancelled) on every new notice,
@@ -419,6 +468,12 @@ final class LiveTranslateSessionModel: ObservableObject {
         // the config's nominal default (off) standing in for a household that
         // has never chosen.
         self.geminiCloudEnabled = dependencies.settings.geminiCloudEnabled
+        // The feature's master switch, from the same store and for the same
+        // reason. Its nominal default is **off**, so a household that has never
+        // chosen does not get the feature by accident — and it is read here
+        // rather than at `start()` so the value the surface renders and the
+        // value the gate reads are one value (review finding 1).
+        self.liveTranslateEnabled = dependencies.settings.liveTranslateEnabled
         self.isExtracting = dependencies.config.extractModeDefault
         self.indicator = CloudActivityIndicatorModel(observabilityBus: dependencies.observabilityBus,
                                                      config: dependencies.config)
@@ -688,6 +743,17 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// and nothing starts after a close.
     func start() async {
         guard !hasStarted, !isClosed else { return }
+        // **The feature's master switch, first** (review finding 1). Nothing is
+        // built and nothing starts while the household has the feature off: no
+        // pipeline, no snapshot or focus path, no camera request, no detector
+        // and no frame loop. `hasStarted` is deliberately left false, so this
+        // is a deferral rather than a refusal — a session that was never opened
+        // can be started the moment the switch is turned back on, with no new
+        // model and no relaunch. `phase` stays `.idle`, the state the surface
+        // already has for "not started"; the surface that says *why*, and the
+        // spoken line that offers the Settings leaf, are Workstream B's and
+        // read `liveTranslateEnabled` (see that property).
+        guard liveTranslateEnabled else { return }
         hasStarted = true
         phase = .starting
         observeLifecycle()
@@ -826,6 +892,10 @@ final class LiveTranslateSessionModel: ObservableObject {
         focusTask?.cancel()
         focusTask = nil
         focusedCapture = nil
+        // The token goes with the task: a read already in flight is not this
+        // session's question any more, so it may neither publish a crop nor end
+        // a wait (review finding 7).
+        focusToken = nil
         focusInProgress = false
         // The picture's correction goes with the picture: a closed model draws
         // no window of a camera that has stopped (see `frameStabilization`).
@@ -977,11 +1047,24 @@ final class LiveTranslateSessionModel: ObservableObject {
         // Without this the toggle would appear to stop working the moment a
         // picture is frozen, which is exactly the kind of lie about a display
         // preference the feature must not tell.
-        guard let held = frozen else { return }
         let layout = pendingLayout
         let policy = self.policy
-        Task { [weak self] in
-            await self?.rePlaceHeldFrame(held.publication, layout: layout, policy: policy)
+        if let held = frozen {
+            Task { [weak self] in
+                await self?.rePlaceHeldFrame(held.publication, layout: layout, policy: policy)
+            }
+        }
+        // **And a focused read keeps it working too** (review finding 12): the
+        // crop's own callouts are re-measured the same way. The focused read is
+        // the picture the elder *pointed at*, so a toggle that stopped working
+        // there would fail on exactly the surface where reading the original
+        // matters most — and it is the same lie the held frame above is
+        // re-placed to avoid. No pass, no cache read and no request: the
+        // strings are read and answered already.
+        if let capture = focusedCapture {
+            Task { [weak self] in
+                await self?.rePlaceFocusedCapture(capture, layout: layout, policy: policy)
+            }
         }
     }
 
@@ -1018,6 +1101,36 @@ final class LiveTranslateSessionModel: ObservableObject {
         let pipeline = self.pipeline
         let resolved = geminiCloudEnabled
         Task { await pipeline?.updateGeminiCloudEnabled(resolved) }
+    }
+
+    /// The feature's master switch, as the Settings leaf writes it (owner
+    /// directive, 2026-09-21; review finding 1).
+    ///
+    /// The same write path shape as the two preferences above — written to the
+    /// store, then read back from it — so the row the elder touched and the
+    /// gate the next session opens behind cannot hold two different answers.
+    /// One setter, one key (`LiveTranslateSettings.setLiveTranslateEnabled`).
+    ///
+    /// What a write does **not** do is end a session that is already running:
+    /// this is a navigation decision the UI owns (Workstream B), and `close()`
+    /// is the call that ends a session. What it does do is decide whether the
+    /// **next** `start()` opens anything at all — and, for a session that is
+    /// open but never started (the switch was off when the surface appeared),
+    /// whether a second `start()` now succeeds.
+    func setLiveTranslateEnabled(_ value: Bool) {
+        guard !isClosed else { return }
+        settings.setLiveTranslateEnabled(value)
+        refreshLiveTranslateEnabled()
+    }
+
+    /// Mirrors the master switch into the model. Nothing is pushed into the
+    /// pipeline, deliberately: unlike the cloud switch, this one is not a
+    /// per-attempt gate but the answer to "is there a session at all", and a
+    /// session that is open already passed it (see `setLiveTranslateEnabled`).
+    /// The value is read back from the setting, not taken from the argument,
+    /// so both write paths land on the same answer.
+    private func refreshLiveTranslateEnabled() {
+        liveTranslateEnabled = settings.liveTranslateEnabled
     }
 
     /// The switch as its row renders it, in the active language — the same
@@ -1144,6 +1257,10 @@ final class LiveTranslateSessionModel: ObservableObject {
         focusTask?.cancel()
         focusTask = nil
         focusedCapture = nil
+        // The token goes with the task: a read already in flight is no longer
+        // the session's question, so it may not publish a picture or end a wait
+        // that no longer exists (review finding 7).
+        focusToken = nil
         focusInProgress = false
         guard frozen != nil else { return }
         snapshotTask?.cancel()
@@ -1205,6 +1322,15 @@ final class LiveTranslateSessionModel: ObservableObject {
         let policy = self.policy
         let rect = Self.pixelRect(for: box, in: frame, fallingBackTo: pixelRect)
         focusTask?.cancel()
+        // **Which read this is** (review finding 7). A second tap cancels the
+        // first task, but cancellation is cooperative: a read already inside
+        // the crop, the pass or the plan answers whatever it was asked, and it
+        // used to write its `focusedCapture` and clear `focusInProgress` when
+        // it came back — installing a picture the elder had already replaced
+        // and ending the *new* read's wait. The token is this read's identity;
+        // only the read that still holds it may publish or finish the wait.
+        let token = UUID()
+        focusToken = token
         // The frame the elder pointed at travels with the work, for the same
         // reason the freeze's does: "that notice", not "whatever the camera
         // delivered while the tap was being handled".
@@ -1212,7 +1338,8 @@ final class LiveTranslateSessionModel: ObservableObject {
             await self?.readFocusedRegion(frame,
                                           pixelRect: rect,
                                           layout: layout,
-                                          policy: policy)
+                                          policy: policy,
+                                          token: token)
         }
     }
 
@@ -1221,17 +1348,25 @@ final class LiveTranslateSessionModel: ObservableObject {
     private func readFocusedRegion(_ frame: CameraFrame,
                                    pixelRect: CGRect,
                                    layout: LiveTranslateLayout,
-                                   policy: LiveOverlayPlacement.Policy) async {
-        guard !isClosed, let path = focusPath else {
-            focusInProgress = false
+                                   policy: LiveOverlayPlacement.Policy,
+                                   token: UUID) async {
+        // **Three ways this read may no longer be the live question**, and all
+        // three must leave the surface alone (review finding 7): the session
+        // closed, the *task* was cancelled (a second tap, a thaw, a resume — a
+        // cancelled task is still running and still resolves, because every
+        // await in the path is cooperative), and a newer read has taken the
+        // token. The cancel alone was never enough: the work in flight answers
+        // what it was asked and comes back to a session that has moved on.
+        guard !isClosed, !Task.isCancelled, let path = focusPath, focusToken == token else {
+            finishFocusedRead(token)
             return
         }
         let outcome = await path.capture(in: frame,
                                          pixelRect: pixelRect,
                                          layout: layout,
                                          policy: policy)
-        guard !isClosed else {
-            focusInProgress = false
+        guard !isClosed, !Task.isCancelled, focusToken == token else {
+            finishFocusedRead(token)
             return
         }
         // A read that failed leaves the *previous* capture standing rather
@@ -1242,6 +1377,18 @@ final class LiveTranslateSessionModel: ObservableObject {
         if case .success(let capture) = outcome {
             focusedCapture = capture
         }
+        finishFocusedRead(token)
+    }
+
+    /// Ends the focus wait — **only if the wait is still this read's**
+    /// (review finding 7). A superseded read that cleared `focusInProgress`
+    /// ended the wait the elder's *newest* tap is still inside, so the surface
+    /// went from "working…" to nothing while the read it should be showing was
+    /// still in flight. The token is cleared with the flag, so the next read
+    /// starts from a state no earlier one can finish.
+    private func finishFocusedRead(_ token: UUID) {
+        guard focusToken == token else { return }
+        focusToken = nil
         focusInProgress = false
     }
 
@@ -1324,6 +1471,26 @@ final class LiveTranslateSessionModel: ObservableObject {
                                              framePixelSize: held.framePixelSize)
         guard !isClosed, frozen?.publication.sequence == publication.sequence else { return }
         frozen = held
+    }
+
+    /// Re-measures a packed **focused** capture under a new policy and the
+    /// current geometry — `rePlaceHeldFrame`'s rule for the other picture
+    /// (review finding 12).
+    ///
+    /// The staleness guard is the same shape and on the same field: the crop on
+    /// screen must still be the capture this call was made about, compared by
+    /// its publication's sequence, so a re-measure that lands after a second
+    /// tap — or after a thaw — writes nothing. The picture, its answers and its
+    /// rows' text are untouched; only the geometry is measured again.
+    private func rePlaceFocusedCapture(_ capture: LiveTranslateFocusedCapture,
+                                       layout: LiveTranslateLayout,
+                                       policy: LiveOverlayPlacement.Policy) async {
+        guard !isClosed, let path = focusPath,
+              focusedCapture?.publication.sequence == capture.publication.sequence else { return }
+        let rePlaced = await path.rePlaced(capture, layout: layout, policy: policy)
+        guard !isClosed,
+              focusedCapture?.publication.sequence == capture.publication.sequence else { return }
+        focusedCapture = rePlaced
     }
 
     // MARK: - Speech (C12)

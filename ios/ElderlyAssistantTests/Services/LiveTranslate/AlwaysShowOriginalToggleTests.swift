@@ -123,16 +123,27 @@ final class AlwaysShowOriginalToggleTests: XCTestCase {
     /// rebuild — and it is a *developer* key, not a third preference: it is
     /// off unless someone turns it on, and nothing in a Release build reads
     /// it. It is listed here so the store's key set stays closed.
+    ///
+    /// The fourth key is the feature's **master switch** (owner directive,
+    /// 2026-09-21), and the pin below is the one this review round had to
+    /// update: the key was added to `featureKeys` by the rework and this
+    /// assertion was left at three, which is a deterministic red rather than a
+    /// drift a reader could miss (review finding 2). It is a *user* preference
+    /// like the two switches above it — read by the session model's own gate —
+    /// and it is listed so the store's key set stays closed.
     func testEverySettingTheFeatureOwnsIsOneDeclaredKeyAndNoOthers() {
         XCTAssertEqual(LiveTranslateSettings.featureKeys,
                        [LiveTranslateSettings.alwaysShowOriginalKey,
                         LiveTranslateSettings.geminiCloudEnabledKey,
-                        LiveTranslateSettings.translationDebugLoggingEnabledKey],
+                        LiveTranslateSettings.translationDebugLoggingEnabledKey,
+                        LiveTranslateSettings.liveTranslateEnabledKey],
                        "each setting is one key, and the feature owns no others")
         XCTAssertEqual(LiveTranslateSettings.geminiCloudEnabledKey,
                        "livetranslate.geminiCloudEnabled")
         XCTAssertEqual(LiveTranslateSettings.translationDebugLoggingEnabledKey,
                        "livetranslate.translationDebugLoggingEnabled")
+        XCTAssertEqual(LiveTranslateSettings.liveTranslateEnabledKey,
+                       "livetranslate.enabled")
     }
 
     // MARK: - Scenario: enabling keeps originals visible alongside translations

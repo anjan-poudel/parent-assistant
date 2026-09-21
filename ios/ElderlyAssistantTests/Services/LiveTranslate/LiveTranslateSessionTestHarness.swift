@@ -400,7 +400,20 @@ func makeLiveTranslateSessionTestParts(
     /// the thing under test. `nil` leaves the key absent, which is how a test
     /// exercises the household that has never chosen (the shipped default);
     /// `false` is how a test says the household turned the cloud off.
-    geminiCloudEnabled: Bool? = true) -> LiveTranslateSessionTestParts {
+    geminiCloudEnabled: Bool? = true,
+    /// The live-translation master switch (review finding 1), written into the
+    /// session's own settings suite before the session is built — the same
+    /// seam `geminiCloudEnabled` uses, and for the same reason: the model
+    /// reads its settings once, at build time.
+    ///
+    /// **On by default here, and the shipped default is off.** A household
+    /// starts with the key absent and the session therefore refuses to open
+    /// (`LiveTranslateSessionModel.start`); the suites that come through this
+    /// composition were written about what a *running* session does, so they
+    /// opt in here. `nil` leaves the key absent — the household that has never
+    /// chosen — and is how a test exercises the refusal; `false` is how a test
+    /// says the feature was turned off after the key was set.
+    liveTranslateEnabled: Bool? = true) -> LiveTranslateSessionTestParts {
 
     // A session opens showing the *recognized text* — that is the shipped
     // default (owner verdict, 2026-09-18) and it is pinned as one, by
@@ -419,6 +432,11 @@ func makeLiveTranslateSessionTestParts(
     // exactly as the Settings leaf's write reaches a session.
     if let geminiCloudEnabled {
         defaults.set(geminiCloudEnabled, forKey: LiveTranslateSettings.geminiCloudEnabledKey)
+    }
+    // The live-translation switch, written the same way: absent means the
+    // household has never chosen, which is the shipped default (off).
+    if let liveTranslateEnabled {
+        defaults.set(liveTranslateEnabled, forKey: LiveTranslateSettings.liveTranslateEnabledKey)
     }
 
     let log = SessionLog()
@@ -532,6 +550,11 @@ final class RecordingBrain: LocalBrainTranslating, @unchecked Sendable {
     private var storedHangs = false
     private var storedCalls: [[String]] = []
     private var storedReleaseCount = 0
+    private var storedHeldCalls = 0
+    private var storedGateIsOpen = false
+    private var storedThroughGate = 0
+    private var storedAnswered = 0
+    private var gateWaiters: [CheckedContinuation<Void, Never>] = []
     private var events: LiveTranslateEvents?
 
     /// The strings this brain answers, and what it answers with.
@@ -555,6 +578,53 @@ final class RecordingBrain: LocalBrainTranslating, @unchecked Sendable {
         set { lock.lock(); defer { lock.unlock() }; storedHangs = newValue }
     }
 
+    /// **The generation gate.** The next `heldCalls` generations are *held*
+    /// rather than answered: each suspends until the test lets it through. A
+    /// scripted *answer* says what the device is; a gate says *when* it is —
+    /// which is what a test that needs two reads in flight at once, in a known
+    /// order and with no wall clock, needs. Held calls are released oldest
+    /// first, so the order the caller scripted the taps in is the order they
+    /// come back in.
+    var heldCalls: Int {
+        get { lock.lock(); defer { lock.unlock() }; return storedHeldCalls }
+        set { lock.lock(); defer { lock.unlock() }; storedHeldCalls = newValue }
+    }
+
+    /// Generations suspended at the gate right now — the *arrival* signal, so
+    /// a test can know a read has reached the device without waiting for a
+    /// duration.
+    var waitingAtGate: Int {
+        lock.lock(); defer { lock.unlock() }; return gateWaiters.count
+    }
+
+    /// Generations that came back *through* the gate: the positive half of the
+    /// same seam — an answer was returned, so the stage it was asked by ran.
+    var generationsThroughTheGate: Int {
+        lock.lock(); defer { lock.unlock() }; return storedThroughGate
+    }
+
+    /// Lets the **oldest** held generation through: one at a time, so a test
+    /// can finish the read it superseded while the read that replaced it is
+    /// still held.
+    func releaseOneHeldCall() {
+        lock.lock()
+        let next = gateWaiters.isEmpty ? nil : gateWaiters.removeFirst()
+        lock.unlock()
+        next?.resume()
+    }
+
+    /// Lets every held generation through, now and later. The teardown escape
+    /// hatch: a test that ends with a read still held would otherwise leave
+    /// that work suspended for the life of the process.
+    func openGate() {
+        lock.lock()
+        storedGateIsOpen = true
+        let waiting = gateWaiters
+        gateWaiters = []
+        lock.unlock()
+        for continuation in waiting { continuation.resume() }
+    }
+
     /// Every batch this brain was handed, in order.
     var calls: [[String]] {
         lock.lock(); defer { lock.unlock() }; return storedCalls
@@ -572,14 +642,35 @@ final class RecordingBrain: LocalBrainTranslating, @unchecked Sendable {
         self.events = events
     }
 
+    /// Generations that have **come back** — answered, refused, or released
+    /// from the gate. `calls` says what was asked; this says how much of it is
+    /// done, which is what a test needs before it arms a gate: a call still in
+    /// flight is a generation another test could hand a hold to.
+    var generationsAnswered: Int {
+        lock.lock(); defer { lock.unlock() }; return storedAnswered
+    }
+
     func translate(_ strings: [String]) async -> LocalBrainTranslationOutcome {
+        let outcome = await answer(strings)
+        lock.lock(); storedAnswered += 1; lock.unlock()
+        return outcome
+    }
+
+    private func answer(_ strings: [String]) async -> LocalBrainTranslationOutcome {
         lock.lock()
         storedCalls.append(strings)
         let answers = storedAnswers
         let unavailable = storedUnavailable
         let hangs = storedHangs
         let events = self.events
+        var held = false
+        if storedHeldCalls > 0 {
+            storedHeldCalls -= 1
+            held = true
+        }
         lock.unlock()
+
+        if held { await awaitTheGate() }
 
         if hangs {
             // Cancellation-aware, like a real generation: the pipeline
@@ -603,6 +694,24 @@ final class RecordingBrain: LocalBrainTranslating, @unchecked Sendable {
     func release() async {
         lock.lock(); defer { lock.unlock() }
         storedReleaseCount += 1
+    }
+
+    /// Suspends a held generation until a test releases it — or the gate is
+    /// opened for everyone. The continuation is resumed outside the lock: what
+    /// it wakes runs on this thread until its next suspension point, and a
+    /// woken caller that reached for the lock again would deadlock.
+    private func awaitTheGate() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            lock.lock()
+            if storedGateIsOpen {
+                lock.unlock()
+                continuation.resume()
+                return
+            }
+            gateWaiters.append(continuation)
+            lock.unlock()
+        }
+        lock.lock(); storedThroughGate += 1; lock.unlock()
     }
 }
 

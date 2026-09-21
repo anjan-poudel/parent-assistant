@@ -84,7 +84,19 @@ final class LiveTranslateSessionModelTests: XCTestCase {
                              /// household that has never chosen — which is the
                              /// state the switch's own scenarios read the
                              /// config default from.
-                             geminiCloudEnabled: Bool? = true) -> Harness {
+                             geminiCloudEnabled: Bool? = true,
+                             /// The feature's master switch (review finding 1)
+                             /// in the session's own settings. **On by default
+                             /// here** — every scenario in this suite that
+                             /// predates the switch is about what a running
+                             /// session does — while `nil` is the shipped state
+                             /// (the key absent, the session refusing to open).
+                             liveTranslateEnabled: Bool? = true,
+                             /// The session's on-device brain, scripted. A
+                             /// scenario about the *order* of the cascade hands
+                             /// one in, so what the device is does not depend on
+                             /// whatever assistant brains the host holds.
+                             brain: LocalBrainTranslating? = nil) -> Harness {
         let parts = makeLiveTranslateSessionTestParts(authorization: authorization,
                                                       consent: consent,
                                                       configured: configured,
@@ -94,7 +106,9 @@ final class LiveTranslateSessionModelTests: XCTestCase {
                                                       locale: locale,
                                                       extractMode: extractMode,
                                                       config: config,
-                                                      geminiCloudEnabled: geminiCloudEnabled)
+                                                      brain: brain,
+                                                      geminiCloudEnabled: geminiCloudEnabled,
+                                                      liveTranslateEnabled: liveTranslateEnabled)
         suiteNames.append(parts.suiteName)
         return Harness(parts: parts,
                        model: LiveTranslateSessionModel(dependencies: parts.dependencies))
@@ -1077,5 +1091,215 @@ final class LiveTranslateSessionModelTests: XCTestCase {
         LiveTranslateSessionModel.wardenNoticeSink(for: harness.model)(.offloadedForVoiceTurn)
         try await Task<Never, Never>.sleep(for: .milliseconds(50))
         XCTAssertNil(harness.model.wardenNotice)
+    }
+
+    // MARK: - The feature's master switch (review finding 1)
+
+    /// The switch's production reader: the session's own door. Nothing is
+    /// built, nothing starts and nothing is asked of the camera while the
+    /// household has the feature off.
+    @MainActor
+    func testTheSessionRefusesToOpenWhileTheFeatureSwitchIsOff() async throws {
+        // The key absent is the shipped state: a household that has never
+        // chosen has not opted in.
+        let harness = makeHarness(liveTranslateEnabled: nil)
+        XCTAssertFalse(harness.model.liveTranslateEnabled,
+                       "the model reads the setting, and an absent key is off")
+
+        await harness.model.start()
+
+        XCTAssertEqual(harness.model.phase, .idle,
+                       "a switched-off feature opens no session: no camera, no pass, no send")
+        XCTAssertEqual(harness.log.count(of: "camera.start"), 0,
+                       "the camera is never started — nothing is built to start it")
+        XCTAssertNil(harness.model.publication)
+
+        // The elder turns it on. The refusal was a *deferral*: the same model
+        // opens, with no second session and no relaunch.
+        harness.model.setLiveTranslateEnabled(true)
+        XCTAssertTrue(harness.model.liveTranslateEnabled,
+                      "the model reads the setting back, not the argument")
+
+        await harness.model.start()
+
+        XCTAssertEqual(harness.model.phase, .running)
+        XCTAssertEqual(harness.log.count(of: "camera.start"), 1,
+                       "the camera starts once the feature is on")
+    }
+
+    /// And the switch is the *door*, not an off-ramp: a session already open is
+    /// not torn down by a later write. The surface that says why the feature is
+    /// closed (and the spoken line that offers Settings) belongs to the
+    /// workstream that owns the UI; this suite pins the Services-side half.
+    @MainActor
+    func testTurningTheSwitchOffDoesNotTearDownASessionAlreadyOpen() async throws {
+        let harness = makeHarness(liveTranslateEnabled: true)
+        await harness.model.start()
+        XCTAssertEqual(harness.model.phase, .running)
+
+        harness.model.setLiveTranslateEnabled(false)
+
+        XCTAssertFalse(harness.model.liveTranslateEnabled, "the switch itself moves")
+        XCTAssertEqual(harness.model.phase, .running,
+                       "an open session stays open: the switch decides whether a session opens")
+    }
+
+    // MARK: - The focus read's identity (review finding 7)
+
+    /// A tap that supersedes an in-flight read must neither install the picture
+    /// the *older* tap asked for nor end the wait the newer tap is still
+    /// inside — the two halves of the read's identity check (review finding 7).
+    ///
+    /// The device is **gated** rather than slow (`RecordingBrain.heldCalls`),
+    /// which is what makes the interleaving a fixture instead of a race: the
+    /// elder's first tap reaches the device and is held there, the second tap
+    /// is held behind it, and the test then lets the *superseded* read's
+    /// generation through while the read that replaced it is still suspended.
+    /// The superseded read really does finish its work — its generation came
+    /// back through the gate and its plan settled with its answer — so "it
+    /// installed nothing" is a claim about the identity check, not about work
+    /// that never ran. A second tap cancels the first *task*, but the plan is
+    /// an unstructured task's and is not a child of the tap's: the cancellation
+    /// is cooperative and the read answers what it was asked.
+    ///
+    /// Which is why the wait for the superseded read's tail is the *inverse*
+    /// one: that tail announces nothing, that being the rule. The newest read
+    /// stays at its gate for the whole window, so nothing else in the session
+    /// can move the two observables, and the premise is asserted inside the
+    /// window rather than assumed.
+    @MainActor
+    func testASupersededFocusedReadCannotInstallItsOwnPicture() async throws {
+        // The pacing clock is the harness's, not this test's subject: the live
+        // pass's own device attempt stamps it, and the shipped
+        // `brainAttemptMinInterval` (8 s) would then refuse *every* focused
+        // read's device stage — the reads would be answered elsewhere and never
+        // reach the gate this test is about.
+        var config = LiveTranslateConfig.default
+        config.brainAttemptMinInterval = 0
+        let brain = RecordingBrain()
+        brain.answers = [curatedText: curatedTranslation]
+        let harness = makeHarness(consent: true,
+                                  configured: true,
+                                  transport: Self.respondingTransport(),
+                                  config: config,
+                                  brain: brain)
+        reportLayout(harness)
+        harness.engine.regions = [detected(curatedText)]
+        await harness.model.start()
+        try await deliverPass(harness)
+
+        // The live pass asks the device too, and it is answered: the gate is
+        // armed only once nothing is in flight, so the two reads are the only
+        // generations that can hold a place in it.
+        await waitUntil("the live pass's device attempt to come and go") {
+            brain.generationsAnswered >= 1 && brain.generationsAnswered == brain.calls.count
+        }
+
+        // Every generation from here on is held, and the test decides the order
+        // they come back in.
+        let supersededText = "Prescription line one and its instructions"
+        let newestText = "A different line to read"
+        brain.answers = [supersededText: "ने:superseded", newestText: "ने:newest"]
+        brain.heldCalls = 2
+
+        // The elder's first tap: its crop is read and its plan reaches the
+        // device, which holds it.
+        harness.engine.regions = [detected(supersededText)]
+        tapFocused(harness)
+        await waitUntil("the superseded read's generation to reach the gate") {
+            brain.waitingAtGate == 1 && brain.calls.last == [supersededText]
+        }
+
+        // The second tap, on another line, one wait behind it at the same gate.
+        harness.engine.regions = [detected(newestText)]
+        tapFocused(harness)
+        await waitUntil("the newest read's generation to reach the gate behind it") {
+            brain.waitingAtGate == 2 && brain.calls.last == [newestText]
+        }
+
+        // The superseded read is let through *while the newest read is still
+        // held*: its answer comes back, its plan settles, and its tail —
+        // guarded by nothing but the read's identity — reaches the session.
+        brain.releaseOneHeldCall()
+        await waitUntil("the superseded read's generation to come back") {
+            brain.generationsThroughTheGate == 1
+        }
+
+        // A bounded window in which the replaced read's effects *would* have
+        // shown up: the picture it asked for on the surface, and the wait it
+        // did not own ended.
+        for _ in 0..<20 {
+            XCTAssertEqual(brain.waitingAtGate, 1, "the newest read is held throughout")
+            if harness.model.focusedCapture != nil || !harness.model.focusInProgress { break }
+            try await Task<Never, Never>.sleep(for: .milliseconds(20))
+        }
+        XCTAssertNil(harness.model.focusedCapture,
+                     "the superseded read must not install the picture it was asked for, "
+                     + "however complete its answer is")
+        XCTAssertTrue(harness.model.focusInProgress,
+                      "and it must not end the wait the newest tap is still inside")
+
+        // The newest read's own answer: the picture the elder asked for last,
+        // installed by the read that still owns the wait.
+        brain.releaseOneHeldCall()
+        await waitUntil("the newest read's picture to be packed") {
+            harness.model.focusedCapture?.publication.regions.first?.text == newestText
+        }
+        XCTAssertEqual(harness.model.focusedCapture?.publication.regions.count, 1)
+        XCTAssertFalse(harness.model.focusInProgress,
+                       "the read that owns the wait is the one that ends it")
+        XCTAssertEqual(brain.generationsThroughTheGate, 2)
+    }
+
+    // MARK: - The display preference on a packed capture (review finding 12)
+
+    /// The show-original toggle re-measures a packed focused capture, exactly as
+    /// it re-measures a held frame: the strings are read and answered already,
+    /// so the only thing a display preference may change is where they are
+    /// drawn. A toggle that stopped working on the one picture the elder
+    /// pointed at would be the lie about a display preference the feature must
+    /// not tell.
+    @MainActor
+    func testTheShowOriginalToggleRePlacesAPackedFocusedCapture() async throws {
+        let harness = makeHarness(dictionary: [curatedText.lowercased(): curatedTranslation])
+        reportLayout(harness)
+        harness.engine.regions = [detected(curatedText)]
+        await harness.model.start()
+        try await deliverPass(harness)
+
+        tapFocused(harness)
+        await waitUntil("the focused read to pack its picture") {
+            harness.model.focusedCapture != nil
+        }
+        let packed = try XCTUnwrap(harness.model.focusedCapture)
+        XCTAssertFalse(packed.publication.policy.alwaysShowOriginal,
+                       "the session opens showing the translation")
+        let passesWhenPacked = harness.engine.recognizeCallCount
+
+        harness.model.toggleAlwaysShowOriginal()
+
+        await waitUntil("the packed capture to be re-measured under the new policy") {
+            harness.model.focusedCapture?.publication.policy.alwaysShowOriginal == true
+        }
+        let rePlaced = try XCTUnwrap(harness.model.focusedCapture)
+
+        XCTAssertEqual(rePlaced.publication.regions.map(\.text),
+                       packed.publication.regions.map(\.text),
+                       "the same read's strings")
+        XCTAssertEqual(rePlaced.pixelRect, packed.pixelRect,
+                       "the same crop, re-measured — not a second read")
+        XCTAssertEqual(rePlaced.rows.count, packed.rows.count,
+                       "the card is rebuilt with the placement, so the two cannot disagree")
+        XCTAssertEqual(harness.engine.recognizeCallCount, passesWhenPacked,
+                       "re-placing is placement: no second pass and no second answer")
+    }
+
+    /// One tap on the focused path's own geometry: the box the elder pointed
+    /// at, with the pixel rect left to the model to derive.
+    @MainActor
+    private func tapFocused(_ harness: Harness) {
+        harness.model.translateFocusedRegion(
+            box: NormalizedBox(xMin: 0.1, yMin: 0.1, xMax: 0.5, yMax: 0.2),
+            pixelRect: .null)
     }
 }

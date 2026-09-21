@@ -1576,24 +1576,31 @@ struct LiveTranslateConfig: Equatable {
     ///
     /// A crop is a small picture, but "small" is not a bound: a paragraph of
     /// medical directions can split into a dozen sentences, and the plan that
-    /// resolves them can reach the device, the cloud and the device again, in
-    /// batches. An unbounded capture is a capture that can spend an arbitrary
-    /// number of requests and generations on one tap.
+    /// resolves them asks the device, then the cloud for whatever the device
+    /// could not answer — in batches. An unbounded capture is a capture that
+    /// can spend an arbitrary number of requests and generations on one tap.
     ///
-    /// Three is the shipped plan's own stage count, which is not a
-    /// coincidence: the plan's stages *are* the cascade (the device for its
-    /// class, the gate for the class the device is not proven on, the device
-    /// again for whatever the cloud could not answer). A capture is allowed the
-    /// whole cascade and no more, so a scene that needed a second pass through
-    /// either tier has its surplus **released, unclaimed**, exactly as a
-    /// clock-held batch is: the next capture — or the live tick that follows —
-    /// carries those strings, and nothing was paid for twice or dropped.
+    /// **Two is the mode's own structural maximum, and the default states it**
+    /// (review finding 10). A `.focused` plan routes nothing to the cloud
+    /// first — `leadingTier` answers `.onDevice` for every string in that
+    /// mode — so `cloudFirst` is empty and of the plan's stages exactly two
+    /// can spend a batch: the device's own (stage 2), and the gate for
+    /// whatever the device could not answer (stage 5). The shipped `3` was
+    /// therefore a bound no `.focused` ask could reach, and a cap that cannot
+    /// bind is a rule the next reader has to re-derive to find out it is
+    /// inert. Stating the real maximum leaves the shipped behaviour
+    /// identical and makes this knob what it now is: a **narrowing**. `1`
+    /// keeps a focus on the device (the gate's strings are released
+    /// unclaimed), `0` resolves nothing through the tiers at all. Either way
+    /// the surplus is **released, unclaimed**, exactly as a clock-held batch
+    /// is: the next capture — or the live tick that follows — carries those
+    /// strings, and nothing was paid for twice or dropped.
     ///
     /// It does not apply to the live picture or to a still frame (their plans
-    /// run `.cascade`): the live cadence is already bounded by its dispatch
-    /// clock, and a held frame's refresh is a re-render of strings the live
-    /// cycle is resolving anyway.
-    var focusMaxBatchCalls: Int = 3
+    /// run `.cascade`, whose budget is unbounded): the live cadence is already
+    /// bounded by its dispatch clock, and a held frame's refresh is a
+    /// re-render of strings the live cycle is resolving anyway.
+    var focusMaxBatchCalls: Int = 2
 
     // MARK: Disclosure
 

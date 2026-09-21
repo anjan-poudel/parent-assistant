@@ -1,3 +1,4 @@
+import CoreMedia
 import XCTest
 @testable import ElderlyAssistant
 
@@ -63,6 +64,9 @@ final class LiveTranslationFocusedModeTests: XCTestCase {
         let transport: TierTranslationTransport
         let brain: RecordingBrain
         let cache: LabelTranslationCache
+        /// The real gate, so a scenario about the prompt can close it and a
+        /// retry can open it — the same component the tier reads.
+        let gate: LiveTranslateConsentGate
     }
 
     /// A sentence-class string: five words, over the short-form bound the
@@ -78,6 +82,11 @@ final class LiveTranslationFocusedModeTests: XCTestCase {
     private func makeHarness(brainAnswers: [String: String] = [:],
                              focusMaxBatchCalls: Int? = nil,
                              unreachable: Bool = false,
+                             /// The household's consent state at build time. A
+                             /// scenario about the prompt closes it, so the
+                             /// ask it raises is a real `awaitingDecision` the
+                             /// retry can pick up.
+                             consent: Bool = true,
                              now: @escaping () -> Date = Date.init) -> Harness {
         var config = LiveTranslationPipelineTests.unpacedDispatchConfig()
         if let focusMaxBatchCalls { config.focusMaxBatchCalls = focusMaxBatchCalls }
@@ -86,7 +95,7 @@ final class LiveTranslationFocusedModeTests: XCTestCase {
         let configStore = GeminiConfigStore(storage: storage)
         configStore.save("fake-key")
         let gate = LiveTranslateConsentGate(storage: storage, config: config, observabilityBus: bus)
-        _ = gate.record(granted: true)
+        if consent { _ = gate.record(granted: true) }
         let governor = GeminiCostGovernor(storage: storage, observabilityBus: bus)
         let cache = LabelTranslationCache(storage: storage,
                                           config: config,
@@ -131,7 +140,8 @@ final class LiveTranslationFocusedModeTests: XCTestCase {
                                                brain: brain,
                                                now: now,
                                                publish: { _ in })
-        return Harness(pipeline: pipeline, transport: transport, brain: brain, cache: cache)
+        return Harness(pipeline: pipeline, transport: transport, brain: brain,
+                       cache: cache, gate: gate)
     }
 
     /// The one answer the scripted transport gives, by wire id.
@@ -222,7 +232,7 @@ final class LiveTranslationFocusedModeTests: XCTestCase {
                                                                 mode: .focused,
                                                                 regionCounts: [:])
         XCTAssertEqual(try XCTUnwrap(defaultCap?["r1"]).sourceTier, .onDeviceBrain,
-                       "the shipped cap of three batches is enough for one string")
+                       "the shipped cap is enough for one string")
         XCTAssertEqual(answered.brain.calls.count, 1)
 
         let capped = makeHarness(brainAnswers: [askedText: answer], focusMaxBatchCalls: 0)
@@ -250,6 +260,189 @@ final class LiveTranslationFocusedModeTests: XCTestCase {
         XCTAssertEqual(harness.brain.calls, [[askedText]])
     }
 
+    // MARK: - What a capture may write
+
+    /// Review finding 3 — the mode's cache policy reaches **both** spends.
+    ///
+    /// The device is the tier that answers in both halves of this A/B (it leads
+    /// every string in `.focused`, and the cascade falls to it when the cloud
+    /// cannot answer), so what the persisted cache holds afterwards is the
+    /// mode's doing and nothing else. The brain path wrote unconditionally, and
+    /// that is exactly the crop-written-to-disk the `.readOnly` policy exists
+    /// to prevent: the tier was told not to store the strings and the pipeline
+    /// stored them behind its back.
+    @MainActor
+    func testAFocusedReadKeepsTheDevicesAnswersOffTheDisk() async throws {
+        let focused = makeHarness(brainAnswers: [askedText: answer])
+        let focusedSettled = await focused.pipeline.resolveFocused([item("r1", askedText)],
+                                                                   mode: .focused,
+                                                                   regionCounts: [:])
+        XCTAssertEqual(try XCTUnwrap(focusedSettled?["r1"]).sourceTier, .onDeviceBrain)
+        XCTAssertNothingPersisted(focused, for: askedText)
+
+        let cascade = makeHarness(brainAnswers: [askedText: answer])
+        let cascadeSettled = await cascade.pipeline.resolveFrozen([item("r1", askedText)],
+                                                                  regionCounts: [:])
+        XCTAssertEqual(try XCTUnwrap(cascadeSettled?["r1"]).sourceTier, .onDeviceBrain)
+        XCTAssertEqual(persistedTranslation(cascade, for: askedText), answer,
+                       "the cascade's device answer is persisted, exactly as it always was")
+    }
+
+    /// Review finding 4 — the ask's mode survives the consent prompt.
+    ///
+    /// A focused capture whose strings reached the prompt is retried when the
+    /// elder answers, and the retry rebuilds the request from the recorded ask.
+    /// Without the mode it ran as a cascade's — `.persist` where the capture
+    /// promised `.readOnly` — so the test's subject is what the persisted layer
+    /// holds after the retry answered the string on the cloud.
+    ///
+    /// The device is not asked a second time here and that is the plan's own
+    /// rule, not this scenario's: `brainAttemptedKeys` remembers that the
+    /// device already declined these strings for this sighting, so the retry
+    /// goes straight to the cloud. Which makes the request count the evidence
+    /// that the retry ran at all, and the cache the evidence of the mode.
+    @MainActor
+    func testTheConsentRetryRunsAFocusedAsksStringsInTheirOwnMode() async throws {
+        let harness = makeHarness(brainAnswers: [:], consent: false)
+
+        let held = await harness.pipeline.resolveFocused([item("r1", askedText)],
+                                                         mode: .focused,
+                                                         regionCounts: ["r1": 1])
+        XCTAssertNil(held, "the closed gate held the capture's string")
+        XCTAssertEqual(harness.brain.calls.count, 1,
+                       "the device was asked, in front, and could not answer")
+        XCTAssertEqual(harness.transport.requestCount, 0, "nothing was sent behind a closed gate")
+
+        // The elder has answered the prompt, and the cloud can answer now.
+        _ = harness.gate.record(granted: true)
+        respond(harness)
+
+        await harness.pipeline.retryAwaitingResolution()
+
+        XCTAssertEqual(harness.transport.requestCount, 1,
+                       "the retry ran the ask's plan and reached the network — the "
+                       + "assertion below is not about a retry that never ran")
+        XCTAssertNothingPersisted(harness, for: askedText)
+    }
+
+    // MARK: - The ledger after a sighting
+
+    /// Review finding 5 — a focused settlement is a *sighting's*, and the next
+    /// sighting may drop it.
+    ///
+    /// The plan that answers a capture does not hold its keys for a frame
+    /// (`holdsAnswers: false`): there is no still to keep them for, and a
+    /// frozen epoch on a plan that never freezes the picture would put them
+    /// behind a release that only a thaw can reach — the keys would outlive
+    /// every sighting, and a degraded answer would come back as the same
+    /// degraded answer for the rest of the session. So `reconcile` prunes them
+    /// like any other sighting's, and the string is asked about again.
+    @MainActor
+    func testAFocusedSettlementIsPrunedWithTheSightingThatProducedIt() async throws {
+        let harness = makeHarness(brainAnswers: [askedText: answer])
+        let first = await harness.pipeline.resolveFocused([item("r1", askedText)],
+                                                          mode: .focused,
+                                                          regionCounts: [:])
+        XCTAssertEqual(try XCTUnwrap(first?["r1"]).sourceTier, .onDeviceBrain)
+        XCTAssertEqual(harness.brain.calls.count, 1)
+
+        // The string leaves the picture: a pass that finds nothing prunes every
+        // settlement no held frame owns.
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        // The device can no longer answer it, and nothing is scripted for the
+        // cloud: a plan that answered from the ledger would answer anyway, and
+        // one that asks again has to send.
+        harness.brain.answers = [:]
+        let second = await harness.pipeline.resolveFocused([item("r1", askedText)],
+                                                           mode: .focused,
+                                                           regionCounts: [:])
+
+        XCTAssertEqual(harness.brain.calls.count, 2,
+                       "the pruned key is askable again — a held key would have been "
+                       + "answered from the ledger without a second ask")
+        XCTAssertEqual(harness.transport.requestCount, 1,
+                       "and with the ledger empty the string reached the network")
+        XCTAssertNotNil(second, "the region is settled either way, not left pending")
+    }
+
+    // MARK: - How much may be spent
+
+    /// Review finding 10 — the cap is the mode's structural maximum, so it must
+    /// be a number the mode can actually reach.
+    ///
+    /// `.focused` puts the device in front of every string, so the cloud-first
+    /// stage has nothing to spend: exactly two stages can reach a batch — the
+    /// device and the cloud behind it — and the shipped cap of two is therefore
+    /// *binding*, which is what makes the knob a knob. One is the narrowing it
+    /// now declares: a capture that may spend a single batch is a device-only
+    /// capture, and its strings are released unclaimed rather than settled
+    /// degraded for having been cut off.
+    @MainActor
+    func testTheShippedCapIsExactlyEnoughAndOneNarrowsToTheDeviceOnly() async throws {
+        let answered = makeHarness(brainAnswers: [:])
+        respond(answered)
+        let full = await answered.pipeline.resolveFocused([item("r1", askedText)],
+                                                          mode: .focused,
+                                                          regionCounts: [:])
+
+        XCTAssertEqual(try XCTUnwrap(full?["r1"]).sourceTier, .cloud,
+                       "two batches: the device, then the cloud behind it")
+        XCTAssertEqual(answered.brain.calls.count, 1)
+        XCTAssertEqual(answered.transport.requestCount, 1)
+
+        let narrowed = makeHarness(brainAnswers: [:], focusMaxBatchCalls: 1)
+        respond(narrowed)
+        let held = await narrowed.pipeline.resolveFocused([item("r1", askedText)],
+                                                          mode: .focused,
+                                                          regionCounts: [:])
+
+        XCTAssertEqual(narrowed.brain.calls.count, 1, "the device's one batch was spent")
+        XCTAssertEqual(narrowed.transport.requestCount, 0, "the cloud's batch was the one held back")
+        XCTAssertNil(held, "a plan the cap held answers nothing and settles nothing")
+    }
+
+    // MARK: - The persisted layer, read
+
+    @MainActor
+    private func persistedTranslation(_ harness: Harness,
+                                      for text: String,
+                                      file: StaticString = #filePath,
+                                      line: UInt = #line) -> String? {
+        switch harness.cache.lookup(text: text,
+                                    targetLanguage: LiveTranslationPipeline.defaultTargetLanguage) {
+        case .success(let hit):
+            return hit?.translation
+        case .failure(let error):
+            XCTFail("the persisted lookup failed: \(error)", file: file, line: line)
+            return nil
+        }
+    }
+
+    @MainActor
+    private func XCTAssertNothingPersisted(_ harness: Harness,
+                                           for text: String,
+                                           file: StaticString = #filePath,
+                                           line: UInt = #line) {
+        switch harness.cache.lookup(text: text,
+                                    targetLanguage: LiveTranslationPipeline.defaultTargetLanguage) {
+        case .success(let hit):
+            XCTAssertNil(hit,
+                         "the persisted cache must not hold this string",
+                         file: file, line: line)
+        case .failure(let error):
+            XCTFail("the persisted lookup failed: \(error)", file: file, line: line)
+        }
+    }
+
+    private func makeFrame(width: Int = 640, height: Int = 480, pts: Int = 1) throws -> CameraFrame {
+        let buffer = try SampleBufferFactory.make(width: width, height: height,
+                                                  pts: CMTime(value: CMTimeValue(pts), timescale: 30))
+        return try XCTUnwrap(CameraFrame(sampleBuffer: buffer))
+    }
+
     // MARK: - The mode's own shape
 
     func testTheCascadeIsTheDefaultEverywhereAndTheModesAreTwo() {
@@ -259,6 +452,13 @@ final class LiveTranslationFocusedModeTests: XCTestCase {
         XCTAssertEqual(TranslationMode.allCases, [.cascade, .focused])
         XCTAssertEqual(TranslationMode(rawValue: "cascade"), .cascade)
         XCTAssertEqual(TranslationMode(rawValue: "focused"), .focused)
-        XCTAssertEqual(LiveTranslateConfig.default.focusMaxBatchCalls, 3)
+        // Review finding 10: the cap is the mode's *structural* maximum, not a
+        // round number above it. In `.focused` the device leads every string,
+        // so the cloud-first stage has nothing to spend and exactly two stages
+        // can reach `spendABatch()` — a cap of three could never bind, and a
+        // knob that cannot bind is a knob nobody can turn.
+        XCTAssertEqual(LiveTranslateConfig.default.focusMaxBatchCalls, 2)
+        XCTAssertEqual(TranslationMode.cascade.cachePolicy, .persist)
+        XCTAssertEqual(TranslationMode.focused.cachePolicy, .readOnly)
     }
 }

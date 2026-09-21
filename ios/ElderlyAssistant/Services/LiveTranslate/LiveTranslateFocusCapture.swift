@@ -304,6 +304,43 @@ struct LiveTranslateFocusCapture {
                                         policy: policy)
     }
 
+    /// Re-measures a packed capture under a new policy and the current
+    /// geometry — the placement call and nothing else (review finding 12).
+    ///
+    /// No crop, no raster, no OCR pass, no cache read and no request: the
+    /// strings are already read and already answered, so the only thing a
+    /// display preference can change is *where they are drawn*. The same rule
+    /// the held frame's re-measure keeps (T-033), for the same reason — a
+    /// preference that appears to stop working the moment there is a picture to
+    /// look at is a lie about a display setting — and it is what keeps the
+    /// focused read and the still path behaving identically for the FR-LCT-017
+    /// toggle.
+    ///
+    /// The capture's **rows** are rebuilt with the publication: the card is
+    /// drawn from them, and a re-placed callout with a stale row would render
+    /// the old placement's text state beside the new geometry.
+    ///
+    /// The frame's own answers, image and rect are untouched: this is one
+    /// picture re-measured, not a second read.
+    func rePlaced(_ capture: LiveTranslateFocusedCapture,
+                  layout: LiveTranslateLayout,
+                  policy: LiveOverlayPlacement.Policy) async -> LiveTranslateFocusedCapture {
+        let publication = await placed(regions: capture.publication.regions,
+                                       outcomes: capture.publication.outcomes,
+                                       policy: policy,
+                                       layout: layout,
+                                       framePixelSize: capture.framePixelSize)
+        let surface = LiveTranslateOverlaySurface(placements: [], policy: policy, locale: locale)
+        let card = LiveTranslateResultsCardSurface(publication: publication,
+                                                   stateCopy: surface.stateCopy(for:),
+                                                   emptyHint: surface.emptyHint)
+        return LiveTranslateFocusedCapture(image: capture.image,
+                                           framePixelSize: capture.framePixelSize,
+                                           pixelRect: capture.pixelRect,
+                                           publication: publication,
+                                           rows: card.rows)
+    }
+
     // MARK: The strings
 
     /// The crop's detected strings, split into sentences and minted as the

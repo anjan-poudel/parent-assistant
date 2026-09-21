@@ -76,6 +76,11 @@ actor LiveTranslateMemoryCache {
     /// The answer for `key`, or `nil` when there is none or the one there is has
     /// outlived the TTL. A stale entry is removed by this read — see the type's
     /// note on why there is no sweeper.
+    ///
+    /// The read never moves the entry's timestamp: the TTL is measured from
+    /// when the answer arrived and not from when someone last asked for it, so
+    /// a tap cannot extend an answer's life past the window the config bounds
+    /// (review finding 8). Nothing degraded is in here to begin with (`store`).
     func lookup(_ key: String) -> TranslationResult? {
         guard !key.isEmpty else { return nil }
         guard let entry = cache.object(forKey: key as NSString) else { return nil }
@@ -90,8 +95,21 @@ actor LiveTranslateMemoryCache {
     /// Keeps `result` under `key` for the TTL. An empty key is refused rather
     /// than stored under `""`: a key nobody can ask for is a leak with a
     /// lookup-shaped hole in it.
+    ///
+    /// **A degraded result is refused too** (review finding 8). The TTL is ten
+    /// minutes, and the failure modes this cache exists to smooth over are the
+    /// ones that *pass*: a slow tier, an overloaded model, a household that
+    /// turned the cloud off for a moment. Caching the degradation made every
+    /// one of those sticky — the elder fixed the cause, tapped the same sign
+    /// again, and this cache answered with the outage instead of asking the
+    /// tier that had recovered, and because a store is what writes the entry,
+    /// each re-tap refreshed the timestamp and re-armed the whole TTL. A
+    /// degradation is therefore never an answer to reuse: it is not kept, and
+    /// the next tap asks again. A resolved result still caches, and a pending
+    /// one never reaches here (`LiveTranslateFocusCapture.remember` stores only
+    /// final outcomes).
     func store(_ result: TranslationResult, forKey key: String) {
-        guard !key.isEmpty else { return }
+        guard !key.isEmpty, !result.degraded else { return }
         cache.setObject(Entry(result: result, insertedAt: now()),
                         forKey: key as NSString,
                         cost: Self.cost(of: result))

@@ -44,6 +44,19 @@ import NaturalLanguage
 /// is left alone even when it carries a danda (a one-sentence crop is a
 /// one-sentence crop). Only the ambiguous case — one sentence, over the
 /// threshold — is re-examined.
+///
+/// **The danda and the exclamation marks always end a piece. The period does
+/// not** (review finding 9). It is the one terminator with other jobs, and a
+/// crop is exactly where those jobs show up: `8.30 बजे` is a time, `Dr. Sharma`
+/// is a name, `Rs. 250` is a price, and a fallback that broke after every dot
+/// handed the tiers "8." and "30" as two strings — ids, cache keys and region
+/// multiplicities all built on the halves of a number. The rules for a period
+/// are the three shapes a crop carries (a decimal, an in-word or abbreviated
+/// dot, a repeated mark), stated in `endsSentence(after:at:in:)`; everything
+/// else the period does is a sentence end, including after a number ("it was
+/// 2024. Then…"). Nothing here consults a locale or a model: the marks are the
+/// input's, the rules are the same on every OS, and the sequence still rejoins
+/// to the input.
 enum LiveTranslateSentenceSplitter {
 
     /// The length, in characters, above which a *single* tokenizer sentence is
@@ -70,6 +83,22 @@ enum LiveTranslateSentenceSplitter {
     /// breaking on only half the marks would leave the other half's sentences
     /// joined.
     static let terminators: Set<Character> = ["।", "॥", ".", "!", "?"]
+
+    /// The tokens whose own trailing period is part of the token, not the end
+    /// of a sentence — matched against the letters before the dot, lowercased,
+    /// with the dots inside the token removed (so "Dr." reads as `dr` and
+    /// "e.g." as `eg`; see `tokenBefore(_:in:)`).
+    ///
+    /// The list is short and deliberately so: each entry is a token that is
+    /// **never** a sentence's last word on its own, because suppressing a real
+    /// break joins two sentences and that is the failure this fallback exists
+    /// to fix. It is sized for the domain the focus capture reads — letters,
+    /// labels, prescriptions and signs — which is where "Dr. Sharma",
+    /// "Rs. 250", "etc." and "approx." actually appear.
+    static let abbreviations: Set<String> = [
+        "dr", "mr", "mrs", "ms", "prof", "sr", "jr", "vs", "etc", "eg", "ie",
+        "rs", "approx", "fig", "dept", "govt", "ltd", "pvt",
+    ]
 
     /// One recognized block as sentence-sized pieces, in the order they were
     /// read. Empty and whitespace-only input yields no pieces — an empty crop
@@ -113,23 +142,107 @@ enum LiveTranslateSentenceSplitter {
         return sentences
     }
 
-    /// The deterministic fallback: break **after** each terminator, keep the
-    /// terminator on the piece it ended, and drop only whitespace. No model, no
-    /// locale, no state — the same input produces the same pieces on every OS
-    /// and every run, which is what a device capture needs to be comparable to
-    /// the next one.
+    /// The deterministic fallback: break **after** each terminator that ends a
+    /// sentence, keep the terminator on the piece it ended, and drop only
+    /// whitespace. No model, no locale, no state — the same input produces the
+    /// same pieces on every OS and every run, which is what a device capture
+    /// needs to be comparable to the next one.
     static func deterministicSentences(in text: String) -> [String] {
         var sentences: [String] = []
         var current = ""
-        for character in text {
+        var index = text.startIndex
+        while index < text.endIndex {
+            let character = text[index]
             current.append(character)
-            guard terminators.contains(character) else { continue }
-            let piece = current.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !piece.isEmpty { sentences.append(piece) }
-            current = ""
+            if terminators.contains(character), endsSentence(after: character, at: index, in: text) {
+                let piece = current.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !piece.isEmpty { sentences.append(piece) }
+                current = ""
+            }
+            index = text.index(after: index)
         }
         let tail = current.trimmingCharacters(in: .whitespacesAndNewlines)
         if !tail.isEmpty { sentences.append(tail) }
         return sentences
+    }
+
+    /// Whether the terminator just consumed ends a sentence.
+    ///
+    /// Everything but the period always does: the danda and the double danda
+    /// are written for nothing else, and `!`/`?` are sentence-final in every
+    /// script this feature reads. The period is the one mark with other jobs,
+    /// and these are the four shapes a crop carries that are **not** a
+    /// boundary (review finding 9):
+    ///
+    ///  - **a decimal point** — a digit on the far side and a digit (or
+    ///    nothing, as in "`.5 mg`") on the near one: "8.30", "1.5 mg";
+    ///  - **a dot inside a token** — a letter immediately on both sides, which
+    ///    is how an acronym or a closed-up initial is written: "e.g.",
+    ///    "U.S.A.", "J.Sharma";
+    ///  - **an abbreviation's own dot** — the token before it is in
+    ///    `abbreviations`: "Dr.", "Rs. 250";
+    ///  - **a repeated mark** — an ellipsis or a doubled dot is one
+    ///    terminator, not a sentence each: "wait…", "hmm.."
+    ///
+    /// A single letter before the dot is treated as an initial ("J. Sharma")
+    /// and does not break: on the letters and forms this path reads, an
+    /// initial is far more common than a one-letter word ending a sentence,
+    /// and joining two sentences is the lesser failure — the joined piece is
+    /// still translated, while a split initial is a name cut in half.
+    ///
+    /// Everything else is a boundary, **including a period after a number**
+    /// ("it was 2024. Then we left"): a rule that refused every digit-adjacent
+    /// period would join those two sentences, and the fallback exists to take
+    /// them apart.
+    private static func endsSentence(after mark: Character,
+                                     at index: String.Index,
+                                     in text: String) -> Bool {
+        guard mark == "." else { return true }
+        let next = text.index(after: index)
+        let nextCharacter = next < text.endIndex ? text[next] : nil
+
+        // A decimal point: a digit across it, and a digit or the string's own
+        // start before it.
+        if let nextCharacter, nextCharacter.isNumber,
+           index == text.startIndex || text[text.index(before: index)].isNumber {
+            return false
+        }
+        // A dot inside a token, an abbreviation's dot, or an initial's.
+        if let nextCharacter, nextCharacter.isLetter,
+           index > text.startIndex, text[text.index(before: index)].isLetter {
+            return false
+        }
+        let token = tokenBefore(index, in: text)
+        if abbreviations.contains(token) || token.count == 1 { return false }
+        // An ellipsis, or any repeated dot: one terminator.
+        if nextCharacter == "." { return false }
+        if index > text.startIndex, text[text.index(before: index)] == "." { return false }
+        return true
+    }
+
+    /// The token immediately before `index`, lowercased, with the dots that sit
+    /// **inside** it dropped — so "Dr." reads as `dr` and "e.g." as `eg`. A dot
+    /// counts as part of the token only when it has a letter before it (the
+    /// letter after it is the one this walk has just consumed), which is what
+    /// makes "J.Sharma" one token while "…tea. A" is two.
+    private static func tokenBefore(_ index: String.Index, in text: String) -> String {
+        var letters: [Character] = []
+        var cursor = index
+        while cursor > text.startIndex {
+            let before = text.index(before: cursor)
+            let character = text[before]
+            if character.isLetter {
+                letters.append(character)
+                cursor = before
+                continue
+            }
+            // An in-word dot — a letter on its far side, and the character
+            // after it is the letter just consumed — is walked over and
+            // dropped.
+            guard character == ".", before > text.startIndex,
+                  text[text.index(before: before)].isLetter else { break }
+            cursor = before
+        }
+        return String(letters.reversed()).lowercased()
     }
 }
