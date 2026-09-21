@@ -1218,10 +1218,11 @@ enum ModelCatalog {
             // 12/12 (post_train_r4, 2026-09-21).
             // SUPERSEDED (2026-09-21, the same day it was pinned as head):
             // it cleared the tier's own sweep but FAILS the gate under the
-            // SHIPPED prompt (S11), so the verdict passed to the Q6_K below.
-            // Sideload-only now — a device that installed it during the trial
-            // keeps it, and the tier list keeps it resolvable so that device
-            // is not stranded by a head change.
+            // SHIPPED prompt — (superseded: fails S11 under shipped prompt) —
+            // so the verdict passed to the Q6_K below. Sideload-only now: no
+            // offered row, but the entry is KEPT because it may already be
+            // installed on a device — the tier list keeps it resolvable so
+            // that device is not stranded by a head change.
             //
             // The name is left exactly as the string table has it
             // (`model.name.nmt-en-ne-qwen17b-r4-q5_k_m`, "…, R4"), because a
@@ -1229,9 +1230,10 @@ enum ModelCatalog {
             // `ModelCatalogLanguageTests` — and the string table is outside
             // this workstream's scope. The demotion is therefore carried by
             // *structure* (the entry is not in `availableTranslationEntries`,
-            // so no device is offered it) and not by new copy. [COPY OWED] A
-            // "superseded" wording for this row, like the offered Q6_K's name,
-            // needs a string-table entry.
+            // so no device is offered it) and not by new copy. The offered
+            // Q6_K's `model.name.<id>` row landed with the swap; [COPY OWED] a
+            // "superseded" wording for THIS row still needs a string-table
+            // entry.
             displayName: "Translate — English to Nepali (Qwen 1.7B, R4)",
             filename: "translate-en-ne-qwen17b-r4-q5_k_m.gguf",
             downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v20/translate-en-ne-qwen17b-r4-q5_k_m.gguf")!,
@@ -1251,8 +1253,8 @@ enum ModelCatalog {
             // passes the gate under the SHIPPED prompt (S11), which the Q5
             // above failed. STANDARD-class fit at the shared 5 GB floor.
             //
-            // [HOSTING] The file must be uploaded to release v20 before this
-            // entry can download: `translate-en-ne-qwen17b-r4-q6_k.gguf`,
+            // [HOSTING — VERIFIED] The asset is live on release v20 and this
+            // entry can download it: `translate-en-ne-qwen17b-r4-q6_k.gguf`,
             // 1,417,754,336 B, sha256
             // 9ed3fccea39b5a1ebe671e2cdad92b635497b983c2d73f8f4a61cd6a174e045e.
             displayName: "Translate — English to Nepali (Qwen 1.7B, R4 Q6)",
@@ -1279,9 +1281,10 @@ enum ModelCatalog {
             // Kept so a device that sideloaded it works, and as the quality
             // reference a roomy device can carry beside the shipped head.
             //
-            // [HOSTING] Same release as the rest of the round-4 family: it is
-            // not downloaded by the app, so it only needs to exist at v20 for
-            // an operator's sideload.
+            // [HOSTING — VERIFIED] Same release as the rest of the round-4
+            // family: it is not downloaded by the app, so it only needs to
+            // exist at v20 for an operator's sideload — where it is live
+            // (0ed9dfdc…, 1,834,426,080 B).
             displayName: "Translate — English to Nepali (Qwen 1.7B, R4 Q8, sideload)",
             filename: "translate-en-ne-qwen17b-r4-q8_0.gguf",
             downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v20/translate-en-ne-qwen17b-r4-q8_0.gguf")!,
@@ -1783,10 +1786,9 @@ enum ModelCatalog {
     /// resolvable in the tier list and deletable from `all`, which is where a
     /// leftover installation surfaces.
     ///
-    /// [HOSTING] The Q6_K artifact is not on the release server yet — it has
-    /// to be uploaded to release **v20** (sha256
-    /// `9ed3fccea39b5a1ebe671e2cdad92b635497b983c2d73f8f4a61cd6a174e045e`,
-    /// 1,417,754,336 B) before the row's Download can succeed on a device.
+    /// [HOSTING — VERIFIED] The Q6_K artifact is live on release **v20**
+    /// (sha256 `9ed3fccea39b5a1ebe671e2cdad92b635497b983c2d73f8f4a61cd6a174e045e`,
+    /// 1,417,754,336 B), so the row's Download resolves on a device.
     static let availableTranslationEntries: [ModelCatalogEntry] =
         [nmtEnNeQwen17bR4Q6].compactMap { entry(for: $0) }
 

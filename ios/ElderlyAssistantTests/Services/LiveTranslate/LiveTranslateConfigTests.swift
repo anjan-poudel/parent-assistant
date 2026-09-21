@@ -575,9 +575,8 @@ final class LiveTranslateConfigTests: XCTestCase {
                           "over the cap the release would need part assets")
         XCTAssertNil(entry.downloadPartURLs,
                      "a single-asset delivery must not carry part URLs")
-        // [HOSTING] The release this points at does not yet carry the Q6_K
-        // asset — the owner has to upload it to v20 — and the pin is what
-        // makes that upload provable once it lands.
+        // [HOSTING — VERIFIED] The v20 release carries the Q6_K asset; the
+        // pin is what proves the download lands on exactly those bytes.
         XCTAssertEqual(entry.downloadURL.absoluteString,
                        "https://github.com/anjan-poudel/elderly-ai-assistant-models"
                        + "/releases/download/v20/translate-en-ne-qwen17b-r4-q6_k.gguf",
