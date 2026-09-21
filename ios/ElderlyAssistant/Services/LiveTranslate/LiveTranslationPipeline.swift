@@ -173,6 +173,37 @@ enum LiveTranslateCloudAttempt: Equatable {
     case answered(CloudTranslationTier.BatchResult)
 }
 
+/// Which mode a plan is running — the one thing a *mode* changes about the
+/// shared plan, stated once so a second path cannot carry a second copy of it.
+///
+/// The plan (`runResolution`) is deliberately mode-blind about everything else:
+/// the claim ledger, the terminal writer, the one-event-per-degradation rule
+/// and the gate-then-tier ordering are the same whatever the elder was doing
+/// when they asked. Two things genuinely differ, and both are here:
+///
+///  - **who leads.** The cascade routes each string by its own class (the short
+///    forms the device is proven on keep the device in front; the sentence
+///    class leads with the cloud when the cloud can lead). A focused read is a
+///    different question — the elder pointed at one thing and asked about
+///    *that* — and a network round-trip under their finger is the wrong
+///    latency for a targeted ask, so the device leads every string.
+///  - **how much may be spent.** A live tick is one frame of a cadence and a
+///    scene is bounded by what is on screen; a focused read's crop is
+///    whatever the recogniser found in the box the elder drew, which is not
+///    bounded by anything this side of the budget. `focusMaxBatchCalls` caps
+///    the tier batches one capture may spend.
+///
+/// `.cascade` is the default on every entry point, so the live cycle, the held
+/// frame, the prompt's retry and the snapshot path are byte-for-byte the plans
+/// they were before this type existed.
+enum TranslationMode: String, Sendable, Equatable, CaseIterable {
+    /// The shipped routing: per-string, by class.
+    case cascade
+    /// One pointed-at region: the device leads, and the plan's batches are
+    /// capped by `LiveTranslateConfig.focusMaxBatchCalls`.
+    case focused
+}
+
 /// The live cycle, as the snapshot path (T-033) may use it: the two things
 /// that must be *shared* rather than re-created — the gate-then-tier sequence
 /// and the session's ordering counter (AM-6).
@@ -1196,11 +1227,28 @@ actor LiveTranslationPipeline {
     /// has already spent. A string whose only cloud attempt is behind it is not
     /// a sentence-class question any more — it is a string the device owes an
     /// answer to.
-    private func leadingTier(for item: CloudTranslationTier.Item)
+    private func leadingTier(for item: CloudTranslationTier.Item,
+                             mode: TranslationMode = .cascade)
         -> TranslationReliabilityRouter.LeadingTier {
         if cloudFailedKeys.contains(item.id) { return .onDevice }
-        return TranslationReliabilityRouter.leadingTier(for: item.text,
-                                                        cloudAvailable: cloudCanLead)
+        switch mode {
+        case .cascade:
+            return TranslationReliabilityRouter.leadingTier(for: item.text,
+                                                            cloudAvailable: cloudCanLead)
+        case .focused:
+            // A pointed-at read leads with the device whatever the string's
+            // class. The class rule is a statement about what the *model* is
+            // proven on, and it is what the cascade exists for — but it is
+            // also a statement about a scene the elder is living in, where a
+            // sentence worth reading will still be there a second later. A
+            // focused read is an elder pointing at one thing and asking for
+            // it now: the device answers in a generation, the cloud in a
+            // round trip, and the round trip is the wrong answer under their
+            // finger. What the device cannot answer still reaches the cloud
+            // through the ordinary stages behind it — the mode changes who
+            // leads, never who is reachable.
+            return .onDevice
+        }
     }
 
     /// Records that a string's brain generation has been paid for (see
@@ -1286,6 +1334,10 @@ actor LiveTranslationPipeline {
         var items: [CloudTranslationTier.Item]
         var urgency: ResolutionUrgency
         var destination: ResolutionDestination
+        /// Which routing and which batch budget this ask runs under. Defaulted
+        /// to `.cascade` so every existing construction states the shipped
+        /// behaviour by saying nothing (see `TranslationMode`).
+        var mode: TranslationMode = .cascade
         /// How many regions are showing each string **in the picture this ask
         /// is about**, when that picture is not the live one. A held frame's
         /// regions are not in the stabiliser, so the live scanner answers 0 for
@@ -1321,12 +1373,17 @@ actor LiveTranslationPipeline {
         /// The frame epoch this plan was made for (see
         /// `ResolutionRequest.frozenEpoch`).
         let frozenEpoch: Int
+        /// Which routing and which batch budget this plan runs under — the
+        /// ask's own, carried so every stage that can spend a batch or route a
+        /// string reads one value (see `TranslationMode`).
+        let mode: TranslationMode
 
         init(token: UUID, request: ResolutionRequest) {
             self.token = token
             self.destination = request.destination
             self.regionCounts = request.regionCounts
             self.frozenEpoch = request.frozenEpoch
+            self.mode = request.mode
         }
     }
 
@@ -1518,13 +1575,32 @@ actor LiveTranslationPipeline {
         }
         let mayGenerateNow = maySpendAGeneration(request.urgency, at: moment)
 
+        // The plan's own batch budget, from the ask's mode. A live tick's
+        // plan is bounded by the screen and a held frame's by the strings a
+        // still picture carries, so neither has ever needed a cap. A focused
+        // read has one: its strings are whatever the recogniser found inside
+        // the box the elder drew — a label, a line, or a whole paragraph —
+        // and nothing this side of the budget bounds that. A stage the cap
+        // holds **releases** its strings rather than failing them: the same
+        // deferral the dispatch and brain clocks already use, so the next
+        // capture (or the live tick behind it) carries them and no region is
+        // settled degraded for a reason that is only "we stopped asking".
+        var batchesRemaining = request.mode == .focused
+            ? max(0, config.focusMaxBatchCalls)
+            : Int.max
+        func spendABatch() -> Bool {
+            guard batchesRemaining > 0 else { return false }
+            batchesRemaining -= 1
+            return true
+        }
+
         // The plan (the router): which tier leads each string, decided before
         // anything is claimed, so the batch, its order and the clocks below are
         // all fixed first.
         var onDeviceFirst: [CloudTranslationTier.Item] = []
         var cloudFirst: [CloudTranslationTier.Item] = []
         for item in items {
-            switch leadingTier(for: item) {
+            switch leadingTier(for: item, mode: request.mode) {
             case .onDevice: onDeviceFirst.append(item)
             case .cloud: cloudFirst.append(item)
             }
@@ -1544,7 +1620,7 @@ actor LiveTranslationPipeline {
         //    one twice.
         var carryOnward = onDeviceFirst.filter { brainAttemptedKeys.contains($0.id) }
         let owed = mayGenerateNow ? onDeviceFirst.filter { !brainAttemptedKeys.contains($0.id) } : []
-        if !owed.isEmpty {
+        if !owed.isEmpty, spendABatch() {
             lastBrainAttemptAt = moment
             let stage = await askTheBrain(owed, by: plan.token)
             guard !Task.isCancelled, !isClosed else { return answers }
@@ -1554,6 +1630,11 @@ actor LiveTranslationPipeline {
             // reader can see that the emptiness is a decision.
             await commit(stage.answered, to: plan, into: &answers, origins: [:])
             carryOnward += stage.unanswered
+        } else {
+            // Either nothing was owed (the surplus is empty and this is a
+            // no-op) or the plan's budget is spent: released, unclaimed, for
+            // the next plan to carry. Never settled, never failed.
+            release(keys: owed.map(\.id), by: plan.token)
         }
 
         // 3. The class the device is not proven on leads with the gate, and
@@ -1561,14 +1642,20 @@ actor LiveTranslationPipeline {
         //    degraded: that reservation is the whole reason this order is
         //    allowed.
         var reserved: [(CloudTranslationTier.Item, LiveTranslateError)] = []
-        if !cloudFirst.isEmpty {
-            let decision = await gateDecision(for: cloudFirst, reservingFallback: true)
+        if !cloudFirst.isEmpty, spendABatch() {
+            let decision = await gateDecision(for: cloudFirst,
+                                              reservingFallback: true,
+                                              mode: request.mode)
             guard !Task.isCancelled, !isClosed else { return answers }
             await commit(decision.terminal, to: plan, into: &answers,
                          origins: decision.origins,
                          degradationsAreTheTiersOwn: decision.degradationsAreTheTiersOwn)
             record(awaiting: decision.awaiting, in: plan)
             reserved = decision.reserved
+        } else {
+            // Budget spent: the strings the gate would have led with are
+            // released unclaimed, which is a deferral and not a failure.
+            release(keys: cloudFirst.map(\.id), by: plan.token)
         }
 
         // 4. What the cloud could not answer is the device's now — and only
@@ -1602,7 +1689,7 @@ actor LiveTranslationPipeline {
                 // (review of #100: without the override an extract-mode tap
                 // could strand the only block it ever gets).
                 guard !Task.isCancelled, !isClosed else { return answers }
-                if maySpendAGeneration(request.urgency, at: now()) {
+                if maySpendAGeneration(request.urgency, at: now()), spendABatch() {
                     lastBrainAttemptAt = now()
                     let stage = await askTheBrain(fresh.map(\.0), by: plan.token)
                     guard !Task.isCancelled, !isClosed else { return answers }
@@ -1625,13 +1712,20 @@ actor LiveTranslationPipeline {
 
         // 5. Everything the plan put in front of the device-and-then-cloud, and
         //    did not answer, goes on to the gate in region order.
-        if !carryOnward.isEmpty {
-            let decision = await gateDecision(for: carryOnward, reservingFallback: false)
+        if !carryOnward.isEmpty, spendABatch() {
+            let decision = await gateDecision(for: carryOnward,
+                                              reservingFallback: false,
+                                              mode: request.mode)
             guard !Task.isCancelled, !isClosed else { return answers }
             await commit(decision.terminal, to: plan, into: &answers,
                          origins: decision.origins,
                          degradationsAreTheTiersOwn: decision.degradationsAreTheTiersOwn)
             record(awaiting: decision.awaiting, in: plan)
+        } else {
+            // Budget spent, or nothing to carry (a no-op): the strings stay
+            // pending and unclaimed for the next plan, exactly as a
+            // clock-held string does.
+            release(keys: carryOnward.map(\.id), by: plan.token)
         }
 
         // Whatever is left of the strings this plan was handed is released by
@@ -1855,8 +1949,9 @@ actor LiveTranslationPipeline {
     ///   device would answer for the elder the very question they are being
     ///   asked) and a string the tier *did* answer, even by degrading it.
     private func gateDecision(for items: [CloudTranslationTier.Item],
-                              reservingFallback: Bool) async -> GateDecision {
-        switch await attemptThroughTheGate(items) {
+                              reservingFallback: Bool,
+                              mode: TranslationMode = .cascade) async -> GateDecision {
+        switch await attemptThroughTheGate(items, mode: mode) {
         case .awaitingDecision:
             // The prompt is on screen. The regions stay pending — not degraded,
             // because nothing has failed and the elder has not answered yet.
@@ -2102,7 +2197,18 @@ actor LiveTranslationPipeline {
     /// gate — no prompt, no in-flight registration, no request — and because a
     /// feature that asked the elder to consent to something the household had
     /// already switched off would be asking a question it would not act on.
-    private func attemptThroughTheGate(_ items: [CloudTranslationTier.Item]) async -> LiveTranslateCloudAttempt {
+    /// `mode` is the ask's own, and it reaches exactly one thing here: the
+    /// store policy the tier runs under. A focused read answers a question
+    /// about a picture the elder pointed at — a letter, a prescription, a
+    /// form — and writing those strings into the session's persisted store
+    /// would put the document's contents on disk for the rest of the day
+    /// because someone held a camera up to it. So the capture reads the store
+    /// and writes nothing, and keeps its own answers in memory instead
+    /// (`LiveTranslateMemoryCache`). Every other mode persists, exactly as it
+    /// always has.
+    private func attemptThroughTheGate(_ items: [CloudTranslationTier.Item],
+                                       mode: TranslationMode = .cascade)
+        async -> LiveTranslateCloudAttempt {
         // The master switch first, and before the gate (owner directive,
         // 2026-09-19): with it off there is no cloud need to detect, so the
         // consent prompt is never presented, no request is ever built, and the
@@ -2119,7 +2225,9 @@ actor LiveTranslationPipeline {
         case .unavailable(let error):
             return .unavailable(error)
         case .proceed:
-            return .answered(await tier.resolve(items: items, targetLanguage: targetLanguage))
+            return .answered(await tier.resolve(items: items,
+                                                targetLanguage: targetLanguage,
+                                                cachePolicy: mode == .focused ? .readOnly : .persist))
         }
     }
 
@@ -2199,6 +2307,67 @@ actor LiveTranslationPipeline {
         let plan = resolutionTask(ResolutionRequest(items: unclaimed,
                                                     urgency: .capture,
                                                     destination: .frozen,
+                                                    regionCounts: regionCounts,
+                                                    frozenEpoch: heldFrameEpoch))
+        let answers = await plan.value
+        return answers.isEmpty ? nil : answers
+    }
+
+    /// The focused read's way in: **the same plan**, in the mode the elder's
+    /// ask put it in.
+    ///
+    /// Deliberately not a second plan. Everything that makes a plan correct —
+    /// the claim ledger and its per-plan ownership, the clock prologue, the
+    /// batch bounding with its release, the gate-then-tier ordering, the one
+    /// terminal writer and its one-event-per-degradation rule — is the same
+    /// whether the elder pressed the shutter, tapped a block or pointed at a
+    /// region, and a second copy of any of it is where the two would start to
+    /// disagree. What `mode` changes is on the plan's own terms: who leads
+    /// (`leadingTier`) and how many batches may be spent (`focusMaxBatchCalls`),
+    /// both stated once inside `runResolution`.
+    ///
+    /// The destination is `.frozen`, like the still path's: the caller is about
+    /// to draw one picture of its own, owns that picture's lifetime and its
+    /// publication, and a plan that wrote onto the live regions would put a
+    /// crop's answers on a scene that has moved on. The urgency is `.capture`,
+    /// also like the still path's — the elder acted, so the dispatch clock
+    /// does not pace it, and it is not a reason to skip the brain's clock
+    /// either, because a read that paid a generation per tap would thrash the
+    /// model's load and a cloud outage is exactly when an elder taps
+    /// repeatedly.
+    ///
+    /// - Returns: one terminal result per string the plan could answer, keyed
+    ///   by item id. `nil` means nothing may be applied at all: the elder's
+    ///   consent question is open (it is their question, and answering it on
+    ///   the device would answer for them the very thing they are being
+    ///   asked), or the session is gone. A key that is absent is a string the
+    ///   plan made no claim about — a generation the clock deferred, or a
+    ///   batch the capture's budget did not spend — which the caller leaves
+    ///   pending, the same honesty the live path keeps.
+    func resolveFocused(_ items: [CloudTranslationTier.Item],
+                        mode: TranslationMode = .focused,
+                        regionCounts: [String: Int] = [:]) async -> [String: TranslationResult]? {
+        guard !isClosed, !items.isEmpty else { return nil }
+        // A string a live plan is already working on is that plan's to answer,
+        // and this caller waits for it rather than dropping it — the same rule
+        // the held frame keeps, for the same reason: two plans asking about
+        // one string pay twice for one answer. The wait is bounded because
+        // every stage of every plan is.
+        let claimed = items.filter { attemptKeys.contains($0.id) }
+        if !claimed.isEmpty {
+            let owners = Set(claimed.compactMap { claimOwner[$0.id] })
+            for owner in owners {
+                guard let task = resolutionTasks[owner] else { continue }
+                _ = await task.value
+            }
+            guard !isClosed else { return nil }
+        }
+        let unclaimed = items.filter { !attemptKeys.contains($0.id) }
+        guard !unclaimed.isEmpty else { return nil }
+        let plan = resolutionTask(ResolutionRequest(items: unclaimed,
+                                                    urgency: .capture,
+                                                    destination: .frozen,
+                                                    mode: mode,
                                                     regionCounts: regionCounts,
                                                     frozenEpoch: heldFrameEpoch))
         let answers = await plan.value

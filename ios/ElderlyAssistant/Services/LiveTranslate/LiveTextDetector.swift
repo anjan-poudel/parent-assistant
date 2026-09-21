@@ -839,6 +839,46 @@ final class LiveTextDetector {
         await perform(frame, crop: .whole, limit: nil) { .ocr }
     }
 
+    /// **The focused read's way in: one OCR pass over a crop.**
+    ///
+    /// The still entry's twin, over a smaller picture — the lifecycle guard,
+    /// this detector's one serial queue and the one engine, so a crop can never
+    /// race the live cadence's own pass.
+    ///
+    /// Deliberately *not* `perform`: that path exists to map Vision's boxes out
+    /// of a frame's window and to group them into blocks, and a crop has
+    /// neither — its boxes are its own whole coordinate space, and the focused
+    /// read splits the raw strings itself (`LiveTranslateSentenceSplitter`).
+    /// The engine's strings come back as the engine read them, in its order.
+    ///
+    /// The engine's remembered rectangles are dropped **first**. They are the
+    /// frame's picture, remembered under its text; a later tracking pass seeded
+    /// with a crop's rectangles would be following boxes of a buffer this
+    /// detector is no longer reading — `noteCropChange`'s rule, applied to a
+    /// one-off window. The cost is one OCR pass on the live cadence's next
+    /// frame (nothing to track re-anchors by OCR), and it buys a live tracker
+    /// that can never be handed a crop's coordinates.
+    func recognizeCrop(_ pixelBuffer: CVPixelBuffer) async -> Result<[DetectedTextRegion], LiveTranslateError> {
+        guard markPassStarted() else {
+            // `begin()` was never called, or `end()` has already run: reported
+            // rather than run anyway, exactly as the still entry reports it.
+            return .failure(.ocrUnavailable(.requestCreationFailed))
+        }
+        defer { markPassFinished() }
+        return await withCheckedContinuation { continuation in
+            visionQueue.async { [self] in
+                engine.forgetRememberedRectangles()
+                do {
+                    continuation.resume(returning: .success(try engine.recognizeText(in: pixelBuffer)))
+                } catch {
+                    // The pass ran and failed. The caller records it and shows
+                    // the honest failure; the next tap runs a fresh pass.
+                    continuation.resume(returning: .failure(.ocrPassFailed(.requestFailed)))
+                }
+            }
+        }
+    }
+
     /// The one pass implementation both entries share, so "a pass" means one
     /// thing: the lifecycle guard, the serial queue and the pass-kind decision
     /// happen here and nowhere else. `limit` is the pass's block cap, and it is

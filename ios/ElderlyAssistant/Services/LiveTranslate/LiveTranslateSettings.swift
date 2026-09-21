@@ -1,9 +1,11 @@
 import Foundation
 
 /// The genuinely user-facing settings this feature owns (C14). Today that is
-/// two preferences — `alwaysShowOriginal`, the FR-LCT-017 toggle, and
+/// three preferences — `alwaysShowOriginal`, the FR-LCT-017 toggle,
 /// `geminiCloudEnabled`, the cloud tier's master switch (owner directive,
-/// 2026-09-19) — plus the disclosure version stamp the consent record carries,
+/// 2026-09-19), and `liveTranslateEnabled`, the feature's own master switch
+/// (owner directive, 2026-09-21) — plus the disclosure version stamp the
+/// consent record carries,
 /// and one developer-facing switch that is not a user preference at all:
 /// `translationDebugLoggingEnabled`, the [DEBUG-LOG] console diagnostic, which
 /// is off by default and has no reader outside a Debug build.
@@ -55,6 +57,10 @@ struct LiveTranslateSettings: Equatable {
     static let translationDebugLoggingEnabledKey =
         "livetranslate.translationDebugLoggingEnabled"
 
+    /// The feature's master switch (owner directive, 2026-09-21). Declared once
+    /// so no call site spells it.
+    static let liveTranslateEnabledKey = "livetranslate.enabled"
+
     /// [DEBUG-LOG] The **production writer** for the diagnostic switch: a
     /// launch argument, so a run can turn the content-free console line on
     /// without a rebuild — the reason the owner asked for the logging at all —
@@ -69,11 +75,12 @@ struct LiveTranslateSettings: Equatable {
     static let translationDebugLoggingLaunchArgument = "-liveTranslateDebugLogging"
 
     /// Every key this feature is allowed to write to `UserDefaults`. The
-    /// persisted state is three booleans — the two preferences and the
-    /// DEBUG-ONLY diagnostic switch — and nothing else.
+    /// persisted state is four booleans — the display preference, the two
+    /// master switches and the DEBUG-ONLY diagnostic switch — and nothing else.
     static let featureKeys: Set<String> = [alwaysShowOriginalKey,
                                            geminiCloudEnabledKey,
-                                           translationDebugLoggingEnabledKey]
+                                           translationDebugLoggingEnabledKey,
+                                           liveTranslateEnabledKey]
 
     private let defaults: UserDefaults
 
@@ -153,6 +160,38 @@ struct LiveTranslateSettings: Equatable {
     /// model's own `setGeminiCloudEnabled` behind it. One setter, one key.
     func setGeminiCloudEnabled(_ value: Bool) {
         geminiCloudEnabled = value
+    }
+
+    // MARK: The feature's master switch (owner directive, 2026-09-21)
+
+    /// Whether live camera translation may run at all.
+    ///
+    /// An absent key means the household has never opted in, which is the
+    /// config's nominal default (**false** — the feature does not turn itself
+    /// on), not `false` by accident. The read is *not* cached: the session
+    /// model re-reads it when a session opens and on every write, so the
+    /// Settings leaf and a running session cannot disagree about it for longer
+    /// than the write takes to land.
+    ///
+    /// It is a *policy*, not consent and not egress: the consent record is still
+    /// required and still enforced per cloud attempt (AM-1), and this switch
+    /// neither creates nor withdraws one.
+    var liveTranslateEnabled: Bool {
+        get {
+            guard defaults.object(forKey: Self.liveTranslateEnabledKey) != nil else {
+                return config.liveTranslateEnabledDefault
+            }
+            return defaults.bool(forKey: Self.liveTranslateEnabledKey)
+        }
+        nonmutating set {
+            defaults.set(newValue, forKey: Self.liveTranslateEnabledKey)
+        }
+    }
+
+    /// The switch's single write path — the Settings leaf's row and the session
+    /// model's own setter behind it. One setter, one key.
+    func setLiveTranslateEnabled(_ value: Bool) {
+        liveTranslateEnabled = value
     }
 
     // MARK: The [DEBUG-LOG] diagnostic switch (review finding on #99)

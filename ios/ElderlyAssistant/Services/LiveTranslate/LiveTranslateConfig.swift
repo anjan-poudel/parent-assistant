@@ -1510,6 +1510,36 @@ struct LiveTranslateConfig: Equatable {
     /// expand short source strings).
     var translationMaxLengthAllowance: Int = 64
 
+    // MARK: The feature's master switch (owner directive, 2026-09-21)
+
+    /// Whether live camera translation may run **at all**, before anything else
+    /// about it is asked.
+    ///
+    /// **False, and that is the owner's directive** (2026-09-21): the feature
+    /// is opt-in from the Settings leaf like the cloud tier is, so an elder who
+    /// has never touched it gets a camera that behaves exactly as it did before
+    /// the feature shipped. The switch is what turns the overlay, the capture
+    /// button and the translation cascade on.
+    ///
+    /// Three things this key is not, mirroring the cloud switch's own list:
+    ///
+    ///  - **It is not consent.** OD-13's consent record is still asked for and
+    ///    still enforced on every cloud attempt (AM-1). This switch gates the
+    ///    *feature*, not egress: turning it on does not create a grant, and
+    ///    turning it off does not withdraw one.
+    ///  - **It is not a budget.** `GeminiCostGovernor`'s soft daily cap is
+    ///    unchanged and still applies (OD7).
+    ///  - **It is not the cloud switch.** The two are independent: the device
+    ///    cascade is a complete answer without egress, so this feature runs
+    ///    with `geminiCloudEnabledDefault` off, and the cloud switch does not
+    ///    turn the feature on.
+    ///
+    /// A *default*, not the persisted state: `LiveTranslateSettings` owns the
+    /// value the household chose, and this is the nominal value an absent key
+    /// reads as — exactly the split `alwaysShowOriginalDefault` and
+    /// `geminiCloudEnabledDefault` use.
+    var liveTranslateEnabledDefault: Bool = false
+
     // MARK: Cache
 
     /// Entries kept in the general translation cache before LRU eviction.
@@ -1518,6 +1548,52 @@ struct LiveTranslateConfig: Equatable {
     /// Whether repeated touches of the same cache key within one pass are
     /// coalesced into one write (the overlay renders at the OCR cadence).
     var cacheTouchCoalescing: Bool = true
+
+    // MARK: The focus capture's in-memory cache
+
+    /// How long an in-memory answer stays an answer, in seconds.
+    ///
+    /// Ten minutes is sized against the gesture it serves: an elder who points
+    /// at the same notice twice does it within a breath, and one who comes back
+    /// to it after a cup of tea is asking a *fresh* question about a picture
+    /// that may have changed. The value is a policy about staleness, not a
+    /// resource bound — the cost bound below is that.
+    var memoryCacheTTLSeconds: TimeInterval = 600
+
+    /// How many characters of cached answers the in-memory cache holds before
+    /// the platform evicts, in **characters** — the same unit the feature's
+    /// other bounds are stated in (`brainTranslationMaxCharacters`,
+    /// `cloudBatchMaxCharacters`), and the unit `LiveTranslateMemoryCache`
+    /// charges one entry (`LiveTranslateMemoryCache.cost(of:)`).
+    ///
+    /// 512,000 characters is roughly 400 average Nepali sentences: far more
+    /// than one session's focused reads, and small enough that the cache can
+    /// never be the thing that pressures a 5.5 GB device. Eviction is
+    /// `NSCache`'s (see that type) — this is the bound it evicts against.
+    var memoryCacheMaxCost: Int = 512_000
+
+    /// How many tier calls one **focused** capture's plan may spend.
+    ///
+    /// A crop is a small picture, but "small" is not a bound: a paragraph of
+    /// medical directions can split into a dozen sentences, and the plan that
+    /// resolves them can reach the device, the cloud and the device again, in
+    /// batches. An unbounded capture is a capture that can spend an arbitrary
+    /// number of requests and generations on one tap.
+    ///
+    /// Three is the shipped plan's own stage count, which is not a
+    /// coincidence: the plan's stages *are* the cascade (the device for its
+    /// class, the gate for the class the device is not proven on, the device
+    /// again for whatever the cloud could not answer). A capture is allowed the
+    /// whole cascade and no more, so a scene that needed a second pass through
+    /// either tier has its surplus **released, unclaimed**, exactly as a
+    /// clock-held batch is: the next capture — or the live tick that follows —
+    /// carries those strings, and nothing was paid for twice or dropped.
+    ///
+    /// It does not apply to the live picture or to a still frame (their plans
+    /// run `.cascade`): the live cadence is already bounded by its dispatch
+    /// clock, and a held frame's refresh is a re-render of strings the live
+    /// cycle is resolving anyway.
+    var focusMaxBatchCalls: Int = 3
 
     // MARK: Disclosure
 
