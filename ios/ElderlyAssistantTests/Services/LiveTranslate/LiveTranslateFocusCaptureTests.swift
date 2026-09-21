@@ -45,30 +45,44 @@ final class LiveTranslateFocusCaptureTests: XCTestCase {
     }
 
     /// A scripted plan: the answers it hands back for the items it is asked
-    /// about, plus every ask it received, so "what the tiers were shown" and
-    /// "which mode the capture ran in" are both assertable.
+    /// about, plus every ask it received, so "what the tiers were shown" is
+    /// assertable. The mode is not recorded because it is no longer a
+    /// parameter: `resolveFocused` fixes it inside the pipeline (review round
+    /// 2, finding 7), and `LiveTranslationFocusedModeTests` is where the mode's
+    /// two effects are pinned.
     private final class StubFocusedCycle: LiveTranslateFocusedCycle {
         var answers: [String: TranslationResult] = [:]
+        /// The ledger a **re-pack** reads: what a later plan settled for these
+        /// strings. Empty by default, which is the state a capture's own plan
+        /// leaves behind.
+        var settled: [String: TranslationResult] = [:]
         /// When true the plan refuses to answer at all (the pipeline's
         /// "nothing settled in time" shape).
         var refuses = false
         private(set) var asks: [(items: [CloudTranslationTier.Item],
-                                 mode: TranslationMode,
                                  regionCounts: [String: Int])] = []
         private var sequence = 0
 
         var askedTexts: [String] { asks.flatMap { $0.items.map(\.text) } }
 
         func resolveFocused(_ items: [CloudTranslationTier.Item],
-                            mode: TranslationMode,
                             regionCounts: [String: Int]) async -> [String: TranslationResult]? {
-            asks.append((items, mode, regionCounts))
+            asks.append((items, regionCounts))
             guard !refuses else { return nil }
-            var settled: [String: TranslationResult] = [:]
+            var answered: [String: TranslationResult] = [:]
             for item in items where answers[item.id] != nil {
-                settled[item.id] = answers[item.id]
+                answered[item.id] = answers[item.id]
             }
-            return settled
+            return answered
+        }
+
+        func settledAnswers(for items: [CloudTranslationTier.Item])
+            -> [String: TranslationResult] {
+            var ledger: [String: TranslationResult] = [:]
+            for item in items where settled[item.id] != nil {
+                ledger[item.id] = settled[item.id]
+            }
+            return ledger
         }
 
         func nextPublicationSequence() async -> Int {
@@ -275,12 +289,101 @@ final class LiveTranslateFocusCaptureTests: XCTestCase {
         XCTAssertEqual(ask.regionCounts.values.first, 2)
     }
 
-    func testTheModeTheCaptureAsksThePlanForIsFocused() async throws {
-        let composition = makeComposition(regions: [detected("Light")])
-        let attempt = await capture(composition)
-        _ = try XCTUnwrap(attempt)
+    // MARK: - A surplus string is deferred, not left translating forever
+    // (review round 2, finding 4)
 
-        XCTAssertEqual(composition.cycle.asks.first?.mode, .focused)
+    /// The plan is handed every pending string and answers what its budget
+    /// allows; the rest are **deferred** — released for a later plan, not
+    /// failed, and not "still translating" for as long as the picture is on
+    /// screen.
+    @MainActor
+    func testASurplusStringThePlanLeavesIsDeferredRatherThanStillTranslating() async throws {
+        let composition = makeComposition(regions: [detected("Light"),
+                                                    detected("Members only beyond this point")])
+        composition.cycle.answers = ["light|ne": resolved("Light", "बत्ती")]
+
+        let attempt = await capture(composition)
+        let capture = try XCTUnwrap(attempt)
+
+        XCTAssertEqual(composition.cycle.asks.count, 1, "one ask carries both strings")
+        XCTAssertEqual(capture.deferredKeys, ["members only beyond this point|ne"],
+                       "the string the plan did not answer is deferred, by key")
+        let surface = LiveTranslateOverlaySurface(placements: [], policy: policy, locale: locale)
+        let awaiting = try XCTUnwrap(capture.rows.first { $0.translation == "Members only beyond this point" })
+        XCTAssertEqual(awaiting.source,
+                       surface.stateCopy(for: .degraded(originalText: "",
+                                                        reason: .noTierResolved)),
+                       "the row says the translation is not available right now, not "
+                       + "'translating…' for the rest of the picture's life")
+        let answered = try XCTUnwrap(capture.rows.first { $0.translation == "बत्ती" })
+        XCTAssertEqual(answered.source, "Light", "the answered row is untouched")
+        // The **outcome** is still pending: a deferral is a promise that the
+        // next plan for this key will carry it, and a settled outcome would
+        // close that door.
+        let deferredRegion = try XCTUnwrap(capture.publication.regions
+            .first { $0.text == "Members only beyond this point" })
+        guard case .pending = capture.publication.outcomes[deferredRegion.id]?.outcome else {
+            return XCTFail("a deferred row stays pending in the publication, not settled")
+        }
+    }
+
+    /// The plan answered *nothing* because the question is open — the deferral
+    /// marking is not for that case: those rows are waiting on the elder, and
+    /// the replay will answer them.
+    @MainActor
+    func testAPlanThatIsHeldByAnOpenQuestionDefersNothing() async throws {
+        let composition = makeComposition(regions: [detected("Light")])
+        composition.cycle.refuses = true
+
+        let attempt = await capture(composition)
+        let capture = try XCTUnwrap(attempt)
+
+        XCTAssertTrue(capture.deferredKeys.isEmpty,
+                      "'the plan may apply nothing' is not 'the plan released this string'")
+    }
+
+    // MARK: - The ledger, read again (review round 2, finding 3)
+
+    /// A later plan settles the crop's strings — the consent replay, the live
+    /// tick behind it — and the standing picture re-reads the ledger and draws
+    /// them: no second crop, no second pass, no second payment.
+    @MainActor
+    func testALaterSettlementIsDrawnOntoTheStandingCaptureAndLeavesTheLedgerAlone() async throws {
+        let composition = makeComposition(regions: [detected("Members only beyond this point")])
+        // The capture's own plan is held by the open question: nothing is
+        // answered and nothing is deferred (`refuses` is the nil shape).
+        composition.cycle.refuses = true
+        let packedAttempt = await capture(composition)
+        let packed = try XCTUnwrap(packedAttempt)
+        let asksWhenPacked = composition.cycle.asks.count
+
+        // The elder answers, the replay runs, and the answer lands in the
+        // ledger — which is all a plan does.
+        composition.cycle.answers = ["members only beyond this point|ne":
+                                        resolved("Members only beyond this point", "सदस्यहरू मात्र")]
+        composition.cycle.settled = composition.cycle.answers
+
+        let updatedAttempt = await composition.path.updated(packed,
+                                                            layout: layout,
+                                                            policy: policy)
+        let updated = try XCTUnwrap(updatedAttempt)
+
+        XCTAssertEqual(composition.cycle.asks.count, asksWhenPacked,
+                       "a re-pack is a render: no plan, no ask and no payment")
+        XCTAssertEqual(updated.rows.first?.translation, "सदस्यहरू मात्र")
+        XCTAssertEqual(updated.publication.regions.map(\.text),
+                       packed.publication.regions.map(\.text),
+                       "the same read, answered — not a second read")
+        XCTAssertEqual(updated.pixelRect, packed.pixelRect)
+        XCTAssertEqual(updated.image.width, packed.image.width)
+        XCTAssertTrue(updated.deferredKeys.isEmpty)
+        XCTAssertGreaterThan(updated.publication.sequence, packed.publication.sequence,
+                             "the picture that replaces another takes the next order")
+
+        // And with nothing new in the ledger the caller keeps the picture it
+        // has: no re-place for an unchanged card.
+        let unchanged = await composition.path.updated(updated, layout: layout, policy: policy)
+        XCTAssertNil(unchanged)
     }
 
     // MARK: - The device layers, and what is never written
@@ -299,17 +402,39 @@ final class LiveTranslateFocusCaptureTests: XCTestCase {
         XCTAssertEqual(capture.rows.first?.translation, "बत्ती")
     }
 
-    func testACaptureWritesNothingToThePersistedLayersItRead() async throws {
+    /// **The read is a read-only read** (review round 2, finding 8), and the
+    /// seeding is what makes that a claim rather than a coincidence.
+    ///
+    /// Seeded through a **second session** — a second `LabelTranslationCache`
+    /// over the same storage — because a same-session seed marks the key as
+    /// already touched and pre-coalesces the very write this test is about: the
+    /// first version of this test seeded through the cache the path holds, so
+    /// it observed a write-free read whatever the policy did. With the key
+    /// untouched in this session, a hit's LRU touch would rewrite the whole
+    /// encrypted payload, and the assertion below is what would see it.
+    @MainActor
+    func testACaptureReadsTheStoredLayerWithoutWritingToIt() async throws {
         let composition = makeComposition(regions: [detected("Members only beyond this point")])
-        composition.cycle.answers = ["members only beyond this point|ne":
-                                        resolved("Members only beyond this point", "सदस्यहरू मात्र")]
+        let seedingSession = LabelTranslationCache(storage: composition.storage,
+                                                   config: config,
+                                                   observabilityBus: composition.bus,
+                                                   dictionary: [:])
+        XCTAssertTrue(seedingSession.store(text: "Members only beyond this point",
+                                           translation: "सदस्यहरू मात्र").isSuccess)
+        let writesBefore = composition.storage.writeCount(forKey: LabelTranslationCache.storageKey)
+        XCTAssertGreaterThan(writesBefore, 0, "the seed is a write, or the rest proves nothing")
+
         let attempt = await capture(composition)
         let capture = try XCTUnwrap(attempt)
 
-        XCTAssertFalse(composition.cycle.asks.isEmpty, "the cloud tier was asked")
-        XCTAssertEqual(composition.storage.writeCount, 0,
-                       "pointing at a letter must not put its translation on disk")
-        XCTAssertEqual(capture.rows.first?.translation, "सदस्यहरू मात्र")
+        XCTAssertEqual(capture.rows.first?.translation, "सदस्यहरू मात्र",
+                       "the persisted layer still answers the crop — the read is kept")
+        XCTAssertTrue(composition.cycle.asks.isEmpty, "and nothing is left to ask")
+        XCTAssertEqual(composition.storage.writeCount(forKey: LabelTranslationCache.storageKey),
+                       writesBefore,
+                       "pointing at a letter must not rewrite the store — not even the "
+                       + "payload a hit's LRU touch used to write")
+        XCTAssertEqual(composition.storage.deleteCount, 0)
     }
 
     func testAnAnswerThisRunAlreadyHasIsReusedInMemoryTheSecondTime() async throws {

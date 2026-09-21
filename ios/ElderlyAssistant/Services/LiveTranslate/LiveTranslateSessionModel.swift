@@ -126,6 +126,52 @@ struct LiveTranslateSessionDependencies {
     }
 }
 
+extension LiveTranslateSessionDependencies {
+    /// The point-ask session **this host** runs: the app layer's own
+    /// composition with `autoAnalyzeOnAnchor` turned off (review round 2,
+    /// finding 6).
+    ///
+    /// In live translate the anchored box is the *target* of a question the
+    /// focus capture asks for itself, not the question — and an anchor that
+    /// started PointAsk's own ladder would run (and pay for) a second,
+    /// different answer nobody asked for. The override lives here rather than
+    /// in the app layer's `PointAskConfig.default` because it is this *host*
+    /// that must not double-pay, and because the PointAsk feature's own flow
+    /// (the standalone tap-and-ask surface) still wants the default. The focus
+    /// capture is the consumer of the box this leaves standing: it reads
+    /// `anchoredTarget` and drives the focus flow, which is why the anchor
+    /// must stay quiet here.
+    ///
+    /// The dependencies are a value of `let`s, so the quiet config is a whole
+    /// new value rather than a mutation: the copy keeps every other field the
+    /// app layer chose (the gate, the cache, the client, the engines) and
+    /// changes the one flag this host must not inherit. A named seam rather
+    /// than an inline closure so the rule can be pinned by behaviour — the
+    /// configuration a host hands in is not observable from the model it
+    /// builds, so the test drives this function and watches the anchor.
+    /// Adding a field to the struct without a default breaks this call site on
+    /// purpose — a host that silently dropped one is the failure mode worth
+    /// compiling against.
+    @MainActor
+    static func quietPointAsk(from hosted: PointAskSessionDependencies) -> PointAskSessionModel {
+        var quietConfig = hosted.config
+        quietConfig.autoAnalyzeOnAnchor = false
+        let quiet = PointAskSessionDependencies(locale: hosted.locale,
+                                                consentGate: hosted.consentGate,
+                                                settings: hosted.settings,
+                                                cache: hosted.cache,
+                                                client: hosted.client,
+                                                objectEngine: hosted.objectEngine,
+                                                maskEngine: hosted.maskEngine,
+                                                yoloEngine: hosted.yoloEngine,
+                                                ocrEngine: hosted.ocrEngine,
+                                                observabilityBus: hosted.observabilityBus,
+                                                config: quietConfig,
+                                                speak: hosted.speak)
+        return PointAskSessionModel(dependencies: quiet)
+    }
+}
+
 /// C13's session model: one session's life, from appear to close.
 @MainActor
 final class LiveTranslateSessionModel: ObservableObject {
@@ -171,9 +217,11 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// hold the camera — the live cycle keeps running behind it.
     ///
     /// Nothing here is persisted: the crop's strings are answered by the
-    /// pipeline in `.focused` mode, which reads the store and writes nothing
-    /// (`CloudTranslationTier.CachePolicy.readOnly`), and this session's own
-    /// answers live in a `LiveTranslateMemoryCache` that goes with the model.
+    /// pipeline in `.focused` mode, whose reads and writes are both told so
+    /// (`CloudTranslationTier.CachePolicy.readOnly` — the tier's adoption write
+    /// and the lookups' own bookkeeping writes, review round 2, finding 8) —
+    /// and this session's own answers live in a `LiveTranslateMemoryCache` that
+    /// goes with the model.
     @Published private(set) var focusedCapture: LiveTranslateFocusedCapture?
 
     @Published private(set) var phase: Phase = .idle
@@ -390,6 +438,19 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// can never be taken of a stale buffer.
     private var latestFrame: CameraFrame?
 
+    /// The frame an anchored box was measured against, for a caller that holds
+    /// one (review round 2, finding 5).
+    ///
+    /// The host forwards every delivered frame to the point-ask session, and
+    /// that session anchors its box on the frame it held at the tap — so a
+    /// caller building a focused read from an anchor hands this frame to
+    /// `translateFocusedRegion(box:pixelRect:measuredOn:)`, and the crop comes
+    /// from the picture the rect is a place on rather than from whatever the
+    /// camera has delivered since. When no frame has been delivered (before the
+    /// first tick, after a close) it is nil, and a caller with no frame to name
+    /// passes nothing.
+    var anchoredFrame: CameraFrame? { latestFrame }
+
     /// One freeze's async work: the still pass, the device layers, and (later)
     /// the cloud answers for what the device could not translate. Cancelled
     /// when the elder returns to live or the session closes, so a slow pass
@@ -497,7 +558,12 @@ final class LiveTranslateSessionModel: ObservableObject {
         // before the forwarding sinks below: an escaping closure that
         // captures `self` may not be created while a `let` stored property
         // is still uninitialized.
-        self.pointAsk = dependencies.pointAsk.map(PointAskSessionModel.init)
+        //
+        // `autoAnalyzeOnAnchor` is turned **off** for this host (review round
+        // 2, finding 6) — see `LiveTranslateSessionDependencies.quietPointAsk`,
+        // which is where the rule and its reasons live and what the anchor
+        // test drives.
+        self.pointAsk = dependencies.pointAsk.map(LiveTranslateSessionDependencies.quietPointAsk(from:))
 
         // The model is the single observation surface: the consent
         // controller's changes are forwarded, so the view observes one object
@@ -701,7 +767,41 @@ final class LiveTranslateSessionModel: ObservableObject {
         Task { [weak self] in
             await pipeline.retryAwaitingResolution()
             await self?.refreshHeldFrame()
+            await self?.repackFocusedCapture()
         }
+    }
+
+    /// Draws the answers the replay settled onto the focused picture the elder
+    /// is still looking at — the card's half of what `refreshHeldFrame` does
+    /// for a still frame (review round 2, finding 3).
+    ///
+    /// A focused read whose strings reached the consent prompt leaves its card
+    /// saying "translating…", and the replay above is what answers them — into
+    /// the ledger, where nothing rendered them onto the crop. Without this the
+    /// only way to see the answer was to tap again, which re-cropped and re-read
+    /// the page to reach the same ledger: the card unanswerable, and the read
+    /// paid for twice.
+    ///
+    /// Guarded the way the held frame's refresh is, and for the same reason: the
+    /// picture is compared **before and after** the `await`, so a thaw, a second
+    /// tap or a close in between keeps its own picture rather than having this
+    /// one's answers drawn onto it. The publication's sequence goes with the
+    /// image because a re-place (a rotation, a display preference) changes the
+    /// layout the rows were measured against — the same pair `refreshHeldFrame`
+    /// compares. `focusInProgress` is deliberately not consulted: a read still
+    /// in flight is a *newer* tap's, and the sequence guard is what keeps this
+    /// from writing over it.
+    private func repackFocusedCapture() async {
+        guard !isClosed, let path = focusPath, let standing = focusedCapture else { return }
+        let layout = pendingLayout
+        let policy = self.policy
+        guard let updated = await path.updated(standing, layout: layout, policy: policy) else {
+            return
+        }
+        guard !isClosed, let current = focusedCapture,
+              current.image === standing.image,
+              current.publication.sequence == standing.publication.sequence else { return }
+        focusedCapture = updated
     }
 
     /// Draws the answers that arrived for a held frame onto that frame — the
@@ -897,6 +997,15 @@ final class LiveTranslateSessionModel: ObservableObject {
         // a wait (review finding 7).
         focusToken = nil
         focusInProgress = false
+        // 1c. And the focused read's own answers go with it (review round 2,
+        //     finding 7): the memory cache is this session's — it holds the
+        //     strings a crop read and the answers they were given — and a model
+        //     that is closed but still retained must not keep a document's
+        //     contents in memory for the rest of the process. `close()` is the
+        //     one moment the session's answers stop being the session's, which
+        //     is the moment this method was written for and the reason it is no
+        //     longer a method nothing calls.
+        if let cache = focusPath?.memoryCache { await cache.clear() }
         // The picture's correction goes with the picture: a closed model draws
         // no window of a camera that has stopped (see `frameStabilization`).
         frameStabilization = .none
@@ -1304,16 +1413,31 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// and the session derives it from the frame's own pixel size, so the two
     /// can never name different regions.
     ///
+    /// **`measuredOn` is the frame the rect was measured against** (review
+    /// round 2, finding 5), and it is a parameter rather than an assumption for
+    /// the reason the class of bug it closes exists: a rect is a *place on a
+    /// picture*, so a rect measured against one frame and cropped from another
+    /// is a crop of a region nobody pointed at. A tap makes both in the same
+    /// instant, so a live tap passes nothing and the newest delivered frame is
+    /// the right one; a caller holding a rect from an earlier moment — the
+    /// anchored box a focus tap was made from, a rect restored with a
+    /// publication — passes the frame that rect belongs to, and it is that
+    /// picture that is cropped. `anchoredFrame` is what such a caller hands
+    /// over when the anchor is current.
+    ///
     /// Unlike `captureSnapshot`, this does **not** hold the camera: the live
     /// cycle keeps running, the overlay keeps drawing the scene, and the
     /// focused read lands as its own picture beside it. And unlike a freeze it
-    /// writes nothing to the session's persisted store — see
+    /// writes nothing to the session's persisted store, reads included — see
     /// `LiveTranslateFocusCapture` and `CloudTranslationTier.CachePolicy`.
     ///
     /// A second call cancels the first: two taps are one question and its
     /// answer, not two pictures racing for the same surface.
-    func translateFocusedRegion(box: NormalizedBox, pixelRect: CGRect) {
-        guard !isClosed, phase == .running, let frame = latestFrame, focusPath != nil else { return }
+    func translateFocusedRegion(box: NormalizedBox,
+                                pixelRect: CGRect,
+                                measuredOn anchored: CameraFrame? = nil) {
+        guard !isClosed, phase == .running, focusPath != nil else { return }
+        guard let frame = anchored ?? latestFrame else { return }
         // The wait starts on the tap's own stack, exactly as the freeze's does,
         // so the surface's loading state is up in the frame of the tap rather
         // than one frame late on a fast read and absent on a slow one.

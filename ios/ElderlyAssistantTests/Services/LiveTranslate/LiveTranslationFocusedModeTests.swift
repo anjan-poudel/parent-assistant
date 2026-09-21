@@ -180,7 +180,6 @@ final class LiveTranslationFocusedModeTests: XCTestCase {
         let harness = makeHarness(brainAnswers: [askedText: answer])
 
         let settled = await harness.pipeline.resolveFocused([item("r1", askedText)],
-                                                            mode: .focused,
                                                             regionCounts: [:])
         let result = try XCTUnwrap(settled?["r1"])
 
@@ -199,7 +198,6 @@ final class LiveTranslationFocusedModeTests: XCTestCase {
         respond(harness)
 
         let settled = await harness.pipeline.resolveFocused([item("r1", askedText)],
-                                                            mode: .focused,
                                                             regionCounts: [:])
         let result = try XCTUnwrap(settled?["r1"])
 
@@ -229,7 +227,6 @@ final class LiveTranslationFocusedModeTests: XCTestCase {
         // only "we stopped asking".
         let answered = makeHarness(brainAnswers: [askedText: answer])
         let defaultCap = await answered.pipeline.resolveFocused([item("r1", askedText)],
-                                                                mode: .focused,
                                                                 regionCounts: [:])
         XCTAssertEqual(try XCTUnwrap(defaultCap?["r1"]).sourceTier, .onDeviceBrain,
                        "the shipped cap is enough for one string")
@@ -237,7 +234,6 @@ final class LiveTranslationFocusedModeTests: XCTestCase {
 
         let capped = makeHarness(brainAnswers: [askedText: answer], focusMaxBatchCalls: 0)
         let held = await capped.pipeline.resolveFocused([item("r1", askedText)],
-                                                        mode: .focused,
                                                         regionCounts: [:])
 
         XCTAssertNil(held, "a plan the cap held answers nothing")
@@ -275,7 +271,6 @@ final class LiveTranslationFocusedModeTests: XCTestCase {
     func testAFocusedReadKeepsTheDevicesAnswersOffTheDisk() async throws {
         let focused = makeHarness(brainAnswers: [askedText: answer])
         let focusedSettled = await focused.pipeline.resolveFocused([item("r1", askedText)],
-                                                                   mode: .focused,
                                                                    regionCounts: [:])
         XCTAssertEqual(try XCTUnwrap(focusedSettled?["r1"]).sourceTier, .onDeviceBrain)
         XCTAssertNothingPersisted(focused, for: askedText)
@@ -306,7 +301,6 @@ final class LiveTranslationFocusedModeTests: XCTestCase {
         let harness = makeHarness(brainAnswers: [:], consent: false)
 
         let held = await harness.pipeline.resolveFocused([item("r1", askedText)],
-                                                         mode: .focused,
                                                          regionCounts: ["r1": 1])
         XCTAssertNil(held, "the closed gate held the capture's string")
         XCTAssertEqual(harness.brain.calls.count, 1,
@@ -341,7 +335,6 @@ final class LiveTranslationFocusedModeTests: XCTestCase {
     func testAFocusedSettlementIsPrunedWithTheSightingThatProducedIt() async throws {
         let harness = makeHarness(brainAnswers: [askedText: answer])
         let first = await harness.pipeline.resolveFocused([item("r1", askedText)],
-                                                          mode: .focused,
                                                           regionCounts: [:])
         XCTAssertEqual(try XCTUnwrap(first?["r1"]).sourceTier, .onDeviceBrain)
         XCTAssertEqual(harness.brain.calls.count, 1)
@@ -357,7 +350,6 @@ final class LiveTranslationFocusedModeTests: XCTestCase {
         // one that asks again has to send.
         harness.brain.answers = [:]
         let second = await harness.pipeline.resolveFocused([item("r1", askedText)],
-                                                           mode: .focused,
                                                            regionCounts: [:])
 
         XCTAssertEqual(harness.brain.calls.count, 2,
@@ -385,7 +377,6 @@ final class LiveTranslationFocusedModeTests: XCTestCase {
         let answered = makeHarness(brainAnswers: [:])
         respond(answered)
         let full = await answered.pipeline.resolveFocused([item("r1", askedText)],
-                                                          mode: .focused,
                                                           regionCounts: [:])
 
         XCTAssertEqual(try XCTUnwrap(full?["r1"]).sourceTier, .cloud,
@@ -396,7 +387,6 @@ final class LiveTranslationFocusedModeTests: XCTestCase {
         let narrowed = makeHarness(brainAnswers: [:], focusMaxBatchCalls: 1)
         respond(narrowed)
         let held = await narrowed.pipeline.resolveFocused([item("r1", askedText)],
-                                                          mode: .focused,
                                                           regionCounts: [:])
 
         XCTAssertEqual(narrowed.brain.calls.count, 1, "the device's one batch was spent")

@@ -166,12 +166,14 @@ struct LiveTranslateSettings: Equatable {
 
     /// Whether live camera translation may run at all.
     ///
-    /// An absent key means the household has never opted in, which is the
-    /// config's nominal default (**false** — the feature does not turn itself
-    /// on), not `false` by accident. The read is *not* cached: the session
-    /// model re-reads it when a session opens and on every write, so the
-    /// Settings leaf and a running session cannot disagree about it for longer
-    /// than the write takes to land.
+    /// An absent key is the config's nominal default, and that default is
+    /// **on** until the Settings leaf can offer the choice (see
+    /// `LiveTranslateConfig.liveTranslateEnabledDefault` — a closed door with
+    /// no copy to explain it is the merge hazard the default avoids). A stored
+    /// value, either way, is the household's answer and this getter returns it.
+    /// The read is *not* cached: the session model re-reads it when a session
+    /// opens and on every write, so the Settings leaf and a running session
+    /// cannot disagree about it for longer than the write takes to land.
     ///
     /// It is a *policy*, not consent and not egress: the consent record is still
     /// required and still enforced per cloud attempt (AM-1), and this switch

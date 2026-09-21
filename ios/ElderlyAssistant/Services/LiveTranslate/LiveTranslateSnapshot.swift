@@ -293,6 +293,103 @@ struct LiveTranslateResultsCardSurface: Equatable {
     var isEmpty: Bool { rows.isEmpty }
 }
 
+// MARK: - What the two capture paths share
+
+/// The steps a held frame and a focused crop take over their own regions,
+/// stated once (review round 2, finding 7).
+///
+/// The two paths are the same picture problem — one region list, one outcome
+/// map, one policy, the feature's one placement, the feature's one copy source
+/// — and each used to carry a private copy of the call. A second spelling of a
+/// rule is where the two start to disagree, and the copies had already drifted
+/// in nothing but their comments, which is exactly the state in which the next
+/// change lands in one of them and not the other.
+///
+/// What is *shared* is the call with its fixed choices (the capture's own
+/// geometry is `.whole` whatever the live window is doing; the copy is the
+/// overlay surface's), the re-statement of a cached answer onto the text a
+/// region is showing now, and the minting of a region from a detected string.
+/// What differs stays in the callers: a crop is measured against the crop's own
+/// pixel size, a held frame against the frame's, and a crop's strings are split
+/// into sentences while a still frame's are not.
+enum LiveTranslateCaptureSupport {
+
+    /// The feature's one placement, over a caller's own regions.
+    ///
+    /// The crop is `.whole` and the copy source is the overlay's, because a
+    /// capture is its own whole picture: the pan and the zoom are live
+    /// gestures, and what the elder captured must not slide when they move.
+    ///
+    /// `stateCopy` is the caller's when it has one that says more than the
+    /// surface's own — a focused read's deferred strings say so in the callout
+    /// and in the card beneath it, one sentence for one situation — and the
+    /// surface's otherwise, which is every other caller.
+    static func placements(regions: [TextRegionStabilizer.StableTextRegion],
+                           outcomes: [TextRegionStabilizer.RegionIdentity: TranslationResult],
+                           policy: LiveOverlayPlacement.Policy,
+                           layout: LiveTranslateLayout,
+                           framePixelSize: CGSize,
+                           locale: Locale,
+                           stateCopy: ((TranslationResult) -> String?)? = nil)
+        -> [LiveOverlayPlacement.PlacedOverlay] {
+        let surface = LiveTranslateOverlaySurface(placements: [], policy: policy, locale: locale)
+        return LiveOverlayPlacement.place(regions: regions,
+                                          results: outcomes,
+                                          containerSize: layout.containerSize,
+                                          framePixelSize: framePixelSize,
+                                          safeArea: layout.safeArea,
+                                          occupiedRects: layout.occupiedRects,
+                                          crop: .whole,
+                                          policy: policy,
+                                          stateCopy: stateCopy ?? surface.stateCopy(for:))
+    }
+
+    /// A cached answer re-stated onto the text it is being used for.
+    ///
+    /// The translation is a property of the *string*; the original text is a
+    /// property of the *region*. The two can differ in spelling while
+    /// normalizing identically ("Light" recognized again as "LIGHT"), and a
+    /// result carrying the previous spelling would put the wrong original on
+    /// screen beside the translation — so the answer is carried over and the
+    /// text is the region's own.
+    ///
+    /// A stored entry is terminal by construction, so the pending branch is
+    /// unreachable from the cache; it is here because "every case is answered"
+    /// is the shape this function promises and a caller restating something
+    /// else may not be so lucky.
+    static func restating(_ result: TranslationResult, for text: String) -> TranslationResult {
+        switch result.outcome {
+        case .pending:
+            return .pending(text)
+        case .resolved(_, let translation, let tier):
+            return .resolved(originalText: text, translation: translation, tier: tier)
+        case .degraded(_, let reason):
+            return .degraded(originalText: text, reason: reason)
+        }
+    }
+
+    /// One region, minted from a detected string with an identity the caller
+    /// assigns.
+    ///
+    /// The initializer is six fields wide and is the shape the placement, the
+    /// cache key and the renderer all read; a second spelling of it in the
+    /// other capture path is how one of them gets a new field and the other
+    /// does not. `text` is a parameter because a crop splits a detected string
+    /// into sentences: the pieces inherit the detection's geometry while each
+    /// carries its own text.
+    static func region(id: Int,
+                       from detected: LiveTextDetector.DetectedTextRegion,
+                       text: String) -> TextRegionStabilizer.StableTextRegion {
+        TextRegionStabilizer.StableTextRegion(
+            id: TextRegionStabilizer.RegionIdentity(rawValue: id),
+            text: text,
+            normalizedText: LiveTranslateTextNormalization.normalized(text),
+            box: detected.normalizedBox,
+            detectedLanguage: detected.detectedLanguage,
+            confidence: detected.confidence)
+    }
+}
+
 // MARK: - The snapshot path
 
 /// The snapshot path: freeze one frame, read it once, place what it says.
@@ -489,16 +586,12 @@ struct LiveTranslateSnapshotPath {
                 policy: LiveOverlayPlacement.Policy,
                 layout: LiveTranslateLayout,
                 framePixelSize: CGSize) async -> LiveTranslatePublication {
-        let surface = LiveTranslateOverlaySurface(placements: [], policy: policy, locale: locale)
-        let placements = LiveOverlayPlacement.place(regions: regions,
-                                                    results: outcomes,
-                                                    containerSize: layout.containerSize,
-                                                    framePixelSize: framePixelSize,
-                                                    safeArea: layout.safeArea,
-                                                    occupiedRects: layout.occupiedRects,
-                                                    crop: .whole,
-                                                    policy: policy,
-                                                    stateCopy: surface.stateCopy(for:))
+        let placements = LiveTranslateCaptureSupport.placements(regions: regions,
+                                                                outcomes: outcomes,
+                                                                policy: policy,
+                                                                layout: layout,
+                                                                framePixelSize: framePixelSize,
+                                                                locale: locale)
         // The session's own counter, from the live cycle: a frozen frame's
         // publication advances the same monotone sequence a live one does
         // (AM-6), so no consumer can see two publications share an order.
@@ -541,13 +634,7 @@ struct LiveTranslateSnapshotPath {
     private static func regions(from detected: [LiveTextDetector.DetectedTextRegion])
         -> [TextRegionStabilizer.StableTextRegion] {
         detected.enumerated().map { index, region in
-            TextRegionStabilizer.StableTextRegion(
-                id: TextRegionStabilizer.RegionIdentity(rawValue: index),
-                text: region.text,
-                normalizedText: LiveTranslateTextNormalization.normalized(region.text),
-                box: region.normalizedBox,
-                detectedLanguage: region.detectedLanguage,
-                confidence: region.confidence)
+            LiveTranslateCaptureSupport.region(id: index, from: region, text: region.text)
         }
     }
 }

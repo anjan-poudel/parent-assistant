@@ -41,6 +41,16 @@ final class PointAskAutoAnalyzeOnAnchorTests: XCTestCase {
     private func makeModel(config: PointAskConfig,
                            ocrRegions: [LiveTextDetector.DetectedTextRegion] = [])
         -> (model: PointAskSessionModel, ocr: StubPointAskOCREngine) {
+        let built = makeDependencies(config: config, ocrRegions: ocrRegions)
+        return (PointAskSessionModel(dependencies: built.dependencies), built.ocr)
+    }
+
+    /// The composition itself, for the one test that has to hand it to a host
+    /// rather than build a session from it.
+    @MainActor
+    private func makeDependencies(config: PointAskConfig,
+                                  ocrRegions: [LiveTextDetector.DetectedTextRegion] = [])
+        -> (dependencies: PointAskSessionDependencies, ocr: StubPointAskOCREngine) {
         let bus = LiveTranslateSanitisingBus()
         let gate = PointAskConsentGate(storage: LabelTranslationCacheTestStorage(),
                                        config: config,
@@ -68,7 +78,7 @@ final class PointAskAutoAnalyzeOnAnchorTests: XCTestCase {
                                                        observabilityBus: bus,
                                                        config: config,
                                                        speak: { _ in })
-        return (PointAskSessionModel(dependencies: dependencies), ocr)
+        return (dependencies: dependencies, ocr: ocr)
     }
 
     private let frameWidth = 640
@@ -233,5 +243,56 @@ final class PointAskAutoAnalyzeOnAnchorTests: XCTestCase {
 
         XCTAssertEqual(model.phase, .awaitingTap)
         XCTAssertNil(model.anchoredTarget, "there is no target until the elder names one")
+    }
+
+    // MARK: - The host: live translate's box is a target, not a question
+
+    /// The live-translate session hands the app layer's composition to its own
+    /// host seam (`LiveTranslateSessionDependencies.quietPointAsk`), and the
+    /// app layer's config is on: in the standalone feature the anchor **is**
+    /// the question. This host must not inherit that — an anchor that ran the
+    /// ladder here would do a second, unasked answer's work and pay for it,
+    /// while the focus capture is the thing that asks (findings 6, round 2).
+    ///
+    /// The control half is what makes the test discriminating: the very same
+    /// dependencies, built into a session directly, do analyze on the same tap
+    /// and the same frame — so the test fails if the flag were ignored rather
+    /// than honoured, and it cannot pass by the tap anchoring nothing.
+    @MainActor
+    func testTheLiveTranslateHostDoesNotLetItsPointAskSessionAnalyzeAnAnchor() async throws {
+        let built = makeDependencies(config: PointAskConfig(autoAnalyzeOnAnchor: true),
+                                     ocrRegions: [detected("FLORAL")])
+
+        // The control, before the host's copy exists: this composition on its
+        // own is a question-answering session.
+        let standalone = PointAskSessionModel(dependencies: built.dependencies)
+        standalone.receiveFrame(makeFrame())
+        standalone.handleTap(atNormalizedPoint: tapPoint)
+        await waitUntil("the unhosted composition to start its ladder") {
+            switch standalone.phase {
+            case .awaitingTap, .boxAnchored: return false
+            case .analyzing, .answered, .failed: return true
+            }
+        }
+
+        // The host's copy, over the same dependencies: the same tap anchors,
+        // and nothing asks.
+        let hosted = LiveTranslateSessionDependencies.quietPointAsk(from: built.dependencies)
+        hosted.receiveFrame(makeFrame())
+        hosted.handleTap(atNormalizedPoint: tapPoint)
+        await waitUntil("the hosted box to anchor") {
+            if case .boxAnchored = hosted.phase { return true }
+            return false
+        }
+        // The window the ladder would have used: a task on the model's own
+        // stack, so "it did not run" has to outlast a scheduler turn.
+        try? await Task.sleep(for: .milliseconds(200))
+
+        guard case .boxAnchored = hosted.phase else {
+            return XCTFail("the host's anchor must stay a target: the question is the focus capture's")
+        }
+        XCTAssertNotNil(hosted.anchoredTarget,
+                        "the target is named for the caller that asks its own question")
+        XCTAssertNil(hosted.answer, "no answer was composed for a question nobody asked")
     }
 }

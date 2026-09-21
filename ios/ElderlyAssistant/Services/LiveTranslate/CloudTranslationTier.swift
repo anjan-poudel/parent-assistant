@@ -168,12 +168,31 @@ actor CloudTranslationTier {
 
     // MARK: - The store policy
 
-    /// Whether a cycle may **write** what it learned to the persisted layers.
+    /// Whether a cycle may **write** to the persisted layers — every write the
+    /// cycle can reach, not only the one it makes with an answer in hand.
     ///
     /// The read is never in question: the dictionary and the persisted store
     /// are what make the device's own answers cheap, and a cycle that stopped
     /// consulting them would pay for a string the session already holds. What
-    /// this policy governs is the other direction — the write.
+    /// this policy governs is the other direction — the write — and it governs
+    /// **all** of them (review round 2, finding 8):
+    ///
+    ///  - the adoption write, when the batch's answers are stored (`adopt`);
+    ///  - the LRU touch's payload rewrite, which a cache *hit* used to make —
+    ///    the first read of a stored key in a session rewrote the whole
+    ///    encrypted payload to record the access order;
+    ///  - the load's invalidation rewrite, when a payload's brain answers were
+    ///    produced by a model that is no longer in force.
+    ///
+    /// The last two were reachable under `.readOnly` before this policy was
+    /// threaded into the lookup: they rewrite what the store already held
+    /// rather than adding the capture's contents, but they are still writes on
+    /// a path whose whole promise is that pointing at a letter does not put
+    /// that letter on disk. One write remains on every spelling, deliberately:
+    /// a payload the store cannot decode is discarded (deleted and rebuilt
+    /// empty), because leaving unreadable bytes behind makes every later launch
+    /// pay the same fault, and that write removes content rather than adding
+    /// any.
     ///
     /// It exists because one caller answers a question about **a picture the
     /// elder pointed at** rather than about the scene they are living in: a
@@ -190,9 +209,11 @@ actor CloudTranslationTier {
         /// Read the persisted layers, and write every answer back — the
         /// session's own store, the same store a later frame reads.
         case persist
-        /// Read the persisted layers, and write nothing back. The answers are
-        /// still resolved and still rendered; they simply do not outlive the
-        /// process. A `[FOCUS]` capture is the one caller.
+        /// Read the persisted layers, and write nothing back: not the answers,
+        /// and not the LRU or invalidation bookkeeping a read would otherwise
+        /// rewrite the payload for. The answers are still resolved and still
+        /// rendered; they simply do not outlive the process. A `[FOCUS]`
+        /// capture is the one caller.
         case readOnly
     }
 
@@ -269,8 +290,9 @@ actor CloudTranslationTier {
     ///
     /// `cachePolicy` is additive and defaults to the shipped behaviour: every
     /// existing caller reads and writes the persisted layers exactly as it
-    /// did. `.readOnly` keeps the read and suppresses the write (see
-    /// `CachePolicy`), which is what a focused capture asks for.
+    /// did. `.readOnly` keeps the read and suppresses **every** write this
+    /// path can reach (see `CachePolicy`), which is what a focused capture
+    /// asks for.
     func resolve(items: [Item],
                  targetLanguage: AppLanguage = .nepali,
                  cachePolicy: CachePolicy = .persist) async -> BatchResult {
@@ -281,9 +303,18 @@ actor CloudTranslationTier {
 
         // 1. Validate the need. The dictionary/cache layer answers first, and
         //    a read fault is a miss (self-healing, never elder-facing).
+        //
+        //    The lookup itself is told the policy (review round 2, finding 8):
+        //    a hit's LRU touch and a load's invalidation both rewrite the whole
+        //    encrypted payload, and "the read is kept and the write is
+        //    suppressed" has to be true of this read too — it is the first write
+        //    a capture used to reach, and it was reached before the one this
+        //    policy was written for.
         var candidates: [Item] = []
         for item in items {
-            if case .success(let hit) = cache.lookup(text: item.text, targetLanguage: targetLanguage),
+            if case .success(let hit) = cache.lookup(text: item.text,
+                                                     targetLanguage: targetLanguage,
+                                                     persistingBookkeeping: cachePolicy == .persist),
                let hit {
                 resolved[item.id] = Resolution(translation: hit.translation,
                                                origin: .cache(hit.origin))
@@ -684,14 +715,15 @@ actor CloudTranslationTier {
     /// the parser refused becomes a per-region failure (row 19: terminal for
     /// that item only, never retried inside the batch).
     ///
-    /// The store is the one thing `cachePolicy` governs: under `.readOnly` the
-    /// batch is still resolved and still returned — every region renders
-    /// exactly as it does under `.persist` — and the persisted layers are left
-    /// untouched, so the answers live only as long as the caller holds them
-    /// (a focused capture's own memory, in the shipped case). The read that
-    /// put this batch on the wire happened in `resolve`, above, and is
-    /// deliberately *not* governed by this policy: the dictionary and the
-    /// store are what stop the device paying twice for one string.
+    /// The store is what `cachePolicy` governs: under `.readOnly` the batch is
+    /// still resolved and still returned — every region renders exactly as it
+    /// does under `.persist` — and the persisted layers are left untouched, so
+    /// the answers live only as long as the caller holds them (a focused
+    /// capture's own memory, in the shipped case). The read that put this batch
+    /// on the wire happened in `resolve`, above, and is governed too — the
+    /// lookup is told the policy and suppresses its own bookkeeping writes — so
+    /// "read the store, write nothing" is a property of the whole cycle rather
+    /// than of this one call (review round 2, finding 8).
     private func adopt(_ outcome: TranslationResponseParser.Outcome,
                        for targets: [Target],
                        targetLanguage: AppLanguage,
@@ -715,10 +747,11 @@ actor CloudTranslationTier {
             }
         }
         // A store failure is recorded by the cache itself and never changes
-        // the outcome: the translation still renders. A `.readOnly` cycle does
-        // not call the store at all — the batch is the same, the answers are
-        // the same, and the only difference is that nothing outlives the
-        // caller (see `CachePolicy`).
+        // the outcome: the translation still renders. A `.readOnly` cycle
+        // stores nothing here — the batch is the same, the answers are the
+        // same, and the only difference is that nothing outlives the caller
+        // (see `CachePolicy`, which suppresses the read path's bookkeeping
+        // writes as well as this one).
         switch cachePolicy {
         case .persist:
             _ = cache.storeBatch(resolutions, targetLanguage: targetLanguage)

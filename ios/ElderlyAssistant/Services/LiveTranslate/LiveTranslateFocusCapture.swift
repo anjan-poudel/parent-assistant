@@ -37,12 +37,21 @@ import Foundation
 //    several sentences and the tiers are measured per *string*, so the split
 //    happens before the hand-over — see `LiveTranslateSentenceSplitter` for
 //    why it can never live inside a tier.
-//  - **Nothing from a capture is persisted.** The tier runs with
-//    `.readOnly` (`CloudTranslationTier.CachePolicy`): the persisted layers are
-//    *read* — the device's curated dictionary still answers the crop — and the
-//    translation is not written back, so pointing at a letter does not put its
-//    contents on disk. What the capture does reuse, it reuses in memory
+//  - **Nothing from a capture is persisted.** Every read this path makes is a
+//    read-only read and every write it could reach is suppressed: the tier runs
+//    with `.readOnly` (`CloudTranslationTier.CachePolicy`), the lookups on both
+//    paths are told so (`persistingBookkeeping: false`), and the tier's own
+//    adoption write is skipped. So the persisted layers are *read* — the
+//    device's curated dictionary still answers the crop — and pointing at a
+//    letter does not put its contents on disk, which is a property of every
+//    write the path can reach rather than a promise about one call (review
+//    round 2, finding 8). What the capture does reuse, it reuses in memory
 //    (`LiveTranslateMemoryCache`), which dies with the process.
+//
+//    One write is still reachable and is not this path's to suppress: a
+//    payload the store cannot decode is discarded by the cache itself (deleted
+//    and rebuilt empty), because every later launch would otherwise pay the
+//    same read fault. That removes content; it cannot add the crop's.
 //  - **The result is a value.** Image, rows and placement, packed and handed
 //    back — the caller owns the picture's lifetime, as the session model owns
 //    a frozen frame's.
@@ -71,9 +80,20 @@ extension LiveTextDetector: LiveTranslateCropRecognising {}
 /// carry a second path's method would break every conformer that has no
 /// interest in it. `LiveTranslationPipeline` conforms to both.
 protocol LiveTranslateFocusedCycle: AnyObject {
+    /// The plan, in the focused mode — the mode is fixed inside the pipeline
+    /// rather than passed in (review round 2, finding 7): every caller of this
+    /// entry is a focused read, and a parameter that has one legal value is a
+    /// second place for that value to drift.
     func resolveFocused(_ items: [CloudTranslationTier.Item],
-                        mode: TranslationMode,
                         regionCounts: [String: Int]) async -> [String: TranslationResult]?
+    /// The ledger read and **nothing else** — no plan, no claim, no request.
+    ///
+    /// The re-pack's entry (`LiveTranslateFocusCapture.updated`): the answers a
+    /// later plan settled for this crop's strings, so a card whose strings the
+    /// consent replay answered can render them without a second crop and
+    /// without paying for the same answer twice (review round 2, finding 3).
+    func settledAnswers(for items: [CloudTranslationTier.Item])
+        async -> [String: TranslationResult]
     func nextPublicationSequence() async -> Int
 }
 
@@ -112,6 +132,19 @@ struct LiveTranslateFocusedCapture {
     /// focused read reuses the feature's reading surface rather than defining a
     /// second one.
     let rows: [LiveTranslateResultsCardSurface.Row]
+
+    /// The strings this crop handed to the plan that the plan did **not**
+    /// answer — the batch budget released them for a later plan rather than
+    /// settling them degraded (review round 2, finding 4).
+    ///
+    /// Keyed by item id, which is the cache key. They are *deferred*: the
+    /// outcomes behind them stay `.pending` (so an answer can still land, and
+    /// the next plan for these keys carries them — the live tick behind the
+    /// crop, the next capture, or the interrupted ask's replay), while the card
+    /// says so instead of "translating…" for as long as the picture is on
+    /// screen. `updated(_:layout:policy:)` is what renders a later settlement
+    /// onto this picture, and it drops each key it answers from this set.
+    let deferredKeys: Set<String>
 
     var placements: [LiveOverlayPlacement.PlacedOverlay] { publication.placements }
 
@@ -191,13 +224,25 @@ struct LiveTranslateFocusCapture {
         var outcomes = await resolveFromTheDevice(regions)
         let pendingItems = Self.items(for: regions, outcomes: outcomes,
                                       targetLanguage: targetLanguage)
+        // What the plan was handed and did not answer is **deferred**, and the
+        // distinction is the whole of review round 2's finding 4: the budget
+        // releases a surplus string for a later plan (a batch the cap held, a
+        // generation the clock deferred, a batch's prefix that did not reach
+        // it), and a card that showed it as "translating…" for the rest of the
+        // picture's life made a deferral look like a hang. `nil` is the other
+        // thing entirely — the consent question is open, or the session is gone
+        // — and nothing is deferred there: the answer is not held back, it is
+        // being asked for.
+        var deferred: Set<String> = []
         if !pendingItems.items.isEmpty {
             let answers = await cycle.resolveFocused(pendingItems.items,
-                                                     mode: .focused,
                                                      regionCounts: pendingItems.regionCounts)
             if let answers {
                 for item in pendingItems.items {
-                    guard let answer = answers[item.id] else { continue }
+                    guard let answer = answers[item.id] else {
+                        deferred.insert(item.id)
+                        continue
+                    }
                     for id in pendingItems.regionIDsByKey[item.id] ?? [] {
                         outcomes[id] = (outcomes[id] ?? .pending(item.text))
                             .applying(answer.outcome)
@@ -210,21 +255,124 @@ struct LiveTranslateFocusCapture {
         //    session's end takes it with the process.
         await remember(outcomes: outcomes, regions: regions)
 
-        // 7. Placed against the crop's own geometry, and packed.
+        // 7. Placed against the crop's own geometry, and packed. The placement
+        //    is given the card's own copy source: a callout's supporting line
+        //    and the row beneath it are one sentence for one situation, and a
+        //    deferred string that said "translating…" in the box while the row
+        //    under it said otherwise would be the picture disagreeing with
+        //    itself.
+        let surface = LiveTranslateOverlaySurface(placements: [], policy: policy, locale: locale)
+        let stateCopy = copySource(deferring: deferred, from: surface)
         let publication = await placed(regions: regions,
                                        outcomes: outcomes,
                                        policy: policy,
                                        layout: layout,
-                                       framePixelSize: cropSize)
-        let surface = LiveTranslateOverlaySurface(placements: [], policy: policy, locale: locale)
+                                       framePixelSize: cropSize,
+                                       stateCopy: stateCopy)
         let card = LiveTranslateResultsCardSurface(publication: publication,
-                                                   stateCopy: surface.stateCopy(for:),
+                                                   stateCopy: stateCopy,
                                                    emptyHint: surface.emptyHint)
         return .success(LiveTranslateFocusedCapture(image: image,
                                                     framePixelSize: cropSize,
                                                     pixelRect: pixelRect,
                                                     publication: publication,
-                                                    rows: card.rows))
+                                                    rows: card.rows,
+                                                    deferredKeys: deferred))
+    }
+
+    /// The standing capture re-read from the session's ledger — the focused
+    /// read's counterpart of the held frame's refresh (review round 2,
+    /// finding 3).
+    ///
+    /// A focused read whose strings reached the consent prompt leaves its card
+    /// saying "translating…". The answers arrive on the **replay** the elder's
+    /// answer triggers (`LiveTranslationPipeline.retryAwaitingResolution`),
+    /// into the ledger every plan reads — and nothing rendered them onto the
+    /// picture: the card stayed unanswerable, and the only way to see the
+    /// answers was a second tap, which re-cropped and re-read the page to reach
+    /// the same ledger, paying for the read twice.
+    ///
+    /// **No plan is started here.** The drive has already happened (the replay,
+    /// or the live tick behind the crop); this is the render, so it makes the
+    /// one ledger read and nothing else: no crop, no pass, no request and no
+    /// claim. A key the ledger still has nothing for is left pending, exactly
+    /// as it was.
+    ///
+    /// - Returns: the re-packed capture, or `nil` when the ledger moved nothing
+    ///   — in which case the caller must leave the picture it already has
+    ///   exactly as it is, publication sequence included.
+    func updated(_ capture: LiveTranslateFocusedCapture,
+                 layout: LiveTranslateLayout,
+                 policy: LiveOverlayPlacement.Policy) async -> LiveTranslateFocusedCapture? {
+        let regions = capture.publication.regions
+        let pendingItems = Self.items(for: regions,
+                                      outcomes: capture.publication.outcomes,
+                                      targetLanguage: targetLanguage)
+        guard !pendingItems.items.isEmpty else { return nil }
+        let settled = await cycle.settledAnswers(for: pendingItems.items)
+        var outcomes = capture.publication.outcomes
+        var stillDeferred = capture.deferredKeys
+        var moved = false
+        for item in pendingItems.items {
+            guard let answer = settled[item.id] else { continue }
+            for id in pendingItems.regionIDsByKey[item.id] ?? [] {
+                let merged = (outcomes[id] ?? .pending(item.text)).applying(answer.outcome)
+                if merged != outcomes[id] { moved = true }
+                outcomes[id] = merged
+            }
+            stillDeferred.remove(item.id)
+        }
+        // Nothing moved: the caller keeps the picture it has rather than a
+        // re-place that would advance the session's publication counter for an
+        // unchanged card.
+        guard moved else { return nil }
+        // The settlement is the same answer the lookup will ask for, so it is
+        // kept in memory with the rest of this crop's answers.
+        await remember(outcomes: outcomes, regions: regions)
+        let surface = LiveTranslateOverlaySurface(placements: [], policy: policy, locale: locale)
+        let stateCopy = copySource(deferring: stillDeferred, from: surface)
+        let publication = await placed(regions: regions,
+                                       outcomes: outcomes,
+                                       policy: policy,
+                                       layout: layout,
+                                       framePixelSize: capture.framePixelSize,
+                                       stateCopy: stateCopy)
+        let card = LiveTranslateResultsCardSurface(publication: publication,
+                                                   stateCopy: stateCopy,
+                                                   emptyHint: surface.emptyHint)
+        return LiveTranslateFocusedCapture(image: capture.image,
+                                           framePixelSize: capture.framePixelSize,
+                                           pixelRect: capture.pixelRect,
+                                           publication: publication,
+                                           rows: card.rows,
+                                           deferredKeys: stillDeferred)
+    }
+
+    /// The card's state copy, with one addition: a row whose string the plan
+    /// was handed and did not answer says what a deferral is instead of
+    /// "translating…".
+    ///
+    /// The sentence is the feature's own rather than a new one — the surface's
+    /// copy for a result that has no translation, "translation isn't available
+    /// right now, showing the original text" — because "not available right
+    /// now" is exactly true of a string the next plan will carry, and because
+    /// this path may not spell a user-facing sentence of its own. The
+    /// **outcome** is untouched: the publication still reads `.pending`, so
+    /// nothing here settles a region that has not been answered.
+    private func copySource(deferring deferred: Set<String>,
+                            from surface: LiveTranslateOverlaySurface)
+        -> (TranslationResult) -> String? {
+        guard !deferred.isEmpty else { return surface.stateCopy(for:) }
+        return { result in
+            guard case .pending = result.outcome,
+                  deferred.contains(LabelTranslationCache.normalizationKey(
+                      text: result.text,
+                      targetLanguage: self.targetLanguage)) else {
+                return surface.stateCopy(for: result)
+            }
+            return surface.stateCopy(for: .degraded(originalText: result.text,
+                                                     reason: .noTierResolved))
+        }
     }
 
     // MARK: The device layers
@@ -243,11 +391,17 @@ struct LiveTranslateFocusCapture {
             let key = LabelTranslationCache.normalizationKey(text: region.text,
                                                              targetLanguage: targetLanguage)
             if let remembered = await memoryCache.lookup(key) {
-                outcomes[region.id] = Self.restating(remembered, for: region.text)
+                outcomes[region.id] = LiveTranslateCaptureSupport.restating(remembered,
+                                                                            for: region.text)
                 continue
             }
+            // The read is told this path may not write (review round 2, finding
+            // 8): a hit's LRU touch used to rewrite the whole encrypted payload
+            // — the first read of a stored key in a session — which is a write
+            // on the one path that promises the crop's contents stay in memory.
             guard case .success(let hit) = cache.lookup(text: region.text,
-                                                        targetLanguage: targetLanguage),
+                                                        targetLanguage: targetLanguage,
+                                                        persistingBookkeeping: false),
                   let hit else {
                 outcomes[region.id] = .pending(region.text)
                 continue
@@ -285,17 +439,16 @@ struct LiveTranslateFocusCapture {
                         outcomes: [TextRegionStabilizer.RegionIdentity: TranslationResult],
                         policy: LiveOverlayPlacement.Policy,
                         layout: LiveTranslateLayout,
-                        framePixelSize: CGSize) async -> LiveTranslatePublication {
-        let surface = LiveTranslateOverlaySurface(placements: [], policy: policy, locale: locale)
-        let placements = LiveOverlayPlacement.place(regions: regions,
-                                                    results: outcomes,
-                                                    containerSize: layout.containerSize,
-                                                    framePixelSize: framePixelSize,
-                                                    safeArea: layout.safeArea,
-                                                    occupiedRects: layout.occupiedRects,
-                                                    crop: .whole,
-                                                    policy: policy,
-                                                    stateCopy: surface.stateCopy(for:))
+                        framePixelSize: CGSize,
+                        stateCopy: ((TranslationResult) -> String?)? = nil)
+        async -> LiveTranslatePublication {
+        let placements = LiveTranslateCaptureSupport.placements(regions: regions,
+                                                                outcomes: outcomes,
+                                                                policy: policy,
+                                                                layout: layout,
+                                                                framePixelSize: framePixelSize,
+                                                                locale: locale,
+                                                                stateCopy: stateCopy)
         let sequence = await cycle.nextPublicationSequence()
         return LiveTranslatePublication(sequence: sequence,
                                         regions: regions,
@@ -325,20 +478,23 @@ struct LiveTranslateFocusCapture {
     func rePlaced(_ capture: LiveTranslateFocusedCapture,
                   layout: LiveTranslateLayout,
                   policy: LiveOverlayPlacement.Policy) async -> LiveTranslateFocusedCapture {
+        let surface = LiveTranslateOverlaySurface(placements: [], policy: policy, locale: locale)
+        let stateCopy = copySource(deferring: capture.deferredKeys, from: surface)
         let publication = await placed(regions: capture.publication.regions,
                                        outcomes: capture.publication.outcomes,
                                        policy: policy,
                                        layout: layout,
-                                       framePixelSize: capture.framePixelSize)
-        let surface = LiveTranslateOverlaySurface(placements: [], policy: policy, locale: locale)
+                                       framePixelSize: capture.framePixelSize,
+                                       stateCopy: stateCopy)
         let card = LiveTranslateResultsCardSurface(publication: publication,
-                                                   stateCopy: surface.stateCopy(for:),
+                                                   stateCopy: stateCopy,
                                                    emptyHint: surface.emptyHint)
         return LiveTranslateFocusedCapture(image: capture.image,
                                            framePixelSize: capture.framePixelSize,
                                            pixelRect: capture.pixelRect,
                                            publication: publication,
-                                           rows: card.rows)
+                                           rows: card.rows,
+                                           deferredKeys: capture.deferredKeys)
     }
 
     // MARK: The strings
@@ -364,13 +520,9 @@ struct LiveTranslateFocusCapture {
             // A string the splitter could not read at all is still a string
             // the recogniser saw: it is kept whole rather than dropped.
             for piece in (pieces.isEmpty ? [region.text] : pieces) {
-                regions.append(TextRegionStabilizer.StableTextRegion(
-                    id: TextRegionStabilizer.RegionIdentity(rawValue: identity),
-                    text: piece,
-                    normalizedText: LiveTranslateTextNormalization.normalized(piece),
-                    box: region.normalizedBox,
-                    detectedLanguage: region.detectedLanguage,
-                    confidence: region.confidence))
+                regions.append(LiveTranslateCaptureSupport.region(id: identity,
+                                                                  from: region,
+                                                                  text: piece))
                 identity += 1
             }
         }
@@ -405,21 +557,5 @@ struct LiveTranslateFocusCapture {
         let items = orderedKeys.compactMap { itemsByKey[$0] }
         let counts = regionIDsByKey.mapValues(\.count)
         return (items, counts, regionIDsByKey)
-    }
-
-    /// A cached answer re-stated onto the text it is being used for. The
-    /// pipeline's own rule (`LiveTranslationPipeline.restating`), applied here
-    /// because a cache key is a *normalized* string and the region's text is
-    /// the one the elder is looking at.
-    private static func restating(_ result: TranslationResult,
-                                  for text: String) -> TranslationResult {
-        switch result.outcome {
-        case .pending:
-            return .pending(text)
-        case .resolved(_, let translation, let tier):
-            return .resolved(originalText: text, translation: translation, tier: tier)
-        case .degraded(_, let reason):
-            return .degraded(originalText: text, reason: reason)
-        }
     }
 }

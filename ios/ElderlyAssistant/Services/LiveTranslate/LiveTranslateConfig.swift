@@ -1515,11 +1515,25 @@ struct LiveTranslateConfig: Equatable {
     /// Whether live camera translation may run **at all**, before anything else
     /// about it is asked.
     ///
-    /// **False, and that is the owner's directive** (2026-09-21): the feature
-    /// is opt-in from the Settings leaf like the cloud tier is, so an elder who
-    /// has never touched it gets a camera that behaves exactly as it did before
-    /// the feature shipped. The switch is what turns the overlay, the capture
-    /// button and the translation cascade on.
+    /// **True, and that is a merge-safety decision rather than a product one**
+    /// (review round 2, finding 1). The reader is the session's door
+    /// (`LiveTranslateSessionModel.start`), the host opens the surface
+    /// unconditionally, and nothing in production writes the key yet — so a
+    /// nominal default of `false` publishes a door that is closed with no copy
+    /// to explain it: the elder opens the feature, `start()` returns before
+    /// anything is built, and the surface falls to black. `true` is also
+    /// exactly what master shipped (the switch is this branch's, and master's
+    /// `start()` opens unconditionally), so a merge changes no device
+    /// behaviour: the feature runs, and the switch is the seam the Settings
+    /// leaf writes the moment it lands.
+    ///
+    /// **Workstream B owns the flip to opt-in**, and it is a copy-and-copy
+    /// decision this side cannot make: the moment the leaf lands the row, the
+    /// "why it is closed" surface and the spoken line that offers Settings,
+    /// this value (or the household's own stored answer) is what the door
+    /// reads. Until then the default is on and the switch is honoured in both
+    /// directions by anyone who writes it — `LiveTranslateSettings.setLiveTranslateEnabled`,
+    /// and the tests that pin the door.
     ///
     /// Three things this key is not, mirroring the cloud switch's own list:
     ///
@@ -1537,8 +1551,9 @@ struct LiveTranslateConfig: Equatable {
     /// A *default*, not the persisted state: `LiveTranslateSettings` owns the
     /// value the household chose, and this is the nominal value an absent key
     /// reads as — exactly the split `alwaysShowOriginalDefault` and
-    /// `geminiCloudEnabledDefault` use.
-    var liveTranslateEnabledDefault: Bool = false
+    /// `geminiCloudEnabledDefault` use. A stored `false` is an opt-out and
+    /// closes the door; an absent key is the nominal value above.
+    var liveTranslateEnabledDefault: Bool = true
 
     // MARK: Cache
 

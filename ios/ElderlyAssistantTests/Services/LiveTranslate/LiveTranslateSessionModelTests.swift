@@ -1097,14 +1097,15 @@ final class LiveTranslateSessionModelTests: XCTestCase {
 
     /// The switch's production reader: the session's own door. Nothing is
     /// built, nothing starts and nothing is asked of the camera while the
-    /// household has the feature off.
+    /// household has the feature off — and off is a **stored** answer now
+    /// (review round 2, finding 1), not the absent key.
     @MainActor
     func testTheSessionRefusesToOpenWhileTheFeatureSwitchIsOff() async throws {
-        // The key absent is the shipped state: a household that has never
-        // chosen has not opted in.
-        let harness = makeHarness(liveTranslateEnabled: nil)
+        // The opt-out, written by whoever the Settings leaf hands the choice
+        // to. An absent key is the other test below.
+        let harness = makeHarness(liveTranslateEnabled: false)
         XCTAssertFalse(harness.model.liveTranslateEnabled,
-                       "the model reads the setting, and an absent key is off")
+                       "the model reads the setting, and a stored false closes the door")
 
         await harness.model.start()
 
@@ -1125,6 +1126,26 @@ final class LiveTranslateSessionModelTests: XCTestCase {
         XCTAssertEqual(harness.model.phase, .running)
         XCTAssertEqual(harness.log.count(of: "camera.start"), 1,
                        "the camera starts once the feature is on")
+    }
+
+    /// The other half of the same door, and the merge-safety decision itself
+    /// (review round 2, finding 1): an **untouched** switch opens the session,
+    /// because the nominal default is what master shipped. This is also the
+    /// test that pins the getter's shape — a `defaults.bool(forKey:)` without
+    /// the presence check reads an absent key as `false` and would leave the
+    /// feature dark with no copy to explain it, which is the hazard the
+    /// default exists to avoid.
+    @MainActor
+    func testAnUntouchedFeatureSwitchOpensTheSession() async throws {
+        let harness = makeHarness(liveTranslateEnabled: nil)
+        XCTAssertTrue(harness.model.liveTranslateEnabled,
+                      "an absent key reads the config's nominal default, which is on")
+
+        await harness.model.start()
+
+        XCTAssertEqual(harness.model.phase, .running)
+        XCTAssertEqual(harness.log.count(of: "camera.start"), 1,
+                       "an untouched switch is not a closed door")
     }
 
     /// And the switch is the *door*, not an off-ramp: a session already open is
@@ -1294,12 +1315,131 @@ final class LiveTranslateSessionModelTests: XCTestCase {
                        "re-placing is placement: no second pass and no second answer")
     }
 
-    /// One tap on the focused path's own geometry: the box the elder pointed
-    /// at, with the pixel rect left to the model to derive.
+    // MARK: - The rect belongs to a frame (review round 2, finding 5)
+
+    /// A rect is a *place on a picture*: a rect measured against one frame and
+    /// cropped from another is a crop of a region nobody pointed at. The
+    /// session therefore crops the frame the rect was measured on — the
+    /// `measuredOn` seam the anchor's caller hands over — and not whatever the
+    /// camera has delivered since.
     @MainActor
-    private func tapFocused(_ harness: Harness) {
+    func testAFocusedReadCropsTheFrameItsRectWasMeasuredOn() async throws {
+        let harness = makeHarness(dictionary: [curatedText.lowercased(): curatedTranslation])
+        reportLayout(harness)
+        harness.engine.regions = [detected(curatedText)]
+        await harness.model.start()
+        try await deliverPass(harness)
+
+        // The frame the rect will be measured against, and then a later,
+        // differently-sized one: what `latestFrame` holds at the tap is no
+        // longer the frame the rect belongs to.
+        let anchored = try XCTUnwrap(harness.model.anchoredFrame)
+        try await deliverPass(harness, width: 640, height: 480)
+
+        tapFocused(harness, measuredOn: anchored)
+        await waitUntil("the focused read to pack its picture") {
+            harness.model.focusedCapture != nil
+        }
+
+        let capture = try XCTUnwrap(harness.model.focusedCapture)
+        XCTAssertEqual(capture.pixelRect,
+                       CGRect(x: 192, y: 108, width: 768, height: 108),
+                       "the box is measured on the frame the caller named, not on the "
+                       + "frame the camera delivered in the meantime (which would be 64x48)")
+    }
+
+    // MARK: - The answer to a prompt reaches the standing capture (review round 2, finding 3)
+
+    /// A focused read whose strings reached the consent prompt leaves its card
+    /// saying "translating…" — nothing else can be said, the ask is open. The
+    /// elder's answer releases the ask and the answers land in the ledger, and
+    /// the picture they are looking at is where they must appear: without the
+    /// re-pack the card stayed unanswerable and the only way to see the answer
+    /// was a second tap, which re-cropped and re-read the page for the same
+    /// ledger — the read paid for twice.
+    @MainActor
+    func testAnsweringThePromptRepacksTheStandingFocusedCapture() async throws {
+        // A device with no model installed, so the read's device stage is an
+        // answer and not a generation: what this scenario is about is where an
+        // answer goes once the question is answered.
+        //
+        // And the brain's clock is not this scenario's subject either
+        // (`brainAttemptMinInterval` is a pacing rule with its own tests): a
+        // capture the clock refuses is released, unasked, for a later plan —
+        // which is a different scenario's question, and one that would leave
+        // this test reading a card nothing had asked about.
+        let brain = RecordingBrain()
+        brain.unavailable = true
+        var config = LiveTranslateConfig.default
+        config.brainAttemptMinInterval = 0
+        let harness = makeHarness(consent: false,
+                                  configured: true,
+                                  transport: Self.respondingTransport(),
+                                  config: config,
+                                  brain: brain)
+        reportLayout(harness)
+        // The live picture carries nothing to read, so the one ask in this
+        // session — and so the one question the prompt is about — is the tap's.
+        harness.engine.regions = []
+        await harness.model.start()
+        try await deliverPass(harness)
+
+        // The tap reads a sentence-class string, which only the cloud can
+        // answer — and there is no consent yet, so the ask is held and the
+        // question is on screen.
+        harness.engine.regions = [detected(cloudText)]
+        tapFocused(harness)
+        await waitUntil("the focused read to pack its picture") {
+            harness.model.focusedCapture != nil
+        }
+        let held = try XCTUnwrap(harness.model.focusedCapture)
+        XCTAssertTrue(harness.model.consent.isPromptPresented,
+                      "the held ask is the question the elder is being asked")
+        XCTAssertEqual(Self.resolvedTranslations(in: held), [],
+                       "nothing is translated while the question is open")
+        XCTAssertTrue(held.publication.outcomes.values.contains { outcome in
+            if case .pending = outcome.outcome { return true }
+            return false
+        }, "and the card says so rather than claiming an answer")
+
+        // The elder answers. The answer releases the recorded ask, and the
+        // standing card renders it — no second tap, no second read.
+        let readsWhenHeld = harness.engine.recognizeCallCount
+        harness.model.grantCloudConsent()
+
+        await waitUntil("the released answer to reach the standing card") {
+            !Self.resolvedTranslations(in: harness.model.focusedCapture).isEmpty
+        }
+        let answered = try XCTUnwrap(harness.model.focusedCapture)
+        XCTAssertEqual(Self.resolvedTranslations(in: answered), ["ने:" + cloudText])
+        XCTAssertEqual(harness.transport.requestCount, 1,
+                       "the released ask went to the tier it was waiting on, once")
+        XCTAssertEqual(answered.pixelRect, held.pixelRect,
+                       "the answer is drawn onto the picture the elder pointed at")
+        XCTAssertEqual(harness.engine.recognizeCallCount, readsWhenHeld,
+                       "a render of an answer the session already paid for is not a second read")
+    }
+
+    /// The translations a packed capture is showing, source text aside — the
+    /// one thing these two scenarios read off a capture.
+    private static func resolvedTranslations(in capture: LiveTranslateFocusedCapture?)
+        -> [String] {
+        guard let capture else { return [] }
+        return capture.publication.outcomes.values.compactMap { result in
+            guard case .resolved(_, let translation, _) = result.outcome else { return nil }
+            return translation
+        }.sorted()
+    }
+
+    /// One tap on the focused path's own geometry: the box the elder pointed
+    /// at, with the pixel rect left to the model to derive **from the frame the
+    /// caller measured it on** — the anchored frame by default, exactly as the
+    /// live view hands it over.
+    @MainActor
+    private func tapFocused(_ harness: Harness, measuredOn frame: CameraFrame? = nil) {
         harness.model.translateFocusedRegion(
             box: NormalizedBox(xMin: 0.1, yMin: 0.1, xMax: 0.5, yMax: 0.2),
-            pixelRect: .null)
+            pixelRect: .null,
+            measuredOn: frame ?? harness.model.anchoredFrame)
     }
 }
