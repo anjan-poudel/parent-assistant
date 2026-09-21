@@ -238,6 +238,11 @@ protocol CloudProbeTier: Sendable {
     func resolve(items: [CloudTranslationTier.Item],
                  targetLanguage: AppLanguage,
                  cachePolicy: CloudTranslationTier.CachePolicy) async -> CloudTranslationTier.BatchResult
+extension CloudProbeTier {
+    func resolve(items: [CloudTranslationTier.Item],
+                 targetLanguage: AppLanguage) async -> CloudTranslationTier.BatchResult {
+        await resolve(items: items, targetLanguage: targetLanguage, cachePolicy: .persist)
+    }
 }
 
 extension CloudTranslationTier: CloudProbeTier {}
