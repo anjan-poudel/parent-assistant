@@ -465,6 +465,21 @@ struct HiddenSettingsSheet: View {
                     }
                     .buttonStyle(.plain)
 
+                    // [TRANSLATE-TEST] (2026-09-21) The translation
+                    // comparison screen — runs the two shipped translation
+                    // tiers against text you type or dictate and shows which
+                    // one answered and how long it took. Same reasoning as
+                    // the scheme tester above: a diagnostic, so it lives
+                    // here and never in a family tab. A closure link rather
+                    // than a `SettingsDestination`, following the row above.
+                    NavigationLink {
+                        TranslateTestView()
+                    } label: {
+                        SettingsRowChrome(icon: "character.bubble",
+                                          titleKey: "settings.translateTest.title")
+                    }
+                    .buttonStyle(.plain)
+
                     Text("settings.hidden.note")
                         .font(.system(size: DesignTokens.minCaptionPointSize))
                         .foregroundStyle(DesignTokens.textSecondary.opacity(0.8))

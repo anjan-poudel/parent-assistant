@@ -12527,6 +12527,195 @@
         }
       }
     },
+    "settings.translateTest.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Translation test" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "अनुवाद परीक्षण" } }
+      }
+    },
+    "settings.translateTest.note": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Developer tool. Runs the real translation engines — the cloud engine obeys the same consent gate as the camera." } },
+        "ne": { "stringUnit": { "state": "translated", "value": "विकासकर्ता उपकरण। यसले वास्तविक अनुवाद इन्जिन चलाउँछ — क्लाउड इन्जिनले क्यामेराको जस्तै सहमति ढोका पालन गर्छ।" } }
+      }
+    },
+    "settings.translateTest.engine.label": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Engine" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "इन्जिन" } }
+      }
+    },
+    "settings.translateTest.engine.local": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Local" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "लोकल" } }
+      }
+    },
+    "settings.translateTest.engine.gemini": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Gemini" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "जेमिनी" } }
+      }
+    },
+    "settings.translateTest.input.placeholder": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Type or dictate the text to translate" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "अनुवाद गर्न पाठ लेख्नुहोस् वा बोल्नुहोस्" } }
+      }
+    },
+    "settings.translateTest.mic.start": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Dictate" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "बोल्नुहोस्" } }
+      }
+    },
+    "settings.translateTest.mic.listening": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Stop dictating" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "बोल्न रोक्नुहोस्" } }
+      }
+    },
+    "settings.translateTest.mic.failed": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Could not hear that. Try again." } },
+        "ne": { "stringUnit": { "state": "translated", "value": "सुन्न सकिएन। फेरि प्रयास गर्नुहोस्।" } }
+      }
+    },
+    "settings.translateTest.mic.denied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Microphone access is off for this app. Turn it on in Settings to dictate." } },
+        "ne": { "stringUnit": { "state": "translated", "value": "यो एपको माइक्रोफोन पहुँच बन्द छ। बोल्न सेटिङमा गएर खोल्नुहोस्।" } }
+      }
+    },
+    "settings.translateTest.mic.busy": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The assistant was using the microphone. Try again." } },
+        "ne": { "stringUnit": { "state": "translated", "value": "सहायकले माइक्रोफोन प्रयोग गर्दै थियो। फेरि प्रयास गर्नुहोस्।" } }
+      }
+    },
+    "settings.translateTest.mic.audio": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The microphone is not available right now. Try again." } },
+        "ne": { "stringUnit": { "state": "translated", "value": "माइक्रोफोन अहिले उपलब्ध छैन। फेरि प्रयास गर्नुहोस्।" } }
+      }
+    },
+    "settings.translateTest.action.translate": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Translate" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "अनुवाद गर्नुहोस्" } }
+      }
+    },
+    "settings.translateTest.state.running": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Translating…" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "अनुवाद हुँदैछ…" } }
+      }
+    },
+    "settings.translateTest.result.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Translation" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "अनुवाद" } }
+      }
+    },
+    "settings.translateTest.result.degraded": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Not translated" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "अनुवाद भएन" } }
+      }
+    },
+    "settings.translateTest.result.tier": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Tier" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "तह" } }
+      }
+    },
+    "settings.translateTest.result.latency": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Latency (ms)" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "समय (ms)" } }
+      }
+    },
+    "settings.translateTest.result.reason": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Reason" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "कारण" } }
+      }
+    },
+    "settings.translateTest.result.origin": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Origin" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "स्रोत" } }
+      }
+    },
+    "settings.translateTest.result.tier1": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Tier 1" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "तह १" } }
+      }
+    },
+    "settings.translateTest.readiness.checking": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Checking…" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "जाँच हुँदैछ…" } }
+      }
+    },
+    "settings.translateTest.readiness.ready": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Ready." } },
+        "ne": { "stringUnit": { "state": "translated", "value": "तयार।" } }
+      }
+    },
+    "settings.translateTest.readiness.modelMissing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "No translation model is installed on this device." } },
+        "ne": { "stringUnit": { "state": "translated", "value": "यो यन्त्रमा अनुवाद मोडेल स्थापना गरिएको छैन।" } }
+      }
+    },
+    "settings.translateTest.readiness.providerKeyMissing": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "No Gemini key is configured on this device." } },
+        "ne": { "stringUnit": { "state": "translated", "value": "यो यन्त्रमा जेमिनी कुञ्जी मिलाइएको छैन।" } }
+      }
+    },
+    "settings.translateTest.readiness.cloudDisabled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The cloud translation switch is off in Settings." } },
+        "ne": { "stringUnit": { "state": "translated", "value": "सेटिङमा क्लाउड अनुवाद स्विच बन्द छ।" } }
+      }
+    },
+    "settings.translateTest.install.section": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Translation model" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "अनुवाद मोडेल" } }
+      }
+    },
     "settings.schemeProbe.title": {
       "extractionState": "manual",
       "localizations": {
