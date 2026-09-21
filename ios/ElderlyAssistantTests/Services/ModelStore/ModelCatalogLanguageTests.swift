@@ -117,19 +117,18 @@ final class ModelCatalogLanguageTests: XCTestCase {
     /// catalog's own `displayName` verbatim; a row that drifted from it
     /// would read differently in Settings than in the catalog's docs.
     func testTheTranslationRowIsNamedInBothLanguages() {
-        // Two entries need copy, not one: a translation row that is offered,
-        // and a superseded artifact a device that upgraded still holds — the
+        // Two entries need copy, not one: the translation row that is OFFERED,
+        // and the superseded artifact a device that upgraded still holds — the
         // installed-hidden row renders beside the new one, and the names must
         // read as different rows.
         //
-        // [COPY OWED] As of the round-4 swap this test names the DEMOTED Q5
-        // and the superseded round-2b Q8 rather than the offered head: the
-        // round-4 Q6_K and Q8_0 entries need `model.name.<id>` rows in the
-        // string table, and the string table is outside this workstream's
-        // scope (Services-only). Until that copy lands the offered row falls
-        // back to its L10n key. The mechanism this test pins is unchanged —
-        // it just currently exercises the two entries whose copy exists.
-        let entries = [ModelCatalog.nmtEnNeQwen17bR4Q5, ModelCatalog.nmtEnNeQwen17bR2bQ8]
+        // The round-4 Q6_K's `model.name.<id>` row landed with the swap
+        // (2026-09-21), so the offered head is named here rather than the
+        // demoted Q5 the previous revision had to fall back to; the Q5 is
+        // still pinned as the second row because a round-4 tester's device
+        // holds it and renders it. Both strings are the catalog's own
+        // `displayName` verbatim, in both shipped languages.
+        let entries = [ModelCatalog.nmtEnNeQwen17bR4Q6, ModelCatalog.nmtEnNeQwen17bR4Q5]
             .compactMap { ModelCatalog.entry(for: $0) }
         XCTAssertEqual(entries.count, 2, "both translation entries resolve")
         let en = Locale(identifier: "en")
