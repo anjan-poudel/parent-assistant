@@ -2030,6 +2030,46 @@ final class AppCoordinator: ObservableObject {
             observabilityBus: observabilityBus,
             makeDependencies: { [weak self] locale in
                 self?.makeLiveTranslateDependencies(locale: locale)
+            },
+            // [MASTER-SWITCH] (Workstream B) The Settings leaf, for the one
+            // path that needs it: the refusal. Built **here** rather than in
+            // the plugin because the leaf draws the app's own consent
+            // controller, and a plugin that minted a second one would be a
+            // second consent surface to keep honest.
+            //
+            // The main-queue hop is part of the seam's contract exactly as it
+            // is for `AppLauncherPlugin` above: the router dispatches plugins
+            // inside a `Task`, so `handle` can run off the main thread, while
+            // `liveTranslateConsentController()` and the leaf's own
+            // `@Published` state are main-confined. The view must come back
+            // synchronously, so this is a sync hop rather than an async one.
+            //
+            // `nil` when the coordinator is gone: the app is tearing down and
+            // nothing will be presented. The plugin turns that into the
+            // shipped apology rather than an empty screen (see
+            // `LiveTranslatePlugin.disabledRefusal`).
+            //
+            // The language is not read here: the leaf draws the controller's
+            // own locale, so the factory's argument is deliberately ignored
+            // rather than a second source of the same truth.
+            makeSettingsView: { [weak self] _ in
+                // `assumeIsolated`, not a plain call: this closure is
+                // nonisolated, while the consent controller is main-confined.
+                // Both branches below are on the main thread **by
+                // construction** — the direct one by the check, the dispatched
+                // one because `DispatchQueue.main.sync` runs there — so the
+                // assumption is made exactly where it holds, and a future
+                // caller who breaks that gets a trap rather than a data race.
+                let buildOnMain = { [weak self] () -> AnyView? in
+                    MainActor.assumeIsolated {
+                        guard let self else { return nil }
+                        return AnyView(LiveTranslateConsentSettingsView(
+                            controller: self.liveTranslateConsentController(),
+                            settings: LiveTranslateSettings()))
+                    }
+                }
+                return Thread.isMainThread ? buildOnMain()
+                                           : DispatchQueue.main.sync(execute: buildOnMain)
             }))
         // [APP-LAUNCHER] (2026-09-16) "क्यामेरा खोल" / "open WhatsApp":
         // the plugin resolves the entity against the catalog and asks this
@@ -2284,6 +2324,35 @@ final class AppCoordinator: ObservableObject {
                 metadata: [:]
             ))
             speak(text: L10n.str(LiveTranslatePlugin.unavailableKey, locale: locale))
+            return
+        }
+        // **[MASTER-SWITCH] The household's switch, before anything is built**
+        // (Workstream B, owner directive 2026-09-21). The tile is the one entry
+        // that owns its own speaking, so it cannot read the line off a
+        // `PluginResult` — it asks the plugin for the refusal instead, which is
+        // the *same* refusal the voice entry gives, from the same method. That
+        // is what makes "the two entries cannot refuse differently" true
+        // rather than intended.
+        //
+        // A refusal, not a failure: someone chose this, so the observability
+        // event is the plugin's own disabled type. Ordered before `tileView`
+        // because a feature that is off must not assemble a capture session,
+        // a detector or a client on its way to saying so (NFR-LCT-012).
+        guard plugin.isEnabled else {
+            guard let refusal = plugin.disabledRefusal(locale: locale) else {
+                observabilityBus.emit(ObservabilityEvent(
+                    component: "plugin_live_translate",
+                    eventType: "live_translate_open_failed",
+                    durationMs: nil,
+                    outcome: "failure",
+                    errorCode: "settings_view_unavailable",
+                    metadata: [:]
+                ))
+                speak(text: L10n.str(LiveTranslatePlugin.unavailableKey, locale: locale))
+                return
+            }
+            speak(text: refusal.spoken)
+            presentPluginView(refusal.view)
             return
         }
         guard let view = plugin.tileView(locale: locale) else {

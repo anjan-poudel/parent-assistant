@@ -81,6 +81,16 @@ final class LiveTranslationFocusedModeTests: XCTestCase {
     @MainActor
     private func makeHarness(brainAnswers: [String: String] = [:],
                              focusMaxBatchCalls: Int? = nil,
+                             /// The brain's own pacing interval. The config
+                             /// this suite builds on is **unpaced**
+                             /// (`brainAttemptMinInterval == 0`), which is what
+                             /// most scenarios want: a second plan is not
+                             /// refused for having run a millisecond after the
+                             /// first. A scenario about the *hold* is the one
+                             /// that sets a real interval — with zero, a closed
+                             /// clock cannot be arranged at all, because
+                             /// `0 >= 0` is always an open one.
+                             brainAttemptMinInterval: TimeInterval? = nil,
                              unreachable: Bool = false,
                              /// The household's consent state at build time. A
                              /// scenario about the prompt closes it, so the
@@ -90,6 +100,7 @@ final class LiveTranslationFocusedModeTests: XCTestCase {
                              now: @escaping () -> Date = Date.init) -> Harness {
         var config = LiveTranslationPipelineTests.unpacedDispatchConfig()
         if let focusMaxBatchCalls { config.focusMaxBatchCalls = focusMaxBatchCalls }
+        if let brainAttemptMinInterval { config.brainAttemptMinInterval = brainAttemptMinInterval }
         let bus = LiveTranslateSanitisingBus()
         let storage = LabelTranslationCacheTestStorage()
         let configStore = GeminiConfigStore(storage: storage)
@@ -236,7 +247,9 @@ final class LiveTranslationFocusedModeTests: XCTestCase {
         let held = await capped.pipeline.resolveFocused([item("r1", askedText)],
                                                         regionCounts: [:])
 
-        XCTAssertNil(held, "a plan the cap held answers nothing")
+        XCTAssertEqual(held?.isEmpty, true,
+                       "a plan the cap held answers nothing — an empty result, which is the "
+                       + "caller's 'not right now' (see the clock test below)")
         XCTAssertTrue(capped.brain.calls.isEmpty, "no generation was paid")
         XCTAssertEqual(capped.transport.requestCount, 0, "and nothing left the device")
     }
@@ -391,7 +404,58 @@ final class LiveTranslationFocusedModeTests: XCTestCase {
 
         XCTAssertEqual(narrowed.brain.calls.count, 1, "the device's one batch was spent")
         XCTAssertEqual(narrowed.transport.requestCount, 0, "the cloud's batch was the one held back")
-        XCTAssertNil(held, "a plan the cap held answers nothing and settles nothing")
+        XCTAssertEqual(held?.isEmpty, true,
+                       "a plan the cap held answers nothing and settles nothing")
+    }
+
+    /// **"Nothing" is two different answers, and the caller that waits has to
+    /// tell them apart** (Workstream B, the clock hold).
+    ///
+    /// A plan whose every string was *released* — the clock held them, or the
+    /// capture's cap did — has told its caller "not right now", and the only
+    /// useful thing to do with that is wait for the clock and ask again. A plan
+    /// the elder is being *asked about* has said the opposite: the answer is
+    /// coming, so there is nothing to wait for and nothing to defer. Both plans
+    /// answer nothing, and while the two were one `nil` a focused read whose
+    /// single string the clock held looked exactly like an open prompt — the
+    /// session deferred nothing, waited for nothing, and the card said
+    /// "translating…" for the rest of the picture's life. That was the stall the
+    /// hold exists to end, so the two are separate results here: an empty
+    /// dictionary for a release, `nil` for a question.
+    @MainActor
+    func testAPlanTheClockHeldIsAnEmptyResultAndAnOpenPromptIsNil() async throws {
+        // One date for the whole scenario: the interval the plan was told about
+        // never elapses, so "the clock is closed" is a fact of the fixture
+        // rather than of how long the test took.
+        let frozen = Date(timeIntervalSinceReferenceDate: 0)
+        let clocked = makeHarness(brainAnswers: [askedText: answer],
+                                  brainAttemptMinInterval: 30,
+                                  unreachable: true,
+                                  now: { frozen })
+        // A plan pays for a generation, and paying is what stamps the clock.
+        let settled = await clocked.pipeline.resolveFrozen([item("r1", askedText)],
+                                                           regionCounts: [:])
+        XCTAssertEqual(try XCTUnwrap(settled?["r1"]).sourceTier, .onDeviceBrain,
+                       "the device answered, which is what it costs to stamp the clock")
+        XCTAssertEqual(clocked.brain.calls.count, 1)
+
+        // A *different* string, so nothing about this read was already asked
+        // for: the clock is the only thing that can release it.
+        let held = await clocked.pipeline.resolveFocused([item("r2", askedText)],
+                                                         regionCounts: [:])
+        XCTAssertEqual(held?.isEmpty, true,
+                       "a plan the clock held answers nothing — and says so by answering "
+                       + "nothing, rather than by looking like a question")
+        XCTAssertEqual(clocked.brain.calls.count, 1, "and pays for nothing")
+
+        // The prompt, the other way to answer nothing: the household has not
+        // consented, so the gate raises the elder's question over this string.
+        let prompted = makeHarness(brainAnswers: [:], consent: false)
+        let asked = await prompted.pipeline.resolveFocused([item("r1", askedText)],
+                                                           regionCounts: [:])
+        XCTAssertNil(asked,
+                     "the elder is being asked: nothing may be applied, and nothing is "
+                     + "deferred — the answer is coming, so there is nothing to wait for")
     }
 
     // MARK: - The persisted layer, read

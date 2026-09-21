@@ -95,6 +95,22 @@ protocol LiveTranslateFocusedCycle: AnyObject {
     func settledAnswers(for items: [CloudTranslationTier.Item])
         async -> [String: TranslationResult]
     func nextPublicationSequence() async -> Int
+    /// How long the brain's clock still holds a generation back — zero when it
+    /// is already open (Workstream B, the clock hold).
+    ///
+    /// The focused path needs the *number* and not the verdict, because the
+    /// plan answers "not now" by deferring the strings: the capture then holds
+    /// rows saying "not right now" until someone plans them again, and the plan
+    /// will not be started by the picture standing still. So the caller that
+    /// was deferred asks how long, waits exactly that long off the same clock
+    /// the plan reads, and asks again — which is `LiveTranslateFocusCapture
+    /// .reDriven(_:layout:policy:)`.
+    ///
+    /// `async` on the protocol because the plan is an actor: the value is read
+    /// on the injected clock (`LiveTranslationPipeline.now`) rather than
+    /// `Date()`, so a test drives the wait to zero instead of sleeping through
+    /// it.
+    func brainClockRemaining() async -> TimeInterval
 }
 
 extension LiveTranslationPipeline: LiveTranslateFocusedCycle {}
@@ -346,6 +362,54 @@ struct LiveTranslateFocusCapture {
                                            publication: publication,
                                            rows: card.rows,
                                            deferredKeys: stillDeferred)
+    }
+
+    /// The standing capture **asked again** — the clock hold's way out
+    /// (Workstream B, review finding 5).
+    ///
+    /// A crop read while the brain's clock was closed was told "not now": the
+    /// plan released its strings, the capture marked them deferred, and the card
+    /// says so. Nothing was going to ask again. The live tick behind the crop
+    /// plans the *live* regions, not this crop's — they are different keys on a
+    /// different picture — so the crop's rows sat on "not right now" for as long
+    /// as the picture was on screen, which is a stall with a polite sentence on
+    /// it.
+    ///
+    /// This is the ask. The caller has already waited out the clock reading
+    /// `brainClockRemaining()`; this call does what `capture(in:pixelRect:layout:
+    /// policy:)` does with the strings, minus the crop and the pass — the same
+    /// pending set, the same plan, the same `.focused` mode — and then re-packs
+    /// through `updated(_:layout:policy:)`, so the merge, the memory write and
+    /// the placement are the one implementation rather than a second that could
+    /// disagree with it.
+    ///
+    /// - Returns: the re-packed capture, or `nil` when nothing moved — a plan
+    ///   that settled nothing (the clock was open but the tiers had nothing
+    ///   new), or a capture with nothing left pending. The caller then keeps the
+    ///   picture it has, exactly as the re-pack's own contract says.
+    func reDriven(_ capture: LiveTranslateFocusedCapture,
+                  layout: LiveTranslateLayout,
+                  policy: LiveOverlayPlacement.Policy) async -> LiveTranslateFocusedCapture? {
+        let regions = capture.publication.regions
+        let pendingItems = Self.items(for: regions,
+                                      outcomes: capture.publication.outcomes,
+                                      targetLanguage: targetLanguage)
+        guard !pendingItems.items.isEmpty else { return nil }
+        // The one thing `updated` deliberately does not do: start a plan. A
+        // `nil` answer (the consent question is open, or the session is gone)
+        // leaves the ledger alone, and the re-pack below then finds nothing
+        // moved and returns `nil` — the picture stays as it is, and the
+        // answer's own path (`resumeInterruptedAsks`) is the one that renders
+        // it.
+        _ = await cycle.resolveFocused(pendingItems.items,
+                                       regionCounts: pendingItems.regionCounts)
+        return await updated(capture, layout: layout, policy: policy)
+    }
+
+    /// The plan's clock, read through this path so a caller holding the path
+    /// does not also have to hold the cycle.
+    func brainClockRemaining() async -> TimeInterval {
+        await cycle.brainClockRemaining()
     }
 
     /// The card's state copy, with one addition: a row whose string the plan

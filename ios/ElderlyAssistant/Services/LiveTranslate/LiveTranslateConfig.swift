@@ -1654,5 +1654,31 @@ struct LiveTranslateConfig: Equatable {
     /// the same meaning and survives the bus intact.
     var disclosureVersion: String = "livetranslate.disclosure.16sep2026.r1"
 
+    // MARK: The focused read (Workstream B)
+
+    /// How much larger than its aspect-fit size the focused read's crop may be
+    /// drawn, as a factor, to buy the translation panel its room.
+    ///
+    /// A different parameter from `inPlaceMaxGrowth` although both are 1.4
+    /// today, and deliberately not the same field: that one bounds how far a
+    /// region's box may grow past the printed text it replaces (a placement
+    /// rule), this one bounds how far the whole picture may be blown up so a
+    /// panel under it can show a longer answer (a layout rule). Two rules that
+    /// happen to share a number are still two rules — sharing the field would
+    /// make a later change to one silently move the other.
+    ///
+    /// A ceiling, not an entitlement: growth is taken only as far as the
+    /// panel's content needs (see `LiveTranslateFocusLayout.resolve`).
+    var focusImageMaxGrowth: Double = 1.4
+
+    /// The fraction of the frame the centre box covers when the elder says
+    /// "translate here" without having pointed at anything: the middle half of
+    /// each axis. Wide enough to hold the sign, label or screen a phone is
+    /// being aimed at, narrow enough that it is a *region* rather than the
+    /// whole picture — which is what keeps the spoken focus a read and not a
+    /// snapshot. A fraction of the frame, not a duration: its 0.25 is its own,
+    /// and is not `ocrSampleInterval`'s.
+    var spokenFocusBoxInset: Double = 0.25
+
     static let `default` = LiveTranslateConfig()
 }

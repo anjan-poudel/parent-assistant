@@ -18,8 +18,9 @@ final class LiveTranslateCommandParserTests: XCTestCase {
     private let english = Locale(identifier: "en")
     private let nepali = Locale(identifier: "ne-NP")
 
-    /// The C12 vocabulary as the String Catalog holds it: six phrases over
-    /// five commands (the toggle has one phrase per state).
+    /// The C12 vocabulary as the String Catalog holds it: seven phrases over
+    /// six commands (the toggle has one phrase per state), the seventh being
+    /// Workstream B's focus command.
     private let phrases: [(key: String, command: LiveTranslateCommand, en: String, ne: String)] = [
         ("livetranslate.command.readAll", .readAll,
          "read this to me", "यो पढेर सुनाउनुहोस्"),
@@ -32,7 +33,11 @@ final class LiveTranslateCommandParserTests: XCTestCase {
         ("livetranslate.command.repeatLast", .repeatLast,
          "say that again", "फेरि भन्नुहोस्"),
         ("livetranslate.command.close", .close,
-         "close translation", "अनुवाद बन्द गर्नुहोस्")
+         "close translation", "अनुवाद बन्द गर्नुहोस्"),
+        // Workstream B: the focus mode's spoken half, the same action the
+        // anchored box's Translate button performs.
+        ("livetranslate.command.translateHere", .translateHere,
+         "translate here", "यहाँ अनुवाद गर्नुहोस्")
     ]
 
     private let parserFile = "ElderlyAssistant/Services/LiveTranslate/LiveTranslateCommandParser.swift"
@@ -101,12 +106,13 @@ final class LiveTranslateCommandParserTests: XCTestCase {
         }
     }
 
-    /// Six phrases, five commands: `set-show-original` is one command with
+    /// Seven phrases, six commands: `set-show-original` is one command with
     /// two phrases, which is what makes "on" and "off" unambiguous.
-    func testTheVocabularyIsFiveCommandsOverSixPhrases() {
+    func testTheVocabularyIsSixCommandsOverSevenPhrases() {
         XCTAssertEqual(LiveTranslateCommand.allCommands.count, phrases.count)
-        XCTAssertEqual(Set(LiveTranslateCommand.allCommands.map(caseName)).count, 5,
-                       "C12's vocabulary is read-all, stop, set-show-original, repeat-last, close")
+        XCTAssertEqual(Set(LiveTranslateCommand.allCommands.map(caseName)).count, 6,
+                       "C12's vocabulary plus the focus read: read-all, stop, "
+                       + "set-show-original, repeat-last, close, translate-here")
     }
 
     /// "No other action is invoked": of C12's five commands only
@@ -129,8 +135,8 @@ final class LiveTranslateCommandParserTests: XCTestCase {
             }
         }
 
-        // Twelve utterances (six phrases × two languages), four of which are
-        // the toggle — and nothing else in the vocabulary writes.
+        // Fourteen utterances (seven phrases × two languages), four of which
+        // are the toggle — and nothing else in the vocabulary writes.
         XCTAssertEqual(writers.sorted(),
                        ["livetranslate.command.hideOriginal", "livetranslate.command.hideOriginal",
                         "livetranslate.command.showOriginal", "livetranslate.command.showOriginal"].sorted(),
@@ -295,11 +301,11 @@ final class LiveTranslateCommandParserTests: XCTestCase {
         }
     }
 
-    func testTheTableReadsExactlyTheSixDeclaredCommandKeys() {
+    func testTheTableReadsExactlyTheSevenDeclaredCommandKeys() {
         XCTAssertEqual(LiveTranslateCommandPhraseTable.catalogKeys.map(\.key).sorted(),
                        phrases.map(\.key).sorted(),
                        "a command whose phrase is not catalogued cannot be localised")
-        XCTAssertEqual(Set(LiveTranslateCommandPhraseTable.catalogKeys.map { String(describing: $0.command) }).count, 6,
+        XCTAssertEqual(Set(LiveTranslateCommandPhraseTable.catalogKeys.map { String(describing: $0.command) }).count, 7,
                        "each key must mean its own command value, including the toggle's two states")
     }
 
@@ -550,6 +556,10 @@ final class LiveTranslateCommandParserTests: XCTestCase {
         XCTAssertNil(LiveTranslateCommand.close.speechMode)
         XCTAssertNil(LiveTranslateCommand.setShowOriginal(true).speechMode)
         XCTAssertNil(LiveTranslateCommand.setShowOriginal(false).speechMode)
+        // "translate here" speaks nothing *as a command*: its answer is a
+        // picture with a card under it, so the vocabulary gains a sixth
+        // command without gaining a third speaker.
+        XCTAssertNil(LiveTranslateCommand.translateHere.speechMode)
     }
 
     // MARK: Helpers

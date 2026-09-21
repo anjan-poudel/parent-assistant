@@ -7917,6 +7917,23 @@
         }
       }
     },
+    "livetranslate.command.translateHere": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "translate here"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यहाँ अनुवाद गर्नुहोस्"
+          }
+        }
+      }
+    },
     "livetranslate.consent.body": {
       "extractionState": "manual",
       "localizations": {
@@ -8087,6 +8104,23 @@
         }
       }
     },
+    "livetranslate.disabled": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Live translation is off. I've opened its settings."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "लाइभ अनुवाद बन्द छ। यसको सेटिङ खोलेको छु।"
+          }
+        }
+      }
+    },
     "livetranslate.empty.hint": {
       "extractionState": "manual",
       "localizations": {
@@ -8100,6 +8134,57 @@
           "stringUnit": {
             "state": "translated",
             "value": "अहिले कुनै अक्षर देखिएन। क्यामेरा साइनबोर्ड, लेबल वा स्क्रिनतिर फर्काउनुहोस्।"
+          }
+        }
+      }
+    },
+    "livetranslate.focus.back": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Back to camera"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "क्यामेरामा फर्कनुहोस्"
+          }
+        }
+      }
+    },
+    "livetranslate.focus.scrolls": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "More below"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "तल थप छ"
+          }
+        }
+      }
+    },
+    "livetranslate.focus.translate": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Translate this"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अनुवाद गर्नुहोस्"
           }
         }
       }
@@ -8134,6 +8219,40 @@
           "stringUnit": {
             "state": "translated",
             "value": "अनलाइन अनुवाद प्रयोग गर्नुहोस् (Gemini)"
+          }
+        }
+      }
+    },
+    "livetranslate.settings.enabled.note": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "When this is off the camera does not translate. You can turn it back on here."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "यो बन्द हुँदा क्यामेराले अनुवाद गर्दैन। यहीँबाट फेरि खोल्न सकिन्छ।"
+          }
+        }
+      }
+    },
+    "livetranslate.settings.enabled.title": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Use live translation"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "लाइभ अनुवाद प्रयोग गर्नुहोस्"
           }
         }
       }

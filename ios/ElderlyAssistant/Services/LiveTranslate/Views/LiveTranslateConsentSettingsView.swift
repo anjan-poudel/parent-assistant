@@ -31,6 +31,18 @@ import SwiftUI
 // grant is still required and still enforced per attempt (AM-1, OD-13), and
 // turning the switch off neither withdraws a recorded grant nor creates one
 // when it is turned back on.
+//
+// **The feature's own master switch sits above both of them** (Workstream B,
+// owner directive 2026-09-21). It is the outermost decision on the page — the
+// feature does not open at all while it is off, so nothing below it matters in
+// that state — and it is drawn *first* for a reason the refusal depends on:
+// when the feature is asked for while it is off, the elder hears
+// `livetranslate.disabled` and lands here. A promise to open "its settings" is
+// only honest if the switch that refused them is the first thing they see.
+//
+// It writes through `LiveTranslateSettings.setLiveTranslateEnabled`, the one
+// setter the session model's own `setLiveTranslateEnabled` also calls, so the
+// leaf and a running session cannot disagree about it.
 
 /// The row's pure surface: the switch's current value and the language its
 /// copy is resolved in. Built by the session model (for the session's own
@@ -63,14 +75,47 @@ struct GeminiCloudToggleSurface: Equatable {
     var note: String { L10n.str(Self.noteKey, locale: locale) }
 }
 
-/// The elder-facing row: a standard switch with a label, an explanation, and
-/// the app's own token sizes. It draws a switch rather than the overlay's
-/// labelled button because it lives on a Settings page among other switches
-/// (`CalendarSettingsView`'s rows are the template), and it carries the
-/// app's minimum tap target in both directions.
-struct GeminiCloudToggleRow: View {
+/// The feature's master switch as its row renders it (Workstream B, owner
+/// directive 2026-09-21) — the twin of `GeminiCloudToggleSurface`, and built
+/// the same way for the same reason: the row draws the value and the language,
+/// and the sentence lives in the catalog in both languages.
+struct LiveTranslateEnabledToggleSurface: Equatable {
 
-    let surface: GeminiCloudToggleSurface
+    /// The row's title. Deliberately the same *shape* as the cloud row's
+    /// ("Use online translation (Gemini)"): the leaf now carries two switches
+    /// and they must read as one family rather than as two unrelated controls.
+    static let titleKey = "livetranslate.settings.enabled.title"
+    /// The one-line explanation under the row: what "off" actually does, and
+    /// where it is undone. The second sentence is the promise the refusal
+    /// keeps — the leaf this line sits on is what opens when the feature is
+    /// asked for while the switch is off.
+    static let noteKey = "livetranslate.settings.enabled.note"
+
+    let isOn: Bool
+    let locale: Locale
+
+    var title: String { L10n.str(Self.titleKey, locale: locale) }
+    var note: String { L10n.str(Self.noteKey, locale: locale) }
+}
+
+/// The elder-facing switch row: a label, an explanation, and the app's own
+/// token sizes. It draws a switch rather than the overlay's labelled button
+/// because it lives on a Settings page among other switches
+/// (`CalendarSettingsView`'s rows are the template), and it carries the app's
+/// minimum tap target in both directions.
+///
+/// **One row for every switch on this leaf.** The master switch and the cloud
+/// switch are the same control with different words, and a second copy of this
+/// layout would be a second place for the token sizes, the identifier shape and
+/// the type floors to drift — the failure the leaf's own copy notes warn about.
+/// The switch's *identifier* is its title's key, so no call site mints a second
+/// identifier for a control the tests need to find.
+struct LiveTranslateToggleRow: View {
+
+    let title: String
+    let note: String
+    /// The accessibility identifier, spelled by the surface that owns the key.
+    let identifier: String
     /// The value the elder is asking for — an explicit set, so the write says
     /// what the tap meant even if the surface it was drawn from is a frame
     /// old, exactly as the overlay's display toggle does it.
@@ -79,16 +124,16 @@ struct GeminiCloudToggleRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: DesignTokens.interElementSpacing / 2) {
             Toggle(isOn: isOn) {
-                Text(surface.title)
+                Text(title)
                     .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .semibold))
                     .foregroundColor(DesignTokens.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .tint(DesignTokens.accent)
             .frame(minHeight: DesignTokens.minTapTargetSize)
-            .accessibilityIdentifier(GeminiCloudToggleSurface.titleKey)
+            .accessibilityIdentifier(identifier)
 
-            Text(surface.note)
+            Text(note)
                 .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize))
                 .foregroundColor(DesignTokens.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -97,6 +142,22 @@ struct GeminiCloudToggleRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(DesignTokens.card)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+}
+
+/// The cloud tier's row, as it has always been — now the shared row with the
+/// cloud surface's own words. Kept as its own type so every existing call site
+/// and test reads unchanged.
+struct GeminiCloudToggleRow: View {
+
+    let surface: GeminiCloudToggleSurface
+    let isOn: Binding<Bool>
+
+    var body: some View {
+        LiveTranslateToggleRow(title: surface.title,
+                               note: surface.note,
+                               identifier: GeminiCloudToggleSurface.titleKey,
+                               isOn: isOn)
     }
 }
 
@@ -119,6 +180,10 @@ struct LiveTranslateConsentSettingsView: View {
     /// answer and this is only the copy the screen is drawing.
     @State private var geminiCloudEnabled = false
 
+    /// The master switch's mirror, for the same reason and with the same rule:
+    /// the mirror follows the write, and the store is the one answer.
+    @State private var liveTranslateEnabled = true
+
     init(controller: ConsentPromptController,
          settings: LiveTranslateSettings = LiveTranslateSettings()) {
         self.controller = controller
@@ -128,6 +193,23 @@ struct LiveTranslateConsentSettingsView: View {
     var body: some View {
         LeafScreen(titleKey: "settings.livetranslate.title") {
             VStack(spacing: 16) {
+                // **The master switch is drawn first on purpose.** An elder who
+                // reached this leaf because the feature refused — the spoken
+                // line promises "I've opened its settings" — must find the
+                // switch that refused them without scrolling past anything
+                // else. It is also the outermost decision on the page: nothing
+                // below it matters while it is off.
+                let masterSwitch = LiveTranslateEnabledToggleSurface(isOn: liveTranslateEnabled,
+                                                                     locale: locale)
+                LiveTranslateToggleRow(title: masterSwitch.title,
+                                       note: masterSwitch.note,
+                                       identifier: LiveTranslateEnabledToggleSurface.titleKey,
+                                       isOn: Binding(get: { liveTranslateEnabled },
+                                                     set: { newValue in
+                                                         liveTranslateEnabled = newValue
+                                                         settings.setLiveTranslateEnabled(newValue)
+                                                     }))
+
                 ConsentControlView(surface: controller.controlSurface,
                                    onGrant: { controller.grant() },
                                    onDecline: { controller.decline() },
@@ -146,12 +228,13 @@ struct LiveTranslateConsentSettingsView: View {
         .onAppear {
             // The language may have changed since the controller was built,
             // and the decision may have been made on another surface: both
-            // are re-read from source rather than remembered. The switch is
+            // are re-read from source rather than remembered. The switches are
             // re-read from the store for the same reason — a value the elder
             // changed on a previous visit is the value this visit must show.
             controller.updateLocale(locale)
             controller.refreshControl()
             geminiCloudEnabled = settings.geminiCloudEnabled
+            liveTranslateEnabled = settings.liveTranslateEnabled
         }
     }
 }

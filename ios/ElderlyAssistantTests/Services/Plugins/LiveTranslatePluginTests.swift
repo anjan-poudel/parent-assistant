@@ -23,7 +23,11 @@ import XCTest
 ///     the factory is not consulted by construction, registration, prompt
 ///     composition or the view-less results;
 ///  7. a session that cannot be assembled is spoken, never silent;
-///  8. the surface's copy and floors hold in the active language.
+///  8. **the feature's master switch refuses both entries the same way**
+///     (Workstream B): the same sentence, the same Settings leaf, nothing
+///     assembled — and the sentence is only sayable when the leaf is really
+///     there;
+///  9. the surface's copy and floors hold in the active language.
 ///
 /// The session itself is the shared harness composition
 /// (`LiveTranslateSessionTestHarness.swift`), so the sessions the plugin hands
@@ -70,12 +74,41 @@ final class LiveTranslatePluginTests: XCTestCase {
         }
     }
 
+    /// The leaf factory, counted and switchable — the app layer's half of the
+    /// refusal (Workstream B). `available` false is the teardown case the
+    /// hosting closure's weak capture leaves open: no leaf, so no promise.
+    final class LeafFactorySpy {
+        private(set) var calls = 0
+        private(set) var locales: [Locale] = []
+        var available = true
+
+        func make(_ locale: Locale) -> AnyView? {
+            calls += 1
+            locales.append(locale)
+            return available ? AnyView(StubSettingsLeaf()) : nil
+        }
+    }
+
+    /// A stand-in for the Settings leaf the app layer owns. It lives here
+    /// because the plugin never inspects the view it is handed — it only
+    /// promises it — so what this suite can honestly assert about it is that a
+    /// view came back and that it *draws* (see the refusal tests).
+    private struct StubSettingsLeaf: View {
+        var body: some View {
+            Color.blue.frame(width: 40, height: 40)
+        }
+    }
+
     @MainActor
     private struct Harness {
         let plugin: LiveTranslatePlugin
         let spy: PluginFactorySpy
+        let leaf: LeafFactorySpy
         let bus: MockObservabilityBus
         let client: GeminiClient
+        /// The plugin's own settings store — the one the Settings leaf writes
+        /// through, and the one both entries read.
+        let settings: LiveTranslateSettings
         /// The sessions the spy hands out, in order.
         let sessions: [LiveTranslateSessionTestParts]
 
@@ -90,7 +123,17 @@ final class LiveTranslatePluginTests: XCTestCase {
     @MainActor
     private func makeHarness(sessionCount: Int = 1,
                              configured: Bool = false,
-                             fails: Bool = false) -> Harness {
+                             fails: Bool = false,
+                             /// The feature's master switch, written into the
+                             /// plugin's own settings suite before the plugin
+                             /// is built — the same seam the session harness
+                             /// uses, and on by default for the same reason:
+                             /// every scenario here but the switch's own is
+                             /// about a feature that is open.
+                             liveTranslateEnabled: Bool = true,
+                             /// Whether the app layer can hand over a Settings
+                             /// leaf. False is the teardown case.
+                             leafAvailable: Bool = true) -> Harness {
         var sessions: [LiveTranslateSessionTestParts] = []
         for _ in 0..<sessionCount {
             let parts = makeLiveTranslateSessionTestParts(locale: nepali)
@@ -109,11 +152,26 @@ final class LiveTranslatePluginTests: XCTestCase {
                                   observabilityBus: bus,
                                   transport: FakeGeminiTransport())
 
+        // The plugin's settings live in their own suite, so a scenario that
+        // flips the switch flips it for this plugin and for nothing else on
+        // the machine — and so teardown can drop the whole store.
+        let settingsSuite = "livetranslate.plugin.tests.\(UUID().uuidString)"
+        let settings = LiveTranslateSettings(defaults: UserDefaults(suiteName: settingsSuite)!)
+        suiteNames.append(settingsSuite)
+        settings.setLiveTranslateEnabled(liveTranslateEnabled)
+
+        let leaf = LeafFactorySpy()
+        leaf.available = leafAvailable
+
         return Harness(plugin: LiveTranslatePlugin(observabilityBus: bus,
-                                                   makeDependencies: spy.make),
+                                                   settings: settings,
+                                                   makeDependencies: spy.make,
+                                                   makeSettingsView: leaf.make),
                        spy: spy,
+                       leaf: leaf,
                        bus: bus,
                        client: client,
+                       settings: settings,
                        sessions: sessions)
     }
 
@@ -563,6 +621,147 @@ final class LiveTranslatePluginTests: XCTestCase {
         XCTAssertEqual(harness.events.map(\.eventType),
                        ["live_translate_open_failed", "live_translate_open_failed"])
         XCTAssertEqual(harness.spy.callCount, 2)
+    }
+
+    // MARK: - 7b. The feature's master switch (Workstream B)
+
+    /// **Both entries, one refusal.** With the switch off the voice entry says
+    /// the line that names the state and the surface that changes it — and the
+    /// line is only sayable because the leaf is really there, which is why the
+    /// refusal returns the two together and why this suite renders the view it
+    /// carries rather than trusting a non-nil option.
+    @MainActor
+    func testScenarioTheVoiceEntryRefusesWhileTheFeatureSwitchIsOff() async throws {
+        let harness = makeHarness(liveTranslateEnabled: false)
+
+        let result = await harness.plugin.handle(command(), context: context(harness))
+
+        guard case .spokenAndPresented(let spoken) = result else {
+            return XCTFail("a switched-off feature refuses rather than fails, got \(result)")
+        }
+        XCTAssertEqual(spoken, L10n.str(LiveTranslatePlugin.disabledKey, locale: nepali))
+        XCTAssertFalse(spoken.isEmpty)
+        XCTAssertNotEqual(spoken, L10n.str(LiveTranslatePlugin.unavailableKey, locale: nepali),
+                          "'I can't do that right now' is a failure to wait out; this is "
+                          + "a state the elder owns and a surface that changes it")
+
+        // Nothing is assembled on the way to saying so (NFR-LCT-012): the
+        // refusal is decided before the factory is consulted at all.
+        XCTAssertEqual(harness.spy.callCount, 0,
+                       "a feature that is off builds no capture, no detector and no client")
+        XCTAssertEqual(harness.leaf.calls, 1, "the leaf is asked for once")
+        XCTAssertEqual(harness.leaf.locales, [nepali])
+
+        // The pair's second half: what the presentation opens. Asserted by
+        // pixels — a view that drew nothing would make the spoken promise a
+        // lie just as surely as a nil one.
+        let view = try XCTUnwrap(harness.plugin.presentationView(for: result),
+                                 "the refusal's promised leaf must be presented")
+        XCTAssertTrue(try drewSomething(view),
+                      "the leaf the refusal promises is a view an elder can see")
+
+        XCTAssertNotNil(harness.plugin.tileView(locale: nepali),
+                        "the tile refuses the same way: the leaf, not the feature")
+        XCTAssertEqual(harness.spy.callCount, 0, "and assembles nothing for it")
+
+        // The switch's own event: nothing failed, so it is not the failure type.
+        XCTAssertEqual(harness.events.map(\.eventType),
+                       [LiveTranslatePlugin.disabledEventType,
+                        LiveTranslatePlugin.disabledEventType])
+        for event in harness.events {
+            XCTAssertEqual(event.component, "plugin_live_translate")
+            XCTAssertEqual(event.errorCode, "master_switch_off")
+            XCTAssertEqual(event.metadata.isEmpty, true)
+        }
+    }
+
+    /// The tile's refusal is the voice entry's refusal — the same sentence, the
+    /// same leaf, from the same method — so the two cannot come to say
+    /// different things about the same switch. The tile returns the leaf
+    /// directly (the Home tile owns its own presentation), which is why the
+    /// claim is made by rendering what it returned.
+    @MainActor
+    func testScenarioTheHomeTileAndTheVoiceEntryRefuseWithOneSentenceAndOneLeaf() async throws {
+        let harness = makeHarness(liveTranslateEnabled: false)
+        XCTAssertFalse(harness.plugin.isEnabled, "the entry facts the coordinator reads")
+
+        let tile = try XCTUnwrap(harness.plugin.tileView(locale: nepali),
+                                 "the tile refuses by opening the leaf")
+        XCTAssertTrue(try drewSomething(tile))
+        XCTAssertEqual(harness.spy.callCount, 0)
+
+        let result = await harness.plugin.handle(command(), context: context(harness))
+        guard case .spokenAndPresented(let spoken) = result else {
+            return XCTFail("the voice entry refuses, got \(result)")
+        }
+        XCTAssertEqual(spoken, L10n.str(LiveTranslatePlugin.disabledKey, locale: nepali))
+        let fromVoice = try XCTUnwrap(harness.plugin.presentationView(for: result))
+        XCTAssertTrue(try drewSomething(fromVoice))
+
+        XCTAssertEqual(harness.leaf.calls, 2,
+                       "each entry asks for the leaf it promises, and neither mints its own")
+        XCTAssertEqual(Set(harness.leaf.locales), [nepali],
+                       "both entries refuse in the language they were opened in")
+    }
+
+    /// The other half of the pair's honesty: an app layer that cannot build the
+    /// leaf cannot be promised one, so the refusal is **refused** — the caller
+    /// falls back to the shipped apology rather than speaking a sentence about
+    /// settings that are not there.
+    @MainActor
+    func testScenarioASwitchRefusalWithNoLeafIsNeverSpokenAsIfSettingsOpened() async {
+        let harness = makeHarness(liveTranslateEnabled: false, leafAvailable: false)
+
+        let result = await harness.plugin.handle(command(), context: context(harness))
+
+        guard case .failed(let apology) = result else {
+            return XCTFail("a refusal with no leaf is a failure, got \(result)")
+        }
+        XCTAssertEqual(apology, L10n.str(LiveTranslatePlugin.unavailableKey, locale: nepali))
+        XCTAssertNotEqual(apology, L10n.str(LiveTranslatePlugin.disabledKey, locale: nepali),
+                          "the sentence that promises the settings must not be sayable "
+                          + "when no settings can be opened")
+        XCTAssertEqual(harness.events.map(\.eventType), ["live_translate_open_failed"])
+        XCTAssertEqual(harness.events.first?.errorCode, "settings_view_unavailable")
+        XCTAssertEqual(harness.spy.callCount, 0, "still nothing assembled")
+        XCTAssertNil(harness.plugin.tileView(locale: nepali),
+                     "the tile has no leaf to open either, so it opens nothing")
+    }
+
+    /// The switch is a door and not a demolition: the leaf's write — the same
+    /// setter the session model calls — is read back by the next entry, with no
+    /// new plugin, no relaunch, and the session assembled then.
+    @MainActor
+    func testScenarioTheLeafTurningTheSwitchBackOnLetsTheNextEntryOpen() async {
+        let harness = makeHarness(liveTranslateEnabled: false)
+
+        _ = await harness.plugin.handle(command(), context: context(harness))
+        XCTAssertEqual(harness.spy.callCount, 0)
+
+        // The Settings leaf's own write, through the one setter.
+        harness.settings.setLiveTranslateEnabled(true)
+        XCTAssertTrue(harness.plugin.isEnabled)
+
+        let result = await harness.plugin.handle(command(), context: context(harness))
+
+        guard case .spokenAndPresented(let spoken) = result else {
+            return XCTFail("the feature opens once the switch is back on, got \(result)")
+        }
+        XCTAssertEqual(spoken, L10n.str(LiveTranslatePlugin.spokenKey, locale: nepali))
+        XCTAssertEqual(harness.spy.callCount, 1, "the session is assembled on the open, once")
+        XCTAssertNotNil(harness.plugin.presentationView(for: result))
+        XCTAssertEqual(harness.events.map(\.eventType),
+                       [LiveTranslatePlugin.disabledEventType, "live_translate_opened"],
+                       "a refusal and an open are different events, in that order")
+    }
+
+    /// A view that drew nothing is not a leaf, whatever the option says — the
+    /// check the two refusal tests lean on.
+    @MainActor
+    private func drewSomething(_ view: AnyView) throws -> Bool {
+        let image = try XCTUnwrap(OverlayRenderProbe.render(view,
+                                                            size: CGSize(width: 100, height: 100)))
+        return try !OverlayRenderProbe.ink(in: image).isEmpty
     }
 
     // MARK: - 8. The surface, in the active language

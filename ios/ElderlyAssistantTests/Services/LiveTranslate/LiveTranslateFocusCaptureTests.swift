@@ -59,6 +59,11 @@ final class LiveTranslateFocusCaptureTests: XCTestCase {
         /// When true the plan refuses to answer at all (the pipeline's
         /// "nothing settled in time" shape).
         var refuses = false
+        /// When true the plan **settles** what it answers into `settled` — the
+        /// real plan writes its answers into the ledger a re-pack reads, and a
+        /// re-drive's whole point is that the ask it makes comes back through
+        /// that ledger rather than through a second crop.
+        var settlesWhatItAnswers = false
         private(set) var asks: [(items: [CloudTranslationTier.Item],
                                  regionCounts: [String: Int])] = []
         private var sequence = 0
@@ -73,6 +78,7 @@ final class LiveTranslateFocusCaptureTests: XCTestCase {
             for item in items where answers[item.id] != nil {
                 answered[item.id] = answers[item.id]
             }
+            if settlesWhatItAnswers { settled.merge(answered) { _, new in new } }
             return answered
         }
 
@@ -89,6 +95,13 @@ final class LiveTranslateFocusCaptureTests: XCTestCase {
             sequence += 1
             return sequence
         }
+
+        /// How long the plan's clock still holds a generation back, in
+        /// seconds. **Zero by default**: the open clock, which is what every
+        /// capture in this suite but the clock-hold ones reads.
+        var clockRemaining: TimeInterval = 0
+
+        func brainClockRemaining() async -> TimeInterval { clockRemaining }
     }
 
     private struct Composition {
@@ -384,6 +397,104 @@ final class LiveTranslateFocusCaptureTests: XCTestCase {
         // has: no re-place for an unchanged card.
         let unchanged = await composition.path.updated(updated, layout: layout, policy: policy)
         XCTAssertNil(unchanged)
+    }
+
+    // MARK: - The re-ask the clock hold makes (Workstream B, finding 5)
+
+    /// A crop whose strings the brain's clock released was answered by nobody:
+    /// the card says "not right now", and the live tick behind the picture is
+    /// planning the *live* regions rather than this crop's, so nothing would
+    /// ever ask again. `reDriven` is the ask the session makes when the clock
+    /// opens — the same strings, planned again, drawn onto the standing
+    /// picture.
+    ///
+    /// The clock's own arithmetic is the plan's (`brainClockRemaining`, pinned
+    /// below and driven end to end by the session suite); what this suite
+    /// proves is what the re-ask *is*: one more plan for the strings the
+    /// picture is still waiting on, and no second read of the page.
+    @MainActor
+    func testAReDriveAsksTheWithheldStringsAndDrawsTheirAnswers() async throws {
+        let composition = makeComposition(regions: [detected("Push the green button")])
+        // The capture's own plan is released before it can ask — the shape a
+        // clock-held focused read leaves behind.
+        composition.cycle.refuses = true
+        let packedAttempt = await capture(composition)
+        let packed = try XCTUnwrap(packedAttempt)
+        let passesWhenPacked = composition.recogniser.passes
+        XCTAssertEqual(composition.cycle.asks.count, 1)
+
+        // The clock opens. The plan can answer now, and it settles what it
+        // answers into the ledger the picture re-reads.
+        composition.cycle.refuses = false
+        composition.cycle.settlesWhatItAnswers = true
+        composition.cycle.answers = ["push the green button|ne":
+                                        resolved("Push the green button", "हरियो बटन थिच्नुहोस्")]
+
+        let redrivenAttempt = await composition.path.reDriven(packed,
+                                                              layout: layout,
+                                                              policy: policy)
+        let redriven = try XCTUnwrap(redrivenAttempt)
+
+        XCTAssertEqual(composition.cycle.asks.count, 2,
+                       "a re-drive asks — that is the one thing it does that a re-pack does not")
+        XCTAssertEqual(composition.recogniser.passes, passesWhenPacked,
+                       "and it does not read the page again: the picture is the one the elder "
+                       + "pointed at, and the crop is what makes this the focused path")
+        XCTAssertEqual(redriven.rows.first?.translation, "हरियो बटन थिच्नुहोस्")
+        XCTAssertEqual(redriven.pixelRect, packed.pixelRect)
+        XCTAssertEqual(redriven.image.width, packed.image.width)
+        XCTAssertGreaterThan(redriven.publication.sequence, packed.publication.sequence,
+                             "the picture that replaces another takes the next order")
+        XCTAssertTrue(redriven.deferredKeys.isEmpty,
+                      "the release is over: these strings were asked and answered")
+    }
+
+    /// The re-drive is an ask, not a promise that the ask succeeds: a plan that
+    /// still settles nothing leaves the standing picture exactly as it was —
+    /// not blanked, not rebuilt for no reason.
+    @MainActor
+    func testAReDriveThatSettlesNothingLeavesTheStandingPictureAlone() async throws {
+        let composition = makeComposition(regions: [detected("Push the green button")])
+        composition.cycle.refuses = true
+        let packedAttempt = await capture(composition)
+        let packed = try XCTUnwrap(packedAttempt)
+
+        let redriven = await composition.path.reDriven(packed, layout: layout, policy: policy)
+
+        XCTAssertNil(redriven, "nothing new to draw: the caller keeps the picture it has")
+        XCTAssertEqual(composition.cycle.asks.count, 2, "the ask was made and came back empty")
+        XCTAssertEqual(composition.recogniser.passes, 1, "and no second read was bought for it")
+    }
+
+    /// A picture with nothing left to ask is not asked about again: the
+    /// re-drive exists for a deferral, and an answered crop has none. This is
+    /// the guard that keeps a late-scheduled re-drive from paying a second time
+    /// for a page that has already been read.
+    @MainActor
+    func testAReDriveOfAnAnsweredCaptureAsksNothingAtAll() async throws {
+        let composition = makeComposition(regions: [detected("Light")])
+        composition.cycle.answers = ["light|ne": resolved("Light", "बत्ती")]
+        composition.cycle.settlesWhatItAnswers = true
+        let packedAttempt = await capture(composition)
+        let packed = try XCTUnwrap(packedAttempt)
+        XCTAssertEqual(composition.cycle.asks.count, 1)
+
+        let redriven = await composition.path.reDriven(packed, layout: layout, policy: policy)
+
+        XCTAssertNil(redriven)
+        XCTAssertEqual(composition.cycle.asks.count, 1,
+                       "a finished read is not asked about, and not paid for, twice")
+    }
+
+    /// The number the session schedules its wait on: it comes from the plan, not
+    /// from this path — the plan is the one that holds the clock.
+    func testThePlansRemainingClockIsReadThroughThePath() async {
+        let composition = makeComposition()
+        composition.cycle.clockRemaining = 1.25
+
+        let remaining = await composition.path.brainClockRemaining()
+
+        XCTAssertEqual(remaining, 1.25, accuracy: 0.0001)
     }
 
     // MARK: - The device layers, and what is never written

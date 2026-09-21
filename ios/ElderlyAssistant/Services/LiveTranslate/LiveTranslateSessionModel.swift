@@ -90,6 +90,36 @@ struct LiveTranslateSessionDependencies {
     /// runs without the point-ask box and chip. The app layer always
     /// passes it (see `AppCoordinator.makeLiveTranslateDependencies`).
     let pointAsk: PointAskSessionDependencies?
+    /// The session's one clock, handed to the pipeline it builds (Workstream B,
+    /// the clock hold).
+    ///
+    /// The model gives the pipeline a clock rather than letting it default to
+    /// `Date.init`, so that "the brain's clock" is one injectable fact for the
+    /// whole session instead of a wall clock that only production can read. A
+    /// suite that asserts a *hold* — that a read inside `brainAttemptMin
+    /// Interval` is deferred and asked again when the interval opens — cannot
+    /// do so against real time without either waiting whole seconds or racing
+    /// the scheduler; with this seam it advances the clock itself, exactly as
+    /// the camera and detector already do through their own `now`.
+    ///
+    /// The default is `Date.init`, so production and every pre-existing
+    /// construction site keep the wall clock they had.
+    let now: () -> Date
+    /// How the session waits out the brain's clock (Workstream B, the clock
+    /// hold).
+    ///
+    /// A seam rather than a bare `Task.sleep`, for the reason every other seam
+    /// here exists: the wait is *seconds* long by design — `brainAttemptMin
+    /// Interval` is the device's own backpressure, measured in whole seconds —
+    /// and a suite that asserted the re-drive by sleeping through it would be
+    /// measuring the machine rather than the code. A test hands in a double that
+    /// returns at once and records what it was asked to wait for; production
+    /// gets the real suspension.
+    ///
+    /// It is the caller's suspension, not a timer in the plan: the task that
+    /// runs it is cancellable, so a close, a thaw or a second tap takes the
+    /// pending re-drive with it.
+    let sleepFor: @Sendable (TimeInterval) async -> Void
 
     init(locale: Locale,
          camera: LiveCameraSession,
@@ -106,7 +136,10 @@ struct LiveTranslateSessionDependencies {
          notifications: NotificationCenter = .default,
          observabilityBus: ObservabilityBus,
          config: LiveTranslateConfig = .default,
-         pointAsk: PointAskSessionDependencies? = nil) {
+         pointAsk: PointAskSessionDependencies? = nil,
+         now: @escaping () -> Date = Date.init,
+         sleepFor: @escaping @Sendable (TimeInterval) async -> Void =
+             LiveTranslateSessionDependencies.realSleep) {
         self.locale = locale
         self.camera = camera
         self.detector = detector
@@ -123,6 +156,19 @@ struct LiveTranslateSessionDependencies {
         self.observabilityBus = observabilityBus
         self.config = config
         self.pointAsk = pointAsk
+        self.now = now
+        self.sleepFor = sleepFor
+    }
+
+    /// The shipped wait: a plain suspension, cancellable by whoever holds the
+    /// task.
+    ///
+    /// `try?` because a cancelled sleep is not an error to report — it is the
+    /// caller's own cancel arriving, and every caller checks `Task.isCancelled`
+    /// after this returns, so a cancelled wait never turns into a re-ask.
+    static let realSleep: @Sendable (TimeInterval) async -> Void = { seconds in
+        guard seconds > 0 else { return }
+        try? await Task.sleep(for: .seconds(seconds))
     }
 }
 
@@ -477,6 +523,18 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// against until it succeeds. Cleared by the read that owns it, and by
     /// `returnToLive()`/`close()` when the picture is put down.
     private var focusToken: UUID?
+
+    /// The wait a deferred focused read is inside, and the re-ask that follows
+    /// it (Workstream B, the clock hold).
+    ///
+    /// Held for the same reason `focusTask` is, and cancelled by the same three
+    /// moments: a close, a thaw, and the next focused read. A re-drive that
+    /// survived any of them would plan a picture the elder has put down — the
+    /// questions would be asked and paid for with nothing on screen to receive
+    /// them. The picture's own guard is the publication sequence (see
+    /// `redriveFocusedCapture`), which is what makes a re-drive that lands late
+    /// draw nothing rather than draw onto a newer crop.
+    private var focusRedriveTask: Task<Void, Never>?
 
     /// The notice's own dismissal timer — the only task this object owns
     /// besides the frame loop, and the reason a notice needs no tap to go
@@ -904,6 +962,11 @@ final class LiveTranslateSessionModel: ObservableObject {
             // closure, so the wiring a test exercises is the wiring that
             // ships.
             onWardenNotice: Self.wardenNoticeSink(for: self),
+            // The session's own clock (Workstream B, the clock hold). The
+            // pipeline's default is the wall clock, which is what production
+            // gets; handing it in here is what makes the *hold* a fact a suite
+            // can arrange rather than a duration it has to wait out.
+            now: dependencies.now,
             publish: { [weak self] publication in
                 await self?.receive(publication)
             })
@@ -992,6 +1055,16 @@ final class LiveTranslateSessionModel: ObservableObject {
         focusTask?.cancel()
         focusTask = nil
         focusedCapture = nil
+        // The clock wait goes with them (Workstream B): nothing this session
+        // owns may plan a picture after the session has ended.
+        focusRedriveTask?.cancel()
+        focusRedriveTask = nil
+        // A spoken "translate here" still waiting for a frame is dropped here
+        // and only here. It is deliberately *not* dropped by a thaw: an ask
+        // made while a picture was held is about a picture the elder has since
+        // put down, but they did ask, and the first frame after the thaw
+        // answers it rather than the command vanishing without a trace.
+        awaitingSpokenFocusFrame = false
         // The token goes with the task: a read already in flight is not this
         // session's question any more, so it may neither publish a crop nor end
         // a wait (review finding 7).
@@ -1366,6 +1439,11 @@ final class LiveTranslateSessionModel: ObservableObject {
         focusTask?.cancel()
         focusTask = nil
         focusedCapture = nil
+        // And the clock wait, for the same reason: the picture it was waiting
+        // to re-ask about is gone, so a re-ask that woke up would plan strings
+        // for a crop the elder has put down (Workstream B, the clock hold).
+        focusRedriveTask?.cancel()
+        focusRedriveTask = nil
         // The token goes with the task: a read already in flight is no longer
         // the session's question, so it may not publish a picture or end a wait
         // that no longer exists (review finding 7).
@@ -1446,6 +1524,12 @@ final class LiveTranslateSessionModel: ObservableObject {
         let policy = self.policy
         let rect = Self.pixelRect(for: box, in: frame, fallingBackTo: pixelRect)
         focusTask?.cancel()
+        // The clock wait belongs to the read that set it off, so it goes the
+        // same way the read does: a re-drive of the *previous* crop firing
+        // between this tap and its picture would plan strings this read is
+        // about to ask for itself (Workstream B, the clock hold).
+        focusRedriveTask?.cancel()
+        focusRedriveTask = nil
         // **Which read this is** (review finding 7). A second tap cancels the
         // first task, but cancellation is cooperative: a read already inside
         // the crop, the pass or the plan answers whatever it was asked, and it
@@ -1465,6 +1549,94 @@ final class LiveTranslateSessionModel: ObservableObject {
                                           policy: policy,
                                           token: token)
         }
+    }
+
+    /// The fraction of the frame the centre box covers when the elder says
+    /// "translate here" without having pointed at anything: the middle half of
+    /// each axis. Wide enough to hold the sign, label or screen a phone is
+    /// being aimed at, narrow enough that it is a *region* rather than the
+    /// whole picture — which is what makes this the focus path and not a
+    /// snapshot.
+    ///
+    /// Read from the config rather than spelled here (NFR-LCT-011): the same
+    /// rule the source-hygiene scan enforces, and the reason it exists — this
+    /// fraction and `ocrSampleInterval` are two different parameters that
+    /// happen to share a number, so one spelling for two meanings is exactly
+    /// the drift the scan exists to catch.
+    static var spokenFocusBoxInset: Double {
+        LiveTranslateConfig.default.spokenFocusBoxInset
+    }
+
+    /// **"translate here"** — the spoken form of the focus mode's Translate
+    /// button (Workstream B, the constitution's voice-reachability rule).
+    ///
+    /// It calls the same `translateFocusedRegion(box:pixelRect:measuredOn:)`
+    /// the button calls, so the words and the touch cannot come to mean two
+    /// different things. Nothing about consent, cost or the tiers is special
+    /// to this entry: a spoken read is a read.
+    ///
+    /// **What "here" is**, in order:
+    ///
+    ///  1. The anchored box, when the elder has pointed at something — the
+    ///     place they named with their finger, which is the most specific
+    ///     answer available and the one the button would use.
+    ///  2. Otherwise the **middle of the picture the camera is aimed at**.
+    ///     This is the case that makes the command worth having: an elder who
+    ///     says "translate here" while holding the phone up has already said
+    ///     where, and a command that answered "tap it first" would require the
+    ///     very dexterity the voice path exists to avoid. It is stated as a
+    ///     fraction of the frame rather than a pixel size so it means the same
+    ///     thing on every camera format.
+    ///  3. Otherwise — no frame has been delivered yet, so there is no picture
+    ///     to have a middle — the ask is **held, not dropped**: see
+    ///     `awaitingSpokenFocusFrame`.
+    ///
+    /// A closed or not-yet-started session does nothing, like every other
+    /// command here: `translateFocusedRegion` is the guard, and it is the same
+    /// guard the button passes through.
+    func translateHere() {
+        guard !isClosed else { return }
+        guard anchoredFrame != nil else {
+            // The session is running — the frame loop starts with the camera —
+            // but nothing has been delivered yet, which is the one window
+            // (`phase = .running` is set a moment before the first frame) where
+            // "here" has no picture to name. Nothing is said and nothing is
+            // dropped: the ask waits for the next frame the camera delivers,
+            // which is the same deferral this feature uses everywhere else
+            // rather than a state the elder has to notice and retry. In
+            // practice the window is shorter than the recognition that produced
+            // the command; it is handled because "practically never" is not
+            // "never", and a command that silently did nothing would be a stub.
+            awaitingSpokenFocusFrame = true
+            return
+        }
+        performSpokenFocus()
+    }
+
+    /// A "translate here" that arrived before there was a picture. Cleared by
+    /// the frame that answers it, and by leaving the surface: a request the
+    /// elder made of a picture they are no longer looking at is not owed an
+    /// answer on the next one.
+    private var awaitingSpokenFocusFrame = false
+
+    /// The held ask, taken. Called from `translateHere` when a picture is
+    /// already in hand, and from `delivered(_:)` for the frame that arrives
+    /// after one was not.
+    private func performSpokenFocus() {
+        awaitingSpokenFocusFrame = false
+        guard !isClosed, let frame = anchoredFrame else { return }
+        let target = pointAsk?.anchoredTarget
+        let inset = Self.spokenFocusBoxInset
+        let box = target?.box ?? NormalizedBox(xMin: inset,
+                                               yMin: inset,
+                                               xMax: 1 - inset,
+                                               yMax: 1 - inset)
+        // A null rect means "derive it from the box and the frame's own pixel
+        // size", which is what a spoken command must do: there is no finger to
+        // have measured one, and the box is this call's own.
+        translateFocusedRegion(box: box,
+                               pixelRect: .null,
+                               measuredOn: frame)
     }
 
     /// The focused read's work, off the tap's call stack: the crop, one pass
@@ -1500,8 +1672,74 @@ final class LiveTranslateSessionModel: ObservableObject {
         // "this crop could not be read" into "the answer you had is gone".
         if case .success(let capture) = outcome {
             focusedCapture = capture
+            // **The clock hold, taken** (Workstream B, review finding 5). A
+            // crop read inside `brainAttemptMinInterval` of the live cycle's
+            // last attempt was answered by nobody: the plan released its
+            // strings, the card says "not right now", and the live tick behind
+            // this picture is planning the *live* regions, not this crop's —
+            // so nothing would ever ask again. The wait is scheduled here, on
+            // the read that was deferred, and the re-ask is `reDriven`.
+            await scheduleFocusedRedrive(for: capture)
         }
         finishFocusedRead(token)
+    }
+
+    /// Waits out the brain's clock and asks the standing crop again — the
+    /// focused path's way out of a deferral the clock caused (Workstream B,
+    /// review finding 5).
+    ///
+    /// **A wait is scheduled only when the clock is what opened the gap.** The
+    /// guard is the plan's own remaining time, not `deferredKeys` alone: a
+    /// session that has never paid for a generation has nothing to wait for
+    /// (`brainClockRemaining()` is zero), and a capture deferred there — a batch
+    /// the budget's cap held, a request that failed — must not be re-planned on
+    /// a timer. Asking again immediately would be a second plan for strings the
+    /// same budget is still holding, paid for with no reason to think the
+    /// answer would change. Those rows keep their sentence; the next tap, or
+    /// the next capture, is what asks again.
+    ///
+    /// The one state the guard cannot separate is a plan the budget held while
+    /// the clock was *also* closed: there the remaining time is real, so the
+    /// re-ask is scheduled, and it lands on an open clock only to be released
+    /// by the same budget again. That costs a plan and no generation, and the
+    /// row is where it was either way — the same sentence, and the next tap.
+    ///
+    /// The wait is the plan's own number, read off the plan's own injected
+    /// clock, so the re-ask lands when the plan says it may rather than when a
+    /// constant here guesses. The suspension is the dependencies' seam
+    /// (`sleepFor`), so a suite drives it without sleeping.
+    private func scheduleFocusedRedrive(for capture: LiveTranslateFocusedCapture) async {
+        guard !isClosed, !capture.deferredKeys.isEmpty, let path = focusPath else { return }
+        let wait = await path.brainClockRemaining()
+        guard wait > 0 else { return }
+        focusRedriveTask?.cancel()
+        focusRedriveTask = Task { [weak self] in
+            await self?.dependencies.sleepFor(wait)
+            // A cancelled wait is a close, a thaw or a newer tap — all three
+            // took the picture away, and none of them wants a plan started.
+            guard !Task.isCancelled else { return }
+            await self?.redriveFocusedCapture(capture)
+        }
+    }
+
+    /// The re-ask itself, on the picture the wait was scheduled for.
+    ///
+    /// Guarded the way the re-pack is, and on the same field: the sequence
+    /// identifies the crop on screen, so a re-drive that lands after a second
+    /// tap, a thaw or a close draws nothing at all rather than answering a
+    /// picture the elder has replaced. Unlike the re-pack it *does* start a
+    /// plan (`LiveTranslateFocusCapture.reDriven`) — that is the whole
+    /// difference between rendering an answer and asking for one.
+    private func redriveFocusedCapture(_ capture: LiveTranslateFocusedCapture) async {
+        guard !isClosed, let path = focusPath, let standing = focusedCapture,
+              standing.publication.sequence == capture.publication.sequence else { return }
+        let updated = await path.reDriven(standing,
+                                          layout: pendingLayout,
+                                          policy: policy)
+        guard !isClosed, let current = focusedCapture,
+              current.image === standing.image,
+              current.publication.sequence == standing.publication.sequence else { return }
+        if let updated { focusedCapture = updated }
     }
 
     /// Ends the focus wait — **only if the wait is still this read's**
@@ -1700,6 +1938,8 @@ final class LiveTranslateSessionModel: ObservableObject {
             refreshAlwaysShowOriginal()
         case .close:
             Task { await close() }
+        case .translateHere:
+            translateHere()
         }
     }
 
@@ -1728,6 +1968,11 @@ final class LiveTranslateSessionModel: ObservableObject {
     private func delivered(_ frame: CameraFrame) async {
         guard !isClosed, frozen == nil else { return }
         latestFrame = frame
+        // A spoken "translate here" that arrived before there was a picture is
+        // taken here, on the first frame that can answer it (`translateHere`).
+        // Before the point-ask hand-off below, so the crop is measured on the
+        // frame the elder was aiming at rather than on a later one.
+        if awaitingSpokenFocusFrame { performSpokenFocus() }
         // [POINT-ASK] The hosted session reads the same frame: the
         // picture the elder taps on is the picture the analysis crops.
         pointAsk?.receiveFrame(frame)

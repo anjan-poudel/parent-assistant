@@ -884,6 +884,12 @@ struct LiveTranslateOverlayView: View {
     /// [POINT-ASK] The chip's tap: the elder's "what is this?". Only the
     /// anchored chip offers it.
     let onPointAskChipTap: () -> Void
+    /// [POINT-ASK] The anchored box's *other* action (Workstream B): read this
+    /// crop and translate it. The host routes it to the focused read, and the
+    /// default draws only the chip the overlay has always drawn — correct for
+    /// every construction site that predates the focused read, and for the
+    /// render probe, which passes no point-ask surface at all.
+    let onPointAskTranslateTap: () -> Void
 
     /// The rects this view is currently drawing, per region identity — the one
     /// piece of state the render path owns, and the reason a box whose text has
@@ -900,7 +906,8 @@ struct LiveTranslateOverlayView: View {
          pointAsk: PointAskOverlaySurface? = nil,
          presentation: LiveCameraPresentation =
             LiveCameraPresentation(crop: .whole, pictureRect: .zero),
-         onPointAskChipTap: @escaping () -> Void = {}) {
+         onPointAskChipTap: @escaping () -> Void = {},
+         onPointAskTranslateTap: @escaping () -> Void = {}) {
         self.surface = surface
         self.onTapRegion = onTapRegion
         self.onSetAlwaysShowOriginal = onSetAlwaysShowOriginal
@@ -909,6 +916,7 @@ struct LiveTranslateOverlayView: View {
         self.pointAsk = pointAsk
         self.presentation = presentation
         self.onPointAskChipTap = onPointAskChipTap
+        self.onPointAskTranslateTap = onPointAskTranslateTap
     }
 
     var body: some View {
@@ -964,9 +972,18 @@ struct LiveTranslateOverlayView: View {
                 // tapped — and the regions are the scene's text. One box
                 // at a time (the surface carries at most one).
                 if let pointAsk {
-                    PointAskOverlayBoxView(surface: pointAsk,
-                                           presentation: self.presentation,
-                                           onChipTap: onPointAskChipTap)
+                    PointAskOverlayBoxView(
+                        surface: pointAsk,
+                        presentation: self.presentation,
+                        onChipTap: onPointAskChipTap,
+                        // The row's own clamp needs the glass, and the glass is
+                        // this reader's (`proxy`), not the box's: the box is
+                        // mapped through the presentation and knows only the
+                        // rect it came from (Workstream B).
+                        containerSize: proxy.size,
+                        translateLabel: L10n.str(PointAskOverlayBoxView.translateKey,
+                                                 locale: surface.locale),
+                        onTranslateTap: onPointAskTranslateTap)
                 }
 
                 if presentations.isEmpty {
@@ -1259,6 +1276,19 @@ struct PointAskOverlayBoxView: View {
     let surface: PointAskOverlaySurface
     let presentation: LiveCameraPresentation
     let onChipTap: () -> Void
+    /// The container the box is mapped into, for the action row's own clamp
+    /// (Workstream B): the row is wider than the box it hangs under, so placing
+    /// it needs the whole glass rather than just the anchor.
+    let containerSize: CGSize
+    /// The anchor's **first** action's copy (Workstream B, "translate here"):
+    /// read this crop and translate it. Resolved text rather than a key,
+    /// because the caller is the view that knows the active language — the
+    /// same rule `surface.chipLabel` follows.
+    let translateLabel: String
+    /// The anchor's first action, performed. The host routes it to the same
+    /// `translateFocusedRegion` the spoken "translate here" calls, so the finger
+    /// and the words cannot come to mean two different things.
+    let onTranslateTap: () -> Void
 
     /// [BOX-ALIGNMENT] (2026-09-20) The box maps LIVE through the same
     /// `presentation.containerRect` the region bubbles use — the exact
@@ -1291,7 +1321,7 @@ struct PointAskOverlayBoxView: View {
 
                 switch surface.state {
                 case .box:
-                    chip(chipRect: chipRect)
+                    actionRow(below: boxRect)
                 case .analyzing:
                     pendingChip(chipRect: chipRect)
                 case .answered:
@@ -1303,26 +1333,81 @@ struct PointAskOverlayBoxView: View {
         )
     }
 
-    /// The "What is this?" chip — a real button at the app's minimum tap
-    /// target, in the active language.
-    private func chip(chipRect: CGRect) -> some View {
+    /// The two actions an anchored box offers (Workstream B).
+    ///
+    /// Until the focused read existed this surface offered one: the chip, which
+    /// asks the object question. An anchored box is now also the *target* of a
+    /// translation — the elder pointed at a sign, and "read that" is as
+    /// reasonable a question as "what is that" — so both are drawn, side by
+    /// side, at the anchor. Neither is hidden behind a mode: a mode is a thing
+    /// the elder has to remember, and the two questions are equally likely at
+    /// the moment they point.
+    ///
+    /// **The row is wider than the box it belongs to**, which is why it is not
+    /// simply offset to the box's leading edge the way the single chip was: an
+    /// elder who anchored something near the right edge would push the second
+    /// button off the glass. It is given the container's own width (less the
+    /// edge inset) and aligned to whichever side of the glass the anchor is on —
+    /// a position that needs no measurement, cannot overflow, and keeps both
+    /// actions on the side of the thing they act on. Copy wraps inside its
+    /// button if it must, rather than being truncated: an elder who cannot read
+    /// half a label has been given a button they cannot use.
+    private func actionRow(below boxRect: CGRect) -> some View {
+        HStack(spacing: DesignTokens.interElementSpacing) {
+            actionButton(label: translateLabel,
+                         identifier: Self.translateIdentifier,
+                         action: onTranslateTap)
+            actionButton(label: surface.chipLabel,
+                         identifier: Self.chipIdentifier,
+                         action: onChipTap)
+        }
+        .frame(width: actionRowWidth,
+               alignment: boxRect.midX < containerSize.width / 2 ? .leading : .trailing)
+        .offset(x: DesignTokens.interElementSpacing,
+                y: min(boxRect.maxY + DesignTokens.interElementSpacing, boxRect.maxY))
+    }
+
+    /// The width the row may occupy: the glass, less one edge inset on each
+    /// side. A container that has not been laid out yields zero, which draws an
+    /// empty row rather than one laid out against a size nobody has measured.
+    private var actionRowWidth: CGFloat {
+        max(0, containerSize.width - 2 * DesignTokens.interElementSpacing)
+    }
+
+    /// One action: a real button at the app's minimum tap target, in the active
+    /// language, on the card surface — the chip's own drawing, kept for both.
+    private func actionButton(label: String,
+                              identifier: String,
+                              action: @escaping () -> Void) -> some View {
         Button {
-            onChipTap()
+            action()
         } label: {
-            Text(surface.chipLabel)
+            Text(label)
                 .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize,
                                             weight: .semibold))
                 .foregroundColor(DesignTokens.textPrimary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, DesignTokens.interElementSpacing * 2)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
         }
         .buttonStyle(.plain)
         .background(DesignTokens.card)
         .clipShape(Capsule())
-        .frame(width: chipRect.width, height: chipRect.height)
-        .offset(x: chipRect.minX, y: chipRect.minY)
-        .accessibilityIdentifier("pointask.chip")
+        .accessibilityIdentifier(identifier)
     }
+
+    /// The two actions' identifiers: the object question keeps the shipped
+    /// `pointask.chip` (the UI tests and the pending chip's own identifier are
+    /// built around it), and the new translation sits beside it as
+    /// `pointask.chip.translate`.
+    static let chipIdentifier = "pointask.chip"
+    static let translateIdentifier = "pointask.chip.translate"
+
+    /// The translation action's copy — the feature's own key for "translate
+    /// here" (`livetranslate.command.translateHere`'s touch half), resolved in
+    /// the active language by the caller that knows it.
+    static let translateKey = "livetranslate.focus.translate"
 
     /// The chip while the analysis runs: the same surface, with the
     /// pending glyph instead of the words — the analysis is in flight,

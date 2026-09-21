@@ -1289,6 +1289,25 @@ actor LiveTranslationPipeline {
         } ?? true
     }
 
+    /// How long the brain's clock will still hold a generation back, from
+    /// `now()` — zero when it is already open.
+    ///
+    /// **The one thing a caller outside this actor cannot work out for
+    /// itself.** `brainMayAttempt` is a private decision, but a *caller* that
+    /// has been deferred needs the number rather than the verdict: a focused
+    /// read whose strings the clock released has been told "not now", and
+    /// "not now" is only usefully different from "never" if someone knows when
+    /// "now" arrives. The alternative — polling `maySpendAGeneration` — would
+    /// burn a generation the moment it flipped, and the alternative of asking
+    /// again immediately is exactly the stall this exists to end.
+    ///
+    /// Read on the injected clock (`now`), not `Date()`, so a test can drive
+    /// the wait to zero without sleeping through it.
+    func brainClockRemaining() -> TimeInterval {
+        guard let last = lastBrainAttemptAt else { return 0 }
+        return max(0, config.brainAttemptMinInterval - now().timeIntervalSince(last))
+    }
+
     /// Records that the cloud came back empty-handed for these strings (see
     /// `cloudFailedKeys`). A method for the same reason `noteBrainAttempt` is
     /// one: the task body is not actor-isolated.
@@ -2451,6 +2470,18 @@ actor LiveTranslationPipeline {
     ///   is absent is a string **nobody** has answered — a generation the clock
     ///   deferred, or a batch the capture's budget did not spend — which the
     ///   caller leaves pending, the same honesty the live path keeps.
+    ///
+    ///   The **empty dictionary** is that same answer at its limit, and it is
+    ///   returned as itself rather than as `nil` when every string the plan was
+    ///   handed was released (Workstream B). The two are not the same: `nil` is
+    ///   "nothing may be applied, and the elder's question is open", while an
+    ///   empty result is "the plan ran and told every string 'not right now'" —
+    ///   which is exactly what a caller that schedules the re-ask has to be
+    ///   able to see, and what it could not while a plan the clocks released
+    ///   was indistinguishable from a prompt. `resolveCaptured` cannot make
+    ///   that distinction for its own callers (the frozen path is content with
+    ///   `nil` there), so it is made here, from the one piece of state that
+    ///   tells them apart.
     func resolveFocused(_ items: [CloudTranslationTier.Item],
                         regionCounts: [String: Int] = [:]) async -> [String: TranslationResult]? {
         // The focused seating of the one capture plan: the mode is fixed here
@@ -2463,10 +2494,24 @@ actor LiveTranslationPipeline {
         // guard would wait for a thaw that never comes (see
         // `ResolutionRequest.holdsAnswers`, and review finding 5 of the first
         // round).
-        await resolveCaptured(items,
-                              mode: .focused,
-                              regionCounts: regionCounts,
-                              holds: false)
+        let answers = await resolveCaptured(items,
+                                            mode: .focused,
+                                            regionCounts: regionCounts,
+                                            holds: false)
+        // A result is a result, empty or not: only the plan's own `nil` needs
+        // reading, and then only to ask which of the two things it was.
+        guard answers == nil else { return answers }
+        // The session is gone: nothing may be applied, and nothing deferred
+        // (the picture is about to be taken down with it).
+        guard !isClosed else { return nil }
+        // The elder is being asked about one of **these** strings: the answer
+        // is not held back, it is being asked for, so the card says so and
+        // nothing waits. Asked per string rather than per session, because a
+        // prompt raised by the live picture says nothing about this crop's
+        // strings — and a crop whose only string the clock released is a
+        // deferral whether or not some other plan is mid-question.
+        guard !items.contains(where: { awaitingDecision[$0.id] != nil }) else { return nil }
+        return [:]
     }
 
     /// The answers the session's ledger already holds for these strings, keyed

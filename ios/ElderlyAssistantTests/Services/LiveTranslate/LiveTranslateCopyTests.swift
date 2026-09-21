@@ -70,7 +70,25 @@ final class LiveTranslateCopyTests: XCTestCase {
         // same OD3 review as the rest of this list; the tests below assert
         // that a notice cannot exist without a sentence in both languages.
         "livetranslate.warden.loading",
-        "livetranslate.warden.offloaded"
+        "livetranslate.warden.offloaded",
+        // Workstream B (2026-09-22): the focused read, the master switch and
+        // the spoken "translate here". Four surfaces in one change — the two
+        // anchored actions ("Translate this" — the value cannot be the bare
+        // word "Translate", because that word is a substring of the feature's
+        // own identifier `LiveTranslate` and would fire
+        // `testEveryFeatureStringIsCatalogBackedRatherThanASwiftLiteral` in
+        // every file of the feature; "What is it?" is the point-ask chip's own
+        // shipped key, deliberately not duplicated), the focused read's back
+        // control and its "more below" value, the Settings leaf's row for the
+        // feature's master switch, and the sentence the refusal speaks. Drafts
+        // awaiting the same OD3 copy review as the rest.
+        "livetranslate.command.translateHere",
+        "livetranslate.disabled",
+        "livetranslate.focus.back",
+        "livetranslate.focus.scrolls",
+        "livetranslate.focus.translate",
+        "livetranslate.settings.enabled.note",
+        "livetranslate.settings.enabled.title"
     ]
 
     private let commandPhrases: [(key: String, english: String, nepali: String)] = [
@@ -79,7 +97,11 @@ final class LiveTranslateCopyTests: XCTestCase {
         ("livetranslate.command.showOriginal", "show the original", "मूल अक्षर देखाउनुहोस्"),
         ("livetranslate.command.hideOriginal", "hide the original", "मूल अक्षर लुकाउनुहोस्"),
         ("livetranslate.command.repeatLast", "say that again", "फेरि भन्नुहोस्"),
-        ("livetranslate.command.close", "close translation", "अनुवाद बन्द गर्नुहोस्")
+        ("livetranslate.command.close", "close translation", "अनुवाद बन्द गर्नुहोस्"),
+        // Workstream B: the focus mode's spoken half. The same *action* the
+        // anchored box's Translate button performs, so an elder who cannot
+        // reach the button can read the thing they are pointing at.
+        ("livetranslate.command.translateHere", "translate here", "यहाँ अनुवाद गर्नुहोस्")
     ]
 
     /// Devanagari (U+0900–U+097F), by scalar.
@@ -280,8 +302,8 @@ final class LiveTranslateCopyTests: XCTestCase {
                            "\(phrase.key) is the C12 phrase table's matcher input; a reword must be deliberate")
             XCTAssertTrue(hasDevanagari(phrase.nepali))
         }
-        XCTAssertEqual(commandPhrases.count, 6,
-                       "read-all, stop, set-show-original on and off, repeat-last, close")
+        XCTAssertEqual(commandPhrases.count, 7,
+                       "read-all, stop, set-show-original on and off, repeat-last, close, translate-here")
     }
 
     // MARK: Scenario: the camera purpose string discloses live translation and the conditional text send
