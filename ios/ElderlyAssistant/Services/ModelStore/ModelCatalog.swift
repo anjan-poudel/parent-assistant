@@ -334,6 +334,27 @@ enum ModelCatalog {
     /// Delivery: 1,417,754,336 B in ONE file — under GitHub's 2 GiB per-asset
     /// cap, so no `.partaa`/`.partab` split (unlike `intentQwen4BSlotCanon`).
     static let nmtEnNeQwen17bR4Q6 = ModelID("nmt-en-ne-qwen17b-r4-q6_k")
+    /// Round-4 **ablation quant** (Q4_K_M, 1.1 GB) — the small arm of the
+    /// Q6-vs-Q4 ARM-kernel A/B (2026-09-21).
+    ///
+    /// TEMPORARY OFFER, and the offer is the A/B's rather than a product
+    /// decision: the owner's phone cannot run the Q8 ceiling, so the arm it
+    /// CAN hold is this one, and one build has to be able to fetch both arms
+    /// on the same device. It is a member of
+    /// `availableTranslationEntries` for the duration of the run and sits
+    /// directly behind the Q6_K in `brainTranslationModelIDs`, so a device
+    /// carrying both still prefers the head. The revert is deleting the id
+    /// from the offer list; the ladder position goes with the verdict.
+    ///
+    /// Gate-clean as its own artifact (67.6% exact, probe 12/12, 34/34
+    /// accepted) — but it is the ablation arm, not a candidate head: the Q6_K
+    /// is the quant the round-4 verdict promoted for passing S11 under the
+    /// SHIPPED prompt, and nothing here reopens that.
+    ///
+    /// Delivery: 1_107_408_608 B in ONE file — under GitHub's 2 GiB
+    /// per-asset cap, so no `.partaa`/`.partab` split (unlike
+    /// `intentQwen4BSlotCanon`).
+    static let nmtEnNeQwen17bR4Q4 = ModelID("nmt-en-ne-qwen17b-r4-q4_k_m")
     /// Round-4 **quality ceiling** (Q8_0, 1.83 GB) — sideload-only, never
     /// offered as a download.
     ///
@@ -1269,6 +1290,42 @@ enum ModelCatalog {
             languages: ["ne"]
         ),
         ModelCatalogEntry(
+            id: nmtEnNeQwen17bR4Q4,
+            kind: .llamaBase,
+            // Round-4 ablation quant (Q4_K_M) — TEMPORARY OFFER for the
+            // Q6-vs-Q4 ARM-kernel A/B. The owner's phone cannot run the Q8
+            // ceiling, so the arm the device can hold is this one, and the
+            // A/B is against the Q6_K head.
+            //
+            // Gate-clean as its own artifact (67.6% exact, probe 12/12,
+            // 34/34 accepted). That is NOT an S11 result under the shipped
+            // prompt — the round-4 verdict's finding stands: the Q6_K is the
+            // ship quant, and this offer is an experiment, not a rival.
+            //
+            // STANDARD-class fit at the shared 5 GB floor: 1.1 GB is the
+            // same file size the round-3 Q4 shipped, so it takes the 1.7B
+            // band's 700 MB overhead — the Q6_K's own band — and the
+            // warden's verdict, not this catalog, decides the load.
+            //
+            // [HOSTING — VERIFIED] live on release v20,
+            // `translate-en-ne-qwen17b-r4-q4_k_m.gguf`, 1,107,408,608 B,
+            // sha256
+            // 4aad12a2fa133d50dd5946902442fa9ee77067ea818a5f57ad08d713d649128f
+            // — the digest below was re-read from the release's own asset
+            // record (2026-09-21), not copied from the training box.
+            displayName: "Translate — English to Nepali (Qwen 1.7B, R4 Q4)",
+            filename: "translate-en-ne-qwen17b-r4-q4_k_m.gguf",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v20/translate-en-ne-qwen17b-r4-q4_k_m.gguf")!,
+            sizeBytes: 1_107_408_608,
+            // Server-original digest (round-4 Q4_K_M export) — the `.sha256`
+            // sidecar on the training box and the v20 asset's own digest
+            // agree on these bytes.
+            sha256: "4aad12a2fa133d50dd5946902442fa9ee77067ea818a5f57ad08d713d649128f",
+            minDeviceRAMBytes: ModelLifecycleBudget.compactBoundaryBytes,
+            dependsOn: nil,
+            languages: ["ne"]
+        ),
+        ModelCatalogEntry(
             id: nmtEnNeQwen17bR4Q8,
             kind: .llamaBase,
             // Round-4 quality ceiling (Q8_0), normally SIDELOAD-ONLY: never
@@ -1821,14 +1878,19 @@ enum ModelCatalog {
     /// (sha256 `9ed3fccea39b5a1ebe671e2cdad92b635497b983c2d73f8f4a61cd6a174e045e`,
     /// 1,417,754,336 B), so the row's Download resolves on a device.
     static let availableTranslationEntries: [ModelCatalogEntry] =
-        // TEMPORARY OFFER (Q6-vs-Q8 ARM-kernel A/B, revert after the verdict):
-        // the Q8_0 rides beside the head so the Settings row and the
-        // translate-test install card can both fetch it. Deleting this second
-        // id is the revert; the head must stay first.
-        [nmtEnNeQwen17bR4Q6, nmtEnNeQwen17bR4Q8].compactMap { entry(for: $0) }
+        // TEMPORARY OFFERS (revert each after its verdict): the Q4_K_M rides
+        // directly behind the head for the Q6-vs-Q4 ARM-kernel A/B — the arm
+        // the owner's phone can actually hold — and the Q8_0 rides behind it
+        // for the earlier Q6-vs-Q8 run. Both are device A/Bs rather than
+        // product decisions, which is why they are the only ids here that the
+        // verdict did not put there. Deleting either id is that run's revert;
+        // the head must stay first, and the Q6_K stays the ship quant.
+        [nmtEnNeQwen17bR4Q6, nmtEnNeQwen17bR4Q4, nmtEnNeQwen17bR4Q8]
+            .compactMap { entry(for: $0) }
 
     /// **Every** translation artifact in the catalog, offered or not: the ship
-    /// quant the translation section offers, the round-4 Q8 ceiling, the
+    /// quant the translation section offers, the round-4 Q4_K_M ablation offer
+    /// (an A/B arm — offered, but not a head), the round-4 Q8 ceiling, the
     /// superseded round-4 Q5 (kept so a device that sideloaded it can still
     /// delete it — and so the id a round-4 tester may already be carrying
     /// does not become undeletable when the verdict moves the head), and the
@@ -1857,6 +1919,7 @@ enum ModelCatalog {
     /// forgotten the same way.
     static let allTranslationEntries: [ModelCatalogEntry] = [
         nmtEnNeQwen17bR4Q6,
+        nmtEnNeQwen17bR4Q4,
         nmtEnNeQwen17bR4Q8,
         nmtEnNeQwen17bR4Q5,
         nmtEnNeQwen17bR3Q4,

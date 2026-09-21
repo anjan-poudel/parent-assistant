@@ -90,17 +90,21 @@ final class ModelCatalogLanguageTests: XCTestCase {
     /// The fallbacks behind the head are deliberately NOT offered: they are
     /// assistant brains with rows of their own in the brain section.
     ///
-    /// [TEMPORARY OFFER] (Q6-vs-Q8 ARM-kernel A/B) One entry is a second row
-    /// for the duration of that run — the round-4 Q8_0 — so a single build can
-    /// fetch both quants for a same-device comparison. The revert is deleting
-    /// it from the catalog's list; the expectation below is the only assertion
-    /// that has to move with it.
+    /// [TEMPORARY OFFER] (Q6-vs-Q8 and Q6-vs-Q4 ARM-kernel A/Bs) Two entries
+    /// are extra rows for the duration of those runs — the round-4 Q8_0 (the
+    /// ceiling, for the earlier run) and the round-4 Q4_K_M (the arm the
+    /// owner's phone can actually hold, for the current one) — so a single
+    /// build can fetch both arms of either comparison. Each revert is deleting
+    /// that id from the catalog's list; the expectation below is the only
+    /// assertion that has to move with it.
     func testTheOfferedTranslationRowsAreExactlyTheTiersHead() {
         let offered = ModelCatalog.availableTranslationEntries.map(\.id)
         XCTAssertEqual(offered, [ModelCatalog.nmtEnNeQwen17bR4Q6,
+                                 ModelCatalog.nmtEnNeQwen17bR4Q4,
                                  ModelCatalog.nmtEnNeQwen17bR4Q8],
-                       "the tier's shipped head, plus the temporary A/B offer "
-                       + "riding behind it")
+                       "the tier's shipped head, plus the temporary A/B offers "
+                       + "riding behind it — the Q4_K_M first (the run this "
+                       + "build exists for), then the Q8 ceiling")
         // Round 4 (2026-09-21) re-decided which artifact that head is: the
         // round-4 Q5 failed the S11 gate under the shipped prompt and the
         // verdict promoted the Q6_K. The row moved with the verdict, which is
@@ -174,20 +178,24 @@ final class ModelCatalogLanguageTests: XCTestCase {
     /// catalog's own `displayName` verbatim; a row that drifted from it
     /// would read differently in Settings than in the catalog's docs.
     func testTheTranslationRowIsNamedInBothLanguages() {
-        // Two entries need copy, not one: the translation row that is OFFERED,
-        // and the superseded artifact a device that upgraded still holds — the
-        // installed-hidden row renders beside the new one, and the names must
-        // read as different rows.
+        // Three entries need copy, not one: the translation row that is
+        // OFFERED (the head), the Q4_K_M ablation offer that rides beside it
+        // for the current A/B — an offered row in every sense, so a Nepali
+        // build must not print its raw id — and the superseded artifact a
+        // device that upgraded still holds. The installed-hidden row renders
+        // beside the new ones, and the names must read as different rows.
         //
         // The round-4 Q6_K's `model.name.<id>` row landed with the swap
         // (2026-09-21), so the offered head is named here rather than the
         // demoted Q5 the previous revision had to fall back to; the Q5 is
-        // still pinned as the second row because a round-4 tester's device
-        // holds it and renders it. Both strings are the catalog's own
+        // still pinned as the third row because a round-4 tester's device
+        // holds it and renders it. All three strings are the catalog's own
         // `displayName` verbatim, in both shipped languages.
-        let entries = [ModelCatalog.nmtEnNeQwen17bR4Q6, ModelCatalog.nmtEnNeQwen17bR4Q5]
+        let entries = [ModelCatalog.nmtEnNeQwen17bR4Q6,
+                       ModelCatalog.nmtEnNeQwen17bR4Q4,
+                       ModelCatalog.nmtEnNeQwen17bR4Q5]
             .compactMap { ModelCatalog.entry(for: $0) }
-        XCTAssertEqual(entries.count, 2, "both translation entries resolve")
+        XCTAssertEqual(entries.count, 3, "all three translation entries resolve")
         let en = Locale(identifier: "en")
         let ne = Locale(identifier: "ne-NP")
         for entry in entries {
@@ -203,9 +211,10 @@ final class ModelCatalogLanguageTests: XCTestCase {
         }
         // The names must DIFFER: identical copy on two rows is exactly the
         // "which one do I delete?" the superseded rename exists to prevent.
-        XCTAssertNotEqual(entries[0].displayName, entries[1].displayName,
-                          "the ship quant and the superseded artifact must not "
-                          + "read as the same row")
+        // Set-wise, because three rows can collide in more than one pair.
+        XCTAssertEqual(Set(entries.map(\.displayName)).count, entries.count,
+                       "the head, the ablation offer and the superseded "
+                       + "artifact must not read as the same row")
     }
 
     func testStockQwenAndLlamaBrainsAreLanguageNeutral() {
