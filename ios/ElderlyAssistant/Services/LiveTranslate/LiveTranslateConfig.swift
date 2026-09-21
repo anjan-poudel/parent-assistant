@@ -1139,13 +1139,18 @@ struct LiveTranslateConfig: Equatable {
     /// would make the tier's availability change under a running session for
     /// reasons unrelated to translation.
     ///
-    /// Why more than one entry. `nmtEnNeQwen17bR3Q4` (round-3, 2026-09-19)
-    /// is the head: a real EN→NE translation fine-tune that passes the
-    /// tier's own raw-prompt + `json_schema` contract AND is the first
-    /// checkpoint whose every quant cleared all 12 runtime safety-probe rows
-    /// with 0 polarity failures. `nmtEnNeQwen17bR3Q5` is the alternate quant
-    /// of the SAME checkpoint (sideload-only — nothing offers its download,
-    /// so the household never picks a quant), then the round-2b artifacts
+    /// Why more than one entry. `nmtEnNeQwen17bR4Q6` (round-4, 2026-09-21) is
+    /// the head: the anti-transliteration fine-tune, and the first checkpoint
+    /// that passes the **shipped** prompt's gate (S11) as well as the tier's
+    /// raw-prompt + `json_schema` contract and the runtime safety probes.
+    /// `nmtEnNeQwen17bR4Q5` is the round-4 Q5 the previous ship pinned, and it
+    /// **fails that gate under the shipped prompt** — so it is demoted to a
+    /// superseded, sideload-only alternate: a device that installed it during
+    /// the round-4 trial keeps working on it, and nothing offers its download.
+    /// `nmtEnNeQwen17bR4Q8` is the round-4 Q8, kept as the sideload-only
+    /// quality ceiling (it takes the 3 GB weight band, so the warden refuses it
+    /// on the standard class — see `ModelBudgetPolicyTests`). Then the
+    /// round-3 pair (`...R3Q4`, `...R3Q5`) and the round-2b artifacts
     /// (`...R2bQ4`, `...R2bQ8`) for devices that installed them before this
     /// upgrade and keep working on them. The two entries
     /// after them are the pre-translation-model fallbacks — `intentQwen4BSlotCanon`
@@ -1192,7 +1197,9 @@ struct LiveTranslateConfig: Equatable {
     /// A follow-up may want this to follow the elder's brain selection
     /// (`AppCoordinator.resolvedBrainModelID`); that is a product decision,
     /// not a lookup to hide in here.
-    var brainTranslationModelIDs: [ModelID] = [ModelCatalog.nmtEnNeQwen17bR4Q5,
+    var brainTranslationModelIDs: [ModelID] = [ModelCatalog.nmtEnNeQwen17bR4Q6,
+                                              ModelCatalog.nmtEnNeQwen17bR4Q5,
+                                              ModelCatalog.nmtEnNeQwen17bR4Q8,
                                               ModelCatalog.nmtEnNeQwen17bR3Q4,
                                               ModelCatalog.nmtEnNeQwen17bR3Q5,
                                               ModelCatalog.nmtEnNeQwen17bR2bQ4,

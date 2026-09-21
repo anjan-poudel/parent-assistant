@@ -197,6 +197,56 @@ final class ModelBudgetPolicyTests: XCTestCase {
         XCTAssertEqual(footprint.hardBytes, 700_000_000)
     }
 
+    /// The round-4 head (2026-09-21). The round-4 Q5 failed the S11 gate under
+    /// the shipped prompt; the round-4 Q6_K is the quant the verdict promoted,
+    /// and promoting it is only allowed if the class arithmetic still holds —
+    /// a head the standard class refuses is a download that lands and then
+    /// cannot load. The Q6 is 160 MB bigger than the Q4 it follows, which is
+    /// the whole question this test answers: does the extra 160 MB buy a rung
+    /// (800 MB overhead) or stay on the 1.7B row?
+    ///
+    /// It stays: 1,417,754,336 B is under the 1.5 GB rung ceiling, so the
+    /// overhead is unchanged at 700 MB and the live figure is 2.12 GB alone /
+    /// 3.12 GB beside the 1.0 GB warm ANE STT — inside the 3.2 GB standard
+    /// budget, with 80 MB to spare. That margin is thin on purpose and pinned
+    /// here: the next quant 100 MB larger would NOT clear this class, so a
+    /// future head must be re-decided rather than assumed.
+    func testTheRoundFourHeadStillClearsTheStandardClass() {
+        let head = ModelCatalog.nmtEnNeQwen17bR4Q6
+        let entry = ModelCatalog.entry(for: head)
+        XCTAssertNotNil(entry, "the tier's head must exist in the catalog")
+
+        XCTAssertEqual(availability(head, on: compactPhone).reason, .deviceTooSmall,
+                       "the 5 GB floor keeps it off the 4 GB class — the same "
+                       + "floor the Q5 and the round-3 Q4 carry, because the "
+                       + "floor is about the class that can co-reside a "
+                       + "translation brain at all, not about this quant")
+        XCTAssertEqual(availability(head, on: ModelLifecycleBudget.compactBoundaryBytes),
+                       .available,
+                       "a device AT the floor is `.standard`, and runs it")
+        XCTAssertEqual(availability(head, on: standardPhone), .available,
+                       "2.12 GB live + 1.0 GB warm STT = 3.12 GB ≤ 3.2 GB — the "
+                       + "head is admitted on the class most households have")
+        XCTAssertEqual(availability(head, on: roomyPhone), .available)
+
+        guard let headEntry = entry else { return }
+        XCTAssertLessThanOrEqual(Int64(headEntry.sizeBytes), 1_500_000_000,
+                                 "the 1.7B rung's file ceiling is what keeps "
+                                 + "the overhead at 700 MB rather than 800 MB")
+    }
+
+    /// The arithmetic behind that verdict, pinned as the round-3 Q4's sibling
+    /// is: the same 700 MB row, a bigger weight page.
+    func testTheRoundFourHeadTakesTheOnePointSevenBWeightBand() {
+        let footprint = ModelLifecycleInventory.footprint(
+            for: .translateBrain,
+            modelID: ModelCatalog.nmtEnNeQwen17bR4Q6)
+        XCTAssertEqual(footprint.weightsBytes, 1_417_754_336)
+        XCTAssertEqual(footprint.runtimeOverheadBytes, 700_000_000)
+        XCTAssertEqual(footprint.liveBytes, 2_117_754_336)
+        XCTAssertEqual(footprint.hardBytes, 700_000_000)
+    }
+
     func testTheCompactClassRefusesEveryShippedBrain() {
         // A finding, pinned so it cannot regress into a surprise: the
         // smallest shipped brain (`intentNepali1B`, 1.81 GB live) plus the
