@@ -60,19 +60,33 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         private(set) var prompts: [String] = []
         private(set) var timeouts: [TimeInterval] = []
         private(set) var releaseCount = 0
+        /// Which artifact each generation was run against. Recorded since
+        /// [TRANSLATE-TEST] because the tier can now be asked for a NAMED
+        /// model, and "the model it ran is the model it was told to run" is
+        /// a claim about this URL rather than about the tier's return value.
+        private(set) var modelURLs: [URL] = []
 
         func generate(prompt: String,
                       jsonSchema: String,
                       modelURL: URL,
-                      timeout: TimeInterval) async throws -> String {
+                      timeout: TimeInterval) async throws -> BrainGenerationOutput {
             prompts.append(prompt)
             timeouts.append(timeout)
+            modelURLs.append(modelURL)
             if let failure { throw failure }
             if let runtimeError { throw runtimeError }
-            return output
+            // The measurement rides with the answer it belongs to
+            // ([MODEL-SWITCH], 2026-09-21 review round 2).
+            return BrainGenerationOutput(text: output, loadMs: loadDurationMs)
         }
 
         func isHoldingHandle() async -> Bool { holdingHandle }
+
+        /// What the runtime measured for the load inside that generation —
+        /// `nil` (the default) is "nothing measured", the answer every
+        /// hand-written fake honestly gives. Set by the tests that make a
+        /// claim about the split between the load and the decode.
+        var loadDurationMs: Int?
 
         func release() async { releaseCount += 1 }
     }
@@ -282,6 +296,197 @@ final class LocalBrainTranslationTierTests: XCTestCase {
 
         let model = await tier.installedModel()
         XCTAssertEqual(model, preferred, "the preference list is an order, not a set")
+    }
+
+    /// [TRANSLATE-TEST] The additive named-model overload: a caller that
+    /// names a model gets THAT model, even when the ladder would have picked
+    /// another one — and the pipeline's own call still resolves the ladder,
+    /// unchanged. Both halves in one test because they are one claim: the
+    /// overload is additive only if the no-argument entry point behaves
+    /// exactly as it did before it existed.
+    func testANamedModelRunsAndTheLaddlersOwnCallIsUnchanged() async throws {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        // Two TRANSLATION models on the device, the ladder's head among them:
+        // with only one installed the two paths would agree by accident.
+        //
+        // Translation models rather than the intent brains this used to name
+        // (2026-09-21 review): the named path now refuses a model that is not
+        // one of this config's translation rungs, because a translation prompt
+        // sent to a slot-filling brain is exactly the mistake naming makes
+        // possible. The rule that used to make this fixture arbitrary is
+        // `testTheNamedPathRefusesAModelThisTierDoesNotTranslateWith`.
+        let head = ModelCatalog.nmtEnNeQwen17bR4Q5
+        let other = ModelCatalog.nmtEnNeQwen17bR3Q4
+        let store = try makeStore(root: root, serving: [head, other], installed: [head, other])
+
+        var config = LiveTranslateConfig.default
+        config.brainTranslationModelIDs = [head, other]
+        let namedGenerator = ScriptedGenerator()
+        namedGenerator.output = answer([brainAnswer])
+        let namedTier = LocalBrainTranslationTier(config: config,
+                                                  modelStore: store,
+                                                  events: LiveTranslateEvents(bus: LiveTranslateSanitisingBus(),
+                                                                              config: config),
+                                                  generator: namedGenerator,
+                                                  memory: ScriptedProbe(),
+                                                  ledger: ModelLifecycleManager(probe: ScriptedProbe()))
+
+        let named = await namedTier.translate([brainText], using: other)
+
+        XCTAssertEqual(named.translations, [brainText: brainAnswer])
+        XCTAssertEqual(try XCTUnwrap(namedGenerator.modelURLs.last).lastPathComponent,
+                       "\(other)-q4_k_m.gguf",
+                       "the NAMED model is the one the generation runs against")
+
+        // And the ladder's own answer is untouched: the head is still what
+        // the pipeline's no-argument call resolves — and runs. A second tier
+        // over the same store, because the first one's load may have left a
+        // resident brain in the ledger, and the gate that refuses a load on
+        // top of one is a different rule than the one under test here.
+        let ladderGenerator = ScriptedGenerator()
+        ladderGenerator.output = answer([brainAnswer])
+        let ladderTier = LocalBrainTranslationTier(config: config,
+                                                   modelStore: store,
+                                                   events: LiveTranslateEvents(bus: LiveTranslateSanitisingBus(),
+                                                                               config: config),
+                                                   generator: ladderGenerator,
+                                                   memory: ScriptedProbe(),
+                                                   ledger: ModelLifecycleManager(probe: ScriptedProbe()))
+
+        let resolved = await ladderTier.installedModel()
+        XCTAssertEqual(resolved, head, "the preference order still decides for the pipeline")
+        _ = await ladderTier.translate([brainText])
+        XCTAssertEqual(try XCTUnwrap(ladderGenerator.modelURLs.last).lastPathComponent,
+                       "\(head)-q4_k_m.gguf")
+    }
+
+    /// A named model that is not on the device is reported exactly as the
+    /// ladder-resolution failure always was: the same reason, the same
+    /// stage, nothing generated.
+    func testANamedModelThatIsNotInstalledIsReportedAsAMissingModel() async throws {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let absent = Self.modelID
+        let bus = LiveTranslateSanitisingBus()
+        // Served by the catalog, absent from the device — the shape a
+        // download row exists for.
+        let store = try makeStore(root: root, serving: [absent], installed: [])
+        let generator = ScriptedGenerator()
+        let tier = LocalBrainTranslationTier(config: config,
+                                             modelStore: store,
+                                             events: LiveTranslateEvents(bus: bus, config: config),
+                                             generator: generator,
+                                             memory: ScriptedProbe(),
+                                             ledger: ModelLifecycleManager(probe: ScriptedProbe()))
+
+        let outcome = await tier.translate([brainText], using: absent)
+
+        XCTAssertEqual(outcome, .none)
+        XCTAssertTrue(generator.prompts.isEmpty, "an absent model is not attempted")
+        let event = bus.events(named: "brain_translation_unavailable").first
+        XCTAssertEqual(event?.metadata["reason"], "model_not_installed")
+        XCTAssertEqual(event?.metadata["failureStage"], "availability")
+    }
+
+    /// [MODEL-KIND] The NAMED path refuses a model this tier does not
+    /// translate with, however it got named (2026-09-21 review). Two ways to
+    /// fail one question — the ladder's fallback tail (a brain entry that is
+    /// NOT a translation model) and a model off this tier's ladder entirely —
+    /// and both refuse BEFORE a byte is paged in, so a screen that offered
+    /// such a row cannot spend 4 GB discovering it.
+    func testTheNamedPathRefusesAModelThisTierDoesNotTranslateWith() async throws {
+        let root = makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        // Served and installed, both of them: neither refusal below is the
+        // store's answer, which is the point — "installed" is not "runnable
+        // by this tier".
+        let fallbackBrain = Self.modelID
+        let offLadder = ModelCatalog.nmtEnNeQwen17bR4Q5
+        let store = try makeStore(root: root,
+                                  serving: [fallbackBrain, offLadder],
+                                  installed: [fallbackBrain, offLadder])
+
+        var config = LiveTranslateConfig.default
+        // The ladder as a device that has the fallback tail and nothing else
+        // would spell it: the brain entry is ON this list, which is exactly
+        // why membership alone is not the check.
+        config.brainTranslationModelIDs = [fallbackBrain]
+        let bus = LiveTranslateSanitisingBus()
+        let generator = ScriptedGenerator()
+        let tier = LocalBrainTranslationTier(config: config,
+                                             modelStore: store,
+                                             events: LiveTranslateEvents(bus: bus, config: config),
+                                             generator: generator,
+                                             memory: ScriptedProbe(),
+                                             ledger: ModelLifecycleManager(probe: ScriptedProbe()))
+
+        let brain = await tier.translate([brainText], using: fallbackBrain)
+        XCTAssertEqual(brain, .none, "an intent brain is not a translation model, on the ladder or not")
+        XCTAssertTrue(generator.prompts.isEmpty, "refused before the load, not after")
+
+        let off = await tier.translate([brainText], using: offLadder)
+        XCTAssertEqual(off, .none, "a translation model this tier's ladder does not carry")
+
+        let reasons = bus.events(named: "brain_translation_unavailable")
+            .compactMap { $0.metadata["reason"] }
+        XCTAssertEqual(reasons, ["not_a_translation_model", "not_a_translation_model"])
+        XCTAssertEqual(bus.events(named: "brain_translation_unavailable")
+                        .map { $0.metadata["failureStage"] } ?? [],
+                       ["availability", "availability"],
+                       "the reason is the first thing actually wrong: the model IS on the device")
+    }
+
+    /// …and the LADDER path is deliberately not checked (2026-09-21 review).
+    /// A device whose ladder resolves to its fallback tail legitimately runs
+    /// that brain — it is the only tier 1 it has — so refusing there would
+    /// take the feature away from exactly the devices the tail exists for.
+    /// The refusal is a rule about NAMING a model, not about running one.
+    func testTheLadderPathStillRunsTheFallbackBrainItResolved() async throws {
+        try await withTier { tier, generator, bus in
+            generator.output = self.answer([self.brainAnswer])
+
+            let outcome = await tier.translate([self.brainText])
+
+            XCTAssertEqual(outcome.translations, [self.brainText: self.brainAnswer])
+            XCTAssertTrue(bus.events(named: "brain_translation_unavailable").isEmpty,
+                          "the tier's own resolution is not a refusal")
+        }
+    }
+
+    /// [MODEL-SWITCH] The load is reported BESIDE the wait, never instead of
+    /// it (2026-09-21 review): the headline stays the whole attempt — that is
+    /// what the event has always meant and what the deadline bounds — and the
+    /// load's share is the additive number a model-to-model comparison needs.
+    /// Without it, the first probe of a model reads as tens of seconds and
+    /// the second as a few hundred milliseconds, and the screen has been
+    /// asked to call the difference a fact about the MODELS.
+    func testTheLoadShareIsReportedBesideTheWholeWait() async throws {
+        try await withTier { tier, generator, bus in
+            generator.output = self.answer([self.brainAnswer])
+            generator.loadDurationMs = 1_100
+
+            let outcome = await tier.translate([self.brainText])
+
+            XCTAssertEqual(outcome.translations, [self.brainText: self.brainAnswer])
+            XCTAssertEqual(outcome.loadDurationMs, 1_100, "the generation's own load, passed through")
+            let event = self.batchEvent(bus)
+            XCTAssertEqual(event?.metadata["durationMs"], "\(outcome.durationMs)",
+                           "the batch event keeps the whole attempt, load included")
+        }
+    }
+
+    /// A generator that measured nothing reports `nil`, never a made-up zero:
+    /// a zero here reads as "this model needed no loading", which is a claim
+    /// no fake is in a position to make (2026-09-21 review).
+    func testAGeneratorThatMeasuredNoLoadReportsNone() async throws {
+        try await withTier { tier, generator, _ in
+            generator.output = self.answer([self.brainText])
+
+            let outcome = await tier.translate([self.brainText])
+
+            XCTAssertNil(outcome.loadDurationMs)
+        }
     }
 
     func testNoInstalledModelIsReportedAndNothingIsGenerated() async throws {
@@ -1170,16 +1375,113 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         XCTAssertNil(box.heldModelURL, "the URL goes with the handle it named")
 
         box.store("a handle", url: url)
-        box.beginDecode()
+        box.beginDecode("a handle")
         XCTAssertEqual(box.releaseForWarden(), .refused(.inUse),
                        "an inference is running on it")
         XCTAssertTrue(box.isHoldingHandle,
                       "a refusal is not a partial drop: the handle is still there")
         XCTAssertEqual(box.currentHandle as? String, "a handle")
 
-        box.endDecode()
+        box.endDecode("a handle")
         XCTAssertEqual(box.releaseForWarden(), .released,
                        "the lease is held for the decode and released after it")
+    }
+
+    /// One handle at a time, by construction ([MODEL-SWITCH], 2026-09-21
+    /// review). The switch's own fix is an ORDERING inside `loadHandle`, and
+    /// that method is `#if canImport(LLM)` — it needs a real GGUF to run, the
+    /// same limit the residency test above records. What a suite can hold is
+    /// the property the ordering leans on: a second `store` REPLACES the
+    /// first handle and its URL rather than joining it, and `drop` clears
+    /// both halves together. If the box could hold two, dropping before
+    /// loading would not be enough to stop a switch double-residing.
+    func testAHandleSlotHoldsOneModelAtATime() {
+        let box = TranslateBrainHandleSlot()
+        let first = URL(fileURLWithPath: "/tmp/\(Self.modelID)-q4_k_m.gguf")
+        let second = URL(fileURLWithPath: "/tmp/\(ModelCatalog.nmtEnNeQwen17bR4Q5)-q4_k_m.gguf")
+
+        box.store("first handle", url: first)
+        box.store("second handle", url: second)
+
+        XCTAssertEqual(box.currentHandle as? String, "second handle",
+                       "the box keeps one handle, so the old model's bytes are not held here")
+        XCTAssertEqual(box.heldModelURL, second,
+                       "…and the URL travels with the handle it names, never orphaned")
+
+        box.drop()
+        XCTAssertNil(box.currentHandle)
+        XCTAssertNil(box.heldModelURL, "a drop is not a partial one: both halves go")
+        XCTAssertFalse(box.isHoldingHandle)
+    }
+
+    /// [MODEL-SWITCH] A decode that outlives its handle stays reachable
+    /// (2026-09-21 review round 2).
+    ///
+    /// The switch drops the box's handle while an earlier decode may still be
+    /// unwinding on that runtime: the loop is synchronous and
+    /// non-cancellable, so `stop` shortens it but does not end it. Before
+    /// this fix the runtime went with the drop — nothing could stop it, and
+    /// the generator had already told the ledger its bytes were back while
+    /// the model was still in memory. The box's half is what a suite can hold
+    /// without a GGUF: the runtime stays referenced, and reachable for a
+    /// stop, until its decode ends.
+    func testASupersededDecodeStaysReachableUntilItEnds() {
+        let box = TranslateBrainHandleSlot()
+        box.store("old handle", url: URL(fileURLWithPath: "/tmp/old-model.gguf"))
+        box.beginDecode("old handle")
+
+        box.drop()
+
+        XCTAssertFalse(box.isHoldingHandle, "the box's reference is gone: the switch moved on")
+        XCTAssertTrue(box.isDecoding, "…but the runtime is still decoding on that model")
+        XCTAssertTrue(box.runtimesToInterrupt.contains { ($0 as? String) == "old handle" },
+                      "a stop can still reach it — the superseded decode is the one nobody else can stop")
+
+        box.endDecode("old handle")
+
+        XCTAssertFalse(box.isDecoding, "the decode is over, so its bytes may be retired")
+        XCTAssertFalse(box.runtimesToInterrupt.contains { ($0 as? String) == "old handle" },
+                       "…and the box stops holding a runtime it no longer runs")
+    }
+
+    /// [MODEL-SWITCH] The ledger's release waits for a superseded decode
+    /// (2026-09-21 review round 2) — the other half of the test above.
+    ///
+    /// Dropping the box's handle is not the moment the old model leaves
+    /// memory: the runtime is still decoding, and the box still references
+    /// it. Retiring the tier's row at the drop is how a switch ends up with
+    /// two models resident while the ledger books one — the arithmetic the
+    /// next load then reserves against.
+    ///
+    /// Driven without a GGUF, like the residency tests beside it: the two
+    /// calls a switch makes are `slot.drop()` and the settle, and both are
+    /// reachable here through `release()`.
+    func testTheLedgerKeepsTheBytesUntilASupersededDecodeEnds() async {
+        let ledger = ModelLifecycleManager(
+            probe: ScriptedProbe(),
+            budgetOverrideBytes: ModelLifecycleBudget.standardModelsBudgetBytes)
+        let generator = LlamaBrainTextGenerator(config: config, lifecycle: ledger)
+        // The shipped registration's owner IS the box (that is what makes the
+        // tier's own releases owner-scoped), so the fixture registers the
+        // same way rather than approximating it with a separate object.
+        ledger.register(slot: .translateBrain, modelID: Self.modelID, owner: generator.slot,
+                        priority: ReservationPurpose.liveTranslate.priority,
+                        resident: generator.slot) {}
+        generator.slot.store("a handle", url: URL(fileURLWithPath: "/tmp/not-a-real-model.gguf"))
+        ledger.didLoad(.translateBrain, owner: generator.slot)
+        generator.slot.beginDecode("a handle")
+
+        await generator.release()
+
+        XCTAssertFalse(generator.slot.isHoldingHandle, "the switch dropped the box's handle")
+        XCTAssertTrue(ledger.isResident(.translateBrain),
+                      "…and the model is STILL resident: a decode is running on it")
+
+        generator.slot.endDecode("a handle")
+        await generator.release()
+
+        XCTAssertFalse(ledger.isResident(.translateBrain),
+                       "the decode ended: the bytes are back, and only now is the row retired")
     }
 
     /// The two rows are distinct positions: registering the tier's does not
@@ -2057,7 +2359,7 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         let box = TranslateBrainHandleSlot()
         box.setOffloadHandler { notices.record(.offloadedForVoiceTurn) }
         box.store("a handle", url: URL(fileURLWithPath: "/tmp/not-a-real-model.gguf"))
-        box.beginDecode()
+        box.beginDecode("a handle")
 
         XCTAssertEqual(box.releaseForWarden(), .refused(.inUse))
         XCTAssertTrue(notices.notices.isEmpty,

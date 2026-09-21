@@ -531,6 +531,7 @@ final class RecordingBrain: LocalBrainTranslating, @unchecked Sendable {
     private var storedUnavailable = false
     private var storedHangs = false
     private var storedCalls: [[String]] = []
+    private var storedNamedRequests: [ModelID?] = []
     private var storedReleaseCount = 0
     private var events: LiveTranslateEvents?
 
@@ -558,6 +559,14 @@ final class RecordingBrain: LocalBrainTranslating, @unchecked Sendable {
     /// Every batch this brain was handed, in order.
     var calls: [[String]] {
         lock.lock(); defer { lock.unlock() }; return storedCalls
+    }
+
+    /// Every model this brain was asked for BY NAME, in order — `nil` where
+    /// the caller named none. Empty for every pipeline suite, because the
+    /// pipeline never names one; kept so a future screen-level suite can
+    /// assert which artifact it asked for rather than only that it asked.
+    var namedRequests: [ModelID?] {
+        lock.lock(); defer { lock.unlock() }; return storedNamedRequests
     }
 
     var releaseCount: Int {
@@ -598,6 +607,24 @@ final class RecordingBrain: LocalBrainTranslating, @unchecked Sendable {
             if let answer = answers[text] { translations[text] = answer }
         }
         return LocalBrainTranslationOutcome(translations: translations, durationMs: 1)
+    }
+
+    /// The named method, which the pipeline never uses — its ladder
+    /// resolution lives in the tier, so every call it makes is the unnamed
+    /// one above. The translate-test screen is the caller that names a
+    /// model, and no suite here drives it, so this runs the same script and
+    /// writes the name down for a suite that one day wants it.
+    ///
+    /// Implemented rather than inherited because the protocol's named method
+    /// has NO default ([MODEL-SWITCH], 2026-09-21 review round 2): a default
+    /// would let a conformer answer a caller who asked for the Q8 out of its
+    /// own resolution, under the Q8's row, and nothing would say so. A
+    /// double has to make the same statement a real engine does.
+    func translate(_ strings: [String], using model: ModelID?) async -> LocalBrainTranslationOutcome {
+        lock.lock()
+        storedNamedRequests.append(model)
+        lock.unlock()
+        return await translate(strings)
     }
 
     func release() async {

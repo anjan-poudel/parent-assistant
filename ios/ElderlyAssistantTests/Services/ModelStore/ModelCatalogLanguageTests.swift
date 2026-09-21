@@ -112,6 +112,55 @@ final class ModelCatalogLanguageTests: XCTestCase {
                       "the translation row is not an assistant-brain choice")
     }
 
+    /// [MODEL-KIND] (2026-09-21 review) The filename family IS the
+    /// classification: every `.llamaBase` artifact exported for the tier's
+    /// translation contract (`translate-en-ne-qwen17b-*.gguf`) must be in
+    /// `allTranslationEntries`, and nothing else may be.
+    ///
+    /// This is the regression a round-4 export exposed: it became the tier's
+    /// head without being added to the hand-list, so the artifact the
+    /// translation row offered classified as a BRAIN — `brainEntries` is
+    /// derived by subtraction, so the head grew a second row on the brain card
+    /// (the two-places hazard both lists exist to prevent), and a picker that
+    /// filters the ladder by translation-kind lost the head entirely. The
+    /// verdict has since moved the head from the round-4 Q5 to the Q6_K, which
+    /// is the same trap one export later. Held by family rather than by
+    /// re-listing the ids, so the next export fails here instead of on a
+    /// device.
+    func testEveryTranslationArtifactIsClassifiedAsOne() {
+        let family = "translate-en-ne-qwen17b-"
+        let byFamily = ModelCatalog.entries(kind: .llamaBase)
+            .filter { $0.filename.hasPrefix(family) }
+            .map(\.id)
+        XCTAssertFalse(byFamily.isEmpty,
+                       "the family must exist — without it this test proves nothing")
+
+        let classified = ModelCatalog.allTranslationEntries.map(\.id)
+        XCTAssertEqual(Set(classified), Set(byFamily),
+                       "the list and the filename family are the same set")
+        // The head, asked of the config rather than spelled here: the verdict
+        // moves it, and this test must not have to move with it.
+        XCTAssertEqual(classified.first, ModelCatalog.availableTranslationEntries.first?.id,
+                       "the list leads with the row the translation section offers")
+        XCTAssertEqual(classified.first,
+                       LiveTranslateConfig.default.brainTranslationModelIDs.first,
+                       "…which is the quant the tier leads with")
+
+        for id in byFamily {
+            XCTAssertTrue(ModelCatalog.isTranslationModel(id),
+                          "\(id.rawValue) is exported for the translation contract")
+            XCTAssertFalse(ModelCatalog.brainEntries.contains { $0.id == id },
+                           "a translation artifact is never a brain-card row")
+        }
+
+        // And the ladder's fallback tail is deliberately the other way round:
+        // those are assistant brains the tier may resolve, not translation
+        // models — which is why the named path's check is membership in the
+        // tier's own translation ladder and not a kind lookup.
+        XCTAssertFalse(ModelCatalog.isTranslationModel(ModelCatalog.intentQwen4BS43))
+        XCTAssertFalse(ModelCatalog.isTranslationModel(ModelCatalog.intentQwen4BSlotCanon))
+    }
+
     /// The row's title is copy, so it lives in the string table like every
     /// other row's — in both shipped languages. The English value is the
     /// catalog's own `displayName` verbatim; a row that drifted from it

@@ -2089,6 +2089,12 @@ final class AppCoordinator: ObservableObject {
         // Settings leaf writes through, so the switch read here is the
         // switch the household set.
         let settings = LiveTranslateSettings()
+        // The dropdown's ladder, read from the SAME config the tiers are
+        // given below — one instance read twice rather than two constants
+        // free to drift apart. The screen never spells a model id, so a
+        // catalog swap that reorders or retires translation models changes
+        // what it offers without a line of it changing.
+        let config = LiveTranslateConfig.default
         return TranslateTestDependencies(
             cache: labelTranslationCache,
             consentGate: liveTranslateConsentGate,
@@ -2096,6 +2102,46 @@ final class AppCoordinator: ObservableObject {
             client: geminiClient,
             observabilityBus: observabilityBus,
             modelStore: modelStore,
+            modelSource: TranslateTestModelSource(
+                // The TRANSLATION rungs of the ladder, by the tier's own rule
+                // ([MODEL-SWITCH], 2026-09-21 review): the config's ladder
+                // carries the assistant's intent brains in its tail as
+                // fallbacks for the tier's own resolution, and a picker that
+                // offered them would send a translation prompt to a
+                // slot-filling brain. Asked of the tier rather than filtered
+                // here, so the rows the screen offers and the names the tier
+                // refuses are one predicate.
+                ladder: LocalBrainTranslationTier.translationModelIDs(from: config.brainTranslationModelIDs),
+                // The catalog's localized name; the raw id when this build
+                // carries no entry for it (a config ahead of the catalog is
+                // exactly what a mid-swap ladder looks like). The locale is
+                // read per call rather than captured, so a language change
+                // is reflected the next time the menu is drawn.
+                displayName: { [weak self] id in
+                    let locale = self?.activeLocale ?? Locale(identifier: "en")
+                    return ModelCatalog.entry(for: id)?.displayName(locale: locale) ?? id.rawValue
+                },
+                // The tier's RUN GATE's question, and the screen's ONE
+                // predicate ([MODEL-SWITCH], 2026-09-21 review): `attempt`
+                // resolves `modelStore.path(for:)` — non-nil only when the
+                // artifact is on disk — so the row's marker, the readiness
+                // line and the install card all answer it the way a run
+                // would. (`installedModel()` asks `isAvailable`, the file
+                // plus its declared dependencies; every ladder entry is a
+                // `.llamaBase` with no dependencies, so the two agree on all
+                // of them — and where they could differ, this is the one the
+                // run would use.)
+                isInstalled: { [weak self] id in
+                    self?.modelStore.path(for: id) != nil
+                },
+                // The warden's verdict, asked of the same manager the
+                // AI-models rows ask: a model this device class refuses is
+                // not "Ready" here either, and the reason token is the one
+                // the ledger and the Settings row use.
+                unavailabilityReason: { id in
+                    guard let entry = ModelCatalog.entry(for: id) else { return nil }
+                    return ModelLifecycleManager.shared.availability(of: entry).reason
+                }),
             isProviderConfigured: { [weak self] in
                 self?.geminiConfigStore.isConfigured ?? false
             },
@@ -2114,7 +2160,7 @@ final class AppCoordinator: ObservableObject {
             cancelCapture: { [weak self] in
                 self?.cancelSearchPhraseCapture()
             },
-            config: LiveTranslateConfig.default,
+            config: config,
             targetLanguage: LiveTranslationPipeline.defaultTargetLanguage)
     }
 

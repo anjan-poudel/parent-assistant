@@ -82,14 +82,30 @@ final class TranslateTestModel: ObservableObject {
     /// What to translate. Bound to the screen's `TextEditor`.
     @Published var inputText: String = ""
 
-    /// Which engine the next run asks.
+    /// Which row of the model dropdown the next run asks.
     ///
     /// Setting it clears the last result: a card still reading "Gemini ·
-    /// 412 ms" under a Local picker would be a screenshot of one engine
+    /// 412 ms" under a model row would be a screenshot of one engine
     /// labelled as another, which is worse than an empty screen.
-    @Published var selectedEngine: TranslateTestEngine = .local {
+    ///
+    /// MODEL switching gets the same treatment engine switching did, and for
+    /// the same reason: two ladder entries are two different engines as far
+    /// as this screen is concerned — different weights, different answers,
+    /// different latencies — so an answer computed with one must not be
+    /// displayed under the other's name.
+    @Published var selection: TranslateTestSelection = .gemini {
         didSet {
-            guard oldValue != selectedEngine else { return }
+            guard oldValue != selection else { return }
+            // The OPENING row is not a switch. `selection` carries an initial
+            // value AND an observer, so assigning it from an initializer (or
+            // from `configure`) goes through a real setter and fires this —
+            // verified against swiftc, because the language's "observers do
+            // not run during initialization" rule does not cover a property
+            // whose storage the wrapper already owns. Left unguarded that
+            // spawned a readiness task nobody asked for, from the screen's
+            // own construction, and gave `configure` a second walk of the
+            // ladder beside the one its caller makes.
+            guard !isChoosingOpeningRow else { return }
             // A run in flight asked the OLD engine. Its answer would arrive
             // to find the cards cleared for the new one and would be read as
             // the new engine's — the one mislabelling this screen must not
@@ -122,6 +138,17 @@ final class TranslateTestModel: ObservableObject {
     /// `nil` before the first ask, so the screen can hold the button rather
     /// than offer an engine it has not checked.
     @Published private(set) var readiness: TranslateEngineReadiness?
+    /// The dropdown's model rows, in the ladder's own order, each with the
+    /// name the catalog gives it and whether the device can run it now.
+    ///
+    /// Built from the dependency's `TranslateTestModelSource` — the ladder,
+    /// live — rather than from a list written here, so a catalog that adds,
+    /// retires or reorders translation models changes this dropdown with no
+    /// code change on this screen (a sibling workstream is swapping the
+    /// catalog's translation head; this must keep working when it lands).
+    /// Empty until the screen configures, which is also when the picker is
+    /// drawn for the first time — so the list is never shown half-built.
+    @Published private(set) var modelOptions: [TranslateTestModelOption] = []
     @Published private(set) var micPhase: MicPhase = .idle
     /// Why the last capture ended without a transcript. Kept beside
     /// `micPhase` rather than inside it so the caption can name the reason
@@ -148,12 +175,28 @@ final class TranslateTestModel: ObservableObject {
     // MARK: Dependencies
 
     /// Empty until the screen configures them — see `configure(with:)`.
-    private var engines: [TranslateTestEngine: any TranslateProbeEngine] = [:]
+    /// One entry per dropdown row, Gemini included.
+    private var engines: [TranslateTestSelection: any TranslateProbeEngine] = [:]
+    /// Kept, not just read once at configure, because "is this model on the
+    /// device" is a question about the device rather than a value captured
+    /// when the screen was built — a download can finish while it is open.
+    private var modelSource: TranslateTestModelSource?
     /// The inner `@escaping` matches `TranslateTestDependencies`: the
     /// completion outlives the call that starts the capture, so the type
     /// says so (and only then can a coordinator forward it on).
     private var startCapture: (@escaping (Result<String, SearchPhraseCapture.Failure>) -> Void) -> Void = { _ in }
     private var cancelCapture: () -> Void = {}
+    /// True while the screen's OPENING row is being assigned — from the
+    /// initializer, or from `configure`. The observer above does nothing for
+    /// either: the transient state is already at its opening values, and the
+    /// caller that configures the screen asks for readiness itself. See the
+    /// observer's note.
+    private var isChoosingOpeningRow = true
+    /// A row's composed label, keyed by model, state and locale. The picker
+    /// asks for every visible row on every redraw, and composing one is a
+    /// catalog lookup plus a localization scan; the answer changes only when
+    /// the rows are rebuilt, which is what empties this.
+    private var labelCache: [String: String] = [:]
     /// The in-flight run, so a second tap supersedes the first instead of
     /// racing it: two results arriving out of order would show the slower
     /// engine's answer.
@@ -161,13 +204,26 @@ final class TranslateTestModel: ObservableObject {
 
     /// The screen's own init. Dependencies arrive through `configure`
     /// rather than here because they come from the environment, which is
-    /// not readable while a `@StateObject` is being built.
-    init() {}
-
-    init(engines: [TranslateTestEngine: any TranslateProbeEngine],
-         startCapture: @escaping (@escaping (Result<String, SearchPhraseCapture.Failure>) -> Void) -> Void,
-         cancelCapture: @escaping () -> Void) {
+    /// not readable while a `@StateObject` is being built — every parameter
+    /// below is defaulted so `TranslateTestModel()` is that no-arg init.
+    ///
+    /// The test-facing init takes the same parameters without the
+    /// environment, and with `modelSource` beside the engines because a
+    /// suite that scripts answers still has to say which models exist.
+    init(engines: [TranslateTestSelection: any TranslateProbeEngine] = [:],
+         modelSource: TranslateTestModelSource? = nil,
+         startCapture: @escaping (@escaping (Result<String, SearchPhraseCapture.Failure>) -> Void) -> Void = { _ in },
+         cancelCapture: @escaping () -> Void = {}) {
         self.engines = engines
+        self.modelSource = modelSource
+        // The same opening rule `configure` applies, so a suite that injects
+        // a source drives the screen it will actually see — assigned with the
+        // flag up, because the observer DOES fire from an initializer here
+        // (see its note), and a switch it did not ask for is a readiness walk
+        // the caller never made.
+        self.modelOptions = modelSource.map(Self.options(from:)) ?? []
+        self.selection = Self.defaultSelection(options: self.modelOptions)
+        self.isChoosingOpeningRow = false
         self.startCapture = startCapture
         self.cancelCapture = cancelCapture
     }
@@ -183,8 +239,144 @@ final class TranslateTestModel: ObservableObject {
         let built = dependencies.makeEngines()
         engines = built.engines
         cloudIndicator = built.cloudIndicator
+        modelSource = dependencies.modelSource
         startCapture = dependencies.startCapture
         cancelCapture = dependencies.cancelCapture
+        // The rows, ONCE, through the one walk — the init's copy and this one
+        // used to be joined by a third from `refreshReadiness`, which the
+        // caller makes a moment later anyway.
+        refreshModelOptions()
+        // The opening row: the first model the device can actually run,
+        // falling back to the first ladder entry (which offers its download)
+        // and then to Gemini. Assigned with the flag up, so it is the opening
+        // value rather than a switch — the caller's own `refreshReadiness()`
+        // is this screen's ask on appearing, and a second one spawned here
+        // would be two walks of the same ladder for one appearance.
+        let opening = Self.defaultSelection(options: modelOptions)
+        isChoosingOpeningRow = true
+        selection = opening
+        isChoosingOpeningRow = false
+    }
+
+    // MARK: - The dropdown
+
+    /// The ladder as dropdown rows. Pure and static so the mapping — ladder
+    /// order, catalog name, live install state — is pinned by a test rather
+    /// than by inspection.
+    ///
+    /// Duplicates are dropped rather than drawn twice: a ladder that names
+    /// the same model in two slots is a config that would show two identical
+    /// rows with two different selection values, and the second one could
+    /// never be reached by looking at the screen.
+    static func options(from source: TranslateTestModelSource) -> [TranslateTestModelOption] {
+        var seen: Set<ModelID> = []
+        return source.ladder.compactMap { id in
+            guard seen.insert(id).inserted else { return nil }
+            return TranslateTestModelOption(id: id,
+                                            displayName: source.displayName(id),
+                                            isInstalled: source.isInstalled(id),
+                                            isUnavailable: source.unavailabilityReason(id) != nil)
+        }
+    }
+
+    /// The row the screen opens on.
+    ///
+    /// The first model the device can actually **run** — asked through the
+    /// TIER'S own resolution rule (`LocalBrainTranslationTier
+    /// .resolvedModel(in:isAvailable:)`, the function `installedModel()` is
+    /// built from) rather than through a second "first where installed"
+    /// spelled here, so the row this screen opens on is the rung the
+    /// pipeline would itself pick ([MODEL-SWITCH], 2026-09-21 review).
+    ///
+    /// **"Runnable" is two questions, not one** (2026-09-21 review round 2):
+    /// the artifact is on the device AND the device class does not refuse it.
+    /// The installed test alone put the opening row on a rung this phone
+    /// cannot run — the screen would open on a model whose first attempt could
+    /// only answer `.modelUnavailable`, with the download card hidden (there
+    /// is nothing to download) and no way forward but a manual pick. The
+    /// tier's own resolution skips those rungs; this is that skip rule.
+    ///
+    /// Failing that, the first row at all: an uninstalled model is a valid
+    /// selection whose card offers that model's download, which is a better
+    /// opening screen than a cloud path the household may have switched off.
+    static func defaultSelection(options: [TranslateTestModelOption]) -> TranslateTestSelection {
+        let resolved = LocalBrainTranslationTier.resolvedModel(in: options.map(\.id)) { id in
+            guard let option = options.first(where: { $0.id == id }) else { return false }
+            return option.isInstalled && !option.isUnavailable
+        }
+        return resolved.map { .model($0) }
+            ?? options.first.map { .model($0.id) }
+            ?? .gemini
+    }
+
+    /// The dropdown row the selection names, or `nil` for Gemini (and for a
+    /// model the source no longer lists — the installed state is read from
+    /// the row, so nothing is drawn for a model with no row).
+    var selectedModelOption: TranslateTestModelOption? {
+        guard case .model(let id) = selection else { return nil }
+        return modelOptions.first { $0.id == id }
+    }
+
+    /// The name to print for the selected model: the row's, when the source
+    /// has one, and the raw id when it does not.
+    ///
+    /// The raw-id half is a contract for a hand-built source rather than a
+    /// case production reaches ([MODEL-SWITCH], 2026-09-21 review round 2):
+    /// the ladder is filtered by catalogue membership
+    /// (`LocalBrainTranslationTier.translationModelIDs(from:)` is a
+    /// `ModelCatalog.isTranslationModel` filter), so every rung the screen
+    /// draws has an entry and a name. It is kept because the rows are a
+    /// caller's to build — the same reason `TranslateTestModelSource
+    /// .displayName` keeps its fallback.
+    ///
+    /// `nil` exactly when the selection is not a model ([MODEL-SWITCH],
+    /// 2026-09-21 review). It used to be `""` for Gemini, which is a name
+    /// that reads as a missing one — and the callers that were supposed to
+    /// be guarded by "nobody asks about Gemini" were not checked by the
+    /// compiler. An optional makes every caller decide what a model-less
+    /// row means.
+    var selectedModelName: String? {
+        guard let option = selectedModelOption else { return selection.modelID?.rawValue }
+        return option.displayName
+    }
+
+    /// A dropdown row's text, composed by the SAME function the AI-models
+    /// pickers use (`AIModelsSettingsView.sttOptionLabel`) rather than by a
+    /// copy of it written here.
+    ///
+    /// [MODEL-SWITCH] (2026-09-21 review): the copy had drifted — it always
+    /// appended a state marker, so an installed row said "Ready" and a row
+    /// the DEVICE CLASS refuses said "Ready" too, while the settings row for
+    /// the same artifact said "not for this phone". One composer means
+    /// "installed" and "this phone cannot run it" mean the same thing on
+    /// every screen that says them, and the warden's marker is why a refused
+    /// row can no longer claim to be ready.
+    ///
+    /// The raw-id fallback is this screen's own: the shared composer takes a
+    /// catalog entry, and a row for an id this build does not carry has none.
+    /// Showing the id is the honest answer for a dev screen, and it keeps
+    /// the row selectable. Unreachable through the production ladder, which
+    /// is filtered by catalogue membership (see `selectedModelName`) — it is
+    /// kept for the same reason: the rows are a caller's to build, and the
+    /// test that pins it builds exactly that caller.
+    ///
+    /// Memoized per (model, state, locale): the picker asks for every row on
+    /// every redraw, and each compose is a catalog lookup plus a localization
+    /// scan for an answer that can only change when the rows are rebuilt.
+    func label(for option: TranslateTestModelOption, locale: Locale) -> String {
+        let key = "\(option.id.rawValue)|\(option.isInstalled)|\(option.isUnavailable)|\(locale.identifier)"
+        if let cached = labelCache[key] { return cached }
+        let label: String
+        if let entry = ModelCatalog.entry(for: option.id) {
+            label = AIModelsSettingsView.sttOptionLabel(entry: entry,
+                                                        downloaded: option.isInstalled,
+                                                        unavailable: option.isUnavailable,
+                                                        locale: locale)
+        } else {
+            label = option.displayName
+        }
+        labelCache[key] = label
+        return label
     }
 
     // MARK: - Running a translation
@@ -203,28 +395,53 @@ final class TranslateTestModel: ObservableObject {
     }
 
     /// Asks the selected engine for its readiness. Called when the screen
-    /// appears, when the engine changes, and when a download settles — the
-    /// three moments the answer can change.
+    /// appears, when the selection changes, and when a download settles —
+    /// the three moments the answer can change.
+    ///
+    /// It refreshes the dropdown's labels FIRST, and both live here because
+    /// they are the same question asked about the same trigger: the rows and
+    /// the line under them say whether a model is installed, and a caller
+    /// that updated one without the other would draw a row marked
+    /// "downloadable" above a line that says the model is missing — the two
+    /// halves of one sentence, disagreeing on screen.
     func refreshReadiness() async {
-        let engine = selectedEngine
+        refreshModelOptions()
+        let current = selection
         // Unconfigured (the screen has not appeared yet) leaves the answer
         // alone rather than clearing it: "not asked" and "asked and refused"
         // are different states, and this one resolves on its own a moment
         // later.
-        guard let probe = engines[engine] else { return }
+        guard let probe = engines[current] else { return }
         let next = await probe.readiness()
         // Guarded: an answer that arrives after the picker moved describes
         // the engine that is no longer selected.
-        guard engine == selectedEngine else { return }
+        guard current == selection else { return }
         readiness = next
+    }
+
+    /// Re-reads the install state behind every row. Cheap (one store query
+    /// per ladder entry, and the ladder is a handful), and published only on
+    /// a real change so a readiness re-ask cannot spin the view.
+    ///
+    /// **The one walk** ([MODEL-SWITCH], 2026-09-21 review): the initializer,
+    /// `configure` and every readiness refresh all come through here — they
+    /// each used to rebuild the rows for themselves, which is three walks of
+    /// the same ladder for one appearance. The label cache is emptied with
+    /// the rows, because a label is a fact about a row's state.
+    private func refreshModelOptions() {
+        guard let source = modelSource else { return }
+        let next = Self.options(from: source)
+        guard next != modelOptions else { return }
+        modelOptions = next
+        labelCache.removeAll(keepingCapacity: true)
     }
 
     /// Runs one translation through the selected engine.
     func run() async {
         let text = trimmedInput
         guard !text.isEmpty else { return }
-        let engine = selectedEngine
-        guard let probe = engines[engine] else { return }
+        let asked = selection
+        guard let probe = engines[asked] else { return }
 
         runTask?.cancel()
         runState = .running
@@ -234,10 +451,11 @@ final class TranslateTestModel: ObservableObject {
             let answer = await probe.probe(text)
             guard let self, !Task.isCancelled else { return }
             // Asked-is-not-selected: the picker may have moved while the
-            // engine worked. The cards were reset for the engine on screen
-            // now, so an answer from the one that was asked is dropped
-            // rather than displayed under the wrong name.
-            guard self.selectedEngine == engine else { return }
+            // engine worked — to another model as much as to the cloud. The
+            // cards were reset for the row on screen now, so an answer from
+            // the one that was asked is dropped rather than displayed under
+            // the wrong name.
+            guard self.selection == asked else { return }
             self.outcome = answer
             self.runState = .done
         }
@@ -427,6 +645,41 @@ final class TranslateTestModel: ObservableObject {
     /// so the rule is pinned by a test rather than by inspection.
     static func completedInstalls(in states: [ModelID: ModelDownloadState]) -> Set<ModelID> {
         Set(states.compactMap { entry in entry.value == .completed ? entry.key : nil })
+    }
+
+    /// The catalog entry this screen may OFFER as a download for `id`, or
+    /// `nil` when it may not ([MODEL-SWITCH], 2026-09-21 review round 2).
+    ///
+    /// **The offer is the catalog's, not the ladder's.** A ladder rung is a
+    /// model the TIER will try; it is not a promise that this build publishes
+    /// the artifact for download, and several rungs exist precisely so a
+    /// device that sideloaded them keeps working (the round-4 Q8 ceiling, the
+    /// superseded quants). This screen used to draw a full management row —
+    /// Download, Cancel, **Delete** — for every rung the catalog happened to
+    /// carry, which made it the one place in the app offering an in-app
+    /// download for models the AI-models screen deliberately never offers.
+    ///
+    /// So the list is `ModelCatalog.availableTranslationEntries`: the SAME
+    /// list the Settings translation section's own download row draws from,
+    /// asked rather than re-spelled, so the two surfaces cannot disagree
+    /// about what a household may fetch.
+    static func offeredEntry(for id: ModelID) -> ModelCatalogEntry? {
+        ModelCatalog.availableTranslationEntries.first { $0.id == id }
+    }
+
+    /// The sentence for a rung this screen cannot offer — one of the two
+    /// cases the catalog leaves, keyed by which one it is.
+    ///
+    /// An id no entry carries at all (a catalog swap mid-flight) and an
+    /// artifact this build carries but does not publish (sideload-only) are
+    /// different facts, and the household's next action differs: nothing can
+    /// be installed for the first, and the file must be put on the device by
+    /// hand for the second. Pure and static so both halves are pinned by a
+    /// test rather than by inspection.
+    static func unofferedInstallNoteKey(for id: ModelID) -> String {
+        ModelCatalog.entry(for: id) == nil
+            ? "settings.translateTest.install.unknown"
+            : "settings.translateTest.install.sideloadOnly"
     }
 
     // MARK: - Teardown

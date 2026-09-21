@@ -9569,6 +9569,40 @@
         }
       }
     },
+    "model.name.intent-ne-qwen4b-s43-q4km": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Brain — Qwen 4B · intent fine-tune (slim, seed 43, superseded)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "दिमाग — Qwen ४B · इन्टेन्ट फाइन-ट्युन (स्लिम, seed ४३, पुरानो)"
+          }
+        }
+      }
+    },
+    "model.name.intent-ne-qwen4b-slotcanon-q4km": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Brain — Qwen 4B · Nepali (gate-passing)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "दिमाग — Qwen ४B · नेपाली (गेट पास)"
+          }
+        }
+      }
+    },
     "model.name.llama-3.2-1b-instruct-q4km": {
       "extractionState": "manual",
       "localizations": {
@@ -12558,18 +12592,11 @@
         "ne": { "stringUnit": { "state": "translated", "value": "विकासकर्ता उपकरण। यसले वास्तविक अनुवाद इन्जिन चलाउँछ — क्लाउड इन्जिनले क्यामेराको जस्तै सहमति ढोका पालन गर्छ।" } }
       }
     },
-    "settings.translateTest.engine.label": {
+    "settings.translateTest.model.label": {
       "extractionState": "manual",
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Engine" } },
-        "ne": { "stringUnit": { "state": "translated", "value": "इन्जिन" } }
-      }
-    },
-    "settings.translateTest.engine.local": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Local" } },
-        "ne": { "stringUnit": { "state": "translated", "value": "लोकल" } }
+        "en": { "stringUnit": { "state": "translated", "value": "Model" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "मोडेल" } }
       }
     },
     "settings.translateTest.engine.gemini": {
@@ -12691,6 +12718,20 @@
         "ne": { "stringUnit": { "state": "translated", "value": "तह १" } }
       }
     },
+    "settings.translateTest.result.busy": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "device busy, not attempted — %@" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "यन्त्र व्यस्त, प्रयास गरिएन — %@" } }
+      }
+    },
+    "settings.translateTest.result.modelLoad": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Model load (ms)" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "मोडेल लोड (ms)" } }
+      }
+    },
     "settings.translateTest.readiness.checking": {
       "extractionState": "manual",
       "localizations": {
@@ -12708,8 +12749,8 @@
     "settings.translateTest.readiness.modelMissing": {
       "extractionState": "manual",
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "No translation model is installed on this device." } },
-        "ne": { "stringUnit": { "state": "translated", "value": "यो यन्त्रमा अनुवाद मोडेल स्थापना गरिएको छैन।" } }
+        "en": { "stringUnit": { "state": "translated", "value": "The model “%@” is not installed on this device." } },
+        "ne": { "stringUnit": { "state": "translated", "value": "“%@” मोडेल यो यन्त्रमा स्थापना गरिएको छैन।" } }
       }
     },
     "settings.translateTest.readiness.providerKeyMissing": {
@@ -12726,11 +12767,32 @@
         "ne": { "stringUnit": { "state": "translated", "value": "सेटिङमा क्लाउड अनुवाद स्विच बन्द छ।" } }
       }
     },
+    "settings.translateTest.readiness.modelUnavailable": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "“%@” cannot run on this device: %@" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "“%@” यो यन्त्रमा चल्न सक्दैन: %@" } }
+      }
+    },
     "settings.translateTest.install.section": {
       "extractionState": "manual",
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Translation model" } },
-        "ne": { "stringUnit": { "state": "translated", "value": "अनुवाद मोडेल" } }
+        "en": { "stringUnit": { "state": "translated", "value": "Download “%@”" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "“%@” डाउनलोड गर्नुहोस्" } }
+      }
+    },
+    "settings.translateTest.install.unknown": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "This build carries no catalog entry for this model, so it cannot be downloaded here." } },
+        "ne": { "stringUnit": { "state": "translated", "value": "यो बिल्डमा यो मोडेलको क्याटलग प्रविष्टि छैन, त्यसैले यहाँ डाउनलोड गर्न सकिँदैन।" } }
+      }
+    },
+    "settings.translateTest.install.sideloadOnly": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "This build does not offer this model for download. Put the file on the phone directly to use it." } },
+        "ne": { "stringUnit": { "state": "translated", "value": "यो बिल्डले यो मोडेल डाउनलोडका लागि उपलब्ध गराउँदैन। प्रयोग गर्न फाइल सिधै फोनमा राख्नुहोस्।" } }
       }
     },
     "settings.schemeProbe.title": {
