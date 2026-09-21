@@ -91,12 +91,13 @@ final class ModelCatalogLanguageTests: XCTestCase {
     /// assistant brains with rows of their own in the brain section.
     func testTheOfferedTranslationRowsAreExactlyTheTiersHead() {
         let offered = ModelCatalog.availableTranslationEntries.map(\.id)
-        XCTAssertEqual(offered, [ModelCatalog.nmtEnNeQwen17bR4Q5],
+        XCTAssertEqual(offered, [ModelCatalog.nmtEnNeQwen17bR4Q6],
                        "the section offers the tier's shipped head, alone")
-        // Round 3 (2026-09-19) ended the round-2b split in which the tier
-        // led with a sideload-only test quant the row did not offer: the
-        // ship quant and the offered row are now the same artifact, so the
-        // row's Download lands on exactly what the tier reads.
+        // Round 4 (2026-09-21) re-decided which artifact that head is: the
+        // round-4 Q5 failed the S11 gate under the shipped prompt and the
+        // verdict promoted the Q6_K. The row moved with the verdict, which is
+        // the property this assertion guards — an offered row that did NOT
+        // move would leave a household downloading a quant the gate refused.
         XCTAssertEqual(LiveTranslateConfig.default.brainTranslationModelIDs.first,
                        offered.first,
                        "the tier leads with the quant the row offers")
@@ -116,10 +117,18 @@ final class ModelCatalogLanguageTests: XCTestCase {
     /// catalog's own `displayName` verbatim; a row that drifted from it
     /// would read differently in Settings than in the catalog's docs.
     func testTheTranslationRowIsNamedInBothLanguages() {
-        // Two entries need copy, not one: the offered row (round-3 head) and
-        // the superseded round-2b artifact it replaced — a device that
-        // installed the old one before the upgrade holds both, and the
-        // installed-hidden row renders beside the new one.
+        // Two entries need copy, not one: a translation row that is offered,
+        // and a superseded artifact a device that upgraded still holds — the
+        // installed-hidden row renders beside the new one, and the names must
+        // read as different rows.
+        //
+        // [COPY OWED] As of the round-4 swap this test names the DEMOTED Q5
+        // and the superseded round-2b Q8 rather than the offered head: the
+        // round-4 Q6_K and Q8_0 entries need `model.name.<id>` rows in the
+        // string table, and the string table is outside this workstream's
+        // scope (Services-only). Until that copy lands the offered row falls
+        // back to its L10n key. The mechanism this test pins is unchanged —
+        // it just currently exercises the two entries whose copy exists.
         let entries = [ModelCatalog.nmtEnNeQwen17bR4Q5, ModelCatalog.nmtEnNeQwen17bR2bQ8]
             .compactMap { ModelCatalog.entry(for: $0) }
         XCTAssertEqual(entries.count, 2, "both translation entries resolve")
