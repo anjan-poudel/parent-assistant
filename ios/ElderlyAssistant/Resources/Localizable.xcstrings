@@ -12590,6 +12590,27 @@
         "ne": { "stringUnit": { "state": "translated", "value": "सुन्न सकिएन। फेरि प्रयास गर्नुहोस्।" } }
       }
     },
+    "settings.translateTest.mic.denied": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Microphone access is off for this app. Turn it on in Settings to dictate." } },
+        "ne": { "stringUnit": { "state": "translated", "value": "यो एपको माइक्रोफोन पहुँच बन्द छ। बोल्न सेटिङमा गएर खोल्नुहोस्।" } }
+      }
+    },
+    "settings.translateTest.mic.busy": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The assistant was using the microphone. Try again." } },
+        "ne": { "stringUnit": { "state": "translated", "value": "सहायकले माइक्रोफोन प्रयोग गर्दै थियो। फेरि प्रयास गर्नुहोस्।" } }
+      }
+    },
+    "settings.translateTest.mic.audio": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "The microphone is not available right now. Try again." } },
+        "ne": { "stringUnit": { "state": "translated", "value": "माइक्रोफोन अहिले उपलब्ध छैन। फेरि प्रयास गर्नुहोस्।" } }
+      }
+    },
     "settings.translateTest.action.translate": {
       "extractionState": "manual",
       "localizations": {
@@ -12639,11 +12660,18 @@
         "ne": { "stringUnit": { "state": "translated", "value": "कारण" } }
       }
     },
-    "settings.translateTest.result.deferral": {
+    "settings.translateTest.result.origin": {
       "extractionState": "manual",
       "localizations": {
-        "en": { "stringUnit": { "state": "translated", "value": "Deferral" } },
-        "ne": { "stringUnit": { "state": "translated", "value": "स्थगन" } }
+        "en": { "stringUnit": { "state": "translated", "value": "Origin" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "स्रोत" } }
+      }
+    },
+    "settings.translateTest.result.tier1": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Tier 1" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "तह १" } }
       }
     },
     "settings.translateTest.readiness.checking": {

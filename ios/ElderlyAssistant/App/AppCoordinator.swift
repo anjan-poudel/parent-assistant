@@ -2059,21 +2059,6 @@ final class AppCoordinator: ObservableObject {
         return registry
     }
 
-    /// [LIVE-TRANSLATE T-027] Assembles one live-translation session (C13).
-    ///
-    /// Called only when the feature is opened, and it is the only place a
-    /// capture session, a detector, a recognition request or a tier is built
-    /// for this feature. The two stores it hands over are the process's own
-    /// instances (`labelTranslationCache`, `liveTranslateConsentGate`, both
-    /// built in `init` over the same cipher) — the session never constructs
-    /// storage and never constructs a second gate.
-    ///
-    /// `nil` when the shell's speech queue does not exist yet. That queue is
-    /// built in `start()`; both entry points are downstream of it, so this is
-    /// the pre-`start()` state and is not reachable from either. Returning
-    /// `nil` rather than a session without speech is deliberate: the plugin
-    /// turns it into the spoken apology the design's failure table specifies,
-    /// instead of a session that silently cannot talk.
     // MARK: - [TRANSLATE-TEST] The hidden dev screen's dependencies (2026-09-21)
 
     /// The translate-test screen's dependencies: the app's OWN instances,
@@ -2133,6 +2118,21 @@ final class AppCoordinator: ObservableObject {
             targetLanguage: LiveTranslationPipeline.defaultTargetLanguage)
     }
 
+    /// [LIVE-TRANSLATE T-027] Assembles one live-translation session (C13).
+    ///
+    /// Called only when the feature is opened, and it is the only place a
+    /// capture session, a detector, a recognition request or a tier is built
+    /// for this feature. The two stores it hands over are the process's own
+    /// instances (`labelTranslationCache`, `liveTranslateConsentGate`, both
+    /// built in `init` over the same cipher) — the session never constructs
+    /// storage and never constructs a second gate.
+    ///
+    /// `nil` when the shell's speech queue does not exist yet. That queue is
+    /// built in `start()`; both entry points are downstream of it, so this is
+    /// the pre-`start()` state and is not reachable from either. Returning
+    /// `nil` rather than a session without speech is deliberate: the plugin
+    /// turns it into the spoken apology the design's failure table specifies,
+    /// instead of a session that silently cannot talk.
     private func makeLiveTranslateDependencies(locale: Locale) -> LiveTranslateSessionDependencies? {
         guard let queue = speakQueue else { return nil }
         // [POINT-ASK] The hosted point-ask session's dependencies: the

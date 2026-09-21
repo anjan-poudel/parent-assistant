@@ -4326,13 +4326,11 @@ struct AIModelsSettingsView: View {
         ModelCatalog.availableSTTEntries.contains { isInstalled($0.id) }
     }
 
-    /// Row state for the downloads list: the service's live state wins;
-    /// otherwise derive from what is on disk (directory-aware so an
-    /// installed WhisperKit model reads as Ready, not Download).
+    /// Row state for the downloads list. The rule itself is shared with the
+    /// translate-test screen (`ModelDownloadState.rowState`); see there for
+    /// why it is derived rather than read from one source.
     private func downloadState(for id: ModelID) -> ModelDownloadState {
-        if let state = downloads.states[id] { return state }
-        guard let entry = ModelCatalog.entry(for: id) else { return .notStarted }
-        return coordinator.modelStore.isInstalled(entry) ? .completed : .notStarted
+        .rowState(for: id, states: downloads.states, modelStore: coordinator.modelStore)
     }
 
     /// Picker row text: the localized model name, plus an honest
@@ -4412,6 +4410,25 @@ struct AIModelsSettingsView: View {
         case .notStarted, .failed, .cancelled: return true
         case .queued, .downloading, .verifying, .completed: return false
         }
+    }
+}
+
+extension ModelDownloadState {
+    /// The row state for one model id, from the two things that know: the
+    /// download service's live state wins; otherwise it is derived from what
+    /// is on disk, so a model installed before the screen opened reads as
+    /// Ready rather than Download.
+    ///
+    /// Shared by the AI-models screen and the translate-test screen, which
+    /// offers the same translation artifact: two copies of this rule would be
+    /// two places to disagree about a model that is complete on disk while no
+    /// download is running.
+    static func rowState(for id: ModelID,
+                         states: [ModelID: ModelDownloadState],
+                         modelStore: ModelStore) -> ModelDownloadState {
+        if let state = states[id] { return state }
+        guard let entry = ModelCatalog.entry(for: id) else { return .notStarted }
+        return modelStore.isInstalled(entry) ? .completed : .notStarted
     }
 }
 

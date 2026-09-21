@@ -64,6 +64,56 @@ enum TranslateEngineReadiness: Equatable {
     case cloudDisabled
 }
 
+/// What tier 1 did with the string.
+///
+/// Three cases because the tier's return value cannot tell them apart by
+/// itself: `LocalBrainTranslationOutcome` reports the same empty
+/// `translations` dictionary for "the batch bound excluded this string",
+/// "the warden declined before attempting" and "the brain ran and had no
+/// answer" alike. Reporting all three as one `noTierResolved` result would
+/// put a fault on a tier that was never asked.
+enum LocalBrainDisposition: Equatable {
+    /// The tier's own batch bound excluded the string before any attempt —
+    /// a source over `brainTranslationMaxCharacters`, or a config with no
+    /// room for one. Proven by asking the tier's own `batchPrefixLength`
+    /// (`> 0` means it would have been asked), never inferred from the empty
+    /// outcome.
+    case neverAttempted
+    /// The tier declined before attempting, and named why. The payload is
+    /// the tier's own deferral, payload and all.
+    case deferred(LocalBrainDeferral)
+    /// The tier attempted (or tried to run) the brain and produced no
+    /// translation for this string — the case the plain `noTierResolved`
+    /// result is actually for.
+    case attemptedWithoutAnswer
+
+    /// The token the card prints.
+    ///
+    /// The deferral case renders the tier's OWN event vocabulary
+    /// (`LocalBrainDeferral.eventToken`), so a card can be checked against
+    /// the logs of the same run; the other two take the same spelling
+    /// convention (snake_case tokens, never prose) because they are the same
+    /// kind of fact.
+    var token: String {
+        switch self {
+        case .neverAttempted: return "never_attempted"
+        case .attemptedWithoutAnswer: return "attempted_without_answer"
+        case .deferred(let deferral): return deferral.eventToken
+        }
+    }
+}
+
+extension LocalBrainDeferral {
+    /// The deferral as the tier names it in its own events.
+    ///
+    /// Derived from `eventReason` rather than re-spelled here: a second
+    /// switch over the same cases is a second place to forget one (and the
+    /// two were in fact already drifting — this used to say `residentBrain`
+    /// where the event schema says `resident_brain`), and the event token is
+    /// what an operator reading the log beside this screen will see.
+    var eventToken: String { eventReason.rawValue }
+}
+
 /// One engine's answer for one string: the result — which already names the
 /// tier that produced it — plus how long the caller waited.
 ///
@@ -75,32 +125,20 @@ struct TranslateProbeOutcome: Equatable {
     let result: TranslationResult
     let latencyMs: Int
 
-    /// Tier 1 only: why the brain declined to attempt the batch, when it
-    /// did. Carried as evidence rather than a branch — the outcome already
-    /// says "no translation", and this says whether the model was even
-    /// asked. `nil` for the cloud path and for a local attempt that ran.
-    var localDeferral: LocalBrainDeferral? = nil
-}
+    /// Tier 1 only: what the tier did with the string, when it did not
+    /// translate it. `nil` when the brain answered (and for the cloud path,
+    /// which has no such states).
+    var localDisposition: LocalBrainDisposition? = nil
 
-extension LocalBrainDeferral {
-    /// The deferral's NAME, without its payload, for the screen's one-line
-    /// cell.
+    /// Tier 2 only: whether the answer was computed now or served from the
+    /// device's own store. `nil` when nothing was answered.
     ///
-    /// The associated values are real evidence (byte counts, pressure
-    /// levels), but a card one line wide cannot carry them, and the case
-    /// name is what tells a reader which of the warden's decisions they are
-    /// looking at. It lives here rather than in the view so a suite can pin
-    /// that every case has a distinct name — a new deferral added to the
-    /// tier would otherwise render as an empty cell instead of failing.
-    var displayToken: String {
-        switch self {
-        case .residentBrain: return "residentBrain"
-        case .insufficientHeadroom: return "insufficientHeadroom"
-        case .memoryPressure: return "memoryPressure"
-        case .recentCriticalPressure: return "recentCriticalPressure"
-        case .releaseRequestedDuringLoad: return "releaseRequestedDuringLoad"
-        }
-    }
+    /// Read from `BatchResult.origins(for:)`, because `TranslationResult`
+    /// alone cannot say this — it names the tier and drops the origin, so a
+    /// cache hit would otherwise show as a cloud answer that took a
+    /// millisecond, which would make the latency this screen exists to
+    /// compare a lie.
+    var cloudOrigin: LiveTranslateResolutionOrigin? = nil
 }
 
 /// One attempt at one string. Two methods, because the screen has exactly
@@ -123,6 +161,27 @@ protocol TranslateProbeEngine {
     func readiness() async -> TranslateEngineReadiness
 }
 
+/// The one method this screen asks of the cloud tier.
+///
+/// Declared here so `CloudProbeEngine` can be tested against a scripted
+/// batch — the provenance and refusal branches below are the ones a live
+/// tier can only produce with a network, a consent record and a cache, and
+/// they are exactly the branches a reviewer has to be able to pin. The
+/// conformance is on the shipped actor itself (`extension CloudTranslationTier:
+/// CloudProbeTier {}`), so there is no wrapper between this screen and the
+/// tier it is measuring.
+///
+/// `Sendable` because the conformer is an actor: an async requirement can be
+/// satisfied by an actor's isolated method only when the protocol carries
+/// that promise, and without it the conformance is a warning today and an
+/// error in Swift 6.
+protocol CloudProbeTier: Sendable {
+    func resolve(items: [CloudTranslationTier.Item],
+                 targetLanguage: AppLanguage) async -> CloudTranslationTier.BatchResult
+}
+
+extension CloudTranslationTier: CloudProbeTier {}
+
 // MARK: - Tier 1 (on-device brain)
 
 /// The on-device path, over the shipped tier 1.
@@ -130,23 +189,42 @@ protocol TranslateProbeEngine {
 /// The install question arrives as a closure rather than a `ModelStore` so
 /// this adapter owns no store and a test can answer it without one — the
 /// same shape the tier itself uses (`modelStore: ModelStore?`, "a tier
-/// without one reports itself unavailable, honestly").
+/// without one reports itself unavailable, honestly"). It is fed by the
+/// tier's own `installedModel()` (see `makeEngines`), not by a second walk
+/// of `brainTranslationModelIDs`, so the two cannot disagree about which
+/// file counts as installed.
 struct LocalBrainProbeEngine: TranslateProbeEngine {
     let brain: any LocalBrainTranslating
-    /// "Is a translation brain installed and complete on this device" —
-    /// the `ModelStore.isAvailable` question over the tier's own
-    /// `brainTranslationModelIDs`.
-    let isModelInstalled: () -> Bool
+    /// The tier's own answer to "which catalogue entry will run", `nil` when
+    /// none will. Async because the tier is an actor: the ask hops to it.
+    let installedModel: () async -> ModelID?
+    /// The tier's config, for its batch bound. Needed because the bound —
+    /// not the tier's return value — is what says whether a string was ever
+    /// handed to the brain (see `LocalBrainDisposition`).
+    let config: LiveTranslateConfig
     /// Injectable clock, the seam convention the shipped tiers use
     /// (`LiveTranslateConsentGate.now`, `CloudTranslationTier.sleep`) so a
     /// suite can pin a latency instead of racing one.
     var now: () -> Date = { Date() }
 
     func readiness() async -> TranslateEngineReadiness {
-        isModelInstalled() ? .ready : .modelMissing
+        await installedModel() != nil ? .ready : .modelMissing
     }
 
     func probe(_ text: String) async -> TranslateProbeOutcome {
+        // The bound is asked FIRST, before the brain is touched, because the
+        // outcome the brain returns cannot answer this: a string over the
+        // character bound never reaches it, and tier 1 returns the same empty
+        // dictionary it returns for an attempt that failed. Charging that to
+        // `.noTierResolved` would report a fault on a tier that was never
+        // asked — and would show a latency for work that never happened.
+        guard LocalBrainTranslationTier.batchPrefixLength(of: [text], config: config) > 0 else {
+            return TranslateProbeOutcome(
+                result: .degraded(originalText: text, reason: .noTierResolved),
+                latencyMs: 0,
+                localDisposition: .neverAttempted)
+        }
+
         let started = now()
         let outcome = await brain.translate([text])
         let latencyMs = Int(now().timeIntervalSince(started) * 1000)
@@ -156,18 +234,22 @@ struct LocalBrainProbeEngine: TranslateProbeEngine {
         // itself"), so presence is the whole test. What it means for the
         // screen is "tier 1 did not translate this" — `noTierResolved`,
         // which is the honest token for a failure no more specific cause
-        // describes. The deferral, when there was one, travels beside it.
+        // describes — and the disposition beside it says whether the brain
+        // was asked at all.
         let result: TranslationResult
+        let disposition: LocalBrainDisposition?
         if let translation = outcome.translations[text] {
             result = .resolved(originalText: text,
                                translation: translation,
                                tier: .onDeviceBrain)
+            disposition = nil
         } else {
             result = .degraded(originalText: text, reason: .noTierResolved)
+            disposition = outcome.deferral.map(LocalBrainDisposition.deferred) ?? .attemptedWithoutAnswer
         }
         return TranslateProbeOutcome(result: result,
                                      latencyMs: latencyMs,
-                                     localDeferral: outcome.deferral)
+                                     localDisposition: disposition)
     }
 }
 
@@ -182,7 +264,7 @@ struct LocalBrainProbeEngine: TranslateProbeEngine {
 /// `degraded` with the taxonomy's reason, and an unanswered item to
 /// `pending`).
 struct CloudProbeEngine: TranslateProbeEngine {
-    let tier: CloudTranslationTier
+    let tier: any CloudProbeTier
     let targetLanguage: AppLanguage
     /// "Is a Gemini key configured" — the `GeminiConfigStore` question.
     /// Without one the tier would spend a request to learn what this
@@ -227,6 +309,15 @@ struct CloudProbeEngine: TranslateProbeEngine {
                 result: .degraded(originalText: text, reason: .cloudDisabled),
                 latencyMs: 0)
         }
+        // The same argument for the key: it can be cleared while the screen
+        // is open, and the tier would spend a request to report a failure
+        // this already knows the fix for — the setup the household has to
+        // do. Asked here too so the card names the setup, not a dead call.
+        guard isProviderConfigured() else {
+            return TranslateProbeOutcome(
+                result: .degraded(originalText: text, reason: .providerNotConfigured),
+                latencyMs: 0)
+        }
         let item = CloudTranslationTier.Item(id: Self.itemID,
                                              text: text,
                                              // Never invented: detection
@@ -238,11 +329,30 @@ struct CloudProbeEngine: TranslateProbeEngine {
         let started = now()
         let batch = await tier.resolve(items: [item], targetLanguage: targetLanguage)
         let latencyMs = Int(now().timeIntervalSince(started) * 1000)
-        return TranslateProbeOutcome(result: batch.result(for: item), latencyMs: latencyMs)
+        return TranslateProbeOutcome(result: batch.result(for: item),
+                                     latencyMs: latencyMs,
+                                     // Provenance, when there was an answer:
+                                     // `origins(for:)` omits unanswered
+                                     // items, exactly as `resolved` does.
+                                     cloudOrigin: batch.origins(for: [item])[item.id])
     }
 }
 
 // MARK: - Production wiring
+
+/// The two engines the screen asks, plus the indicator that belongs to them.
+///
+/// The indicator travels WITH the engines because it is built from the same
+/// tier: production gives the tier the session's indicator, and this screen
+/// has no session, so the screen must render the one its own tier moves
+/// (OD-13: a visible indicator while the cloud tier is active — a screen
+/// that showed cloud activity with no indicator would be the one surface
+/// exempt from that rule).
+@MainActor
+struct TranslateTestEngines {
+    let engines: [TranslateTestEngine: any TranslateProbeEngine]
+    let cloudIndicator: CloudActivityIndicatorModel
+}
 
 /// The screen's dependencies: the coordinator's OWN instances.
 ///
@@ -305,7 +415,7 @@ struct TranslateTestDependencies {
     /// belongs, and this screen drives the tier from the main actor
     /// anyway. Everything else here is main-actor by the screen's nature.
     @MainActor
-    func makeEngines() -> [TranslateTestEngine: any TranslateProbeEngine] {
+    func makeEngines() -> TranslateTestEngines {
         // The tier is given THIS screen's indicator: the counter it moves
         // belongs to the surface that asked, not to a session that is not
         // running. Its deadline sleeps for real (`sleep` defaulted), which
@@ -317,29 +427,28 @@ struct TranslateTestDependencies {
                                               events: LiveTranslateEvents(bus: observabilityBus,
                                                                           config: config),
                                               targetLanguage: targetLanguage)
-        // The readiness question is the tier's OWN question, asked the same
-        // way (`installedModel()`: the first of `brainTranslationModelIDs`
-        // that is installed *and complete*). Spelling it here rather than
-        // calling the tier would let the two drift, and a screen that says
-        // "ready" for a brain the tier then refuses is worse than one that
-        // says nothing.
-        let isModelInstalled: () -> Bool = { [config, modelStore] in
-            guard let modelStore else { return false }
-            return config.brainTranslationModelIDs.contains { modelStore.isAvailable($0) }
-        }
-        return [
-            .local: LocalBrainProbeEngine(brain: brain,
-                                          isModelInstalled: isModelInstalled),
-            .gemini: CloudProbeEngine(tier: CloudTranslationTier(cache: cache,
-                                                                 consentGate: consentGate,
-                                                                 costGovernor: costGovernor,
-                                                                 client: client,
-                                                                 config: config,
-                                                                 observabilityBus: observabilityBus,
-                                                                 indicator: indicator),
-                                      targetLanguage: targetLanguage,
-                                      isProviderConfigured: isProviderConfigured,
-                                      isCloudEnabled: isCloudEnabled),
-        ]
+        // The readiness question is the tier's OWN, asked of the tier
+        // itself (`installedModel()`: the first of
+        // `brainTranslationModelIDs` that is installed *and complete*).
+        // Re-spelling the walk here would let the two drift, and a screen
+        // that says "ready" for a brain the tier then refuses is worse than
+        // one that says nothing.
+        return TranslateTestEngines(
+            engines: [
+                .local: LocalBrainProbeEngine(brain: brain,
+                                              installedModel: { await brain.installedModel() },
+                                              config: config),
+                .gemini: CloudProbeEngine(tier: CloudTranslationTier(cache: cache,
+                                                                     consentGate: consentGate,
+                                                                     costGovernor: costGovernor,
+                                                                     client: client,
+                                                                     config: config,
+                                                                     observabilityBus: observabilityBus,
+                                                                     indicator: indicator),
+                                          targetLanguage: targetLanguage,
+                                          isProviderConfigured: isProviderConfigured,
+                                          isCloudEnabled: isCloudEnabled),
+            ],
+            cloudIndicator: indicator)
     }
 }

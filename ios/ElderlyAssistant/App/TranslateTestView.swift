@@ -62,11 +62,25 @@ private struct TranslateTestBody: View {
     let downloads: ModelDownloadService
     let locale: Locale
 
+    @Environment(\.scenePhase) private var scenePhase
+
+    /// Which translation artifacts had finished downloading as of the last
+    /// publication of the service's states. The key that turns the readiness
+    /// re-ask below into a transition rather than a per-callback flood.
+    @State private var completedInstalls: Set<ModelID> = []
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             TranslateTestComposerCard(model: model, locale: locale)
 
             TranslateTestControlsCard(model: model, locale: locale)
+
+            // Sits under the button that starts the request, which is where
+            // the eye already is — and it is the tier's own indicator, the
+            // one this screen's tier moves (OD-13).
+            if let indicator = model.cloudIndicator {
+                TranslateTestCloudIndicatorRow(indicator: indicator, locale: locale)
+            }
 
             if model.readiness == .modelMissing, model.selectedEngine == .local {
                 TranslateTestInstallCard(downloads: downloads, locale: locale)
@@ -81,12 +95,44 @@ private struct TranslateTestBody: View {
                 .foregroundStyle(DesignTokens.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        // A finished install is the one thing that can flip the local
-        // engine from "no model" to runnable while this screen is open.
-        .onReceive(downloads.$states) { _ in
+        // A finished install is the one thing that can flip the local engine
+        // from "no model" to runnable while this screen is open. The service
+        // republishes its states on every progress chunk of every download,
+        // so the finished SET is compared first: a readiness ask (and the
+        // Task it needs) per chunk would be hundreds of store queries for an
+        // answer that can only change when this set does.
+        .onReceive(downloads.$states) { states in
+            let completed = TranslateTestModel.completedInstalls(in: states)
+            guard completed != completedInstalls else { return }
+            completedInstalls = completed
             Task { await model.refreshReadiness() }
         }
+        .onAppear { model.refreshMicVisibility() }
+        // The fix for a denied microphone lives in Settings, so the way back
+        // to the foreground is the moment the answer can have changed.
+        .onChange(of: scenePhase) { phase in
+            guard phase == .active else { return }
+            model.refreshMicVisibility()
+        }
         .onDisappear { model.onDisappear() }
+    }
+}
+
+/// Renders the tier's cloud-activity indicator (OD-13: a visible indicator
+/// while the cloud tier is active).
+///
+/// The view is wrapped rather than called directly because reading
+/// `isActive` is what makes it redraw, and reading it once in the body would
+/// observe nothing: the model is an `ObservableObject`, so the observation
+/// has to be in a view that holds it.
+private struct TranslateTestCloudIndicatorRow: View {
+    @ObservedObject var indicator: CloudActivityIndicatorModel
+    let locale: Locale
+
+    var body: some View {
+        CloudActivityIndicatorView(
+            surface: CloudActivityIndicatorSurface(isActive: indicator.isActive,
+                                                   locale: locale))
     }
 }
 
@@ -120,13 +166,25 @@ private struct TranslateTestComposerCard: View {
                         .frame(minHeight: 120)
                 }
 
-                TranslateTestMicButton(model: model, locale: locale)
+                // Hidden outright when the microphone is unusable (the
+                // shipped leaves' rule): a button whose only possible outcome
+                // is the failure it just had is worse than no button.
+                if model.micButtonVisible {
+                    TranslateTestMicButton(model: model, locale: locale)
+                }
             }
 
-            if model.micPhase == .failed {
-                Text(L10n.str("settings.translateTest.mic.failed", locale: locale))
+            // The caption is derived from the mic facts, not from the phase:
+            // a busy pipeline returns the button to idle AND still owes the
+            // person a sentence about why the tap did nothing.
+            if let notice = model.micNotice {
+                Text(L10n.str(notice.captionKey, locale: locale))
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.stateError)
+                    // Busy is not a fault — the button is live again — so it
+                    // is stated plainly rather than in the error colour.
+                    .foregroundStyle(notice == .busy ? DesignTokens.textSecondary
+                                                     : DesignTokens.stateError)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(16)
@@ -187,9 +245,7 @@ private struct TranslateTestControlsCard: View {
 
             Text(readinessLine)
                 .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(model.readiness == .ready
-                                 ? DesignTokens.stateSpeaking
-                                 : DesignTokens.stateError)
+                .foregroundStyle(readinessColor)
                 .fixedSize(horizontal: false, vertical: true)
 
             Button {
@@ -213,6 +269,24 @@ private struct TranslateTestControlsCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(DesignTokens.card)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+    }
+
+    /// The readiness line's colour: green only for an engine that can run,
+    /// red only for one that refused.
+    ///
+    /// "Not checked yet" is neither. The line is drawn before the first
+    /// answer arrives (and again for a moment after each engine switch), and
+    /// colouring that state as an error would put a fault on screen before
+    /// anything had been asked.
+    private var readinessColor: Color {
+        switch model.readiness {
+        case .ready:
+            return DesignTokens.stateSpeaking
+        case .none:
+            return DesignTokens.textSecondary
+        case .modelMissing, .providerKeyMissing, .cloudDisabled:
+            return DesignTokens.stateError
+        }
     }
 
     /// The readiness caption: what the selected engine needs, in the words
@@ -285,12 +359,23 @@ private struct TranslateTestResultCard: View {
                      reason.rawValue)
             }
 
-            // Tier 1's own words for "I declined to attempt this": the
-            // result above already says nothing was translated, and this
-            // says whether the model was even asked.
-            if let deferral = outcome.localDeferral {
-                fact(L10n.str("settings.translateTest.result.deferral", locale: locale),
-                     deferral.displayToken)
+            // Where a cloud answer came from: `fresh` was computed now,
+            // `cache` was served out of the device's own store without a
+            // request. Without this a cache hit reads as a cloud round trip
+            // that took a millisecond — which is precisely the comparison
+            // this screen exists to make honest.
+            if let origin = outcome.cloudOrigin {
+                fact(L10n.str("settings.translateTest.result.origin", locale: locale),
+                     origin.rawValue)
+            }
+
+            // Tier 1's own account of the string: whether the brain was asked
+            // at all, and what the tier said when it declined. `noTierResolved`
+            // above says "nothing was translated"; this says which of the three
+            // quite different things produced that.
+            if let disposition = outcome.localDisposition {
+                fact(L10n.str("settings.translateTest.result.tier1", locale: locale),
+                     disposition.token)
             }
         }
         .padding(16)
@@ -357,12 +442,10 @@ private struct TranslateTestInstallCard: View {
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
     }
 
-    /// The service's live state wins; otherwise derive from what is on disk,
-    /// so a model installed before this screen opened reads as Ready rather
-    /// than Download.
+    /// The rule itself is shared with the AI-models screen
+    /// (`ModelDownloadState.rowState`) — this card and that one offer the same
+    /// artifact, so they must not disagree about whether it is already here.
     private func downloadState(for id: ModelID) -> ModelDownloadState {
-        if let state = downloads.states[id] { return state }
-        guard let entry = ModelCatalog.entry(for: id) else { return .notStarted }
-        return coordinator.modelStore.isInstalled(entry) ? .completed : .notStarted
+        .rowState(for: id, states: downloads.states, modelStore: coordinator.modelStore)
     }
 }
