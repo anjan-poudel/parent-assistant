@@ -247,6 +247,41 @@ final class ModelBudgetPolicyTests: XCTestCase {
         XCTAssertEqual(footprint.hardBytes, 700_000_000)
     }
 
+    /// The Q6-vs-Q4 A/B arm (2026-09-21) — an OFFERED artifact, which is what
+    /// puts it under the same rule the head was promoted under: a download the
+    /// standard class then refuses is a download that lands and cannot load
+    /// (and the A/B would measure a quant no device in the run could hold).
+    ///
+    /// It is the round-3 Q4's exact byte count, so it takes the same rung and
+    /// the same verdict — pinned rather than assumed, because the offer is
+    /// what makes it a promise to a phone.
+    func testTheAblationArmClearsTheClassItIsOfferedTo() {
+        let arm = ModelCatalog.nmtEnNeQwen17bR4Q4
+        XCTAssertNotNil(ModelCatalog.entry(for: arm),
+                        "an offered id must resolve, or the row draws a "
+                        + "Download that cannot exist")
+        XCTAssertEqual(availability(arm, on: compactPhone).reason, .deviceTooSmall,
+                       "the shared 5 GB floor keeps it off the 4 GB class — "
+                       + "the same floor the head carries")
+        XCTAssertEqual(availability(arm, on: ModelLifecycleBudget.compactBoundaryBytes),
+                       .available,
+                       "a device AT the floor is `.standard`, and runs it")
+        XCTAssertEqual(availability(arm, on: standardPhone), .available,
+                       "1.81 GB live + 1.0 GB warm STT ≤ 3.2 GB — the arm fits "
+                       + "the class the owner's phone is in")
+        XCTAssertEqual(availability(arm, on: roomyPhone), .available)
+
+        let footprint = ModelLifecycleInventory.footprint(for: .translateBrain,
+                                                          modelID: arm)
+        XCTAssertEqual(footprint.weightsBytes, 1_107_408_608)
+        XCTAssertEqual(footprint.runtimeOverheadBytes, 700_000_000,
+                       "1.1 GB stays on the 1.7B rung, like the same-sized "
+                       + "round-3 Q4 and the Q6_K head beside it — a bigger "
+                       + "arm would not be an A/B, it would be a different "
+                       + "class of artifact")
+        XCTAssertEqual(footprint.liveBytes, 1_807_408_608)
+    }
+
     func testTheCompactClassRefusesEveryShippedBrain() {
         // A finding, pinned so it cannot regress into a surprise: the
         // smallest shipped brain (`intentNepali1B`, 1.81 GB live) plus the

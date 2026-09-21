@@ -9688,6 +9688,23 @@
         }
       }
     },
+    "model.name.nmt-en-ne-qwen17b-r4-q4_k_m": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Translate — English to Nepali (Qwen 1.7B, R4 Q4)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अनुवाद — अंग्रेजीबाट नेपालीमा (Qwen १.७B, R4 Q4)"
+          }
+        }
+      }
+    },
     "model.name.nmt-en-ne-qwen17b-r4-q5_k_m": {
       "extractionState": "manual",
       "localizations": {

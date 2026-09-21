@@ -1197,7 +1197,18 @@ struct LiveTranslateConfig: Equatable {
     /// A follow-up may want this to follow the elder's brain selection
     /// (`AppCoordinator.resolvedBrainModelID`); that is a product decision,
     /// not a lookup to hide in here.
+    ///
+    /// [TEMPORARY — Q6-vs-Q4 ARM-kernel A/B] (2026-09-21) The round-4 Q4_K_M
+    /// rides directly behind the head for the duration of that run. The A/B
+    /// compares the two quants on ONE device, and this list is what decides
+    /// which of them a device carrying both actually loads: the head, still —
+    /// the Q4 is a rung, not a rival, and a device that holds only the Q4
+    /// keeps translating on it. Its gate data (67.6% exact, probe 12/12,
+    /// 34/34 accepted) is its own artifact's and is NOT an S11 pass under the
+    /// shipped prompt, which is what the Q6_K was promoted for. The revert is
+    /// deleting the id; the position goes with the verdict.
     var brainTranslationModelIDs: [ModelID] = [ModelCatalog.nmtEnNeQwen17bR4Q6,
+                                              ModelCatalog.nmtEnNeQwen17bR4Q4,
                                               ModelCatalog.nmtEnNeQwen17bR4Q5,
                                               ModelCatalog.nmtEnNeQwen17bR4Q8,
                                               ModelCatalog.nmtEnNeQwen17bR3Q4,

@@ -490,6 +490,12 @@ final class LiveTranslateConfigTests: XCTestCase {
     /// round-4 tester may already hold it, and a device that installed a
     /// model must keep being able to run it and to delete it.
     ///
+    /// [TEMPORARY — Q6-vs-Q4 ARM-kernel A/B] (2026-09-21) The round-4 Q4_K_M
+    /// rides directly behind the head: the A/B needs a build in which a device
+    /// can hold both quants, and the rung order is what keeps the Q6_K the
+    /// artifact that actually loads when both are on disk. It is an experiment
+    /// arm, not a promotion — its own gate data is not an S11 pass.
+    ///
     /// The Q8_0 sits behind the Q5 as the sideload-only ceiling: it is the
     /// quality reference a roomy device can carry, never the artifact the
     /// row offers. Then the round-3 and round-2b exports for devices that
@@ -497,6 +503,7 @@ final class LiveTranslateConfigTests: XCTestCase {
     func testTheTranslationListLeadsWithTheShippedTranslationModel() {
         let ids = LiveTranslateConfig.default.brainTranslationModelIDs
         XCTAssertEqual(ids, [ModelCatalog.nmtEnNeQwen17bR4Q6,
+                             ModelCatalog.nmtEnNeQwen17bR4Q4,
                              ModelCatalog.nmtEnNeQwen17bR4Q5,
                              ModelCatalog.nmtEnNeQwen17bR4Q8,
                              ModelCatalog.nmtEnNeQwen17bR3Q4,
@@ -507,11 +514,13 @@ final class LiveTranslateConfigTests: XCTestCase {
                              ModelCatalog.intentQwen4BS43],
                        "the round-4 Q6_K ship quant leads (it is the quant the "
                        + "round-4 verdict promoted after the Q5 failed S11 "
-                       + "under the shipped prompt); the Q5 it replaced and "
-                       + "the Q8_0 ceiling sit behind it — resolvable, never "
-                       + "offered — then the round-3 and round-2b artifacts "
-                       + "for devices that already hold them; the intent "
-                       + "brains stay behind as fallbacks")
+                       + "under the shipped prompt); the Q4_K_M ablation arm "
+                       + "sits directly behind it for the Q6-vs-Q4 A/B — a "
+                       + "rung, so a device holding both still loads the head "
+                       + "— then the Q5 it replaced and the Q8_0 ceiling — "
+                       + "resolvable, never preferred — then the round-3 and "
+                       + "round-2b artifacts for devices that already hold "
+                       + "them; the intent brains stay behind as fallbacks")
         // A list is only a list if every entry can be resolved — an id with
         // no catalog entry can never be installed and would silently be a
         // hole in the order.
@@ -671,6 +680,57 @@ final class LiveTranslateConfigTests: XCTestCase {
         XCTAssertGreaterThan(ids.firstIndex(of: ModelCatalog.nmtEnNeQwen17bR4Q8) ?? Int.max,
                              ids.firstIndex(of: ModelCatalog.nmtEnNeQwen17bR4Q6) ?? Int.min,
                              "the Q8 is resolvable but never preferred")
+    }
+
+    /// The Q6-vs-Q4 A/B arm (2026-09-21): an artifact a device really
+    /// DOWNLOADS during that run, so its bytes are as load-bearing as the
+    /// head's — a digest that does not match the release installs nothing,
+    /// and the A/B would then be measuring an arm nobody could fetch.
+    ///
+    /// The offer's own membership is pinned where the offer list is
+    /// (`ModelCatalogLanguageTests`); what is pinned here is that the arm and
+    /// the v20 release agree on the bytes, and that the arm stays BEHIND the
+    /// head — the A/B compares kernels, so it would compare nothing if the
+    /// run's rung had displaced the ship quant.
+    func testTheAblationArmIsPinnedAndStaysBehindTheHead() throws {
+        let arm = try XCTUnwrap(
+            ModelCatalog.entry(for: ModelCatalog.nmtEnNeQwen17bR4Q4),
+            "the A/B arm must be a catalog entry, or the offered row is a "
+            + "download that cannot resolve")
+        XCTAssertEqual(ModelCatalog.nmtEnNeQwen17bR4Q4.rawValue,
+                       "nmt-en-ne-qwen17b-r4-q4_k_m")
+        XCTAssertEqual(arm.filename, "translate-en-ne-qwen17b-r4-q4_k_m.gguf")
+        XCTAssertEqual(arm.sizeBytes, 1_107_408_608)
+        XCTAssertEqual(arm.sha256,
+                       "4aad12a2fa133d50dd5946902442fa9ee77067ea818a5f57ad08d713d649128f",
+                       "the v20 asset's OWN digest — re-read from the release "
+                       + "record rather than copied from the training box's "
+                       + "sidecar, so the two sources are known to agree")
+        XCTAssertEqual(arm.sha256.count, 64)
+        XCTAssertNotEqual(arm.sha256, ModelCatalogEntry.pendingSHA256,
+                          "a placeholder can only ever fail `finalize`")
+        XCTAssertEqual(arm.downloadURL.absoluteString,
+                       "https://github.com/anjan-poudel/elderly-ai-assistant-models"
+                       + "/releases/download/v20/translate-en-ne-qwen17b-r4-q4_k_m.gguf",
+                       "the release the arm is published to (v20, the same "
+                       + "release as the rest of the round-4 family)")
+        XCTAssertEqual(arm.minDeviceRAMBytes,
+                       ModelLifecycleBudget.compactBoundaryBytes,
+                       "the shared floor — the whole point of this arm is that "
+                       + "the phone the Q8 cannot fit can hold it")
+        XCTAssertNil(arm.downloadPartURLs,
+                     "1.1 GB is under the per-asset cap: one file, no parts")
+
+        XCTAssertTrue(ModelCatalog.availableTranslationEntries.contains { $0.id == arm.id },
+                      "the arm is OFFERED — that is the mechanism of the A/B")
+        let ids = LiveTranslateConfig.default.brainTranslationModelIDs
+        XCTAssertEqual(ids.first, ModelCatalog.nmtEnNeQwen17bR4Q6,
+                       "the head is unchanged by the offer")
+        XCTAssertGreaterThan(ids.firstIndex(of: ModelCatalog.nmtEnNeQwen17bR4Q4) ?? Int.max,
+                             ids.firstIndex(of: ModelCatalog.nmtEnNeQwen17bR4Q6) ?? Int.min,
+                             "the arm is a rung behind the head, never "
+                             + "preferred: a device holding both runs the "
+                             + "ship quant, and the A/B reads the difference")
     }
 
     /// The head's admission — which phones can run the model this list
