@@ -329,12 +329,14 @@ final class TranslateTestModelTests: XCTestCase {
     /// PUBLISHES (2026-09-21 review round 2).
     ///
     /// A ladder rung is what the tier will TRY, not what this build hands
-    /// out: the round-4 Q8 ceiling and the superseded quants sit on the
-    /// ladder so a device that sideloaded them keeps working, and the
-    /// AI-models screen deliberately never offers them. A card that drew its
-    /// management row for every catalog entry made this dev screen the one
-    /// place in the app offering those downloads — with a Delete beside them
-    /// for an artifact it neither installed nor can fetch.
+    /// out: the superseded quants sit on the ladder so a device that
+    /// sideloaded them keeps working, and the AI-models screen deliberately
+    /// never offers them. (The round-4 Q8 ceiling is the same kind of rung,
+    /// but it is a TEMPORARY member of the offer list for the Q6-vs-Q8
+    /// ARM-kernel A/B, so it is NOT the unoffered fixture below.) A card that
+    /// drew its management row for every catalog entry made this dev screen
+    /// the one place in the app offering those downloads — with a Delete
+    /// beside them for an artifact it neither installed nor can fetch.
     ///
     /// The published head IS offered, which is what keeps this from being a
     /// card that offers nothing at all.
@@ -347,7 +349,14 @@ final class TranslateTestModelTests: XCTestCase {
         // Carried, never offered: an entry in the catalog (so it has a
         // management row SOMEWHERE, on the AI-models screen) that this build
         // publishes no download for.
-        let sideloadOnly = ModelCatalog.nmtEnNeQwen17bR4Q8
+        //
+        // The fixture is the SUPERSEDED round-4 Q5, not the Q8 ceiling the
+        // previous revision used: the Q8 is a temporary member of the offer
+        // list for the Q6-vs-Q8 ARM-kernel A/B, so pinning the unoffered
+        // branches on it would be asserting the opposite of what this build
+        // does. The Q5 is the same kind of artifact the Q8 was before that
+        // offer — on the ladder, in the catalog, published by nobody.
+        let sideloadOnly = ModelCatalog.nmtEnNeQwen17bR4Q5
         XCTAssertNotNil(ModelCatalog.entry(for: sideloadOnly),
                         "the fixture must be an entry the catalog carries, or it tests the wrong branch")
         XCTAssertNil(TranslateTestModel.offeredEntry(for: sideloadOnly),
