@@ -236,7 +236,8 @@ protocol TranslateProbeEngine {
 /// error in Swift 6.
 protocol CloudProbeTier: Sendable {
     func resolve(items: [CloudTranslationTier.Item],
-                 targetLanguage: AppLanguage) async -> CloudTranslationTier.BatchResult
+                 targetLanguage: AppLanguage,
+                 cachePolicy: CloudTranslationTier.CachePolicy) async -> CloudTranslationTier.BatchResult
 }
 
 extension CloudTranslationTier: CloudProbeTier {}
