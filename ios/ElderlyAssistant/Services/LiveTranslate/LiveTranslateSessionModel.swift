@@ -1078,7 +1078,7 @@ final class LiveTranslateSessionModel: ObservableObject {
         //     one moment the session's answers stop being the session's, which
         //     is the moment this method was written for and the reason it is no
         //     longer a method nothing calls.
-        if let cache = focusPath?.memoryCache { await cache.clear() }
+        if let cache = focusPath?.memoryCache { cache.clear() }
         // The picture's correction goes with the picture: a closed model draws
         // no window of a camera that has stopped (see `frameStabilization`).
         frameStabilization = .none

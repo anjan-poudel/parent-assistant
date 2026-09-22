@@ -390,6 +390,11 @@ enum LiveTranslateEventCatalogue {
         "camera_resumed": Entry(outcomes: ["success"], metadataKeys: ["reason"]),
 
         "ocr_pass": Entry(outcomes: ["success", "empty"], metadataKeys: ["regionCount"]),
+        // The frame-change gate answered this pass from the last one: no Vision
+        // request ran (reuse rework, 2026-09-22). Same outcomes and same one
+        // key as `ocr_pass` — it is the same count of the same regions, and the
+        // only difference the reader needs is which event carried it.
+        "ocr_pass_reused": Entry(outcomes: ["success", "empty"], metadataKeys: ["regionCount"]),
         "ocr_pass_failed": Entry(outcomes: ["failure"], metadataKeys: []),
         "tracking_unsupported": Entry(outcomes: ["degraded"], metadataKeys: []),
         // The object pass (scene-block rework, 2026-09-18). `object_pass` is
@@ -654,6 +659,21 @@ struct LiveTranslateEvents {
 
     func ocrPassFailed(_ error: LiveTranslateError) {
         emit("ocr_pass_failed", outcome: "failure", errorCode: code(error))
+    }
+
+    /// One pass the frame-change gate answered from the previous pass: the
+    /// picture had not materially changed, so the last OCR pass's regions were
+    /// restated and **no Vision request ran at all**.
+    ///
+    /// A separate event rather than a silent absence of `ocr_pass`, because the
+    /// absence is ambiguous — it reads the same as a cadence that simply
+    /// sampled less — and the reuse's whole claim is the *ratio* of restatements
+    /// to real passes on a real device. Carries the reused region count and
+    /// nothing else: the count is the shape of the elder's screen, never what is
+    /// written on it.
+    func ocrPassReused(regionCount: Int) {
+        emit("ocr_pass_reused", outcome: regionCount > 0 ? "success" : "empty",
+             metadata: [.regionCount: String(regionCount)])
     }
 
     /// Tracking is a SHOULD (FR-LCT-004): the feature continues with OCR

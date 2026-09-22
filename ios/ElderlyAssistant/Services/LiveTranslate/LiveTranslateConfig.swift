@@ -80,6 +80,33 @@ struct LiveTranslateConfig: Equatable {
     /// fraction of a level.
     var frameChangeThreshold: Double = 0.02
 
+    /// How long a frame the gate says has **not** materially changed may keep
+    /// reusing the last OCR pass's regions before the detector runs Vision
+    /// again, as a multiple of `ocrSampleInterval` (8 × 0.25 s = **2 s**).
+    ///
+    /// The bound exists because the gate is a signature and not a proof: 4,096
+    /// luminance samples can miss a small change — a word on a large sign, a
+    /// digit on a display — that still alters the recognized string. Past this
+    /// window the frame is read again whatever the gate says, so a still scene
+    /// is *periodically re-read* rather than trusted indefinitely, and the
+    /// worst case for such a change is this long on screen instead of one
+    /// sample.
+    ///
+    /// The value is sized against the cadence the tap actually delivers at. A
+    /// still scene is sampled at `stableSampleInterval` (0.7 s, ~2.8 nominal
+    /// intervals), so a bound at or below one nominal interval would never be
+    /// reached and the reuse would never happen at all — the refresh pass would
+    /// simply run every time. 2 s is ~2.9 of those deliveries, which is what
+    /// makes a still scene cost about a third of the Vision passes it did when
+    /// every delivery was a refresh pass, while the frame is still delivered to
+    /// the stabiliser on every sample (the appearance hysteresis and the
+    /// departure grace advance unchanged).
+    ///
+    /// Zero disables the reuse entirely: every delivered frame gets a real
+    /// pass, which is the behaviour this feature shipped before the reuse
+    /// existed.
+    var ocrUnchangedReuseIntervals: Double = 8
+
     /// The cadence the frame tap falls back to while the scene is not
     /// changing: 0.7 s ≈ 1.4 fps.
     ///

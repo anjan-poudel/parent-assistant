@@ -50,9 +50,9 @@ final class LiveTranslateMemoryCacheTests: XCTestCase {
         let clock = TestClock()
         let cache = makeCache(clock: clock)
 
-        await cache.store(resolved("Light", "बत्ती"), forKey: "light|ne")
+        cache.store(resolved("Light", "बत्ती"), forKey: "light|ne")
 
-        let hit = await cache.lookup("light|ne")
+        let hit = cache.lookup("light|ne")
         XCTAssertEqual(hit, resolved("Light", "बत्ती"))
     }
 
@@ -60,7 +60,7 @@ final class LiveTranslateMemoryCacheTests: XCTestCase {
         let clock = TestClock()
         let cache = makeCache(clock: clock)
 
-        let miss = await cache.lookup("light|ne")
+        let miss = cache.lookup("light|ne")
         XCTAssertNil(miss)
     }
 
@@ -70,9 +70,9 @@ final class LiveTranslateMemoryCacheTests: XCTestCase {
 
         // Stored under "" and asked for as "" — the two would otherwise agree
         // with each other about a key no caller can legitimately form.
-        await cache.store(resolved("Light", "बत्ती"), forKey: "")
+        cache.store(resolved("Light", "बत्ती"), forKey: "")
 
-        let miss = await cache.lookup("")
+        let miss = cache.lookup("")
         XCTAssertNil(miss)
     }
 
@@ -80,12 +80,12 @@ final class LiveTranslateMemoryCacheTests: XCTestCase {
         let clock = TestClock()
         let cache = makeCache(clock: clock)
 
-        await cache.store(resolved("Light", "बत्ती"), forKey: "light|ne")
+        cache.store(resolved("Light", "बत्ती"), forKey: "light|ne")
 
         // The cache is keyed by whatever the caller passes; the key *derivation*
         // is `LabelTranslationCache.normalizationKey` and is not duplicated
         // here. A second derivation would be a second source of truth.
-        let miss = await cache.lookup("Light|ne")
+        let miss = cache.lookup("Light|ne")
         XCTAssertNil(miss)
     }
 
@@ -94,50 +94,50 @@ final class LiveTranslateMemoryCacheTests: XCTestCase {
     func testAnAnswerInsideTheTTLIsStillAnswered() async {
         let clock = TestClock()
         let cache = makeCache(ttl: 600, clock: clock)
-        await cache.store(resolved("Light", "बत्ती"), forKey: "light|ne")
+        cache.store(resolved("Light", "बत्ती"), forKey: "light|ne")
 
         clock.advance(599)
 
-        let hit = await cache.lookup("light|ne")
+        let hit = cache.lookup("light|ne")
         XCTAssertEqual(hit, resolved("Light", "बत्ती"))
     }
 
     func testAnAnswerAtTheTTLBoundaryIsExpired() async {
         let clock = TestClock()
         let cache = makeCache(ttl: 600, clock: clock)
-        await cache.store(resolved("Light", "बत्ती"), forKey: "light|ne")
+        cache.store(resolved("Light", "बत्ती"), forKey: "light|ne")
 
         clock.advance(600)
 
-        let miss = await cache.lookup("light|ne")
+        let miss = cache.lookup("light|ne")
         XCTAssertNil(miss)
     }
 
     func testTheReadThatFoundAStaleAnswerIsTheOneThatDropsIt() async {
         let clock = TestClock()
         let cache = makeCache(ttl: 600, clock: clock)
-        await cache.store(resolved("Light", "बत्ती"), forKey: "light|ne")
+        cache.store(resolved("Light", "बत्ती"), forKey: "light|ne")
 
         clock.advance(601)
-        _ = await cache.lookup("light|ne")
+        _ = cache.lookup("light|ne")
         // The clock is wound back: were the entry still there, it would be
         // inside the TTL again. A read-only expiry would answer it.
         clock.advance(-120)
 
-        let miss = await cache.lookup("light|ne")
+        let miss = cache.lookup("light|ne")
         XCTAssertNil(miss, "the stale entry must be removed, not merely skipped")
     }
 
     func testAClockThatWentBackwardsIsNotAnExpiry() async {
         let clock = TestClock()
         let cache = makeCache(ttl: 600, clock: clock)
-        await cache.store(resolved("Light", "बत्ती"), forKey: "light|ne")
+        cache.store(resolved("Light", "बत्ती"), forKey: "light|ne")
 
         // A device clock correction, not ten minutes of reading: only a
         // genuinely old entry is dropped.
         clock.advance(-5)
 
-        let hit = await cache.lookup("light|ne")
+        let hit = cache.lookup("light|ne")
         XCTAssertEqual(hit, resolved("Light", "बत्ती"))
     }
 
@@ -147,31 +147,31 @@ final class LiveTranslateMemoryCacheTests: XCTestCase {
         // notice they are reading line by line — would never expire.
         let clock = TestClock()
         let cache = makeCache(ttl: 600, clock: clock)
-        await cache.store(resolved("Light", "बत्ती"), forKey: "light|ne")
+        cache.store(resolved("Light", "बत्ती"), forKey: "light|ne")
 
         clock.advance(500)
-        let inside = await cache.lookup("light|ne")
+        let inside = cache.lookup("light|ne")
         XCTAssertEqual(inside, resolved("Light", "बत्ती"))
 
         // At 600 s the entry is at the bound its own insertion set — not one
         // the read restarted.
         clock.advance(100)
-        let miss = await cache.lookup("light|ne")
+        let miss = cache.lookup("light|ne")
         XCTAssertNil(miss, "the read must not have re-armed the entry")
     }
 
     func testEachEntryCarriesItsOwnInsertionMoment() async {
         let clock = TestClock()
         let cache = makeCache(ttl: 600, clock: clock)
-        await cache.store(resolved("Light", "बत्ती"), forKey: "light|ne")
+        cache.store(resolved("Light", "बत्ती"), forKey: "light|ne")
 
         clock.advance(400)
-        await cache.store(resolved("Gate", "गेट"), forKey: "gate|ne")
+        cache.store(resolved("Gate", "गेट"), forKey: "gate|ne")
 
         clock.advance(250) // light is stale at 650, gate is fresh at 250
 
-        let light = await cache.lookup("light|ne")
-        let gate = await cache.lookup("gate|ne")
+        let light = cache.lookup("light|ne")
+        let gate = cache.lookup("gate|ne")
         XCTAssertNil(light)
         XCTAssertEqual(gate, resolved("Gate", "गेट"))
     }
@@ -187,9 +187,9 @@ final class LiveTranslateMemoryCacheTests: XCTestCase {
         let clock = TestClock()
         let cache = makeCache(clock: clock)
 
-        await cache.store(.pending("Light"), forKey: "light|ne")
+        cache.store(.pending("Light"), forKey: "light|ne")
 
-        let hit = await cache.lookup("light|ne")
+        let hit = cache.lookup("light|ne")
         XCTAssertEqual(hit, .pending("Light"))
     }
 
@@ -203,10 +203,10 @@ final class LiveTranslateMemoryCacheTests: XCTestCase {
         let clock = TestClock()
         let cache = makeCache(clock: clock)
 
-        await cache.store(.degraded(originalText: "Light", reason: .noTierResolved),
+        cache.store(.degraded(originalText: "Light", reason: .noTierResolved),
                           forKey: "light|ne")
 
-        let miss = await cache.lookup("light|ne")
+        let miss = cache.lookup("light|ne")
         XCTAssertNil(miss, "the next tap must be allowed to ask again")
     }
 
@@ -216,12 +216,12 @@ final class LiveTranslateMemoryCacheTests: XCTestCase {
         // not overwritten by a later failure for the same string.
         let clock = TestClock()
         let cache = makeCache(clock: clock)
-        await cache.store(resolved("Light", "बत्ती"), forKey: "light|ne")
+        cache.store(resolved("Light", "बत्ती"), forKey: "light|ne")
 
-        await cache.store(.degraded(originalText: "Light", reason: .noTierResolved),
+        cache.store(.degraded(originalText: "Light", reason: .noTierResolved),
                           forKey: "light|ne")
 
-        let hit = await cache.lookup("light|ne")
+        let hit = cache.lookup("light|ne")
         XCTAssertEqual(hit, resolved("Light", "बत्ती"))
     }
 
@@ -248,9 +248,9 @@ final class LiveTranslateMemoryCacheTests: XCTestCase {
         let clock = TestClock()
         let cache = makeCache(maxCost: LiveTranslateConfig.default.memoryCacheMaxCost, clock: clock)
 
-        await cache.store(resolved("Light", "बत्ती"), forKey: "light|ne")
+        cache.store(resolved("Light", "बत्ती"), forKey: "light|ne")
 
-        let hit = await cache.lookup("light|ne")
+        let hit = cache.lookup("light|ne")
         XCTAssertEqual(hit, resolved("Light", "बत्ती"))
     }
 
@@ -260,12 +260,12 @@ final class LiveTranslateMemoryCacheTests: XCTestCase {
         let clock = TestClock()
         let cache = makeCache(maxCost: -1, clock: clock)
 
-        await cache.store(resolved("Light", "बत्ती"), forKey: "light|ne")
+        cache.store(resolved("Light", "बत्ती"), forKey: "light|ne")
 
         // What such a cache holds is the platform's business — `NSCache` may
         // drop anything at any time — so this asserts only that the type
         // survives being built over it.
-        _ = await cache.lookup("light|ne")
+        _ = cache.lookup("light|ne")
     }
 
     // MARK: - Clearing
@@ -273,13 +273,13 @@ final class LiveTranslateMemoryCacheTests: XCTestCase {
     func testClearingDropsEveryAnswer() async {
         let clock = TestClock()
         let cache = makeCache(clock: clock)
-        await cache.store(resolved("Light", "बत्ती"), forKey: "light|ne")
-        await cache.store(resolved("Gate", "गेट"), forKey: "gate|ne")
+        cache.store(resolved("Light", "बत्ती"), forKey: "light|ne")
+        cache.store(resolved("Gate", "गेट"), forKey: "gate|ne")
 
-        await cache.clear()
+        cache.clear()
 
-        let light = await cache.lookup("light|ne")
-        let gate = await cache.lookup("gate|ne")
+        let light = cache.lookup("light|ne")
+        let gate = cache.lookup("gate|ne")
         XCTAssertNil(light)
         XCTAssertNil(gate)
     }
@@ -287,5 +287,33 @@ final class LiveTranslateMemoryCacheTests: XCTestCase {
     func testTheDefaultTTLAndBoundAreTheConfigsOwnValues() {
         XCTAssertEqual(LiveTranslateConfig.default.memoryCacheTTLSeconds, 600)
         XCTAssertEqual(LiveTranslateConfig.default.memoryCacheMaxCost, 512_000)
+    }
+
+    // MARK: - The live cycle's constraint
+
+    /// **Not `async`, and that is the assertion.** The live cycle reads this
+    /// layer *inside* its resolution pass and fills it between `apply` and
+    /// `publish` — both points sit in a stretch the pipeline's own scenario
+    /// tests pin to the publication. Every `await` there is a place another
+    /// task can land: as an `actor`, each read and each store was a suspension
+    /// in the middle of a cycle, and a plan task could publish out of order
+    /// there. That is what the first gate run on this branch measured — eight
+    /// reds, every one of them a publication count off by one or a region
+    /// settled a cycle early, all eight gone when the three call sites were
+    /// stubbed out, none of them about what the cache answered.
+    ///
+    /// Written without `async` so the constraint is enforced by the compiler
+    /// rather than left to a review: declaring the type as an `actor` again, or
+    /// adding an `await` to either call in the pipeline, stops this test
+    /// compiling — which is the only kind of regression test a suspension point
+    /// can have.
+    func testTheLiveCycleCanReadAndWriteItWithoutSuspending() {
+        let clock = TestClock()
+        let cache = makeCache(clock: clock)
+
+        cache.store(resolved("Light", "बत्ती"), forKey: "light|ne")
+        let hit = cache.lookup("light|ne")
+
+        XCTAssertEqual(hit, resolved("Light", "बत्ती"))
     }
 }

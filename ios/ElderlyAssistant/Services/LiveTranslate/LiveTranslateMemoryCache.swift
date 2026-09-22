@@ -35,17 +35,26 @@ import Foundation
 ///    entries for evidence or reports a hit rate for that reason: a count this
 ///    type kept would be a number the platform can silently invalidate.
 ///
-/// An actor rather than a lock: the callers are already async (the capture
-/// path), the injected clock has to be read once per decision, and the
-/// alternative — an `NSCache` read on the main thread from the overlay's
-/// render — is the shape that made the persisted cache's own reads a
-/// `@MainActor` hazard.
-actor LiveTranslateMemoryCache {
+/// **Synchronous, behind a lock — not an actor.** It was an actor while the
+/// only caller was the focused read. The live cycle changed that: it consults
+/// this layer *inside* its resolution pass and fills it between `apply` and
+/// `publish`, and both of those points sit in a strictly ordered stretch that
+/// the pipeline's own tests pin to the publication — an `await` there lets a
+/// plan task land in the middle of the cycle and publish out of order, which
+/// changes what the elder sees for reasons that have nothing to do with what
+/// the device knows. A read that cannot suspend is the only kind the live cycle
+/// can make, so the isolation moved from an actor to an `NSLock`: the container
+/// is an `NSCache` (documented thread-safe), an `Entry` is immutable once
+/// stored, and the lock is what makes the TTL's read-then-remove one step. The
+/// focused read keeps calling it the same way; it simply no longer has to wait
+/// for its answer. This is the same trade the persisted store already makes,
+/// and a smaller claim than that one: nothing here is a two-part invariant.
+final class LiveTranslateMemoryCache: @unchecked Sendable {
 
     /// One cached answer: the result itself, and when it was put here.
     ///
     /// A class because `NSCache` stores objects. It holds no logic — the TTL
-    /// rule lives in the actor, once, rather than being split between the entry
+    /// rule lives in this type, once, rather than being split between the entry
     /// and its reader.
     final class Entry {
         let result: TranslationResult
@@ -58,6 +67,9 @@ actor LiveTranslateMemoryCache {
     }
 
     private let cache = NSCache<NSString, Entry>()
+    /// What makes the class `Sendable` and keeps a TTL's `object(forKey:)` /
+    /// `removeObject(forKey:)` pair one decision rather than two.
+    private let lock = NSLock()
     private let config: LiveTranslateConfig
     /// The clock, injected for the same reason every other clock in this
     /// feature is: a TTL that can only be tested by sleeping for ten minutes is
@@ -83,13 +95,15 @@ actor LiveTranslateMemoryCache {
     /// (review finding 8). Nothing degraded is in here to begin with (`store`).
     func lookup(_ key: String) -> TranslationResult? {
         guard !key.isEmpty else { return nil }
-        guard let entry = cache.object(forKey: key as NSString) else { return nil }
-        let age = now().timeIntervalSince(entry.insertedAt)
-        // A clock that went backwards (a test's, a device's) is not an expiry:
-        // only a genuinely old entry is dropped.
-        guard age >= config.memoryCacheTTLSeconds else { return entry.result }
-        cache.removeObject(forKey: key as NSString)
-        return nil
+        return lock.withLock { () -> TranslationResult? in
+            guard let entry = cache.object(forKey: key as NSString) else { return nil }
+            let age = now().timeIntervalSince(entry.insertedAt)
+            // A clock that went backwards (a test's, a device's) is not an
+            // expiry: only a genuinely old entry is dropped.
+            guard age >= config.memoryCacheTTLSeconds else { return entry.result }
+            cache.removeObject(forKey: key as NSString)
+            return nil
+        }
     }
 
     /// Keeps `result` under `key` for the TTL. An empty key is refused rather
@@ -110,15 +124,17 @@ actor LiveTranslateMemoryCache {
     /// final outcomes).
     func store(_ result: TranslationResult, forKey key: String) {
         guard !key.isEmpty, !result.degraded else { return }
-        cache.setObject(Entry(result: result, insertedAt: now()),
-                        forKey: key as NSString,
-                        cost: Self.cost(of: result))
+        lock.withLock {
+            cache.setObject(Entry(result: result, insertedAt: now()),
+                            forKey: key as NSString,
+                            cost: Self.cost(of: result))
+        }
     }
 
     /// Drops everything. Called when the session that filled it ends: the
     /// answers belong to a run, not to the app.
     func clear() {
-        cache.removeAllObjects()
+        lock.withLock { cache.removeAllObjects() }
     }
 
     /// What one entry costs against `memoryCacheMaxCost`: both halves of the
