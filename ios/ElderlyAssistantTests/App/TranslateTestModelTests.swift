@@ -341,7 +341,7 @@ final class TranslateTestModelTests: XCTestCase {
     /// The published head IS offered, which is what keeps this from being a
     /// card that offers nothing at all.
     func testOnlyCatalogPublishedModelsGetADownloadRow() {
-        let published = ModelCatalog.nmtEnNeQwen17bR4Q6
+        let published = ModelCatalog.nmtEnNeQwen17bR7Q8
         XCTAssertNotNil(TranslateTestModel.offeredEntry(for: published),
                         "the ship quant is what the household downloads — the row must be drawn for it")
         XCTAssertEqual(TranslateTestModel.offeredEntry(for: published)?.id, published)

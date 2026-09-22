@@ -366,6 +366,25 @@ enum ModelCatalog {
     /// must keep working, and a later policy that moves the class line must
     /// not have to re-add it.
     static let nmtEnNeQwen17bR4Q8 = ModelID("nmt-en-ne-qwen17b-r4-q8_0")
+    /// Round-7 **ship quant** (Q8_0, 1.83 GB) — the head of
+    /// `LiveTranslateConfig.brainTranslationModelIDs` as of 2026-09-22.
+    ///
+    /// The round-7 verdict: the withconv fine-tune at Q8_0 is the first
+    /// artifact that clears all three gates under the app's SHIPPED 4-line
+    /// header — sign 82.4% (against the round-4 Q6_K's 76.5%), the 12-row
+    /// runtime safety probe 12/12, and the conversational set 66.7% — so the
+    /// head moves onto the quant with the best measured sign accuracy in the
+    /// record.
+    ///
+    /// One rung behind it, deliberately: this file is 1,834,426,080 B, over
+    /// the 1.5 GB "1.7B" file ceiling, so it takes the 3B rung's 800 MB
+    /// overhead (2.63 GB live) and the standard class refuses it BESIDE the
+    /// warm STT — the Q6_K stays directly behind it as the rung for a phone
+    /// that cannot hold the Q8 at all.
+    ///
+    /// Delivery: 1,834,426,080 B in ONE file — under GitHub's 2 GiB per-asset
+    /// cap, so no `.partaa`/`.partab` split (unlike `intentQwen4BSlotCanon`).
+    static let nmtEnNeQwen17bR7Q8 = ModelID("nmt-en-ne-qwen17b-r7-q8_0")
     /// The GEMMA leg of the bake-off (2026-09-07): the QLoRA fine-tune
     /// over google/gemma-3-1b-it, merged to fp16 and exported Q4_K_M
     /// (`intent-ne-gemma-q4_k_m.gguf`, release v7). A real, hosted
@@ -1269,16 +1288,23 @@ enum ModelCatalog {
         ModelCatalogEntry(
             id: nmtEnNeQwen17bR4Q6,
             kind: .llamaBase,
-            // Round-4 SHIP quant (2026-09-21) — the tier's new head. The
-            // round-4 anti-transliteration checkpoint at the size where it
-            // passes the gate under the SHIPPED prompt (S11), which the Q5
-            // above failed. STANDARD-class fit at the shared 5 GB floor.
+            // Round-4 ship quant (2026-09-21) — the tier's head until the
+            // round-7 Q8 above superseded it (2026-09-22), and now the rung
+            // directly behind it. The round-4 anti-transliteration checkpoint
+            // at the size where it passes the gate under the SHIPPED prompt
+            // (S11), which the Q5 above failed, and a STANDARD-class fit at
+            // the shared 5 GB floor — 1.42 GB takes the 1.7B band (700 MB
+            // overhead → 2.12 GB live), so the class most households have
+            // runs it BESIDE the warm STT, which is exactly what the round-7
+            // head cannot do. A phone that cannot hold the Q8 translates on
+            // this; the order in `brainTranslationModelIDs` is what makes
+            // that a fallback rather than a choice.
             //
             // [HOSTING — VERIFIED] The asset is live on release v20 and this
             // entry can download it: `translate-en-ne-qwen17b-r4-q6_k.gguf`,
             // 1,417,754,336 B, sha256
             // 9ed3fccea39b5a1ebe671e2cdad92b635497b983c2d73f8f4a61cd6a174e045e.
-            displayName: "Translate — English to Nepali (Qwen 1.7B, R4 Q6)",
+            displayName: "Translate — English to Nepali (Qwen 1.7B, R4 Q6, superseded by R7 Q8)",
             filename: "translate-en-ne-qwen17b-r4-q6_k.gguf",
             downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v20/translate-en-ne-qwen17b-r4-q6_k.gguf")!,
             sizeBytes: 1_417_754_336,
@@ -1366,6 +1392,45 @@ enum ModelCatalog {
             // on the training box, 2026-09-21.
             sha256: "0ed9dfdc9b2e8041f1bd2d9b6aeb9837ea560459ac998ca10c0bd96dfc505240",
             minDeviceRAMBytes: 4_000_000_000,
+            dependsOn: nil,
+            languages: ["ne"]
+        ),
+        ModelCatalogEntry(
+            id: nmtEnNeQwen17bR7Q8,
+            kind: .llamaBase,
+            // Round-7 SHIP quant (2026-09-22) — the tier's head, and the
+            // first artifact to clear all three gates under the app's SHIPPED
+            // 4-line header: sign 82.4% (the round-4 Q6_K below measured
+            // 76.5%), safety probe 12/12, conversational 66.7%.
+            //
+            // CLASS: 1,834,426,080 B is over the 1.5 GB "1.7B" file ceiling,
+            // so the file takes the 3B rung's 800 MB overhead → 2.63 GB live.
+            // The standard class therefore refuses it BESIDE a warm STT
+            // (`requires_evicting_warm_stt` — it fits that class alone), which
+            // the warden's escape hatch answers by evicting the STT rather
+            // than refusing the load; the Q6_K below stays the rung for a
+            // phone that cannot hold the Q8 at all. Both are `.available` on
+            // the roomy class, and the shared 5 GB floor keeps either off the
+            // compact class (`ModelBudgetPolicyTests`).
+            //
+            // [HOSTING — VERIFIED] The v21 asset is live: GitHub records the
+            // upload at sha256
+            // 57b246a42c4d10c5cbc175fbb1ef47f2adedea0d33503c704dec125b351cc7c8,
+            // 1,834,426,080 B. That digest was first read independently on the
+            // training box — from the artifact's `.sha256` sidecar AND
+            // re-computed with `sha256sum` over the whole file (2026-09-22) —
+            // and the two sources agree, so the pin below resolves to bytes a
+            // device can verify; an upload that did not match would install
+            // nothing.
+            displayName: "Translate — English to Nepali (Qwen 1.7B, R7 Q8)",
+            filename: "translate-en-ne-qwen17b-r7-q8_0.gguf",
+            downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v21/translate-en-ne-qwen17b-r7-q8_0.gguf")!,
+            sizeBytes: 1_834_426_080,
+            // Server-original digest (round-7 withconv Q8_0 export), `.sha256`
+            // sidecar on the training box, re-verified over the whole
+            // artifact, 2026-09-22.
+            sha256: "57b246a42c4d10c5cbc175fbb1ef47f2adedea0d33503c704dec125b351cc7c8",
+            minDeviceRAMBytes: ModelLifecycleBudget.compactBoundaryBytes,
             dependsOn: nil,
             languages: ["ne"]
         ),
@@ -1866,31 +1931,45 @@ enum ModelCatalog {
     /// superseded round-4 Q5, and the round-3/round-2b artifacts are
     /// alternates, not choices the household should have to make. They stay
     /// resolvable in the tier list and deletable from `all`, which is where a
-    /// leftover installation surfaces. The [TEMPORARY] block at the top is the
-    /// one exception, and it is a device A/B rather than a product decision.
+    /// leftover installation surfaces. The one exception is the Q6_K rung
+    /// behind the round-7 head (2026-09-22): the head's admission is a
+    /// per-device class verdict, so the row for the quant a smaller phone can
+    /// actually hold stays offered rather than living on in the tier list
+    /// alone. The [TEMPORARY] block is a device A/B rather than a product
+    /// decision.
     ///
     /// Adding the Q8 does not double-render an installed one: `managedRows`
     /// subtracts the offered set from its installed leftovers, so a device
     /// that already sideloaded the ceiling sees it once, as an offered row it
     /// can finally Delete without sideloading it by hand.
     ///
-    /// [HOSTING — VERIFIED] The Q6_K artifact is live on release **v20**
+    /// [HOSTING] The Q6_K artifact is live on release **v20**
     /// (sha256 `9ed3fccea39b5a1ebe671e2cdad92b635497b983c2d73f8f4a61cd6a174e045e`,
-    /// 1,417,754,336 B), so the row's Download resolves on a device.
+    /// 1,417,754,336 B), so that row's Download resolves on a device today.
+    /// The round-7 head's **v21 asset is live** (2026-09-22): GitHub records
+    /// the upload at `sha256:57b246a4…` / 1,834,426,080 B, the same digest
+    /// re-computed on the training box, so the head's Download resolves to
+    /// bytes `ModelStore.finalize` will accept.
     static let availableTranslationEntries: [ModelCatalogEntry] =
-        // TEMPORARY OFFERS (revert each after its verdict): the Q4_K_M rides
-        // directly behind the head for the Q6-vs-Q4 ARM-kernel A/B — the arm
-        // the owner's phone can actually hold — and the Q8_0 rides behind it
-        // for the earlier Q6-vs-Q8 run. Both are device A/Bs rather than
-        // product decisions, which is why they are the only ids here that the
-        // verdict did not put there. Deleting either id is that run's revert;
-        // the head must stay first, and the Q6_K stays the ship quant.
-        [nmtEnNeQwen17bR4Q6, nmtEnNeQwen17bR4Q4, nmtEnNeQwen17bR4Q8]
+        // The round-7 Q8 leads (2026-09-22): the promoted head is the row a
+        // household downloads. The Q6_K rides directly behind it as the
+        // fallback rung for a phone that cannot hold the Q8 — that is the
+        // warden's per-device class verdict, not this list's decision.
+        //
+        // TEMPORARY OFFERS (revert each after its verdict): the Q4_K_M and
+        // the Q8_0 ride behind those two for the Q6-vs-Q4 and Q6-vs-Q8
+        // ARM-kernel A/Bs. Both are device A/Bs rather than product
+        // decisions, which is why they are the only ids here that the verdict
+        // did not put there. Deleting either id is that run's revert; the
+        // head must stay first.
+        [nmtEnNeQwen17bR7Q8, nmtEnNeQwen17bR4Q6, nmtEnNeQwen17bR4Q4, nmtEnNeQwen17bR4Q8]
             .compactMap { entry(for: $0) }
 
     /// **Every** translation artifact in the catalog, offered or not: the ship
-    /// quant the translation section offers, the round-4 Q4_K_M ablation offer
-    /// (an A/B arm — offered, but not a head), the round-4 Q8 ceiling, the
+    /// quant the translation section offers (the round-7 Q8 as of 2026-09-22),
+    /// the round-4 Q6_K rung the ship before it pinned, the round-4 Q4_K_M
+    /// ablation offer (an A/B arm — offered, but not a head), the round-4 Q8
+    /// ceiling, the
     /// superseded round-4 Q5 (kept so a device that sideloaded it can still
     /// delete it — and so the id a round-4 tester may already be carrying
     /// does not become undeletable when the verdict moves the head), and the
@@ -1912,12 +1991,14 @@ enum ModelCatalog {
     /// derived by subtraction, so the head was offered a second row on the
     /// brain card (the two-places hazard this list's own doc forbids), and a
     /// picker that filters the ladder by translation-kind lost the head
-    /// entirely. The round-4 verdict has since moved the head from the Q5 to
-    /// the Q6_K (2026-09-21), which is the same trap one export later:
+    /// entirely. The round-4 verdict moved the head from the Q5 to the Q6_K
+    /// (2026-09-21) and the round-7 verdict moved it on to the Q8 above
+    /// (2026-09-22), which is the same trap one export later:
     /// `testEveryTranslationArtifactIsClassifiedAsOne` therefore holds the
     /// whole filename family to this list, so the next head cannot be
     /// forgotten the same way.
     static let allTranslationEntries: [ModelCatalogEntry] = [
+        nmtEnNeQwen17bR7Q8,
         nmtEnNeQwen17bR4Q6,
         nmtEnNeQwen17bR4Q4,
         nmtEnNeQwen17bR4Q8,
