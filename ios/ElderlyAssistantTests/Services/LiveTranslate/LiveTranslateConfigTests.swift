@@ -491,10 +491,11 @@ final class LiveTranslateConfigTests: XCTestCase {
     /// model must keep being able to run it and to delete it.
     ///
     /// [TEMPORARY — Q6-vs-Q4 ARM-kernel A/B] (2026-09-21) The round-4 Q4_K_M
-    /// rides directly behind the head: the A/B needs a build in which a device
-    /// can hold both quants, and the rung order is what keeps the Q6_K the
-    /// artifact that actually loads when both are on disk. It is an experiment
-    /// arm, not a promotion — its own gate data is not an S11 pass.
+    /// rides behind the head and the rungs beneath it: the A/B needs a build in
+    /// which a device can hold both quants, and the rung order is what keeps
+    /// the head the artifact that actually loads when several are on disk. It
+    /// is an experiment arm, not a promotion — its own gate data is not an S11
+    /// pass.
     ///
     /// The Q8_0 sits behind the Q5 as the sideload-only ceiling: it is the
     /// quality reference a roomy device can carry, never the artifact the
@@ -502,7 +503,8 @@ final class LiveTranslateConfigTests: XCTestCase {
     /// already hold them, and the intent brains last as fallbacks.
     func testTheTranslationListLeadsWithTheShippedTranslationModel() {
         let ids = LiveTranslateConfig.default.brainTranslationModelIDs
-        XCTAssertEqual(ids, [ModelCatalog.nmtEnNeQwen17bR7Q8,
+        XCTAssertEqual(ids, [ModelCatalog.nmtEnNeQwen17bR8Q8,
+                             ModelCatalog.nmtEnNeQwen17bR7Q8,
                              ModelCatalog.nmtEnNeQwen17bR4Q6,
                              ModelCatalog.nmtEnNeQwen17bR4Q4,
                              ModelCatalog.nmtEnNeQwen17bR4Q5,
@@ -513,11 +515,13 @@ final class LiveTranslateConfigTests: XCTestCase {
                              ModelCatalog.nmtEnNeQwen17bR2bQ8,
                              ModelCatalog.intentQwen4BSlotCanon,
                              ModelCatalog.intentQwen4BS43],
-                       "the round-7 Q8 ship quant leads (it clears all three "
-                       + "gates under the app's shipped 4-line header); the "
-                       + "round-4 Q6_K sits directly behind it as the "
-                       + "standard-class rung — a device that cannot hold the "
-                       + "Q8 keeps translating, and a device holding both still "
+                       "the round-8 Q8 ship quant leads (strictly better than "
+                       + "the round-7 Q8 it replaces at the same file size); "
+                       + "the round-7 Q8 it superseded sits directly behind it "
+                       + "so a device that installed it keeps translating, and "
+                       + "the round-4 Q6_K behind that is the standard-class "
+                       + "rung — a device that cannot hold a Q8 keeps "
+                       + "translating, and a device holding several still "
                        + "loads the head — then the Q4_K_M ablation arm for the "
                        + "Q6-vs-Q4 A/B, then the Q5 it replaced and the Q8_0 "
                        + "ceiling — resolvable, never preferred — then the "
@@ -536,7 +540,7 @@ final class LiveTranslateConfigTests: XCTestCase {
         // never be offered to `LlamaCommandInterpreter`'s picker, whose
         // prompt this artifact was not trained on.
         XCTAssertFalse(ModelCatalog.availableBrainEntries.contains {
-            $0.id == ModelCatalog.nmtEnNeQwen17bR7Q8
+            $0.id == ModelCatalog.nmtEnNeQwen17bR8Q8
         }, "the translation model is not an assistant-brain choice")
     }
 
@@ -546,27 +550,27 @@ final class LiveTranslateConfigTests: XCTestCase {
     /// these ships a model nobody can install (2026-09-14's 18-byte
     /// "reassembly" is the precedent for pinning the URL, not just the id).
     ///
-    /// Round 7 (2026-09-22) moved the ship pin from the round-4 Q6_K to this
-    /// withconv Q8_0: it clears all three gates under the app's shipped 4-line
-    /// header (sign 82.4% against the Q6_K's 76.5%, the 12-row safety probe
-    /// 12/12, conversational 66.7%), and the verdict promoted it. The Q6_K
-    /// becomes the standard-class rung behind it. Round 4 had moved the pin
-    /// from the round-4 Q5 to the Q6_K for the same reason, and round 3 from
+    /// Round 8 (2026-09-22) moved the ship pin on to this withconv Q8_0 —
+    /// strictly better than the round-7 head at the same file size (sign 85.3%
+    /// against 82.4%, the 12-row safety probe 12/12 on both, conversational
+    /// 72.2% against 66.7%) — so the round-7 Q8 becomes the rung behind it.
+    /// Round 7 had moved the pin from the round-4 Q6_K to its own Q8 for the
+    /// same reason, round 4 from the round-4 Q5 to the Q6_K, and round 3 from
     /// the 1.83 GB round-2b Q8 to a Q4_K_M — a quant's bytes never drift, but
     /// the *decision* does, and this test is the record of which artifact a
     /// device is actually told to fetch.
     func testTheShippedTranslationArtifactIsPinned() throws {
         let entry = try XCTUnwrap(
-            ModelCatalog.entry(for: ModelCatalog.nmtEnNeQwen17bR7Q8),
+            ModelCatalog.entry(for: ModelCatalog.nmtEnNeQwen17bR8Q8),
             "the tier's head model must exist in the catalog")
-        XCTAssertEqual(ModelCatalog.nmtEnNeQwen17bR7Q8.rawValue,
-                       "nmt-en-ne-qwen17b-r7-q8_0")
+        XCTAssertEqual(ModelCatalog.nmtEnNeQwen17bR8Q8.rawValue,
+                       "nmt-en-ne-qwen17b-r8-q8_0")
         XCTAssertEqual(entry.kind, .llamaBase)
-        XCTAssertEqual(entry.filename, "translate-en-ne-qwen17b-r7-q8_0.gguf")
+        XCTAssertEqual(entry.filename, "translate-en-ne-qwen17b-r8-q8_0.gguf")
         XCTAssertEqual(entry.sizeBytes, 1_834_426_080,
-                       "the shipped round-7 Q8_0 artifact's size on disk")
+                       "the shipped round-8 Q8_0 artifact's size on disk")
         XCTAssertEqual(entry.sha256,
-                       "57b246a42c4d10c5cbc175fbb1ef47f2adedea0d33503c704dec125b351cc7c8",
+                       "cb2a59eaaebdaa328fed97c4cdf8be9f2eee6af68bf52a2f0a0e083a06ed58d2",
                        "the digest of the server original's `.sha256` sidecar, "
                        + "recomputed over the full file — the downloader "
                        + "verifies it, so an upload that does not match "
@@ -591,14 +595,16 @@ final class LiveTranslateConfigTests: XCTestCase {
                           "over the cap the release would need part assets")
         XCTAssertNil(entry.downloadPartURLs,
                      "a single-asset delivery must not carry part URLs")
-        // [HOSTING — VERIFIED] The v21 asset is up: GitHub's recorded digest
-        // for the upload is the same sha256 this pin carries (and it matches
-        // the digest re-computed over the whole file on the training box), so
-        // the download lands on exactly these bytes.
+        // [HOSTING — OWED] The v22 upload runs in parallel with this change:
+        // what can be pinned today is the digest read on the training box
+        // (from the `.sha256` sidecar AND re-computed over the whole file) and
+        // the release the artifact must land on. Until the upload matches, the
+        // download fails `finalize` — and this assertion is what says which
+        // bytes the upload has to be.
         XCTAssertEqual(entry.downloadURL.absoluteString,
                        "https://github.com/anjan-poudel/elderly-ai-assistant-models"
-                       + "/releases/download/v21/translate-en-ne-qwen17b-r7-q8_0.gguf",
-                       "the release the artifact must be published to (v21)")
+                       + "/releases/download/v22/translate-en-ne-qwen17b-r8-q8_0.gguf",
+                       "the release the artifact must be published to (v22)")
         XCTAssertEqual(entry.downloadURL.lastPathComponent, entry.filename,
                        "the asset name is the on-disk name, so "
                        + "`LlamaBrainTextGenerator.modelID(forURL:)` resolves "
@@ -685,9 +691,9 @@ final class LiveTranslateConfigTests: XCTestCase {
         // device that has NOT sideloaded it never picks it: the order is the
         // promise that the offered artifact is what a plain install runs.
         let ids = LiveTranslateConfig.default.brainTranslationModelIDs
-        XCTAssertEqual(ids.first, ModelCatalog.nmtEnNeQwen17bR7Q8)
+        XCTAssertEqual(ids.first, ModelCatalog.nmtEnNeQwen17bR8Q8)
         XCTAssertGreaterThan(ids.firstIndex(of: ModelCatalog.nmtEnNeQwen17bR4Q8) ?? Int.max,
-                             ids.firstIndex(of: ModelCatalog.nmtEnNeQwen17bR7Q8) ?? Int.min,
+                             ids.firstIndex(of: ModelCatalog.nmtEnNeQwen17bR8Q8) ?? Int.min,
                              "the Q8 is resolvable but never preferred")
     }
 
@@ -733,10 +739,10 @@ final class LiveTranslateConfigTests: XCTestCase {
         XCTAssertTrue(ModelCatalog.availableTranslationEntries.contains { $0.id == arm.id },
                       "the arm is OFFERED — that is the mechanism of the A/B")
         let ids = LiveTranslateConfig.default.brainTranslationModelIDs
-        XCTAssertEqual(ids.first, ModelCatalog.nmtEnNeQwen17bR7Q8,
+        XCTAssertEqual(ids.first, ModelCatalog.nmtEnNeQwen17bR8Q8,
                        "the head is unchanged by the offer")
         XCTAssertGreaterThan(ids.firstIndex(of: ModelCatalog.nmtEnNeQwen17bR4Q4) ?? Int.max,
-                             ids.firstIndex(of: ModelCatalog.nmtEnNeQwen17bR7Q8) ?? Int.min,
+                             ids.firstIndex(of: ModelCatalog.nmtEnNeQwen17bR8Q8) ?? Int.min,
                              "the arm is a rung behind the head, never "
                              + "preferred: a device holding both runs the "
                              + "ship quant, and the A/B reads the difference")
@@ -744,16 +750,18 @@ final class LiveTranslateConfigTests: XCTestCase {
 
     /// The head's admission — which phones can run the model this list
     /// leads with — is a policy verdict, and it is pinned where the policy
-    /// lives: `ModelBudgetPolicyTests`. The short version: the round-7 Q8_0
+    /// lives: `ModelBudgetPolicyTests`. The short version: the round-8 Q8_0
     /// takes the 3B weight band's 800 MB overhead (2.63 GB live), which fits
     /// the roomy class's co-residency budget but sits over the standard
     /// class's — a 6 GB phone answers `requiresEvictingWarmSTT`, the warden's
     /// escape hatch, which is the trade the round-7 verdict accepted when it
-    /// promoted a quant this size. The round-4 Q6_K (1.7B band, 2.12 GB live)
-    /// stays the rung behind it precisely so a phone that cannot hold the Q8
-    /// still translates, with the STT it holds kept warm.
+    /// promoted a quant this size and the round-8 verdict re-accepted, since
+    /// the head it promotes is the same size. The round-7 Q8 directly behind
+    /// it shares that verdict; the round-4 Q6_K (1.7B band, 2.12 GB live)
+    /// further down stays the rung that keeps the STT warm, so a phone that
+    /// cannot hold a Q8 still translates.
     func testTheTranslationHeadsClassVerdictIsOutOfThisSuitesHands() {
-        let head = ModelCatalog.entry(for: ModelCatalog.nmtEnNeQwen17bR7Q8)!
+        let head = ModelCatalog.entry(for: ModelCatalog.nmtEnNeQwen17bR8Q8)!
         XCTAssertEqual(ModelLifecycleInventory
             .footprint(for: .translateBrain, modelID: head.id).liveBytes,
                        2_634_426_080,
@@ -766,7 +774,7 @@ final class LiveTranslateConfigTests: XCTestCase {
         XCTAssertTrue(ModelBudgetPolicy.roomy
             .availability(of: head, physicalMemoryBytes: 8_000_000_000)
             .isAvailable)
-        // The rung behind the head is what the standard class runs, and it
+        // The standard-class rung further down is what that class runs, and it
         // keeps the verdict that made it the round-4 ship quant.
         let rung = ModelCatalog.entry(for: ModelCatalog.nmtEnNeQwen17bR4Q6)!
         XCTAssertEqual(ModelLifecycleInventory
@@ -777,7 +785,7 @@ final class LiveTranslateConfigTests: XCTestCase {
             .availability(of: rung, physicalMemoryBytes: 6_000_000_000)
             .isAvailable,
                        "a 6 GB phone runs the Q6_K beside a warm STT — that "
-                       + "is why it is the rung behind the Q8")
+                       + "is why it is the rung the standard class holds")
     }
 
     // MARK: The OCR-first rework (owner verdict, 2026-09-18)

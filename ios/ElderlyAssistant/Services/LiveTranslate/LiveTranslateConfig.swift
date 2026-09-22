@@ -1139,15 +1139,18 @@ struct LiveTranslateConfig: Equatable {
     /// would make the tier's availability change under a running session for
     /// reasons unrelated to translation.
     ///
-    /// Why more than one entry. `nmtEnNeQwen17bR7Q8` (round-7, 2026-09-22) is
-    /// the head: the withconv Q8_0 ship quant, and the first artifact that
-    /// clears all three gates under the app's **shipped** 4-line header —
-    /// sign 82.4% against the round-4 Q6_K's 76.5%, the 12-row runtime safety
-    /// probe 12/12, and the conversational set 66.7%. `nmtEnNeQwen17bR4Q6`
-    /// (round-4) is the rung behind it: the anti-transliteration fine-tune the
-    /// previous ship pinned, a standard-class fit that keeps the STT warm, so
-    /// a device that cannot hold the Q8 still translates — and a device
-    /// holding both still loads the head, because first installed wins.
+    /// Why more than one entry. `nmtEnNeQwen17bR8Q8` (round-8, 2026-09-22) is
+    /// the head: the withconv Q8_0 ship quant, and strictly better than the
+    /// round-7 Q8 it replaces at the same file size — sign 85.3% against
+    /// 82.4%, the 12-row runtime safety probe 12/12 on both, and the
+    /// conversational set 72.2% against 66.7%. `nmtEnNeQwen17bR7Q8` (round-7)
+    /// is the rung directly behind it: the head it superseded, kept so a
+    /// device that installed it keeps translating — and a device holding both
+    /// still loads the head, because first installed wins.
+    /// `nmtEnNeQwen17bR4Q6` (round-4) is the rung behind that one: the
+    /// anti-transliteration fine-tune the previous ship pinned, a
+    /// standard-class fit that keeps the STT warm, so a device that cannot
+    /// hold a Q8 at all still translates.
     /// `nmtEnNeQwen17bR4Q5` is the round-4 Q5 the ship before that pinned, and
     /// it **fails the gate under the shipped prompt** — so it is demoted to a
     /// superseded, sideload-only alternate: a device that installed it during
@@ -1188,25 +1191,27 @@ struct LiveTranslateConfig: Equatable {
     /// present on the phones that can run it, and on a phone whose class
     /// verdict is what changes later.
     ///
-    /// Note the round-7 head is NOT a standard-class fit, where the Q6_K rung
-    /// behind it is: 1.83 GB takes the 3B weight band (800 MB overhead) →
-    /// 2.63 GB live, so the standard class's 3.2 GB budget refuses it BESIDE
-    /// the class's 1.0 GB warm STT (`requires_evicting_warm_stt`) — a verdict
-    /// the warden's escape hatch answers by evicting the STT rather than
-    /// refusing the load, which is why a 6 GB-class phone still translates on
-    /// the Q8 with a cold STT. The Q6_K behind it (1.42 GB → the 1.7B band,
+    /// Note the round-8 head is NOT a standard-class fit, and neither is the
+    /// round-7 Q8 directly behind it: 1.83 GB takes the 3B weight band (800 MB
+    /// overhead) → 2.63 GB live, so the standard class's 3.2 GB budget refuses
+    /// each BESIDE the class's 1.0 GB warm STT (`requires_evicting_warm_stt`) —
+    /// a verdict the warden's escape hatch answers by evicting the STT rather
+    /// than refusing the load, which is why a 6 GB-class phone still translates
+    /// on a Q8 with a cold STT. The Q6_K behind them (1.42 GB → the 1.7B band,
     /// 2.12 GB live) is the rung that keeps the STT warm, so a phone that
-    /// cannot hold the Q8 at all keeps translating on the round-4 quant, and
-    /// the order in the list is what makes the Q8 the artifact a device
-    /// holding both actually loads. A device the warden still refuses falls to
-    /// the cloud tier; that is the policy's call, not this list's.
+    /// cannot hold a Q8 at all keeps translating on the round-4 quant, and
+    /// the order in the list is what makes the head the artifact a device
+    /// holding several of them actually loads. A device the warden still
+    /// refuses falls to the cloud tier; that is the policy's call, not this
+    /// list's.
     ///
     /// A follow-up may want this to follow the elder's brain selection
     /// (`AppCoordinator.resolvedBrainModelID`); that is a product decision,
     /// not a lookup to hide in here.
     ///
     /// [TEMPORARY — Q6-vs-Q4 ARM-kernel A/B] (2026-09-21) The round-4 Q4_K_M
-    /// rides behind the head and the Q6_K rung for the duration of that run. The A/B
+    /// rides behind the head and the rungs beneath it for the duration of that
+    /// run. The A/B
     /// compares the two quants on ONE device, and this list is what decides
     /// which of them a device carrying both actually loads: the head, still —
     /// the Q4 is a rung, not a rival, and a device that holds only the Q4
@@ -1214,7 +1219,8 @@ struct LiveTranslateConfig: Equatable {
     /// 34/34 accepted) is its own artifact's and is NOT an S11 pass under the
     /// shipped prompt, which is what the Q6_K was promoted for. The revert is
     /// deleting the id; the position goes with the verdict.
-    var brainTranslationModelIDs: [ModelID] = [ModelCatalog.nmtEnNeQwen17bR7Q8,
+    var brainTranslationModelIDs: [ModelID] = [ModelCatalog.nmtEnNeQwen17bR8Q8,
+                                              ModelCatalog.nmtEnNeQwen17bR7Q8,
                                               ModelCatalog.nmtEnNeQwen17bR4Q6,
                                               ModelCatalog.nmtEnNeQwen17bR4Q4,
                                               ModelCatalog.nmtEnNeQwen17bR4Q5,

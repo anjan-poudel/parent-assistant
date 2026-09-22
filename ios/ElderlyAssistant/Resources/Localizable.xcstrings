@@ -9858,19 +9858,36 @@
         }
       }
     },
+    "model.name.nmt-en-ne-qwen17b-r8-q8_0": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Translate — English to Nepali (Qwen 1.7B, R8 Q8)"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "अनुवाद — अंग्रेजीबाट नेपालीमा (Qwen १.७B, R8 Q8)"
+          }
+        }
+      }
+    },
     "model.name.nmt-en-ne-qwen17b-r7-q8_0": {
       "extractionState": "manual",
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Translate — English to Nepali (Qwen 1.7B, R7 Q8)"
+            "value": "Translate — English to Nepali (Qwen 1.7B, R7 Q8, superseded by R8 Q8)"
           }
         },
         "ne": {
           "stringUnit": {
             "state": "translated",
-            "value": "अनुवाद — अंग्रेजीबाट नेपालीमा (Qwen १.७B, R7 Q8)"
+            "value": "अनुवाद — अंग्रेजीबाट नेपालीमा (Qwen १.७B, R7 Q8, R8 Q8 ले प्रतिस्थापित)"
           }
         }
       }
