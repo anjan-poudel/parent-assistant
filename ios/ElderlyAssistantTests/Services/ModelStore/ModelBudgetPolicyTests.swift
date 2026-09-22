@@ -198,19 +198,20 @@ final class ModelBudgetPolicyTests: XCTestCase {
         XCTAssertEqual(footprint.hardBytes, 700_000_000)
     }
 
-    /// The rung behind the head (round-4 Q6_K, 2026-09-21 — the tier's head
-    /// until the round-7 Q8 superseded it on 2026-09-22).
+    /// The standard-class rung (round-4 Q6_K, 2026-09-21 — the tier's head
+    /// until the round-7 Q8 superseded it on 2026-09-22, and one rung further
+    /// down since the round-8 Q8 took the head the same day).
     ///
     /// It stays the standard class's translation artifact precisely because
-    /// the round-7 head is not one: 1,417,754,336 B is under the 1.5 GB rung
-    /// ceiling, so the overhead is unchanged at 700 MB and the live figure is
-    /// 2.12 GB alone / 3.12 GB beside the 1.0 GB warm ANE STT — inside the
-    /// 3.2 GB standard budget, with 80 MB to spare. That margin is thin on
-    /// purpose and pinned here: the head above is 400 MB larger and takes the
-    /// next rung, so it needs the warden's eviction on this class at best.
-    /// A device that cannot hold the Q8 translates on this rung, and the
+    /// the Q8 artifacts above it are not: 1,417,754,336 B is under the 1.5 GB
+    /// rung ceiling, so the overhead is unchanged at 700 MB and the live
+    /// figure is 2.12 GB alone / 3.12 GB beside the 1.0 GB warm ANE STT —
+    /// inside the 3.2 GB standard budget, with 80 MB to spare. That margin is
+    /// thin on purpose and pinned here: the Q8s above are 400 MB larger and
+    /// take the next rung, so they need the warden's eviction on this class at
+    /// best. A device that cannot hold a Q8 translates on this rung, and the
     /// ladder order is what makes that automatic.
-    func testTheRungBehindTheHeadClearsTheStandardClass() {
+    func testTheStandardClassRungClearsTheStandardClass() {
         let rung = ModelCatalog.nmtEnNeQwen17bR4Q6
         let entry = ModelCatalog.entry(for: rung)
         XCTAssertNotNil(entry, "the rung must exist in the catalog")
@@ -226,7 +227,7 @@ final class ModelBudgetPolicyTests: XCTestCase {
         XCTAssertEqual(availability(rung, on: standardPhone), .available,
                        "2.12 GB live + 1.0 GB warm STT = 3.12 GB ≤ 3.2 GB — the "
                        + "rung is admitted on the class most households have, "
-                       + "which is exactly what the head above cannot do")
+                       + "which is exactly what the Q8s above cannot do")
         XCTAssertEqual(availability(rung, on: roomyPhone), .available)
 
         guard let rungEntry = entry else { return }
@@ -237,7 +238,7 @@ final class ModelBudgetPolicyTests: XCTestCase {
 
     /// The arithmetic behind that verdict, pinned as the round-3 Q4's sibling
     /// is: the same 700 MB row, a bigger weight page.
-    func testTheRungBehindTheHeadTakesTheOnePointSevenBWeightBand() {
+    func testTheStandardClassRungTakesTheOnePointSevenBWeightBand() {
         let footprint = ModelLifecycleInventory.footprint(
             for: .translateBrain,
             modelID: ModelCatalog.nmtEnNeQwen17bR4Q6)
@@ -247,28 +248,83 @@ final class ModelBudgetPolicyTests: XCTestCase {
         XCTAssertEqual(footprint.hardBytes, 700_000_000)
     }
 
-    /// The round-7 head (2026-09-22). The withconv Q8_0 clears all three gates
-    /// under the app's SHIPPED 4-line header — sign 82.4% (against the Q6_K's
-    /// 76.5%), the 12-row safety probe 12/12, conversational 66.7% — so the
-    /// head moved onto it. Promoting it is only allowed if the class
-    /// arithmetic is faced rather than wished away: 1,834,426,080 B is over
-    /// the 1.5 GB rung ceiling, so it takes the 3B band's 800 MB overhead and
-    /// 2.63 GB live.
+    /// The rung behind the head (round-7 Q8, 2026-09-22 — the tier's head
+    /// until the round-8 Q8 superseded it the same day). It is the same size
+    /// class as the head above it, which is why the round-8 promotion moved no
+    /// policy number: the verdicts below are the round-7 head's own, still
+    /// true of the artifact now that it is a rung.
+    ///
+    /// The standard class does NOT hold it beside the warm ANE STT, and the
+    /// verdict says so in the specific words: `requiresEvictingWarmSTT` — it
+    /// fits the class ALONE. That is the sentence the warden's escape hatch
+    /// answers (by evicting the STT rather than refusing the load), and it is
+    /// why the Q6_K further down stays the rung that keeps the STT warm. The
+    /// cloud tier is the floor under all of them.
+    func testTheRungBehindTheHeadIsOverTheStandardClassAndAdmittedOnlyOnRoomy() {
+        let rung = ModelCatalog.nmtEnNeQwen17bR7Q8
+        XCTAssertNotNil(ModelCatalog.entry(for: rung),
+                        "the rung must exist in the catalog")
+
+        XCTAssertEqual(availability(rung, on: compactPhone).reason, .deviceTooSmall,
+                       "the shared 5 GB floor keeps it off the 4 GB class — "
+                       + "the same floor the Q6_K below it carries")
+        XCTAssertEqual(availability(rung, on: standardPhone).reason,
+                       .requiresEvictingWarmSTT,
+                       "2.63 GB live + 1.0 GB warm STT = 3.63 GB > 3.2 GB: it "
+                       + "fits the class alone, not beside the STT — which is "
+                       + "the verdict the warden's escape hatch exists for")
+        // The ladder refusal underneath that sentence: with the warm STT taken
+        // out of the question, the shipped standard policy still refuses —
+        // 1.83 GB is over its 1.5 GB rung, so an unaided load is not the
+        // answer either.
+        XCTAssertEqual(ModelBudgetPolicy.standard.availability(
+            of: entry(rung),
+            physicalMemoryBytes: standardPhone,
+            warmSTTLiveBytes: 0),
+                       .unavailable(reason: .overBrainCeiling),
+                       "over the 1.7B rung's file ceiling, so the reason is "
+                       + "the ladder's and not only co-residency's")
+        XCTAssertEqual(availability(rung, on: roomyPhone), .available,
+                       "the 8 GB class holds it: 2.63 + 1.0 GB ≤ 5.0 GB")
+    }
+
+    /// The arithmetic behind that verdict: the 3B row, at the byte count the
+    /// round-2b Q8 took before it — which is why neither the round-7 nor the
+    /// round-8 promotion moved a policy number, and why the round-2b verdicts
+    /// pin the same figures.
+    func testTheRungBehindTheHeadTakesTheThreeBWeightBand() {
+        let footprint = ModelLifecycleInventory.footprint(
+            for: .translateBrain,
+            modelID: ModelCatalog.nmtEnNeQwen17bR7Q8)
+        XCTAssertEqual(footprint.weightsBytes, 1_834_426_080)
+        XCTAssertEqual(footprint.runtimeOverheadBytes, 800_000_000)
+        XCTAssertEqual(footprint.liveBytes, 2_634_426_080)
+        XCTAssertEqual(footprint.hardBytes, 800_000_000)
+    }
+
+    /// The round-8 head (2026-09-22). The withconv Q8_0 is strictly better
+    /// than the round-7 head it replaces at the same file size — sign 85.3%
+    /// against 82.4%, the 12-row safety probe 12/12 on both, conversational
+    /// 72.2% against 66.7% — so the head moved onto it. Promoting it is only
+    /// allowed if the class arithmetic is faced rather than wished away:
+    /// 1,834,426,080 B is over the 1.5 GB rung ceiling, so it takes the 3B
+    /// band's 800 MB overhead and 2.63 GB live.
     ///
     /// The standard class does NOT hold that beside the warm ANE STT, and the
     /// verdict says so in the specific words: `requiresEvictingWarmSTT` — it
     /// fits the class ALONE. That is the sentence the warden's escape hatch
     /// answers (by evicting the STT rather than refusing the load), and it is
-    /// why the Q6_K stays directly behind it as the rung that keeps the STT
-    /// warm. The cloud tier is the floor under both.
-    func testTheRoundSevenHeadIsOverTheStandardClassAndAdmittedOnlyOnRoomy() {
-        let head = ModelCatalog.nmtEnNeQwen17bR7Q8
+    /// why the round-7 Q8 directly behind it and the Q6_K below that stay as
+    /// the rungs that keep the STT warm. The cloud tier is the floor under all
+    /// of them.
+    func testTheRoundEightHeadIsOverTheStandardClassAndAdmittedOnlyOnRoomy() {
+        let head = ModelCatalog.nmtEnNeQwen17bR8Q8
         XCTAssertNotNil(ModelCatalog.entry(for: head),
                         "the tier's head must exist in the catalog")
 
         XCTAssertEqual(availability(head, on: compactPhone).reason, .deviceTooSmall,
                        "the shared 5 GB floor keeps it off the 4 GB class — "
-                       + "the same floor the Q6_K behind it carries")
+                       + "the same floor the Q8 rung behind it carries")
         XCTAssertEqual(availability(head, on: standardPhone).reason,
                        .requiresEvictingWarmSTT,
                        "2.63 GB live + 1.0 GB warm STT = 3.63 GB > 3.2 GB: it "
@@ -289,13 +345,14 @@ final class ModelBudgetPolicyTests: XCTestCase {
                        "the 8 GB class holds it: 2.63 + 1.0 GB ≤ 5.0 GB")
     }
 
-    /// The arithmetic behind that verdict: the 3B row, at the byte count the
-    /// round-2b Q8 took before it — which is why a promotion moved no policy
-    /// number, and why the round-2b verdicts pin the same figures.
-    func testTheRoundSevenHeadTakesTheThreeBWeightBand() {
+    /// The arithmetic behind that verdict, read off the NEW entry rather than
+    /// inherited from the rung's identical figures: a promotion that changed
+    /// the id must not change the byte count, and a typo in the new pin is
+    /// what this catches.
+    func testTheRoundEightHeadTakesTheThreeBWeightBand() {
         let footprint = ModelLifecycleInventory.footprint(
             for: .translateBrain,
-            modelID: ModelCatalog.nmtEnNeQwen17bR7Q8)
+            modelID: ModelCatalog.nmtEnNeQwen17bR8Q8)
         XCTAssertEqual(footprint.weightsBytes, 1_834_426_080)
         XCTAssertEqual(footprint.runtimeOverheadBytes, 800_000_000)
         XCTAssertEqual(footprint.liveBytes, 2_634_426_080)
