@@ -562,6 +562,51 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         }
     }
 
+    /// **The owner's device, end to end: the SCREEN's question, composed the
+    /// way production composes it.** Not the gate's answer in isolation but
+    /// `LocalBrainProbeEngine.readiness()` over a real tier — the Q8 head that
+    /// a 6 GB phone holds, with the warm recogniser resident and the offer
+    /// side reporting `.requiresEvictingWarmSTT`.
+    ///
+    /// This is the reported bug in one assertion. Before the fix the readiness
+    /// line stopped at that verdict: `.modelUnavailable`, the sentence "cannot
+    /// run on this device", the Translate button disabled — for a run that
+    /// was admitted every time it was asked. Now the line is the run's own
+    /// answer, with the cost named, because the tier was asked with the gate
+    /// the run uses.
+    ///
+    /// The engine's brain is the tier itself (it conforms to
+    /// `LocalBrainTranslating`): the screen's probe and the button's run are
+    /// then the same actor, which is what production wires and what makes
+    /// "the readiness line and the tap cannot describe two devices" a fact
+    /// rather than a hope.
+    func testTheScreensReadinessIsReadyForTheModelTheAdvisoryRefuses() async throws {
+        let required = ModelLifecycleInventory.footprint(for: .brain,
+                                                         modelID: Self.modelID).hardBytes
+        let (ledger, sttOwner, probe) = makeWarmSTTEvictionFixture(headroom: required / 2,
+                                                                   freeing: required)
+
+        try await withTier(memory: probe, ledger: ledger) { tier, _, _ in
+            let engine = LocalBrainProbeEngine(brain: tier,
+                                               model: Self.modelID,
+                                               isInstalled: { _ in true },
+                                               unavailabilityReason: { _ in .requiresEvictingWarmSTT },
+                                               admissionForLoad: { await tier.admissionForLoad(of: $0) },
+                                               config: .default)
+
+            let readiness = await engine.readiness()
+
+            XCTAssertEqual(readiness, .ready(evicting: [.speechToText]),
+                           "the screen's question, on the owner's device: ready, and "
+                           + "the price of the tap is named")
+            XCTAssertNotEqual(readiness, .modelUnavailable(reason: .requiresEvictingWarmSTT),
+                              "the advisory is the offer side's; the gate admits this load")
+            XCTAssertTrue(readiness.isReady, "the button must be live")
+            XCTAssertEqual(sttOwner.unloadCount, 1,
+                           "and the room the answer promises is the room the walk took")
+        }
+    }
+
     /// A manager with `slot` fully resident (registered, admitted, marked
     /// loaded). Returns the owner, which the caller must keep alive.
     ///
