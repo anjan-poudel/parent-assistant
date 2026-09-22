@@ -1481,15 +1481,15 @@ enum ModelCatalog {
             // roomy class, and the shared 5 GB floor keeps any off the compact
             // class (`ModelBudgetPolicyTests`).
             //
-            // [HOSTING — OWED] The **v22** asset is uploaded in parallel with
-            // this change, so GitHub's own record is not yet the second
-            // source. The pin below is the digest read on the training box —
-            // from the artifact's `.sha256` sidecar AND re-computed with
-            // `sha256sum` over the whole file (2026-09-22) — and those two
-            // agree, so what is owed is the upload, not the number. The
-            // uploaded asset must match this digest before a device installs
-            // it: `ModelStore.finalize` verifies the pin, so a mismatched
-            // asset installs nothing rather than installing wrong bytes.
+            // [HOSTING — VERIFIED] The v22 asset is live: GitHub records the
+            // upload at sha256
+            // cb2a59eaaebdaa328fed97c4cdf8be9f2eee6af68bf52a2f0a0e083a06ed58d2,
+            // 1,834,426,080 B. That digest was first read independently on the
+            // training box — from the artifact's `.sha256` sidecar AND
+            // re-computed with `sha256sum` over the whole file (2026-09-22) —
+            // and all three sources agree, so the pin below resolves to bytes
+            // a device can verify; an upload that did not match would install
+            // nothing (`ModelStore.finalize` checks the pin).
             displayName: "Translate — English to Nepali (Qwen 1.7B, R8 Q8)",
             filename: "translate-en-ne-qwen17b-r8-q8_0.gguf",
             downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v22/translate-en-ne-qwen17b-r8-q8_0.gguf")!,
@@ -2022,12 +2022,11 @@ enum ModelCatalog {
     /// re-computed on the training box, so the rung's Download resolves to
     /// bytes `ModelStore.finalize` will accept.
     ///
-    /// The **round-8 head's v22 asset is OWED**: the upload runs in parallel
-    /// with this change, and the pin below is the training box's own digest
-    /// (`sha256:cb2a59ea…` / 1,834,426,080 B), read from the artifact's
-    /// `.sha256` sidecar and re-computed over the whole file. Until the
-    /// upload lands — and matches — the head's Download would fail
-    /// `ModelStore.finalize`; nothing installs bytes the pin does not name.
+    /// The **round-8 head's v22 asset is live** (2026-09-22): GitHub records
+    /// the upload at `sha256:cb2a59ea…` / 1,834,426,080 B — the same digest
+    /// read on the training box from the artifact's `.sha256` sidecar and
+    /// re-computed over the whole file — so the head's Download resolves to
+    /// bytes `ModelStore.finalize` accepts. Three sources, one number.
     static let availableTranslationEntries: [ModelCatalogEntry] =
         // The round-8 Q8 leads (2026-09-22): the promoted head is the row a
         // household downloads. The round-7 Q8 rides directly behind it — the

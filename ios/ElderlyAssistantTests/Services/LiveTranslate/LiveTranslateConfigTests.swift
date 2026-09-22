@@ -595,12 +595,11 @@ final class LiveTranslateConfigTests: XCTestCase {
                           "over the cap the release would need part assets")
         XCTAssertNil(entry.downloadPartURLs,
                      "a single-asset delivery must not carry part URLs")
-        // [HOSTING — OWED] The v22 upload runs in parallel with this change:
-        // what can be pinned today is the digest read on the training box
-        // (from the `.sha256` sidecar AND re-computed over the whole file) and
-        // the release the artifact must land on. Until the upload matches, the
-        // download fails `finalize` — and this assertion is what says which
-        // bytes the upload has to be.
+        // [HOSTING — VERIFIED] The v22 upload has landed and GitHub records it
+        // at the same digest the training box reported (from the `.sha256`
+        // sidecar AND re-computed over the whole file) — three sources, one
+        // number. A download whose bytes did not match would fail `finalize`;
+        // this assertion is what says which bytes the release must keep.
         XCTAssertEqual(entry.downloadURL.absoluteString,
                        "https://github.com/anjan-poudel/elderly-ai-assistant-models"
                        + "/releases/download/v22/translate-en-ne-qwen17b-r8-q8_0.gguf",
