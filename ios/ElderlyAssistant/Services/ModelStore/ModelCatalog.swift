@@ -1413,13 +1413,15 @@ enum ModelCatalog {
             // the roomy class, and the shared 5 GB floor keeps either off the
             // compact class (`ModelBudgetPolicyTests`).
             //
-            // [HOSTING — OWED] The v21 asset upload happens separately: the
-            // artifact is on the training box (1,834,426,080 B, sha256
+            // [HOSTING — VERIFIED] The v21 asset is live: GitHub records the
+            // upload at sha256
             // 57b246a42c4d10c5cbc175fbb1ef47f2adedea0d33503c704dec125b351cc7c8,
-            // read from its `.sha256` sidecar AND re-computed with `sha256sum`
-            // over the whole file, 2026-09-22), and the pin below is true only
-            // once v21 carries bytes that hash to it — an upload that does not
-            // match installs nothing.
+            // 1,834,426,080 B. That digest was first read independently on the
+            // training box — from the artifact's `.sha256` sidecar AND
+            // re-computed with `sha256sum` over the whole file (2026-09-22) —
+            // and the two sources agree, so the pin below resolves to bytes a
+            // device can verify; an upload that did not match would install
+            // nothing.
             displayName: "Translate — English to Nepali (Qwen 1.7B, R7 Q8)",
             filename: "translate-en-ne-qwen17b-r7-q8_0.gguf",
             downloadURL: URL(string: "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v21/translate-en-ne-qwen17b-r7-q8_0.gguf")!,
@@ -1944,9 +1946,10 @@ enum ModelCatalog {
     /// [HOSTING] The Q6_K artifact is live on release **v20**
     /// (sha256 `9ed3fccea39b5a1ebe671e2cdad92b635497b983c2d73f8f4a61cd6a174e045e`,
     /// 1,417,754,336 B), so that row's Download resolves on a device today.
-    /// The round-7 head's **v21 upload is OWED**: the artifact is on the
-    /// training box, and v21 must serve bytes hashing to `57b246a4…` /
-    /// 1,834,426,080 B or the head's Download installs nothing.
+    /// The round-7 head's **v21 asset is live** (2026-09-22): GitHub records
+    /// the upload at `sha256:57b246a4…` / 1,834,426,080 B, the same digest
+    /// re-computed on the training box, so the head's Download resolves to
+    /// bytes `ModelStore.finalize` will accept.
     static let availableTranslationEntries: [ModelCatalogEntry] =
         // The round-7 Q8 leads (2026-09-22): the promoted head is the row a
         // household downloads. The Q6_K rides directly behind it as the

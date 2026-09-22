@@ -591,10 +591,10 @@ final class LiveTranslateConfigTests: XCTestCase {
                           "over the cap the release would need part assets")
         XCTAssertNil(entry.downloadPartURLs,
                      "a single-asset delivery must not carry part URLs")
-        // [HOSTING — OWED] The v21 asset upload happens separately: the file
-        // is on the box and the pin is what proves the download lands on
-        // exactly those bytes once it is published. The sha must still match
-        // after upload.
+        // [HOSTING — VERIFIED] The v21 asset is up: GitHub's recorded digest
+        // for the upload is the same sha256 this pin carries (and it matches
+        // the digest re-computed over the whole file on the training box), so
+        // the download lands on exactly these bytes.
         XCTAssertEqual(entry.downloadURL.absoluteString,
                        "https://github.com/anjan-poudel/elderly-ai-assistant-models"
                        + "/releases/download/v21/translate-en-ne-qwen17b-r7-q8_0.gguf",
