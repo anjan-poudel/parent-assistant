@@ -425,6 +425,31 @@ actor LiveTranslationPipeline {
     private let targetLanguage: AppLanguage
     private let recogniser: LiveTranslateFrameRecognising
     private let cache: LabelTranslationCache
+    /// This run's answers, in memory, ahead of the persisted cache — the live
+    /// cycle's own layer, and the same shape the focused read has.
+    ///
+    /// **Why the live path needs one at all.** The persisted cache answers a
+    /// lookup from an index it has already read, so a hit is not slow — but it
+    /// is not free either: a hit on a stored key is an LRU *touch*, and the
+    /// touch rewrites the whole encrypted payload on the first read of that key
+    /// in a session (`LabelTranslationCache.touch` → `persist`). The live cycle
+    /// asks on every tick for every pending region, which is exactly the
+    /// repetition a run-scoped memory layer exists to absorb: a string that
+    /// leaves the picture and comes back a moment later is answered here,
+    /// without the disk write and without the payload rewrite.
+    ///
+    /// **Keyed by the same canonical key as everything else**
+    /// (`LabelTranslationCache.normalizationKey`, the shape
+    /// `<normalizedText>|<language>`), so a layer can never disagree with the
+    /// layer behind it about which strings are the same string.
+    ///
+    /// **Its own instance, not the focused read's.** A capture's answers stay in
+    /// the capture's own cache by design (`LiveTranslateFocusCapture`), which is
+    /// what lets a `.focused` plan read the session's store without writing to
+    /// it. Sharing one instance would be a much larger change to that promise
+    /// than this one is, so the live cycle holds its own — with its own
+    /// `memoryCacheMaxCost` bound, and cleared by the same `close()`.
+    private let memoryCache: LiveTranslateMemoryCache
     /// Tier 1 — the on-device brain, asked before anything leaves the device
     /// (FR-LCT-008 as amended 2026-09-17). Never nil: a device with no brain
     /// installed has a tier that says so and hands the strings back, which is
@@ -680,6 +705,15 @@ actor LiveTranslationPipeline {
          targetLanguage: AppLanguage = LiveTranslationPipeline.defaultTargetLanguage,
          recogniser: LiveTranslateFrameRecognising,
          cache: LabelTranslationCache,
+         /// The live cycle's in-memory layer, ahead of the persisted cache.
+         ///
+         /// **Defaulted to one built from the config**, so every construction
+         /// site that predates it — nearly every test — keeps the layer without
+         /// being edited, and a caller that means a particular one (a test
+         /// driving the TTL) hands in the instance it means. Production lets it
+         /// default: the session model has no reason to hold a second reference
+         /// to it, and `close()` clears it from here.
+         memoryCache: LiveTranslateMemoryCache? = nil,
          tier: CloudTranslationTier,
          cloudNeed: LiveTranslateCloudNeedDeciding,
          backpressure: LiveTranslateBackpressure?,
@@ -726,6 +760,7 @@ actor LiveTranslationPipeline {
         self.targetLanguage = targetLanguage
         self.recogniser = recogniser
         self.cache = cache
+        self.memoryCache = memoryCache ?? LiveTranslateMemoryCache(config: config)
         self.tier = tier
         self.cloudNeed = cloudNeed
         self.backpressure = backpressure
@@ -978,6 +1013,11 @@ actor LiveTranslationPipeline {
         outcomes.removeAll()
         settledOutcomes.removeAll()
         brainAttemptedKeys.removeAll()
+        // The memory layer belongs to the run that filled it, exactly as the
+        // focus path's does: a session that is over leaves no answers behind
+        // it. (The persisted store is the long-term layer and is untouched —
+        // this is the nearer one only.)
+        memoryCache.clear()
         lastDispatchAt = nil
         lastBrainAttemptAt = nil
     }
@@ -1173,8 +1213,18 @@ actor LiveTranslationPipeline {
     /// and in `LiveTranslateFocusCapture`, which is exactly the pair of copies
     /// review round 2 (finding 7) asked to collapse.
     ///
-    /// The on-device layers — the curated dictionary and the persisted cache —
-    /// answer before anything else is asked.
+    /// The on-device layers — this run's memory layer, then the curated
+    /// dictionary and the persisted cache — answer before anything else is
+    /// asked.
+    ///
+    /// **Synchronous, and that is load-bearing.** This pass runs between the
+    /// frame's stabilisation and the cycle's publication, and an `await` here
+    /// is somewhere a plan task can land: the answer then reaches the screen in
+    /// a later publication than the tick that produced it, which every scenario
+    /// in this suite that counts publications sees. It was `async` while the
+    /// memory layer was an actor, and the extra reds moved with that one
+    /// keyword. Nothing in it needs to suspend — the memory layer answers from
+    /// behind a lock and the persisted store from its own.
     ///
     /// This is a sequencing decision, not a second copy of a rule: the lookup
     /// *is* C05's, and the tier asks the same layer again for anything it is
@@ -1185,10 +1235,42 @@ actor LiveTranslationPipeline {
     private func resolveFromTheDevice(only key: String? = nil) {
         for region in stabilizer.visible {
             guard let existing = outcomes[region.id], case .pending = existing.outcome else { continue }
+            let regionKey = Self.cacheKey(for: region.text, targetLanguage: targetLanguage)
             // Extract mode asks about one region at a time; `nil` is the
             // translated view's "every pending region", which is the shipped
             // behaviour and stays the default.
-            if let key, Self.cacheKey(for: region.text, targetLanguage: targetLanguage) != key {
+            if let key, regionKey != key { continue }
+            // This run's memory layer first, then the session's store. The
+            // order is the focused read's, for the same reason: the nearer
+            // layer answers without touching the disk at all, and a string the
+            // session has already answered is not asked again on the strength
+            // of it having left the picture for a moment.
+            //
+            // The lookup does not suspend (the layer is a lock, not an actor —
+            // see `LiveTranslateMemoryCache`), so nothing can have settled this
+            // region between the caller's pass and this line. The still-pending
+            // check stays anyway: it is the invariant in one line — a nearer
+            // layer must never overwrite a fresher answer with an older one —
+            // and this pass is also entered for a single `only:` key, where the
+            // region list and the settlement can come from different moments.
+            if let remembered = memoryCache.lookup(regionKey) {
+                guard let current = outcomes[region.id],
+                      case .pending = current.outcome else { continue }
+                let result = LiveTranslateCaptureSupport.restating(remembered,
+                                                                   for: region.text)
+                outcomes[region.id] = result
+                // The same both-keys write the persisted path below documents
+                // ([CACHE-SETTLE]): a hit that only filled `outcomes` would
+                // re-pend its region on the next churn.
+                settledOutcomes[regionKey] = result
+                // Only a tier's answer is reported as one. `LiveTranslateMemoryCache`
+                // keeps resolved results only and `restating` preserves the tier,
+                // so this is always taken in practice — and the event's contract
+                // (`tier: TranslationTier`) is what says so, rather than an
+                // invented tier standing in for a question nobody can answer.
+                if let tier = result.sourceTier {
+                    events.translationResolved(tier: tier, origin: .cache, count: 1)
+                }
                 continue
             }
             guard case .success(let hit) = cache.lookup(text: region.text,
@@ -2016,6 +2098,35 @@ actor LiveTranslationPipeline {
         switch plan.destination {
         case .live:
             apply(items: terminal)
+            // [LIVE-MEMORY] The live picture's answers are kept in this run's
+            // memory layer as well as in the session's store, so the *next*
+            // sighting of the same string on the same sign is answered by
+            // `resolveFromTheDevice` without a tier being asked at all. The
+            // order of the two layers is the one the read already states (see
+            // `resolveFromTheDevice`): memory first, the persisted store
+            // behind it. The two are filled from the same settled result, so
+            // they cannot disagree about a string.
+            //
+            // **Exactly the keys this call settled** — `settleTerminal`'s own
+            // return, not the batch it was handed. The ledger deduped a
+            // re-arriving identical answer out of `settled`, and a store is
+            // what arms the TTL: keeping the deduped copy here would re-arm
+            // the window for an answer nobody re-derived, which is how a
+            // ten-minute cache becomes an unbounded one (the rule the memory
+            // cache's own doc states for a re-tap).
+            //
+            // The `.frozen` destination is deliberately not filled: a held
+            // frame's answers are its caller's, read out of `plan.value`, and
+            // a capture path keeps its own memory cache for them
+            // (`LiveTranslateFocusCapture.remember`) rather than seeding the
+            // live picture's.
+            // The store does not suspend: it is a lock and a hash insert, so the
+            // commit's `apply` → `publish` pair stays the ordered stretch it is
+            // on master, with the answers already in the layer when publication
+            // returns (see `LiveTranslateMemoryCache`).
+            for (item, result) in terminal where settled.contains(item.id) {
+                memoryCache.store(result, forKey: item.id)
+            }
             await publish()
         case .frozen:
             for (item, result) in terminal {

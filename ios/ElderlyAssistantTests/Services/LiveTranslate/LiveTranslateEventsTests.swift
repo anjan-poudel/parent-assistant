@@ -25,6 +25,8 @@ final class LiveTranslateEventsTests: XCTestCase {
         events.cameraResumed(recoveringFrom: .backgrounded)
         events.ocrPass(regionCount: 3)
         events.ocrPass(regionCount: 0)
+        events.ocrPassReused(regionCount: 3)
+        events.ocrPassReused(regionCount: 0)
         events.ocrPassFailed(.ocrPassFailed(.requestFailed))
         events.trackingUnsupported()
         events.objectPass(objectCount: 2)

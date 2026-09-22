@@ -807,6 +807,41 @@ final class TextRegionStabilizerTests: XCTestCase {
                           LiveTranslateTextNormalization.normalized("begin"))
     }
 
+    /// **Punctuation is part of the key, and the caching directive's "remove
+    /// punctuation" is deliberately not implemented** (owner directive,
+    /// 2026-09-22; the directive itself makes the strengthening conditional —
+    /// "if you strengthen …").
+    ///
+    /// The premise of stripping is that two spellings are the same string. On
+    /// this feature's screens they are not always the same string: a dose is
+    /// "5.5 mg" or it is "55 mg"; a price is "1,50" or it is "150"; a sign says
+    /// "No entry." or "No entry". Folding those together answers a question the
+    /// elder did not ask, on the one screen where being wrong is not cosmetic.
+    ///
+    /// And the key is not only the cache's: it is the **stabiliser's region
+    /// identity** (FR-LCT-007, and the region tests below). A fold here would
+    /// merge two regions showing two different numbers into one row, which is
+    /// a rendering bug on top of a translation one. So the canonical form stays
+    /// exact — trim, collapse, case-fold, and nothing else — and this test is
+    /// where a later "improvement" has to argue with the reason.
+    func testPunctuationIsPartOfTheKeyAndDeliberatelyNotFolded() {
+        XCTAssertNotEqual(LiveTranslateTextNormalization.normalized("Take 5.5 mg"),
+                          LiveTranslateTextNormalization.normalized("Take 55 mg"))
+        XCTAssertNotEqual(LiveTranslateTextNormalization.normalized("No entry."),
+                          LiveTranslateTextNormalization.normalized("No entry"))
+        XCTAssertNotEqual(LiveTranslateTextNormalization.normalized("₹1,50"),
+                          LiveTranslateTextNormalization.normalized("₹150"))
+        // The one fold that *is* performed, and it is performed on whole
+        // clusters (`lowercased()`): two spellings of the same English string
+        // share an answer, punctuation and all.
+        XCTAssertEqual(LiveTranslateTextNormalization.normalized("NO ENTRY."),
+                       LiveTranslateTextNormalization.normalized("no entry."))
+        // …and the key they share is the canonical spelling's.
+        XCTAssertEqual(LabelTranslationCache.normalizationKey(text: "  NO   ENTRY. ",
+                                                              targetLanguage: .nepali),
+                       "no entry.|" + AppLanguage.nepali.rawValue)
+    }
+
     // MARK: - Devanagari fixture (pin, do not "fix")
 
     /// The known behaviour: Swift's `String` is a collection of extended
@@ -836,6 +871,65 @@ final class TextRegionStabilizerTests: XCTestCase {
                        "नमस्ते संसार")
         XCTAssertEqual(LiveTranslateTextNormalization.normalized("  नमस्ते   संसार ").count,
                        "नमस्ते संसार".count)
+    }
+
+    /// The caching directive's own samples (2026-09-22), pinned as literals so
+    /// a future strengthening of the canonicalisation has to fail here before
+    /// it can reach a key.
+    ///
+    /// `रो` carries a dependent vowel sign and `छँ` a candrabindu; both are
+    /// part of the *word*, not decoration. A canonicalisation that stripped
+    /// combining marks — the obvious way to "normalise harder", and the way a
+    /// Unicode-aware fold would do it — would answer `रो` with `र`'s
+    /// translation, and would merge a region showing one with a region showing
+    /// the other. Case folding does not touch them (`lowercased()` on
+    /// Devanagari is the identity, cluster by cluster), and the whitespace
+    /// collapse runs on `Character` boundaries, so a cluster is never split by
+    /// the one transformation that does run.
+    func testTheCachingDirectivesNepaliSamplesSurviveCanonicalisationUnaltered() {
+        XCTAssertEqual(LiveTranslateTextNormalization.normalized("रो"), "रो")
+        XCTAssertEqual(LiveTranslateTextNormalization.normalized("रो").count, 1,
+                       "a dependent vowel sign is part of the cluster, not a second character")
+        XCTAssertEqual(LiveTranslateTextNormalization.normalized("छँ"), "छँ")
+        XCTAssertEqual(LiveTranslateTextNormalization.normalized("छँ").count, 1,
+                       "and so is a candrabindu")
+        XCTAssertEqual(LiveTranslateTextNormalization.normalized("मा"), "मा")
+
+        // The near-misses stay distinct: dropping the sign is a different word
+        // and therefore a different answer.
+        XCTAssertNotEqual(LiveTranslateTextNormalization.normalized("रो"),
+                          LiveTranslateTextNormalization.normalized("र"))
+        XCTAssertNotEqual(LiveTranslateTextNormalization.normalized("छँ"),
+                          LiveTranslateTextNormalization.normalized("छ"))
+        XCTAssertNotEqual(LiveTranslateTextNormalization.normalized("मा"),
+                          LiveTranslateTextNormalization.normalized("म"))
+
+        // A whole sentence: the whitespace collapse runs *between* clusters
+        // (one space, as the English rule says) and the sentence's own danda is
+        // left exactly where the sign put it — there is no per-script exception
+        // to the punctuation rule above.
+        XCTAssertEqual(LiveTranslateTextNormalization.normalized("  नेपाली  बोल्नुहोस्।  "),
+                       "नेपाली बोल्नुहोस्।")
+        XCTAssertNotEqual(LiveTranslateTextNormalization.normalized("नेपाली बोल्नुहोस्।"),
+                          LiveTranslateTextNormalization.normalized("नेपाली बोल्नुहोस्"))
+    }
+
+    /// The directive's samples through the *key*, which is the form the cache
+    /// actually stores: `<canonical text>|<language>`, and back out again. This
+    /// is the round trip a hit depends on — a key that lost a cluster on the
+    /// way in would look up a string nobody will ever ask for again.
+    func testTheNepaliKeyRoundTripsThroughTheCacheKeyFormat() {
+        let key = LabelTranslationCache.normalizationKey(text: " रो ", targetLanguage: .nepali)
+        XCTAssertEqual(key, "रो|" + AppLanguage.nepali.rawValue)
+        XCTAssertEqual(LiveTranslateTextNormalization.normalizedText(fromKey: key), "रो")
+        XCTAssertEqual(LiveTranslateTextNormalization.targetLanguage(fromKey: key),
+                       AppLanguage.nepali.rawValue)
+
+        // Two sessions of the same string across the languages the feature
+        // serves are two keys, never one.
+        XCTAssertNotEqual(key,
+                          LabelTranslationCache.normalizationKey(text: "रो",
+                                                                 targetLanguage: .english))
     }
 
     func testADependentVowelSignOnTheSameBoxIsATextChangeNotASilentNoOp() {

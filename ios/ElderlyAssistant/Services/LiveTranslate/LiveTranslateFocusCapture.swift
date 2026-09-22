@@ -529,7 +529,7 @@ struct LiveTranslateFocusCapture {
         for region in regions {
             let key = LabelTranslationCache.normalizationKey(text: region.text,
                                                              targetLanguage: targetLanguage)
-            if let remembered = await memoryCache.lookup(key) {
+            if let remembered = memoryCache.lookup(key) {
                 outcomes[region.id] = LiveTranslateCaptureSupport.restating(remembered,
                                                                             for: region.text)
                 continue
@@ -561,7 +561,7 @@ struct LiveTranslateFocusCapture {
             guard let result = outcomes[region.id], result.isFinal else { continue }
             let key = LabelTranslationCache.normalizationKey(text: region.text,
                                                              targetLanguage: targetLanguage)
-            await memoryCache.store(result, forKey: key)
+            memoryCache.store(result, forKey: key)
         }
     }
 

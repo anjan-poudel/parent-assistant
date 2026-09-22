@@ -261,7 +261,16 @@ final class LiveTranslationPipelineTests: XCTestCase {
                              /// scenarios were written against. A scenario
                              /// about the router passes a scripted answer and
                              /// says which one it means.
-                             reachability: NetworkReachability = UnavailableReachability()) -> Harness {
+                             reachability: NetworkReachability = UnavailableReachability(),
+                             /// The live cycle's in-memory layer (owner
+                             /// directive, 2026-09-22). Defaulted to the
+                             /// pipeline's own — built from the config — so
+                             /// every scenario that predates it keeps one and
+                             /// no construction site here had to change. A
+                             /// scenario *about* the layer hands in the
+                             /// instance it holds, which is the only way to
+                             /// see what the pipeline put in it.
+                             memoryCache: LiveTranslateMemoryCache? = nil) -> Harness {
         let bus = LiveTranslateSanitisingBus()
         // The brain is behind its own seam, so these tests never build a
         // `ModelStore` or touch a model file: the cascade is what is under
@@ -310,6 +319,7 @@ final class LiveTranslationPipelineTests: XCTestCase {
         let pipeline = LiveTranslationPipeline(locale: Locale(identifier: "ne_NP"),
                                                recogniser: recogniser,
                                                cache: cache,
+                                               memoryCache: memoryCache,
                                                tier: tier,
                                                cloudNeed: controller,
                                                backpressure: backpressure,
@@ -539,6 +549,139 @@ final class LiveTranslationPipelineTests: XCTestCase {
         XCTAssertFalse(harness.controller.isPromptPresented,
                        "a curated scene must never show the consent prompt")
         XCTAssertEqual(harness.gate.inFlightRegistrationCount, 0)
+    }
+
+    // MARK: - Scenario: the run's memory layer answers the live picture
+    //        (owner caching directive, 2026-09-22)
+    //
+    // Two claims, one layer. The live cycle **consults** this run's in-memory
+    // answers *before* the session's persisted store, and it **keeps** every
+    // answer it settles live in that layer. The persisted cache stays the
+    // long-term store; the memory layer is the nearer one, and its win is that
+    // a string the session has already answered is not answered again through
+    // a disk read — and, on a tick that finds a region still pending, not
+    // through a tier round trip either.
+
+    /// **Which of the two layers answered**, made unambiguous: the memory
+    /// layer holds a translation for a string the *curated dictionary* also
+    /// knows, and the two disagree. If the persisted layers answered first —
+    /// as they did before this change — the elder is shown the dictionary's
+    /// word; if the memory layer answers first, they are shown this run's.
+    ///
+    /// Extract mode is what makes the claim exact rather than racy: nothing is
+    /// dispatched on the cycle, so the elder's tap is the only thing that
+    /// resolves and it is awaited inline. The second half is the directive's
+    /// own scenario — the same string sighted again inside the TTL — reached
+    /// honestly, by letting the region retire first, so the second sighting is
+    /// a *fresh pending region* and the lookup really runs.
+    @MainActor
+    func testTheRunsMemoryLayerAnswersTheLivePictureBeforeThePersistedLayers() async throws {
+        let clock = ScriptedClock()
+        let memoryTranslation = "स्मृतिबाट बत्ती"
+        let key = LabelTranslationCache.normalizationKey(text: curatedText,
+                                                        targetLanguage: .nepali)
+        let memoryCache = LiveTranslateMemoryCache(config: config, now: { clock.now })
+        memoryCache.store(.resolved(originalText: curatedText,
+                                          translation: memoryTranslation,
+                                          tier: .cloud),
+                                forKey: key)
+
+        let harness = makeHarness(now: { clock.now },
+                                  extractionMode: true,
+                                  memoryCache: memoryCache)
+        await harness.pipeline.updateLayout(layout)
+        let frame = try makeFrame()
+        harness.recogniser.defaultStep = .regions([detected(curatedText)])
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        let pending = try await latest(harness)
+        let first = try XCTUnwrap(region(curatedText, in: pending))
+        await harness.pipeline.translateRegion(first.id)
+
+        let answered = try await latest(harness)
+        let firstRegion = try XCTUnwrap(region(curatedText, in: answered))
+        guard case .resolved(_, let translation, let tier) = answered.result(for: firstRegion).outcome else {
+            return XCTFail("a memory hit resolves the region")
+        }
+        XCTAssertEqual(translation, memoryTranslation,
+                       "the nearer layer answered: the dictionary's own word here would mean "
+                       + "the persisted store was consulted first")
+        XCTAssertEqual(tier, .cloud, "a remembered answer keeps the tier that produced it")
+        XCTAssertEqual(harness.brain.calls.count, 0)
+        XCTAssertEqual(harness.transport.requestCount, 0, "a memory hit asks no tier at all")
+
+        // The region retires — two misses (`regionMissPasses`) drop the
+        // identity — and that is what makes the next sighting a fresh pending
+        // region instead of one still carrying its answer.
+        harness.recogniser.defaultStep = .regions([])
+        for _ in 0..<harness.config.regionMissPasses {
+            clock.advance(by: harness.config.overlayDepartureGraceSeconds + 0.1)
+            await harness.pipeline.ingest(frame)
+        }
+        let alive = await activeRegions(harness)
+        XCTAssertEqual(alive, 0, "the identity is retired, not merely unpublished")
+
+        harness.recogniser.defaultStep = .regions([detected(curatedText)])
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+        let reborn = try await latest(harness)
+        let rebornRegion = try XCTUnwrap(region(curatedText, in: reborn))
+        XCTAssertNotEqual(rebornRegion.id, firstRegion.id,
+                          "a retired identity is never recycled, so this is a new sighting")
+
+        await harness.pipeline.translateRegion(rebornRegion.id)
+
+        let again = try await latest(harness)
+        let secondRegion = try XCTUnwrap(region(curatedText, in: again))
+        guard case .resolved(_, let secondTranslation, _) = again.result(for: secondRegion).outcome else {
+            return XCTFail("the second sighting resolves")
+        }
+        XCTAssertEqual(secondTranslation, memoryTranslation,
+                       "the same string inside the TTL is answered from the run's own layer")
+        XCTAssertEqual(harness.brain.calls.count, 0)
+        XCTAssertEqual(harness.transport.requestCount, 0,
+                       "neither sighting asked a tier: the near layer had the answer to both")
+    }
+
+    /// The other half of the directive: a live answer the session **settles**
+    /// is kept in the run's memory layer, so a later sighting of the same
+    /// string can be answered there instead of by re-reading the persisted
+    /// store — whose hit rewrites its whole encrypted payload on the first
+    /// read of a key in a session.
+    ///
+    /// And the layer is the run's, not the app's: closing the session drops
+    /// every answer in it, while the persisted store — the long-term layer —
+    /// is exactly what survives that.
+    @MainActor
+    func testASettledLiveAnswerIsKeptInTheRunsMemoryLayerUntilTheSessionCloses() async throws {
+        let memoryCache = LiveTranslateMemoryCache(config: config)
+        let harness = makeHarness(transport: Self.respondingTransport(),
+                                  memoryCache: memoryCache)
+        await harness.pipeline.updateLayout(layout)
+        let frame = try makeFrame()
+
+        harness.recogniser.defaultStep = .regions([detected(cloudText)])
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+        await waitUntil("the cloud answer to settle") { harness.transport.requestCount == 1 }
+
+        let key = LabelTranslationCache.normalizationKey(text: cloudText,
+                                                        targetLanguage: .nepali)
+        await waitUntil("the settled answer to reach the run's memory layer") {
+            memoryCache.lookup(key) != nil
+        }
+        let remembered = memoryCache.lookup(key)
+        XCTAssertEqual(remembered?.originalText, cloudText)
+        XCTAssertEqual(remembered?.text, "ने:" + cloudText,
+                       "the layer holds the answer that was rendered, as it was rendered")
+        XCTAssertEqual(remembered?.sourceTier, .cloud)
+        XCTAssertFalse(remembered?.degraded ?? true,
+                       "only answers are kept: a degradation is never an answer to reuse")
+
+        await harness.pipeline.close()
+        let afterClose = memoryCache.lookup(key)
+        XCTAssertNil(afterClose, "a session that is over leaves no answers behind it")
     }
 
     // MARK: - Scenario: Unresolved strings reach the cloud tier only through the gate
@@ -1787,8 +1930,12 @@ final class LiveTranslationPipelineTests: XCTestCase {
 
     @MainActor
     func testScenarioASubEpsilonWobbleIsNotPublishedAndAVisibleMoveIs() async throws {
-        // A curated string, so nothing asynchronous can publish between the
-        // ticks and make the deltas below a claim about the wrong cycle.
+        // A curated string: its answer comes from the device, so the deltas
+        // below are a claim about this cycle's own work rather than about a
+        // tier. The plan the first cycle dispatches for it — the region is
+        // askable and still pending when it runs, and the device answers only
+        // in the *second* cycle — is drained before any of those deltas is
+        // read; see the quiescence below.
         let harness = makeHarness()
         await harness.pipeline.updateLayout(layout)
         let frame = try makeFrame()
@@ -1800,6 +1947,19 @@ final class LiveTranslationPipelineTests: XCTestCase {
         let epsilon = harness.config.publishBoxEpsilon
         XCTAssertEqual(epsilon, 0.02, "2% of the container dimension, as documented")
         XCTAssertEqual(harness.transport.requestCount, 0)
+
+        // Quiescent first — the quiescence `testPublicationSequenceIsMonotonic`
+        // also waits for, and here it is load-bearing rather than tidy. Whether
+        // that first cycle's plan finds its key already settled and commits
+        // nothing, or derives the curated answer and publishes it, is a
+        // scheduling race decided at the microsecond, and `settledCount` below
+        // is the baseline every later assertion is a delta from: read it while
+        // the plan is in flight and the wobble assertions become a coin flip on
+        // whoever the actor scheduled next. Measured, not assumed — the
+        // unmodified master tree passes this test 16 of 16, and fails 8 of 8
+        // with nothing changed but a `print` added to the commit path.
+        await waitUntil("the pipeline to go quiet") { await harness.pipeline.inFlightAttemptCount == 0 }
+
         let settledCount = await publicationCount(harness)
         let settledSequence = await publishedSequence(harness)
         XCTAssertEqual(settledCount, settledSequence)

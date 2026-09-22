@@ -99,6 +99,15 @@ final class LiveTranslateConfigTests: XCTestCase {
         XCTAssertEqual(config.brainTranslationHeadroomFactor, 1.0)
         XCTAssertTrue(config.brainTranslationDefersToResidentBrain)
 
+        // The OCR dedup directive (2026-09-22): an unchanged frame is restated
+        // rather than read, and this is how long that may go on — 8 × 0.25 s
+        // = the 2 s bound the doc argues for. Pinned as a number, because the
+        // *relation* that makes the number meaningful (it must outlast the
+        // tap's still-scene cadence, or the reuse never fires at all) is the
+        // subject of
+        // `LiveTextDetectorTests.testTheReuseAllowanceOutlastsTheStillSceneSampleInterval`.
+        XCTAssertEqual(config.ocrUnchangedReuseIntervals, 8)
+
         // The warden's notice (owner directive, 2026-09-19). A status line,
         // not a modal: its window is the whole of how it ends, so the value is
         // pinned here rather than left to whichever surface happens to draw it.

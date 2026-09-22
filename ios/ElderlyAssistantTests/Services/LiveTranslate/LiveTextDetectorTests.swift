@@ -169,8 +169,9 @@ final class LiveTextDetectorTests: XCTestCase {
     /// The tracking pass costs one `VNTrackRectangleRequest` per remembered
     /// rectangle, so a still scene used to buy a burst of Vision requests for
     /// geometry that could only come back the same. A tracker cannot find
-    /// movement that is not there: the pass is skipped and the frame gets the
-    /// OCR refresh it was delivered for.
+    /// movement that is not there: the pass is skipped and the frame is
+    /// restated from the last read instead (`.reused` — see the reuse tests
+    /// below for the OCR half of the same rule).
     func testAStillSceneIsNotTrackedAndAChangedOneIs() async throws {
         engine.regions = [region("Exit")]
         let detector = makeDetector()
@@ -181,11 +182,19 @@ final class LiveTextDetectorTests: XCTestCase {
         _ = await detector.recognize(try frame(luma: 0))
         XCTAssertEqual(engine.trackCallCount, 0,
                        "the same picture as the last OCR'd frame has nothing to follow")
-        XCTAssertEqual(engine.recognizeCallCount, 2,
-                       "the frame is not dropped: it is read again (an OCR refresh)")
+        XCTAssertEqual(engine.recognizeCallCount, 1,
+                       "and nothing to re-read either: the frame is not dropped, it is restated")
 
+        // A change that lands on the cadence is read: the sample interval has
+        // passed since the last real pass, so a new picture deserves one.
         clock.advance(by: detector.config.ocrSampleInterval / 2)
         _ = await detector.recognize(try frame(luma: 90))
+        XCTAssertEqual(engine.recognizeCallCount, 2)
+        XCTAssertEqual(engine.trackCallCount, 0)
+
+        // A change *inside* the interval is the case tracking exists for.
+        clock.advance(by: detector.config.ocrSampleInterval / 2)
+        _ = await detector.recognize(try frame(luma: 200))
         XCTAssertEqual(engine.trackCallCount, 1,
                        "a materially different picture is what tracking exists for")
     }
@@ -196,12 +205,115 @@ final class LiveTextDetectorTests: XCTestCase {
         _ = detector.begin()
 
         _ = await detector.recognize(try frame())
-        clock.advance(by: detector.config.ocrSampleInterval / 2)
+        // Past the reuse allowance: an unchanged frame is read again rather
+        // than restated, which is the only way a still picture can ever gain
+        // the text it did not have (and the reason the allowance exists at
+        // all).
+        clock.advance(by: detector.config.ocrSampleInterval
+                        * detector.config.ocrUnchangedReuseIntervals)
         _ = await detector.recognize(try frame())
 
         XCTAssertEqual(engine.trackCallCount, 0,
                        "with nothing remembered there is no rectangle to follow: OCR runs instead")
         XCTAssertEqual(engine.recognizeCallCount, 2)
+    }
+
+    // MARK: Scenario: an unchanged frame costs no Vision pass at all
+
+    /// The owner's directive (2026-09-22): dedupe the OCR request itself, not
+    /// only the tracking one.
+    ///
+    /// Vision is deterministic for a fixed input, so recognition over the frame
+    /// the last pass already read can only return the regions it returned then.
+    /// The frame is still *handed to the stabiliser* — the pass is restated
+    /// whole, ids and geometry included — and that is what keeps the
+    /// corroboration honest: a region on a still scene goes on being observed
+    /// pass after pass (`consecutiveDetections`, the appearance hysteresis, the
+    /// departure grace) instead of ageing out because the detector stopped
+    /// speaking.
+    func testAnUnchangedFrameIsRestatedInsteadOfReadAgain() async throws {
+        engine.regions = [region("Exit"), region("Push", y: 0.6)]
+        let detector = makeDetector()
+        XCTAssertTrue(detector.begin().isSuccess)
+
+        let first = await detector.recognize(try frame(luma: 0))
+        XCTAssertEqual(engine.recognizeCallCount, 1)
+
+        clock.advance(by: detector.config.ocrSampleInterval / 2)
+        let second = await detector.recognize(try frame(luma: 0))
+
+        XCTAssertEqual(engine.recognizeCallCount, 1,
+                       "the hot cost — the Vision pass — is skipped on an unchanged frame")
+        XCTAssertEqual(engine.trackCallCount, 0)
+        guard case .success(let read) = first, case .success(let reused) = second else {
+            return XCTFail("expected two passes: \(first) / \(second)")
+        }
+        XCTAssertEqual(reused, read, "the restatement is the last read, whole")
+        XCTAssertEqual(reused.regions.map(\.text), ["Exit", "Push"])
+        XCTAssertTrue(reused.trackedBoxes.isEmpty)
+
+        let reuses = bus.events(named: "ocr_pass_reused")
+        XCTAssertEqual(reuses.count, 1, "the reuse is on the evidence bus")
+        XCTAssertEqual(reuses.first?.outcome, "success")
+        XCTAssertEqual(reuses.first?.metadata["regionCount"], "2")
+        XCTAssertEqual(bus.events(named: "ocr_pass").count, 1,
+                       "one Vision pass covered both frames")
+    }
+
+    /// The gate is a signature, not a proof: a page can turn behind a lamp, a
+    /// sign can be walked past slowly, and a 64 × 64 luminance comparison can
+    /// read either as unchanged. The restatement is therefore **bounded** — past
+    /// the allowance the frame is read again whether or not the gate still says
+    /// the picture is the one the last pass saw.
+    func testAStillSceneIsReadAgainOnceTheReuseAllowanceHasPassed() async throws {
+        engine.regions = [region("Exit")]
+        let detector = makeDetector()
+        _ = detector.begin()
+
+        _ = await detector.recognize(try frame(luma: 0))
+        clock.advance(by: detector.config.ocrSampleInterval
+                        * detector.config.ocrUnchangedReuseIntervals)
+        _ = await detector.recognize(try frame(luma: 0))
+
+        XCTAssertEqual(engine.recognizeCallCount, 2,
+                       "the allowance bounds the restatement; it does not replace the pass")
+        XCTAssertTrue(bus.events(named: "ocr_pass_reused").isEmpty)
+    }
+
+    /// The allowance must be reachable at all, which is a statement about the
+    /// camera tap: the tap delivers an unchanged scene at `stableSampleInterval`
+    /// (0.7 s), so an allowance of one nominal interval (0.25 s) would have
+    /// expired before the next sample ever arrived and every still frame would
+    /// have gone on being read. The shipped bound is checked against it here
+    /// rather than left to the reader of two config values.
+    func testTheReuseAllowanceOutlastsTheStillSceneSampleInterval() {
+        let config = LiveTranslateConfig.default
+        let allowance = config.ocrSampleInterval * config.ocrUnchangedReuseIntervals
+        XCTAssertGreaterThan(allowance, config.stableSampleInterval,
+                             "a bound the tap's own cadence cannot reach is a dead knob")
+    }
+
+    /// The one thing that must never be restated: another window's regions. A
+    /// crop is a fresh read of a box the elder drew, so the frame after one has
+    /// no cached pass to restate and gets the full pass — the same rule the
+    /// crop test above states for the tracking half.
+    func testACropLeavesNothingToRestate() async throws {
+        engine.regions = [region("Exit")]
+        engine.trackedBoxes = ["Exit": box(0.25)]
+        let detector = makeDetector()
+        _ = detector.begin()
+
+        _ = await detector.recognize(try frame(luma: 0))
+        _ = await detector.recognizeCrop(try frame(luma: 90).pixelBuffer)
+        let readsAfterTheCrop = engine.recognizeCallCount
+
+        clock.advance(by: detector.config.ocrSampleInterval / 2)
+        _ = await detector.recognize(try frame(luma: 180))
+
+        XCTAssertEqual(engine.recognizeCallCount, readsAfterTheCrop + 1,
+                       "the live frame after a crop is read, not restated over regions "
+                       + "the crop already replaced")
+        XCTAssertTrue(bus.events(named: "ocr_pass_reused").isEmpty)
     }
 
     // MARK: Scenario: an unreadable frame is not an error
@@ -423,12 +535,17 @@ final class LiveTextDetectorTests: XCTestCase {
     func testTwoConcurrentCallersAreSerialisedRatherThanRacingTheRequestHandler() async throws {
         let hold = DispatchSemaphore(value: 0)
         let entered = expectation(description: "the first pass reached the engine")
-        // Both callers now run an *OCR* pass: the frames are identical, so the
-        // scene gate declines to track and reads the frame again (see
-        // `testAStillSceneIsNotTrackedAndAChangedOneIs`). The engine's entry
-        // hook therefore fires once per caller, and the wait below is about the
-        // first of them — the second firing is the second caller being served,
-        // not an over-fulfilment to fail on.
+        // Both callers run a real *OCR* pass, so the engine's entry hook fires
+        // once per caller and the wait below is about the first of them — the
+        // second firing is the second caller being served, not an
+        // over-fulfilment to fail on.
+        //
+        // The clock is stepped past the reuse allowance between the two calls,
+        // deliberately: on identical frames the second caller would otherwise be
+        // *restated* from the first pass instead of reaching Vision at all
+        // (`testAnUnchangedFrameIsRestatedInsteadOfReadAgain` pins that, and it
+        // is the point of the reuse rule), and this test is about two passes
+        // that do reach the engine.
         entered.assertForOverFulfill = false
         engine.hold = hold
         engine.onEnter = { entered.fulfill() }
@@ -439,6 +556,11 @@ final class LiveTextDetectorTests: XCTestCase {
         let sample = try frame()
         let first = Task { await detector.recognize(sample) }
         await fulfillment(of: [entered], timeout: 5)
+        // The first pass stamped its time when it started and is held inside the
+        // engine, so this puts the *second* caller past the window without
+        // moving the first one's stamp.
+        clock.advance(by: LiveTranslateConfig.default.ocrSampleInterval
+                      * (LiveTranslateConfig.default.ocrUnchangedReuseIntervals + 1))
         let second = Task { await detector.recognize(sample) }
         // One permit per pass: the first caller is released here, and the
         // second takes the second permit when the engine hands it the pass.

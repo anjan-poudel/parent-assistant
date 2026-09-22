@@ -622,7 +622,15 @@ final class LiveTextDetector {
     /// Which request a pass is. Not a mode to be toggled by callers: the
     /// cadence decides, and the pass kind decides which output field can be
     /// filled.
-    enum PassKind: Equatable { case ocr, tracking }
+    ///
+    /// `.reused` is the third kind and the only one that runs no request at
+    /// all: the frame-change gate has said the picture is the one the last OCR
+    /// pass already read, so that pass's own regions are returned again. It is
+    /// neither an OCR pass (Vision did not run, so nothing was recognized) nor
+    /// a tracking pass (no geometry was followed) — see
+    /// `ocrUnchangedReuseIntervals` for why the feature is willing to answer a
+    /// frame it did not read, and for the bound on how long it may keep doing so.
+    enum PassKind: Equatable { case ocr, tracking, reused }
 
     private enum State { case idle, ready }
 
@@ -696,6 +704,22 @@ final class LiveTextDetector {
     /// Whether the frame in hand is materially different from the last OCR'd
     /// one. Defaults to `true` so a session's first pass is never gated.
     private var sceneChanged = true
+
+    /// The last **successful** OCR pass, whole: the regions Vision recognized
+    /// and the objects the pass grouped them with.
+    ///
+    /// It is what a `.reused` pass is answered from. Kept as the pass object
+    /// rather than as bare regions so a reused frame is indistinguishable
+    /// downstream from the pass it restates — the stabiliser, the grouping
+    /// limit and the object set are all the ones that pass actually produced,
+    /// and nothing has to be regrouped or re-decided to hand them back.
+    ///
+    /// Written only where the frame-change gate's own reference is written (a
+    /// successful OCR pass) and dropped wherever that reference is dropped —
+    /// see `noteCropChange` and `forgetTrackingForOneOffPass`, which are the
+    /// two places a pass over a *different picture* would otherwise be
+    /// restated as if it described this one.
+    private var lastOCRPass: Pass?
 
     /// The window the last OCR pass ran on. A pass over a different window is a
     /// pass over a different picture — its remembered rectangles describe the
@@ -779,6 +803,7 @@ final class LiveTextDetector {
             objects = []
             frameDetector.forget()
             sceneChanged = true
+            lastOCRPass = nil
             lastPassCrop = .whole
             return true
         }
@@ -913,32 +938,75 @@ final class LiveTextDetector {
                     continuation.resume(returning: runOCRPass(on: frame, crop: crop, limit: limit))
                 case .tracking:
                     continuation.resume(returning: runTrackingPass(on: frame, crop: crop))
+                case .reused:
+                    // The decision was made a moment ago under this same lock
+                    // and on this same queue, so a `nil` here means a lifecycle
+                    // call (`begin`/`end`) landed in between. A real pass is
+                    // the honest fallback: never a failure, and never an empty
+                    // pass invented to cover the gap.
+                    if let cached = reusedPass() {
+                        continuation.resume(returning: .success(cached))
+                    } else {
+                        continuation.resume(returning: runOCRPass(on: frame,
+                                                                 crop: crop,
+                                                                 limit: limit))
+                    }
                 }
             }
         }
     }
 
-    /// The pass kind this frame gets. OCR when the cadence is due, when there
-    /// is nothing to track, or when the scene has not changed; tracking
-    /// otherwise. The camera's frame tap already throttles samples to the same
-    /// interval, so a sampled frame is normally due — the tracking branch is
-    /// what carries geometry for any frame the caller delivers sooner than the
-    /// cadence.
+    /// The pass kind this frame gets. Reused when the frame-change gate says the
+    /// picture is the one the last OCR pass read and that pass is still fresh
+    /// enough to restate; OCR when the cadence is due, when there is nothing to
+    /// track, or when there is no pass to restate; tracking otherwise. The
+    /// camera's frame tap already throttles samples to the same interval, so a
+    /// sampled frame is normally due — the tracking branch is what carries
+    /// geometry for any frame the caller delivers sooner than the cadence.
     ///
     /// The scene-change condition is the resource fix and it is not a
     /// micro-optimisation: a tracking pass costs one `VNTrackRectangleRequest`
     /// per remembered rectangle, so a still scene used to buy a burst of Vision
     /// requests per delivered frame for geometry that could only come back the
     /// same. A tracker cannot find movement that is not there, so the whole
-    /// pass is skipped and the frame gets the OCR pass it was delivered for
-    /// (the tap's reduced cadence is what makes that the *refresh* pass and not
-    /// a fourth of a second of wasted Vision).
+    /// pass is skipped.
+    ///
+    /// **And on a still scene the OCR pass itself is now skipped too**
+    /// (`.reused`). It used to be the frame's *refresh*: the tap's reduced
+    /// cadence made it ~1.4 passes a second of Vision over a picture whose
+    /// strings cannot have changed — Vision is deterministic for a fixed input,
+    /// so recognition over the frame the last pass already read can only
+    /// produce the same regions it produced then. Restating them costs a
+    /// dictionary read instead of a Vision pass, and the frame is still
+    /// *delivered* to the stabiliser, so a region's appearance hysteresis and
+    /// the departure grace advance exactly as they did on the refresh pass
+    /// (`regionAppearPasses` — the bound that made the tap's cadence reduced
+    /// rather than zero).
+    ///
+    /// The reuse is bounded, and the bound is the second condition: past
+    /// `ocrUnchangedReuseIntervals` × `ocrSampleInterval` the detector runs a
+    /// real pass whether or not the gate still says the picture is unchanged.
+    /// The gate is a 64 × 64 luminance signature — a scene can change under
+    /// it — so a still scene is re-read periodically rather than trusted
+    /// indefinitely. A crop change, a resume and a session's first sighting
+    /// have no cached pass to restate and get the full pass for free.
     func passKind(at time: TimeInterval) -> PassKind {
-        let decision: PassKind? = withLock {
-            guard trackingAvailable, !rememberedKeys.isEmpty, let last = lastOCRPassAt else {
-                return nil
+        // The closure's result type is spelled out: with three returns and one
+        // of them `nil`, inference under the annotation below would otherwise
+        // settle on the non-optional `PassKind` and refuse the `nil` branch.
+        let decision: PassKind? = withLock { () -> PassKind? in
+            // No OCR pass has run in this session (or since the last crop):
+            // there is nothing to restate and nothing to follow.
+            guard let last = lastOCRPassAt else { return nil }
+
+            guard sceneChanged else {
+                guard lastOCRPass != nil else { return .ocr }
+                return time - last < config.ocrSampleInterval * config.ocrUnchangedReuseIntervals
+                    ? .reused
+                    : .ocr
             }
-            guard sceneChanged else { return .ocr }
+
+            guard trackingAvailable, !rememberedKeys.isEmpty else { return nil }
             return time - last >= config.ocrSampleInterval ? .ocr : .tracking
         }
         return decision ?? .ocr
@@ -953,6 +1021,25 @@ final class LiveTextDetector {
                                                           side: config.frameSignatureSide,
                                                           threshold: config.frameChangeThreshold)
         withLock { sceneChanged = changed }
+    }
+
+    /// The last OCR pass, restated — the whole of what a `.reused` pass is.
+    ///
+    /// The pass's own `trackedBoxes` travel with it, which for an OCR pass is
+    /// always empty: a restated pass has no more tracked geometry to report
+    /// than the pass it restates had, and reporting the last *tracking* pass's
+    /// boxes here would claim geometry moved on a frame the gate says did not
+    /// change.
+    ///
+    /// Records the reuse on the evidence bus, because the one thing a device
+    /// capture cannot otherwise see is how much of the frame's cadence was
+    /// Vision and how much was a restatement — and that ratio is the whole
+    /// claim this path makes.
+    private func reusedPass() -> Pass? {
+        let cached = withLock { lastOCRPass }
+        guard let cached else { return nil }
+        events.ocrPassReused(regionCount: cached.regions.count)
+        return cached
     }
 
     // MARK: Pass implementation (visionQueue)
@@ -1003,6 +1090,10 @@ final class LiveTextDetector {
                                    confidence: $0.confidence,
                                    blockIdentity: $0.identityKey)
             }
+            // An OCR pass has no tracked geometry to report — it is the
+            // anchor, not the carrier. Zero regions is the empty-state hint,
+            // not a failure.
+            let pass = Pass(regions: regions, trackedBoxes: [:], objects: sceneObjects)
             withLock {
                 rememberedKeys = Set(regions.map(\.text))
                 // The block map the tracking pass re-keys through. Two blocks
@@ -1019,15 +1110,27 @@ final class LiveTextDetector {
                 // a picture nothing was recognized in.
                 frameDetector.remember(frame, side: config.frameSignatureSide)
                 sceneChanged = false
+                // Kept beside the gate's own reference, and committed on the
+                // same terms: this is the pass a later unchanged frame may be
+                // answered from, so it must be the pass whose picture the gate
+                // is now comparing against.
+                lastOCRPass = pass
             }
             events.ocrPass(regionCount: regions.count)
-            // An OCR pass has no tracked geometry to report — it is the
-            // anchor, not the carrier. Zero regions is the empty-state hint,
-            // not a failure.
-            return .success(Pass(regions: regions, trackedBoxes: [:], objects: sceneObjects))
+            return .success(pass)
         } catch {
             let failure = (error as? LiveTranslateError) ?? .ocrPassFailed(.requestFailed)
             events.ocrPassFailed(failure)
+            // A **failed** pass leaves nothing to restate. The cadence clock was
+            // stamped at the top of this pass on purpose (a failing scene must
+            // not become a per-frame retry loop), but the cached pass is a
+            // different matter: a failure does not touch the frame-change gate's
+            // reference either, so leaving the cache standing would let a run of
+            // failures keep re-arming the reuse window over a picture the gate is
+            // measuring against an old signature — and hand back regions of
+            // unbounded age under a "nothing changed" claim nobody re-verified.
+            // Dropping it costs exactly one real pass when Vision recovers.
+            withLock { lastOCRPass = nil }
             return .failure(failure)
         }
     }
@@ -1243,6 +1346,12 @@ final class LiveTextDetector {
             lastPassCrop = crop
             rememberedKeys = []
             blockMembers = [:]
+            // The cached pass's boxes were mapped out of the old window, so
+            // restating it here would put last window's regions on this
+            // window's picture — the one thing a `.reused` pass may never do.
+            // Dropped first, before the kind is chosen, so a moved window can
+            // only ever get the OCR pass that re-anchors on its own pixels.
+            lastOCRPass = nil
             // The cached objects are geometry of the old window: their boxes
             // were mapped out of a buffer this session is no longer reading, so
             // grouping the new window's text with them would put a panel over
@@ -1294,6 +1403,10 @@ final class LiveTextDetector {
             blockMembers = [:]
             lastOCRPassAt = nil
             sceneChanged = true
+            // The crop's pass is the one that will re-anchor, and it is not
+            // this state's to restate: the cached pass belongs to the live
+            // window, which the crop did not read.
+            lastOCRPass = nil
         }
         engine.forgetRememberedRectangles()
     }
