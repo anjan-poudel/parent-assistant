@@ -83,6 +83,175 @@ final class ApplianceLabelDictionaryTests: XCTestCase {
         }
     }
 
+    // MARK: - [TIER-0-CONVERSATION] The conversational set
+
+    /// Every conversational entry this change adds, pinned as a pair: the key
+    /// in the exact form the lookup asks for, the value in the exact form the
+    /// elder reads. A change to either fails here, and that is the point — the
+    /// table is additive only (NFR-LCT-012).
+    ///
+    /// The two-spelling groups are not duplicates: the lookup's normalization
+    /// is trim + collapse + case-fold and deliberately not punctuation, so
+    /// "what is your name?" and "what is your name" are two distinct keys and
+    /// both are listed (OCR keeps a printed question mark about as often as it
+    /// drops it). The next test proves each key is already normalized.
+    private let conversationalEntries: [String: String] = [
+        // Questions — both spellings, see above.
+        "what is your name?": "तपाईंको नाम के हो?",
+        "what is your name": "तपाईंको नाम के हो?",
+        "what is your age?": "तपाईंको उमेर कति छ?",
+        "what is your age": "तपाईंको उमेर कति छ?",
+        "how are you?": "तपाईंलाई कस्तो छ?",
+        "how are you": "तपाईंलाई कस्तो छ?",
+        "where are you?": "तपाईं कहाँ हुनुहुन्छ?",
+        "where are you": "तपाईं कहाँ हुनुहुन्छ?",
+        "what time is it?": "अहिले कति बज्यो?",
+        "what time is it": "अहिले कति बज्यो?",
+        "where is the toilet?": "शौचालय कहाँ छ?",
+        "where is the toilet": "शौचालय कहाँ छ?",
+        "how much is this?": "यसको मूल्य कति छ?",
+        "how much is this": "यसको मूल्य कति छ?",
+
+        // Stating how one is, and what one needs.
+        "i am fine, thank you": "म ठीक छु, धन्यवाद।",
+        "i am fine thank you": "म ठीक छु, धन्यवाद।",
+        "i am fine": "म ठीक छु।",
+        "i am hungry": "मलाई भोक लाग्यो।",
+        "i am thirsty": "मलाई तिर्खा लाग्यो।",
+        "i am sick": "म बिरामी छु।",
+        "i need help": "मलाई सहयोग चाहिन्छ।",
+        "help me": "मलाई सहयोग गर्नुहोस्।",
+        "i do not understand": "मलाई बुझिएन।",
+        "i want to go home": "म घर जान चाहन्छु।",
+
+        // Greetings and partings.
+        "good morning": "शुभ प्रभात",
+        "good afternoon": "शुभ दिउँसो",
+        "good evening": "शुभ साँझ",
+        "good night": "शुभ रात्रि",
+        "namaste": "नमस्ते",
+        "see you later": "फेरि भेटौंला।",
+        "take care": "आफ्नो ख्याल राख्नुहोस्।",
+        "happy birthday": "जन्मदिनको शुभकामना।",
+
+        // Courtesies.
+        "please": "कृपया",
+        "thank you": "धन्यवाद",
+        "thank you very much": "धेरै धन्यवाद।",
+        "sorry": "माफ गर्नुहोस्।",
+        "yes": "हो",
+        "no": "होइन",
+        "please sit down": "कृपया बस्नुहोस्।",
+        "please come here": "कृपया यहाँ आउनुहोस्।",
+        "please speak slowly": "कृपया बिस्तारै बोल्नुहोस्।",
+        "please say it again": "कृपया फेरि भन्नुहोस्।",
+
+        // The door.
+        "open the door": "ढोका खोल्नुहोस्।",
+        "close the door": "ढोका बन्द गर्नुहोस्।",
+
+        // Reaching people.
+        "call my daughter": "मेरी छोरीलाई फोन गर्नुहोस्।",
+        "call my son": "मेरो छोरालाई फोन गर्नुहोस्।",
+        "call my doctor": "मेरो डाक्टरलाई फोन गर्नुहोस्।",
+        "call my husband": "मेरो श्रीमान्लाई फोन गर्नुहोस्।",
+        "call my wife": "मेरी श्रीमतीलाई फोन गर्नुहोस्।",
+        "call the doctor": "डाक्टरलाई फोन गर्नुहोस्।",
+        "call the police": "प्रहरीलाई फोन गर्नुहोस्।",
+        "call an ambulance": "एम्बुलेन्स बोलाउनुहोस्।",
+
+        // The day.
+        "today is sunday": "आज आइतबार हो।",
+        "today is monday": "आज सोमबार हो।",
+        "today is tuesday": "आज मङ्गलबार हो।",
+        "today is wednesday": "आज बुधबार हो।",
+        "today is thursday": "आज बिहीबार हो।",
+        "today is friday": "आज शुक्रबार हो।",
+        "today is saturday": "आज शनिबार हो।"
+    ]
+
+    func testEveryConversationalEntryIsPinnedToItsExactKeyAndNepaliValue() {
+        XCTAssertEqual(conversationalEntries.count, 59,
+                       "the conversational extension is 59 entries")
+        for (key, value) in conversationalEntries.sorted(by: { $0.key < $1.key }) {
+            XCTAssertEqual(ApplianceLabelLocalizer.dictionary[key], value,
+                           "the conversational entry '\(key)' is missing or changed; "
+                           + "the extension is additive only (NFR-LCT-012)")
+        }
+    }
+
+    func testEveryConversationalKeyIsAlreadyInTheFormTheLookupAsksFor() {
+        // The lookup normalizes the recognized text and asks the table with
+        // the result. A key that is not already normalized is dead data: no
+        // input could ever fold onto it, so the entry would never be answered
+        // — and the pipeline would quietly reach for a model instead.
+        for key in conversationalEntries.keys.sorted() {
+            XCTAssertEqual(LabelTranslationCache.normalizationKey(text: key, targetLanguage: .nepali),
+                           key + "|" + AppLanguage.nepali.rawValue,
+                           "'\(key)' is not in the normalized form the lookup builds: "
+                           + "the entry is unreachable")
+            XCTAssertEqual(key, key.lowercased(), "'\(key)' is not case-folded")
+            XCTAssertEqual(key.trimmingCharacters(in: .whitespacesAndNewlines), key,
+                           "'\(key)' carries edge whitespace the lookup would strip")
+            XCTAssertFalse(key.contains("  "),
+                           "'\(key)' carries whitespace the lookup would collapse")
+        }
+    }
+
+    /// The Nepali is the deliverable, so its two failure modes are pinned:
+    /// a half-translated value or an impolite one.
+    func testTheConversationalValuesAreFullyNepaliAndPoliteAddress() {
+        for (key, value) in conversationalEntries.sorted(by: { $0.key < $1.key }) {
+            XCTAssertFalse(value.isEmpty, "'\(key)' renders a blank label")
+
+            // तपाईं-level: the intimate second person is never used. These are
+            // the pronominal forms an elder would be addressed by, and getting
+            // politeness wrong is a social error, not a typo.
+            for intimate in ["तिमी", "तँ", "तेरो", "तिम्रो", "तँलाई"] {
+                XCTAssertFalse(value.contains(intimate),
+                               "'\(key)' uses the intimate form '\(intimate)'")
+            }
+
+            // Cluster safety: the object marker is written as one word with
+            // the noun it governs. A separated " लाई" is the particle-fusion
+            // error this set was reviewed for.
+            XCTAssertFalse(value.contains(" लाई"),
+                           "'\(key)' separates the object marker: '\(value)'")
+
+            // No Latin left in place — a half-translated value is worse than a
+            // miss, because it renders as if it were finished.
+            let latin = value.unicodeScalars.filter {
+                (0x41...0x5A).contains($0.value) || (0x61...0x7A).contains($0.value)
+            }
+            XCTAssertTrue(latin.isEmpty,
+                          "'\(key)' leaves Latin letters in '\(value)'")
+
+            // The value is Devanagari (the danda and the question mark are the
+            // only punctuation this vocabulary uses).
+            XCTAssertTrue(ApplianceLabelLocalizer.containsDevanagari(value),
+                          "'\(key)' resolved to a non-Devanagari value '\(value)'")
+        }
+    }
+
+    func testEveryConversationalPhraseResolvesFromTheCuratedTableWithNoModelInTheLoop() {
+        // Behavioural, through the same entry point the label seam uses: any
+        // case, any surrounding whitespace, and the pinned Nepali comes back
+        // with the printed English kept as the reference line.
+        for (key, value) in conversationalEntries.sorted(by: { $0.key < $1.key }) {
+            let printed = "  " + key.uppercased() + "  "
+            let display = ApplianceLabelLocalizer.display(for: printed, locale: nepali)
+            XCTAssertEqual(display.primary, value,
+                           "'\(key)' must resolve from the curated table, not from a model")
+            XCTAssertEqual(display.secondary, key.uppercased(),
+                           "the printed English stays as the secondary reference")
+        }
+        // …and the Nepali-active gate still holds for the new vocabulary: an
+        // English-locale session is shown the printed text verbatim.
+        for key in conversationalEntries.keys {
+            XCTAssertEqual(ApplianceLabelLocalizer.display(for: key, locale: english).primary, key)
+        }
+    }
+
     // MARK: - No network path
 
     func testACuratedLabelResolvesWithNoNetworkPathInvolved() {
