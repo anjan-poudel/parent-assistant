@@ -2983,8 +2983,15 @@ actor LiveTranslationPipeline {
         // lives in the string ledger and lands through `reconcile` when it
         // appears. The filter is the one central gate every settlement
         // path flows through.
-        let visibleIDs = Set(regions.map(\.id))
-        let publicationOutcomes = outcomes.filter { visibleIDs.contains($0.key) }
+        // Carry every settled outcome in the publication. Outcomes are
+        // keyed by normalized text; placements are built per region, so a
+        // stale outcome with no region in this publication has no placement
+        // and draws nothing — the old visible-only filter was pure loss:
+        // a settled string whose region had not (yet) corroborated into
+        // `stabilizer.visible` never rendered, leaving "translating…" on
+        // screen for an answer the tier had already produced (owner-verified
+        // on device). Render correctness lives in the placements, not here.
+        let publicationOutcomes = outcomes
         let publication = LiveTranslatePublication(
             sequence: publicationSequence,
             regions: regions,
