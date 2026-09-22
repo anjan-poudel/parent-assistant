@@ -75,7 +75,7 @@ enum StartupInterval: String, CaseIterable {
 final class StartupSignpostTracker {
     static let shared = StartupSignpostTracker()
 
-    static let subsystem = "com.elderlyassistant.app"
+    static let subsystem = "ai.voicebridge.senior.assistant"
     static let category = "startup"
 
     let signposter = OSSignposter(subsystem: subsystem, category: category)

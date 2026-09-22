@@ -9,7 +9,7 @@
 
 name: seniOS
 options:
-  bundleIdPrefix: com.elderlyassistant
+  bundleIdPrefix: ai.voicebridge
   deploymentTarget:
     iOS: "16.0"
   createIntermediateGroups: true
@@ -236,7 +236,7 @@ targets:
     # point INFOPLIST_FILE at the plist we maintain by hand.
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.elderlyassistant.app
+        PRODUCT_BUNDLE_IDENTIFIER: ai.voicebridge.senior.assistant
         PRODUCT_NAME: ElderlyAssistant
         INFOPLIST_FILE: ElderlyAssistant/Info.plist
         GENERATE_INFOPLIST_FILE: NO
@@ -329,7 +329,7 @@ targets:
         NSSupportsLiveActivities: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.elderlyassistant.app.TimerAlarmWidget
+        PRODUCT_BUNDLE_IDENTIFIER: ai.voicebridge.senior.assistant.TimerAlarmWidget
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "1"
         APPLICATION_EXTENSION_API_ONLY: YES
@@ -358,7 +358,7 @@ targets:
         type: folder
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.elderlyassistant.app.tests
+        PRODUCT_BUNDLE_IDENTIFIER: ai.voicebridge.senior.assistant.tests
         GENERATE_INFOPLIST_FILE: YES
         BUNDLE_LOADER: "$(TEST_HOST)"
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/ElderlyAssistant.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/ElderlyAssistant"
@@ -372,7 +372,7 @@ targets:
       - path: ElderlyAssistantUITests
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.elderlyassistant.app.uitests
+        PRODUCT_BUNDLE_IDENTIFIER: ai.voicebridge.senior.assistant.uitests
         GENERATE_INFOPLIST_FILE: YES
     dependencies:
       - target: ElderlyAssistant
