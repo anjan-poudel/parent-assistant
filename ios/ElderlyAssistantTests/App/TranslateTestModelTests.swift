@@ -73,7 +73,7 @@ final class TranslateTestModelTests: XCTestCase {
         private let probeLatch = Latch()
         var isProbeWaiting: Bool { probeLatch.isWaiting }
 
-        init(readiness: TranslateEngineReadiness = .ready,
+        init(readiness: TranslateEngineReadiness = .ready(),
              outcome: TranslateProbeOutcome = .resolved("hello", "नमस्ते", tier: .onDeviceBrain, latencyMs: 12)) {
             self.readinessValue = readiness
             self.outcome = outcome
@@ -454,12 +454,12 @@ final class TranslateTestModelTests: XCTestCase {
         // The download lands: the store has it now, and the fake engine —
         // which stands in for the adapter over the same store — says so.
         installed = [Self.head]
-        engine.readinessValue = .ready
+        engine.readinessValue = .ready()
         await model.refreshReadiness()
 
         XCTAssertEqual(model.modelOptions.map(\.isInstalled), [true],
                        "the row follows the device, not the screen's opening state")
-        XCTAssertEqual(model.readiness, .ready,
+        XCTAssertEqual(model.readiness, .ready(),
                        "and the line under it follows the same call")
         XCTAssertTrue(model.canRun,
                       "the finished install is what arms the button, with no relaunch")
@@ -570,7 +570,7 @@ final class TranslateTestModelTests: XCTestCase {
         XCTAssertEqual(model.readiness, .modelMissing)
         XCTAssertFalse(model.canRun, "a refused engine must not be runnable")
 
-        head.readinessValue = .ready
+        head.readinessValue = .ready()
         await model.refreshReadiness()
         XCTAssertTrue(model.canRun)
 
@@ -659,7 +659,7 @@ final class TranslateTestModelTests: XCTestCase {
     /// and the button's availability with it.
     func testReadinessReportsEachRefusalSeparately() async {
         let head = FakeProbeEngine(readiness: .modelMissing)
-        let fallback = FakeProbeEngine(readiness: .ready)
+        let fallback = FakeProbeEngine(readiness: .ready())
         let gemini = FakeProbeEngine(readiness: .cloudDisabled)
         let (model, _) = makeModel(headEngine: head,
                                    fallbackEngine: fallback,
@@ -676,7 +676,7 @@ final class TranslateTestModelTests: XCTestCase {
 
         model.selection = .model(Self.fallback)
         await model.refreshReadiness()
-        XCTAssertEqual(model.readiness, .ready, "the same tier, a model that IS on the device")
+        XCTAssertEqual(model.readiness, .ready(), "the same tier, a model that IS on the device")
 
         model.selection = .gemini
         await model.refreshReadiness()
@@ -690,7 +690,7 @@ final class TranslateTestModelTests: XCTestCase {
 
     func testRefreshReadinessIgnoresAStaleAnswerForALeftEngine() async {
         let head = FakeProbeEngine(readiness: .modelMissing)
-        let gemini = FakeProbeEngine(readiness: .ready)
+        let gemini = FakeProbeEngine(readiness: .ready())
         let (model, _) = makeModel(headEngine: head, gemini: gemini)
 
         // Hold the HEAD's answer in flight, then move the picker to Gemini
@@ -703,11 +703,11 @@ final class TranslateTestModelTests: XCTestCase {
 
         model.selection = .gemini
         await model.refreshReadiness()
-        XCTAssertEqual(model.readiness, .ready)
+        XCTAssertEqual(model.readiness, .ready())
 
         head.release()
         await pending.value
-        XCTAssertEqual(model.readiness, .ready,
+        XCTAssertEqual(model.readiness, .ready(),
                        "a late answer for the left row must not overwrite the new one's")
     }
 
@@ -1038,7 +1038,7 @@ final class TranslateTestEngineAdapterTests: XCTestCase {
         XCTAssertEqual(brain.askedStrings, [["hello"]])
 
         let readiness = await engine.readiness()
-        XCTAssertEqual(readiness, .ready)
+        XCTAssertEqual(readiness, .ready())
     }
 
     /// The NAMED model is what reaches the tier. This is the whole point of
@@ -1121,7 +1121,7 @@ final class TranslateTestEngineAdapterTests: XCTestCase {
                                            config: config())
 
         let ready = await engine.readiness()
-        XCTAssertEqual(ready, .ready, "the named model is on the device")
+        XCTAssertEqual(ready, .ready(), "the named model is on the device")
 
         let absent = LocalBrainProbeEngine(brain: brain,
                                            model: ModelID("absent"),
@@ -1204,7 +1204,7 @@ final class TranslateTestEngineAdapterTests: XCTestCase {
         let readiness = await engine.readiness()
 
         XCTAssertEqual(readiness, .modelUnavailable(reason: .overClassBudget))
-        XCTAssertNotEqual(readiness, .ready, "installed is not the same question as admitted")
+        XCTAssertNotEqual(readiness, .ready(), "installed is not the same question as admitted")
     }
 
     /// And the store's answer is asked first: for a model that is not on the
@@ -1220,6 +1220,127 @@ final class TranslateTestEngineAdapterTests: XCTestCase {
         let readiness = await engine.readiness()
 
         XCTAssertEqual(readiness, .modelMissing, "install it — the class verdict is for models you have")
+    }
+
+    // MARK: - [READINESS-EVICT] The readiness question is the RUN's question
+
+    /// Whether the scripted gate was asked, and for which model. A reference
+    /// box with `@unchecked Sendable`, like every other fake here, because
+    /// the closure outlives the statement that built it.
+    private final class GateCalls: @unchecked Sendable {
+        private(set) var asked: [ModelID] = []
+        func record(_ model: ModelID) { asked.append(model) }
+    }
+
+    /// **[READINESS-EVICT] The owner's device, 2026-09-22.** A 6 GB phone with
+    /// the warm STT resident: the offer side's advisory refuses the Q8 head
+    /// (`.requiresEvictingWarmSTT`) while the load gate — the question the RUN
+    /// asks, eviction and re-ask included — admits it by unloading the
+    /// recogniser.
+    ///
+    /// The gate's answer is scripted here; the tier suite answers this same
+    /// case against a real ledger and a real 6 GB probe
+    /// (`testTheAdmissionQuestionEvictsTheWarmSTTForTheHeadItAdmits`). What
+    /// this pins is the screen's reading of it: the readiness line used to
+    /// stop at the advisory, which disabled a button whose run works every
+    /// time — the reported bug.
+    func testReadinessTakesTheGatesAnswerForAModelTheAdvisoryRefuses() async {
+        let engine = LocalBrainProbeEngine(brain: FakeBrain(),
+                                           model: ModelID("q8"),
+                                           isInstalled: { _ in true },
+                                           unavailabilityReason: { _ in .requiresEvictingWarmSTT },
+                                           admissionForLoad: { _ in .admittedByEvicting([.speechToText]) },
+                                           config: config())
+
+        let readiness = await engine.readiness()
+
+        XCTAssertEqual(readiness, .ready(evicting: [.speechToText]),
+                       "admitted by unloading the voice model — with the cost on the "
+                       + "answer, so the row can say what the tap takes")
+        XCTAssertNotEqual(readiness, .modelUnavailable(reason: .requiresEvictingWarmSTT),
+                          "the advisory is about the class; the gate is about the load")
+        XCTAssertTrue(readiness.isReady, "the button must be live: the run is admitted")
+    }
+
+    /// The same verdict with nothing to spend: still ready, and now with no
+    /// note at all — the plain sentence, exactly as before this change.
+    func testReadinessIsPlainReadyWhenTheGateAdmitsWithNothingToSpend() async {
+        let engine = LocalBrainProbeEngine(brain: FakeBrain(),
+                                           model: ModelID("q8"),
+                                           isInstalled: { _ in true },
+                                           unavailabilityReason: { _ in .requiresEvictingWarmSTT },
+                                           admissionForLoad: { _ in .admitted },
+                                           config: config())
+
+        let readiness = await engine.readiness()
+
+        XCTAssertEqual(readiness, .ready(), "admitted with nothing to spend: the plain sentence")
+    }
+
+    /// **The refusal that survives the eviction.** The warden's walk spent the
+    /// warm STT and the model still does not fit, so the class verdict that
+    /// sent it to the walk is now final — and it is the sentence shown, not
+    /// the walk's leftover arithmetic.
+    func testReadinessKeepsTheClassVerdictWhenTheRefusalSurvivesTheWalk() async {
+        let engine = LocalBrainProbeEngine(
+            brain: FakeBrain(),
+            model: ModelID("q8"),
+            isInstalled: { _ in true },
+            unavailabilityReason: { _ in .requiresEvictingWarmSTT },
+            admissionForLoad: { _ in
+                .refused(.insufficientHeadroom(requiredBytes: 4_000_000_000,
+                                               availableBytes: 1_000_000_000))
+            },
+            config: config())
+
+        let readiness = await engine.readiness()
+
+        XCTAssertEqual(readiness, .modelUnavailable(reason: .requiresEvictingWarmSTT))
+        XCTAssertFalse(readiness.isReady, "the device was emptied and it still does not fit")
+    }
+
+    /// And a refusal that was never about other residents keeps its OWN
+    /// vocabulary: the kernel is out of pages, no eviction answers it, and the
+    /// row prints the tier's own token rather than bending the refusal into a
+    /// class verdict it is not.
+    func testReadinessReportsAGateRefusalNoEvictionAnswers() async {
+        let engine = LocalBrainProbeEngine(
+            brain: FakeBrain(),
+            model: ModelID("q8"),
+            isInstalled: { _ in true },
+            unavailabilityReason: { _ in nil },
+            admissionForLoad: { _ in .refused(.memoryPressure(level: .critical)) },
+            config: config())
+
+        let readiness = await engine.readiness()
+
+        XCTAssertEqual(readiness, .loadDeferred(reason: .memoryPressure(level: .critical)))
+        XCTAssertFalse(readiness.isReady)
+        XCTAssertEqual(LocalBrainDeferral.memoryPressure(level: .critical).eventToken,
+                       "memory_pressure",
+                       "the token the row prints is the one the run's events carry")
+    }
+
+    /// The class verdicts no load can answer are taken WITHOUT a walk: the
+    /// gate is not asked for a model the phone cannot hold at all, so the
+    /// warden is never sent to unload anything for a refusal it cannot fix.
+    func testReadinessDoesNotSendTheWalkAfterAModelThePhoneCannotHold() async {
+        let calls = GateCalls()
+        let engine = LocalBrainProbeEngine(brain: FakeBrain(),
+                                           model: ModelID("huge"),
+                                           isInstalled: { _ in true },
+                                           unavailabilityReason: { _ in .overClassBudget },
+                                           admissionForLoad: { model in
+                                               calls.record(model)
+                                               return .admitted
+                                           },
+                                           config: config())
+
+        let readiness = await engine.readiness()
+
+        XCTAssertEqual(readiness, .modelUnavailable(reason: .overClassBudget))
+        XCTAssertTrue(calls.asked.isEmpty,
+                      "no eviction is spent on a refusal the walk cannot answer")
     }
 
     /// The wait the card shows includes the model load, so the load is
@@ -1452,7 +1573,7 @@ final class TranslateTestEngineAdapterTests: XCTestCase {
                      "an engine here would be a row that sends an intent brain a translation prompt")
 
         let ready = await built.engines[.model(installed)]?.readiness()
-        XCTAssertEqual(ready, .ready, "the staged artifact is the run gate's own answer: on disk")
+        XCTAssertEqual(ready, .ready(), "the staged artifact is the run gate's own answer: on disk")
         let missing = await built.engines[.model(absent)]?.readiness()
         XCTAssertEqual(missing, .modelMissing, "and this rung offers a download instead of a spinner")
         XCTAssertEqual(TranslateTestModel.unofferedInstallNoteKey(for: absent),

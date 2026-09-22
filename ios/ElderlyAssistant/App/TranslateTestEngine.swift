@@ -54,21 +54,44 @@ enum TranslateTestSelection: Hashable {
 
 /// What an engine would need before it can answer, in the screen's terms.
 ///
-/// Five cases, and no associated payload beyond the refusal's own reason
-/// token: the screen resolves WHICH download to offer from the selection
-/// itself, so this type stays comparable in a test with no catalog fixture.
+/// Six cases, and no associated payload beyond the refusal's own reason and
+/// the ready answer's cost: the screen resolves WHICH download to offer from
+/// the selection itself, so this type stays comparable in a test with no
+/// catalog fixture.
 ///
 /// It was three (`ready`, `modelMissing`, `providerKeyMissing`) until the
 /// 2026-09-21 review, which is why the doc used to say three. Each split
 /// since is a pair with OPPOSITE fixes, which is the test for whether a case
 /// is its own: `modelUnavailable` is "this phone cannot run it" where
-/// `modelMissing` is "install it", and `cloudDisabled` is "someone shut the
-/// cloud off" where `providerKeyMissing` is "enter a key". A screen that
-/// folded either pair together would tell the household to do the one thing
-/// that cannot help.
+/// `modelMissing` is "install it", `cloudDisabled` is "someone shut the
+/// cloud off" where `providerKeyMissing` is "enter a key", and
+/// `loadDeferred` is "not right now" where `modelUnavailable` is "not on this
+/// phone". A screen that folded either pair together would tell the household
+/// to do the one thing that cannot help.
 enum TranslateEngineReadiness: Equatable {
-    /// The engine can run right now.
-    case ready
+    /// The engine can run right now — with a note when the run will cost the
+    /// device something first.
+    ///
+    /// [READINESS-EVICT] The payload is what the warden will unload to make
+    /// room, and it rides here rather than in a case of its own because the
+    /// household's move is identical to a plain ready: press the button. Only
+    /// what the row SAYS differs, and a row that stayed silent would hide the
+    /// price of the tap — the same price the result card reports afterwards
+    /// (`TranslateProbeOutcome.evictedForRoom`).
+    ///
+    /// Empty on every answer that costs nothing, which is every model that
+    /// fits beside what is already resident, so a plain ready still means
+    /// exactly what it always did.
+    ///
+    /// **A defaulted payload is not a payload you may leave off in an
+    /// expression** (Swift: `case ready(evicting:)` resolves to a static
+    /// *function*, so a bare `.ready` where a value is expected is "member is
+    /// a function that produces expected type"). The spelling that omits it
+    /// is `.ready()`; PATTERNS are unaffected — `case .ready` and
+    /// `if case .ready = …` still match either form. Every expression call
+    /// site here and in the suites says `.ready()` for that reason, and only
+    /// that reason.
+    case ready(evicting: [ModelSlot] = [])
     /// The selected model is not installed. The screen offers that entry's
     /// download row instead of a spinner that would never resolve.
     case modelMissing
@@ -81,6 +104,19 @@ enum TranslateEngineReadiness: Equatable {
     /// installed model "Ready" — which is what the readiness line did before
     /// this — offers a button whose only outcome is a refusal.
     case modelUnavailable(reason: ModelUnavailabilityReason)
+    /// [READINESS-EVICT] The model is installed and the device class does not
+    /// refuse it, but the tier's load gate will not admit a load **right
+    /// now** for a reason that unloading a resident does not answer: the
+    /// kernel's pressure state, or a headroom the warden's walk could not
+    /// recover even after spending what it could.
+    ///
+    /// Its own case rather than a second spelling of `modelUnavailable` for
+    /// the opposite-fixes test this type's header gives: "this phone cannot
+    /// run it" is answered by picking a different model, and this one by
+    /// waiting (or by closing whatever is holding the pages). The payload is
+    /// the tier's OWN deferral, so the row prints the token the same run
+    /// would log, and the sentence cannot drift from the reason.
+    case loadDeferred(reason: LocalBrainDeferral)
     /// Tier 2 has no provider key on this device, so nothing could be sent
     /// even with consent.
     case providerKeyMissing
@@ -92,6 +128,18 @@ enum TranslateEngineReadiness: Equatable {
     /// Folding the two together would tell the household to enter a key it
     /// already has.
     case cloudDisabled
+
+    /// Whether the engine can run: `.ready` with or without a cost attached.
+    ///
+    /// [READINESS-EVICT] The button's own question, and the reason `.ready`
+    /// carrying a payload did not quietly disable it. `readiness == .ready`
+    /// was that question until the payload existed, and it is now the wrong
+    /// answer for the one case this feature is about — the model that runs
+    /// *because* the voice model is offloaded first.
+    var isReady: Bool {
+        if case .ready = self { return true }
+        return false
+    }
 }
 
 /// What tier 1 did with the string.
@@ -337,7 +385,32 @@ struct LocalBrainProbeEngine: TranslateProbeEngine {
     /// would offer a button whose only outcome is a refusal. `nil` rather
     /// than a `Bool` because the refusal's own sentence is what the screen
     /// shows.
+    ///
+    /// **[READINESS-EVICT] The OFFER side's advisory, and it is final only
+    /// where a load cannot answer it** (2026-09-22). The verdicts about the
+    /// PHONE (`deviceTooSmall`, `overClassBudget`) and about the product
+    /// ladder (`overBrainCeiling`) are refused here — no eviction moves them.
+    /// `.requiresEvictingWarmSTT` deliberately is not: that one is about the
+    /// device's OTHER RESIDENTS, and `admissionForLoad` below is where it is
+    /// answered, by the gate that can take their bytes.
     let unavailabilityReason: (ModelID) -> ModelUnavailabilityReason?
+    /// What the TIER's own load gate answers for a model: whether a load
+    /// would be admitted now, and what the warden would unload to make room.
+    ///
+    /// [READINESS-EVICT] The question the run itself asks
+    /// (`LocalBrainTranslationTier.gateForLoad`, eviction and re-ask
+    /// included), which is the question the offer-side advisory cannot
+    /// answer: it reports `.requiresEvictingWarmSTT` for the very model the
+    /// gate admits by unloading the warm STT, so a button gated on it is
+    /// disabled for a run that would work — the owner's device, 2026-09-22.
+    ///
+    /// A closure like the two above, so a suite can script a device (a 6 GB
+    /// probe with a warm recogniser, a kernel under pressure, a walk that
+    /// spends a resident and still refuses) without a ledger or a model file.
+    /// **Defaulted to `.admitted`** — "no gate information" — so every
+    /// hand-built engine in the suites keeps its old answer: installed and
+    /// not refused by class means ready. Production always wires the tier.
+    var admissionForLoad: @Sendable (ModelID) async -> LocalBrainLoadAdmission = { _ in .admitted }
     /// The tier's config, for its batch bound. Needed because the bound —
     /// not the tier's return value — is what says whether a string was ever
     /// handed to the brain (see `LocalBrainDisposition`).
@@ -347,6 +420,21 @@ struct LocalBrainProbeEngine: TranslateProbeEngine {
     /// suite can pin a latency instead of racing one.
     var now: () -> Date = { Date() }
 
+    /// "Can the tier load this model right now" — asked of the TIER.
+    ///
+    /// [READINESS-EVICT] The owner's device, 2026-09-22: the Q8 head read as
+    /// `.modelUnavailable` here, with the button disabled and the sentence
+    /// "cannot run on this device", while the load path — which unloads the
+    /// warm STT and re-asks the gate (PR #129) — admits it every time. The
+    /// readiness line was answering the OFFER side's question (can this model
+    /// be *chosen* on this class) where the screen needed the LOAD side's
+    /// (will this load be *admitted* now), and the two disagree by design:
+    /// the advisory refuses nothing and describes the class, and the gate is
+    /// allowed to take the neighbour's bytes.
+    ///
+    /// So the order is: is it on disk, then the offer side's verdict for the
+    /// refusals no load can answer, then the gate — with the gate's own cost
+    /// attached when it names one, and its own reason when it refuses.
     func readiness() async -> TranslateEngineReadiness {
         // The store's answer first: a model that is not on disk has a more
         // useful thing to say than its class verdict (its download row).
@@ -355,8 +443,40 @@ struct LocalBrainProbeEngine: TranslateProbeEngine {
         // an installed model the device class refuses is not ready, and
         // saying so is the difference between "install it" and "this phone
         // cannot run it".
-        if let reason = unavailabilityReason(model) { return .modelUnavailable(reason: reason) }
-        return .ready
+        //
+        // [READINESS-EVICT] With ONE exception, and it is the whole fix: a
+        // verdict about the device's other residents is not settled here,
+        // because the gate below is entitled to take their bytes. Asking the
+        // ledger and stopping was the bug — `.requiresEvictingWarmSTT` is
+        // exactly the Q8-on-a-6 GB-phone case, and it is the reason the
+        // button could not be pressed.
+        let offerSide = unavailabilityReason(model)
+        if let offerSide, !offerSide.isAboutOtherResidents {
+            return .modelUnavailable(reason: offerSide)
+        }
+        // Then the tier's own gate: the same call the run makes, eviction and
+        // re-ask included, so the line above the button and the tap below it
+        // cannot describe two different devices.
+        switch await admissionForLoad(model) {
+        case .admitted:
+            return .ready()
+        case .admittedByEvicting(let evicted):
+            return .ready(evicting: evicted)
+        case .refused(let deferral):
+            // The walk ran (or found nothing it was entitled to spend) and
+            // the refusal stands. Where the class HAD a verdict, that verdict
+            // is now final, and it is the sentence to show: the model could
+            // not be admitted even after the device was emptied of what the
+            // warden may take. Otherwise the gate's own reason is the honest
+            // one — the kernel's pressure, or a headroom nothing recovered —
+            // and it travels in its own vocabulary (`.loadDeferred`) rather
+            // than being bent into a class verdict it is not.
+            guard LocalBrainTranslationTier.isAboutOtherResidents(deferral),
+                  let offerSide else {
+                return .loadDeferred(reason: deferral)
+            }
+            return .modelUnavailable(reason: offerSide)
+        }
     }
 
     func probe(_ text: String) async -> TranslateProbeOutcome {
@@ -456,7 +576,7 @@ struct CloudProbeEngine: TranslateProbeEngine {
         // the fact that matters, and the household would go and add one
         // for a door that is still locked.
         guard isCloudEnabled() else { return .cloudDisabled }
-        return isProviderConfigured() ? .ready : .providerKeyMissing
+        return isProviderConfigured() ? .ready() : .providerKeyMissing
     }
 
     func probe(_ text: String) async -> TranslateProbeOutcome {
@@ -582,6 +702,14 @@ struct TranslateTestModelSource {
     /// (`ModelLifecycleManager.availability(of:)`), so a row this screen
     /// marks "not for this phone" is marked that way for the same reason,
     /// with the same reason token, as the row in Settings.
+    ///
+    /// **[READINESS-EVICT] The OFFER side's advisory** (2026-09-22), which
+    /// the readiness check may take as final only for the refusals a load
+    /// cannot answer — see `LocalBrainProbeEngine.unavailabilityReason`. It
+    /// still drives the ROW MARKERS as it always did: the phrase "not for
+    /// this phone" is a statement about the class, and the class has not
+    /// changed just because a load can now buy its way past the advisory by
+    /// unloading the neighbour.
     let unavailabilityReason: (ModelID) -> ModelUnavailabilityReason?
 }
 
@@ -697,6 +825,12 @@ struct TranslateTestDependencies {
                                                         model: id,
                                                         isInstalled: modelSource.isInstalled,
                                                         unavailabilityReason: modelSource.unavailabilityReason,
+                                                        // [READINESS-EVICT] The tier's own load gate, one
+                                                        // closure per row over the ONE tier they share. Every
+                                                        // row asks the same question of the same actor the tap
+                                                        // will drive, so the readiness line is the run's own
+                                                        // answer and not a second opinion about it.
+                                                        admissionForLoad: { await brain.admissionForLoad(of: $0) },
                                                         config: config)
         }
         engines[.gemini] = CloudProbeEngine(tier: CloudTranslationTier(cache: cache,

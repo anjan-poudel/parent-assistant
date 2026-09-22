@@ -324,6 +324,41 @@ extension LocalBrainDeferral {
     }
 }
 
+/// [READINESS-EVICT] What the load gate answers for one model, asked without
+/// a batch — "can this tier load this model right now".
+///
+/// The translate-test screen's readiness question, and it belongs to the tier
+/// rather than to the warden's offer-side advisory for the reason the owner's
+/// device found: `ModelLifecycleManager.availability(of:)` refuses nothing
+/// (its own doc says so) and reports `.requiresEvictingWarmSTT` for exactly
+/// the model the production gate now ADMITS, by unloading the warm resident
+/// whose bytes it counts. A readiness line gated on the advisory therefore
+/// disables a button whose load would run — the screen could not ask the
+/// question the run answers.
+///
+/// A `nil` deferral is the gate's "proceed"; the two admitted cases differ in
+/// what the run COSTS, which is the whole reason the cost is carried rather
+/// than folded into a `Bool` (the result card shows the same fact after a run
+/// — `LocalBrainTranslationOutcome.evictedForRoom`).
+enum LocalBrainLoadAdmission: Equatable, Sendable {
+    /// A load would be admitted as it stands: nothing has to be unloaded.
+    case admitted
+    /// A load would be admitted after the warden unloads the residents named
+    /// here — the device's others, never the model being asked about. Empty
+    /// is impossible (the gate only re-asks when the walk took something), so
+    /// a non-empty list is what makes the note on the row true.
+    case admittedByEvicting([ModelSlot])
+    /// The gate refuses, and unloading a resident does not answer it. The
+    /// payload is the gate's own reason — the one the same run would report
+    /// on the card, in the tier's own event vocabulary.
+    ///
+    /// Reached with `evicted` non-empty as well (the warden's walk spent a
+    /// resident and the re-ask still refused); the refusal is the fact the
+    /// caller acts on, and the eviction it cost is on the `evicted` /
+    /// `preempted` events of the attempt that walked.
+    case refused(LocalBrainDeferral)
+}
+
 /// The two moments the warden's hand-off owes the elder an explanation.
 ///
 /// Owner directive, 2026-09-19: "keep the user in the loop so they don't
@@ -1038,6 +1073,45 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
         case .memoryPressure, .recentCriticalPressure, .releaseRequestedDuringLoad:
             return false
         }
+    }
+
+    /// [READINESS-EVICT] The gate's answer for one model, asked WITHOUT a
+    /// batch: the translate-test screen's readiness question, and **the same
+    /// walk the run behind the button will take**.
+    ///
+    /// `gateForLoad` and nothing else, deliberately. A second, gentler
+    /// question ("would the gate admit this if it unloaded something") would
+    /// be a second arithmetic — this file's whole gate section exists because
+    /// two spellings of one judgement drift — and it could not answer the one
+    /// case the row's owner most needs: a refusal the walk spent a resident on
+    /// and still could not answer is a finding about the DEVICE, and only the
+    /// re-ask knows it.
+    ///
+    /// **What that costs, stated plainly.** On a device whose warm resident is
+    /// what stands between the model and its load, asking this question
+    /// performs the eviction the run would have performed — the residents
+    /// named by the answer leave the ledger, and the `evicted` / `preempted`
+    /// events are emitted, on a screen that may never send a batch. That is
+    /// the price of an honest readiness line here (the alternative — a
+    /// prediction — would let the row offer a button whose run refuses), and
+    /// it is bounded: the walk's victims are chosen by the same ladder a
+    /// `.liveTranslate` load uses, and once the model is resident the gate
+    /// short-circuits on the held handle (`deferralForLoad`) with no walk at
+    /// all, which is every repeat ask after the first run. A caller that
+    /// walked and did not load would spend the eviction and leave the bytes
+    /// free, which is the state the next real load wants; and a caller that
+    /// walked a resident out three times in two minutes meets the warden's
+    /// own thrash guard (`noteLoadDrivenEvictionLocked`), which spares the
+    /// victim rather than letting a screen churn the ledger.
+    ///
+    /// The caller is `LocalBrainProbeEngine.readiness()` — the only one, and
+    /// the reason this is not `private`.
+    func admissionForLoad(of modelID: ModelID) async -> LocalBrainLoadAdmission {
+        let gate = await gateForLoad(of: modelID)
+        guard let deferral = gate.deferral else {
+            return gate.evicted.isEmpty ? .admitted : .admittedByEvicting(gate.evicted)
+        }
+        return .refused(deferral)
     }
 
     /// [LOAD-EVICT] What `gateForLoad` decided, and what it cost.

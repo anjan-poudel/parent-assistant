@@ -307,10 +307,12 @@ private struct TranslateTestControlsCard: View {
     private var readinessColor: Color {
         switch model.readiness {
         case .ready:
+            // Including a ready that will cost the device a resident first:
+            // the button is live, and the note below says what the tap buys.
             return DesignTokens.stateSpeaking
         case .none:
             return DesignTokens.textSecondary
-        case .modelMissing, .modelUnavailable, .providerKeyMissing, .cloudDisabled:
+        case .modelMissing, .modelUnavailable, .loadDeferred, .providerKeyMissing, .cloudDisabled:
             return DesignTokens.stateError
         }
     }
@@ -326,8 +328,19 @@ private struct TranslateTestControlsCard: View {
             return L10n.str("settings.translateTest.readiness.checking", locale: locale)
         }
         switch readiness {
-        case .ready:
-            return L10n.str("settings.translateTest.readiness.ready", locale: locale)
+        case .ready(let evicting):
+            // [READINESS-EVICT] The plain sentence when the run costs
+            // nothing, and the cost when it does. The note is the second
+            // half of an honest ready: the model CAN run, and the row says
+            // what the tap takes off the device to make that so — the same
+            // fact the result card reports afterwards. The slots themselves
+            // are not printed (they are the ledger's snake_case tokens, and
+            // every one of them is a voice position): the sentence names
+            // what the household would notice, and `evicting` is carried for
+            // the tests and for the log.
+            return evicting.isEmpty
+                ? L10n.str("settings.translateTest.readiness.ready", locale: locale)
+                : L10n.str("settings.translateTest.readiness.willEvict", locale: locale)
         case .modelMissing:
             // The model is NAMED, because the screen now offers several:
             // "no translation model is installed" was true enough when
@@ -353,6 +366,16 @@ private struct TranslateTestControlsCard: View {
                             locale: locale,
                             model.selectedModelName ?? "",
                             AIModelsSettingsView.unavailableNote(reason, locale: locale))
+        case .loadDeferred(let deferral):
+            // [READINESS-EVICT] The gate refused and unloading a resident did
+            // not answer it. NAMED like the two lines above, so the row says
+            // which model it is about, and the reason is the tier's own
+            // token — the same word the run's events and the result card
+            // carry, so a screen and a log can be read side by side.
+            return L10n.fmt("settings.translateTest.readiness.loadDeferred",
+                            locale: locale,
+                            model.selectedModelName ?? "",
+                            deferral.eventToken)
         case .providerKeyMissing:
             return L10n.str("settings.translateTest.readiness.providerKeyMissing", locale: locale)
         case .cloudDisabled:

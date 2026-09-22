@@ -12975,6 +12975,20 @@
         "ne": { "stringUnit": { "state": "translated", "value": "“%@” यो यन्त्रमा चल्न सक्दैन: %@" } }
       }
     },
+    "settings.translateTest.readiness.willEvict": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "Ready. This run will offload the voice model to make room." } },
+        "ne": { "stringUnit": { "state": "translated", "value": "तयार। यो चलाउँदा ठाउँ बनाउन आवाज मोडेल हटाइनेछ।" } }
+      }
+    },
+    "settings.translateTest.readiness.loadDeferred": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": { "stringUnit": { "state": "translated", "value": "“%@” cannot run right now: %@" } },
+        "ne": { "stringUnit": { "state": "translated", "value": "“%@” अहिले चल्न सक्दैन: %@" } }
+      }
+    },
     "settings.translateTest.install.section": {
       "extractionState": "manual",
       "localizations": {

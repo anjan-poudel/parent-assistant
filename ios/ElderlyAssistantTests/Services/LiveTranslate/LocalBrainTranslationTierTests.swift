@@ -477,6 +477,136 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         }
     }
 
+    // MARK: - [READINESS-EVICT] The same walk, asked before a batch
+
+    /// **The readiness question on the owner's device.** A 6 GB class probe
+    /// with the warm recogniser resident: the translation head's gate refuses
+    /// on headroom, the warden's walk takes the STT's bytes, and the answer
+    /// this returns is the one the RUN would give — admitted, at the cost of
+    /// the warm STT.
+    ///
+    /// That is what the translate-test screen's button is gated on. It used
+    /// to be gated on the warden's OFFER-side advisory
+    /// (`ModelLifecycleManager.availability(of:)`), which refuses this very
+    /// model as `.requiresEvictingWarmSTT` and so disabled a button whose run
+    /// works every time — the reported bug.
+    func testTheAdmissionQuestionEvictsTheWarmSTTForTheHeadItAdmits() async throws {
+        let required = ModelLifecycleInventory.footprint(for: .brain,
+                                                         modelID: Self.modelID).hardBytes
+        let (ledger, sttOwner, probe) = makeWarmSTTEvictionFixture(headroom: required / 2,
+                                                                   freeing: required)
+
+        try await withTier(memory: probe, ledger: ledger) { tier, _, _ in
+            let admission = await tier.admissionForLoad(of: Self.modelID)
+
+            XCTAssertEqual(admission, .admittedByEvicting([.speechToText]),
+                           "the run's own answer: admitted, and the warm STT is the price")
+            XCTAssertEqual(sttOwner.unloadCount, 1,
+                           "the warden's own victim walk did the unloading")
+            XCTAssertFalse(ledger.isResident(.speechToText))
+        }
+    }
+
+    /// And the same question on the device where the room is not enough: the
+    /// walk spends the recogniser, the re-ask refuses, and the refusal is what
+    /// comes back — with the numbers of the device as it is now, not the first
+    /// refusal's. A readiness line that reported "ready" here would offer a
+    /// button whose run refuses.
+    func testTheAdmissionQuestionReportsTheRefusalTheWalkCouldNotAnswer() async throws {
+        let required = ModelLifecycleInventory.footprint(for: .brain,
+                                                         modelID: Self.modelID).hardBytes
+        // `freeing: 0` — the STT goes, the pages do not come back.
+        let (ledger, sttOwner, probe) = makeWarmSTTEvictionFixture(headroom: required / 2,
+                                                                   freeing: 0)
+
+        try await withTier(memory: probe, ledger: ledger) { tier, _, _ in
+            let admission = await tier.admissionForLoad(of: Self.modelID)
+
+            XCTAssertEqual(admission,
+                           .refused(.insufficientHeadroom(requiredBytes: Double(required),
+                                                          availableBytes: Double(probe.headroom))),
+                           "the second answer is the one reported")
+            XCTAssertEqual(sttOwner.unloadCount, 1)
+        }
+    }
+
+    /// The kernel's rule is not offered to the walk on the readiness path
+    /// either: the same device under a `.critical` reading answers with the
+    /// pressure refusal, and nothing is unloaded to try to answer it.
+    func testTheAdmissionQuestionKeepsTheKernelsRefusalAndSpendsNothing() async throws {
+        let required = ModelLifecycleInventory.footprint(for: .brain,
+                                                         modelID: Self.modelID).hardBytes
+        let clock = PressureClock()
+        let ledger = makePressureLedger(clock)
+        ledger.handleMemoryPressure(level: .critical)
+
+        let sttOwner = FakeOwner()
+        let probe = ScriptedProbe(headroom: required / 2)
+        ledger.register(slot: .speechToText,
+                        modelID: Self.warmSTT,
+                        owner: sttOwner,
+                        evictable: true,
+                        priority: .background) { [weak sttOwner] in
+            sttOwner?.unload()
+            probe.headroom += required
+        }
+        ledger.didLoad(.speechToText, owner: sttOwner)
+
+        try await withTier(memory: probe, ledger: ledger) { tier, _, _ in
+            let admission = await tier.admissionForLoad(of: Self.modelID)
+
+            XCTAssertEqual(admission, .refused(.memoryPressure(level: .critical)))
+            XCTAssertEqual(sttOwner.unloadCount, 0,
+                           "the kernel's refusal is not answered by unloading a resident")
+            XCTAssertTrue(ledger.isResident(.speechToText))
+        }
+    }
+
+    /// **The owner's device, end to end: the SCREEN's question, composed the
+    /// way production composes it.** Not the gate's answer in isolation but
+    /// `LocalBrainProbeEngine.readiness()` over a real tier — the Q8 head that
+    /// a 6 GB phone holds, with the warm recogniser resident and the offer
+    /// side reporting `.requiresEvictingWarmSTT`.
+    ///
+    /// This is the reported bug in one assertion. Before the fix the readiness
+    /// line stopped at that verdict: `.modelUnavailable`, the sentence "cannot
+    /// run on this device", the Translate button disabled — for a run that
+    /// was admitted every time it was asked. Now the line is the run's own
+    /// answer, with the cost named, because the tier was asked with the gate
+    /// the run uses.
+    ///
+    /// The engine's brain is the tier itself (it conforms to
+    /// `LocalBrainTranslating`): the screen's probe and the button's run are
+    /// then the same actor, which is what production wires and what makes
+    /// "the readiness line and the tap cannot describe two devices" a fact
+    /// rather than a hope.
+    func testTheScreensReadinessIsReadyForTheModelTheAdvisoryRefuses() async throws {
+        let required = ModelLifecycleInventory.footprint(for: .brain,
+                                                         modelID: Self.modelID).hardBytes
+        let (ledger, sttOwner, probe) = makeWarmSTTEvictionFixture(headroom: required / 2,
+                                                                   freeing: required)
+
+        try await withTier(memory: probe, ledger: ledger) { tier, _, _ in
+            let engine = LocalBrainProbeEngine(brain: tier,
+                                               model: Self.modelID,
+                                               isInstalled: { _ in true },
+                                               unavailabilityReason: { _ in .requiresEvictingWarmSTT },
+                                               admissionForLoad: { await tier.admissionForLoad(of: $0) },
+                                               config: .default)
+
+            let readiness = await engine.readiness()
+
+            XCTAssertEqual(readiness, .ready(evicting: [.speechToText]),
+                           "the screen's question, on the owner's device: ready, and "
+                           + "the price of the tap is named")
+            XCTAssertNotEqual(readiness, .modelUnavailable(reason: .requiresEvictingWarmSTT),
+                              "the advisory is the offer side's; the gate admits this load")
+            XCTAssertTrue(readiness.isReady, "the button must be live")
+            XCTAssertEqual(sttOwner.unloadCount, 1,
+                           "and the room the answer promises is the room the walk took")
+        }
+    }
+
     /// A manager with `slot` fully resident (registered, admitted, marked
     /// loaded). Returns the owner, which the caller must keep alive.
     ///
