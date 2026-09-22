@@ -72,6 +72,38 @@ final class LabelTranslationCacheTests: XCTestCase {
         XCTAssertNil(hit, "the curated layer is keyed on the target language too")
     }
 
+    /// [TIER-0-CONVERSATION] The conversational vocabulary rides the **same**
+    /// layer A as the appliance labels — not a second table, not a second
+    /// path. A phrase the elder meets on paper resolves on a fresh install,
+    /// with nothing read and nothing written, and reports the dictionary's own
+    /// tier. This is the assertion that the live pipeline answers these before
+    /// any model: `resolveFromTheDevice` asks exactly this lookup, and a hit
+    /// here means neither the cloud nor the brain is reached for the string.
+    func testAConversationalPhraseResolvesFromLayerAAtTierZero() {
+        let cache = makeCache()
+
+        let phrases: [(String, String)] = [
+            ("What is your name?", "तपाईंको नाम के हो?"),
+            ("Good morning", "शुभ प्रभात"),
+            ("Thank you", "धन्यवाद"),
+            // Whitespace and case belong to the normalization, not the table:
+            // the same phrase in OCR's own spelling is the same key.
+            ("  call   my   daughter  ", "मेरी छोरीलाई फोन गर्नुहोस्।"),
+            ("TODAY IS MONDAY", "आज सोमबार हो।")
+        ]
+        for (text, expected) in phrases {
+            guard case .success(.some(let hit)) = cache.lookup(text: text) else {
+                return XCTFail("'\(text)' must resolve from the curated table, before any model")
+            }
+            XCTAssertEqual(hit.translation, expected, "'\(text)' must answer with its curated Nepali")
+            XCTAssertEqual(hit.origin, .curatedDictionary)
+            XCTAssertEqual(hit.tier, .dictionary, "a curated entry is tier 0 by definition")
+        }
+
+        XCTAssertEqual(storage.writeCount, 0, "nothing curated is written to disk (FR-LCT-019)")
+        XCTAssertEqual(storage.readCount, 0, "a curated hit is answered without opening the payload")
+    }
+
     // MARK: - Layer B: persisted, across sessions
 
     func testARepeatedCloudTranslationIsServedFromThePersistedLayerInThisAndALaterSession() {
@@ -396,10 +428,15 @@ final class LabelTranslationCacheTests: XCTestCase {
 
     func testAVariationInWhitespaceOrCaseIsTheSameEntryAndANearMissIsNot() {
         let cache = makeCache()
-        _ = cache.store(text: "Good   Morning", translation: translationText)
+        // The sample is deliberately **not** a curated string: this test is
+        // about the normalization, and a draft that resolved from layer A
+        // would never reach the persisted layer it is asserting on. (It was
+        // "Good Morning" until [TIER-0-CONVERSATION] curated that greeting —
+        // the string was incidental, the rule is what is pinned.)
+        _ = cache.store(text: "Turbo   Chef", translation: translationText)
 
         // trim + collapse + case-fold: the same key, one entry.
-        guard case .success(.some(let hit)) = cache.lookup(text: " good morning ") else {
+        guard case .success(.some(let hit)) = cache.lookup(text: " turbo chef ") else {
             return XCTFail("normalization must collapse to one key")
         }
         XCTAssertEqual(hit.translation, translationText)
@@ -409,11 +446,11 @@ final class LabelTranslationCacheTests: XCTestCase {
         // (the same rule the stabiliser applies to a region), so a doubled
         // space is the SAME key — and anything beyond the three steps is a
         // miss: no fuzzy, no partial, no approximate match.
-        guard case .success(.some(let respaced)) = cache.lookup(text: "good  morning") else {
+        guard case .success(.some(let respaced)) = cache.lookup(text: "turbo  chef") else {
             return XCTFail("a whitespace variant is the same key, not a failure")
         }
         XCTAssertEqual(respaced.translation, translationText)
-        for nearMiss in ["good mornings", "morning", "good-morning", "goodmorning"] {
+        for nearMiss in ["turbo chefs", "chef", "turbo-chef", "turbochef"] {
             guard case .success(let missing) = cache.lookup(text: nearMiss) else {
                 return XCTFail("a miss is not a failure")
             }
