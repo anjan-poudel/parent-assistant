@@ -9,16 +9,23 @@ import CoreGraphics
 // that settles the competition is the plan's:
 //
 //  1. **The panel is bounded by the picture.** It may take at most
-//     `panelHeightFraction` (0.45) of the drawn picture's height. The picture
-//     is the reason the elder raised the phone; a panel that grew to fill the
-//     screen would answer a question about something they can no longer see.
-//  2. **The picture may grow to buy the panel room.** When 0.45 of the
-//     aspect-fit picture is less than the panel needs, the picture is drawn
-//     larger — up to `maximumImageGrowth` (1.4×) — which raises the allowance
-//     with it. Growth is *scale*, never a second crop: the picture is drawn
-//     through `.fill` and clipped, so growing it discards nothing the elder
-//     pointed at (the pixels are all still there), it simply spends screen on
-//     the text rather than on the margin around it.
+//     `Rule.panelHeightFraction` (45 %) of the drawn picture's height. The
+//     picture is the reason the elder raised the phone; a panel that grew to
+//     fill the screen would answer a question about something they can no
+//     longer see.
+//  2. **The picture may grow to buy the panel room — but only while growth
+//     buys anything.** When 45 % of the aspect-fit picture is less than the
+//     panel needs, the picture is drawn larger — up to `Rule.maximumImageGrowth`
+//     (1.4×) — which raises the allowance with it. Growth is *scale*, never a
+//     second crop: the picture is drawn through `.fill` and clipped, so
+//     growing it discards nothing the elder pointed at (the pixels are all
+//     still there), it simply spends screen on the text rather than on the
+//     margin around it. **The search stops the moment a further step cannot
+//     raise the resolved panel** (review finding 5): once the floor or the
+//     container's own remainder pins the panel, every extra step enlarges the
+//     picture for nothing — and a `.fill`ed picture that grew for nothing has
+//     had its edges clipped for nothing, which is how the ends of the very
+//     line the elder pointed at came off the glass.
 //  3. **Legibility is a floor, not a preference.** The picture may never grow
 //     so far that the panel falls below `minimumPanelHeight`, which is the
 //     room one row needs at the app's type floors (`DesignTokens`
@@ -43,26 +50,49 @@ import CoreGraphics
 /// still hand answers the same value frame after frame.
 struct LiveTranslateFocusLayout: Equatable {
 
-    /// The panel's share of the drawn picture's height. A constant with no
-    /// token of its own: it is this rule's own number, not a spacing.
-    static let panelHeightFraction: CGFloat = 0.45
-
-    /// How much larger than its aspect-fit size the picture may be drawn in
-    /// order to buy the panel room.
+    /// The rule's own numbers, as one value.
     ///
-    /// Read from the config rather than spelled here: it is an operational
-    /// parameter of the feature, and `LiveTranslateConfig` is the one place a
-    /// nominal value is spelled (NFR-LCT-011 — the source-hygiene scan fails a
-    /// re-declared literal, which is how this one was caught).
-    static var maximumImageGrowth: CGFloat {
-        CGFloat(LiveTranslateConfig.default.focusImageMaxGrowth)
-    }
+    /// A value and not three statics, because they are *injected*: the
+    /// session's `LiveTranslateConfig` is the one place a nominal value is
+    /// spelled, and a layout that read `LiveTranslateConfig.default` would be
+    /// a second, invisible source of truth for a suite that drives a session
+    /// with its own config (review finding: use the injected config on the
+    /// layout path, not the shipped default). `shipped` is the default for a
+    /// caller with no config to hand — the shipped numbers exactly once.
+    struct Rule: Equatable {
 
-    /// The growth step the search walks in. Coarse on purpose: the value that
-    /// comes out is a screen height, and a hundredth of a point of panel is
-    /// not a readability difference — the *floor* is what matters, and the
-    /// floor is enforced exactly (see `minimumPanelHeight` below).
-    static let growthStep: CGFloat = 0.05
+        /// The panel's share of the drawn picture's height.
+        let panelHeightFraction: CGFloat
+
+        /// How much larger than its aspect-fit size the picture may be drawn
+        /// in order to buy the panel room.
+        let maximumImageGrowth: CGFloat
+
+        /// The growth step the search walks in. Coarse on purpose: the value
+        /// that comes out is a screen height, and a hundredth of a point of
+        /// panel is not a readability difference — the *floor* is what matters,
+        /// and the floor is enforced exactly.
+        let growthStep: CGFloat
+
+        init(panelHeightFraction: CGFloat,
+             maximumImageGrowth: CGFloat,
+             growthStep: CGFloat) {
+            self.panelHeightFraction = panelHeightFraction
+            self.maximumImageGrowth = maximumImageGrowth
+            self.growthStep = growthStep
+        }
+
+        /// The three numbers a session's config carries.
+        init(config: LiveTranslateConfig) {
+            self.init(panelHeightFraction: CGFloat(config.focusPanelHeightFraction),
+                      maximumImageGrowth: CGFloat(config.focusImageMaxGrowth),
+                      growthStep: CGFloat(config.focusPanelGrowthStep))
+        }
+
+        /// The shipped numbers, for a caller with no config in hand (a
+        /// preview, a test of the arithmetic itself).
+        static let shipped = Rule(config: LiveTranslateConfig.default)
+    }
 
     /// The height the crop is drawn at, in points. Always ≤ the container's
     /// height minus the panel's floor.
@@ -97,10 +127,21 @@ struct LiveTranslateFocusLayout: Equatable {
     ///     room one row needs at the type floors. The picture is grown to buy
     ///     the panel room, and this is what stops that trade from being made
     ///     at the reader's expense.
+    ///   - columnSpacing: the gap the column draws **between** the picture and
+    ///     the panel, in points. It is part of the arithmetic rather than the
+    ///     view's business (review finding 14): the two heights and the gap
+    ///     are one column, so a rule that bounded the heights by the whole
+    ///     container left a saturated layout one gap taller than the glass —
+    ///     and the top of the picture, which is where the elder's subject
+    ///     usually is, went off it.
+    ///   - rule: the three numbers this rule is resolved with, from the
+    ///     session's config.
     static func resolve(containerSize: CGSize,
                         imageSize: CGSize,
                         panelContentHeight: CGFloat,
-                        minimumPanelHeight: CGFloat) -> LiveTranslateFocusLayout {
+                        minimumPanelHeight: CGFloat,
+                        columnSpacing: CGFloat = 0,
+                        rule: Rule = .shipped) -> LiveTranslateFocusLayout {
         let containerHeight = containerSize.height
         let containerWidth = containerSize.width
         // Nothing to lay out: a zero container (a first pass under SwiftUI's
@@ -112,48 +153,68 @@ struct LiveTranslateFocusLayout: Equatable {
                                             panelScrolls: true)
         }
 
-        // The floor is itself bounded by the container: a floor taller than
-        // the screen would push the picture to a negative height, and a
+        // What the column has to divide: the container, less the gap it draws
+        // between its two elements. Never negative — a gap larger than the
+        // glass is a layout with nothing in it, not a negative one.
+        let spacing = min(max(0, columnSpacing), containerHeight)
+        let available = containerHeight - spacing
+        // The floor is itself bounded by what the column has: a floor taller
+        // than the screen would push the picture to a negative height, and a
         // negative frame is a crash waiting for a small enough window rather
         // than a rule.
-        let floor = min(max(0, minimumPanelHeight), containerHeight)
-        // What the picture may take: the container minus the floor. This is
-        // rule 3, applied before the picture is measured at all.
-        let imageCeiling = containerHeight - floor
+        let floor = min(max(0, minimumPanelHeight), available)
+        // What the picture may take: the column minus the floor. This is rule
+        // 3, applied before the picture is measured at all.
+        let imageCeiling = available - floor
         // The aspect-fit height — the picture as the elder would see it with
         // no panel under it at all (contained in *both* axes: a wide picture
         // is bounded by the width, which is what `.fill` then spends).
         let fitScale = min(containerWidth / imageSize.width,
-                           containerHeight / imageSize.height)
+                           available / imageSize.height)
         let baseHeight = imageSize.height * fitScale
 
-        // Rule 2: the smallest growth in [1, 1.4] whose allowance covers the
-        // panel's content. Walking upward and stopping at the first that
-        // covers it keeps the picture as large as it needs to be and no
-        // larger — an elder who does not need the room keeps the picture.
+        // The panel a picture of this height resolves to: rule 1's bound,
+        // raised to rule 3's floor (the two disagree only in a container too
+        // small for both, and legibility is the one that wins), and finally
+        // bounded by what the column has left. One function, because the
+        // search below has to ask "did this step buy anything?" of exactly
+        // the number the caller will get.
+        func panelHeight(forImageHeight height: CGFloat) -> CGFloat {
+            let allowance = height * rule.panelHeightFraction
+            let ceiling = max(0, available - height)
+            return min(max(allowance, floor), ceiling)
+        }
+
+        // Rule 2: the smallest growth in [1, cap] that buys the panel enough
+        // room — and **no step that buys nothing** (review finding 5). The
+        // search stops the moment a further step cannot raise the resolved
+        // panel: once the floor or the column's remainder pins it, growing the
+        // picture enlarges the evidence and clips its edges for no answer's
+        // sake at all.
         //
         // Counted in whole steps and *clamped to the cap* rather than walked
         // with `stride(through:by:)`: `1 + 0.05 * 8` is not exactly 1.4 in
         // binary floating point, so a stride's last value lands on 1.35 and
         // the rule's own ceiling becomes unreachable — growth would stop short
         // of the one number the rule names.
-        let stepCount = max(1, Int(((Self.maximumImageGrowth - 1) / Self.growthStep).rounded()))
-        var growth: CGFloat = 1
-        for index in 0...stepCount {
-            growth = min(1 + CGFloat(index) * Self.growthStep, Self.maximumImageGrowth)
-            let height = min(baseHeight * growth, imageCeiling)
-            if height * Self.panelHeightFraction >= panelContentHeight { break }
+        let stepCount = max(1, Int(((rule.maximumImageGrowth - 1) / rule.growthStep).rounded()))
+        var imageHeight = min(baseHeight, imageCeiling)
+        var panel = panelHeight(forImageHeight: imageHeight)
+        if panel < panelContentHeight {
+            for index in 1...stepCount {
+                let factor = min(1 + CGFloat(index) * rule.growthStep, rule.maximumImageGrowth)
+                let candidate = min(baseHeight * factor, imageCeiling)
+                let candidatePanel = panelHeight(forImageHeight: candidate)
+                // Growth that cannot raise the panel is growth the elder pays
+                // for with picture and gets nothing back.
+                guard candidatePanel > panel else { break }
+                imageHeight = candidate
+                panel = candidatePanel
+                if panel >= panelContentHeight { break }
+            }
         }
-        let imageHeight = min(baseHeight * growth, imageCeiling)
-        // Rule 1's bound, raised to rule 3's floor (the two disagree only in a
-        // container too small for both, and legibility is the one that wins),
-        // and finally bounded by what the container has left — the two heights
-        // are drawn in one column, so the panel may not exceed the remainder.
-        let allowance = imageHeight * Self.panelHeightFraction
-        let panelCeiling = max(0, containerHeight - imageHeight)
-        let panelHeight = min(max(allowance, floor), panelCeiling)
         return LiveTranslateFocusLayout(imageHeight: imageHeight,
-                                        panelHeight: panelHeight,
-                                        panelScrolls: panelHeight < panelContentHeight)
+                                        panelHeight: panel,
+                                        panelScrolls: panel < panelContentHeight)
     }
 }

@@ -891,6 +891,16 @@ struct LiveTranslateOverlayView: View {
     /// render probe, which passes no point-ask surface at all.
     let onPointAskTranslateTap: () -> Void
 
+    /// The safe area's bottom inset, in points, reported by the host's own
+    /// `GeometryProxy` (review finding 7).
+    ///
+    /// The action row hangs under the anchor and is bottom-clamped; the clamp
+    /// needs the glass's *usable* floor, and the host is the reader that has
+    /// it — the live surface ignores the safe area, so a proxy read here is
+    /// the one thing about the insets this view cannot be sure of. Zero for
+    /// every construction site that predates the row.
+    let safeAreaBottomInset: CGFloat
+
     /// The rects this view is currently drawing, per region identity — the one
     /// piece of state the render path owns, and the reason a box whose text has
     /// not changed holds still (`LiveOverlayGeometryMemory`). It holds
@@ -907,7 +917,8 @@ struct LiveTranslateOverlayView: View {
          presentation: LiveCameraPresentation =
             LiveCameraPresentation(crop: .whole, pictureRect: .zero),
          onPointAskChipTap: @escaping () -> Void = {},
-         onPointAskTranslateTap: @escaping () -> Void = {}) {
+         onPointAskTranslateTap: @escaping () -> Void = {},
+         safeAreaBottomInset: CGFloat = 0) {
         self.surface = surface
         self.onTapRegion = onTapRegion
         self.onSetAlwaysShowOriginal = onSetAlwaysShowOriginal
@@ -917,6 +928,7 @@ struct LiveTranslateOverlayView: View {
         self.presentation = presentation
         self.onPointAskChipTap = onPointAskChipTap
         self.onPointAskTranslateTap = onPointAskTranslateTap
+        self.safeAreaBottomInset = safeAreaBottomInset
     }
 
     var body: some View {
@@ -981,6 +993,7 @@ struct LiveTranslateOverlayView: View {
                         // mapped through the presentation and knows only the
                         // rect it came from (Workstream B).
                         containerSize: proxy.size,
+                        bottomInset: safeAreaBottomInset,
                         translateLabel: L10n.str(PointAskOverlayBoxView.translateKey,
                                                  locale: surface.locale),
                         onTranslateTap: onPointAskTranslateTap)
@@ -1280,6 +1293,10 @@ struct PointAskOverlayBoxView: View {
     /// (Workstream B): the row is wider than the box it hangs under, so placing
     /// it needs the whole glass rather than just the anchor.
     let containerSize: CGSize
+    /// The safe area's bottom inset, in points: the floor the action row may
+    /// not go under (review finding 7). The caller reports it; zero is the
+    /// honest default for a surface with no glass to speak of.
+    var bottomInset: CGFloat = 0
     /// The anchor's **first** action's copy (Workstream B, "translate here"):
     /// read this crop and translate it. Resolved text rather than a key,
     /// because the caller is the view that knows the active language — the
@@ -1364,7 +1381,42 @@ struct PointAskOverlayBoxView: View {
         .frame(width: actionRowWidth,
                alignment: boxRect.midX < containerSize.width / 2 ? .leading : .trailing)
         .offset(x: DesignTokens.interElementSpacing,
-                y: min(boxRect.maxY + DesignTokens.interElementSpacing, boxRect.maxY))
+                y: Self.actionRowOriginY(below: boxRect,
+                                         containerHeight: containerSize.height,
+                                         bottomInset: bottomInset,
+                                         rowHeight: Self.actionRowHeight,
+                                         spacing: DesignTokens.interElementSpacing))
+    }
+
+    /// One action row is one tap target tall at the app's floor. The button's
+    /// own `minHeight` is what draws it; this is the same number, named so the
+    /// clamp below can do arithmetic with it.
+    static let actionRowHeight: CGFloat = DesignTokens.minTapTargetSize
+
+    /// Where the row's top edge goes: under the anchor when the glass has room
+    /// for it, and **above** the anchor when it has not (review finding 7).
+    ///
+    /// The offset this replaced read
+    /// `min(boxRect.maxY + spacing, boxRect.maxY)` — which is `boxRect.maxY`
+    /// for every input, a clamp that clamped nothing. An anchor near the
+    /// bottom of the glass therefore put both actions flush against the screen
+    /// edge and, under the home indicator's strip, half off the usable glass;
+    /// a two-line label ran off it entirely. The row is clamped to the safe
+    /// area's floor (`containerHeight - bottomInset`) — the same floor the
+    /// live chrome reserves for itself — and flipped above the anchor rather
+    /// than slid up over it: a row that slid would cover the very thing it
+    /// acts on. When neither side has room (a glass shorter than two rows and
+    /// an anchor) the row takes the top of the glass, which is the honest
+    /// last resort — on screen beats perfectly placed.
+    static func actionRowOriginY(below boxRect: CGRect,
+                                 containerHeight: CGFloat,
+                                 bottomInset: CGFloat,
+                                 rowHeight: CGFloat,
+                                 spacing: CGFloat) -> CGFloat {
+        let floor = max(0, containerHeight - max(0, bottomInset))
+        let below = boxRect.maxY + spacing
+        if below + rowHeight <= floor { return below }
+        return max(0, boxRect.minY - spacing - rowHeight)
     }
 
     /// The width the row may occupy: the glass, less one edge inset on each
@@ -1453,13 +1505,25 @@ struct PointAskOverlayBoxView: View {
     /// clamped into the container so a box near the bottom cannot push
     /// the chip off the glass. Wide enough for the elder's tap target in
     /// either language.
+    ///
+    /// The clamp is `actionRowOriginY`'s, and deliberately the same one
+    /// (review finding 7): the leading-edge clamp below is honest — the chip is
+    /// the box's own width, so it cannot start past the box — but the vertical
+    /// one was `min(boxRect.maxY + spacing, boxRect.maxY)`, which is
+    /// `boxRect.maxY` for every input. A box near the floor therefore put the
+    /// pending chip in the home-indicator strip. It flips above the box on the
+    /// same rule the action row does, so the two never disagree about where
+    /// "under the anchor" stops being possible.
     private func chipRect(below boxRect: CGRect) -> CGRect {
         let chipWidth = boxRect.width + 2 * DesignTokens.interElementSpacing
         let chipHeight = DesignTokens.minTapTargetSize + 2 * DesignTokens.interElementSpacing
         return CGRect(x: min(max(boxRect.minX, DesignTokens.interElementSpacing),
                              boxRect.minX),
-                      y: min(boxRect.maxY + DesignTokens.interElementSpacing,
-                             boxRect.maxY),
+                      y: Self.actionRowOriginY(below: boxRect,
+                                               containerHeight: containerSize.height,
+                                               bottomInset: bottomInset,
+                                               rowHeight: chipHeight,
+                                               spacing: DesignTokens.interElementSpacing),
                       width: chipWidth,
                       height: chipHeight)
     }

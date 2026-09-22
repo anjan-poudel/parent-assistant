@@ -2335,19 +2335,19 @@ final class AppCoordinator: ObservableObject {
         // rather than intended.
         //
         // A refusal, not a failure: someone chose this, so the observability
-        // event is the plugin's own disabled type. Ordered before `tileView`
-        // because a feature that is off must not assemble a capture session,
-        // a detector or a client on its way to saying so (NFR-LCT-012).
+        // event is the plugin's own disabled type — and it is **recorded by the
+        // refusal itself** (`disabledRefusal`), not here (review finding 10):
+        // this branch used to speak the line and present the leaf without
+        // emitting anything, so the tile's refusal left no trace while the
+        // voice entry's did. One ceremony, so one record, whichever entry made
+        // the refusal. Ordered before `tileView` because a feature that is off
+        // must not assemble a capture session, a detector or a client on its way
+        // to saying so (NFR-LCT-012).
         guard plugin.isEnabled else {
             guard let refusal = plugin.disabledRefusal(locale: locale) else {
-                observabilityBus.emit(ObservabilityEvent(
-                    component: "plugin_live_translate",
-                    eventType: "live_translate_open_failed",
-                    durationMs: nil,
-                    outcome: "failure",
-                    errorCode: "settings_view_unavailable",
-                    metadata: [:]
-                ))
+                // No leaf, so no promise: the shipped apology is the only
+                // sentence here that is true — and the failure is already
+                // recorded, in the same ceremony that could not build the leaf.
                 speak(text: L10n.str(LiveTranslatePlugin.unavailableKey, locale: locale))
                 return
             }

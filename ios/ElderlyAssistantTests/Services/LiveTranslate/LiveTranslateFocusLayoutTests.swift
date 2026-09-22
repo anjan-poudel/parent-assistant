@@ -1,4 +1,5 @@
 import CoreGraphics
+import SwiftUI
 import XCTest
 @testable import ElderlyAssistant
 
@@ -28,23 +29,73 @@ final class LiveTranslateFocusLayoutTests: XCTestCase {
     /// The floor the real view passes: one row at the app's type floors.
     private var floor: CGFloat { LiveTranslateFocusResultView.minimumPanelHeight }
 
+    /// The rule every resolution below is asked for **explicitly**. The numbers
+    /// live on `Rule` because they are config parameters (review finding: the
+    /// injected config on the surface path), so the suite reads them from a rule
+    /// it names rather than from statics that no longer exist — and the same
+    /// value is what a production caller gets from its own config.
+    private let rule = LiveTranslateFocusLayout.Rule.shipped
+
     private func resolve(containerSize: CGSize? = nil,
                          imageSize: CGSize = CGSize(width: 1000, height: 1000),
                          content: CGFloat,
-                         minimum: CGFloat? = nil) -> LiveTranslateFocusLayout {
+                         minimum: CGFloat? = nil,
+                         rule: LiveTranslateFocusLayout.Rule? = nil) -> LiveTranslateFocusLayout {
         LiveTranslateFocusLayout.resolve(containerSize: containerSize ?? container,
                                          imageSize: imageSize,
                                          panelContentHeight: content,
-                                         minimumPanelHeight: minimum ?? floor)
+                                         minimumPanelHeight: minimum ?? floor,
+                                         rule: rule ?? self.rule)
     }
 
     // MARK: - The rule's own numbers
 
-    /// The four constants the plan names, spelled here as numbers so that a
-    /// change to any of them has to be a deliberate change to this test.
+    /// The rule's numbers, spelled here as numbers so that a change to any of
+    /// them has to be a deliberate change to this test. The **growth step** is
+    /// one of them (review finding: the stride the loop walks is a config
+    /// parameter like the other two, so it is pinned like the other two — a
+    /// step that quietly doubled would still satisfy every "the picture grew"
+    /// assertion below).
     func testTheRulesOwnNumbersArePinned() {
-        XCTAssertEqual(LiveTranslateFocusLayout.panelHeightFraction, 0.45, accuracy: 0.0001)
-        XCTAssertEqual(LiveTranslateFocusLayout.maximumImageGrowth, 1.4, accuracy: 0.0001)
+        XCTAssertEqual(rule.panelHeightFraction, 0.45, accuracy: 0.0001)
+        XCTAssertEqual(rule.maximumImageGrowth, 1.4, accuracy: 0.0001)
+        XCTAssertEqual(rule.growthStep, 0.05, accuracy: 0.0001)
+    }
+
+    /// The shipped rule **is the shipped config's**, not a second spelling of
+    /// the same numbers (review finding: the injected config on the layout
+    /// path). A session builds its rule from its own config
+    /// (`LiveTranslateSessionModel.focusRule`), so a config a suite drives has
+    /// to be the config that draws; `.shipped` is only what stands in for a
+    /// preview or a test with no session.
+    func testTheShippedRuleIsTheConfigsOwnNumbers() {
+        XCTAssertEqual(rule, LiveTranslateFocusLayout.Rule(config: LiveTranslateConfig.default))
+        XCTAssertEqual(rule.panelHeightFraction,
+                       LiveTranslateConfig.default.focusPanelHeightFraction,
+                       accuracy: 0.0001)
+        XCTAssertEqual(rule.growthStep,
+                       LiveTranslateConfig.default.focusPanelGrowthStep,
+                       accuracy: 0.0001)
+        XCTAssertEqual(rule.maximumImageGrowth,
+                       LiveTranslateConfig.default.focusImageMaxGrowth,
+                       accuracy: 0.0001)
+    }
+
+    /// A rule built from a config is **that** config's: the numbers a suite
+    /// arranges are the numbers the surface is drawn with, which is the whole
+    /// point of carrying the rule rather than reading the default at draw time.
+    func testARuleIsBuiltFromTheConfigItIsGiven() {
+        var config = LiveTranslateConfig()
+        config.focusPanelHeightFraction = 0.3
+        config.focusPanelGrowthStep = 0.2
+        config.focusImageMaxGrowth = 2.0
+
+        let sessionRule = LiveTranslateFocusLayout.Rule(config: config)
+
+        XCTAssertEqual(sessionRule.panelHeightFraction, 0.3, accuracy: 0.0001)
+        XCTAssertEqual(sessionRule.growthStep, 0.2, accuracy: 0.0001)
+        XCTAssertEqual(sessionRule.maximumImageGrowth, 2.0, accuracy: 0.0001)
+        XCTAssertNotEqual(sessionRule, rule)
     }
 
     /// The floor is the app's own type tokens, not a literal of this screen's:
@@ -73,23 +124,43 @@ final class LiveTranslateFocusLayoutTests: XCTestCase {
         // 400pt wide container, square picture: aspect-fit height is the width.
         XCTAssertEqual(layout.imageHeight, 400, accuracy: 0.001)
         XCTAssertEqual(layout.panelHeight,
-                       400 * LiveTranslateFocusLayout.panelHeightFraction,
+                       400 * rule.panelHeightFraction,
                        accuracy: 0.001)
         XCTAssertFalse(layout.panelScrolls, "a one-line answer fits the allowance")
         XCTAssertTrue(layout.isUsable)
     }
 
-    /// A crop whose content is shorter than the allowance is not padded out to
-    /// it: the rule is a cap, and the panel is drawn at what it needs.
+    /// A crop whose content is shorter than the allowance is **not paid more
+    /// than the cap**: the panel's grant is the allowance and not a point over
+    /// it, and the picture keeps its aspect-fit height — a short answer does not
+    /// push the picture down to make the panel look filled.
     ///
-    /// This is the assertion that keeps 0.45 from being read as "the panel is
-    /// always 45% of the picture" — a reading that would push the picture down
-    /// for every short answer.
+    /// **Pinned strictly** (review finding: the cap test's slack). The old
+    /// assertion was `panelHeight < cap + 0.001`, which a rule that paid out
+    /// `cap + 0.0005` for every short answer — or one that let the allowance
+    /// drift with the content — would have satisfied. There is now no tolerance
+    /// at all on the bound: the panel is the allowance, and it is `<=` the
+    /// allowance the caller can compute for itself.
+    ///
+    /// The distinction this test draws is between the *grant* and the *content*:
+    /// the grant is the rule's allowance — the bounded frame the view hands the
+    /// card, and the height the column has to find — while the card inside it
+    /// draws its own rows and scrolls if they do not fit. What must never happen
+    /// is the grant itself exceeding 0.45 of the picture, and that is what is
+    /// asserted here, tightly: the panel is the allowance and not a point more.
+    /// Whether the card fills its frame or sits short inside it is
+    /// `LiveTranslateResultsCardView`'s business, not this rule's — the rule's
+    /// promise is only that the panel is never given more of the picture than
+    /// 0.45, and that a short answer never grows the picture to make the panel
+    /// look filled (`imageHeight` stays at the aspect-fit 400).
     func testTheAllowanceIsACapAndNotAQuota() {
         let small = resolve(content: 10)
-        XCTAssertLessThan(small.panelHeight,
-                          400 * LiveTranslateFocusLayout.panelHeightFraction + 0.001,
-                          "the panel is at or under the cap")
+        XCTAssertEqual(small.panelHeight, 400 * rule.panelHeightFraction,
+                       accuracy: 0.001,
+                       "the panel's grant is the allowance exactly")
+        XCTAssertLessThanOrEqual(small.panelHeight, 400 * rule.panelHeightFraction,
+                                 "and never a point more — the cap is what its name says")
+        XCTAssertFalse(small.panelScrolls, "ten points of content in 180 fits")
         XCTAssertEqual(small.imageHeight, 400, accuracy: 0.001,
                        "and the picture keeps the height the answer did not take")
     }
@@ -115,7 +186,7 @@ final class LiveTranslateFocusLayoutTests: XCTestCase {
                              "the picture grew rather than the panel shrinking")
         XCTAssertGreaterThan(layout.imageHeight, 400)
         XCTAssertGreaterThanOrEqual(layout.imageHeight,
-                                    layout.panelHeight / LiveTranslateFocusLayout.panelHeightFraction
+                                    layout.panelHeight / rule.panelHeightFraction
                                         - 0.001,
                                     "0.45 of the drawn picture still covers the panel")
         XCTAssertFalse(layout.panelScrolls,
@@ -125,14 +196,68 @@ final class LiveTranslateFocusLayoutTests: XCTestCase {
     /// Growth stops at the rule's ceiling — and reaches *exactly* it. A stride
     /// walked in binary floating point lands on 1.35, which would put the
     /// ceiling the plan names permanently out of reach.
+    ///
+    /// The crop is a **wide** one on purpose. Growth is bounded twice: by the
+    /// rule's 1.4× and by what the column has left (`available - height`, which
+    /// falls as the picture rises). For a *square* crop in this container the
+    /// second bound bites first — at ≈552 pt, under the 560 the ceiling names —
+    /// so no square crop can ever be drawn at 1.4×, and asserting that it is
+    /// would be asserting arithmetic this rule does not do (review finding 5:
+    /// the search stops when a step cannot raise the panel). What the ceiling
+    /// governs is a picture small enough that 1.4× of it still leaves the panel
+    /// room: a 1000×900 crop fits the width at 360 pt, its 1.4× is 504, and
+    /// that is the binding constraint. The square case is pinned separately, in
+    /// `testGrowthStopsAtTheCrossoverWhenTheColumnBindsFirst`, as what it is.
     func testThePictureStopsGrowingAtTheCeiling() {
+        let wide = CGSize(width: 1000, height: 900)
+        let base = resolve(imageSize: wide, content: 10).imageHeight
+        XCTAssertEqual(base, 360, accuracy: 0.001,
+                       "the wide crop's aspect-fit height, at the container's width")
         // Content that no amount of growth can cover: the loop must run out.
-        let layout = resolve(content: 10_000)
+        let layout = resolve(imageSize: wide, content: 10_000)
         XCTAssertEqual(layout.imageHeight,
-                       400 * LiveTranslateFocusLayout.maximumImageGrowth,
+                       base * rule.maximumImageGrowth,
                        accuracy: 0.001,
                        "growth ran to the ceiling and stopped there")
+        XCTAssertEqual(layout.imageHeight, 504, accuracy: 0.001)
         XCTAssertTrue(layout.panelScrolls, "and the answer still does not fit")
+    }
+
+    /// When the column binds before the ceiling does, growth stops at the
+    /// **crossover** — the height where 45 % of the picture and the column's
+    /// remainder are the same number — and the last step the search refuses is
+    /// the one that would have made the answer *shorter* (review finding 5:
+    /// growth that cannot raise the resolved panel enlarges the picture and
+    /// clips its edges for nothing).
+    ///
+    /// Both halves are pinned here, because the guard is only honest if the
+    /// refused step really was worse: at 1.4× the panel would have been 240 pt
+    /// against the 243 the search settled on, so the picture would have spent
+    /// twenty more points of glass to give back three of answer.
+    func testGrowthStopsAtTheCrossoverWhenTheColumnBindsFirst() {
+        let layout = resolve(content: 10_000)
+        XCTAssertEqual(layout.imageHeight, 540, accuracy: 0.001,
+                       "the last step that bought the panel anything")
+        XCTAssertLessThan(layout.imageHeight, 400 * rule.maximumImageGrowth,
+                          "the ceiling is not what stopped it — the column was")
+        // At the crossover the allowance is exactly what the panel gets: the
+        // column's remainder (260) is still the larger of the two.
+        XCTAssertEqual(layout.panelHeight,
+                       layout.imageHeight * rule.panelHeightFraction,
+                       accuracy: 0.001,
+                       "the search settled where the allowance and the remainder meet")
+        XCTAssertTrue(layout.panelScrolls)
+
+        // The step the guard refused, taken deliberately by a rule that walks
+        // straight to the cap: the picture reaches 1.4× and the panel falls.
+        let oneStep = LiveTranslateFocusLayout.Rule(panelHeightFraction: rule.panelHeightFraction,
+                                                    maximumImageGrowth: rule.maximumImageGrowth,
+                                                    growthStep: 0.4)
+        let overshot = resolve(content: 10_000, rule: oneStep)
+        XCTAssertEqual(overshot.imageHeight, 560, accuracy: 0.001,
+                       "a stride that leaps to the cap does reach it")
+        XCTAssertLessThan(overshot.panelHeight, layout.panelHeight,
+                          "and that is the trade the guard refuses: more picture, less answer")
     }
 
     /// The picture's growth is bounded by the container as well as by 1.4×: a
@@ -240,8 +365,65 @@ final class LiveTranslateFocusLayoutTests: XCTestCase {
                                                          panelContentHeight: 10)
         XCTAssertEqual(layout.imageHeight, 400, accuracy: 0.001)
         XCTAssertEqual(layout.panelHeight,
-                       layout.imageHeight * LiveTranslateFocusLayout.panelHeightFraction,
+                       layout.imageHeight * rule.panelHeightFraction,
                        accuracy: 0.001)
+    }
+
+    /// The panel is bottom-anchored, so the **bottom inset is load-bearing**:
+    /// without it the last row of the answer lands in the home-indicator strip
+    /// (review finding 13). The subtraction is the view's own, on the proxy's
+    /// report — asserted here as arithmetic, because the two things that can go
+    /// wrong (an inset not subtracted, a sign flipped) are invisible to every
+    /// layout assertion above: the rule would resolve perfectly, one strip too
+    /// low.
+    func testTheSafeAreaIsTakenOutOfTheSpaceTheColumnGets() {
+        let insets = EdgeInsets(top: 47, leading: 0, bottom: 34, trailing: 0)
+        let available = LiveTranslateFocusResultView.availableSize(in: container, insets: insets)
+        XCTAssertEqual(available.width, 400, accuracy: 0.001)
+        XCTAssertEqual(available.height, 800 - 47 - 34, accuracy: 0.001,
+                       "the column is the glass less the status bar and the home indicator")
+
+        // And the insets are the difference the *column* sees. The crop here is
+        // taller than the glass on purpose: it is the case where the container,
+        // rather than 0.45 of the picture, is what bounds the column — so the
+        // whole of the inset shows up as a shorter picture-plus-panel column.
+        // (A square crop resolves to the same total in both containers: its
+        // panel is 0.45 of a picture whose fit is the *width*, and the insets
+        // are all height. That equality is the rule working, not the insets
+        // being ignored, which is why the discriminator is this crop.)
+        let tall = LiveTranslateFocusResultFixture.capture(pixelSize: CGSize(width: 1000, height: 4000))
+        let plain = LiveTranslateFocusResultView.layout(for: container,
+                                                        capture: tall,
+                                                        panelContentHeight: 200)
+        let inset = LiveTranslateFocusResultView.layout(for: available,
+                                                        capture: tall,
+                                                        panelContentHeight: 200)
+        // The column is the glass less the gap the picture and the panel draw
+        // between them — that gap is part of the rule (`columnSpacing`), so the
+        // two heights fill the glass *minus* it and not the glass itself.
+        let gap = DesignTokens.interElementSpacing
+        XCTAssertEqual(plain.imageHeight + plain.panelHeight,
+                       container.height - gap, accuracy: 0.001,
+                       "the tall crop fills the glass it was given, less the column's gap")
+        XCTAssertEqual(inset.imageHeight + inset.panelHeight,
+                       available.height - gap, accuracy: 0.001,
+                       "the insets are taken out of the column, not left in the glass")
+        XCTAssertLessThan(inset.imageHeight, plain.imageHeight,
+                          "and it is the picture that gives the strip up")
+    }
+
+    /// A proxy that reports less than its own insets — a view being laid out,
+    /// or a caller handing over a square it has already subtracted from — is a
+    /// zero, not a negative: a negative height handed to the rule is a frame
+    /// of negative height, which is a crash rather than a clip.
+    func testInsetsLargerThanTheGlassResolveToNothing() {
+        let available = LiveTranslateFocusResultView.availableSize(in: CGSize(width: 10, height: 10),
+                                                                  insets: EdgeInsets(top: 60,
+                                                                                     leading: 20,
+                                                                                     bottom: 60,
+                                                                                     trailing: 20))
+        XCTAssertEqual(available.width, 0)
+        XCTAssertEqual(available.height, 0)
     }
 
     /// Two resolutions of the same inputs are equal, so a view can tell a

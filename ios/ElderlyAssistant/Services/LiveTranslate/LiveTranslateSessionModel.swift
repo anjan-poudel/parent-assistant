@@ -1156,9 +1156,28 @@ final class LiveTranslateSessionModel: ObservableObject {
     }
 
     /// Pauses frame processing. Idempotent, and a no-op after close.
+    ///
+    /// **The focused read goes with the pause** (review finding 15), exactly as
+    /// it goes with a close and with a thaw: the crop is a picture the elder is
+    /// no longer looking at, and the clock wait scheduled for it is a task that
+    /// would otherwise wake up in the background and start a plan — a plan that
+    /// can reach the cloud — for a picture nobody can see. A backgrounded
+    /// session that kept its crop also kept the strings on it in memory, which
+    /// is the thing `close` releases.
+    ///
+    /// The live picture's own state is left exactly as it was: the pause is a
+    /// claim about *frames*, and `resume` re-declares what is on screen from
+    /// the cache (FR-LCT-023). This is the focused read's state only.
     func pause() {
         guard !isClosed, !isPaused else { return }
         isPaused = true
+        focusTask?.cancel()
+        focusTask = nil
+        focusRedriveTask?.cancel()
+        focusRedriveTask = nil
+        focusToken = nil
+        focusInProgress = false
+        focusedCapture = nil
         let pipeline = self.pipeline
         Task { await pipeline?.pause() }
     }
@@ -1511,10 +1530,23 @@ final class LiveTranslateSessionModel: ObservableObject {
     ///
     /// A second call cancels the first: two taps are one question and its
     /// answer, not two pictures racing for the same surface.
+    ///
+    /// **A held picture refuses the read, out loud** (review finding 4). The
+    /// freeze owns the surface: no box is drawn over a held frame, and its card
+    /// is the reading surface, so there is nothing on it to point at. Worse,
+    /// the focus read's only exit is `returnToLive` — which is the thaw — so a
+    /// read started over a held frame would destroy the snapshot the elder is
+    /// reading on its way to showing its own picture. Refused rather than
+    /// silently ignored: they asked for something, and the sentence names the
+    /// way out they already have on screen.
     func translateFocusedRegion(box: NormalizedBox,
                                 pixelRect: CGRect,
                                 measuredOn anchored: CameraFrame? = nil) {
         guard !isClosed, phase == .running, focusPath != nil else { return }
+        guard frozen == nil else {
+            speech.reprompt(text: L10n.str(Self.frozenRefusalKey, locale: locale))
+            return
+        }
         guard let frame = anchored ?? latestFrame else { return }
         // The wait starts on the tap's own stack, exactly as the freeze's does,
         // so the surface's loading state is up in the frame of the tap rather
@@ -1522,7 +1554,14 @@ final class LiveTranslateSessionModel: ObservableObject {
         focusInProgress = true
         let layout = pendingLayout
         let policy = self.policy
-        let rect = Self.pixelRect(for: box, in: frame, fallingBackTo: pixelRect)
+        // The box is a place on the picture the elder is *looking at*, and what
+        // they are looking at is the window the zoom and the pan have moved
+        // (review finding 12) — so a box that falls outside it is bounded to it
+        // before it is measured. The spoken default is the same rule's other
+        // half and is built inside the window (`performSpokenFocus`).
+        let rect = Self.pixelRect(for: Self.focusBox(box, in: layout.crop),
+                                  in: frame,
+                                  fallingBackTo: pixelRect)
         focusTask?.cancel()
         // The clock wait belongs to the read that set it off, so it goes the
         // same way the read does: a re-drive of the *previous* crop firing
@@ -1558,14 +1597,28 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// whole picture — which is what makes this the focus path and not a
     /// snapshot.
     ///
-    /// Read from the config rather than spelled here (NFR-LCT-011): the same
+    /// Read from **this session's own** config rather than the shipped default
+    /// (review finding: the injected config on the session path, not
+    /// `LiveTranslateConfig.default`): a suite that drives a session with its
+    /// own numbers must get a session that reads them, or the number it
+    /// arranged is a number nothing consults.
+    ///
+    /// And from the config rather than spelled here (NFR-LCT-011): the same
     /// rule the source-hygiene scan enforces, and the reason it exists — this
     /// fraction and `ocrSampleInterval` are two different parameters that
     /// happen to share a number, so one spelling for two meanings is exactly
     /// the drift the scan exists to catch.
-    static var spokenFocusBoxInset: Double {
-        LiveTranslateConfig.default.spokenFocusBoxInset
-    }
+    var spokenFocusBoxInset: Double { config.spokenFocusBoxInset }
+
+    /// The focused reading surface's geometry rule, built from **this session's
+    /// own** config (review finding: the injected config on the surface path).
+    ///
+    /// The surface takes the rule rather than the config, so it stays a pure
+    /// view: the session is what knows which numbers are in force, and a
+    /// session built over a suite's own `LiveTranslateConfig` draws the panel
+    /// and the growth that suite arranged. `LiveTranslateFocusLayout.Rule
+    /// .shipped` remains the default for a preview or a test with no session.
+    var focusRule: LiveTranslateFocusLayout.Rule { LiveTranslateFocusLayout.Rule(config: config) }
 
     /// **"translate here"** — the spoken form of the focus mode's Translate
     /// button (Workstream B, the constitution's voice-reachability rule).
@@ -1625,12 +1678,22 @@ final class LiveTranslateSessionModel: ObservableObject {
     private func performSpokenFocus() {
         awaitingSpokenFocusFrame = false
         guard !isClosed, let frame = anchoredFrame else { return }
-        let target = pointAsk?.anchoredTarget
-        let inset = Self.spokenFocusBoxInset
-        let box = target?.box ?? NormalizedBox(xMin: inset,
-                                               yMin: inset,
-                                               xMax: 1 - inset,
-                                               yMax: 1 - inset)
+        let inset = spokenFocusBoxInset
+        // **"Here" is a place in the window the elder is looking through**
+        // (review finding 12). The default box is the middle half of *that* —
+        // built in the window's own coordinates and mapped back into the
+        // frame's, which is what `frameBox(ofCropBox:)` is for. Built against
+        // the frame instead (the old `NormalizedBox(xMin: inset, …)`), a
+        // zoomed-in elder's "translate here" cropped the middle of the sensor
+        // frame: mostly picture their fingers had already pushed off the glass.
+        // The live path makes the same mapping the other way round, cropping
+        // the frame to the window before recognition.
+        let window = pendingLayout.crop
+        let middle = NormalizedBox(xMin: inset,
+                                   yMin: inset,
+                                   xMax: 1 - inset,
+                                   yMax: 1 - inset)
+        let box = pointAsk?.anchoredTarget?.box ?? window.frameBox(ofCropBox: middle)
         // A null rect means "derive it from the box and the frame's own pixel
         // size", which is what a spoken command must do: there is no finger to
         // have measured one, and the box is this call's own.
@@ -1679,7 +1742,7 @@ final class LiveTranslateSessionModel: ObservableObject {
             // this picture is planning the *live* regions, not this crop's —
             // so nothing would ever ask again. The wait is scheduled here, on
             // the read that was deferred, and the re-ask is `reDriven`.
-            await scheduleFocusedRedrive(for: capture)
+            await scheduleFocusedRedrive(for: capture, token: token)
         }
         finishFocusedRead(token)
     }
@@ -1708,38 +1771,92 @@ final class LiveTranslateSessionModel: ObservableObject {
     /// clock, so the re-ask lands when the plan says it may rather than when a
     /// constant here guesses. The suspension is the dependencies' seam
     /// (`sleepFor`), so a suite drives it without sleeping.
-    private func scheduleFocusedRedrive(for capture: LiveTranslateFocusedCapture) async {
-        guard !isClosed, !capture.deferredKeys.isEmpty, let path = focusPath else { return }
+    ///
+    /// **The read is asked again whose wait this is after the clock is read**
+    /// (review finding 6). `brainClockRemaining()` is an actor hop and every
+    /// await on this path is an opening for a second tap, a thaw or a close —
+    /// the token is what says which read the wait belongs to, and it is read on
+    /// the far side of the hop rather than trusted from before it. A wait armed
+    /// for a read that has moved on would do its damage on the way *in*, not on
+    /// the way out: `focusRedriveTask?.cancel()` would take down the newer
+    /// read's own wait before `redriveFocusedCapture`'s identity guard got the
+    /// chance to refuse the plan.
+    private func scheduleFocusedRedrive(for capture: LiveTranslateFocusedCapture,
+                                        token: UUID) async {
+        guard !isClosed, !Task.isCancelled, focusToken == token,
+              !capture.deferredKeys.isEmpty, let path = focusPath else { return }
         let wait = await path.brainClockRemaining()
-        guard wait > 0 else { return }
+        guard !isClosed, !Task.isCancelled, focusToken == token, wait > 0 else { return }
         focusRedriveTask?.cancel()
+        armFocusedRedrive(for: capture, after: wait, attempt: 1)
+    }
+
+    /// The wait itself, and the re-arms behind it (review findings 6 and 9).
+    ///
+    /// Split from the decision about *whose* wait it is because an attempt has
+    /// no token to check: by the time a wait fires the read that armed it has
+    /// finished (`finishFocusedRead` clears `focusToken`), so a re-arm — which
+    /// happens inside a running attempt — is guarded by the picture instead
+    /// (`redriveFocusedCapture`). Nothing needs cancelling here either: the
+    /// only wait that could still be standing when an attempt re-arms is the
+    /// attempt's own task, and cancelling that one would cancel the re-ask that
+    /// is running.
+    private func armFocusedRedrive(for capture: LiveTranslateFocusedCapture,
+                                   after wait: TimeInterval,
+                                   attempt: Int) {
         focusRedriveTask = Task { [weak self] in
             await self?.dependencies.sleepFor(wait)
             // A cancelled wait is a close, a thaw or a newer tap — all three
             // took the picture away, and none of them wants a plan started.
             guard !Task.isCancelled else { return }
-            await self?.redriveFocusedCapture(capture)
+            await self?.redriveFocusedCapture(capture, attempt: attempt)
         }
     }
 
     /// The re-ask itself, on the picture the wait was scheduled for.
     ///
-    /// Guarded the way the re-pack is, and on the same field: the sequence
-    /// identifies the crop on screen, so a re-drive that lands after a second
-    /// tap, a thaw or a close draws nothing at all rather than answering a
-    /// picture the elder has replaced. Unlike the re-pack it *does* start a
-    /// plan (`LiveTranslateFocusCapture.reDriven`) — that is the whole
-    /// difference between rendering an answer and asking for one.
-    private func redriveFocusedCapture(_ capture: LiveTranslateFocusedCapture) async {
+    /// **Guarded by the picture, not by the sequence** (review finding 3). The
+    /// re-packed capture carries the same `image` as the one it was packed from
+    /// (`LiveTranslateFocusCapture.updated` copies it through), so identity is
+    /// the test that survives a re-pack — and it is the test that says what the
+    /// guard means: the picture on screen is the crop this wait belongs to. The
+    /// publication sequence could not stand in for it: a re-ask that moved
+    /// something wrote a *new* sequence onto the standing capture, so the next
+    /// attempt of the same picture would have compared its own (older) sequence
+    /// against a newer one and refused to fire — the re-arm dying on the first
+    /// answer it rendered.
+    ///
+    /// Unlike the re-pack it *does* start a plan (`LiveTranslateFocusCapture
+    /// .reDriven`) — that is the whole difference between rendering an answer
+    /// and asking for one — and it then arms the next wait while the clock is
+    /// still what stands between the picture and its answers.
+    private func redriveFocusedCapture(_ capture: LiveTranslateFocusedCapture,
+                                       attempt: Int) async {
         guard !isClosed, let path = focusPath, let standing = focusedCapture,
-              standing.publication.sequence == capture.publication.sequence else { return }
+              standing.image === capture.image else { return }
         let updated = await path.reDriven(standing,
                                           layout: pendingLayout,
                                           policy: policy)
         guard !isClosed, let current = focusedCapture,
-              current.image === standing.image,
-              current.publication.sequence == standing.publication.sequence else { return }
+              current.image === standing.image else { return }
         if let updated { focusedCapture = updated }
+        // **One wait is not a guarantee** (review finding 9). What the wait
+        // buys is a due clock, not an answer: a plan that lands on an open
+        // clock can still be released — the budget's cap holding a surplus, a
+        // prefix that did not reach the batch — and those rows would then sit
+        // on "not right now" for the life of the picture, which is the stall
+        // this whole path exists to end. So the attempt re-arms while the
+        // picture still has deferred keys, up to the config's bound: a clock
+        // the re-ask never opens (a budget that caps every pass) stops on the
+        // `wait > 0` guard rather than spinning, and a clock that keeps
+        // closing is given `focusRedriveMaxAttempts` plans and no more.
+        let pending = (updated ?? standing).deferredKeys
+        guard !pending.isEmpty, attempt < config.focusRedriveMaxAttempts else { return }
+        let wait = await path.brainClockRemaining()
+        guard !isClosed, !Task.isCancelled, wait > 0,
+              let stillStanding = focusedCapture,
+              stillStanding.image === standing.image else { return }
+        armFocusedRedrive(for: capture, after: wait, attempt: attempt + 1)
     }
 
     /// Ends the focus wait — **only if the wait is still this read's**
@@ -1753,6 +1870,37 @@ final class LiveTranslateSessionModel: ObservableObject {
         focusToken = nil
         focusInProgress = false
     }
+
+    /// The box a focus read may crop, given the window the elder is looking
+    /// through (review finding 12).
+    ///
+    /// A box the elder **pointed at** is already frame-normalized — the overlay
+    /// maps it through the presentation to draw it — so it needs no mapping,
+    /// only a bound: the part of it that lies outside the window is a part they
+    /// have pushed off the glass and cannot be asking about. Intersecting is
+    /// what makes the picture the crop is taken from *visible*; the anchored
+    /// case is unchanged whenever the anchor is on screen, which is the case
+    /// the anchor exists for.
+    ///
+    /// An intersection that comes out empty (the elder panned the window away
+    /// from the box and then asked anyway) leaves the box alone rather than
+    /// refusing: the read still answers the place they named, which is more
+    /// use than a sentence about windows.
+    private static func focusBox(_ box: NormalizedBox,
+                                 in window: LiveCameraCrop) -> NormalizedBox {
+        guard !window.isWhole else { return box }
+        let xMin = max(box.xMin, window.box.xMin)
+        let xMax = min(box.xMax, window.box.xMax)
+        let yMin = max(box.yMin, window.box.yMin)
+        let yMax = min(box.yMax, window.box.yMax)
+        guard xMax > xMin, yMax > yMin else { return box }
+        return NormalizedBox(xMin: xMin, yMin: yMin, xMax: xMax, yMax: yMax)
+    }
+
+    /// What the session says when a focus read is asked for over a held picture
+    /// (review finding 4). A key and never a literal (NFR-LCT-004), resolved in
+    /// the active language at the moment it is spoken.
+    static let frozenRefusalKey = "livetranslate.focus.frozen"
 
     /// The pixel rect a box names on a frame. The caller's own rect wins when
     /// it has one — it was measured against the buffer the crop came from —
@@ -1865,6 +2013,27 @@ final class LiveTranslateSessionModel: ObservableObject {
     func tapRegion(_ regionID: TextRegionStabilizer.RegionIdentity) {
         guard !isClosed, let activePublication else { return }
         speech.speakTappedRegion(regionID, in: activePublication.placements)
+    }
+
+    /// Tap-to-hear on the **focused read's** rows (review finding 1).
+    ///
+    /// The crop's rows carry the crop's own region identities — they were built
+    /// from the crop's publication — so that is the publication they must be
+    /// resolved against. `tapRegion` resolves against the *live* one, and while
+    /// a focused read is up the live picture is a different picture with
+    /// different rows: the identity found nothing at all, or found a live
+    /// region that happened to answer to it and spoke a sentence from a scene
+    /// the elder is no longer looking at. The frozen card's rule
+    /// (`tapRegion`'s `activePublication` is the held frame's while a picture
+    /// is held), applied to the other picture this session can be showing: what
+    /// is spoken is what is drawn.
+    ///
+    /// A tap with no capture standing is a no-op rather than a fallback to the
+    /// live placements: the row that was tapped is gone, and speaking the live
+    /// picture's line for it would be the same bug in the other direction.
+    func tapFocusedRegion(_ regionID: TextRegionStabilizer.RegionIdentity) {
+        guard !isClosed, let capture = focusedCapture else { return }
+        speech.speakTappedRegion(regionID, in: capture.publication.placements)
     }
 
     @discardableResult

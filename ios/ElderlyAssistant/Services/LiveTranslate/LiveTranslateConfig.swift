@@ -1671,6 +1671,40 @@ struct LiveTranslateConfig: Equatable {
     /// panel's content needs (see `LiveTranslateFocusLayout.resolve`).
     var focusImageMaxGrowth: Double = 1.4
 
+    /// The share of the drawn crop's height the focused read's panel may take
+    /// (`LiveTranslateFocusLayout`'s rule 1).
+    ///
+    /// An operational parameter and not a token, for the reason the growth
+    /// above is one: it is the number a device check moves, and the layout
+    /// reads it rather than spelling its own. Its own field rather than
+    /// `panelMaxHeightFraction`'s (which happens to be the same 0.45 today):
+    /// that one caps a *block's callout* inside a live container, this one
+    /// caps a *crop's* answer under the picture the elder pointed at. Two
+    /// rules that share a number are still two rules.
+    var focusPanelHeightFraction: Double = 0.45
+
+    /// The step the focused read's growth search walks in (`0.05` ⇒ five
+    /// per cent of the aspect-fit height at a time).
+    ///
+    /// Coarse on purpose: the value that comes out is a screen height, and a
+    /// hundredth of a point of panel is not a readability difference — the
+    /// *floor* is what matters, and the floor is enforced exactly. Named here
+    /// rather than spelled in the layout so the search's granularity is an
+    /// operational parameter like the ceiling it walks toward.
+    var focusPanelGrowthStep: Double = 0.05
+
+    /// How many times a focused read's clock hold may be re-armed for the same
+    /// picture (review finding 9).
+    ///
+    /// A re-ask that lands on a clock which has closed again would otherwise
+    /// leave the crop's rows saying "not right now" for the rest of the
+    /// picture's life. Re-arming is bounded because an unbounded one is a
+    /// timer that never stops for a picture nobody is waiting on any more;
+    /// after these attempts the rows keep their sentence and the next tap (or
+    /// the next capture) is what asks again — the same honest end the budget's
+    /// own deferral has.
+    var focusRedriveMaxAttempts: Int = 3
+
     /// The fraction of the frame the centre box covers when the elder says
     /// "translate here" without having pointed at anything: the middle half of
     /// each axis. Wide enough to hold the sign, label or screen a phone is

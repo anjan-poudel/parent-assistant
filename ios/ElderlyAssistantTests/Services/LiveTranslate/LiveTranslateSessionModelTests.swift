@@ -1562,7 +1562,11 @@ final class LiveTranslateSessionModelTests: XCTestCase {
         let capture = try XCTUnwrap(harness.model.focusedCapture)
         let frame = try XCTUnwrap(harness.model.anchoredFrame)
         let size = frame.pixelSize
-        let inset = LiveTranslateSessionModel.spokenFocusBoxInset
+        // The session's **own** config's number (review finding: the injected
+        // config on the session path), not the shipped static: a session driven
+        // over its own numbers must place "here" by them, or the number the
+        // suite arranged is one nothing consults.
+        let inset = harness.model.spokenFocusBoxInset
         let expected = CGRect(x: inset * size.width,
                               y: inset * size.height,
                               width: (1 - 2 * inset) * size.width,
@@ -1815,5 +1819,175 @@ final class LiveTranslateSessionModelTests: XCTestCase {
         XCTAssertEqual(brain.calls.count, generationsWhenHeld,
                        "the cancelled wait re-asked nothing: the picture it was for is gone")
         XCTAssertNil(harness.model.focusedCapture)
+    }
+
+    /// **The hold is bounded** (review finding 9). A clock that is still closed
+    /// when the first re-ask runs is a clock that will refuse the second one
+    /// too, so a session that re-armed on the clock alone would ask again for
+    /// as long as the picture stood — with the interval in minutes on a device,
+    /// a plan running for the rest of the session, for an answer the same
+    /// pacing rule keeps refusing. `focusRedriveMaxAttempts` is the bound, and
+    /// the config's number is the number of waits: the clock refused every
+    /// re-ask here (it never opens — the interval is longer than this test
+    /// lives), so what is asserted is the *bound* and not the clock.
+    @MainActor
+    func testTheClockHoldIsRetriedOnlyAsManyTimesAsTheConfigurationAllows() async throws {
+        let brain = RecordingBrain()
+        var config = LiveTranslateConfig.default
+        config.brainAttemptMinInterval = 30
+        config.focusRedriveMaxAttempts = 2
+        let harness = makeHarness(consent: true,
+                                  configured: true,
+                                  transport: Self.respondingTransport(),
+                                  config: config,
+                                  brain: brain)
+        reportLayout(harness)
+        harness.engine.regions = [detected(liveLabelText)]
+        await harness.model.start()
+        try await deliverPasses(3, in: harness)
+        await waitUntil("the live cycle's own generation to be paid") {
+            brain.generationsAnswered > 0
+        }
+        let generationsWhenHeld = brain.calls.count
+
+        harness.engine.regions = [detected(cropLabelText)]
+        brain.answers[cropLabelText] = "रातो लिभर तान्नुहोस्"
+        tapFocused(harness)
+
+        // The sleeper returns at once, so the whole chain runs here: two waits
+        // (the read's own and the first re-drive's), then the bound.
+        await waitUntil("the re-drive chain to reach its bound") {
+            harness.sleeper.callCount == config.focusRedriveMaxAttempts
+        }
+        // A third wait would appear in no time at all; give it the window anyway,
+        // so "the bound is `maxAttempts`" is not an assertion about scheduling
+        // luck.
+        try await Task<Never, Never>.sleep(for: .milliseconds(200))
+
+        XCTAssertEqual(harness.sleeper.callCount, config.focusRedriveMaxAttempts,
+                       "the clock hold is bounded by the config, not by the clock")
+        XCTAssertEqual(brain.calls.count, generationsWhenHeld,
+                       "and every re-ask was refused by the clock: no generation was spent")
+        XCTAssertFalse(try XCTUnwrap(harness.model.focusedCapture).deferredKeys.isEmpty,
+                       "the string is still unasked, and the next tap is what asks again")
+    }
+
+    /// **A held picture refuses the read, out loud** (review finding 4). The
+    /// freeze owns the surface: no box is drawn over a held frame and its card
+    /// is the reading surface, so there is nothing on it to point at — and the
+    /// focused read's only exit is `returnToLive`, which is the thaw, so a read
+    /// started over a held frame would destroy the snapshot the elder is
+    /// reading on its way to showing its own picture.
+    ///
+    /// Refused rather than silently ignored: they asked for something, and the
+    /// sentence names the way out they already have on screen. The counterfactual
+    /// is asserted with it — no crop, no read — because a refusal that still
+    /// read the page would be a refusal in name only.
+    @MainActor
+    func testAPictureThatIsHeldRefusesAFocusedReadOutLoud() async throws {
+        let harness = makeHarness(dictionary: [curatedText.lowercased(): curatedTranslation])
+        reportLayout(harness)
+        harness.engine.regions = [detected(curatedText)]
+        await harness.model.start()
+        try await deliverPass(harness)
+        harness.model.captureSnapshot()
+        await waitUntil("the frame to be held") { harness.model.isFrozen }
+        let readsWhenFrozen = harness.engine.recognizeCallCount
+        let spokenWhenFrozen = harness.speech.spokenTexts.count
+
+        tapFocused(harness)
+        try await Task<Never, Never>.sleep(for: .milliseconds(120))
+
+        XCTAssertEqual(LiveTranslateSessionModel.frozenRefusalKey, "livetranslate.focus.frozen",
+                       "the refusal is the feature's own sentence, in the catalog")
+        let refusal = L10n.str(LiveTranslateSessionModel.frozenRefusalKey, locale: nepali)
+        XCTAssertFalse(refusal.isEmpty)
+        XCTAssertEqual(harness.speech.spokenTexts.count, spokenWhenFrozen + 1,
+                       "the refusal is spoken: one sentence, on the tap's own stack")
+        XCTAssertEqual(harness.speech.spokenTexts.last, refusal)
+        XCTAssertNotEqual(refusal, harness.model.repromptText,
+                          "it names the way out rather than being the catch-all re-prompt")
+        XCTAssertNil(harness.model.focusedCapture, "no crop was packed over the held picture")
+        XCTAssertEqual(harness.engine.recognizeCallCount, readsWhenFrozen,
+                       "and the held page was not read: a refusal is not a slow yes")
+        XCTAssertTrue(harness.model.isFrozen, "the snapshot still owns the surface")
+    }
+
+    /// **The focused read goes with the pause** (review finding 15), exactly as
+    /// it goes with a close and with a thaw. A backgrounded session keeps no
+    /// crop: the picture is one the elder is no longer looking at, the strings
+    /// on it are the thing `close` releases, and the clock wait scheduled for
+    /// it would otherwise wake up in the background and start a plan — a plan
+    /// that can reach the cloud — for a picture nobody can see.
+    ///
+    /// The live picture's own state is deliberately *not* this test's subject:
+    /// a pause is a claim about frames, and `resume` re-declares what is on
+    /// screen from the cache.
+    @MainActor
+    func testPausingTakesTheFocusedPictureAndItsScheduledReAskWithIt() async throws {
+        let brain = RecordingBrain()
+        var config = LiveTranslateConfig.default
+        config.brainAttemptMinInterval = 30
+        let harness = makeHarness(consent: true,
+                                  configured: true,
+                                  transport: Self.respondingTransport(),
+                                  config: config,
+                                  brain: brain)
+        harness.sleeper.parksTheWait = true
+        reportLayout(harness)
+        harness.engine.regions = [detected(liveLabelText)]
+        await harness.model.start()
+        try await deliverPasses(3, in: harness)
+        await waitUntil("the live cycle's own generation to be paid") {
+            brain.generationsAnswered > 0
+        }
+        let generationsWhenHeld = brain.calls.count
+
+        harness.engine.regions = [detected(cropLabelText)]
+        brain.answers[cropLabelText] = "रातो लिभर तान्नुहोस्"
+        tapFocused(harness)
+        // The wait **parks**, so the hold is provably in flight when the elder
+        // backgrounds the phone: a wait that had already returned would make
+        // this a race rather than a cancellation.
+        await waitUntil("the clock-held read to pack its picture and take its wait") {
+            harness.model.focusedCapture != nil && harness.sleeper.callCount == 1
+        }
+
+        harness.model.pause()
+        XCTAssertNil(harness.model.focusedCapture,
+                     "a backgrounded session keeps no crop: the strings go with it")
+
+        // The wait ends the way a real one would have — only late, and into a
+        // session that has moved on. What the task does with that is the claim:
+        // it looks at `Task.isCancelled` and asks nothing.
+        harness.sleeper.releaseParkedWait()
+        try await Task<Never, Never>.sleep(for: .milliseconds(200))
+
+        XCTAssertEqual(brain.calls.count, generationsWhenHeld,
+                       "the cancelled wait planned nothing: the crop it was for is gone")
+        XCTAssertNil(harness.model.focusedCapture,
+                     "and no picture was installed into a session nobody is looking at")
+    }
+
+    /// The rule the focused surface is drawn with is the **session's own
+    /// config's** (review finding: the injected config on the surface path),
+    /// not the shipped default read at draw time. A rule read from
+    /// `LiveTranslateConfig.default` would silently ignore the numbers the
+    /// session was built with, which is exactly the kind of second source of
+    /// truth a suite driving its own config cannot see.
+    @MainActor
+    func testTheFocusRuleIsTheSessionsOwnConfiguration() {
+        var config = LiveTranslateConfig.default
+        config.focusPanelHeightFraction = 0.5
+        config.focusPanelGrowthStep = 0.1
+        config.focusImageMaxGrowth = 1.2
+        let harness = makeHarness(config: config)
+
+        XCTAssertEqual(harness.model.focusRule,
+                       LiveTranslateFocusLayout.Rule(panelHeightFraction: 0.5,
+                                                     maximumImageGrowth: 1.2,
+                                                     growthStep: 0.1))
+        XCTAssertNotEqual(harness.model.focusRule, LiveTranslateFocusLayout.Rule.shipped,
+                          "a configured session does not draw with the shipped numbers")
     }
 }

@@ -383,16 +383,28 @@ final class LiveTranslateSpeechTests: XCTestCase {
                        "every site is in the feature's speech file")
     }
 
-    /// The re-prompt's call site is the session's command-outcome handler and
-    /// nothing else: a second caller would be a second way for the feature to
+    /// The re-prompt's call sites are the session's own named handlers and
+    /// nothing else: a caller outside them would be a way for the feature to
     /// speak without the microphone gate knowing.
-    func testTheRePromptIsSpawnedFromExactlyOnePlaceInTheFeature() {
+    ///
+    /// **Two sites, both named, and the second was deliberate** (Workstream B,
+    /// review finding 4): `handleCapture` is where a miss meets the shipped
+    /// re-prompt, and `translateFocusedRegion` is where a focused read over a
+    /// *held* picture is refused — a different sentence for a different
+    /// situation, spoken through the same channel because the channel is the
+    /// one that carries the gate (`LiveTranslateSpeech.isSpeaking`). The count
+    /// is pinned all the same: a third site, or either site moving out of its
+    /// handler, is what this test exists to catch.
+    func testTheRePromptIsSpawnedFromExactlyTheFeaturesNamedHandlers() {
         let sites = featureSites(of: ".reprompt(text:")
-        XCTAssertEqual(sites.count, 1,
+        XCTAssertEqual(sites.count, 2,
                        "re-prompt call sites: \(sites.map { "\($0.file):\($0.line)" })")
-        XCTAssertEqual(sites.first?.file, "ElderlyAssistant/Services/LiveTranslate/LiveTranslateSessionModel.swift")
-        XCTAssertEqual(sites.first?.enclosingFunction, "handleCapture",
-                       "the capture's outcome handler is where a miss meets its copy")
+        XCTAssertEqual(Set(sites.map(\.file)),
+                       ["ElderlyAssistant/Services/LiveTranslate/LiveTranslateSessionModel.swift"],
+                       "both sites are the session's, which is what owns the gate")
+        XCTAssertEqual(Set(sites.map(\.enclosingFunction)),
+                       ["handleCapture", "translateFocusedRegion"],
+                       "the miss handler and the refused read: no third handler speaks a sentence")
     }
 
     /// The scan is falsifiable: the same scanner, over a source that does have

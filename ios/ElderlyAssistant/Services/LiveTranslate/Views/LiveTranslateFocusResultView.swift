@@ -52,6 +52,25 @@ struct LiveTranslateFocusResultView: View {
     /// The language every string this view shows is resolved in.
     let locale: Locale
 
+    /// The three numbers the layout rule is resolved with, from the session's
+    /// own config (review finding: the injected config, not the shipped
+    /// default). Defaulted to the shipped rule so a preview or a test that has
+    /// no session still draws.
+    var rule: LiveTranslateFocusLayout.Rule = .shipped
+
+    /// The safe-area insets this surface is drawn inside, reported by the
+    /// caller's own `GeometryProxy`.
+    ///
+    /// Passed in rather than read from a proxy of this view's own: the whole
+    /// live surface ignores the safe area (the camera is drawn edge to edge),
+    /// so a nested `GeometryReader`'s report is the one thing about the insets
+    /// this view cannot be sure of — the caller that *owns* the ignoring is
+    /// the reader that knows. The live chrome pads itself by exactly these
+    /// (`LiveTranslateView.chrome(in:)`), and the panel here is bottom-anchored
+    /// by design, so without them it landed in the home-indicator strip
+    /// (review finding 13).
+    var safeAreaInsets: EdgeInsets = EdgeInsets()
+
     /// Tap-to-hear, on the crop's own placements — the row hands back the
     /// region it was built from, exactly as the live card's does.
     let onSpeak: (TextRegionStabilizer.RegionIdentity) -> Void
@@ -85,11 +104,17 @@ struct LiveTranslateFocusResultView: View {
 
     var body: some View {
         GeometryReader { proxy in
-            let layout = Self.layout(for: proxy.size,
+            let insets = safeAreaInsets
+            // The space the column may use: the glass, less the home
+            // indicator's strip at the bottom and the status bar's at the top
+            // (review finding 13).
+            let available = Self.availableSize(in: proxy.size, insets: insets)
+            let layout = Self.layout(for: available,
                                      capture: capture,
-                                     panelContentHeight: panelContentHeight)
+                                     panelContentHeight: panelContentHeight,
+                                     rule: rule)
             VStack(spacing: DesignTokens.interElementSpacing) {
-                crop(height: layout.imageHeight, width: proxy.size.width)
+                crop(height: layout.imageHeight, width: available.width)
                 panel(height: layout.panelHeight,
                       scrolls: layout.panelScrolls)
             }
@@ -98,23 +123,45 @@ struct LiveTranslateFocusResultView: View {
             // short there is slack, and the slack belongs at the top — under
             // the back control — rather than as a gap between the two, which
             // would read as the panel belonging to something else.
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            .frame(width: available.width, height: available.height, alignment: .bottom)
+            .padding(.top, insets.top)
+            .padding(.bottom, insets.bottom)
+            .padding(.leading, insets.leading)
+            .padding(.trailing, insets.trailing)
             .overlay(alignment: .topLeading) { backControl }
         }
         .background(DesignTokens.background)
         .accessibilityIdentifier(Self.identifier)
     }
 
-    /// The rule, with this view's own floor and the measured content height
-    /// folded in. Static and pure so a test can resolve the same geometry
-    /// without rendering anything.
+    /// The space the column may use inside a proxy's report: the glass, less
+    /// the insets the caller owns.
+    ///
+    /// Static and pure so the subtraction is assertable on its own — the whole
+    /// live surface ignores the safe area (the camera is drawn edge to edge),
+    /// and the panel is bottom-anchored by design, so the bottom inset is the
+    /// difference between the answer sitting on the home indicator's strip and
+    /// sitting above it (review finding 13). Never negative: a proxy that
+    /// reports less than its own insets is a view being laid out, not a reason
+    /// to hand the rule a negative height to resolve.
+    static func availableSize(in size: CGSize, insets: EdgeInsets) -> CGSize {
+        CGSize(width: max(0, size.width - insets.leading - insets.trailing),
+               height: max(0, size.height - insets.top - insets.bottom))
+    }
+
+    /// The rule, with this view's own floor, the column's own gap and the
+    /// measured content height folded in. Static and pure so a test can
+    /// resolve the same geometry without rendering anything.
     static func layout(for containerSize: CGSize,
                        capture: LiveTranslateFocusedCapture,
-                       panelContentHeight: CGFloat) -> LiveTranslateFocusLayout {
+                       panelContentHeight: CGFloat,
+                       rule: LiveTranslateFocusLayout.Rule = .shipped) -> LiveTranslateFocusLayout {
         LiveTranslateFocusLayout.resolve(containerSize: containerSize,
                                          imageSize: capture.framePixelSize,
                                          panelContentHeight: panelContentHeight,
-                                         minimumPanelHeight: minimumPanelHeight)
+                                         minimumPanelHeight: minimumPanelHeight,
+                                         columnSpacing: DesignTokens.interElementSpacing,
+                                         rule: rule)
     }
 
     /// The floor the picture may not eat into: one row of the panel at the

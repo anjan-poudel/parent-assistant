@@ -192,7 +192,7 @@ final class LiveTranslationFocusedModeTests: XCTestCase {
 
         let settled = await harness.pipeline.resolveFocused([item("r1", askedText)],
                                                             regionCounts: [:])
-        let result = try XCTUnwrap(settled?["r1"])
+        let result = try XCTUnwrap(settled?.answers["r1"])
 
         XCTAssertEqual(result.sourceTier, .onDeviceBrain,
                        "a pointed-at read is answered by the device first, whatever its class")
@@ -210,7 +210,7 @@ final class LiveTranslationFocusedModeTests: XCTestCase {
 
         let settled = await harness.pipeline.resolveFocused([item("r1", askedText)],
                                                             regionCounts: [:])
-        let result = try XCTUnwrap(settled?["r1"])
+        let result = try XCTUnwrap(settled?.answers["r1"])
 
         XCTAssertEqual(result.sourceTier, .cloud,
                        "the device led and could not answer, so the cloud answered — "
@@ -239,7 +239,7 @@ final class LiveTranslationFocusedModeTests: XCTestCase {
         let answered = makeHarness(brainAnswers: [askedText: answer])
         let defaultCap = await answered.pipeline.resolveFocused([item("r1", askedText)],
                                                                 regionCounts: [:])
-        XCTAssertEqual(try XCTUnwrap(defaultCap?["r1"]).sourceTier, .onDeviceBrain,
+        XCTAssertEqual(try XCTUnwrap(defaultCap?.answers["r1"]).sourceTier, .onDeviceBrain,
                        "the shipped cap is enough for one string")
         XCTAssertEqual(answered.brain.calls.count, 1)
 
@@ -247,7 +247,7 @@ final class LiveTranslationFocusedModeTests: XCTestCase {
         let held = await capped.pipeline.resolveFocused([item("r1", askedText)],
                                                         regionCounts: [:])
 
-        XCTAssertEqual(held?.isEmpty, true,
+        XCTAssertEqual(held?.answers.isEmpty, true,
                        "a plan the cap held answers nothing — an empty result, which is the "
                        + "caller's 'not right now' (see the clock test below)")
         XCTAssertTrue(capped.brain.calls.isEmpty, "no generation was paid")
@@ -285,7 +285,7 @@ final class LiveTranslationFocusedModeTests: XCTestCase {
         let focused = makeHarness(brainAnswers: [askedText: answer])
         let focusedSettled = await focused.pipeline.resolveFocused([item("r1", askedText)],
                                                                    regionCounts: [:])
-        XCTAssertEqual(try XCTUnwrap(focusedSettled?["r1"]).sourceTier, .onDeviceBrain)
+        XCTAssertEqual(try XCTUnwrap(focusedSettled?.answers["r1"]).sourceTier, .onDeviceBrain)
         XCTAssertNothingPersisted(focused, for: askedText)
 
         let cascade = makeHarness(brainAnswers: [askedText: answer])
@@ -315,7 +315,10 @@ final class LiveTranslationFocusedModeTests: XCTestCase {
 
         let held = await harness.pipeline.resolveFocused([item("r1", askedText)],
                                                          regionCounts: ["r1": 1])
-        XCTAssertNil(held, "the closed gate held the capture's string")
+        XCTAssertEqual(held?.awaitingDecision, ["r1"],
+                       "the closed gate held the capture's string — reported on the string "
+                       + "it is open over (review finding 2), so its neighbours are not "
+                       + "silenced by it")
         XCTAssertEqual(harness.brain.calls.count, 1,
                        "the device was asked, in front, and could not answer")
         XCTAssertEqual(harness.transport.requestCount, 0, "nothing was sent behind a closed gate")
@@ -349,7 +352,7 @@ final class LiveTranslationFocusedModeTests: XCTestCase {
         let harness = makeHarness(brainAnswers: [askedText: answer])
         let first = await harness.pipeline.resolveFocused([item("r1", askedText)],
                                                           regionCounts: [:])
-        XCTAssertEqual(try XCTUnwrap(first?["r1"]).sourceTier, .onDeviceBrain)
+        XCTAssertEqual(try XCTUnwrap(first?.answers["r1"]).sourceTier, .onDeviceBrain)
         XCTAssertEqual(harness.brain.calls.count, 1)
 
         // The string leaves the picture: a pass that finds nothing prunes every
@@ -370,7 +373,8 @@ final class LiveTranslationFocusedModeTests: XCTestCase {
                        + "answered from the ledger without a second ask")
         XCTAssertEqual(harness.transport.requestCount, 1,
                        "and with the ledger empty the string reached the network")
-        XCTAssertNotNil(second, "the region is settled either way, not left pending")
+        XCTAssertNotNil(second?.answers["r1"],
+                        "the region is settled either way, not left pending")
     }
 
     // MARK: - How much may be spent
@@ -392,7 +396,7 @@ final class LiveTranslationFocusedModeTests: XCTestCase {
         let full = await answered.pipeline.resolveFocused([item("r1", askedText)],
                                                           regionCounts: [:])
 
-        XCTAssertEqual(try XCTUnwrap(full?["r1"]).sourceTier, .cloud,
+        XCTAssertEqual(try XCTUnwrap(full?.answers["r1"]).sourceTier, .cloud,
                        "two batches: the device, then the cloud behind it")
         XCTAssertEqual(answered.brain.calls.count, 1)
         XCTAssertEqual(answered.transport.requestCount, 1)
@@ -404,12 +408,12 @@ final class LiveTranslationFocusedModeTests: XCTestCase {
 
         XCTAssertEqual(narrowed.brain.calls.count, 1, "the device's one batch was spent")
         XCTAssertEqual(narrowed.transport.requestCount, 0, "the cloud's batch was the one held back")
-        XCTAssertEqual(held?.isEmpty, true,
+        XCTAssertEqual(held?.answers.isEmpty, true,
                        "a plan the cap held answers nothing and settles nothing")
     }
 
     /// **"Nothing" is two different answers, and the caller that waits has to
-    /// tell them apart** (Workstream B, the clock hold).
+    /// tell them apart** (Workstream B, the clock hold; review finding 2).
     ///
     /// A plan whose every string was *released* — the clock held them, or the
     /// capture's cap did — has told its caller "not right now", and the only
@@ -419,11 +423,12 @@ final class LiveTranslationFocusedModeTests: XCTestCase {
     /// answer nothing, and while the two were one `nil` a focused read whose
     /// single string the clock held looked exactly like an open prompt — the
     /// session deferred nothing, waited for nothing, and the card said
-    /// "translating…" for the rest of the picture's life. That was the stall the
-    /// hold exists to end, so the two are separate results here: an empty
-    /// dictionary for a release, `nil` for a question.
+    /// "translating…" for the rest of the picture's life. So the answers are
+    /// empty for a release, and the string is **named** in `awaitingDecision`
+    /// for a question — and only the `nil` that is not per string (the session
+    /// is gone) means nothing may be applied at all.
     @MainActor
-    func testAPlanTheClockHeldIsAnEmptyResultAndAnOpenPromptIsNil() async throws {
+    func testAPlanTheClockHeldIsAnEmptyResultAndAnOpenPromptNamesItsString() async throws {
         // One date for the whole scenario: the interval the plan was told about
         // never elapses, so "the clock is closed" is a fact of the fixture
         // rather than of how long the test took.
@@ -443,9 +448,10 @@ final class LiveTranslationFocusedModeTests: XCTestCase {
         // for: the clock is the only thing that can release it.
         let held = await clocked.pipeline.resolveFocused([item("r2", askedText)],
                                                          regionCounts: [:])
-        XCTAssertEqual(held?.isEmpty, true,
+        XCTAssertEqual(held?.answers.isEmpty, true,
                        "a plan the clock held answers nothing — and says so by answering "
                        + "nothing, rather than by looking like a question")
+        XCTAssertEqual(held?.awaitingDecision, [])
         XCTAssertEqual(clocked.brain.calls.count, 1, "and pays for nothing")
 
         // The prompt, the other way to answer nothing: the household has not
@@ -453,9 +459,13 @@ final class LiveTranslationFocusedModeTests: XCTestCase {
         let prompted = makeHarness(brainAnswers: [:], consent: false)
         let asked = await prompted.pipeline.resolveFocused([item("r1", askedText)],
                                                            regionCounts: [:])
-        XCTAssertNil(asked,
-                     "the elder is being asked: nothing may be applied, and nothing is "
-                     + "deferred — the answer is coming, so there is nothing to wait for")
+        XCTAssertEqual(asked?.answers.isEmpty, true,
+                       "the elder is being asked: nothing may be applied, and nothing is "
+                       + "deferred — the answer is coming, so there is nothing to wait for")
+        XCTAssertEqual(asked?.awaitingDecision, ["r1"],
+                       "and the question is **named**, on the string it is open over: the "
+                       + "caller that defers and re-asks must not read a question as a "
+                       + "release (review finding 2)")
     }
 
     // MARK: - The persisted layer, read

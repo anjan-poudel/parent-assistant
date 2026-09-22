@@ -178,16 +178,29 @@ struct LiveTranslateConsentSettingsView: View {
     /// first handed. The write still goes to the store — the mirror follows
     /// the write, never the other way round — so there is one persisted
     /// answer and this is only the copy the screen is drawing.
-    @State private var geminiCloudEnabled = false
+    @State private var geminiCloudEnabled: Bool
 
     /// The master switch's mirror, for the same reason and with the same rule:
     /// the mirror follows the write, and the store is the one answer.
-    @State private var liveTranslateEnabled = true
+    @State private var liveTranslateEnabled: Bool
 
+    /// Both mirrors are **read from the store here**, synchronously, rather
+    /// than in `onAppear` (review finding 8).
+    ///
+    /// This screen is *pushed by a refusal*: the elder tapped a tile that said
+    /// the feature is off, "I've opened its settings" was spoken, and this leaf
+    /// is what appears. `onAppear` runs after the first frame is drawn, so a
+    /// mirror that started `true` painted the switch ON under the sentence that
+    /// had just said the feature is off — the refusal contradicting itself for
+    /// a frame. The store is the one answer and this is the same read
+    /// `onAppear` makes; that read stays, because the decision can change on
+    /// another surface while this one is alive.
     init(controller: ConsentPromptController,
          settings: LiveTranslateSettings = LiveTranslateSettings()) {
         self.controller = controller
         self.settings = settings
+        _geminiCloudEnabled = State(initialValue: settings.geminiCloudEnabled)
+        _liveTranslateEnabled = State(initialValue: settings.liveTranslateEnabled)
     }
 
     var body: some View {

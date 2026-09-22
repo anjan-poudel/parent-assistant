@@ -56,8 +56,15 @@ final class LiveTranslateFocusCaptureTests: XCTestCase {
         /// strings. Empty by default, which is the state a capture's own plan
         /// leaves behind.
         var settled: [String: TranslationResult] = [:]
-        /// When true the plan refuses to answer at all (the pipeline's
-        /// "nothing settled in time" shape).
+        /// The strings the plan **puts to the elder** — the answer is not held
+        /// back, it is being asked for (review finding 2). Empty by default:
+        /// every string the plan was handed that it did not answer was released,
+        /// which is the ordinary deferral.
+        var asking: Set<String> = []
+        /// When true the plan reports **nothing at all** — the `nil` that is
+        /// not per string, which the pipeline reserves for a session that is
+        /// gone. The shape a suite scripts when it wants the caller to apply
+        /// nothing and defer nothing.
         var refuses = false
         /// When true the plan **settles** what it answers into `settled` — the
         /// real plan writes its answers into the ledger a re-pack reads, and a
@@ -71,7 +78,8 @@ final class LiveTranslateFocusCaptureTests: XCTestCase {
         var askedTexts: [String] { asks.flatMap { $0.items.map(\.text) } }
 
         func resolveFocused(_ items: [CloudTranslationTier.Item],
-                            regionCounts: [String: Int]) async -> [String: TranslationResult]? {
+                            regionCounts: [String: Int])
+            async -> LiveTranslateFocusedResolution? {
             asks.append((items, regionCounts))
             guard !refuses else { return nil }
             var answered: [String: TranslationResult] = [:]
@@ -79,7 +87,12 @@ final class LiveTranslateFocusCaptureTests: XCTestCase {
                 answered[item.id] = answers[item.id]
             }
             if settlesWhatItAnswers { settled.merge(answered) { _, new in new } }
-            return answered
+            // Intersected with the batch, like the plan's own report: a scripted
+            // question about a string this batch does not carry is not this
+            // batch's question.
+            return LiveTranslateFocusedResolution(
+                answers: answered,
+                awaitingDecision: asking.intersection(Set(items.map(\.id))))
         }
 
         func settledAnswers(for items: [CloudTranslationTier.Item])
@@ -342,17 +355,58 @@ final class LiveTranslateFocusCaptureTests: XCTestCase {
 
     /// The plan answered *nothing* because the question is open — the deferral
     /// marking is not for that case: those rows are waiting on the elder, and
-    /// the replay will answer them.
+    /// the replay will answer them. Scripted as a **question over this batch's
+    /// string** (review finding 2), which is how the plan reports that state
+    /// now: the string is named as being asked about rather than the whole
+    /// batch being refused.
     @MainActor
     func testAPlanThatIsHeldByAnOpenQuestionDefersNothing() async throws {
         let composition = makeComposition(regions: [detected("Light")])
-        composition.cycle.refuses = true
+        composition.cycle.asking = ["light|ne"]
 
         let attempt = await capture(composition)
         let capture = try XCTUnwrap(attempt)
 
         XCTAssertTrue(capture.deferredKeys.isEmpty,
-                      "'the plan may apply nothing' is not 'the plan released this string'")
+                      "a string the elder is being asked about is not deferred, and the "
+                      + "clock hold must not re-ask for it")
+    }
+
+    /// **One string in the elder's question does not speak for its neighbour**
+    /// (Workstream B, review finding 2).
+    ///
+    /// The plan's outcomes are per string and the caller acts on each: the
+    /// string it put to the elder is waiting on the elder and is **not**
+    /// deferred (nothing re-asks it on a clock — the replay renders it), while
+    /// the one the budget released **is** deferred, which is what arms the
+    /// clock hold. The batch used to be all-or-nothing: a question raised over
+    /// any string made every row of the crop "translating…" and left the
+    /// released one with no re-ask behind it.
+    @MainActor
+    func testAnAskedStringIsNotDeferredWhileItsReleasedNeighbourIs() async throws {
+        let composition = makeComposition(regions: [detected("Light"),
+                                                    detected("Members only beyond this point")])
+        composition.cycle.asking = ["light|ne"]
+
+        let attempt = await capture(composition)
+        let capture = try XCTUnwrap(attempt)
+
+        XCTAssertEqual(composition.cycle.asks.count, 1, "one ask carries both strings")
+        XCTAssertEqual(capture.deferredKeys, ["members only beyond this point|ne"],
+                       "the released string is deferred — the clock hold's business — and "
+                       + "the asked one is not")
+        let surface = LiveTranslateOverlaySurface(placements: [], policy: policy, locale: locale)
+        let asked = try XCTUnwrap(capture.rows.first { $0.translation == "Light" })
+        XCTAssertEqual(asked.source, surface.stateCopy(for: .pending("Light")),
+                       "the string the elder is being asked about says it is on its way, "
+                       + "because it is")
+        let released = try XCTUnwrap(capture.rows
+            .first { $0.translation == "Members only beyond this point" })
+        XCTAssertEqual(released.source,
+                       surface.stateCopy(for: .degraded(originalText: "",
+                                                        reason: .noTierResolved)),
+                       "and the released string says its translation is not available "
+                       + "right now")
     }
 
     // MARK: - The ledger, read again (review round 2, finding 3)
@@ -364,8 +418,9 @@ final class LiveTranslateFocusCaptureTests: XCTestCase {
     func testALaterSettlementIsDrawnOntoTheStandingCaptureAndLeavesTheLedgerAlone() async throws {
         let composition = makeComposition(regions: [detected("Members only beyond this point")])
         // The capture's own plan is held by the open question: nothing is
-        // answered and nothing is deferred (`refuses` is the nil shape).
-        composition.cycle.refuses = true
+        // answered and nothing is deferred — the string is reported as being
+        // asked about (review finding 2), not as released.
+        composition.cycle.asking = ["members only beyond this point|ne"]
         let packedAttempt = await capture(composition)
         let packed = try XCTUnwrap(packedAttempt)
         let asksWhenPacked = composition.cycle.asks.count

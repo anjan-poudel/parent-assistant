@@ -85,6 +85,13 @@ final class LiveTranslateCopyTests: XCTestCase {
         "livetranslate.command.translateHere",
         "livetranslate.disabled",
         "livetranslate.focus.back",
+        // The held picture's refusal (review finding 4): a focused read started
+        // over a frozen frame would destroy the snapshot the elder is reading
+        // on its way to showing its own picture, so it is refused — out loud,
+        // because they asked for something and the sentence names the way out
+        // they already have on screen. Draft awaiting the same OD3 copy review
+        // as the rest of this list.
+        "livetranslate.focus.frozen",
         "livetranslate.focus.scrolls",
         "livetranslate.focus.translate",
         "livetranslate.settings.enabled.note",

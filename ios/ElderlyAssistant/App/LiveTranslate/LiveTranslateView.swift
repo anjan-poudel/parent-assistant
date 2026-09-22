@@ -139,7 +139,12 @@ struct LiveTranslateView: View {
                             model.translateFocusedRegion(box: target.box,
                                                          pixelRect: .null,
                                                          measuredOn: model.anchoredFrame)
-                        })
+                        },
+                        // The host's own insets (review finding 7): this is
+                        // the reader that owns the `.ignoresSafeArea()` the
+                        // whole surface is drawn under, so it is the one that
+                        // can say where the glass stops being usable.
+                        safeAreaBottomInset: proxy.safeAreaInsets.bottom)
                 }
 
                 chrome(in: proxy)
@@ -158,7 +163,22 @@ struct LiveTranslateView: View {
                     LiveTranslateFocusResultView(
                         capture: capture,
                         locale: model.locale,
-                        onSpeak: { model.tapRegion($0) },
+                        // The session's own numbers, not the shipped default:
+                        // a suite that drives a session with its own config
+                        // gets the layout that config describes.
+                        rule: model.focusRule,
+                        safeAreaInsets: proxy.safeAreaInsets,
+                        // **The crop's own placements** (review finding 1).
+                        // `tapRegion` reads the *live* publication, and while a
+                        // focused read is up that is a different picture with
+                        // different rows: the id the row handed back belongs to
+                        // this crop, so resolving it against the live picture
+                        // found nothing (or, worse, found a live region that
+                        // happened to share the id) and spoke the wrong text.
+                        // The focused surface's taps resolve against the
+                        // capture's publication, exactly as the frozen card's
+                        // resolve against the held frame's.
+                        onSpeak: { model.tapFocusedRegion($0) },
                         onReturnToLive: { model.returnToLive() })
                 }
 

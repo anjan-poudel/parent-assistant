@@ -55,12 +55,13 @@ final class LiveTranslateFocusButtonsTests: XCTestCase {
     /// centred in the glass and every rect measured below would be measured
     /// from the wrong origin.
     @MainActor
-    private func render(box: NormalizedBox) throws -> UIImage {
+    private func render(box: NormalizedBox, bottomInset: CGFloat = 0) throws -> UIImage {
         let view = PointAskOverlayBoxView(
             surface: surface(box: box),
             presentation: presentation,
             onChipTap: {},
             containerSize: container,
+            bottomInset: bottomInset,
             translateLabel: L10n.str(PointAskOverlayBoxView.translateKey, locale: nepali),
             onTranslateTap: {})
             .frame(width: container.width, height: container.height, alignment: .topLeading)
@@ -227,6 +228,94 @@ final class LiveTranslateFocusButtonsTests: XCTestCase {
                           L10n.str(PointAskOverlayBoxView.translateKey, locale: english),
                           "the row is drawn in the active language, not in English twice")
     }
+
+    // MARK: - Where the row goes (review finding 7)
+
+    /// The row hangs under the anchor while the glass has room for it: its top
+    /// edge is the box's bottom edge plus the gap, exactly — the row and the
+    /// thing it acts on read as one object.
+    func testTheRowHangsUnderTheAnchorWhenTheGlassHasRoom() {
+        let boxRect = CGRect(x: 39, y: 169, width: 156, height: 84)
+        let origin = PointAskOverlayBoxView.actionRowOriginY(below: boxRect,
+                                                             containerHeight: 844,
+                                                             bottomInset: 34,
+                                                             rowHeight: 48,
+                                                             spacing: 8)
+        XCTAssertEqual(origin, boxRect.maxY + 8, accuracy: 0.001)
+    }
+
+    /// An anchor near the floor **flips the row above itself** rather than
+    /// sliding it up over the box or pushing it under the home indicator.
+    ///
+    /// The offset this replaced was `min(boxRect.maxY + spacing, boxRect.maxY)`
+    /// — `boxRect.maxY` for every input, a clamp that clamped nothing — so a
+    /// low anchor put both actions in the indicator's strip, half off the
+    /// usable glass. The floor is `containerHeight - bottomInset`.
+    func testAnAnchorNearTheFloorFlipsTheRowAboveItself() {
+        let boxRect = CGRect(x: 39, y: 740, width: 156, height: 60)
+        let origin = PointAskOverlayBoxView.actionRowOriginY(below: boxRect,
+                                                             containerHeight: 844,
+                                                             bottomInset: 34,
+                                                             rowHeight: 48,
+                                                             spacing: 8)
+        XCTAssertLessThan(origin, boxRect.minY,
+                          "the row is above the anchor, not over it and not under the glass")
+        XCTAssertLessThanOrEqual(origin + 48, boxRect.minY - 8 + 0.001,
+                                 "and it clears the anchor by the same gap it would have hung by")
+        XCTAssertLessThanOrEqual(origin + 48, 844 - 34 + 0.001,
+                                 "nothing of the row is in the home indicator's strip")
+    }
+
+    /// A glass too short for two rows and an anchor takes the top of the glass:
+    /// **on screen** beats perfectly placed, and a negative origin — a row drawn
+    /// above the top edge, where nobody can tap it — is never the answer.
+    func testACrowdedGlassPutsTheRowAtTheTopRatherThanAboveIt() {
+        let boxRect = CGRect(x: 0, y: 30, width: 100, height: 40)
+        let origin = PointAskOverlayBoxView.actionRowOriginY(below: boxRect,
+                                                             containerHeight: 90,
+                                                             bottomInset: 34,
+                                                             rowHeight: 48,
+                                                             spacing: 8)
+        XCTAssertGreaterThanOrEqual(origin, 0, "a row above the glass is an untappable row")
+        XCTAssertEqual(origin, 0, accuracy: 0.001, "the last resort is the top of the glass")
+    }
+
+    /// A box in the bottom half of the glass: the row is drawn **above** it, so
+    /// the two actions are not sitting on the home indicator's strip. Measured
+    /// on the drawing, not on the arithmetic: the row's clamp is only worth
+    /// anything if the offset it produces is what reaches the glass.
+    @MainActor
+    func testARowUnderALowAnchorIsDrawnAboveItAndAboveTheStrip() throws {
+        let box = NormalizedBox(xMin: 0.1, yMin: 0.88, xMax: 0.5, yMax: 0.95)
+        let boxRect = presentation.containerRect(ofFrameBox: box)
+        let floor = container.height - safeBottom
+        let image = try render(box: box, bottomInset: safeBottom)
+
+        // Nothing at all is drawn in the home indicator's strip.
+        XCTAssertTrue(try OverlayRenderProbe.ink(in: image,
+                                                 within: CGRect(x: 0, y: floor,
+                                                                width: container.width,
+                                                                height: container.height - floor))
+                        .isEmpty,
+                      "the strip below the safe area is left to the system")
+
+        // And the actions are above the box: the region between the top of the
+        // glass and the anchor's top edge carries the row's ink.
+        let above = try OverlayRenderProbe.ink(in: image,
+                                               within: CGRect(x: 0, y: 0,
+                                                              width: container.width,
+                                                              height: boxRect.minY))
+        XCTAssertFalse(above.isEmpty, "the row flipped above the anchor and was drawn")
+        let middle = CGFloat(above.minY + above.maxY) / (2 * image.scale)
+        XCTAssertEqual(try OverlayRenderProbe.inkRunCount(in: image, atY: middle,
+                                                          from: 0, to: container.width),
+                       2,
+                       "both actions came with it")
+    }
+
+    /// The strip the tests reserve: one home indicator, as a `GeometryProxy`
+    /// reports it on the phones this screen is designed for.
+    private var safeBottom: CGFloat { 34 }
 
     // MARK: - The wiring (a claim about code, so it is scanned)
 
