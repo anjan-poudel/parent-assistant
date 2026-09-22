@@ -118,10 +118,69 @@ struct LiveTranslateView: View {
                         // surface (no point-ask wiring) draws nothing new.
                         pointAsk: model.pointAsk?.overlaySurface,
                         presentation: presentation(in: proxy),
-                        onPointAskChipTap: { model.pointAsk?.chipTapped() })
+                        onPointAskChipTap: { model.pointAsk?.chipTapped() },
+                        // [FOCUS-CAPTURE] The anchored box's two actions
+                        // (Workstream B): "What is it?" above, and here the
+                        // elder's "read that" — the touch half of the spoken
+                        // "translate here", routed to the same call the words
+                        // make, so the two cannot mean different things.
+                        //
+                        // The box is passed as a *normalized* rect against the
+                        // frame in hand (`.null` pixel rect), because that is
+                        // what the box is: a place on the picture the elder is
+                        // looking at, drawn through the same live presentation
+                        // mapping as every other box. A pixel rect measured when
+                        // the anchor was made would be a rect from an older
+                        // frame, which is the stale-rect crop the focus path
+                        // exists to avoid (`translateFocusedRegion`'s
+                        // `measuredOn`).
+                        onPointAskTranslateTap: {
+                            guard let target = model.pointAsk?.anchoredTarget else { return }
+                            model.translateFocusedRegion(box: target.box,
+                                                         pixelRect: .null,
+                                                         measuredOn: model.anchoredFrame)
+                        },
+                        // The host's own insets (review finding 7): this is
+                        // the reader that owns the `.ignoresSafeArea()` the
+                        // whole surface is drawn under, so it is the one that
+                        // can say where the glass stops being usable.
+                        safeAreaBottomInset: proxy.safeAreaInsets.bottom)
                 }
 
                 chrome(in: proxy)
+
+                // [FOCUS-CAPTURE] The focused read (Workstream B), over the
+                // live surface: the elder pointed at one thing and asked for
+                // *that*, so the crop and its reading are what is on screen —
+                // not the live scene with a box drawn on it. It is drawn above
+                // the chrome (its own back control is the way out, and the
+                // zoom and capture controls belong to a live picture that is no
+                // longer the subject) and below the two prompts beneath it,
+                // which must never be hidden: a focused read can reach the
+                // consent question, and the question is the one thing that
+                // cannot wait.
+                if let capture = model.focusedCapture {
+                    LiveTranslateFocusResultView(
+                        capture: capture,
+                        locale: model.locale,
+                        // The session's own numbers, not the shipped default:
+                        // a suite that drives a session with its own config
+                        // gets the layout that config describes.
+                        rule: model.focusRule,
+                        safeAreaInsets: proxy.safeAreaInsets,
+                        // **The crop's own placements** (review finding 1).
+                        // `tapRegion` reads the *live* publication, and while a
+                        // focused read is up that is a different picture with
+                        // different rows: the id the row handed back belongs to
+                        // this crop, so resolving it against the live picture
+                        // found nothing (or, worse, found a live region that
+                        // happened to share the id) and spoke the wrong text.
+                        // The focused surface's taps resolve against the
+                        // capture's publication, exactly as the frozen card's
+                        // resolve against the held frame's.
+                        onSpeak: { model.tapFocusedRegion($0) },
+                        onReturnToLive: { model.returnToLive() })
+                }
 
                 // The consent prompt is presented over everything (it is the
                 // one thing that must not be missed) and the permission card
@@ -711,6 +770,22 @@ struct LiveTranslateResultsCardView: View {
     /// Tap-to-hear (C12), on the held frame's own placements: the row hands
     /// back the region it was built from.
     let onSpeak: (TextRegionStabilizer.RegionIdentity) -> Void
+    /// The height the card's **content** wants at the width it was given, for
+    /// a caller that has to decide how much room to leave it (Workstream B).
+    ///
+    /// A defaulted `var` rather than a `let`, deliberately: every construction
+    /// site that predates the focused read keeps the memberwise initializer it
+    /// was written against — the frozen path passes nothing and measures
+    /// nothing — and a `let` with a default is excluded from that initializer,
+    /// which would break them all instead.
+    ///
+    /// The focused read is the caller that needs it: its panel is bounded by
+    /// the picture above it, so it must know what the rows actually need before
+    /// it decides how far the picture may grow. Only the card can answer that —
+    /// it is the thing that laid the rows out at the width in force — and the
+    /// alternative, an estimate from the row count, is a number that would drift
+    /// from the type floors it is supposed to respect.
+    var onContentHeight: ((CGFloat) -> Void)?
 
     var body: some View {
         ScrollView {
@@ -723,6 +798,19 @@ struct LiveTranslateResultsCardView: View {
                 }
             }
             .padding(DesignTokens.interElementSpacing)
+            // The content's natural height, measured off its own frame: inside
+            // the scroll view that frame is the height the rows want at the
+            // offered width, which is the number the caller asked for. A
+            // background reader, so the measurement never changes the layout it
+            // measures.
+            .background(
+                GeometryReader { proxy in
+                    Color.clear
+                        .onAppear { onContentHeight?(proxy.size.height) }
+                        .onChange(of: proxy.size.height) { height in
+                            onContentHeight?(height)
+                        }
+                })
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(DesignTokens.card)

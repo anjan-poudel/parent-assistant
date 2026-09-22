@@ -97,6 +97,54 @@ enum OverlayRenderProbe {
         return Ink(minX: minX, minY: minY, maxX: maxX, maxY: maxY, count: count)
     }
 
+    /// **How many separate things are drawn along one horizontal line** — the
+    /// claim a bounding box cannot make: one capsule and two sitting side by
+    /// side have the same ink bounds, and only the gap between them tells them
+    /// apart.
+    ///
+    /// The line is in container points (`image.scale` is applied here, as
+    /// everywhere else in this probe) and is sampled in `step`-point slices, so
+    /// a run is "a stretch of the line with ink on it" rather than "a lit
+    /// pixel": antialiasing between two glyphs inside one capsule must not read
+    /// as two controls.
+    static func inkRunCount(in image: UIImage, atY y: CGFloat,
+                            from minX: CGFloat = 0,
+                            to maxX: CGFloat? = nil,
+                            step: CGFloat = 2) throws -> Int {
+        let pixels = try pixelBytes(of: image)
+        let scale = image.scale
+        let row = Int((y * scale).rounded())
+        guard row >= 0, row < pixels.height else {
+            throw NSError(domain: "OverlayRenderProbe", code: 2, userInfo: [
+                NSLocalizedDescriptionKey: "the line y=\(y) is outside the rendering",
+            ])
+        }
+        let first = max(0, Int((minX * scale).rounded(.down)))
+        let last = min(pixels.width, Int(((maxX ?? CGFloat(pixels.width) / scale) * scale).rounded(.up)))
+        let slice = max(1, Int((step * scale).rounded()))
+        var runs = 0
+        var inRun = false
+        var column = first
+        while column < last {
+            var hasInk = false
+            for offset in 0..<slice where column + offset < last {
+                let index = (row * pixels.width + column + offset) * 4
+                let red = pixels.bytes[index]
+                let green = pixels.bytes[index + 1]
+                let blue = pixels.bytes[index + 2]
+                let alpha = pixels.bytes[index + 3]
+                if alpha > 0, red < 250 || green < 250 || blue < 250 {
+                    hasInk = true
+                    break
+                }
+            }
+            if hasInk, !inRun { runs += 1 }
+            inRun = hasInk
+            column += slice
+        }
+        return runs
+    }
+
     /// What a region of a rendering looks like, in colour terms: the average
     /// straight-sRGB components of its pixels, and the share of them that are
     /// darker than `darkBelow` in relative luminance.

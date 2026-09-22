@@ -72,6 +72,44 @@ protocol LiveTranslateCropRecognising: AnyObject {
 
 extension LiveTextDetector: LiveTranslateCropRecognising {}
 
+/// What one focused plan answered, told **per string** (review finding 2).
+///
+/// The plan's outcomes are per string and the caller acts on each of them
+/// differently, so they are reported together rather than collapsed into one
+/// verdict for the batch. Three cases, and the third is the one that has to be
+/// distinguishable from the second:
+///
+///  - a string with an entry in `answers` is answered: apply it;
+///  - a string in `awaitingDecision` is the one the elder is being asked about.
+///    Nothing is applied and **nothing is deferred**: the answer is not held
+///    back, it is being asked for, and the replay the elder's decision triggers
+///    renders it (`LiveTranslationFocusCapture.updated`);
+///  - anything else the plan was handed was **released** — a batch the budget
+///    capped, a generation the clock deferred — and is a deferral. That is the
+///    state the card says "not right now" for, and the state the clock hold
+///    re-asks from (`LiveTranslateSessionModel.scheduleFocusedRedrive`).
+///
+/// **One string in a prompt must not speak for the batch.** It did: the entry
+/// answered a question about any of its strings with a `nil` for *all* of them,
+/// so a crop with one string in the elder's prompt and three the clock released
+/// showed every row as "translating…" and deferred none — which meant the three
+/// the clock had released were never re-asked, and the stall the clock hold
+/// exists to end went on behind the elder's own question.
+struct LiveTranslateFocusedResolution {
+
+    /// The answers this plan's ledger holds, keyed by item id. A key that is
+    /// absent is a string nobody has answered.
+    let answers: [String: TranslationResult]
+
+    /// The strings of this batch the elder is being asked about **right now**.
+    let awaitingDecision: Set<String>
+
+    init(answers: [String: TranslationResult] = [:], awaitingDecision: Set<String> = []) {
+        self.answers = answers
+        self.awaitingDecision = awaitingDecision
+    }
+}
+
 /// The focused cycle: the two calls the shared plan offers a capture.
 ///
 /// A protocol of its own rather than a member added to
@@ -84,8 +122,16 @@ protocol LiveTranslateFocusedCycle: AnyObject {
     /// rather than passed in (review round 2, finding 7): every caller of this
     /// entry is a focused read, and a parameter that has one legal value is a
     /// second place for that value to drift.
+    ///
+    /// - Returns: what each string of the batch got — an answer, a question, or
+    ///   a release (see `LiveTranslateFocusedResolution`) — or `nil` for the one
+    ///   state that is not per string: **the session is gone**, so nothing may
+    ///   be applied and nothing deferred (the picture is about to be taken down
+    ///   with the session). The empty resolution is the other end of the same
+    ///   scale — the plan ran and released every string — and is returned as
+    ///   itself so a caller that has to react to a deferral can see one.
     func resolveFocused(_ items: [CloudTranslationTier.Item],
-                        regionCounts: [String: Int]) async -> [String: TranslationResult]?
+                        regionCounts: [String: Int]) async -> LiveTranslateFocusedResolution?
     /// The ledger read and **nothing else** — no plan, no claim, no request.
     ///
     /// The re-pack's entry (`LiveTranslateFocusCapture.updated`): the answers a
@@ -95,6 +141,22 @@ protocol LiveTranslateFocusedCycle: AnyObject {
     func settledAnswers(for items: [CloudTranslationTier.Item])
         async -> [String: TranslationResult]
     func nextPublicationSequence() async -> Int
+    /// How long the brain's clock still holds a generation back — zero when it
+    /// is already open (Workstream B, the clock hold).
+    ///
+    /// The focused path needs the *number* and not the verdict, because the
+    /// plan answers "not now" by deferring the strings: the capture then holds
+    /// rows saying "not right now" until someone plans them again, and the plan
+    /// will not be started by the picture standing still. So the caller that
+    /// was deferred asks how long, waits exactly that long off the same clock
+    /// the plan reads, and asks again — which is `LiveTranslateFocusCapture
+    /// .reDriven(_:layout:policy:)`.
+    ///
+    /// `async` on the protocol because the plan is an actor: the value is read
+    /// on the injected clock (`LiveTranslationPipeline.now`) rather than
+    /// `Date()`, so a test drives the wait to zero instead of sleeping through
+    /// it.
+    func brainClockRemaining() async -> TimeInterval
 }
 
 extension LiveTranslationPipeline: LiveTranslateFocusedCycle {}
@@ -229,24 +291,32 @@ struct LiveTranslateFocusCapture {
         // releases a surplus string for a later plan (a batch the cap held, a
         // generation the clock deferred, a batch's prefix that did not reach
         // it), and a card that showed it as "translating…" for the rest of the
-        // picture's life made a deferral look like a hang. `nil` is the other
-        // thing entirely — the consent question is open, or the session is gone
-        // — and nothing is deferred there: the answer is not held back, it is
-        // being asked for.
+        // picture's life made a deferral look like a hang. Being asked about is
+        // the third thing and not a deferral (review finding 2): the answer is
+        // not held back there, it is being asked for, so the row stays pending
+        // and **is not re-asked on a clock** — the elder is the one who answers
+        // it. `nil` remains the fourth: the session is gone, and nothing at all
+        // is applied or deferred (the picture goes with it).
         var deferred: Set<String> = []
         if !pendingItems.items.isEmpty {
-            let answers = await cycle.resolveFocused(pendingItems.items,
-                                                     regionCounts: pendingItems.regionCounts)
-            if let answers {
+            let resolution = await cycle.resolveFocused(pendingItems.items,
+                                                        regionCounts: pendingItems.regionCounts)
+            if let resolution {
                 for item in pendingItems.items {
-                    guard let answer = answers[item.id] else {
-                        deferred.insert(item.id)
+                    if let answer = resolution.answers[item.id] {
+                        for id in pendingItems.regionIDsByKey[item.id] ?? [] {
+                            outcomes[id] = (outcomes[id] ?? .pending(item.text))
+                                .applying(answer.outcome)
+                        }
                         continue
                     }
-                    for id in pendingItems.regionIDsByKey[item.id] ?? [] {
-                        outcomes[id] = (outcomes[id] ?? .pending(item.text))
-                            .applying(answer.outcome)
-                    }
+                    // Asked, so not deferred — decided **per string** rather
+                    // than for the batch: one string in the elder's prompt used
+                    // to answer for its neighbours, and the ones the clock had
+                    // released were left looking like a hang with no re-ask
+                    // behind them.
+                    guard !resolution.awaitingDecision.contains(item.id) else { continue }
+                    deferred.insert(item.id)
                 }
             }
         }
@@ -303,7 +373,8 @@ struct LiveTranslateFocusCapture {
     ///   exactly as it is, publication sequence included.
     func updated(_ capture: LiveTranslateFocusedCapture,
                  layout: LiveTranslateLayout,
-                 policy: LiveOverlayPlacement.Policy) async -> LiveTranslateFocusedCapture? {
+                 policy: LiveOverlayPlacement.Policy,
+                 asked: Set<String> = []) async -> LiveTranslateFocusedCapture? {
         let regions = capture.publication.regions
         let pendingItems = Self.items(for: regions,
                                       outcomes: capture.publication.outcomes,
@@ -313,6 +384,22 @@ struct LiveTranslateFocusCapture {
         var outcomes = capture.publication.outcomes
         var stillDeferred = capture.deferredKeys
         var moved = false
+        // **A string the elder is being asked about is not deferred** (review
+        // finding 2). It leaves the deferred set here, which is what stops the
+        // card saying "not available right now" about a string whose answer is
+        // on its way, and what stops the clock hold re-asking for it: a re-ask
+        // armed for a string that is waiting on the elder is a plan that could
+        // not have answered. Passed in rather than derived because the ask is
+        // the caller's to know — `reDriven` is the one call that has just made
+        // a plan, and the re-pack after the elder's own decision (`asked`
+        // empty) has no ask open by construction.
+        if !asked.isEmpty {
+            let askedHere = stillDeferred.intersection(asked)
+            if !askedHere.isEmpty {
+                stillDeferred.subtract(askedHere)
+                moved = true
+            }
+        }
         for item in pendingItems.items {
             guard let answer = settled[item.id] else { continue }
             for id in pendingItems.regionIDsByKey[item.id] ?? [] {
@@ -346,6 +433,58 @@ struct LiveTranslateFocusCapture {
                                            publication: publication,
                                            rows: card.rows,
                                            deferredKeys: stillDeferred)
+    }
+
+    /// The standing capture **asked again** — the clock hold's way out
+    /// (Workstream B, review finding 5).
+    ///
+    /// A crop read while the brain's clock was closed was told "not now": the
+    /// plan released its strings, the capture marked them deferred, and the card
+    /// says so. Nothing was going to ask again. The live tick behind the crop
+    /// plans the *live* regions, not this crop's — they are different keys on a
+    /// different picture — so the crop's rows sat on "not right now" for as long
+    /// as the picture was on screen, which is a stall with a polite sentence on
+    /// it.
+    ///
+    /// This is the ask. The caller has already waited out the clock reading
+    /// `brainClockRemaining()`; this call does what `capture(in:pixelRect:layout:
+    /// policy:)` does with the strings, minus the crop and the pass — the same
+    /// pending set, the same plan, the same `.focused` mode — and then re-packs
+    /// through `updated(_:layout:policy:)`, so the merge, the memory write and
+    /// the placement are the one implementation rather than a second that could
+    /// disagree with it.
+    ///
+    /// - Returns: the re-packed capture, or `nil` when nothing moved — a plan
+    ///   that settled nothing (the clock was open but the tiers had nothing
+    ///   new), or a capture with nothing left pending. The caller then keeps the
+    ///   picture it has, exactly as the re-pack's own contract says.
+    func reDriven(_ capture: LiveTranslateFocusedCapture,
+                  layout: LiveTranslateLayout,
+                  policy: LiveOverlayPlacement.Policy) async -> LiveTranslateFocusedCapture? {
+        let regions = capture.publication.regions
+        let pendingItems = Self.items(for: regions,
+                                      outcomes: capture.publication.outcomes,
+                                      targetLanguage: targetLanguage)
+        guard !pendingItems.items.isEmpty else { return nil }
+        // The one thing `updated` deliberately does not do: start a plan. A
+        // `nil` resolution (the session is gone) leaves the ledger alone, and
+        // the re-pack below then finds nothing moved and returns `nil` — the
+        // picture stays as it is. A string the plan has just put to the elder
+        // is the case the re-pack *does* take notice of (review finding 2): its
+        // answer is not on the clock, so the deferral the re-ask was armed for
+        // is over and is dropped before the picture is re-packed.
+        let resolution = await cycle.resolveFocused(pendingItems.items,
+                                                    regionCounts: pendingItems.regionCounts)
+        return await updated(capture,
+                             layout: layout,
+                             policy: policy,
+                             asked: resolution?.awaitingDecision ?? [])
+    }
+
+    /// The plan's clock, read through this path so a caller holding the path
+    /// does not also have to hold the cycle.
+    func brainClockRemaining() async -> TimeInterval {
+        await cycle.brainClockRemaining()
     }
 
     /// The card's state copy, with one addition: a row whose string the plan

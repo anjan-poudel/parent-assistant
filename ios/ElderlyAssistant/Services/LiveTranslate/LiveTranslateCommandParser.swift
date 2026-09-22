@@ -64,6 +64,21 @@ enum LiveTranslateCommand: Equatable {
     /// "close translation": the session's one explicit exit.
     case close
 
+    /// "translate here" (Workstream B): the spoken half of the focus mode's
+    /// Translate button — crop what the elder is pointing at and read it.
+    ///
+    /// It is the same *action* the button performs, not a second one: both
+    /// call `LiveTranslateSessionModel.translateFocusedRegion`, so the words
+    /// and the touch cannot come to mean two different things. What "here"
+    /// resolves to is the session's (see `translateHere` there): the anchored
+    /// box when the elder has pointed at something, and otherwise the middle
+    /// of the picture the camera is aimed at — because an elder who says
+    /// "translate here" while aiming the phone has already said where.
+    ///
+    /// It carries no value and speaks nothing of its own: the answer is the
+    /// focused read's card, which is the same surface the button produces.
+    case translateHere
+
     /// The vocabulary's phrase-level values in C12 order: six phrases over
     /// the five commands, because the toggle has one phrase per state. The
     /// parser's results are asserted against exactly this set.
@@ -73,7 +88,8 @@ enum LiveTranslateCommand: Equatable {
         .setShowOriginal(true),
         .setShowOriginal(false),
         .repeatLast,
-        .close
+        .close,
+        .translateHere
     ]
 
     /// The speech mode this command asks for, or `nil` when it asks for no
@@ -84,7 +100,12 @@ enum LiveTranslateCommand: Equatable {
         switch self {
         case .readAll: return .readAll
         case .repeatLast: return .repeatLast
-        case .stopSpeaking, .setShowOriginal, .close: return nil
+        // "translate here" speaks nothing *as a command*: its answer is a
+        // picture with a card under it, which the session draws rather than
+        // says. It is not a silent command — the focused read's own surfaces
+        // carry its result — so this `nil` says "this command requests no
+        // speech", exactly as close's does.
+        case .stopSpeaking, .setShowOriginal, .close, .translateHere: return nil
         }
     }
 
@@ -103,7 +124,7 @@ enum LiveTranslateCommand: Equatable {
         case .setShowOriginal(let showOriginal):
             settings.setAlwaysShowOriginal(showOriginal)
             return true
-        case .readAll, .stopSpeaking, .repeatLast, .close:
+        case .readAll, .stopSpeaking, .repeatLast, .close, .translateHere:
             return false
         }
     }
@@ -144,7 +165,8 @@ struct LiveTranslateCommandPhraseTable: Equatable {
         ("livetranslate.command.showOriginal", .setShowOriginal(true)),
         ("livetranslate.command.hideOriginal", .setShowOriginal(false)),
         ("livetranslate.command.repeatLast", .repeatLast),
-        ("livetranslate.command.close", .close)
+        ("livetranslate.command.close", .close),
+        ("livetranslate.command.translateHere", .translateHere)
     ]
 
     /// The resolved table. Ordered: the active language's forms first, so if

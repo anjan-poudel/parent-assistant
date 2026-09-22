@@ -358,10 +358,131 @@ struct LiveTranslateSessionTestParts {
     let bus: LiveTranslateSanitisingBus
     let log: SessionLog
     let clock: SessionClock
+    /// The session's *date* clock (Workstream B, the clock hold) — what the
+    /// pipeline paces the brain's interval on. Wall time plus whatever a test
+    /// has advanced it by; see `SessionDateClock`.
+    let dateClock: SessionDateClock
+    /// The session's suspension seam (Workstream B, the clock hold). Records
+    /// what it was asked to wait for and returns at once.
+    let sleeper: RecordingSleeper
     let defaults: UserDefaults
     /// The `UserDefaults` suite this composition owns; the caller removes its
     /// persistent domain in teardown.
     let suiteName: String
+}
+
+/// The session's wait, recorded and not slept through (Workstream B).
+///
+/// The clock hold is *seconds* long by design, so a suite that asserted the
+/// re-drive by waiting would be timing the machine. This returns immediately
+/// and keeps what it was asked for, so "the session waited for exactly the
+/// plan's remaining time and then asked again" is a fact a test can read.
+final class RecordingSleeper: @unchecked Sendable {
+    private let lock = NSLock()
+    private var requested: [TimeInterval] = []
+    private var onSleep: (() -> Void)?
+    private var storedParksTheWait = false
+    private var parked: CheckedContinuation<Void, Never>?
+    private var releaseWasRequested = false
+
+    /// Whether the wait **suspends until the test releases it**, or returns at
+    /// once.
+    ///
+    /// **Returns at once, by default**, which is what the rest of this suite
+    /// wants: the hold's arithmetic is assertable from `waits`, and nothing
+    /// should be timing the machine. One scenario needs the hold to be
+    /// genuinely *in flight* — "putting the picture down takes the wait with
+    /// it" is a claim about a cancellation, and a wait that has already
+    /// returned is a race rather than a cancellation. Parking it makes that
+    /// moment something the test stands in rather than something it hopes for:
+    /// the task is provably inside `sleepFor` when the picture goes down, and
+    /// `releaseParkedWait()` is what lets it look at `Task.isCancelled`.
+    var parksTheWait: Bool {
+        get { lock.lock(); defer { lock.unlock() }; return storedParksTheWait }
+        set { lock.lock(); defer { lock.unlock() }; storedParksTheWait = newValue }
+    }
+
+    /// What each call was asked to wait for, in order.
+    var waits: [TimeInterval] {
+        lock.lock(); defer { lock.unlock() }
+        return requested
+    }
+
+    var callCount: Int { waits.count }
+
+    /// Runs at the start of every wait — the hook a suite uses to arrange the
+    /// world the re-ask will find (a newer crop, a close, a clock that has
+    /// opened).
+    func observe(_ body: @escaping () -> Void) {
+        lock.lock(); onSleep = body; lock.unlock()
+    }
+
+    /// Lets a parked wait return. Safe in either order: a release that arrives
+    /// before the task parked is remembered, so a test cannot lose the race it
+    /// just built.
+    func releaseParkedWait() {
+        lock.lock()
+        if let parked {
+            self.parked = nil
+            lock.unlock()
+            parked.resume()
+            return
+        }
+        releaseWasRequested = true
+        lock.unlock()
+    }
+
+    func sleep(for seconds: TimeInterval) async {
+        lock.lock()
+        requested.append(seconds)
+        let hook = onSleep
+        let parks = storedParksTheWait
+        lock.unlock()
+        hook?()
+        guard parks else { return }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            lock.lock()
+            if releaseWasRequested {
+                releaseWasRequested = false
+                lock.unlock()
+                continuation.resume()
+                return
+            }
+            parked = continuation
+            lock.unlock()
+        }
+    }
+}
+
+/// The session's **date** clock (Workstream B, the clock hold): the wall
+/// clock, shifted by whatever a test has advanced it by.
+///
+/// The camera's and the detector's `SessionClock` cannot serve here. It is a
+/// monotonic *counter* that a test steps deliberately, and the frame helper
+/// (`deliverPass`) steps it once per delivered frame by design — handing it to
+/// the pipeline would make three delivered passes "three seconds later" and
+/// pace the brain's own interval off a number the frame path moves.
+///
+/// The wall clock, by contrast, is exactly what the pipeline reads in
+/// production (`Date.init`), so a suite that never advances this one runs the
+/// same timing it ran before the seam existed — and the interval the brain
+/// clock is asked about is the same real interval. `advance` is then the one
+/// thing a suite needs to say "the clock has opened" without sleeping through
+/// whole seconds: the hold is measured against real time plus the shift, so
+/// shifting past `brainAttemptMinInterval` is what a real wait would have
+/// bought, in no time at all.
+final class SessionDateClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var offset: TimeInterval = 0
+
+    func advance(_ interval: TimeInterval) {
+        lock.lock(); offset += interval; lock.unlock()
+    }
+
+    var now: Date {
+        lock.lock(); defer { lock.unlock() }
+        return Date().addingTimeInterval(offset)
+    }
 }
 
 /// The production composition, with only the platform seams doubled. Every
@@ -401,18 +522,27 @@ func makeLiveTranslateSessionTestParts(
     /// exercises the household that has never chosen (the shipped default);
     /// `false` is how a test says the household turned the cloud off.
     geminiCloudEnabled: Bool? = true,
+    /// The point, tap & ask session's dependencies, when the host under test
+    /// runs one (Workstream B: the focused path's two buttons live on the
+    /// anchored box, so the box has to exist). `nil` — the default — is the
+    /// session with no point-ask wiring at all, which is what every scenario
+    /// that predates the focus buttons wants: no box, no chip, and no second
+    /// route to `focusedCapture` that a test could mistake for its subject.
+    pointAsk: PointAskSessionDependencies? = nil,
     /// The live-translation master switch (review finding 1), written into the
     /// session's own settings suite before the session is built — the same
     /// seam `geminiCloudEnabled` uses, and for the same reason: the model
     /// reads its settings once, at build time.
     ///
-    /// **On by default here, and the shipped default is off.** A household
-    /// starts with the key absent and the session therefore refuses to open
-    /// (`LiveTranslateSessionModel.start`); the suites that come through this
-    /// composition were written about what a *running* session does, so they
-    /// opt in here. `nil` leaves the key absent — the household that has never
-    /// chosen — and is how a test exercises the refusal; `false` is how a test
-    /// says the feature was turned off after the key was set.
+    /// **On by default here, and on by shipped default too**
+    /// (`LiveTranslateConfig.liveTranslateEnabledDefault`), so this parameter
+    /// is about *provenance* rather than about what a household sees: `nil`
+    /// leaves the key absent, which is the household that has never chosen and
+    /// therefore runs on the shipped default, and `false` is how a test says
+    /// the leaf was switched off (`LiveTranslateSettings
+    /// .setLiveTranslateEnabled(false)`) — the state the refusal is for. The
+    /// suites that come through this composition were written about what a
+    /// *running* session does, so they opt in explicitly.
     liveTranslateEnabled: Bool? = true) -> LiveTranslateSessionTestParts {
 
     // A session opens showing the *recognized text* — that is the shipped
@@ -441,6 +571,8 @@ func makeLiveTranslateSessionTestParts(
 
     let log = SessionLog()
     let clock = SessionClock()
+    let dateClock = SessionDateClock()
+    let sleeper = RecordingSleeper()
     let bus = LiveTranslateSanitisingBus()
     let notifications = NotificationCenter()
     let storage = LabelTranslationCacheTestStorage()
@@ -494,7 +626,18 @@ func makeLiveTranslateSessionTestParts(
         settings: LiveTranslateSettings(defaults: defaults),
         notifications: notifications,
         observabilityBus: bus,
-        config: config)
+        config: config,
+        pointAsk: pointAsk,
+        // The session's date clock (Workstream B, the clock hold): the wall
+        // clock, so the composition here paces the brain's interval exactly as
+        // production does, and shiftable so a suite can open the clock without
+        // sleeping through it.
+        now: { dateClock.now },
+        // The suspension seam (Workstream B, the clock hold): recorded, and
+        // returned at once unless the scenario has asked the sleeper to serve
+        // the wait for real, so a suite that drives the re-drive does not wait
+        // the seconds the hold is for.
+        sleepFor: { seconds in await sleeper.sleep(for: seconds) })
 
     return LiveTranslateSessionTestParts(dependencies: dependencies,
                                          camera: camera,
@@ -514,6 +657,8 @@ func makeLiveTranslateSessionTestParts(
                                          bus: bus,
                                          log: log,
                                          clock: clock,
+                                         dateClock: dateClock,
+                                         sleeper: sleeper,
                                          defaults: defaults,
                                          suiteName: suiteName)
 }

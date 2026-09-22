@@ -231,6 +231,19 @@ struct LiveTranslateResultsCardSurface: Equatable {
         self.emptyHint = emptyHint
     }
 
+    /// A card from rows that were already built.
+    ///
+    /// The focused read's path ([FOCUS-CAPTURE]): its rows are packed through
+    /// the publication initializer above, inside the capture, and the view that
+    /// draws them is handed a capture rather than a publication — so re-deriving
+    /// them here would mean carrying the publication for that one purpose. The
+    /// rows handed back are the same values, in the same order, from the same
+    /// initializer; this is a hand-off, not a second rule.
+    init(rows: [Row], emptyHint: String) {
+        self.rows = rows
+        self.emptyHint = emptyHint
+    }
+
     /// A publication as a list to read.
     ///
     /// **One row per recognized string.** The regions the overlay drew come

@@ -167,9 +167,13 @@ struct LiveTranslateSettings: Equatable {
     /// Whether live camera translation may run at all.
     ///
     /// An absent key is the config's nominal default, and that default is
-    /// **on** until the Settings leaf can offer the choice (see
-    /// `LiveTranslateConfig.liveTranslateEnabledDefault` — a closed door with
-    /// no copy to explain it is the merge hazard the default avoids). A stored
+    /// **on** (see `LiveTranslateConfig.liveTranslateEnabledDefault` — a closed
+    /// door with no copy to explain it was the merge hazard the default
+    /// avoided). The Settings leaf now *does* offer the choice (Workstream B:
+    /// `livetranslate.settings.enabled.title`, drawn first on the consent leaf
+    /// because the refusal it drives promises the elder that the settings are
+    /// open), so the reason the default was on no longer holds — but the
+    /// shipped default is a product decision and is left as it is; a stored
     /// value, either way, is the household's answer and this getter returns it.
     /// The read is *not* cached: the session model re-reads it when a session
     /// opens and on every write, so the Settings leaf and a running session
