@@ -99,17 +99,21 @@ final class ModelCatalogLanguageTests: XCTestCase {
     /// assertion that has to move with it.
     func testTheOfferedTranslationRowsAreExactlyTheTiersHead() {
         let offered = ModelCatalog.availableTranslationEntries.map(\.id)
-        XCTAssertEqual(offered, [ModelCatalog.nmtEnNeQwen17bR4Q6,
+        XCTAssertEqual(offered, [ModelCatalog.nmtEnNeQwen17bR7Q8,
+                                 ModelCatalog.nmtEnNeQwen17bR4Q6,
                                  ModelCatalog.nmtEnNeQwen17bR4Q4,
                                  ModelCatalog.nmtEnNeQwen17bR4Q8],
-                       "the tier's shipped head, plus the temporary A/B offers "
-                       + "riding behind it — the Q4_K_M first (the run this "
-                       + "build exists for), then the Q8 ceiling")
-        // Round 4 (2026-09-21) re-decided which artifact that head is: the
-        // round-4 Q5 failed the S11 gate under the shipped prompt and the
-        // verdict promoted the Q6_K. The row moved with the verdict, which is
-        // the property this assertion guards — an offered row that did NOT
-        // move would leave a household downloading a quant the gate refused.
+                       "the tier's shipped head leads, then the rungs behind it "
+                       + "— the Q6_K (the standard-class fallback a phone that "
+                       + "cannot hold the Q8 translates on), then the two "
+                       + "temporary A/B offers, the Q4_K_M and the Q8 ceiling")
+        // Round 7 (2026-09-22) re-decided which artifact that head is: the
+        // withconv Q8_0 clears all three gates under the app's shipped 4-line
+        // header (sign 82.4% against the Q6_K's 76.5%, probe 12/12,
+        // conversational 66.7%) and the verdict promoted it. The row moved
+        // with the verdict, which is the property this assertion guards — an
+        // offered row that did NOT move would leave a household downloading a
+        // quant the gate refused.
         XCTAssertEqual(LiveTranslateConfig.default.brainTranslationModelIDs.first,
                        offered.first,
                        "the tier leads with the quant the row offers")
@@ -178,24 +182,27 @@ final class ModelCatalogLanguageTests: XCTestCase {
     /// catalog's own `displayName` verbatim; a row that drifted from it
     /// would read differently in Settings than in the catalog's docs.
     func testTheTranslationRowIsNamedInBothLanguages() {
-        // Three entries need copy, not one: the translation row that is
-        // OFFERED (the head), the Q4_K_M ablation offer that rides beside it
-        // for the current A/B — an offered row in every sense, so a Nepali
-        // build must not print its raw id — and the superseded artifact a
-        // device that upgraded still holds. The installed-hidden row renders
-        // beside the new ones, and the names must read as different rows.
+        // Four entries need copy, not one: the translation row that is
+        // OFFERED (the head), the Q6_K rung behind it — now marked superseded
+        // by the round-7 head, so a household reading two Qwen rows knows
+        // which one to delete — the Q4_K_M ablation offer that rides beside
+        // them for the current A/B (an offered row in every sense, so a
+        // Nepali build must not print its raw id), and the older superseded
+        // artifact a device that upgraded still holds. The installed-hidden
+        // row renders beside the new ones, and the names must read as
+        // different rows.
         //
-        // The round-4 Q6_K's `model.name.<id>` row landed with the swap
-        // (2026-09-21), so the offered head is named here rather than the
-        // demoted Q5 the previous revision had to fall back to; the Q5 is
-        // still pinned as the third row because a round-4 tester's device
-        // holds it and renders it. All three strings are the catalog's own
+        // The round-7 Q8's `model.name.<id>` row lands with this swap
+        // (2026-09-22): every offered row is named here, and the Q5 is still
+        // pinned as the last row because a round-4 tester's device holds it
+        // and renders it. All four strings are the catalog's own
         // `displayName` verbatim, in both shipped languages.
-        let entries = [ModelCatalog.nmtEnNeQwen17bR4Q6,
+        let entries = [ModelCatalog.nmtEnNeQwen17bR7Q8,
+                       ModelCatalog.nmtEnNeQwen17bR4Q6,
                        ModelCatalog.nmtEnNeQwen17bR4Q4,
                        ModelCatalog.nmtEnNeQwen17bR4Q5]
             .compactMap { ModelCatalog.entry(for: $0) }
-        XCTAssertEqual(entries.count, 3, "all three translation entries resolve")
+        XCTAssertEqual(entries.count, 4, "all four translation entries resolve")
         let en = Locale(identifier: "en")
         let ne = Locale(identifier: "ne-NP")
         for entry in entries {
@@ -211,10 +218,11 @@ final class ModelCatalogLanguageTests: XCTestCase {
         }
         // The names must DIFFER: identical copy on two rows is exactly the
         // "which one do I delete?" the superseded rename exists to prevent.
-        // Set-wise, because three rows can collide in more than one pair.
+        // Set-wise, because four rows can collide in more than one pair.
         XCTAssertEqual(Set(entries.map(\.displayName)).count, entries.count,
-                       "the head, the ablation offer and the superseded "
-                       + "artifact must not read as the same row")
+                       "the head, the rung behind it, the ablation offer and "
+                       + "the superseded artifact must not read as the same "
+                       + "row")
     }
 
     func testStockQwenAndLlamaBrainsAreLanguageNeutral() {

@@ -198,13 +198,13 @@ final class LabelTranslationCacheTests: XCTestCase {
         _ = first.store(text: recognizedText, translation: translationText,
                         tier: .onDeviceBrain)
         _ = first.store(text: "Another label", translation: "अर्को", tier: .cloud)
-        // Round 4 (2026-09-21) moved the head to the Q6_K: the token is the
-        // model *in force* when the payload is written, so the swap moved
-        // this expectation with it. Pinned to the head rather than to
+        // Round 7 (2026-09-22) moved the head to the withconv Q8_0: the token
+        // is the model *in force* when the payload is written, so the swap
+        // moved this expectation with it. Pinned to the head rather than to
         // "whatever is first" so a future promotion fails here and is
         // re-decided, not silently re-stamped.
         XCTAssertEqual(try storedPayload().producerToken,
-                       ModelCatalog.nmtEnNeQwen17bR4Q6.rawValue,
+                       ModelCatalog.nmtEnNeQwen17bR7Q8.rawValue,
                        "the payload names the model the brain answers came from")
 
         // The model in force is not the one that wrote them.
