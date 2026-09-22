@@ -64,6 +64,19 @@ import LLM
 //      recorded. The tier reads the residency ledger and the memory probe, and
 //      writes to neither.
 //
+//      **Answered by the warden before it is final (2026-09-22).** A refusal
+//      that is about the device's *other residents* — the warm voice brain, and
+//      the headroom its bytes depress — gets one more question asked before the
+//      strings go: `ModelLifecycleManager.makeRoom(for:)`, the warden's own
+//      victim walk, which may unload a resident (the household's warm STT
+//      first, by priority) and free exactly the bytes the arithmetic was
+//      missing. The owner's directive is the reason: the translation model is
+//      a foreground, live request, and the warden unloads other models to make
+//      room for it. What the walk unloaded rides on the outcome
+//      (`LocalBrainTranslationOutcome.evictedForRoom`); the pressure rules are
+//      not answerable this way, and the pass takes no permit — it frees bytes,
+//      it does not allocate.
+//
 // The **direction** is a parameter, not an assumption: every string this tier
 // is handed is translated *into* `targetLanguage`, the same language tier 0
 // answers in and tier 2 is asked for. The prompt shipped saying "Nepali sign
@@ -210,9 +223,10 @@ struct LocalBrainTranslationOutcome: Equatable {
     /// hidden — it is reported, separately, and the screen shows both.
     var loadDurationMs: Int? = nil
 
-    /// [DEVSCREEN-EVICT] (2026-09-21) What the warden had to unload to let
-    /// this attempt reach its load — empty on every path that did not evict,
-    /// which is every production path.
+    /// [LOAD-EVICT] (2026-09-21) What the warden had to unload to let this
+    /// attempt reach its load — empty on every path that did not evict, which
+    /// is every refusal the warden's walk has no answer for and every batch
+    /// that never needed room made for it.
     ///
     /// **Evidence, not a branch**, like `deferral` above: the caller's next
     /// tier is chosen the same way whether the STT was warm or not. It is
@@ -512,17 +526,6 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
     /// without this tier claiming anything.
     private let ledger: ModelLifecycleManager
 
-    /// [DEVSCREEN-EVICT] Whether a refusal that is about *other residents*
-    /// may be answered by having the warden unload them — the translate-test
-    /// screen's persisted bypass toggle, read live at each gate so the
-    /// owner can flip it without rebuilding the tier.
-    ///
-    /// A closure, not a Bool, for exactly that reason; and `false` by
-    /// default, which is every production construction site. The pipeline
-    /// does not evict the household's voice brain to translate a sign, and
-    /// nothing here changes that unless the screen says so.
-    private let makesRoomForLoads: @Sendable () -> Bool
-
     /// Where the two warden notices go, if anything is listening. A sink
     /// rather than a return value because both moments happen *during* an
     /// attempt — a load that is running, a handle that was just taken — and
@@ -550,7 +553,6 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
          targetLanguage: AppLanguage = LiveTranslationPipeline.defaultTargetLanguage,
          memory: MemoryProbing = SystemMemoryProbe(),
          ledger: ModelLifecycleManager = .shared,
-         makesRoomForLoads: @escaping @Sendable () -> Bool = { false },
          onWardenNotice: (@Sendable (LocalBrainWardenNotice) -> Void)? = nil) {
         self.config = config
         self.modelStore = modelStore
@@ -560,7 +562,6 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
         self.targetLanguage = targetLanguage
         self.memory = memory
         self.ledger = ledger
-        self.makesRoomForLoads = makesRoomForLoads
         self.noticeSink = onWardenNotice
         // The warden can take the handle at any moment, so the wiring is
         // done here rather than at the first load: an offload that beats the
@@ -734,9 +735,10 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
         // of the method because it is a gate on a *load*: there is nothing to
         // refuse until a model has been found to load, and a device whose
         // brain is missing has a more honest reason to report than its memory.
-        // [DEVSCREEN-EVICT] The gate, through the one wrapper that may make
-        // room for the load first. With the bypass off — production — this
-        // is `deferralForLoad`'s answer and nothing else happens.
+        // [LOAD-EVICT] The gate, through the one wrapper that may make room
+        // for the load first: on a refusal that is about the device's other
+        // residents, the warden is asked whether it can unload them before
+        // the refusal is taken as final.
         let gate = await gateForLoad(of: modelID)
         if let deferral = gate.deferral {
             // The batch event, not the unavailable event: nothing was
@@ -920,11 +922,11 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
     /// load has already happened; refusing the *decode* then would cost an
     /// answer without returning a byte.
     ///
-    /// **[DEVSCREEN-EVICT] This method is the pure gate and knows nothing
-    /// about the translate-test screen's bypass.** The pass that may unload a
-    /// resident and re-ask wraps it (`gateForLoad`); keeping the two apart is
-    /// what lets a test pin this gate's answers with the bypass in either
-    /// position, and what keeps production's call graph this method alone.
+    /// **[LOAD-EVICT] This method is the pure gate.** The pass that may
+    /// unload a resident and re-ask wraps it (`gateForLoad`); keeping the two
+    /// apart is what lets a test pin this gate's answers with and without the
+    /// warden's walk behind it, and it is why the rules above read as rules
+    /// rather than as the first step of an eviction.
     private func deferralForLoad(of modelID: ModelID) async -> LocalBrainDeferral? {
         if config.brainTranslationDefersToResidentBrain,
            ledger.isResident(.brain) || ledger.isResident(.intentBrain) {
@@ -945,33 +947,52 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
         return .insufficientHeadroom(requiredBytes: required, availableBytes: available)
     }
 
-    /// [DEVSCREEN-EVICT] The gate, plus the one pass that may get past it.
+    /// [LOAD-EVICT] The gate, plus the one pass that may get past it.
     ///
-    /// Production asks `deferralForLoad` and stops there: this wrapper is
-    /// that answer verbatim whenever `makesRoomForLoads()` is false, which is
-    /// every construction site except the translate-test screen's.
+    /// **Asked before the refusal is final (2026-09-22).** The owner's device
+    /// falsified the old shape: the q8 translation head refused
+    /// `insufficientHeadroom` while the warm STT's bytes were exactly what
+    /// stood between it and the load — the warden's own reserve path would
+    /// have admitted it by evicting the recogniser, but the pre-gate read the
+    /// arithmetic, refused, and stopped, so the eviction hatch never got its
+    /// turn. The pass is no longer a translate-test-screen experiment: it is
+    /// how the production gate works, and the owner's standing directive is
+    /// the reason — "ModelWarden should UNLOAD other models and load the
+    /// translation model", by the warden's own priority order.
     ///
-    /// With the bypass on, two of the four refusals get one more question
-    /// asked before they stand. Both are refusals *about other residents*
-    /// (`isAboutOtherResidents`): the voice pipeline's warm brain, and the
-    /// headroom arithmetic the presence of that brain's bytes is what
-    /// depresses. The question is the warden's own —
-    /// `ModelLifecycleManager.makeRoom(for:)`, which runs the identical
-    /// victim walk a reservation runs — and what it unloads is reported
-    /// back on the outcome so the screen can say what the attempt cost.
+    /// Two of the four refusals get one more question asked before they stand.
+    /// Both are refusals *about other residents* (`isAboutOtherResidents`): the
+    /// voice pipeline's warm brain, and the headroom arithmetic the presence of
+    /// that brain's bytes is what depresses. The question is the warden's own —
+    /// `ModelLifecycleManager.makeRoom(for:)`, which runs the identical victim
+    /// walk a reservation runs, in the identical priority order, with the same
+    /// preemption ask and the same thrash count — and what it unloads is
+    /// reported back on the outcome so the surface can say what the attempt
+    /// cost.
     ///
     /// **The gate is then re-asked, and its second answer is the one
-    /// reported.** Evicting the STT can leave the arithmetic still short —
-    /// the model genuinely does not fit on this device, alone or not — and
-    /// that refusal is a finding rather than a busy moment. Returning the
-    /// first answer instead would make the two indistinguishable.
+    /// reported.** Evicting the STT can leave the arithmetic still short — the
+    /// model genuinely does not fit on this device, alone or not — and that
+    /// refusal is a finding rather than a busy moment. Returning the first
+    /// answer instead would make the two indistinguishable.
     ///
     /// The pressure rule is asked first on the second pass too, because a
     /// kernel out of pages does not become a kernel with pages the moment a
     /// resident is let go.
+    ///
+    /// **No second mechanism, and no double residency.** `makeRoom` is the
+    /// warden's own walk, extracted from `reserveInternal` rather than
+    /// re-spelled here, and it completes its unloads before it returns. The
+    /// load that follows still reserves `.translateBrain` / `.liveTranslate`
+    /// with `replacesSlotContents` exactly as it always did
+    /// (`LlamaBrainTextGenerator.loadHandle`): the victims this pass took are
+    /// non-resident by then, so the reserve's own plan finds nothing left to
+    /// evict and either admits the load or refuses it on its own arithmetic.
+    /// The pass takes no permit and allocates nothing — the bytes are freed
+    /// here, and the LLM allocation still happens in the load path, after it.
     private func gateForLoad(of modelID: ModelID) async -> LoadGate {
         let first = await deferralForLoad(of: modelID)
-        guard let first, makesRoomForLoads(), Self.isAboutOtherResidents(first) else {
+        guard let first, Self.isAboutOtherResidents(first) else {
             return LoadGate(deferral: first, evicted: [])
         }
 
@@ -990,9 +1011,9 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
         return LoadGate(deferral: await deferralForLoad(of: modelID), evicted: evicted)
     }
 
-    /// [DEVSCREEN-EVICT] Whether this refusal is about the device's other
+    /// [LOAD-EVICT] Whether this refusal is about the device's other
     /// residents — and so may be answered by unloading them — or about
-    /// something the bypass must not touch.
+    /// something the warden's walk does not touch.
     ///
     ///  - `.residentBrain` — the warm voice brain. The warden's own
     ///    `.liveTranslate` walk is entitled to evict it, and does so in the
@@ -1007,7 +1028,7 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
     ///  - `.memoryPressure` and `.recentCriticalPressure` ([PRESSURE-SAFE
     ///    LOAD]) are about the kernel's free pages. Evicting a resident does
     ///    not answer them, and the 2026-09-19 device death is not a thing a
-    ///    debug toggle gets to re-argue.
+    ///    load — or the camera that would like one — gets to re-argue.
     ///  - `.releaseRequestedDuringLoad` is produced by the load path, never
     ///    by the pre-attempt gate this wrapper sits on.
     static func isAboutOtherResidents(_ deferral: LocalBrainDeferral) -> Bool {
@@ -1019,13 +1040,14 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
         }
     }
 
-    /// [DEVSCREEN-EVICT] What `gateForLoad` decided, and what it cost.
+    /// [LOAD-EVICT] What `gateForLoad` decided, and what it cost.
     private struct LoadGate {
         /// Non-nil when the batch must not be attempted.
         let deferral: LocalBrainDeferral?
         /// The residents the warden unloaded on the way to that answer.
-        /// Empty whenever nothing was evicted — every production path, and
-        /// every refusal the bypass is not allowed to answer.
+        /// Empty whenever nothing was evicted: every refusal the walk has no
+        /// answer for (the kernel's pressure rules, a resident it will not or
+        /// cannot take), and every batch that never reached the walk at all.
         let evicted: [ModelSlot]
     }
 

@@ -217,14 +217,14 @@ struct TranslateProbeOutcome: Equatable {
 
     /// Tier 1 only: the residents the warden unloaded so this attempt could
     /// load its model — empty whenever nothing was evicted, which is every
-    /// run with the bypass off.
+    /// run the warden's walk had no answer for.
     ///
-    /// [DEVSCREEN-EVICT] The screen's own record of what the bypass COSTS,
-    /// on the card of the run that spent it. It is drawn on both endings: a
-    /// run that then answered (the price of the answer) and a run that was
-    /// still refused (`caption` reads it to say so). A `var` with a default,
-    /// like the fields above, so the shipped initializer shape — and every
-    /// fake in the suites — keeps compiling unchanged.
+    /// [LOAD-EVICT] What the warden's walk COST, on the card of the run that
+    /// spent it. It is drawn on both endings: a run that then answered (the
+    /// price of the answer) and a run that was still refused (`caption` reads
+    /// it to say so). A `var` with a default, like the fields above, so the
+    /// shipped initializer shape — and every fake in the suites — keeps
+    /// compiling unchanged.
     var evictedForRoom: [ModelSlot] = []
 }
 
@@ -405,10 +405,10 @@ struct LocalBrainProbeEngine: TranslateProbeEngine {
                                      loadMs: outcome.loadDurationMs,
                                      localDisposition: disposition,
                                      // [DEVSCREEN-EVICT] What the tier had to
-                                     // unload first, when the bypass let it:
-                                     // empty on every run that did not evict,
-                                     // and carried whether or not the string
-                                     // was answered.
+                                     // unload first, when the warden's walk
+                                     // had an answer: empty on every run that
+                                     // did not evict, and carried whether or
+                                     // not the string was answered.
                                      evictedForRoom: outcome.evictedForRoom)
     }
 }
@@ -675,25 +675,22 @@ struct TranslateTestDependencies {
         // (see `LocalBrainProbeEngine`). A tier per model would hold a 2–3 GB
         // handle per row and blow the device on the second one.
         //
-        // [DEVSCREEN-EVICT] `makesRoomForLoads` is the screen's ONE
-        // production-visible difference, and it is the persisted download
-        // bypass read live: with the switch on, a refusal that is about the
-        // device's other residents is answered by having the warden unload
-        // them (see `LocalBrainTranslationTier.gateForLoad`), which is what
-        // makes the Q8 measurable on a phone whose warm STT is holding the
-        // bytes. Read through the same key the download path reads, so the
-        // switch the developer turned on for the DOWNLOAD is the switch that
-        // governs the LOAD — one toggle, one meaning.
-        //
-        // Read at each gate rather than captured now, so flipping the switch
-        // in the technical sheet takes effect on the next tap instead of the
-        // next screen. This is the only construction site that passes it.
+        // [LOAD-EVICT] (2026-09-22) This screen builds the tier exactly as
+        // production does. A refusal that is about the device's other
+        // residents is answered by having the warden unload them (see
+        // `LocalBrainTranslationTier.gateForLoad`) for every caller now — that
+        // is what makes the Q8 measurable on a phone whose warm STT is holding
+        // the bytes, and the owner's device settled that it is also what the
+        // shipped gate must do. It used to be this screen's ONE
+        // production-visible difference, behind the persisted download bypass;
+        // the bypass switch now governs DOWNLOADS only
+        // (`ModelDownloadService`), which is what its row in the technical
+        // sheet has always said.
         let brain = LocalBrainTranslationTier(
             config: config,
             modelStore: modelStore,
             events: LiveTranslateEvents(bus: observabilityBus, config: config),
-            targetLanguage: targetLanguage,
-            makesRoomForLoads: { ModelDownloadDebugSettings.ignoresFitPolicy() })
+            targetLanguage: targetLanguage)
         var engines: [TranslateTestSelection: any TranslateProbeEngine] = [:]
         for id in modelSource.ladder {
             engines[.model(id)] = LocalBrainProbeEngine(brain: brain,

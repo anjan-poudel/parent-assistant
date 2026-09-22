@@ -118,7 +118,7 @@ final class LocalBrainTranslationTierTests: XCTestCase {
     /// only resident for as long as somebody holds this.
     ///
     /// `unloadCount` is the warden suite's convention, copied here for the
-    /// [DEVSCREEN-EVICT] cases: an eviction is only *this* owner being let go
+    /// [LOAD-EVICT] cases: an eviction is only *this* owner being let go
     /// if the closure the ledger was handed actually ran, and a test that
     /// asserted on ledger state alone could not tell an unload from a slot
     /// that had never been resident in the first place.
@@ -196,7 +196,6 @@ final class LocalBrainTranslationTierTests: XCTestCase {
                              targetLanguage: AppLanguage = .nepali,
                              memory: MemoryProbing? = nil,
                              ledger: ModelLifecycleManager? = nil,
-                             makesRoomForLoads: @escaping @Sendable () -> Bool = { false },
                              onWardenNotice: (@Sendable (LocalBrainWardenNotice) -> Void)? = nil,
                              run: (LocalBrainTranslationTier, ScriptedGenerator, LiveTranslateSanitisingBus) async throws -> T) async rethrows -> T {
         let root = makeRoot()
@@ -212,65 +211,94 @@ final class LocalBrainTranslationTierTests: XCTestCase {
                                              targetLanguage: targetLanguage,
                                              memory: memory ?? ScriptedProbe(),
                                              ledger: ledger ?? ModelLifecycleManager(probe: ScriptedProbe()),
-                                             makesRoomForLoads: makesRoomForLoads,
                                              onWardenNotice: onWardenNotice)
         return try await run(tier, generator, bus)
     }
 
-    // MARK: - [DEVSCREEN-EVICT] Making room for a load the gate would refuse
+    // MARK: - [LOAD-EVICT] Making room for a load the gate would refuse
 
     /// The STT the owner's device is holding warm — the recogniser that is
     /// not decoding anything right now and whose ~1 GB is what the translation
     /// head cannot fit beside.
     private static let warmSTT = ModelCatalog.whisperKitMediumV6
 
-    /// The owner's device as a fixture: a warm STT resident in the ledger, a
-    /// manager pinned to a budget the STT and the incoming model can only
-    /// share by evicting, and the headroom the tier's gate reads.
+    /// The owner's device as a fixture: a warm `slot` resident in the ledger,
+    /// a manager pinned to a budget the resident and the incoming model can
+    /// only share by evicting, and the headroom the tier's gate reads.
     ///
     /// The pin is `warm + incoming - 1` rather than the real 3.2 GB class
     /// budget, so the arithmetic is a fact about this file rather than about
     /// how large the catalog's 4B happens to be today — the same convention
     /// (`budgetOverrideBytes`) every pinned case in the warden suite uses.
-    /// `freeing` is what the STT gives back when it is unloaded: a real
+    /// `freeing` is what the resident gives back when it is unloaded: a real
     /// device gets the bytes back, and a test can also model one that does
     /// not (the device that is genuinely full).
-    private func makeWarmSTTEvictionFixture(
+    ///
+    /// `priority` is the resident's rung on the warden's ladder. It orders the
+    /// walk rather than gating it — a lone resident is a candidate whatever it
+    /// holds — so the `.background` the warm STT really carries is what makes
+    /// it the *first* thing taken when the voice positions are resident too.
+    private func makeWarmResidentEvictionFixture(
+        slot: ModelSlot,
+        modelID: ModelID,
+        priority: ModelPriority,
         headroom: UInt64,
         freeing freedBytes: UInt64
     ) -> (ledger: ModelLifecycleManager, owner: FakeOwner, probe: ScriptedProbe) {
         let probe = ScriptedProbe(headroom: headroom)
         let incoming = ModelLifecycleInventory.footprint(for: .translateBrain,
                                                          modelID: Self.modelID).liveBytes
-        let warm = ModelLifecycleInventory.footprint(for: .speechToText,
-                                                     modelID: Self.warmSTT).liveBytes
+        let warm = ModelLifecycleInventory.footprint(for: slot, modelID: modelID).liveBytes
         let ledger = ModelLifecycleManager(
             probe: ScriptedProbe(),
             budgetOverrideBytes: warm + incoming - 1)
         let owner = FakeOwner()
-        ledger.register(slot: .speechToText,
-                        modelID: Self.warmSTT,
+        ledger.register(slot: slot,
+                        modelID: modelID,
                         owner: owner,
                         evictable: true,
-                        priority: .background) { [weak owner] in
+                        priority: priority) { [weak owner] in
             owner?.unload()
             probe.headroom += freedBytes
         }
-        ledger.didLoad(.speechToText, owner: owner)
-        XCTAssertTrue(ledger.isResident(.speechToText),
-                      "the fixture's warm STT must actually be resident")
+        ledger.didLoad(slot, owner: owner)
+        XCTAssertTrue(ledger.isResident(slot),
+                      "the fixture's warm \(slot.rawValue) must actually be resident")
         return (ledger, owner, probe)
     }
 
-    /// **Toggle off.** The device state the owner reported, pinned as it
-    /// ships: a warm STT in the ledger, headroom below the head's hard
-    /// bytes, and a gate that refuses without touching anything — no
-    /// eviction, no generation, the recogniser still resident.
+    /// The owner's phone in one call: the warm recogniser holding the bytes
+    /// the translation head cannot fit beside, on a 6 GB class probe.
+    private func makeWarmSTTEvictionFixture(
+        headroom: UInt64,
+        freeing freedBytes: UInt64
+    ) -> (ledger: ModelLifecycleManager, owner: FakeOwner, probe: ScriptedProbe) {
+        makeWarmResidentEvictionFixture(slot: .speechToText,
+                                        modelID: Self.warmSTT,
+                                        priority: .background,
+                                        headroom: headroom,
+                                        freeing: freedBytes)
+    }
+
+    /// **The owner's device, and the bug this fixes (2026-09-22).**
     ///
-    /// This is the direction that must not move: production constructs the
-    /// tier with the closure defaulted to `false`, and every one of these
-    /// four facts is what the app does on the elder's phone today.
-    func testWithoutTheBypassTheWarmSTTIsNeverEvicted() async throws {
+    /// A 6 GB class probe, the app's available memory below the head's declared
+    /// non-pageable bytes, and a warm STT resident in the ledger — the shape
+    /// the owner reported from the phone, where the translation head refused
+    /// `insufficientHeadroom` even though the warden's own reserve path was
+    /// proven to admit it by evicting the recogniser.
+    ///
+    /// Production used to stop at `deferralForLoad`'s first answer, so the
+    /// refusal was the last word and the eviction hatch never got its turn. It
+    /// does not stop there any more (`gateForLoad`), and this is the test that
+    /// mirrors the capture: the batch runs, the warm STT is what made the room,
+    /// and the outcome names it.
+    ///
+    /// The unload closure raises the probe's reading, which is what a real
+    /// eviction does to a real device — the gate's second pass is judged
+    /// against the memory that actually came back, not against the reading
+    /// that produced the first refusal.
+    func testTheWarmSTTIsEvictedAndTheTranslationRuns() async throws {
         let required = ModelLifecycleInventory.footprint(for: .brain,
                                                          modelID: Self.modelID).hardBytes
         let fixture = makeWarmSTTEvictionFixture(headroom: required / 2,
@@ -278,46 +306,12 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         let (ledger, sttOwner, probe) = fixture
 
         try await withTier(memory: probe, ledger: ledger) { tier, generator, bus in
-            let outcome = await tier.translate([self.brainText])
-
-            XCTAssertTrue(generator.prompts.isEmpty, "no load: no generation")
-            XCTAssertEqual(outcome.deferral,
-                           .insufficientHeadroom(requiredBytes: Double(required),
-                                                 availableBytes: Double(probe.headroom)),
-                           "the refusal is the one this screen has always shown")
-            XCTAssertTrue(outcome.evictedForRoom.isEmpty,
-                          "the bypass is off: nothing was offered to the warden")
-            XCTAssertEqual(sttOwner.unloadCount, 0,
-                           "…and the household's recogniser was not taken")
-            XCTAssertTrue(ledger.isResident(.speechToText))
-            XCTAssertEqual(batchEvent(bus)?.outcome, "degraded")
-        }
-    }
-
-    /// **Toggle on.** The same device state, with the screen's bypass on: the
-    /// gate asks the warden, the warden evicts the warm STT by its own
-    /// priority order, the headroom comes back, and the model runs.
-    ///
-    /// The unload closure raises the probe's reading, which is what a real
-    /// eviction does to a real device — the gate's second pass is judged
-    /// against the memory that actually came back, not against the reading
-    /// that produced the first refusal.
-    func testWithTheBypassTheWarmSTTIsEvictedAndTheModelRuns() async throws {
-        let required = ModelLifecycleInventory.footprint(for: .brain,
-                                                         modelID: Self.modelID).hardBytes
-        let fixture = makeWarmSTTEvictionFixture(headroom: required / 2,
-                                                 freeing: required)
-        let (ledger, sttOwner, probe) = fixture
-
-        try await withTier(memory: probe,
-                           ledger: ledger,
-                           makesRoomForLoads: { true }) { tier, generator, bus in
             generator.output = answer([self.brainAnswer])
             let outcome = await tier.translate([self.brainText])
 
             XCTAssertEqual(generator.prompts.count, 1,
-                           "the model was loaded and asked, which is the whole "
-                           + "point of the toggle")
+                           "the model was loaded and asked: the gate asks the "
+                           + "warden before a headroom reading is taken as final")
             XCTAssertEqual(outcome.translations, [self.brainText: self.brainAnswer])
             XCTAssertNil(outcome.deferral)
             XCTAssertEqual(outcome.evictedForRoom, [.speechToText],
@@ -326,29 +320,65 @@ final class LocalBrainTranslationTierTests: XCTestCase {
             XCTAssertEqual(sttOwner.unloadCount, 1,
                            "the warden's own victim walk did the unloading")
             XCTAssertFalse(ledger.isResident(.speechToText))
+            XCTAssertEqual(batchEvent(bus)?.metadata["resolvedCount"], "1")
         }
     }
 
-    /// **Toggle on, and the room is still not enough.** A device whose warm
-    /// STT was resident *and* whose free memory does not come back to the
-    /// required figure — a phone with something else holding the pages — must
-    /// refuse, and the refusal must say what was spent trying.
+    /// **The other half of the resident rule (2026-09-22).** The same device
+    /// state with the voice pipeline's own brain in place of the recogniser,
+    /// and nothing else in the ledger: the gate's first answer is
+    /// `.residentBrain`, the warden is asked, and its walk takes the voice
+    /// brain — a `.foreground` `.liveTranslate` load is entitled to those
+    /// bytes, and with nothing lower on the ladder there is nothing else to
+    /// spend first.
     ///
-    /// Without `evictedForRoom` this outcome is indistinguishable from the
-    /// busy-device refusal above, which is the opposite finding: "the device
-    /// was in use" versus "the device was emptied and the model still does
-    /// not fit". The tokens are asserted, not just the counts, because the
-    /// screen prints exactly these.
-    func testWithTheBypassARefusalThatSurvivesTheEvictionSaysSo() async throws {
+    /// This is the owner's directive, pinned: "ModelWarden should UNLOAD other
+    /// models and load the translation model", in the warden's own priority
+    /// order. The refusal is not gone — it is *answered*, and only where the
+    /// warden's walk has an answer. The cases where it does not (a resident the
+    /// warden may not take, the kernel's pressure rules) are pinned around it.
+    func testAnEvictableVoiceBrainIsOffloadedForTheTranslationLoad() async throws {
+        let (ledger, voiceOwner, probe) = makeWarmResidentEvictionFixture(
+            slot: .brain,
+            modelID: Self.modelID,
+            priority: .foreground,
+            headroom: 8_000_000_000,
+            freeing: 0)
+
+        try await withTier(memory: probe, ledger: ledger) { tier, generator, bus in
+            generator.output = answer([self.brainAnswer])
+            let outcome = await tier.translate([self.brainText])
+
+            XCTAssertEqual(generator.prompts.count, 1,
+                           "the voice brain's bytes are what the load needed, "
+                           + "and the warden gave them up")
+            XCTAssertNil(outcome.deferral)
+            XCTAssertEqual(outcome.evictedForRoom, [.brain],
+                           "the outcome names the position the warden emptied")
+            XCTAssertEqual(voiceOwner.unloadCount, 1)
+            XCTAssertFalse(ledger.isResident(.brain))
+            XCTAssertEqual(batchEvent(bus)?.metadata["resolvedCount"], "1")
+        }
+    }
+
+    /// **And the room is still not enough.** A device whose warm STT was
+    /// resident *and* whose free memory does not come back to the required
+    /// figure — a phone with something else holding the pages — must refuse,
+    /// and the refusal must say what was spent trying.
+    ///
+    /// Without `evictedForRoom` this outcome is indistinguishable from an
+    /// ordinary busy-device refusal, which is the opposite finding: "the device
+    /// was in use" versus "the device was emptied and the model still does not
+    /// fit". The tokens are asserted, not just the counts, because the surface
+    /// prints exactly these.
+    func testARefusalThatSurvivesTheEvictionSaysSo() async throws {
         let required = ModelLifecycleInventory.footprint(for: .brain,
                                                          modelID: Self.modelID).hardBytes
         // `freeing: 0` — the STT goes, the pages do not come back.
         let fixture = makeWarmSTTEvictionFixture(headroom: required / 2, freeing: 0)
         let (ledger, sttOwner, probe) = fixture
 
-        try await withTier(memory: probe,
-                           ledger: ledger,
-                           makesRoomForLoads: { true }) { tier, generator, bus in
+        try await withTier(memory: probe, ledger: ledger) { tier, generator, bus in
             let outcome = await tier.translate([self.brainText])
 
             XCTAssertTrue(generator.prompts.isEmpty,
@@ -365,13 +395,17 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         }
     }
 
-    /// **The bypass does not touch the kernel's rule.** A `.critical` reading
-    /// ([PRESSURE-SAFE LOAD], the 2026-09-19 device death) refuses whether or
-    /// not the toggle is on, and it does so *before* anything is offered to
-    /// the warden: unloading a resident does not answer "the system is out of
-    /// pages", and the bytes of the elder's warm recogniser are not the debug
-    /// screen's to spend on a device that is being killed.
-    func testTheBypassDoesNotOverrideTheKernelsPressureRefusal() async throws {
+    /// **The warden's walk is not asked about the kernel's rule.** A
+    /// `.critical` reading ([PRESSURE-SAFE LOAD], the 2026-09-19 device death)
+    /// refuses, and it does so *before* anything is offered to the warden:
+    /// unloading a resident does not answer "the system is out of pages", and
+    /// the bytes of the elder's warm recogniser are not the camera's to spend
+    /// on a device that is being killed.
+    ///
+    /// The resident here is evictable and the warden would take it for any load
+    /// that got as far as asking — which is exactly what makes this the honest
+    /// test of where the pass stops.
+    func testTheWardensWalkIsNotAskedToAnswerTheKernelsPressureRefusal() async throws {
         let required = ModelLifecycleInventory.footprint(for: .brain,
                                                          modelID: Self.modelID).hardBytes
         let clock = PressureClock()
@@ -390,9 +424,7 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         }
         ledger.didLoad(.speechToText, owner: sttOwner)
 
-        try await withTier(memory: probe,
-                           ledger: ledger,
-                           makesRoomForLoads: { true }) { tier, generator, _ in
+        try await withTier(memory: probe, ledger: ledger) { tier, generator, _ in
             let outcome = await tier.translate([self.brainText])
 
             XCTAssertTrue(generator.prompts.isEmpty)
@@ -405,14 +437,64 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         }
     }
 
+    /// The same boundary, one level quieter: a `.critical` that has since
+    /// eased out of the level but is still inside its window. Nothing is
+    /// offered to the warden here either, for the same reason — the window is
+    /// about the device the kernel was about to kill, and no eviction answers
+    /// it. The warm STT is present and evictable, so the only thing keeping it
+    /// resident is the rule.
+    func testTheWardensWalkIsNotAskedToAnswerARecentCriticalPressure() async throws {
+        let required = ModelLifecycleInventory.footprint(for: .brain,
+                                                         modelID: Self.modelID).hardBytes
+        let clock = PressureClock()
+        let ledger = makePressureLedger(clock)
+        ledger.handleMemoryPressure(level: .critical)
+        ledger.handleMemoryPressure(level: .normal)
+        clock.advance(5)
+
+        let sttOwner = FakeOwner()
+        let probe = ScriptedProbe(headroom: required / 2)
+        ledger.register(slot: .speechToText,
+                        modelID: Self.warmSTT,
+                        owner: sttOwner,
+                        evictable: true,
+                        priority: .background) { [weak sttOwner] in
+            sttOwner?.unload()
+            probe.headroom += required
+        }
+        ledger.didLoad(.speechToText, owner: sttOwner)
+
+        try await withTier(memory: probe, ledger: ledger) { tier, generator, _ in
+            let outcome = await tier.translate([self.brainText])
+
+            XCTAssertTrue(generator.prompts.isEmpty)
+            XCTAssertEqual(outcome.deferral,
+                           .recentCriticalPressure(secondsSince: 5, windowSeconds: 30))
+            XCTAssertTrue(outcome.evictedForRoom.isEmpty,
+                          "the window is not answered by unloading a resident")
+            XCTAssertEqual(sttOwner.unloadCount, 0)
+            XCTAssertTrue(ledger.isResident(.speechToText))
+        }
+    }
+
     /// A manager with `slot` fully resident (registered, admitted, marked
     /// loaded). Returns the owner, which the caller must keep alive.
+    ///
+    /// `evictable` is the axis the warden's walk reads: the tests whose
+    /// subject is the *deferral rule* — "another owner's brain is live, so
+    /// this batch is not asked" — pass `false`, which is the shape production
+    /// gives the residents the app must not unload (the VAD, the wake-word
+    /// model, the encoder). With an evictable resident the walk has an answer
+    /// and takes it, and that half of the behaviour is pinned in the
+    /// [LOAD-EVICT] section below rather than here.
     @discardableResult
-    private func makeLedger(residing slot: ModelSlot) -> (ModelLifecycleManager, FakeOwner) {
+    private func makeLedger(residing slot: ModelSlot,
+                            evictable: Bool = true) -> (ModelLifecycleManager, FakeOwner) {
         let owner = FakeOwner()
         let manager = ModelLifecycleManager(probe: ScriptedProbe(),
                                             budgetOverrideBytes: ModelLifecycleBudget.standardModelsBudgetBytes)
         manager.register(slot: slot, modelID: Self.modelID, owner: owner,
+                         evictable: evictable,
                          unload: { [weak owner] in _ = owner })
         let admission = manager.prepareLoad(of: slot, modelID: Self.modelID)
         XCTAssertTrue(admission.isAllowed, "the fixture's own load must be admitted: \(admission)")
@@ -1355,7 +1437,12 @@ final class LocalBrainTranslationTierTests: XCTestCase {
     /// shape that gets the app killed. The translation is the workload that can
     /// afford to wait, and the strings are left for the cloud.
     func testTheBatchIsNotAskedWhenAnotherOwnersBrainIsResident() async throws {
-        let (ledger, owner) = makeLedger(residing: .brain)
+        // `evictable: false` is what keeps this the *rule's* test rather than
+        // the warden's: the walk has nothing it is allowed to take, so the
+        // refusal `deferralForLoad` produced is the one that stands. With an
+        // evictable resident the warden is asked and answers — that half is
+        // pinned in the [LOAD-EVICT] section below.
+        let (ledger, owner) = makeLedger(residing: .brain, evictable: false)
         let probe = ScriptedProbe()
         try await withTier(memory: probe, ledger: ledger) { tier, generator, bus in
             let outcome = await tier.translate([self.brainText, self.secondBrainText])
@@ -1383,7 +1470,7 @@ final class LocalBrainTranslationTierTests: XCTestCase {
     /// llama handle for the same 4B class, and co-residency is exactly what the
     /// ledger's budget exists to prevent.
     func testTheBatchIsNotAskedWhenTheIntentBrainIsResident() async throws {
-        let (ledger, owner) = makeLedger(residing: .intentBrain)
+        let (ledger, owner) = makeLedger(residing: .intentBrain, evictable: false)
         try await withTier(ledger: ledger) { tier, generator, _ in
             let outcome = await tier.translate([self.brainText])
 
@@ -1480,7 +1567,7 @@ final class LocalBrainTranslationTierTests: XCTestCase {
     /// A gate that fired is not an unavailable tier, and the difference is what
     /// the caller reads to decide whether the batch is owed to the cloud.
     func testADeferredBatchReportsItselfAsUnresolvedRatherThanUnavailable() async throws {
-        let (ledger, owner) = makeLedger(residing: .brain)
+        let (ledger, owner) = makeLedger(residing: .brain, evictable: false)
         try await withTier(ledger: ledger) { tier, _, bus in
             _ = await tier.translate([self.brainText])
 
@@ -1750,8 +1837,12 @@ final class LocalBrainTranslationTierTests: XCTestCase {
             _ = owner
         }
         // The contrast case, unchanged from Step 1: the SAME residency on the
-        // voice interpreter's position does defer.
-        let (voiceLedger, voiceOwner) = makeLedger(residing: .brain)
+        // voice interpreter's position does defer — the warden's walk has
+        // nothing it may take here (`evictable: false`, the shape production
+        // gives the residents the app must not unload), so the deferral is
+        // final. An evictable voice brain is a different test, and it lives in
+        // the [LOAD-EVICT] section.
+        let (voiceLedger, voiceOwner) = makeLedger(residing: .brain, evictable: false)
         try await withTier(ledger: voiceLedger) { tier, generator, _ in
             let outcome = await tier.translate([self.brainText])
             XCTAssertEqual(outcome.deferral, .residentBrain)

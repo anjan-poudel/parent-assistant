@@ -1933,18 +1933,20 @@ final class ModelLifecycleManagerTests: XCTestCase {
         }
     }
 
-    // MARK: - [DEVSCREEN-EVICT] Making room without taking a permit
+    // MARK: - [LOAD-EVICT] Making room without taking a permit
 
-    /// `makeRoom` is the translate-test screen's escape hatch: the same
-    /// eviction the reservation above performs, performed for a caller that
-    /// is NOT about to be handed a permit.
+    /// `makeRoom` is the translation tier's pre-gate pass: the same eviction
+    /// the reservation above performs, performed for a caller that is NOT
+    /// about to be handed a permit.
     ///
-    /// The screen's load gate refuses before the reservation path is ever
+    /// The tier's load gate refuses before the reservation path is ever
     /// reached, so a model the warden would happily make room for is refused
     /// by a gate that cannot know what is evictable. This is the warden's
-    /// answer, and the two facts pinned here are the ones that make it usable
-    /// there: the warm background STT is really unloaded, and **nothing is
-    /// reserved** — the load that follows must still be admitted.
+    /// answer, and the three facts pinned here are the ones that make it usable
+    /// there: the warm background STT is really unloaded, **nothing is
+    /// reserved** — the load that follows must still be admitted — and that
+    /// load evicts nothing a second time, because the bytes it needed are
+    /// already free.
     func testMakeRoomUnloadsTheWarmSTTAndGrantsNoPermit() {
         // 6 GB physical → `.standard` → the 3.2 GB class budget; 1.5 GB of
         // headroom with a warm 1 GB STT beside it: the owner's device.
@@ -1979,7 +1981,7 @@ final class ModelLifecycleManagerTests: XCTestCase {
 
         guard let reservation = reserveOrFail(manager, ask) else { return }
         XCTAssertFalse(reservation.evicted.contains(.speechToText),
-                       "the bytes were already free: the load the screen is "
+                       "the bytes were already free: the load the gate is "
                        + "about to attempt is admitted without a second eviction")
     }
 

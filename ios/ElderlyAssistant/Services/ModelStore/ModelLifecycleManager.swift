@@ -944,19 +944,21 @@ final class ModelLifecycleManager {
         return .success(reservation)
     }
 
-    // MARK: - [DEVSCREEN-EVICT] Making room without taking a permit
+    // MARK: - [LOAD-EVICT] Making room without taking a permit
 
     /// Unload whatever the warden's own admission walk would have to unload
     /// for `request` to fit — and grant nothing.
     ///
-    /// This is the translation test screen's escape hatch, and it exists
-    /// because that screen's load gate refuses *before* the reservation path
-    /// is ever reached: `LocalBrainTranslationTier.deferralForLoad` judges the
-    /// incoming model against the class/headroom rules first, so a model the
-    /// warden would happily have made room for (the live tier's own
-    /// `mayEvictPastTheSessionBudget` path) never gets the chance. The gate is
-    /// right to refuse on its own terms — it cannot know what is evictable —
-    /// so the fix is to *ask the warden*, which is this method.
+    /// This is the translation tier's pre-gate pass (born as the translate-test
+    /// screen's escape hatch, 2026-09-21, and promoted to the production gate
+    /// on 2026-09-22 — `LocalBrainTranslationTier.gateForLoad`). It exists
+    /// because the tier's load gate refuses *before* the reservation path is
+    /// ever reached: `deferralForLoad` judges the incoming model against the
+    /// class/headroom rules first, so a model the warden would happily have
+    /// made room for (the live tier's own `mayEvictPastTheSessionBudget` path)
+    /// never gets the chance. The gate is right to refuse on its own terms — it
+    /// cannot know what is evictable — so the fix is to *ask the warden*, which
+    /// is this method.
     ///
     /// What it is NOT: a second eviction mechanism. Phase 1 and phases 2b–2d
     /// of `reserveInternal` are extracted as `planLoadLocked` and
