@@ -390,8 +390,13 @@ final class TranslateTestModel: ObservableObject {
     /// Whether the Translate button does anything. The button is disabled
     /// when this is false, so a tap can never start a run the screen has
     /// already decided is pointless.
+    ///
+    /// [READINESS-EVICT] Through `isReady`, not `== .ready`: a ready answer
+    /// can now carry the residents the run will unload to make room, and the
+    /// case this whole fix is about — the Q8 that runs *because* the warm STT
+    /// is offloaded first — would otherwise be ready-looking and disabled.
     var canRun: Bool {
-        !trimmedInput.isEmpty && runState != .running && readiness == .ready
+        !trimmedInput.isEmpty && runState != .running && readiness?.isReady == true
     }
 
     /// Asks the selected engine for its readiness. Called when the screen

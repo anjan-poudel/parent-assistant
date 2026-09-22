@@ -120,6 +120,26 @@ enum ModelUnavailabilityReason: String, Equatable, CaseIterable {
         case .overBrainCeiling: return "model.unavailable.overBrainCeiling"
         }
     }
+
+    /// Whether this refusal is about the device's **other residents** — the
+    /// warm STT whose footprint the arithmetic counted — rather than about
+    /// the phone or the product ladder.
+    ///
+    /// Only `.requiresEvictingWarmSTT` is, and that is the whole of its
+    /// definition: the model fits the class alone and not beside the
+    /// neighbour, which is exactly the refusal a load gate can ANSWER by
+    /// taking the neighbour's bytes (`LocalBrainTranslationTier.gateForLoad`,
+    /// whose load-time classifier — `…isAboutOtherResidents(_:)` on
+    /// `LocalBrainDeferral` — is this same judgement in the other
+    /// vocabulary). So this is the one verdict of the four a readiness check
+    /// must not treat as final, and the owner's device is why (2026-09-22):
+    /// the Q8 translation head read as unavailable on a 6 GB phone while the
+    /// load, asked properly, admits it every time.
+    ///
+    /// The rest are final, and they are about the phone rather than its
+    /// occupants: `.deviceTooSmall` and `.overClassBudget` are ceilings no
+    /// eviction moves, and `.overBrainCeiling` is a product choice.
+    var isAboutOtherResidents: Bool { self == .requiresEvictingWarmSTT }
 }
 
 /// Whether a catalog entry may be chosen on this device, and if not, the
