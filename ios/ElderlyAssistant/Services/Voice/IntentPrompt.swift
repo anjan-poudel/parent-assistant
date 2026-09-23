@@ -151,6 +151,48 @@ enum IntentPrompt {
         return sections.joined()
     }
 
+    /// [CHAT] Stage 1 of the conversational-augmentation plan (2026-09-23):
+    /// the prompt for a CHIT-CHAT turn — the free-text reply shape.
+    ///
+    /// A separate builder, not a mode inside `build`, because the two
+    /// teach different decodes: `build` teaches the 12-intent slot
+    /// contract, this one teaches a three-key object with a free-text
+    /// `reply` and no slots at all. `build`'s text is byte-mirrored by
+    /// `tools/train-intent/seeds/prompt_template.txt` and pinned by
+    /// `IntentPromptTests`; adding a mode to it would move those bytes and
+    /// invalidate the training/inference identity that mirror exists to
+    /// protect. The chat shape is a NEW contract with its own labels (the
+    /// stage that fine-tunes it authors them against this text).
+    ///
+    /// Deliberately smaller than `build`: there is no catalog to teach, no
+    /// entity vocabulary and no example slot-fill, so the prompt fits the
+    /// 1,024-token on-device context with room to spare. `pendingMedications`
+    /// is not composed in either — a turn that executes nothing has no use
+    /// for a dose list, and leaving it out keeps the smallest possible
+    /// context for the reply the user is waiting on.
+    ///
+    /// The key order (`intent`, `reply`, `confidence`) matches
+    /// `LlamaGrammar.chatJSONSchema` exactly, and the one-shot output line
+    /// is the shape the decode grammar enforces: even an untrained model
+    /// that follows the instruction produces a string this runtime can
+    /// read, and one that does not ABSTAINS (nil) rather than speaking
+    /// something malformed — the graceful stage-1 state.
+    static func buildChat(transcript: String,
+                          context: InterpreterContext) -> String {
+        return """
+        You are Sahayak, a warm companion talking with an elderly speaker. This turn is SMALL TALK — a greeting, thanks, a goodbye, or how they feel. Nothing is being asked for, so nothing runs: "reply" IS the whole answer.
+
+        "reply" is SPOKEN ALOUD: non-empty, in their own language (hint: \(context.userLanguageHint)), plain and simple, short sentences, warm, respectful. In Nepali, say "हजुर", one short idea per sentence. Never invent a fact, a name, a time or an appointment, and promise nothing you cannot do.
+
+        Reply with ONLY one JSON object (no fences, no other text):
+        {"intent": "chat", "reply": the spoken reply, "confidence": 0-1}
+
+        User said: "\(transcript)"
+        Now output ONLY the JSON object for that reply.
+
+        """
+    }
+
     /// Collapse #1 prompt (intent-engine spec 2026-09-05 §4): audio goes
     /// in with this prompt; ONE response carries the transcript AND the
     /// intent AND the reply, so STT and interpretation are a single

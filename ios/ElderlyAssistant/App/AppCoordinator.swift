@@ -1396,7 +1396,15 @@ final class AppCoordinator: ObservableObject {
         preferredBaseId: resolvedBrainModelID,
         config: LlamaCommandInterpreter.Config(confidenceThreshold: 0.4,
                                                maxTokens: 128,
-                                               timeoutSeconds: 10),
+                                               timeoutSeconds: 10,
+                                               // [CHAT] The chat shape's own
+                                               // floor — deliberately NOT the
+                                               // 0.4 above: a command the brain
+                                               // is 40% sure of is worth trying,
+                                               // a conversational answer it is
+                                               // 40% sure of is not worth
+                                               // stating as fact.
+                                               chatConfidenceFloor: 0.6),
         pluginRegistry: pluginRegistry,
         // [TURN-TIMING-BREAKDOWN] Nil on every build but an
         // `INTENT_ENCODER` one — the picker brain's prompt-build and

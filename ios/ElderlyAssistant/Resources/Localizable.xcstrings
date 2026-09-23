@@ -12476,6 +12476,24 @@
         }
       }
     },
+    "router.chatLowConfidence": {
+      "comment": "[CHAT-CONFIDENCE-FLOOR] Spoken instead of a chat reply the brain decoded below its confidence floor — an admitted gap beats a guess stated as fact.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I'm not confident about this — I can't answer that well."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मलाई यसमा विश्वास छैन — म यो राम्ररी जवाफ दिन सक्दिनँ।"
+          }
+        }
+      }
+    },
     "router.confirmationAmbiguous": {
       "extractionState": "manual",
       "localizations": {
