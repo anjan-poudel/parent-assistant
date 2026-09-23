@@ -53,7 +53,13 @@ final class IntentCommandCache {
         case .call, .music, .suggestVideo:
             return true
         case .ackMed, .emergency, .setReminder, .createCalendarEvent,
-             .sendMessage, .healthQuery, .guide, .query, .none:
+             .sendMessage, .healthQuery, .guide, .query, .none,
+             // [CHAT] (2026-09-23) A chat reply is conversation, not a
+             // command: caching it would replay a stale pleasantry for a
+             // later transcript and teach the cache nothing worth
+             // keeping. The cache exists to re-execute what worked, and a
+             // chat turn executes nothing.
+             .chat:
             return false
         case .plugin:
             // Plugin commands carry plugin-specific entities; caching

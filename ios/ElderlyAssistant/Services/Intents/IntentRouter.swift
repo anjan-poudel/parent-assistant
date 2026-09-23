@@ -224,6 +224,72 @@ final class IntentRouter: CommandInterpreter {
 
     // MARK: - Ladders
 
+    /// The local lane's entry point: the CHAT pre-check above the ladder.
+    ///
+    /// [CHAT] Stage 1 of the conversational-augmentation plan (2026-09-23):
+    /// `ChatIntentClassifier` decides — before the local brain is asked
+    /// anything — whether this utterance is small talk or a request, and a
+    /// chat turn is asked of the brain's chat entry point (the chat prompt
+    /// + `LlamaGrammar.chatJSONSchema`) instead of the intent-slot one.
+    ///
+    /// Three properties are load-bearing and tested:
+    ///  - COMMANDS ARE UNTOUCHED. The classifier's default is `.command`
+    ///    and only an exact-table hit (or a greeting followed by nothing
+    ///    but address terms) changes it, so every command utterance takes
+    ///    `runLocalLadder` below — byte-identical to before this existed.
+    ///  - A CHAT TURN NEVER EXECUTES. Only a `.chat` answer is accepted;
+    ///    anything else the chat entry point returns (a slot-bearing
+    ///    action off a prompt that never taught slots, or a nil) is
+    ///    treated as an abstention and the turn falls through to the
+    ///    command ladder — where the full command contract governs it.
+    ///  - AN ABSTENTION IS NOT AN ERROR. Until a later stage fine-tunes
+    ///    the brain for this shape, a chat ask probably abstains; the turn
+    ///    then takes exactly the path it takes today (hence the fallback,
+    ///    not a dead end).
+    ///
+    /// Where it sits, and why: BELOW the cache and cloud-preparse layers
+    /// (unchanged — a cached or preparsed answer still answers first) and
+    /// inside the local lane only. A cloud-first turn the selector sends
+    /// to the cloud is untouched: the chat class is a property of the
+    /// local brain's shape, not a cloud routing rule. The chat reply is
+    /// deliberately NOT run through the band policy — there is nothing to
+    /// confirm, rephrase or execute, and the spoken-reply contract is
+    /// enforced downstream by the same sanity gate every model reply
+    /// passes (`CommandRouter.sanitisedModelReply`).
+    private func interpretLocalLadder(transcript: String,
+                                      context: InterpreterContext,
+                                      canEscalate: Bool,
+                                      completion: @escaping (InterpretedCommand?) -> Void) {
+        if ChatIntentClassifier.classify(transcript) == .chat,
+           let chatBrain = localBrain as? ChatResponding {
+            chatBrain.respondToChat(transcript: transcript,
+                                    context: context) { [weak self] command in
+                guard let self else { completion(nil); return }
+                guard let command, command.action == .chat else {
+                    // Abstention (or an answer of the wrong shape): today's
+                    // path owns the turn. Emitted so the fallback is
+                    // visible in the field, exactly like every other
+                    // ladder decision.
+                    self.emit("chat_abstained", outcome: "info")
+                    self.runLocalLadder(transcript: transcript, context: context,
+                                        canEscalate: canEscalate,
+                                        completion: completion)
+                    return
+                }
+                self.traceRecorder?.record(
+                    .band,
+                    input: "chat turn",
+                    output: "nothing to band — a chat reply is not a command",
+                    decision: "served/chat")
+                self.emit("chat_reply", outcome: "success")
+                completion(command)
+            }
+            return
+        }
+        runLocalLadder(transcript: transcript, context: context,
+                       canEscalate: canEscalate, completion: completion)
+    }
+
     /// The legacy local-first ladder: the local brain (layer 4) answers
     /// when available; its abstention (or a mid-band tier-free drop, when
     /// `canEscalate`) escalates to the cloud brain (layer 5).
@@ -235,10 +301,14 @@ final class IntentRouter: CommandInterpreter {
     /// readiness), even where an abstention would not: a failure is
     /// never a bare apology while a cloud can answer. The escalation
     /// carries the honest `local_failed_fallback` selection event.
-    private func interpretLocalLadder(transcript: String,
-                                      context: InterpreterContext,
-                                      canEscalate: Bool,
-                                      completion: @escaping (InterpretedCommand?) -> Void) {
+    ///
+    /// [CHAT] Reached for every command utterance, and for a chat turn
+    /// whose chat entry point abstained — the one body, so a fallback can
+    /// never behave differently from the pre-chat path.
+    private func runLocalLadder(transcript: String,
+                                context: InterpreterContext,
+                                canEscalate: Bool,
+                                completion: @escaping (InterpretedCommand?) -> Void) {
         if let local = localBrain, local.isAvailable {
             // Is escalation actually possible? A mid-band tier-free answer
             // is dropped for escalation ONLY when a cloud layer exists;

@@ -634,10 +634,30 @@ final class CommandRouter {
     /// `AppCoordinator` injects its store. See `logToolRequest`.
     private let localToolLogStore: LocalToolLogStore?
 
+    /// [CHAT] Stage 1 of the conversational-augmentation plan
+    /// (2026-09-23): the CHAT shape's confidence floor — applied here,
+    /// where every other "this model answer is not good enough to speak"
+    /// decision already lives (`ReplySanityGate`, `router.modelReplyUnclear`).
+    ///
+    /// The value comes from the brain's own config
+    /// (`LlamaCommandInterpreter.Config.chatConfidenceFloor`) so the two
+    /// cannot drift: the interpreter stops applying the command threshold
+    /// to chat turns and THIS layer decides what a sub-floor chat decode
+    /// means. Below the floor the model's text is not spoken at all — the
+    /// honest line is (`router.chatLowConfidence`), and the turn is
+    /// observable as `chatLowConfidence`. At or above it the reply is
+    /// spoken through the same sanity gate a `query` answer passes.
+    private let chatConfidenceFloor: Double
+
     init(coordinator: VoiceCommandCoordinating,
          observabilityBus: ObservabilityBus,
          speaker: Speaker? = nil,
          interpreter: CommandInterpreter = NullCommandInterpreter(),
+         // [CHAT] The chat shape's floor — defaults to the brain's own
+         // (`LlamaCommandInterpreter.Config.default.chatConfidenceFloor`,
+         // currently 0.6) so an unconfigured router and the brain it
+         // drives agree; a test can inject any value.
+         chatConfidenceFloor: Double = LlamaCommandInterpreter.Config.default.chatConfidenceFloor,
          pluginRegistry: PluginRegistry? = nil,
          geminiClient: GeminiClient? = nil,
          searchConfigStore: SearchConfigStore? = nil,
@@ -655,6 +675,7 @@ final class CommandRouter {
         self.observabilityBus = observabilityBus
         self.speaker = speaker
         self.interpreter = interpreter
+        self.chatConfidenceFloor = chatConfidenceFloor
         self.turnTracer = turnTracer
         self.preAckPlayer = preAckPlayer
         self.pluginRegistry = pluginRegistry
@@ -1419,7 +1440,18 @@ final class CommandRouter {
                     // are unaffected — their executor confirmation
                     // already verifies aloud. `neverGated` never reaches
                     // here (safety net ran first).
-                    if command.confidence < 0.7,
+                    //
+                    // [CHAT-CONFIDENCE-FLOOR] …and a CHAT turn is never
+                    // rephrased. There is no interpretation for the user
+                    // to confirm — "did you mean…?" about small talk is
+                    // nonsense — and the chat shape already has its own
+                    // low-confidence outcome (the honest line below
+                    // `chatConfidenceFloor`, the reply above it). Without
+                    // this exclusion a chat reply in [floor, 0.7) would be
+                    // swapped for a confirmation question, which is
+                    // exactly what the floor exists to avoid.
+                    if command.action != .chat,
+                       command.confidence < 0.7,
                        ConfirmationTier.tier(for: command.action) == .free,
                        self.coordinator?.pendingRephraseCommand == nil {
                         self.coordinator?.startRephraseConfirmation(command, sourceTranscript: raw)
@@ -2598,6 +2630,48 @@ final class CommandRouter {
             speakWithVisibleOutcome(key: "router.featureNotYet")
         case .query:
             emit(eventType: "command_llm_query", outcome: "info")
+            deliverModelReply(command.reply)
+        case .chat:
+            // [CHAT] Stage 1 of the conversational-augmentation plan
+            // (2026-09-23): a free-text conversational reply — a greeting,
+            // thanks, a farewell, small talk. It rides the SAME
+            // spoken-answer surface a `query` answer uses, through the
+            // same sanity gate (`deliverModelReply` → `sanitisedModelReply`
+            // → `speakWithVisibleOutcome` on rejection), so chat text gets
+            // exactly the sanitisation and abuse-gate every model answer
+            // gets.
+            //
+            // Nothing executes here, and the wiring is what makes that
+            // structural rather than a promise: the chat decode carries no
+            // slots (`LlamaGrammar.chatJSONSchema`), the intent cache
+            // refuses the action (`IntentCommandCache.isCacheable`), and
+            // the tier is free (`ConfirmationTier`). The event is distinct
+            // from `command_llm_query` so the field can tell a chat turn
+            // from an answered question.
+            //
+            // [CHAT-CONFIDENCE-FLOOR] The decoded object's own
+            // `confidence`, checked BEFORE a word of the model's text can
+            // be spoken: below the floor (see `chatConfidenceFloor`) the
+            // brain has told us it is guessing, and a guess spoken in the
+            // assistant's voice is worse than an admitted gap — so the
+            // honest line is spoken instead, the model's text never
+            // reaches the speaker or the card, and the turn is observable
+            // (`chatLowConfidence`, with both numbers in metadata). At or
+            // above the floor the reply is delivered exactly like a
+            // `query` answer, sanity gate included.
+            guard command.confidence >= chatConfidenceFloor else {
+                observabilityBus.emit(ObservabilityEvent(
+                    component: "command_router",
+                    eventType: "chatLowConfidence",
+                    durationMs: nil,
+                    outcome: "info",
+                    errorCode: nil,
+                    metadata: ["confidence": String(format: "%.2f", command.confidence),
+                               "floor": String(format: "%.2f", chatConfidenceFloor)]))
+                speakWithVisibleOutcome(key: "router.chatLowConfidence")
+                return
+            }
+            emit(eventType: "command_llm_chat", outcome: "info")
             deliverModelReply(command.reply)
         case .none:
             emit(eventType: "command_llm_no_action", outcome: "info")

@@ -49,6 +49,34 @@ extension CommandInterpreter {
     func unload() {}
 }
 
+/// [CHAT] Stage 1 of the conversational-augmentation plan (2026-09-23): a
+/// local interpreter that can answer a CHIT-CHAT turn — the free-text
+/// reply shape — as well as the command shape it already answers.
+///
+/// Why a separate protocol rather than a case in the command schema: a
+/// chat turn is not a command with a different label, it is a different
+/// DECODE (no slots, a free-text `reply`) and a different PROMPT. The
+/// router asks for it through this entry point instead, which leaves
+/// `CommandInterpreter` and every existing conformer byte-identical, and
+/// makes "does this brain have a chat shape?" a question the router can
+/// ask at runtime (`as? ChatResponding`).
+///
+/// Contract, mirroring `CommandInterpreter`:
+///   - nil = an ABSTENTION (no chat shape, no model, an unparseable or
+///     empty reply, or a confidence under the interpreter's gate). The
+///     caller keeps its own fallback; an abstention is never an error.
+///   - a non-nil result is an `InterpretedCommand` whose `reply` is the
+///     spoken text. The interpreter's OWN contract is that an action
+///     reachable here is `.chat` — anything else would mean the chat
+///     prompt produced a slot-bearing command, which the caller treats
+///     as unusable (a chat turn must never execute).
+///   - completion runs on the main queue.
+protocol ChatResponding: AnyObject {
+    func respondToChat(transcript: String,
+                       context: InterpreterContext,
+                       completion: @escaping (InterpretedCommand?) -> Void)
+}
+
 /// [LAT-EVIDENCE] (2026-09-12) A local interpreter that distinguishes a
 /// FAILED inference (timeout / truncated output — both retried once by
 /// the interpreter itself) from an ABSTENTION. `IntentRouter` consults
@@ -93,6 +121,23 @@ struct InterpretedCommand: Equatable, Codable {
         /// single case is the only core change a plugin ever needs
         /// (docs/superpowers/specs/2026-09-05-plugin-architecture-design.md).
         case plugin = "plugin"
+        /// [CHAT] Stage 1 of the conversational-augmentation plan
+        /// (2026-09-23): a FREE-TEXT conversational reply — a greeting,
+        /// thanks, a farewell, small talk. It carries no slots and
+        /// executes nothing: the reply is spoken through the same
+        /// `deliverModelReply` surface a `query` answer uses, and the
+        /// action exists so the observability trail can tell a chat turn
+        /// from a command turn.
+        ///
+        /// NOT a member of the command schema: the 12-action catalog the
+        /// command prompt and `commandJSONSchema` teach is frozen (the
+        /// encoder's `IntentEncoderSchema.actionRawValues` pins the same
+        /// 12), and a chat turn is asked with the SEPARATE
+        /// `LlamaGrammar.chatJSONSchema` instead. This case is reachable
+        /// only through `respondToChat`, never through the command entry
+        /// point — `IntentEncoderSchema.action(forRawValue:)` rejects it
+        /// as an encoder label, and the command grammar cannot emit it.
+        case chat = "chat"
         case none
     }
     let action: Action
@@ -251,6 +296,48 @@ enum LlamaGrammar {
         "pluginEntities"]
     }
     """
+
+    /// [CHAT] Stage 1 of the conversational-augmentation plan (2026-09-23):
+    /// the decode schema for a CHIT-CHAT turn — the free-text reply shape.
+    ///
+    /// Deliberately a SEPARATE schema, not a widened `commandJSONSchema`.
+    /// The command schema is frozen: it is the contract the fine-tuned
+    /// intent brains were trained against, the encoder's 12-action
+    /// allow-list pins the same catalog (`IntentEncoderSchema
+    /// .actionRawValues`), and the shipped tests pin its bytes. A chat
+    /// turn is a different decode, so it gets its own schema and both
+    /// stay readable: three keys, one intent, one free-text reply, no
+    /// slots.
+    ///
+    /// Why there is no slot here, and no `pluginAction` either: a chat
+    /// turn executes NOTHING, so the grammar that constrains its decode
+    /// must not be ABLE to express a slot. That is what makes "a chat
+    /// reply can never run anything" structural rather than a promise the
+    /// router is trusted to keep.
+    ///
+    /// Key order (`intent`, `reply`, `confidence`) is the command schema's
+    /// own order with the payload in `response`'s position, so the
+    /// json-schema→GBNF converter's fixed key order and the training
+    /// labels the chat shape will be fine-tuned on agree by construction.
+    /// The reply is a plain JSON string — the same `string` rule the
+    /// command grammar uses, so no quote, backslash or control character
+    /// can leak into the spoken text.
+    ///
+    /// The single-value `enum` is the structural half of the routing
+    /// contract: a decode through this schema CANNOT claim a command
+    /// intent, so a mis-routed turn abstains (an unparseable label) rather
+    /// than executing something off a prompt that never taught slots.
+    static let chatJSONSchema: String = """
+    {
+      "type": "object",
+      "properties": {
+        "intent": {"type": "string", "enum": ["chat"]},
+        "reply": {"type": "string"},
+        "confidence": {"type": "number"}
+      },
+      "required": ["intent", "reply", "confidence"]
+    }
+    """
 }
 
 /// [NO-GIBBERISH] Deterministic on-device sampling (2026-09-07), shared by
@@ -312,13 +399,41 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
         /// interpreter reports nil so the router falls back to keyword
         /// matching — this is a NEW failure path, not preserved behavior.
         let timeoutSeconds: Double
+        /// [CHAT] Stage 1 of the conversational-augmentation plan
+        /// (2026-09-23): the decode-time CONFIDENCE FLOOR for the chat
+        /// shape — read from the decoded object's own `confidence` field,
+        /// the same field `confidenceThreshold` gates commands on.
+        ///
+        /// It stands in `confidenceThreshold`'s place for chat turns,
+        /// because the two shapes want opposite things from an uncertain
+        /// decode. A command below the threshold is DROPPED (nil) so the
+        /// router falls back to keyword matching; a chat turn has no
+        /// keyword fallback to be honest with (the ladder would just ask
+        /// the same brain a different question), so its below-floor
+        /// consequence is a SPOKEN line, not a silent one: the decode
+        /// still completes, carrying its confidence, and the delivery
+        /// layer speaks the honest low-confidence line instead of model
+        /// text it does not trust (`CommandRouter.dispatchInterpreted`).
+        ///
+        /// 0.6, not the command threshold's 0.7: small talk is not an
+        /// instruction, and demanding instruction-grade certainty of it
+        /// would turn *most* chat turns into abstentions. Conversely, an
+        /// answer the brain is only half sure of should say so rather
+        /// than be delivered as fact.
+        ///
+        /// Deliberately here and not in the translate feature's config:
+        /// this is the BRAIN's own threshold (the coordinators asked for
+        /// it "beside the brain's other thresholds"), and it is only
+        /// meaningful where the brain's decoded confidences are read.
+        let chatConfidenceFloor: Double
         // [NO-GIBBERISH] (2026-09-07): sampling temperature/seed are NOT
         // configurable — determinism is a correctness invariant here, so
         // every interpreter samples through `OnDeviceSampling` (temp 0,
         // fixed seed) regardless of configuration.
         static let `default` = Config(confidenceThreshold: 0.7,
                                       maxTokens: 128,
-                                      timeoutSeconds: 10)
+                                      timeoutSeconds: 10,
+                                      chatConfidenceFloor: 0.6)
     }
 
     private let modelStore: ModelStore
@@ -499,9 +614,89 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
 
     // MARK: - Interpret
 
+    /// The command entry point — byte-identical to what it was before the
+    /// chat shape existed: `runTurn` below is the same body, with the
+    /// prompt and schema supplied by the shape.
     func interpret(transcript: String,
                    context: InterpreterContext,
                    completion: @escaping (InterpretedCommand?) -> Void) {
+        runTurn(transcript: transcript, context: context, shape: .command,
+                completion: completion)
+    }
+
+    /// [CHAT] Stage 1 of the conversational-augmentation plan (2026-09-23):
+    /// the chit-chat entry point — the same turn pipeline asked with the
+    /// chat prompt and decoded against `LlamaGrammar.chatJSONSchema`.
+    ///
+    /// Everything the command path guards, this path guards identically:
+    /// the sanitiser runs before the transcript can reach a prompt string,
+    /// an empty completion is an observable failure rather than a silent
+    /// success, and an unparseable or low-confidence answer ABSTAINS (nil)
+    /// so the router's own fallback owns the turn. A chat ask that the
+    /// brain cannot answer — the expected state until a later stage
+    /// fine-tunes it for this shape — is therefore a graceful nil, never
+    /// an invented command.
+    func respondToChat(transcript: String,
+                       context: InterpreterContext,
+                       completion: @escaping (InterpretedCommand?) -> Void) {
+        runTurn(transcript: transcript, context: context, shape: .chat,
+                completion: completion)
+    }
+
+    /// Which of the brain's two response shapes a turn is asked for. The
+    /// ONLY thing a shape changes is the prompt and the decode schema —
+    /// every other part of the turn below (sanitise, guard, infer, gate,
+    /// trace, events) is shared, so the two shapes cannot drift on the
+    /// parts that are not the shape itself.
+    private enum ResponseShape {
+        /// The shipped intent-slot contract.
+        case command
+        /// The free-text conversational reply.
+        case chat
+
+        /// The schema llama.cpp's sampler decodes against.
+        var schema: String {
+            switch self {
+            case .command: return LlamaGrammar.commandJSONSchema
+            case .chat: return LlamaGrammar.chatJSONSchema
+            }
+        }
+
+        func prompt(transcript: String, context: InterpreterContext) -> String {
+            switch self {
+            case .command: return IntentPrompt.build(transcript: transcript,
+                                                     context: context)
+            case .chat: return IntentPrompt.buildChat(transcript: transcript,
+                                                      context: context)
+            }
+        }
+
+        /// What the trace row calls an ACCEPTED answer of this shape. A
+        /// chat reply is not a command, and the trace is read by humans.
+        var acceptedDecision: String {
+            switch self {
+            case .command: return "command"
+            case .chat: return "chat"
+            }
+        }
+    }
+
+    /// The confidence an answer of `shape` must clear to be ACCEPTED.
+    /// Commands keep `confidenceThreshold` — their gate is untouched.
+    /// The chat shape is gated by its own floor, which is a different
+    /// question from the acceptance gate a command faces: see
+    /// `Config.chatConfidenceFloor` and the completion in `runTurn`.
+    private func acceptanceThreshold(for shape: ResponseShape) -> Double {
+        switch shape {
+        case .command: return config.confidenceThreshold
+        case .chat: return config.chatConfidenceFloor
+        }
+    }
+
+    private func runTurn(transcript: String,
+                         context: InterpreterContext,
+                         shape: ResponseShape,
+                         completion: @escaping (InterpretedCommand?) -> Void) {
         // [LAT-EVIDENCE] A fresh attempt starts clean — the failure
         // reason belongs to the LAST attempt only.
         lastInferenceFailureReason = nil
@@ -515,7 +710,8 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
             return
         }
         // Sanitise BEFORE the transcript reaches any prompt string
-        // (NFR-013 / review H3 / spec §5.2).
+        // (NFR-013 / review H3 / spec §5.2). Shared by both shapes — the
+        // chat prompt is a prompt string like any other.
         let clean = InputSanitiser.sanitise(transcript, level: .quarantine)
         guard !clean.isEmpty else {
             // [PIPELINE-TRACE] Same shape as the encoder's abstention
@@ -529,7 +725,7 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
         // Plugin fragments are deliberately NOT composed here — the
         // on-device context (1,024 tokens) cannot fit them (see the
         // pluginRegistry property docs); `IntentPrompt.build` defaults to
-        // no plugins.
+        // no plugins (and the chat shape has none to compose).
         //
         // [TURN-TIMING-BREAKDOWN] `picker_prompt_build` — the prompt
         // construction only (sanitisation above is deliberately outside
@@ -544,7 +740,7 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
             .pickerPrompt,
             input: PipelineTraceSummary.text(clean))
         let prompt = timingRecorder.measure(.pickerPromptBuild) {
-            IntentPrompt.build(transcript: clean, context: context)
+            shape.prompt(transcript: clean, context: context)
         }
         promptTrace?.finish(
             output: PipelineTraceSummary.estimatedPromptTokens(prompt),
@@ -565,17 +761,26 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
             let traceSpan = self?.traceRecorder?.start(
                 .pickerInference,
                 input: PipelineTraceSummary.estimatedPromptTokens(prompt))
-            self?.runInference(prompt: prompt) { json in
+            self?.runInference(prompt: prompt, schema: shape.schema) { json in
                 inferenceSpan?.finish()
                 let parsed = Self.parse(json: json)
                 let failure = self?.lastInferenceFailureReason
-                let threshold = self?.config.confidenceThreshold ?? 0.7
+                let threshold = self?.acceptanceThreshold(for: shape) ?? 0.7
+                // [CHAT] Only the COMMAND shape abstains on low confidence
+                // here. A chat decode always completes — below its floor it
+                // is the delivery layer's honest line, not a fall-through
+                // to the command ladder (see `Config.chatConfidenceFloor`),
+                // so the trace names that outcome rather than reporting an
+                // abstention that did not happen.
+                let chatFloor = shape == .chat ? self?.config.chatConfidenceFloor : nil
                 traceSpan?.finish(
                     output: Self.traceSummary(of: parsed, failure: failure),
                     decision: Self.traceDecision(of: parsed, threshold: threshold,
-                                                 failure: failure),
+                                                 failure: failure,
+                                                 accepted: shape.acceptedDecision,
+                                                 chatFloor: chatFloor),
                     tokenCount: PipelineTraceSummary.estimatedPromptTokenCount(prompt))
-                if let p = parsed, p.confidence < threshold {
+                if let p = parsed, shape == .command, p.confidence < threshold {
                     // Below the threshold — treat as "not confident" so the
                     // router falls back to keyword matching.
                     DispatchQueue.main.async { completion(nil) }
@@ -964,7 +1169,13 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
     }
     #endif
 
+    /// `schema` is the decode constraint for THIS turn's shape — the
+    /// command schema by default (every pre-chat call site is unchanged),
+    /// `LlamaGrammar.chatJSONSchema` for a chat turn. It reaches both the
+    /// test seam and the real sampler call, so what the seam observes is
+    /// what llama.cpp is handed.
     private func runInference(prompt: String,
+                              schema: String = LlamaGrammar.commandJSONSchema,
                               completion: @escaping (String?) -> Void) {
         // Test seam — mirrors `LocalIntentInterpreter.generateOverride`.
         // The returned string still runs through the SAME empty-output
@@ -977,8 +1188,7 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
                     // same schema the real runtime call receives below, so
                     // the grammar-wiring tests can assert the schema
                     // reaches the point of the llama.cpp call.
-                    let out = try await generateOverride(prompt,
-                                                         LlamaGrammar.commandJSONSchema)
+                    let out = try await generateOverride(prompt, schema)
                     if out.isEmpty {
                         emit("inference_empty_output", outcome: "failure")
                         completion(nil)
@@ -1026,8 +1236,10 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
 
         Task {
             // [NO-GIBBERISH] (2026-09-07) Grammar-constrained generation:
-            // `LlamaGrammar.commandJSONSchema` is converted by llama.cpp to
-            // a GBNF grammar and the sampler is chained through it (see
+            // the turn's decode schema (`schema` — the canonical command
+            // schema, or the chat schema on a chat turn) is converted by
+            // llama.cpp to a GBNF grammar and the sampler is chained
+            // through it (see
             // `LLMCore.generateWithConstraints`) — the canonical JSON
             // contract is STRUCTURALLY enforced at decode time, and the
             // reply text is constrained to a JSON string (no quotes,
@@ -1056,7 +1268,7 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
                         }
                         let output = try await llm.core.generateWithConstraints(
                             from: formattedPrompt,
-                            jsonSchema: LlamaGrammar.commandJSONSchema)
+                            jsonSchema: schema)
                         return output.isEmpty ? .failed : .success(output)
                     } catch {
                         return .failed
@@ -1130,12 +1342,28 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
     /// closed vocabulary: the picker's own threshold gate applied, or the
     /// runtime's failure token when nothing parsed. Token-only, because a
     /// Release console prints this field.
+    /// `accepted` names what an accepted answer of THIS turn's shape is —
+    /// "command" (the default, and every pre-chat caller) or "chat". A
+    /// chat reply reported as a "command" in the trace card would misread
+    /// the turn; the abstention and failure vocabulary is shared, because
+    /// those outcomes are the same for both shapes.
+    /// `chatFloor` — non-nil only on a CHAT turn (the shape's floor).
+    /// A chat decode below it is not an abstention: the router speaks the
+    /// honest low-confidence line, so the trace names that instead of
+    /// `abstained(low_confidence)`, which would send whoever reads the row
+    /// looking for a command-ladder fallback that never ran. Command turns
+    /// pass nil and keep the labels they have always had.
     static func traceDecision(of command: InterpretedCommand?,
                               threshold: Double,
-                              failure: String?) -> String {
+                              failure: String?,
+                              accepted: String = "command",
+                              chatFloor: Double? = nil) -> String {
         if let command {
+            if let chatFloor, command.confidence < chatFloor {
+                return "low_confidence(honest_line)"
+            }
             return command.confidence < threshold
-                ? "abstained(low_confidence)" : "command"
+                ? "abstained(low_confidence)" : accepted
         }
         guard let failure else { return "abstained(no_command)" }
         return "failed(\(failure))"

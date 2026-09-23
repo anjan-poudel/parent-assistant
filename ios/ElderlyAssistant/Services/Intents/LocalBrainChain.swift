@@ -55,7 +55,7 @@ import Foundation
 /// untouched by the seam: it changes the STRING a brain reads, never which
 /// brain is asked or what is done with its answer.
 final class LocalBrainChain: CommandInterpreter, InterpreterFailureReporting,
-                             PreparedTranscriptInterpreting {
+                             PreparedTranscriptInterpreting, ChatResponding {
 
     /// [ENCODER-RUNTIME-CASCADE] Why a cascade turn left the preferred
     /// brain. Fixed vocabulary for the observability trail — event
@@ -201,9 +201,68 @@ final class LocalBrainChain: CommandInterpreter, InterpreterFailureReporting,
                   context: context, completion: completion)
     }
 
+    /// [CHAT] The local slot's chat entry point (stage 1 of the
+    /// conversational-augmentation plan, 2026-09-23): the free-text reply
+    /// shape, forwarded to the brain that can answer it.
+    ///
+    /// WHICH brain — the CAPABILITY rule, not the availability rule: it is
+    /// `preferred` when `preferred` has a chat shape, else `standIn` when
+    /// `standIn` has one, else an abstention (nil). The distinction
+    /// matters in exactly one configuration: a preferred brain that is
+    /// intent-only (the fine-tuned intent models are precisely that — a
+    /// frozen 12-action surface with no conversational mode) while the
+    /// stand-in is a general generative brain. Asking the intent model a
+    /// chat prompt would be asking it outside its trained surface;
+    /// abstaining would drop every chat turn the moment a fine-tuned GGUF
+    /// ships. Handing the turn to the general brain is the only one of
+    /// the three that answers the user, and it is the same brain the
+    /// command path would fall back to anyway.
+    ///
+    /// The CASCADE is deliberately not consulted: it compares a command's
+    /// confidence against the router's accept band, and a chat reply is
+    /// not banded (`IntentRouter.interpretLocalLadder` documents why).
+    ///
+    /// The turn's seam runs exactly as it does for a command turn (the
+    /// `turnInput(for:)` builder above), and the chat brain reads the
+    /// turn's prepared TEXT: the only pair-consuming brain in this
+    /// codebase is the encoder, which has no chat shape, so a chat turn
+    /// never has a pair consumer to hand the pair to.
+    func respondToChat(transcript: String,
+                       context: InterpreterContext,
+                       completion: @escaping (InterpretedCommand?) -> Void) {
+        respondToChat(turn: turnInput(for: transcript), context: context,
+                      completion: completion)
+    }
+
+    private func respondToChat(turn: TurnInput,
+                               context: InterpreterContext,
+                               completion: @escaping (InterpretedCommand?) -> Void) {
+        guard let brain = chatBrain else {
+            DispatchQueue.main.async { completion(nil) }
+            return
+        }
+        lastServedPreferred = brain === preferred
+        brain.respondToChat(transcript: turn.plainText, context: context,
+                            completion: completion)
+    }
+
+    /// The brain that answers a chat turn — `preferred` when it has the
+    /// chat shape, else `standIn` when it has one, else nothing (the
+    /// caller abstains and the router's command ladder owns the turn).
+    private var chatBrain: ChatResponding? {
+        if let preferred = preferred as? ChatResponding { return preferred }
+        if let standIn = standIn as? ChatResponding { return standIn }
+        return nil
+    }
+
     /// One turn's input at the local slot. Built by exactly one of the two
     /// entry points above, then threaded through the UNCHANGED decision
     /// logic below.
+    ///
+    /// [CHAT] The chat entry point below is a THIRD builder of the same
+    /// value, for the same reason: a chat turn runs the slot's seam too,
+    /// so the brain that answers it reads the same corrected text a
+    /// command turn would.
     private struct TurnInput {
         /// The prepared pair, or nil on a chain with no seam (the
         /// pass-through shape, and every pre-relocation call site).
