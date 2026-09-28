@@ -14,7 +14,13 @@ set -euo pipefail
 #               IOS_DERIVED_DATA yourself (there is no build-clean mode).
 #   ipa         build + archive + export an .ipa.
 #   test        FULL test gate: unit AND UI tests (for merges/nightly).
-#   test:unit   Fast gate: unit tests only (skips the UI suite).
+#               Optional unit test class names scope the run to those
+#               classes — the UI suite is skipped and the impact baseline
+#               is not advanced (see test:impact below).
+#   test:unit   Fast gate: unit tests only (skips the UI suite). Optional
+#               unit test class names scope the run to those classes, e.g.
+#               `./build.sh test:unit QueryEndToEndRegressionTests`. Scoped
+#               runs never advance the impact baseline.
 #   test:ui     UI tests only.
 #   test:impact IMPACT-AWARE unit gate: diffs the working tree against the
 #               last recorded green baseline (ios/build/.last-tested-sha) and
@@ -24,7 +30,9 @@ set -euo pipefail
 #               to the full unit gate when the mapping is ambiguous or more
 #               than 40% of suites are affected. The baseline is advanced
 #               ONLY after a run that covered the full unit gate, so a green
-#               impact run never silently skips later work.
+#               impact run never silently skips later work. Class-scoped
+#               test/test:unit runs are excluded from that recording — a
+#               partial run must never look like full coverage.
 #   test-clean  FULL test gate after wiping the warm test DerivedData —
 #               rare (new simulator runtime, suspect build cache).
 #   generate    Regenerate the Xcode project from project.yml only.
@@ -84,7 +92,13 @@ Usage: $0 {build|ipa|test|test:unit|test:ui|test:impact|test-clean|generate|help
               Incremental on build/DerivedData — no clean.
   ipa         build + archive + export an .ipa.
   test        Full gate: unit + UI tests (merge/nightly). Warm DerivedData.
+              Optional unit test class names scope the run to those classes
+              (-only-testing:ElderlyAssistantTests/<Class>); the UI suite is
+              then skipped and the impact baseline is not advanced.
   test:unit   Fast: unit tests only (skips ElderlyAssistantUITests).
+              Optional unit test class names scope the run, e.g.
+              ./build.sh test:unit QueryEndToEndRegressionTests
+              Scoped runs do not advance the impact baseline.
   test:ui     UI tests only, parallel-testing enabled.
   test:impact Impact-aware unit gate: only suites whose source areas changed
               since the last recorded green run (ios/build/.last-tested-sha),
@@ -112,6 +126,7 @@ Environment:
 Examples:
   cd ios
   ./build.sh test:unit            # fast local check (minutes on warm dir)
+  ./build.sh test:unit QueryEndToEndRegressionTests   # just that unit suite
   ./build.sh test:impact          # only suites hit by your edits + safety net
   ./build.sh test                 # full gate incl. UI tests
   IOS_TEST_CLONES=2 ./build.sh test:ui   # UI suite split over 2 sim clones
@@ -392,7 +407,9 @@ compute_impact_suites() {
 #   unit — unit tests only  (-skip-testing:ElderlyAssistantUITests); extra
 #          classes become -only-testing:ElderlyAssistantTests/<Class> entries
 #   ui   — UI tests only    (-only-testing:ElderlyAssistantUITests)
-#   full — unit + UI tests  (scheme default)
+#   full — unit + UI tests  (scheme default). With extra classes the run is
+#          class-scoped: -only-testing excludes everything it does not name,
+#          so the UI suite is skipped explicitly and the label says so.
 # UI runs get -parallel-testing-enabled YES; IOS_TEST_CLONES=N adds
 # -parallel-testing-worker-count N. (xcodebuild has no `-parallelizable`
 # CLI flag — that is a scheme TestAction attribute for Xcode's own UI —
@@ -428,14 +445,22 @@ run_tests() {
         for extra in "${only_classes[@]}"; do
             testing_args+=(-only-testing:ElderlyAssistantTests/"${extra}")
         done
+        if [ "${scope}" = "full" ]; then
+            # -only-testing excludes every identifier it does not name, so a
+            # class-scoped "full" run would not exercise the UI suite anyway.
+            # Skip it explicitly and relabel so the output matches reality.
+            testing_args+=(-skip-testing:ElderlyAssistantUITests)
+            label="unit tests (class-scoped; UI suite skipped)"
+        fi
         echo "  only-testing: ${only_count} class(es): ${only_classes[*]}"
     fi
 
     echo ""
     echo "Running ${label}..."
-    if [ "${scope}" != "unit" ]; then
+    if [ "${scope}" = "ui" ] || { [ "${scope}" = "full" ] && [ "${only_count}" -eq 0 ]; }; then
         # Parallel UI testing. Default stays serial (safe on busy machines);
         # IOS_TEST_CLONES=N fans the suite out over N simulator clones.
+        # Class-scoped full runs are unit-scoped and stay serial.
         testing_args+=(-parallel-testing-enabled YES)
         if [ -n "${IOS_TEST_CLONES:-}" ]; then
             testing_args+=(-parallel-testing-worker-count "${IOS_TEST_CLONES}")
@@ -493,18 +518,34 @@ case "${1:-build}" in
     test)
         check_prereqs
         generate_project
-        run_tests full
+        # Remaining args are optional unit test class names; they scope the
+        # run to those classes (the UI suite is skipped — see run_tests). A
+        # scoped run is partial coverage, so it must not advance the
+        # test:impact green baseline.
+        shift
+        run_tests full "$@"
         echo ""
-        echo "=== Full test gate passed ==="
-        record_green "$(git -C "${REPO_ROOT}" rev-parse HEAD)"
+        if [ "$#" -eq 0 ]; then
+            echo "=== Full test gate passed ==="
+            record_green "$(git -C "${REPO_ROOT}" rev-parse HEAD)"
+        else
+            echo "=== Scoped test run passed (UI suite skipped; baseline not advanced) ==="
+        fi
         ;;
     test:unit)
         check_prereqs
         generate_project
-        run_tests unit
+        # Remaining args are optional unit test class names; a class-scoped
+        # run is partial coverage and must not advance the impact baseline.
+        shift
+        run_tests unit "$@"
         echo ""
-        echo "=== Unit tests passed ==="
-        record_green "$(git -C "${REPO_ROOT}" rev-parse HEAD)"
+        if [ "$#" -eq 0 ]; then
+            echo "=== Unit tests passed ==="
+            record_green "$(git -C "${REPO_ROOT}" rev-parse HEAD)"
+        else
+            echo "=== Scoped unit run passed (baseline not advanced) ==="
+        fi
         ;;
     test:ui)
         check_prereqs
