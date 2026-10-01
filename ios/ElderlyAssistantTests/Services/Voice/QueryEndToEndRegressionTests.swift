@@ -53,13 +53,25 @@ final class QueryEndToEndRegressionTests: XCTestCase {
     private final class RecordingSpeaker: Speaker {
         private let lock = NSLock()
         private(set) var texts: [String] = []
+        /// The locale each utterance was handed to the speaker with —
+        /// the VOICE half of the voice+text pairing (it selects which
+        /// TTS voice speaks the text). Paired index-for-index with
+        /// `texts`.
+        private(set) var locales: [Locale] = []
         func speak(_ text: String, locale: Locale) async {
-            lock.lock(); texts.append(text); lock.unlock()
+            lock.lock()
+            texts.append(text)
+            locales.append(locale)
+            lock.unlock()
         }
         func cancel() {}
         var spoken: [String] {
             lock.lock(); defer { lock.unlock() }
             return texts
+        }
+        var spokenLocales: [Locale] {
+            lock.lock(); defer { lock.unlock() }
+            return locales
         }
     }
 
@@ -139,9 +151,11 @@ final class QueryEndToEndRegressionTests: XCTestCase {
 
     /// [VOICE-ACK] The pre-ack committed on the LLM round-trip — spoken
     /// before every model reply or honest fallback in these end-to-end
-    /// pins.
-    private func preAckText() -> String {
-        L10n.str("voiceAck.moment1", locale: Locale(identifier: "ne-NP"))
+    /// pins. Variant 1 is the first in the rotation, and every harness
+    /// builds a fresh router (counter at 0), so this is the ack a
+    /// single-route test hears.
+    private func preAckText(locale: Locale = Locale(identifier: "ne-NP")) -> String {
+        L10n.str("voiceAck.moment1", locale: locale)
     }
 
     // MARK: - The device repro, fixed (model path, neutral question)
@@ -256,6 +270,88 @@ final class QueryEndToEndRegressionTests: XCTestCase {
                        "a topic pre-answer must never consult the brain")
         XCTAssertFalse(bus.contains("inference_empty_output"))
         XCTAssertFalse(bus.contains("command_unrecognised"))
+    }
+
+    // MARK: - [EN-VOICE-PAIRING] English voice Q&A — one text, three places
+
+    /// The English-locale half of the structured-response contract,
+    /// pinned at the router level (Option A) through this file's harness
+    /// seams — `RecordingSpeaker`, the stand-in's `generateOverride`,
+    /// and the stub store/bus.
+    ///
+    /// The contract: for an English voice question, ONE text must appear
+    /// in all three places — the visible CARD
+    /// (`coordinator.noteGenericReply`), the SPEECH (`Speaker.speak`),
+    /// and the brain's own reply (the `response` field of the structured
+    /// JSON the interpreter returned). Drift between them lies to one of
+    /// the elder's two channels: a card the voice never said, or a voice
+    /// the elder can never re-read. The pre-ack is part of the pin too —
+    /// it must be the ENGLISH ack ("one moment…"), not the ne-NP
+    /// fallback, so the whole turn is coherent in the language the
+    /// question was asked in.
+    ///
+    /// English is the half of the matrix that needs pinning because the
+    /// topic table, the keyword ladder and the safety net all carry
+    /// English vocabulary; the transcript below is chosen to clear every
+    /// deterministic stage, so it reaches the brain exactly the way an
+    /// unscripted English question does.
+    private let englishLocale = Locale(identifier: "en-US")
+
+    /// A neutral English voice question with NO deterministic vocabulary
+    /// — no weather/time/date/greeting token (`TopicPreAnswer`), no
+    /// emergency / call / medication-ack word (the safety net phrase
+    /// lists), no news / YouTube / app-launch phrase
+    /// (`KeywordIntentRule`), and no digits (calculator, alarms,
+    /// timers).
+    private let englishQuestion = "Why is the sky blue?"
+
+    /// The brain's structured reply for that question — English, and
+    /// clean under `ReplySanityGate` (alphabetic majority, no JSON
+    /// structure, no repetition loop), so the contract is exercised on
+    /// the happy path rather than on the rejection fallback.
+    private let englishAnswer =
+        "That is a lovely question. Sunlight scatters in the air, and blue light scatters the most — that is why the sky looks blue."
+
+    func testEnglishVoiceQuestionCardsAndSpeaksExactlyTheBrainReply() {
+        let harness = makeLocalHarness(
+            overrideJSON: canonicalQueryJSON(response: englishAnswer))
+        // The elder is in English: the coordinator's active locale is
+        // what selects the pre-ack wording AND the spoken voice.
+        harness.coordinator.activeLocale = englishLocale
+
+        harness.router.route(transcript: englishQuestion)
+
+        waitUntil { harness.coordinator.genericReplies.count == 1 }
+        waitUntil { harness.speaker.spoken.count == 2 }
+
+        // Leg 1 — the brain's reply reaches the visible card ...
+        XCTAssertEqual(harness.coordinator.genericReplies, [englishAnswer],
+                       "the card must show the brain's own reply")
+        // ... Leg 2 — and the same text is what the speaker is handed,
+        // behind the ENGLISH pre-ack (never the ne-NP fallback).
+        XCTAssertEqual(harness.speaker.spoken,
+                       [preAckText(locale: englishLocale), englishAnswer],
+                       "the spoken reply must be the brain's reply, pre-acked in English")
+        // Leg 3 — the pairing itself: card text == spoken text.
+        XCTAssertEqual(harness.speaker.spoken.last,
+                       harness.coordinator.genericReplies.first,
+                       "card text and spoken text must be the same string")
+        // The voice half of the pairing: the utterances were handed to
+        // the speaker with the active (English) locale, so the TTS voice
+        // matches the language of the text.
+        XCTAssertEqual(harness.speaker.spokenLocales.map(\.identifier),
+                       [englishLocale.identifier, englishLocale.identifier],
+                       "both utterances must be spoken in the active (en-US) locale")
+
+        XCTAssertTrue(bus.contains("command_llm_query"),
+                      "an English query answer rides the query dispatch")
+        XCTAssertTrue(bus.contains("inference_done"))
+        XCTAssertFalse(bus.contains("command_unrecognised"),
+                       "a parseable English answer must never hit command_unrecognised")
+        XCTAssertFalse(bus.contains("llama_response_rejected_sanity"),
+                       "the English answer must pass the sanity gate")
+        XCTAssertFalse(bus.contains("topic_pre_answer"),
+                       "the question must reach the brain, not a deterministic pre-answer")
     }
 
     // MARK: - Gemini (cloud) path — same contract, stubbed transport
