@@ -10,11 +10,6 @@
 	</array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
-	<key>CFBundleLocalizations</key>
-	<array>
-		<string>en</string>
-		<string>ne</string>
-	</array>
 	<key>CFBundleDisplayName</key>
 	<string>VoiceBridge AI</string>
 	<key>CFBundleExecutable</key>
@@ -23,22 +18,17 @@
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>ne</string>
+	</array>
 	<key>CFBundleName</key>
 	<string>$(PRODUCT_NAME)</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
 	<string>1.0</string>
-	<key>CFBundleVersion</key>
-	<string>2</string>
-	<!-- Calendar & family sharing (2026-09-16). The Google OAuth client
-	     id for this app, and the reversed-client-id URL scheme Google
-	     sign-in returns through. Client registered for
-	     com.elderlyassistant.app in the Google Cloud console; the id is
-	     app identity, not a user credential — users still sign in with
-	     their own account at run time (design §2 decision 3). -->
-	<key>GIDClientID</key>
-	<string>906771099595-cdqhrgvdqqm1um8ml76sqm92llriqhfv.apps.googleusercontent.com</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -52,6 +42,10 @@
 			</array>
 		</dict>
 	</array>
+	<key>CFBundleVersion</key>
+	<string>7</string>
+	<key>GIDClientID</key>
+	<string>906771099595-cdqhrgvdqqm1um8ml76sqm92llriqhfv.apps.googleusercontent.com</string>
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
 		<string>App-Prefs</string>
@@ -69,10 +63,6 @@
 		<string>instagram</string>
 		<string>maps</string>
 		<string>message</string>
-		<!-- [SCHEME-PROBE] Candidate schemes the URL-scheme tester probes —
-		     a probe for an un-whitelisted scheme answers false REGARDLESS
-		     of registration, so the tester's chips must be declared here
-		     to be honest. -->
 		<string>contact</string>
 		<string>people</string>
 		<string>mobilephone</string>
@@ -98,28 +88,33 @@
 	<true/>
 	<key>MinimumOSVersion</key>
 	<string>16.0</string>
-	<key>NSCalendarsUsageDescription</key>
-	<string>Your daily routine (medicines, exercise, meals) is mirrored to the Calendar app so your family can see it too. The app works fully even if you say no.</string>
+	<key>NSAlarmKitUsageDescription</key>
+	<string>Timers you set are kept by your phone so they ring like a real alarm — loudly and full screen, even when this app is closed or the phone is on silent. You can say no; timers will then only ring while the app is open.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>NSCalendarsFullAccessUsageDescription</key>
 	<string>Events you keep in the Calendar app (doctor visits, family plans) can be read so they appear here with a reminder, and your routine can be mirrored to a dedicated Sahayak calendar. With two-way mirroring switched on (off by default), changes you make to those mirrored events in the Calendar app update your routine here too. The app works fully even if you say no.</string>
-	<key>NSAlarmKitUsageDescription</key>
-	<string>Alarms you ask for by voice ring like the built-in Clock's alarms — even in silent mode — and can be stopped or snoozed from the Lock Screen. If you say no, the assistant cannot set alarms.</string>
-	<key>NSRemindersUsageDescription</key>
-	<string>Reminders you keep in the Reminders app can be read so they appear here with a reminder. Nothing is ever written to them. The app works fully even if you say no.</string>
-	<key>NSRemindersFullAccessUsageDescription</key>
-	<string>Reminders you keep in the Reminders app can be read so they appear here with a reminder. Nothing is ever written to them. The app works fully even if you say no.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Your daily routine (medicines, exercise, meals) is mirrored to the Calendar app so your family can see it too. The app works fully even if you say no.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>The camera is used to verify medication intake, to photograph appliances, remotes, or screens when you ask for help using them, and to take an ordinary photo when you ask for one — that photo is then saved to your photo library. The camera is also used to read printed text aloud in your language with live translation. Appliance photos are sent to the assistant's cloud service so it can guide you. For live translation, only the text seen by the camera is sent — and only when the phone's own dictionary cannot translate it. Photos of that text are never sent. When you tap &quot;what is this?&quot;, the small picture of the tapped thing — only that picture, and nothing else from your camera — is sent to the assistant's cloud service to work out what it is.</string>
-	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Photos you take with the assistant are saved to your photo library so you can keep them. The assistant can only ADD photos — it never looks at or changes the photos you already have. The app works fully even if you say no.</string>
+	<string>The camera is used to verify medication intake, to photograph appliances, remotes, or screens when you ask for help using them, and to take an ordinary photo when you ask for one — that photo is then saved to your photo library. The camera is also used to read printed text aloud in your language with live translation. Appliance photos are sent to the assistant's cloud service so it can guide you. For live translation, only the text seen by the camera is sent — and only when the phone's own dictionary cannot translate it. Photos of that text are never sent. When you tap "what is this?", the small picture of the tapped thing — only that picture, and nothing else from your camera — is sent to the assistant's cloud service to work out what it is.</string>
 	<key>NSContactsUsageDescription</key>
 	<string>Searching from the phone screen can call anyone in your phone book — including people added by WhatsApp, Messenger and other apps. The app works fully even if you say no.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Download on-device voice models from your home server.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>The assistant uses your location to tell you the local weather and to give you driving directions to your home or saved places (your current location is the route's start point). Nothing else in the app uses it, and you can say no.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>The assistant needs microphone access to hear your voice commands. By default your speech goes to Gemini, a cloud service, to be turned into text — you can switch to a fully on-device engine in Settings → Voice Engine.</string>
-	<key>NSAlarmKitUsageDescription</key>
-	<string>Timers you set are kept by your phone so they ring like a real alarm — loudly and full screen, even when this app is closed or the phone is on silent. You can say no; timers will then only ring while the app is open.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Photos you take with the assistant are saved to your photo library so you can keep them. The assistant can only ADD photos — it never looks at or changes the photos you already have. The app works fully even if you say no.</string>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>Reminders you keep in the Reminders app can be read so they appear here with a reminder. Nothing is ever written to them. The app works fully even if you say no.</string>
+	<key>NSRemindersUsageDescription</key>
+	<string>Reminders you keep in the Reminders app can be read so they appear here with a reminder. Nothing is ever written to them. The app works fully even if you say no.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Speech recognition turns your voice into text for the assistant. The default engine is Gemini (cloud): your audio is sent to Gemini for transcription. You can switch to a fully on-device engine any time in Settings → Voice Engine.</string>
 	<key>UIBackgroundModes</key>
@@ -144,12 +139,5 @@
 	</array>
 	<key>UIUserInterfaceStyle</key>
 	<string>Light</string>
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<key>NSAllowsLocalNetworking</key>
-		<true/>
-	</dict>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>Download on-device voice models from your home server.</string>
 </dict>
 </plist>
