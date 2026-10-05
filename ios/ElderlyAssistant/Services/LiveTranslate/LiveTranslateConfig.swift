@@ -1092,7 +1092,7 @@ struct LiveTranslateConfig: Equatable {
     // text and stabilise the overlay. The bounding box can be TRANSPARENT GREEN
     // with DARK COLORED TEXT — text plus the transparent green overlay." The
     // grammar — the corner, the fill, the ink — is the token table's
-    // (`DesignTokens.overlayHighlight`, `DesignTokens.textPrimary`); the three
+    // (`DesignTokens.overlayHighlight`, `DesignTokens.overlayText`); the three
     // numbers below are operational, because a device check on a dim kitchen or
     // a bright shopfront is exactly what would move them.
 
@@ -1107,7 +1107,7 @@ struct LiveTranslateConfig: Equatable {
     /// opaque panel this replaces did, and what the owner rejected.
     ///
     /// The value has a second job, and it is the one that is easy to miss:
-    /// `DesignTokens.textPrimary` is drawn *inside* the wash, so the wash is the
+    /// `DesignTokens.overlayText` is drawn *inside* the wash, so the wash is the
     /// text's background. At 0.4 over a white page the composite is a light
     /// green that near-black type clears by a wide margin; a household that
     /// raises this key past 0.5 is trading the dark text's contrast for the

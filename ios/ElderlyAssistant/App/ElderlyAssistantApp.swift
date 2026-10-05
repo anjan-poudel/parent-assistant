@@ -59,6 +59,10 @@ struct ElderlyAssistantApp: App {
             // root. Every Text/catalog lookup, date, and number
             // formatter below this point follows it automatically.
             .environment(\.locale, appCoordinator.activeLocale)
+            .environment(\.appAppearance, AppAppearance(
+                skin: appCoordinator.appTheme, style: appCoordinator.appVisualStyle))
+            .tint(AppColors.palette(for: appCoordinator.appTheme).accent)
+            .preferredColorScheme(.light)
         }
     }
 }

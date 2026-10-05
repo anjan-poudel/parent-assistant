@@ -11,6 +11,7 @@ import SwiftUI
 /// cap (the cap note stays visible). Mirrors `IntentLogReviewView`'s
 /// LeafScreen form and the export row of the intent-log screen.
 struct ToolLogReviewView: View {
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject private var coordinator: AppCoordinator
     @State private var entries: [LocalToolLogEntry] = []
     @State private var exportURL: URL?
@@ -28,7 +29,7 @@ struct ToolLogReviewView: View {
                 // says what fills it (and that nothing here grows forever).
                 Text(L10n.str("toolLog.capNote", locale: coordinator.activeLocale))
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
                     .multilineTextAlignment(.center)
             }
         }
@@ -49,7 +50,7 @@ struct ToolLogReviewView: View {
                         Text("toolLog.export")
                     }
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.accent)
+                    .foregroundStyle(appearance.colors.accent)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
                 }
             }
@@ -75,33 +76,32 @@ struct ToolLogReviewView: View {
             HStack(spacing: 8) {
                 Image(systemName: kindIcon(for: entry.kind))
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.accent)
+                    .foregroundStyle(appearance.colors.accent)
                 Text(kindLabel(for: entry.kind))
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
                 outcomeBadge(entry.outcome)
                 Spacer(minLength: 0)
                 Text(timeLabel(for: entry))
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
             }
             Text(entry.query)
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .foregroundStyle(appearance.colors.textPrimary)
                 .multilineTextAlignment(.leading)
                 .lineLimit(2)
             if !entry.response.isEmpty {
                 Text(entry.response)
                     .font(.system(size: DesignTokens.minBodyPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
                     .multilineTextAlignment(.leading)
                     .lineLimit(3)
             }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// Outcome badge — raw debug vocabulary (ok / fallback / cap / fail)
@@ -162,10 +162,10 @@ struct ToolLogReviewView: View {
         VStack(spacing: 12) {
             Image(systemName: "text.magnifyingglass")
                 .font(.system(size: 44))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
             Text(L10n.str("toolLog.empty", locale: coordinator.activeLocale))
                 .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity, minHeight: 320)

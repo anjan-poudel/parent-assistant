@@ -111,6 +111,7 @@ struct LiveTranslateEnabledToggleSurface: Equatable {
 /// The switch's *identifier* is its title's key, so no call site mints a second
 /// identifier for a control the tests need to find.
 struct LiveTranslateToggleRow: View {
+    @Environment(\.appAppearance) private var appearance
 
     let title: String
     let note: String
@@ -126,22 +127,21 @@ struct LiveTranslateToggleRow: View {
             Toggle(isOn: isOn) {
                 Text(title)
                     .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .foregroundColor(appearance.colors.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .tint(DesignTokens.accent)
+            .tint(appearance.colors.accent)
             .frame(minHeight: DesignTokens.minTapTargetSize)
             .accessibilityIdentifier(identifier)
 
             Text(note)
                 .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize))
-                .foregroundColor(DesignTokens.textSecondary)
+                .foregroundColor(appearance.colors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface()
     }
 }
 

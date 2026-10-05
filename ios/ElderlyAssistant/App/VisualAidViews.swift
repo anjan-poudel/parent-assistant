@@ -106,6 +106,7 @@ struct VisualAidPhotoPicker: UIViewControllerRepresentable {
 /// the escape chevron are shared rather than copied, so a fix to any of
 /// them fixes both the walk reminder and the medicine reminder.
 struct ReminderVisualAidScreen<Footer: View>: View {
+    @Environment(\.appAppearance) private var appearance
     let entryId: UUID
     let title: String
     let aids: [VisualAid]
@@ -152,7 +153,7 @@ struct ReminderVisualAidScreen<Footer: View>: View {
 
     var body: some View {
         ZStack {
-            DesignTokens.background.ignoresSafeArea()
+            appearance.colors.background.ignoresSafeArea()
             VStack(spacing: 16) {
                 HStack {
                     Button(action: onClose) {
@@ -161,8 +162,7 @@ struct ReminderVisualAidScreen<Footer: View>: View {
                             .foregroundStyle(.white)
                             .frame(minWidth: DesignTokens.minTapTargetSize,
                                    minHeight: DesignTokens.minTapTargetSize)
-                            .background(DesignTokens.accent)
-                            .clipShape(Circle())
+                            .appSurface(role: .accent, cornerRadius: 999)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(Text("common.close"))
@@ -178,14 +178,14 @@ struct ReminderVisualAidScreen<Footer: View>: View {
                 VStack(spacing: 10) {
                     Text(title)
                         .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
-                        .foregroundStyle(DesignTokens.textPrimary)
+                        .foregroundStyle(appearance.colors.textPrimary)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 24)
 
                     if let caption = display.currentCaption {
                         Text(caption)
                             .font(.system(size: DesignTokens.minBodyPointSize))
-                            .foregroundStyle(DesignTokens.textSecondary)
+                            .foregroundStyle(appearance.colors.textSecondary)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, 32)
                     }
@@ -198,7 +198,7 @@ struct ReminderVisualAidScreen<Footer: View>: View {
                        currentImage != nil {
                         Text(indicator)
                             .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                            .foregroundStyle(DesignTokens.textSecondary)
+                            .foregroundStyle(appearance.colors.textSecondary)
                             .accessibilityLabel(Text(indicator))
                     }
 
@@ -230,8 +230,7 @@ struct ReminderVisualAidScreen<Footer: View>: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(DesignTokens.card)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+                .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
                 .padding(.horizontal, 20)
                 .accessibilityLabel(Text("visualAid.title"))
                 .accessibilityHint(Text(aid.caption ?? ""))
@@ -276,6 +275,7 @@ struct FiredRoutineVisualAids: Identifiable, Equatable {
 /// screen the moment a routine reminder with photos is delivered in the
 /// foreground.
 struct RoutineVisualAidOverlay: View {
+    @Environment(\.appAppearance) private var appearance
     let presentation: FiredRoutineVisualAids?
     let store: VisualAidStore
     let locale: Locale
@@ -321,6 +321,7 @@ struct RoutineVisualAidOverlay: View {
 /// — same behaviour as the routine enable toggle: there is no draft state
 /// to lose if the sheet is swiped away.
 struct ReminderVisualAidEditorView: View {
+    @Environment(\.appAppearance) private var appearance
     /// The ENTRY this reminder's photos belong to. The caller's store is
     /// keyed by it, and it is all the sheet needs to render and save.
     let entryId: UUID
@@ -362,7 +363,7 @@ struct ReminderVisualAidEditorView: View {
                     if aids.isEmpty {
                         Text("visualAid.addHint")
                             .font(.system(size: DesignTokens.minBodyPointSize))
-                            .foregroundStyle(DesignTokens.textSecondary)
+                            .foregroundStyle(appearance.colors.textSecondary)
                     }
                     ForEach(aids) { aid in
                         thumbnailRow(aid)
@@ -373,7 +374,7 @@ struct ReminderVisualAidEditorView: View {
                 }
                 .padding(20)
             }
-            .background(DesignTokens.background)
+            .background(appearance.colors.background)
             .navigationTitle(Text(title))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -422,12 +423,11 @@ struct ReminderVisualAidEditorView: View {
                         } else {
                             Image(systemName: "photo")
                                 .font(.system(size: 28))
-                                .foregroundStyle(DesignTokens.textSecondary)
+                                .foregroundStyle(appearance.colors.textSecondary)
                         }
                     }
                     .frame(width: 88, height: 88)
-                    .background(DesignTokens.card)
-                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                    .appSurface(role: .card, cornerRadius: DesignTokens.bubbleCornerRadius)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(Text("visualAid.title"))
@@ -465,10 +465,10 @@ struct ReminderVisualAidEditorView: View {
                 Text("visualAid.add")
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
             }
-            .foregroundStyle(DesignTokens.accent)
+            .foregroundStyle(appearance.colors.accent)
             .frame(maxWidth: .infinity)
             .frame(minHeight: DesignTokens.minTapTargetSize + 12)
-            .background(DesignTokens.setupReminder)
+            .background(appearance.colors.setupReminder)
             .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
         }
         .buttonStyle(.plain)

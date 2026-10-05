@@ -20,6 +20,7 @@ import SwiftUI
 /// screen is a presentation of the reminder, never a second way to
 /// acknowledge one.
 struct MedicationDoseFireScreen: View {
+    @Environment(\.appAppearance) private var appearance
     /// The dose's own text: the medication name, the optional dose
     /// description the family configured, and the photos.
     let medicationName: String
@@ -89,14 +90,14 @@ struct MedicationDoseFireScreen: View {
         VStack(spacing: 14) {
             Text("meds.firePrompt")
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .foregroundStyle(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
 
             if !doseText.isEmpty {
                 Text(doseText)
                     .font(.system(size: DesignTokens.minBodyPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
             }
@@ -107,8 +108,7 @@ struct MedicationDoseFireScreen: View {
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .frame(minHeight: DesignTokens.minTapTargetSize + 12)
-                    .background(DesignTokens.accent)
-                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                    .appSurface(role: .accent, cornerRadius: DesignTokens.bubbleCornerRadius)
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 24)
@@ -206,6 +206,7 @@ struct MedicationVisualAidsPresentation: Identifiable, Equatable {
 /// household that never adds a photo to a medication sees exactly today's
 /// behaviour (banner + read-aloud).
 struct MedicationVisualAidOverlay: View {
+    @Environment(\.appAppearance) private var appearance
     let presentation: MedicationVisualAidsPresentation?
     let store: VisualAidStore
     let locale: Locale

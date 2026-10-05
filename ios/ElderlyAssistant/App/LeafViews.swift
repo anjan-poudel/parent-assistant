@@ -11,6 +11,7 @@ import Speech
 /// persists on every screen because it's a safety invariant, not
 /// conversational voice chrome.
 struct LeafScreen<Content: View>: View {
+    @Environment(\.appAppearance) private var appearance
     @Environment(\.dismiss) private var dismiss
     /// Background theme (skinnable home, 2026-09-07): this is the shared
     /// chrome nearly every full-screen leaf draws its background through,
@@ -34,14 +35,14 @@ struct LeafScreen<Content: View>: View {
                     Button(action: { dismiss() }) {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 24, weight: .bold))
-                            .foregroundStyle(DesignTokens.textPrimary)
+                            .foregroundStyle(appearance.colors.textPrimary)
                             .frame(minWidth: DesignTokens.minTapTargetSize,
                                    minHeight: DesignTokens.minTapTargetSize)
-                            .background(DesignTokens.card)
-                            .clipShape(Circle())
+                            .appSurface(role: .card, cornerRadius: 999)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(Text("common.back"))
+                    .accessibilityIdentifier(titleKey.hasPrefix("settings.") ? "settings.back" : "leaf.back")
                     Spacer(minLength: 8)
                     EmergencyIconButton()
                 }
@@ -50,7 +51,7 @@ struct LeafScreen<Content: View>: View {
 
                 Text(LocalizedStringKey(titleKey))
                     .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .foregroundStyle(appearance.colors.textPrimary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 20)
                     .padding(.top, 8)
@@ -61,6 +62,7 @@ struct LeafScreen<Content: View>: View {
                         .padding(.horizontal, 20)
                         .padding(.bottom, 32)
                 }
+                .accessibilityIdentifier("leaf.content")
             }
         }
         .toolbar(.hidden, for: .navigationBar)
@@ -84,6 +86,7 @@ struct LeafScreen<Content: View>: View {
 /// entry that drafts from `MedicalAppointmentParser` and asks for
 /// confirmation before saving.
 struct MedicalView: View {
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
     @EnvironmentObject var session: VoiceSessionStateMachine
     @Environment(\.dismiss) private var dismiss
@@ -123,7 +126,7 @@ struct MedicalView: View {
         LeafScreen(titleKey: "meds.title") {
             VStack(spacing: 12) {
                 if todaysReminders.isEmpty {
-                    emptyState(key: "meds.empty")
+                    emptyState(key: "meds.empty", appearance: appearance)
                 } else {
                     VStack(spacing: 12) {
                         ForEach(todaysReminders) { reminder in
@@ -177,7 +180,7 @@ struct MedicalView: View {
             sectionHeader(key: "medical.appointments.title")
 
             if coordinator.appointments.isEmpty {
-                emptyState(key: "medical.appointments.empty")
+                emptyState(key: "medical.appointments.empty", appearance: appearance)
             } else {
                 VStack(spacing: 12) {
                     ForEach(coordinator.appointments) { appointment in
@@ -211,19 +214,19 @@ struct MedicalView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(appointment.doctorOrPlace)
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .foregroundStyle(appearance.colors.textPrimary)
                 if let place = appointment.place {
                     Text(place)
                         .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .foregroundStyle(appearance.colors.textSecondary)
                 }
                 Text(appointment.date.formatted(date: .abbreviated, time: .shortened))
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
                 if let note = appointment.note {
                     Text(note)
                         .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .foregroundStyle(appearance.colors.textSecondary)
                 }
             }
             Spacer()
@@ -240,10 +243,7 @@ struct MedicalView: View {
             .accessibilityLabel(Text("medical.appointments.remove"))
         }
         .padding(16)
-        .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+        .frame(maxWidth: .infinity).appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// The smsNote card: what the iPhone can and cannot do with
@@ -253,11 +253,11 @@ struct MedicalView: View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: "info.circle.fill")
                 .font(.system(size: 18))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
                 .padding(.top, 2)
             Text("medical.smsNote")
                 .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
                 .multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Button {
@@ -265,7 +265,7 @@ struct MedicalView: View {
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 22))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
                     .frame(minWidth: DesignTokens.minTapTargetSize,
                            minHeight: DesignTokens.minTapTargetSize)
             }
@@ -274,8 +274,7 @@ struct MedicalView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// "Paste appointment message" (2026-09-07): drafts from whatever
@@ -289,7 +288,7 @@ struct MedicalView: View {
             } label: {
                 Label("medical.pasteAppointment", systemImage: "doc.text.fill")
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.accent)
+                    .foregroundStyle(appearance.colors.accent)
                     .frame(maxWidth: .infinity)
                     .frame(minHeight: DesignTokens.chipHeight)
                     .fixedSize(horizontal: false, vertical: true)
@@ -306,8 +305,7 @@ struct MedicalView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     private var addFormCard: some View {
@@ -317,15 +315,13 @@ struct MedicalView: View {
                 .padding(14)
                 .frame(minHeight: 56)
                 .fixedSize(horizontal: false, vertical: true)
-                .background(DesignTokens.background)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
             TextField(LocalizedStringKey("medical.appointments.place"), text: $clinic)
                 .font(.system(size: DesignTokens.minBodyPointSize))
                 .padding(14)
                 .frame(minHeight: 56)
                 .fixedSize(horizontal: false, vertical: true)
-                .background(DesignTokens.background)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
 
             pickerRow(key: "medical.appointments.date",
                       components: .date,
@@ -339,8 +335,7 @@ struct MedicalView: View {
                 .padding(14)
                 .frame(minHeight: 56)
                 .fixedSize(horizontal: false, vertical: true)
-                .background(DesignTokens.background)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
 
             Button {
                 addFromForm()
@@ -351,7 +346,7 @@ struct MedicalView: View {
                     .frame(maxWidth: .infinity)
                     .frame(minHeight: DesignTokens.chipHeight)
                     .fixedSize(horizontal: false, vertical: true)
-                    .background(canAddAppointment ? DesignTokens.accent : DesignTokens.textSecondary.opacity(0.4))
+                    .background(canAddAppointment ? appearance.colors.accent : appearance.colors.textSecondary.opacity(0.4))
                     .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
             }
             .buttonStyle(.plain)
@@ -359,8 +354,7 @@ struct MedicalView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// Date/time picker row in the same shape as the medication
@@ -370,7 +364,7 @@ struct MedicalView: View {
         HStack(spacing: 12) {
             Text(LocalizedStringKey(key))
                 .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .foregroundStyle(appearance.colors.textPrimary)
             Spacer()
             DatePicker("", selection: selection, displayedComponents: components)
                 .labelsHidden()
@@ -379,8 +373,7 @@ struct MedicalView: View {
         .padding(14)
         .frame(minHeight: 56)
         .fixedSize(horizontal: false, vertical: true)
-        .background(DesignTokens.background)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+        .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
     }
 
     private func addFromForm() {
@@ -459,7 +452,7 @@ struct MedicalView: View {
     private func sectionHeader(key: String) -> some View {
         Text(LocalizedStringKey(key))
             .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-            .foregroundStyle(DesignTokens.textSecondary)
+            .foregroundStyle(appearance.colors.textSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 8)
     }
@@ -477,10 +470,10 @@ struct MedicalView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(coordinator.medicationName(for: reminder.medicationEntryId))
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .foregroundStyle(appearance.colors.textPrimary)
                 Text(reminder.scheduledAt.formatted(date: .omitted, time: .shortened))
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
             }
             Spacer()
             if let aids {
@@ -489,7 +482,7 @@ struct MedicalView: View {
                 } label: {
                     Image(systemName: "photo.fill")
                         .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(DesignTokens.accent)
+                        .foregroundStyle(appearance.colors.accent)
                         .frame(minWidth: DesignTokens.minTapTargetSize,
                                minHeight: DesignTokens.minTapTargetSize)
                 }
@@ -504,16 +497,12 @@ struct MedicalView: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 20)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.accent)
-                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                    .appSurface(role: .accent, cornerRadius: DesignTokens.bubbleCornerRadius)
             }
             .buttonStyle(.plain)
         }
         .padding(16)
-        .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+        .frame(maxWidth: .infinity).appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// Baseline ack or challenge → Home for the yes/no chips. The
@@ -548,6 +537,7 @@ struct MedicalView: View {
 /// Reminders tab (`RoutineSettingsView`, routine-settings move,
 /// 2026-09-17). This leaf shows the day; Settings configures it.
 struct RemindersView: View {
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
 
     /// DESIGN-REVIEW (P2 — "keep encrypted storage reads out of `body`",
@@ -641,7 +631,7 @@ struct RemindersView: View {
         LeafScreen(titleKey: "reminders.title") {
             VStack(spacing: 12) {
                 if todayRows.isEmpty {
-                    emptyState(key: "reminders.empty")
+                    emptyState(key: "reminders.empty", appearance: appearance)
                 } else {
                     sectionHeader(key: "reminders.todaySection")
                     ForEach(todayRows) { row in
@@ -710,7 +700,7 @@ struct RemindersView: View {
     private func sectionHeader(key: String) -> some View {
         Text(LocalizedStringKey(key))
             .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-            .foregroundStyle(DesignTokens.textSecondary)
+            .foregroundStyle(appearance.colors.textSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 8)
     }
@@ -720,19 +710,19 @@ struct RemindersView: View {
             Image(systemName: row.systemImage)
                 .font(.system(size: 24))
                 .foregroundStyle(row.isDimmed || row.external != nil
-                                 ? DesignTokens.textSecondary : DesignTokens.accent)
+                                 ? appearance.colors.textSecondary : appearance.colors.accent)
             VStack(alignment: .leading, spacing: 4) {
                 Text(row.title)
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundStyle(row.isDimmed ? DesignTokens.textSecondary : DesignTokens.textPrimary)
+                    .foregroundStyle(row.isDimmed ? appearance.colors.textSecondary : appearance.colors.textPrimary)
                 Text(rowCaption(row))
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
                 // Which native calendar/reminder list the item came from.
                 if let external = row.external {
                     Text(external.calendarName)
                         .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .foregroundStyle(appearance.colors.textSecondary)
                 }
             }
             Spacer()
@@ -744,7 +734,7 @@ struct RemindersView: View {
             if !row.visualAids.isEmpty {
                 Image(systemName: "photo.fill")
                     .font(.system(size: 22))
-                    .foregroundStyle(DesignTokens.accent)
+                    .foregroundStyle(appearance.colors.accent)
                     .frame(minWidth: DesignTokens.minTapTargetSize,
                            minHeight: DesignTokens.minTapTargetSize)
                     .accessibilityHidden(true)
@@ -752,8 +742,7 @@ struct RemindersView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
         .contentShape(Rectangle())
         // External rows open their item in the native app (read-only
         // bridge); a row WITH photos — routine OR medication dose — opens
@@ -814,9 +803,9 @@ struct RemindersView: View {
             sectionHeader(key: "reminders.upcoming.title")
             switch coordinator.externalCalendar.status {
             case .denied:
-                emptyState(key: "externalReminders.statusDenied")
+                emptyState(key: "externalReminders.statusDenied", appearance: appearance)
             case .error:
-                emptyState(key: "externalReminders.statusError")
+                emptyState(key: "externalReminders.statusError", appearance: appearance)
             default:
                 upcomingEventsContent
             }
@@ -827,7 +816,7 @@ struct RemindersView: View {
     private var upcomingEventsContent: some View {
         let events = upcomingEvents
         if events.isEmpty {
-            emptyState(key: "reminders.upcoming.empty")
+            emptyState(key: "reminders.upcoming.empty", appearance: appearance)
         } else {
             ForEach(events.prefix(Self.upcomingEventsLimit)) { event in
                 upcomingEventRow(event)
@@ -846,24 +835,23 @@ struct RemindersView: View {
         HStack(spacing: 12) {
             Image(systemName: event.source.systemImage)
                 .font(.system(size: 24))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
             VStack(alignment: .leading, spacing: 4) {
                 Text(event.title)
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .foregroundStyle(appearance.colors.textPrimary)
                 Text(upcomingEventTimeText(event))
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
                 Text(event.calendarName)
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
             }
             Spacer()
         }
         .padding(16)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// When the event happens: the relative day via `HistoryTimeFormat`
@@ -889,19 +877,17 @@ struct RemindersView: View {
         NavigationLink(value: LeafDestination.calendar) {
             Text("history.showMore")
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                .foregroundStyle(DesignTokens.accent)
+                .foregroundStyle(appearance.colors.accent)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
-                .background(DesignTokens.card)
-                .clipShape(Capsule())
+                .appSurface(role: .card, cornerRadius: 999)
                 .overlay(
-                    Capsule().stroke(DesignTokens.accent.opacity(0.35),
+                    Capsule().stroke(appearance.colors.accent.opacity(0.35),
                                      lineWidth: 1.5)
                 )
         }
         .buttonStyle(.plain)
     }
-
 }
 
 // MARK: - Call (फोन) — redesign spec §3.2 + system-contacts search (2026-09-06)
@@ -937,9 +923,11 @@ struct RemindersView: View {
 /// (contact-photos task, 2026-09-07): a photo resolves when the
 /// contact has a `photoFilename`, otherwise the initials avatar stays.
 struct CallView: View {
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.displayScale) private var displayScale
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private let directory = AddressBookDirectory()
 
@@ -1105,7 +1093,10 @@ struct CallView: View {
     /// openers probe first and announce an absent app aloud (never a
     /// silent dead tap), mirroring the quick-access honesty rules.
     private var launchRow: some View {
-        HStack(spacing: 10) {
+        let layout = dynamicTypeSize > .large
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+            : AnyLayout(HStackLayout(spacing: 10))
+        return layout {
             contactListButton(titleKey: "call.openWhatsAppContacts",
                               systemImage: "bubble.left.and.bubble.right.fill") {
                 coordinator.openWhatsAppContacts()
@@ -1117,12 +1108,8 @@ struct CallView: View {
         }
     }
 
-    /// One half-width capsule of `launchRow` (horizontal 16 padding,
-    /// card background, Capsule clip, caption-size semibold label over a
-    /// ≥44pt target), stretched with `.frame(maxWidth: .infinity)` so
-    /// the two share the row. The old top history capsule left the leaf
-    /// (Phone review, 2026-09-07) — recent activity now sits at the
-    /// bottom; the launch capsules keep this look.
+    /// The launcher buttons share a row at standard text sizes and stack
+    /// at larger sizes, so translated labels never have to split mid-word.
     private func contactListButton(titleKey: String, systemImage: String,
                                    action: @escaping () -> Void) -> some View {
         Button(action: action) {
@@ -1131,16 +1118,16 @@ struct CallView: View {
                     // Caption-token glyph (DESIGN-REVIEW) beside the
                     // button's 18pt title — scales with Dynamic Type.
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.accent)
+                    .foregroundStyle(appearance.colors.accent)
                 Text(LocalizedStringKey(titleKey))
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .foregroundStyle(appearance.colors.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 16)
             .frame(minHeight: DesignTokens.minTapTargetSize)
-            .background(DesignTokens.card)
-            .clipShape(Capsule())
+            .appSurface(role: .card, cornerRadius: 999)
         }
         .frame(maxWidth: .infinity)
         .buttonStyle(.plain)
@@ -1200,10 +1187,10 @@ struct CallView: View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
             TextField("call.search.placeholder", text: $searchText)
                 .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .foregroundStyle(appearance.colors.textPrimary)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
             if micButtonVisible {
@@ -1212,8 +1199,7 @@ struct CallView: View {
         }
         .padding(.horizontal, 16)
         .frame(minHeight: DesignTokens.minTapTargetSize)
-        .background(DesignTokens.card)
-        .clipShape(Capsule())
+        .appSurface(role: .card, cornerRadius: 999)
     }
 
     /// In-pill voice-search button (voice-contact-search, 2026-09-07):
@@ -1229,9 +1215,9 @@ struct CallView: View {
                 // aware — the circle below uses minWidth/minHeight so the
                 // glyph can never clip at Accessibility XXXL.
                 .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                .foregroundStyle(listening ? .white : DesignTokens.accent)
+                .foregroundStyle(listening ? DesignTokens.overlayText : appearance.colors.accent)
                 .frame(minWidth: 30, minHeight: 30)
-                .background(listening ? DesignTokens.accent : DesignTokens.background)
+                .background(listening ? DesignTokens.stateListening : appearance.colors.background)
                 .clipShape(Circle())
         }
         .frame(minWidth: DesignTokens.minTapTargetSize,
@@ -1249,13 +1235,13 @@ struct CallView: View {
         case .listening:
             Text(L10n.str("call.search.micListening", locale: coordinator.activeLocale))
                 .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(DesignTokens.accent)
+                .foregroundStyle(appearance.colors.accent)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 6)
         case .failed:
             Text(L10n.str("call.search.micFailed", locale: coordinator.activeLocale))
                 .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 6)
         case .idle:
@@ -1283,7 +1269,7 @@ struct CallView: View {
         HStack(spacing: 12) {
             Text(LocalizedStringKey("settings.family.title"))
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .foregroundStyle(appearance.colors.textPrimary)
             Spacer(minLength: 8)
             searchOpenButton
         }
@@ -1298,11 +1284,10 @@ struct CallView: View {
         Button(action: openSearch) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(DesignTokens.accent)
+                .foregroundStyle(appearance.colors.accent)
                 .frame(minWidth: DesignTokens.minTapTargetSize,
                        minHeight: DesignTokens.minTapTargetSize)
-                .background(DesignTokens.card)
-                .clipShape(Circle())
+                .appSurface(role: .card, cornerRadius: 999)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text("call.search.openLabel"))
@@ -1318,11 +1303,10 @@ struct CallView: View {
         Button(action: exitSearch) {
             Image(systemName: "chevron.backward")
                 .font(.system(size: 20, weight: .bold))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .foregroundStyle(appearance.colors.textPrimary)
                 .frame(minWidth: DesignTokens.minTapTargetSize,
                        minHeight: DesignTokens.minTapTargetSize)
-                .background(DesignTokens.card)
-                .clipShape(Circle())
+                .appSurface(role: .card, cornerRadius: 999)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text("common.back"))
@@ -1710,7 +1694,7 @@ struct CallView: View {
             if outcome.moreAvailable {
                 Text("call.search.moreAvailable")
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 4)
             }
@@ -1719,9 +1703,9 @@ struct CallView: View {
                 // simply matched nobody, are different truths — say
                 // which one it is.
                 if entries.isEmpty && coordinator.familyContacts.isEmpty {
-                    emptyState(key: "call.search.bookEmpty")
+                    emptyState(key: "call.search.bookEmpty", appearance: appearance)
                 } else {
-                    emptyState(key: "call.search.noResults")
+                    emptyState(key: "call.search.noResults", appearance: appearance)
                 }
             } else {
                 // Per-row photo thumbnails come from `resultPhotos`,
@@ -1765,7 +1749,7 @@ struct CallView: View {
     @ViewBuilder
     private var familyArea: some View {
         if coordinator.familyContacts.isEmpty {
-            emptyState(key: "call.contactsEmpty")
+            emptyState(key: "call.contactsEmpty", appearance: appearance)
         } else {
             VStack(spacing: 12) {
                 ForEach(coordinator.familyContacts) { contact in
@@ -1805,7 +1789,7 @@ struct CallView: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text(LocalizedStringKey("history.title"))
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, 8)
                 ForEach(shown) { entry in
@@ -1815,13 +1799,12 @@ struct CallView: View {
                     NavigationLink(value: LeafDestination.history) {
                         Text(LocalizedStringKey("history.showMore"))
                             .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                            .foregroundStyle(DesignTokens.accent)
+                            .foregroundStyle(appearance.colors.accent)
                             .frame(maxWidth: .infinity)
                             .frame(minHeight: DesignTokens.minTapTargetSize)
-                            .background(DesignTokens.card)
-                            .clipShape(Capsule())
+                            .appSurface(role: .card, cornerRadius: 999)
                             .overlay(
-                                Capsule().stroke(DesignTokens.accent.opacity(0.35),
+                                Capsule().stroke(appearance.colors.accent.opacity(0.35),
                                                  lineWidth: 1.5)
                             )
                     }
@@ -1874,10 +1857,10 @@ struct CallView: View {
                                           locale: coordinator.activeLocale,
                                           correlatedName: coordinator.missedCallDisplayNames[entry.id]))
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .foregroundStyle(appearance.colors.textPrimary)
                 Text(recentActivityTimeText(entry))
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
                     .lineLimit(2)
             }
             Spacer(minLength: 8)
@@ -1887,15 +1870,13 @@ struct CallView: View {
                     .foregroundStyle(.white)
                     .frame(minWidth: DesignTokens.minTapTargetSize,
                            minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.accent)
-                    .clipShape(Circle())
+                    .appSurface(role: .accent, cornerRadius: 999)
                     .accessibilityHidden(true)
             }
         }
         .padding(16)
         .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// Screen-reader label of the row above — HistoryView's split: call
@@ -2069,10 +2050,10 @@ struct CallView: View {
             VStack(alignment: .leading, spacing: 14) {
                 Text(L10n.fmt("messenger.handlePrompt.title", locale: locale, result.name))
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .foregroundStyle(appearance.colors.textPrimary)
                 Text(L10n.str("messenger.handleHints.title", locale: locale))
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
                 ForEach(1...3, id: \.self) { index in
                     HStack(alignment: .top, spacing: 10) {
                         Text("\(index)")
@@ -2082,11 +2063,10 @@ struct CallView: View {
                             // fixed 22pt circle) so the scaled digit can
                             // never clip at Accessibility XXXL.
                             .frame(minWidth: 22, minHeight: 22)
-                            .background(DesignTokens.accent)
-                            .clipShape(Circle())
+                            .appSurface(role: .accent, cornerRadius: 999)
                         Text(L10n.str("messenger.handleHints.line\(index)", locale: locale))
                             .font(.system(size: DesignTokens.minBodyPointSize))
-                            .foregroundStyle(DesignTokens.textPrimary)
+                            .foregroundStyle(appearance.colors.textPrimary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -2097,8 +2077,7 @@ struct CallView: View {
                     .autocorrectionDisabled()
                     .padding(.horizontal, 14)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.background)
-                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                    .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
                 HStack(spacing: 10) {
                     Button(L10n.str("messenger.handlePrompt.cancel", locale: locale)) {
                         handleCaptureTarget = nil
@@ -2107,8 +2086,7 @@ struct CallView: View {
                     .buttonStyle(.plain)
                     .padding(.horizontal, 20)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.background)
-                    .clipShape(Capsule())
+                    .appSurface(role: .control, cornerRadius: 999)
                     Spacer()
                     Button(L10n.str("messenger.handlePrompt.save", locale: locale)) {
                         saveCapturedHandle()
@@ -2118,7 +2096,7 @@ struct CallView: View {
                     .padding(.horizontal, 20)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
                     .foregroundStyle(.white)
-                    .background(canSave ? DesignTokens.accent : DesignTokens.textSecondary.opacity(0.5))
+                    .background(canSave ? appearance.colors.accent : appearance.colors.textSecondary.opacity(0.5))
                     .clipShape(Capsule())
                 }
             }
@@ -2142,6 +2120,7 @@ private enum AddressBookAccessMode {
 }
 
 private struct AddressBookAccessCard: View {
+    @Environment(\.appAppearance) private var appearance
     let mode: AddressBookAccessMode
     /// Fires the one-time permission request; used only by `.ask`.
     var onAllow: (() -> Void)?
@@ -2150,11 +2129,11 @@ private struct AddressBookAccessCard: View {
         VStack(spacing: 14) {
             Text(titleKey)
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .foregroundStyle(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
             Text(bodyKey)
                 .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
                 .multilineTextAlignment(.center)
             Button(action: action) {
                 Text(buttonKey)
@@ -2162,15 +2141,13 @@ private struct AddressBookAccessCard: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 20)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.accent)
-                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                    .appSurface(role: .accent, cornerRadius: DesignTokens.bubbleCornerRadius)
             }
             .buttonStyle(.plain)
         }
         .padding(20)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     private var titleKey: LocalizedStringKey {
@@ -2205,6 +2182,7 @@ private struct AddressBookAccessCard: View {
 /// the loaded book is small; the coordinator re-probes at the tap and
 /// announces honestly either way.
 private struct WhatsAppSyncHintCard: View {
+    @Environment(\.appAppearance) private var appearance
     /// Opens WhatsApp (the coordinator probes and announces).
     var openWhatsApp: () -> Void
 
@@ -2212,10 +2190,10 @@ private struct WhatsAppSyncHintCard: View {
         VStack(spacing: 12) {
             Image(systemName: "person.2.badge.gearshape")
                 .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundStyle(DesignTokens.accent)
+                .foregroundStyle(appearance.colors.accent)
             Text(LocalizedStringKey("call.waSyncHint"))
                 .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .foregroundStyle(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
             Button(action: openWhatsApp) {
                 Text(LocalizedStringKey("call.openWhatsApp"))
@@ -2223,41 +2201,40 @@ private struct WhatsAppSyncHintCard: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 20)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.accent)
-                    .clipShape(Capsule())
+                    .appSurface(role: .accent, cornerRadius: 999)
             }
             .buttonStyle(.plain)
         }
         .padding(20)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 }
 
 private struct AddressBookLoadingCard: View {
+    @Environment(\.appAppearance) private var appearance
     var body: some View {
         HStack(spacing: 10) {
             ProgressView()
             Text("call.search.loading")
                 .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
         }
         .padding(16)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 }
 
 private struct AddressBookLoadFailedCard: View {
+    @Environment(\.appAppearance) private var appearance
     let retry: () -> Void
 
     var body: some View {
         VStack(spacing: 12) {
             Text("call.search.loadFailed")
                 .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
                 .multilineTextAlignment(.center)
             Button(action: retry) {
                 Text("call.search.retry")
@@ -2265,15 +2242,13 @@ private struct AddressBookLoadFailedCard: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 20)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.accent)
-                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                    .appSurface(role: .accent, cornerRadius: DesignTokens.bubbleCornerRadius)
             }
             .buttonStyle(.plain)
         }
         .padding(20)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 }
 
@@ -2321,6 +2296,7 @@ private struct RowChannelState {
 /// the leaf's add-handle sheet. All of it is driven by the caller — the
 /// row never guesses availability or resolves anything itself.
 private struct UnifiedContactResultRow: View {
+    @Environment(\.appAppearance) private var appearance
     let result: UnifiedContactSearch.Result
     /// The row's leading photo thumbnail (contact-photos task,
     /// 2026-09-07): ONLY `.family` rows carry one — the leaf resolves
@@ -2362,10 +2338,7 @@ private struct UnifiedContactResultRow: View {
             channelControls
         }
         .padding(16)
-        .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-        .shadow(color: .black.opacity(0.05), radius: 6, y: 2)
+        .frame(maxWidth: .infinity).appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// The wide dial button — tapping anywhere on the face/name zone
@@ -2379,7 +2352,7 @@ private struct UnifiedContactResultRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(result.name)
                         .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                        .foregroundStyle(DesignTokens.textPrimary)
+                        .foregroundStyle(appearance.colors.textPrimary)
                         .multilineTextAlignment(.leading)
                     HStack(spacing: 6) {
                         if isFamily {
@@ -2387,7 +2360,7 @@ private struct UnifiedContactResultRow: View {
                         }
                         Text(result.caption)
                             .font(.system(size: DesignTokens.minCaptionPointSize))
-                            .foregroundStyle(DesignTokens.textSecondary)
+                            .foregroundStyle(appearance.colors.textSecondary)
                             .lineLimit(2)
                     }
                 }
@@ -2396,7 +2369,7 @@ private struct UnifiedContactResultRow: View {
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(minWidth: DesignTokens.minTapTargetSize, minHeight: DesignTokens.minTapTargetSize)
-                    .background(Self.circleColor(for: channelState.resolvedChannel))
+                    .background(circleColor(for: channelState.resolvedChannel))
                     .clipShape(Circle())
                     .accessibilityHidden(true)
             }
@@ -2448,10 +2421,10 @@ private struct UnifiedContactResultRow: View {
     private var familyChip: some View {
         Text(L10n.str("call.search.familyChip", locale: locale))
             .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-            .foregroundStyle(DesignTokens.accent)
+            .foregroundStyle(appearance.colors.accent)
             .padding(.horizontal, 10)
             .padding(.vertical, 3)
-            .background(DesignTokens.accent.opacity(0.12))
+            .background(appearance.colors.accent.opacity(0.12))
             .clipShape(Capsule())
             .accessibilityHidden(true)
     }
@@ -2514,10 +2487,9 @@ private struct UnifiedContactResultRow: View {
         } label: {
             Image(systemName: "ellipsis.circle")
                 .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
                 .frame(minWidth: DesignTokens.minTapTargetSize, minHeight: DesignTokens.minTapTargetSize)
-                .background(DesignTokens.background)
-                .clipShape(Circle())
+                .appSurface(role: .control, cornerRadius: 999)
         }
         .accessibilityLabel(Text(L10n.str(Self.appNameKey(for: channelState.resolvedChannel),
                                            locale: locale)))
@@ -2549,10 +2521,9 @@ private struct UnifiedContactResultRow: View {
         Button(action: addHandle) {
             Image(systemName: "person.crop.circle.badge.plus")
                 .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(DesignTokens.accent)
+                .foregroundStyle(appearance.colors.accent)
                 .frame(minWidth: DesignTokens.minTapTargetSize, minHeight: DesignTokens.minTapTargetSize)
-                .background(DesignTokens.background)
-                .clipShape(Circle())
+                .appSurface(role: .control, cornerRadius: 999)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text(L10n.fmt("messenger.handlePrompt.title", locale: locale, result.name)))
@@ -2575,12 +2546,12 @@ private struct UnifiedContactResultRow: View {
     /// phone.fill / video.fill glyph, per the 2026-09-10 badge-tint
     /// consolidation), and each chat app's own brand color so the glyph
     /// reads like the app it opens.
-    private static func circleColor(for app: CallApp) -> Color {
+    private func circleColor(for app: CallApp) -> Color {
         switch app {
-        case .phone: return DesignTokens.accent
-        case .faceTime: return DesignTokens.BadgeTint.call.tint
-        case .whatsApp: return whatsAppGreen
-        case .messenger: return messengerBlue
+        case .phone: return appearance.colors.accent
+        case .faceTime: return appearance.badgeTint(.call)
+        case .whatsApp: return Self.whatsAppGreen
+        case .messenger: return Self.messengerBlue
         }
     }
 
@@ -2611,6 +2582,7 @@ private struct UnifiedContactResultRow: View {
 /// otherwise the initials FaceAvatar — same 52pt circle either way, so
 /// a curated row of tiles keeps a uniform face column.
 struct ContactTile: View {
+    @Environment(\.appAppearance) private var appearance
     let contact: FamilyContact
     @EnvironmentObject var coordinator: AppCoordinator
     @Environment(\.locale) private var locale
@@ -2651,10 +2623,10 @@ struct ContactTile: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(contact.name)
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .foregroundStyle(appearance.colors.textPrimary)
                 Text(contact.relationship)
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
             }
             Spacer()
             Button(action: videoCall) {
@@ -2662,7 +2634,7 @@ struct ContactTile: View {
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(minWidth: DesignTokens.minTapTargetSize, minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.BadgeTint.call.tint)
+                    .background(appearance.badgeTint(.call))
                     .clipShape(Circle())
             }
             .buttonStyle(.plain)
@@ -2672,17 +2644,13 @@ struct ContactTile: View {
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(minWidth: DesignTokens.minTapTargetSize, minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.accent)
-                    .clipShape(Circle())
+                    .appSurface(role: .accent, cornerRadius: 999)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(Text(L10n.fmt("call.callButtonLabel", locale: locale, contact.name)))
         }
         .padding(16)
-        .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-        .shadow(color: .black.opacity(0.05), radius: 6, y: 2)
+        .frame(maxWidth: .infinity).appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
         // Keyed by the stored file name, so replacing a contact's photo
         // (or clearing it) re-resolves the face; an unchanged contact
         // costs one cached lookup per appearance.
@@ -2711,6 +2679,7 @@ struct ContactTile: View {
 /// when the NepaliCalendarPlugin applies and can answer. No mock data
 /// anywhere: sections that have no real content are simply omitted.
 struct CalendarView: View {
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
 
     /// DESIGN-REVIEW (P2 — repeated work in view evaluation): this leaf
@@ -2757,28 +2726,27 @@ struct CalendarView: View {
             if let overlay {
                 Text(overlay.weekdayNepali)
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
                 Text(BikramSambat.nepaliString(overlay.bsDate))
                     .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .foregroundStyle(appearance.colors.textPrimary)
                     .multilineTextAlignment(.center)
                 // Tithi overlay — every day, per product requirement.
                 Text(overlay.tithi.displayNepali)
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.accent)
+                    .foregroundStyle(appearance.colors.accent)
                 Text(Date().formatted(.dateTime.day().month(.wide).year().locale(coordinator.activeLocale)))
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
             } else {
                 Text("calendar.bsUnavailable")
                     .font(.system(size: DesignTokens.minBodyPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
             }
         }
         .padding(18)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// Festival(s) falling today, with their tithi labels.
@@ -2787,27 +2755,26 @@ struct CalendarView: View {
         return VStack(alignment: .leading, spacing: 8) {
             Text("calendar.festivalToday")
                 .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
             ForEach(festivals, id: \.id) { festival in
                 HStack(spacing: 10) {
                     Image(systemName: "sparkles")
-                        .foregroundStyle(DesignTokens.accent)
+                        .foregroundStyle(appearance.colors.accent)
                     Text(festival.nameNepali)
                         .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                        .foregroundStyle(DesignTokens.textPrimary)
+                        .foregroundStyle(appearance.colors.textPrimary)
                     Spacer()
                     if let tithi = festival.tithiNepali {
                         Text(tithi)
                             .font(.system(size: DesignTokens.minCaptionPointSize))
-                            .foregroundStyle(DesignTokens.textSecondary)
+                            .foregroundStyle(appearance.colors.textSecondary)
                     }
                 }
             }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// Upcoming festivals (next 5) with BS dates and days-away.
@@ -2816,13 +2783,13 @@ struct CalendarView: View {
         return VStack(alignment: .leading, spacing: 10) {
             Text("calendar.upcomingFestivals")
                 .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
             ForEach(upcoming, id: \.festival.id) { item in
                 HStack(spacing: 10) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(item.festival.nameNepali)
                             .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                            .foregroundStyle(DesignTokens.textPrimary)
+                            .foregroundStyle(appearance.colors.textPrimary)
                         // Years outside the verified panchang table are
                         // resolved by tithi astronomy (±1 day) and say so
                         // rather than presenting an estimate as fact.
@@ -2830,19 +2797,18 @@ struct CalendarView: View {
                              ? "\(BikramSambat.nepaliString(item.bsDate)) · \(L10n.str("calendar.approximateDate", locale: coordinator.activeLocale))"
                              : BikramSambat.nepaliString(item.bsDate))
                             .font(.system(size: DesignTokens.minCaptionPointSize))
-                            .foregroundStyle(DesignTokens.textSecondary)
+                            .foregroundStyle(appearance.colors.textSecondary)
                     }
                     Spacer()
                     Text(daysAwayText(item.daysAway))
                         .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                        .foregroundStyle(DesignTokens.accent)
+                        .foregroundStyle(appearance.colors.accent)
                 }
             }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     private func daysAwayText(_ days: Int) -> String {
@@ -2892,7 +2858,7 @@ struct CalendarView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("calendar.todaySchedule")
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
                 ForEach(scheduleRows) { row in
                     scheduleRowView(row)
                 }
@@ -2906,24 +2872,23 @@ struct CalendarView: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(row.title)
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .foregroundStyle(appearance.colors.textPrimary)
                 Text(row.isAllDay
                      ? L10n.str("externalReminders.allDay", locale: coordinator.activeLocale)
                      : row.scheduledAt.formatted(date: .omitted, time: .shortened))
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
                 if let calendarName = row.calendarName {
                     Text(calendarName)
                         .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .foregroundStyle(appearance.colors.textSecondary)
                 }
             }
             Spacer()
         }
         .padding(16)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     private struct ScheduleRow: Identifiable {
@@ -2956,6 +2921,7 @@ struct CalendarView: View {
 /// `todayBriefing` is nil and the leaf says so instead of showing
 /// yesterday's text as if it were today's.
 struct BriefingView: View {
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
 
     var body: some View {
@@ -2965,7 +2931,7 @@ struct BriefingView: View {
                     briefingCard(stored)
                     speakAgainButton(stored)
                 } else {
-                    emptyState(key: "briefing.view.empty")
+                    emptyState(key: "briefing.view.empty", appearance: appearance)
                 }
             }
         }
@@ -2976,11 +2942,10 @@ struct BriefingView: View {
     private func briefingCard(_ stored: StoredBriefing) -> some View {
         Text(stored.text)
             .font(.system(size: DesignTokens.minBodyPointSize))
-            .foregroundStyle(DesignTokens.textPrimary)
+            .foregroundStyle(appearance.colors.textPrimary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(18)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+            .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// Replays the stored text through the existing speak path
@@ -3001,8 +2966,7 @@ struct BriefingView: View {
             .padding(.horizontal, 18)
             .frame(maxWidth: .infinity)
             .frame(minHeight: DesignTokens.minTapTargetSize)
-            .background(DesignTokens.accent)
-            .clipShape(Capsule())
+            .appSurface(role: .accent, cornerRadius: 999)
         }
         .buttonStyle(.plain)
     }
@@ -3014,13 +2978,12 @@ struct BriefingView: View {
 /// empty list state — internal rather than private to this file so the
 /// Events leaf (`EventsView`) draws the identical card instead of a
 /// look-alike.
-func emptyState(key: String) -> some View {
+func emptyState(key: String, appearance: AppAppearance) -> some View {
     Text(LocalizedStringKey(key))
         .font(.system(size: DesignTokens.minBodyPointSize))
-        .foregroundStyle(DesignTokens.textSecondary)
+        .foregroundStyle(appearance.colors.textSecondary)
         .multilineTextAlignment(.center)
         .padding(32)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
 }

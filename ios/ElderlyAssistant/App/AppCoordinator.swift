@@ -275,18 +275,21 @@ final class AppCoordinator: ObservableObject {
     private static let sttPreferenceKey = "sttModelPreference"
     private static let noiseFilterEnabledKey = "noiseFilterEnabled"
 
-    /// The app-wide background theme (skinnable home, 2026-09-07) — a UI
-    /// preference, not a secret, persisted in UserDefaults the same way as
-    /// `sttModelPreference`. Every screen draws its background from this
-    /// through the `Color(theme:)` helper, so one change re-skins the
-    /// whole app at once. didSet persists; the init-time restore assigns
-    /// directly (house pattern — didSet does not fire there).
+    /// Colour and surface treatment are independent, non-secret preferences.
+    /// Restore only at launch; rendering consumes the root environment value.
     @Published var appTheme: AppTheme {
         didSet {
             UserDefaults.standard.set(appTheme.rawValue, forKey: Self.themeKey)
         }
     }
     private static let themeKey = "appTheme"
+
+    @Published var appVisualStyle: AppVisualStyle {
+        didSet {
+            UserDefaults.standard.set(appVisualStyle.rawValue, forKey: Self.visualStyleKey)
+        }
+    }
+    private static let visualStyleKey = "appVisualStyle"
 
     /// The app an ADDRESS-BOOK row's call button opens when the row has no
     /// per-contact channel pick saved — per-row picks live in
@@ -2641,13 +2644,10 @@ final class AppCoordinator: ObservableObject {
         // pilot language (spec §3.2).
         self.appLanguage = AppLanguage.persisted()
 
-        // Theme — restore the persisted background theme (skinnable home,
-        // 2026-09-07). Unknown/missing raw values fall back to `.cream`
-        // (`AppTheme(rawOrDefault:)`). This is the property's ONLY initial
-        // assignment, so its didSet does not fire here — nothing needs to
-        // react to the restored value (same rule as `voiceEngineStack`).
         self.appTheme = AppTheme(rawOrDefault:
             UserDefaults.standard.string(forKey: Self.themeKey))
+        self.appVisualStyle = AppVisualStyle(rawOrDefault:
+            UserDefaults.standard.string(forKey: Self.visualStyleKey))
 
         // Calendar display (calendar-display task, 2026-09-09) — the
         // default calendar + overlay toggles behind the Home top bar's
