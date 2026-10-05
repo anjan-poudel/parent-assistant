@@ -84,13 +84,13 @@ struct ApplianceHelperView: View {
             // A voice turn that found this appliance's saved default manual
             // (2026-09-13, appliance-default-manual) opens THAT first —
             // camera-less, network-free, and the reason the elder asked.
-            // Only when no manual was pending, or the pending one can no
-            // longer be rendered (deleted in the meantime, photo file
-            // gone), does the camera affordance open as it always has.
+            // Only when no manual was pending, or it cannot be rendered,
+            // does a configured session open the camera. An unconfigured
+            // helper stays on its visible explanation and offline library.
             if session.pendingManualEntryID != nil, session.presentPendingManualIfNeeded() {
                 return
             }
-            showCamera = true
+            if session.canAnalyzePhotos { showCamera = true }
         }
         .sheet(isPresented: $showCamera) {
             CameraPicker(onImage: { image in
@@ -134,7 +134,9 @@ struct ApplianceHelperView: View {
             Image(systemName: "camera.viewfinder")
                 .font(.system(size: 64))
                 .foregroundColor(DesignTokens.accent)
-            Text("plugin.applianceHelper.cameraPrompt")
+            Text(LocalizedStringKey(session.canAnalyzePhotos
+                 ? "plugin.applianceHelper.cameraPrompt"
+                 : "plugin.applianceHelper.notConfigured"))
                 .font(.system(size: DesignTokens.minBodyPointSize))
                 .foregroundColor(DesignTokens.textPrimary)
                 .multilineTextAlignment(.center)
@@ -151,6 +153,7 @@ struct ApplianceHelperView: View {
                     .clipShape(Capsule())
             }
             .frame(minHeight: DesignTokens.minTapTargetSize)
+            .disabled(!session.canAnalyzePhotos)
 
             // Saved-manuals entry (2026-09-06): the second way the cache
             // pays off — browse previously saved guides without touching

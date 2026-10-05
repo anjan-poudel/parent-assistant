@@ -88,18 +88,20 @@ final class ApplianceHelperPluginTests: XCTestCase {
 
     // MARK: - handle → present handoff
 
-    func testHandleUnconfiguredClientFailsHonestly() async {
+    func testUnconfiguredClientPresentsManualsWithAnHonestCloudRefusal() async {
         let plugin = makePlugin()
         let result = await plugin.handle(
             PluginCommand(actionName: "appliance.identify", transcript: "",
                           entities: ["question": "q"], confidence: 0.9),
             context: makeContext(configured: false))
-        guard case .failed = result else {
-            XCTFail("an unconfigured assistant must fail honestly, got \(result)")
+        guard case .spokenAndPresented(let spoken) = result else {
+            XCTFail("Missing cloud configuration must not block the offline helper, got \(result)")
             return
         }
-        XCTAssertNil(plugin.presentationView(for: result),
-                     "a failed result must not present the camera")
+        XCTAssertEqual(spoken, L10n.str("plugin.applianceHelper.notConfigured",
+                                       locale: Locale(identifier: "ne")))
+        XCTAssertNotNil(plugin.presentationView(for: result),
+                        "The offline manuals surface must be reachable")
     }
 
     func testHandleIdentifyPresentsCameraFlow() async {
@@ -172,7 +174,7 @@ final class ApplianceHelperPluginTests: XCTestCase {
                           entities: ["question": "माइक्रोवेभ कसरी चलाउने",
                                      "appliance": "माइक्रोवेभ"],
                           confidence: 0.9),
-            context: makeContext())
+            context: makeContext(configured: false))
 
         guard case .spokenAndPresented(let spoken) = result else {
             XCTFail("expected spokenAndPresented, got \(result)")

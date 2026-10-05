@@ -98,11 +98,6 @@ final class ApplianceHelperPlugin: AssistantPlugin {
     }
 
     func handle(_ command: PluginCommand, context: PluginExecutionContext) async -> PluginResult {
-        guard context.geminiClient.isAvailable else {
-            context.observabilityBus.emit(Self.event("appliance_helper_unconfigured"))
-            return .failed(spokenApology: L10n.str("plugin.applianceHelper.notConfigured",
-                                                   locale: context.locale))
-        }
         let question = Self.extractQuestion(from: command)
 
         // A manual the elder already saved for this appliance outranks the
@@ -127,8 +122,13 @@ final class ApplianceHelperPlugin: AssistantPlugin {
                                         geminiClient: context.geminiClient,
                                         observabilityBus: context.observabilityBus,
                                         pendingManualEntryID: nil)
-        context.observabilityBus.emit(Self.event("appliance_helper_presented"))
-        return .spokenAndPresented(L10n.str("plugin.applianceHelper.cameraPrompt",
+        // The same menu as the Home tile: an absent key disables fresh
+        // analysis, not saved/bundled manuals or their presentation.
+        let configured = context.geminiClient.isAvailable
+        context.observabilityBus.emit(Self.event(configured
+            ? "appliance_helper_presented" : "appliance_helper_unconfigured"))
+        return .spokenAndPresented(L10n.str(configured
+            ? "plugin.applianceHelper.cameraPrompt" : "plugin.applianceHelper.notConfigured",
                                             locale: context.locale))
     }
 

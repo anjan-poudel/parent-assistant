@@ -8460,10 +8460,8 @@ self.noteTalkContractChanged()
     /// `ApplianceHelperPlugin.handle` instead. 2026-09-06: until now only
     /// the voice path existed; the dock tile was designed but unbuilt.
     func presentApplianceHelper(question: String?) {
-        guard geminiClient.isAvailable else {
-            speak(text: L10n.str("plugin.applianceHelper.notConfigured", locale: activeLocale))
-            return
-        }
+        // The helper also owns the offline manuals library. Cloud
+        // configuration gates photo analysis, never the whole menu.
         let session = ApplianceHelperSession(question: question,
                                              locale: activeLocale,
                                              geminiClient: geminiClient,
@@ -8478,9 +8476,8 @@ self.noteTalkContractChanged()
     /// The session is armed already in `.guidance`, so the presented
     /// sheet renders the manual's step cards immediately and never shows
     /// the camera-capture state (ApplianceHelperView's auto-open camera is
-    /// gated on `.capturing`). Not gated on `geminiClient.isAvailable` —
-    /// unlike `presentApplianceHelper`, bundled content must work first
-    /// launch, offline, with no key configured.
+    /// gated on `.capturing`). Like the helper menu, bundled content
+    /// must work first launch, offline, with no key configured.
     ///
     /// Returns false when the manual's overview image is unavailable — the
     /// caller stays on the browse list and shows an honest failure.

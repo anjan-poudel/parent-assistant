@@ -41,11 +41,7 @@ final class ElderlyAssistantUITests: XCTestCase {
             } else {
                 break
             }
-            app.tap()  // lets interruption monitors fire
         }
-        // The pipeline start (post-wizard) re-requests mic; if the alert
-        // is still up, one more tap lets the monitor accept it.
-        app.tap()
     }
 
     private func launchToHome() -> XCUIApplication {
@@ -105,6 +101,36 @@ final class ElderlyAssistantUITests: XCTestCase {
                       + app.debugDescription)
         XCTAssertTrue(app.staticTexts["तयार छु"].exists,
                       "Idle status should be Nepali")
+    }
+
+    /// Precondition: the simulator has no Gemini key and uses Nepali.
+    /// The Home tile must still open offline manuals, not just speak a
+    /// refusal. Opening a guide also proves the nested library dismisses
+    /// back into the helper instead of losing the app-wide presentation.
+    func testApplianceHelpWithoutCloudOpensBundledManualAndDismisses() throws {
+        let app = launchToHome()
+        let appliance = app.buttons.matching(NSPredicate(
+            format: "label CONTAINS %@", "उपकरण सहायता")).firstMatch
+        let manuals = app.buttons.matching(NSPredicate(
+            format: "label CONTAINS %@", "म्यानुअलहरू")).firstMatch
+        tap(appliance, expecting: manuals, within: 15, in: app)
+        let takePhoto = app.buttons["फोटो खिच्नुहोस्"]
+        XCTAssertTrue(takePhoto.exists)
+        XCTAssertFalse(takePhoto.isEnabled,
+                       "Fresh cloud analysis must be unavailable without a key")
+        XCTAssertTrue(manuals.isEnabled, "Offline manuals must remain usable")
+
+        let iphone = app.buttons.matching(NSPredicate(
+            format: "label CONTAINS %@", "आइफोन सुरुवात")).firstMatch
+        tap(manuals, expecting: iphone, within: 10, in: app)
+        let firstStep = app.descendants(matching: .any).matching(NSPredicate(
+            format: "label CONTAINS %@",
+            "तपाईंको फोन सुतिरहेको छ। ब्युँझाउन दायाँपट्टिको बटन थिच्नुहोस्।")).firstMatch
+        tap(iphone, expecting: firstStep, within: 10, in: app)
+        XCTAssertFalse(manuals.exists, "Opening a bundled guide must leave the library")
+
+        tap(app.buttons["बन्द गर्नुहोस्"].firstMatch,
+            expecting: app.buttons["बोल्नुहोस्"], within: 10, in: app)
     }
 
     func testTalkButtonStartsListening() throws {

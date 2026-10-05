@@ -41,9 +41,10 @@ final class ApplianceHelperSessionTests: XCTestCase {
 
     private func makeSession(transport: SequencedGeminiTransport,
                              question: String? = "चिया कसरी बनाउने",
-                             pendingManualEntryID: UUID? = nil) -> ApplianceHelperSession {
+                             pendingManualEntryID: UUID? = nil,
+                             configured: Bool = true) -> ApplianceHelperSession {
         let store = GeminiConfigStore(storage: GeminiInMemoryStorage())
-        store.save("fake-key")
+        if configured { store.save("fake-key") }
         let client = GeminiClient(configStore: store, observabilityBus: bus,
                                   transport: transport)
         return ApplianceHelperSession(question: question, locale: locale,
@@ -138,6 +139,29 @@ final class ApplianceHelperSessionTests: XCTestCase {
         XCTAssertFalse(message.isEmpty)
         XCTAssertNotEqual(message, "appliance.error.generic",
                           "the message must be resolved, not a raw key")
+    }
+
+    func testUnconfiguredPhotoReportsConfigurationFailureAndStillOpensSavedManual() async {
+        let transport = SequencedGeminiTransport(results: [])
+        let session = makeSession(transport: transport, configured: false)
+        session.handleCapturedPhoto(makeImage())
+        await waitForPipeline(session)
+
+        XCTAssertEqual(session.state, .unavailable(message:
+            L10n.str("plugin.applianceHelper.notConfigured", locale: locale)))
+        XCTAssertEqual(transport.requestCount, 0)
+        XCTAssertEqual(makeCache().count, 0, "An unavailable analysis must not save a fabricated guide")
+
+        let jpeg = makeImage().jpegData(compressionQuality: 0.8)!
+        let entryID = makeCache().store(cachedPanasonicGuidance(), photoHash: "saved-photo",
+                                       imageJPEG: jpeg)
+        XCTAssertTrue(session.presentManual(entryID: entryID))
+        guard case let .guidance(presentation, _) = session.state else {
+            XCTFail("The saved manual must remain readable without cloud configuration")
+            return
+        }
+        XCTAssertEqual(presentation.guidance.steps, ["cached step"])
+        XCTAssertEqual(transport.requestCount, 0)
     }
 
     // MARK: - Question-aware photo-hash cache (2026-09-06)
