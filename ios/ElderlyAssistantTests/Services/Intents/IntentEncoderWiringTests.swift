@@ -510,7 +510,7 @@ final class IntentEncoderWiringTests: XCTestCase {
         let manifest = IntentEncoderManifest.t033Spike
         model.logits = IntentEncoderLogits(
             intentLogits: manifest.intents.map { $0 == "set_reminder" ? 6 : -6 },
-            slotLogits: [[-6, -6, -6, 6, 6]])
+            slotLogits: [[-6, -6, -6, 6, 6], [-6, -6, -6, -6, 6]])
         spy.make = { model }
         let encoder = makeEncoder(store: store, tokenizer: tokenizer, spy: spy)
         let fallback = StubCommandInterpreter(result: makeCommand(action: .query))

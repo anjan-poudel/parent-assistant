@@ -995,10 +995,12 @@ final class IntentEncoderInterpreterTests: XCTestCase {
         let pair = preparedPair(original: "भोलि सम्झाइदिनु",
                                 canonical: "भोलि सम्झाइदिनुस्")
         // A confident `set_reminder` whose time span is the FIRST word, with
-        // the spike's tag order (B-time is index 3).
+        // the spike's tag order (B-time is index 3). Two rows: the pair's
+        // model text is two words ("भोलि सम्झाइदिनुस्"), and a one-row
+        // fixture would trip the alignment guard into an abstention.
         model.logits = IntentEncoderLogits(
             intentLogits: manifest.intents.map { $0 == "set_reminder" ? 6 : -6 },
-            slotLogits: [[-6, -6, -6, 6, 6]])
+            slotLogits: [[-6, -6, -6, 6, 6], [-6, -6, -6, -6, 6]])
         spy.make = { model }
 
         let result = interpretPrepared(interpreter, pair)
@@ -1046,7 +1048,7 @@ final class IntentEncoderInterpreterTests: XCTestCase {
                                        preparedPair(original: "", canonical: "")))
         XCTAssertEqual(tokenizer.callCount, 0)
         let abstained = events("encoder_abstained")
-        XCTAssertEqual(abstained.last?.metadata["error_code"],
+        XCTAssertEqual(abstained.last?.errorCode,
                        IntentEncoderAbstention.emptyAfterSanitise.rawValue)
     }
 
@@ -1274,8 +1276,10 @@ final class IntentEncoderInterpreterTests: XCTestCase {
         model.logits = makeLogits(
             manifest: manifest,
             intent: intent,
+            // Time is the ONLY slot: with the medication word also tagged,
+            // the bounded summary could never fit its "[time=" substring.
             wordTags: ["B-time", "I-time", "I-time", "I-time",
-                       "B-medication", "O", "O"],
+                       "O", "O", "O"],
             tokenization: tokenization)
         spy.make = { model }
         let recorder = PipelineTraceRecorder()

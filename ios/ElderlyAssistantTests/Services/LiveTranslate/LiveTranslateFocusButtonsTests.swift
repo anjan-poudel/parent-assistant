@@ -89,10 +89,11 @@ final class LiveTranslateFocusButtonsTests: XCTestCase {
                       height: container.height - boxRect.maxY)
     }
 
-    /// The line the two actions are counted on: the vertical middle of what the
-    /// row actually drew, rather than an assumed offset — the row's height
-    /// depends on how the copy wraps in the active language, and a scan line at
-    /// a guessed y would count zero runs and pass for the wrong reason.
+    /// The vertical middle of what the row actually drew — the anchor the
+    /// "hangs from the box" check and the side-of-anchor band read. Measured
+    /// rather than assumed: the row's height depends on how the copy wraps in
+    /// the active language, and a scan at a guessed y would miss the row
+    /// entirely and pass for the wrong reason.
     private func rowMiddle(of image: UIImage,
                            under box: NormalizedBox) throws -> (y: CGFloat, ink: OverlayRenderProbe.Ink) {
         let ink = try OverlayRenderProbe.ink(in: image, within: regionUnder(box))
@@ -100,10 +101,36 @@ final class LiveTranslateFocusButtonsTests: XCTestCase {
         return (CGFloat(ink.minY + ink.maxY) / (2 * image.scale), ink)
     }
 
+    /// The line the two actions are counted on: the row's own top-stroke line
+    /// — a point below the top of what the row itself drew. Deliberately
+    /// **not** the row's middle: the restyle draws each control as a capsule
+    /// of a pale `appSurface` gradient behind a hairline border, and along
+    /// the middle of that fill the gradient drifts across the probe's
+    /// knife-edge ink threshold (red < 250) — one capsule's paint then reads
+    /// as several runs, and the count stops answering the question it is
+    /// asked. The top of a capsule is a straight border stroke, one solid run
+    /// per control, and it sits clear of the soft shadow the capsule casts
+    /// (offset downward, so the bleed that matters is below the line).
+    ///
+    /// The box above the row draws its own `boxLineWidth` stroke, which
+    /// reaches half that below its frame; the scan for the row's ink starts
+    /// clear of it, so `minY` is the row's own top and not the box's outline.
+    private func rowTop(of image: UIImage, under box: NormalizedBox) throws -> CGFloat {
+        let boxRect = presentation.containerRect(ofFrameBox: box)
+        let clearOfTheBoxStroke = PointAskOverlayBoxView.boxLineWidth
+        let rowBand = CGRect(x: 0,
+                             y: boxRect.maxY + clearOfTheBoxStroke,
+                             width: container.width,
+                             height: container.height - boxRect.maxY - clearOfTheBoxStroke)
+        let ink = try OverlayRenderProbe.ink(in: image, within: rowBand)
+        XCTAssertFalse(ink.isEmpty, "the anchored box drew no actions under it")
+        return CGFloat(ink.minY) / image.scale + 1
+    }
+
     private func actionsOnRow(of image: UIImage, under box: NormalizedBox) throws -> Int {
-        let middle = try rowMiddle(of: image, under: box)
+        let top = try rowTop(of: image, under: box)
         let region = regionUnder(box)
-        return try OverlayRenderProbe.inkRunCount(in: image, atY: middle.y,
+        return try OverlayRenderProbe.inkRunCount(in: image, atY: top,
                                                   from: region.minX, to: region.maxX)
     }
 
@@ -306,8 +333,11 @@ final class LiveTranslateFocusButtonsTests: XCTestCase {
                                                               width: container.width,
                                                               height: boxRect.minY))
         XCTAssertFalse(above.isEmpty, "the row flipped above the anchor and was drawn")
-        let middle = CGFloat(above.minY + above.maxY) / (2 * image.scale)
-        XCTAssertEqual(try OverlayRenderProbe.inkRunCount(in: image, atY: middle,
+        // Count on the row's top-stroke line, clear of the box's shadow
+        // bleed (which sits just above the box's top edge) and of the
+        // appSurface gradient's mid-capsule split (MASTER-REPAIR).
+        let top = CGFloat(above.minY) / image.scale + 1
+        XCTAssertEqual(try OverlayRenderProbe.inkRunCount(in: image, atY: top,
                                                           from: 0, to: container.width),
                        2,
                        "both actions came with it")

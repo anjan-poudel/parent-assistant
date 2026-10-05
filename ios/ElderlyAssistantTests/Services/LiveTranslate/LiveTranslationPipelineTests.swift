@@ -465,17 +465,22 @@ final class LiveTranslationPipelineTests: XCTestCase {
         }.count
     }
 
-    /// Every visible region in a publication has an outcome, and every
-    /// outcome belongs to a visible region. This is the shape of "never a
-    /// blank bubble and never a silent drop": a region cannot be published
-    /// without a rendered state, and an outcome cannot outlive its region.
+    /// Every visible region in a publication has an outcome, and no outcome
+    /// without a region can be DRAWN. The outcomes map is a superset of the
+    /// visible regions' outcomes by design (83479f6, owner-verified on
+    /// device): a settled answer whose region has not (yet) corroborated
+    /// into `visible` is carried so the overlay never leaves "translating…"
+    /// on screen for an answer the tier already produced. "Never a blank
+    /// bubble and never a silent drop" therefore pins: every visible region
+    /// covered, and every placement backed by its outcome — extras are the
+    /// carried set, and render correctness lives in the placements.
     private func assertEveryRegionIsRendered(_ publication: LiveTranslatePublication,
                                              file: StaticString = #filePath,
                                              line: UInt = #line) {
-        XCTAssertEqual(Set(publication.outcomes.keys),
-                       Set(publication.regions.map(\.id)),
-                       "a publication must carry exactly one outcome per visible region",
-                       file: file, line: line)
+        let visibleIDs = Set(publication.regions.map(\.id))
+        XCTAssertTrue(visibleIDs.isSubset(of: publication.outcomes.keys),
+                      "every visible region must carry an outcome (carried extras are legal)",
+                      file: file, line: line)
         for placement in publication.placements {
             XCTAssertEqual(publication.outcomes[placement.region.id], placement.result,
                            "the drawn placement and the outcome it was measured from must be one value",
@@ -1576,10 +1581,15 @@ final class LiveTranslationPipelineTests: XCTestCase {
                      "a region that left the publication must clear its overlay within one "
                      + "cycle plus the departure grace — nothing may still be drawn for it")
         XCTAssertTrue(departed.regions.isEmpty)
-        assertEveryRegionIsRendered(departed)
+        XCTAssertTrue(departed.placements.isEmpty,
+                      "a carried outcome whose region is gone draws nothing")
+        XCTAssertEqual(Set(departed.outcomes.keys), Set(resolved.regions.map(\.id)),
+                       "the departure grace carries the region's last outcome for one cycle — "
+                       + "nothing is drawn for it, but nothing new is claimed for it either")
 
         // 3. The camera comes back to the same sign. It resolves again — and
-        //    the resolution costs nothing: the persisted cache answers it.
+        //    the resolution costs nothing: the outcome retained across the
+        //    departure answers it, with no lookup on the return.
         harness.recogniser.defaultStep = .regions([detected(cloudText)])
         clock.advance(by: 0.7)
         await harness.pipeline.ingest(frame)
@@ -1593,16 +1603,19 @@ final class LiveTranslationPipelineTests: XCTestCase {
         }
 
         XCTAssertEqual(requests(carrying: cloudText, in: harness), 1,
-                       "the same text is one question for the session: the second resolution is a "
-                       + "cache hit, not a second request the family pays for")
+                       "the same text is one question for the session: the return reuses the "
+                       + "retained outcome, not a second request the family pays for")
         XCTAssertEqual(harness.transport.requestCount, 1)
         XCTAssertEqual(harness.brain.calls.count, 1,
-                       "a cache hit is answered before the brain is asked again, so the return "
-                       + "costs no generation either")
-        let persistedHits = harness.bus.events(named: "cache_hit")
-            .filter { $0.metadata["origin"] == "persisted" }
-        XCTAssertGreaterThanOrEqual(persistedHits.count, 1,
-                                    "the second resolution is recorded as what it is: a persisted hit")
+                       "the retained outcome answers before the brain is asked again, so the "
+                       + "return costs no generation either")
+        // The retained-outcome path, as distinct from a lookup: no lookup is
+        // performed at all on the return — the region's identity survived the
+        // departure and `reconcile` kept its final outcome — so no cache hit,
+        // persisted or curated, is recorded or made.
+        XCTAssertTrue(harness.bus.events(named: "cache_hit").isEmpty,
+                      "the return performs no lookup: the outcome was retained across the "
+                      + "departure, so there is no hit to record")
 
         let returned = try await latest(harness)
         let returnedRegion = try XCTUnwrap(region(cloudText, in: returned))
@@ -1613,7 +1626,8 @@ final class LiveTranslationPipelineTests: XCTestCase {
             return XCTFail("a cached string resolves; the elder sees the same translation again")
         }
         XCTAssertEqual(translation, "ने:" + cloudText, "the same text resolves to the same translation")
-        XCTAssertEqual(tier, .cloud, "a persisted entry is cloud-produced and says so (no request claimed)")
+        XCTAssertEqual(tier, .cloud, "the retained outcome is the cloud resolution the sign got — "
+                       + "the tier still says cloud, and no request claimed it on the return")
         let awaited = await inFlightAttempts(harness)
         XCTAssertEqual(awaited, 0)
     }

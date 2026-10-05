@@ -97,7 +97,18 @@ final class LiveTranslateAllowListTests: XCTestCase {
             // text. What survives is that a pair existed, its order and its
             // timing. `testTheContentTypedKeysAreDeclaredAndStillRedacted`
             // pins both halves.
-            "recognized_text", "source_text", "translated_text"
+            "recognized_text", "source_text", "translated_text",
+            // [ANALYSIS-DIAGNOSTIC] (2026-09-19) The pre-pipeline failure's
+            // geometry: the frame size ("1920x1080") and rect ("x,y,w,h") are
+            // count- and coordinate-shaped — the numbers that name why a crop
+            // was refused — and `cloud` is the analysis launch's on/off
+            // switch, a closed two-token vocabulary. Never text.
+            "frame", "rect", "cloud",
+            // [YOLO-OBSERVABILITY] (2026-09-19) The detector pass's evidence:
+            // COCO class names with confidences ("bottle:0.87,person:0.45")
+            // and normalized boxes ("0.1,0.2,0.5,0.6;…") — closed vocabulary
+            // and coordinates, never pixels, never scene text.
+            "labels", "boxes"
         ], "the extension is exactly the union of the three declared key sets")
         XCTAssertNil(sanitisedMetadata(["somethingNoOneDeclared": "x"])["somethingNoOneDeclared"],
                      "unknown keys are still dropped outright")

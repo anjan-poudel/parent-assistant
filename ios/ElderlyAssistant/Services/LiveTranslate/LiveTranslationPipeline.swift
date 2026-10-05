@@ -306,8 +306,12 @@ struct LiveTranslatePublication: Equatable {
     /// The stabilised regions, in the stabiliser's own order.
     let regions: [TextRegionStabilizer.StableTextRegion]
 
-    /// Every visible region's outcome. Rebuilt each cycle from the visible set
-    /// only, so no outcome outlives the region it belongs to.
+    /// Every settled outcome the ledger holds at publication time (83479f6):
+    /// a superset of the visible regions' outcomes — a settled answer whose
+    /// region has not (yet) corroborated into `visible` is carried so the
+    /// overlay never leaves "translating…" on screen for an answer the tier
+    /// already produced. Placements (built per visible region) are what the
+    /// overlay draws; an outcome with no region draws nothing.
     let outcomes: [TextRegionStabilizer.RegionIdentity: TranslationResult]
 
     /// The placements measured from these regions and these outcomes under
@@ -3088,20 +3092,14 @@ actor LiveTranslationPipeline {
         guard !isJitterOnly(regions: regions, policy: policy) else { return }
 
         publicationSequence += 1
-        // [DISPATCH-ON-FIRST-SIGHTING] The askable set feeds the dispatch,
-        // but the publication must carry exactly the visible regions — an
-        // answer for a region that has not corroborated into `visible`
-        // lives in the string ledger and lands through `reconcile` when it
-        // appears. The filter is the one central gate every settlement
-        // path flows through.
-        // Carry every settled outcome in the publication. Outcomes are
-        // keyed by normalized text; placements are built per region, so a
-        // stale outcome with no region in this publication has no placement
-        // and draws nothing — the old visible-only filter was pure loss:
-        // a settled string whose region had not (yet) corroborated into
-        // `stabilizer.visible` never rendered, leaving "translating…" on
-        // screen for an answer the tier had already produced (owner-verified
-        // on device). Render correctness lives in the placements, not here.
+        // Carry every settled outcome (83479f6, owner-verified on device):
+        // a settled string whose region has not (yet) corroborated into
+        // `stabilizer.visible` must still land in the publication, or the
+        // overlay leaves "translating…" on screen for an answer the tier
+        // has already produced. Render correctness lives in the placements
+        // (built per visible region), not in this map — an extra outcome
+        // with no region draws nothing. The publication-type doc above is
+        // the same contract.
         let publicationOutcomes = outcomes
         let publication = LiveTranslatePublication(
             sequence: publicationSequence,
