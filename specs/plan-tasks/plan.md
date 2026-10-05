@@ -1,319 +1,285 @@
-# Task Breakdown — Live Camera Translation (EN → NE, v1)
+# Task Breakdown — Profile Interview (v1)
 
-**Feature:** `live-camera-translation` · **Branch:** `worktree-live-camera-translation` · 2026-09-16
+**Feature:** `profile-interview` · **Branch:** `feat/profile-interview` · 2026-10-05
 **Task:** `plan-tasks` (agent `le`) · **Contract:** `task_breakdown_l3` → this file + `specs/plan-tasks/tasks/`
-**Inputs folded in:** `specs/design-component.md` (L2 component design, `review-l2` GO at 2026-09-16);
-`specs/security-design-review.md` (`SECURITY-GO`, STRIDE, amendments AM-1 … AM-10, residual SR-1);
-`specs/review-l2.md` (GO, clarifications CL-1 … CL-8); the signed-off requirement set
-`specs/define-requirements/index.md` + `specs/define-requirements.md` (23 FR / 13 NFR, lock read-only);
-the owner-approved first-pass design under `docs/superpowers/specs/`; `constitution.md` (Architecture
-Constraint 1, Open Decision 13) and `specs/live-camera-translation/constitution.md`; and the workflow
-`.ai-sdd/workflows/live-camera-translation.yaml`.
+**Inputs folded in:** `specs/design-l2.md` (L2 component design C01–C13, `review-l2` GO at 2026-10-05;
+includes the C13 app-start routing under the 2026-10-05 owner amendment FR-PI-016);
+`specs/security-design-review.md` (`SECURITY-GO`, STRIDE, findings SD-1 … SD-7, amendments
+AM-1 … AM-4, 10 evidence obligations, accepted residuals); `specs/review-l2.md` (GO, observations
+OB-1 … OB-5); the signed-off requirement set `specs/define-requirements.lock.yaml` +
+`specs/define-requirements/` (16 FR-PI / 11 NFR-PI); `constitution.md` and
+`specs/profile-interview/constitution.md`.
 
 ## Summary
 
-- **Task groups: 10** (Jira Epics) — TG-01 … TG-10
-- **Total tasks: 30** — T-001 … T-030, all leaf task files (no subtasks: single iOS codebase, no
+- **Task groups: 4** (Jira Epics) — TG-14 … TG-17
+- **Total tasks: 16** — T-090 … T-105, all leaf task files (no subtasks: single iOS codebase, no
   platform split, and no task's deliverables are separable enough to justify a second tracker level)
-- **Estimated effort:** ~42–58 developer-days of work; ~29–33 days elapsed with two developers,
-  bounded below by the critical path below (~29 days), which a third developer cannot shorten
-- **Critical path:** `T-001 → T-003 → T-014 → T-018 → T-019 → T-026 → T-027 → T-028 → T-029 → T-030`
-- **Security work:** every amendment AM-1 … AM-10 has a named task (map below). AM-1, AM-2 and AM-5
-  gate `security-test`; AM-5 additionally gates `final-sign-off`. All CL-1 … CL-8 clarifications are
-  routed into tasks (map below).
-- **Requirement coverage:** all 23 FR-LCT and all 13 NFR-LCT map to at least one task. Nothing is
+- **ID numbering convention:** the accumulated global maxima before this plan are T-089 and TG-13,
+  so Profile Interview continues at T-090 and TG-14 (stated per the dispatch rule; computed by the
+  prescribed scan before writing). No existing T-NNN or TG-NN file or folder is reused.
+- **Estimated effort:** ~41–52 developer-days of work; ~21–26 days elapsed with two developers,
+  bounded below by the critical path (~19–22 sequential days on the chain), which a third developer
+  cannot shorten
+- **Critical path:** `T-090 → T-097 → T-098 → T-099 → T-102 → T-104 → T-105`
+- **Security work:** every amendment AM-1 … AM-4 has a named task, and all 10 evidence obligations
+  have a named task and DoD line (both maps below). No blocker exists (`SECURITY-GO`); the
+  amendments are folded non-blockingly, and no finding was turned into a gate.
+- **Requirement coverage:** all 16 FR-PI and all 11 NFR-PI map to at least one task. Nothing is
   unmapped.
-- **Scope:** no task touches an out-of-scope capability. The v1 non-goals (NE→EN, phrase-card mode,
-  world-anchored rendering, auto-speak, live full-scene explanation, on-device NMT tier 1, family
-  configuration surface, feed translation) are absent by construction — several tasks carry an
-  explicit acceptance scenario that keeps them absent rather than stubbed.
+- **Scope:** iOS only; no task touches an out-of-scope capability. No post-MVP work, no new egress,
+  no new permission, no `Info.plist` change, and no Android work appear anywhere; several tasks
+  carry an acceptance scenario that would fail if an absent capability were introduced rather than
+  stubbed.
 
 ### Recommended execution order and parallelism
 
-Tasks are numbered in dependency order, so executing T-001 → T-030 in order always satisfies every
-dependency. The waves below are the recommended parallel packing for two developers.
+Tasks are numbered in dependency order, so executing T-090 → T-105 in order always satisfies every
+dependency (the `implement` dispatch is a single sequential pass; this order is that pass). The
+waves below are the recommended parallel packing for two developers.
 
 | Wave | Tasks (parallel within a wave) | Note |
 |---|---|---|
-| 1 | T-001, T-002, T-003, T-004, T-005, T-011 | all dependency-free; T-011 is dictionary authoring and can start immediately |
-| 2 | T-006, T-012, T-014, T-016, T-017, T-023 | the camera, cache, consent, cloud and voice tracks all open at once |
-| 3 | T-007, T-008, T-013, T-015, T-018 | camera, cache, consent and cloud tracks run in parallel |
-| 4 | T-009, T-019 | the two longest chains; one developer each |
-| 5 | T-010 | decluttering needs the stabiliser |
-| 6 | T-020 | placement needs the decluttered region set |
-| 7 | T-021 | rendering needs placement |
-| 8 | T-022, T-024 | both need the rendered overlay; T-024 also needs the sanitiser and the outcome taxonomy |
-| 9 | T-025 | in-session capture needs the parser and the speech path |
-| 10 | T-026 | joins the camera, cache, consent and cloud tracks — nothing downstream can start before it |
-| 11 | T-027 | |
-| 12 | T-028 | the gate extension needs the final sources |
-| 13 | T-029 | the evidence suite needs the gate in place |
-| 14 | T-030 | the device protocol needs both the gate and the suite |
+| 1 | T-090, T-093, T-095 | store, strings and the pipeline extraction are dependency-free and open three independent tracks |
+| 2 | T-091, T-097 | the guard needs the store; the drafts need the record type |
+| 3 | T-092, T-098, T-101 | the coordinator seam needs the guard; the field needs bounds and clamp; the fingerprint step needs only copy |
+| 4 | T-094, T-096, T-099, T-100, T-103 | the clause/seed unit, the ack service, two wizard steps and the Settings editor all open once their foundations exist |
+| 5 | T-102 | the enum and routing wait for all three step views so the exhaustive switch compiles |
+| 6 | T-104 | the log-safety coverage needs every feature source in place |
+| 7 | T-105 | the release evidence bundle needs the gate and the whole journey |
 
-Two independent tracks make the parallelism real: **camera/detection** (T-006 → T-007 → T-009 →
-T-010) and **cloud translation** (T-004/T-017 → T-018 → T-019, with T-014 → T-015 alongside). The
-cache track (T-011 → T-012 → T-013) is independent of both until T-026.
+Two independent tracks make the parallelism real: the **reply/prompt track** (T-090 → T-091 →
+T-092 → T-094, with the mirror gate) and the **wake/ack track** (T-095 → T-096). The wizard track
+(T-097 → T-098 → T-099 → T-102) joins them at T-102, and the Settings/evidence track (T-103 →
+T-104 → T-105) closes the feature.
 
 ### Critical path
 
 ```
-T-001 (config)
-  → T-003 (event allow-list)
-    → T-014 (consent gate)
-      → T-018 (text-only translation client)
-        → T-019 (cloud tier: latch, retry, deadline)
-          → T-026 (pipeline + session model)
-            → T-027 (plugin + session view)
-              → T-028 (release log-safety gate)
-                → T-029 (security evidence suite)
-                  → T-030 (device validation protocol)
+T-090 (encrypted store)
+  → T-097 (drafts, bounds, mandatory predicate)
+    → T-098 (address-as field)
+      → T-099 (about-you step)
+        → T-102 (step enum + cold-start routing + shell wiring)
+          → T-104 (log-safety coverage)
+            → T-105 (release evidence bundle)
 ```
 
-Sequential effort on this chain is ~24 days to T-028 and ~29 to T-030. It is the longest chain because
-the consent gate must exist before the client method (the request builder takes a consent proof, AM-7),
-the tier is the single point every cloud path passes through, and nothing downstream of T-026 can be
-built until the pipeline publishes outcomes.
-
-The **second-critical chain** is the camera track:
-`T-001 → T-006 → T-007 → T-009 → T-010 → T-026`. It is roughly three days shorter and it must land on
-a different developer, because T-026 depends on both chains.
-
-The **release gate chain** (`T-026 → T-027 → T-028 → T-029 → T-030`) is what `security-test` and
-`final-sign-off` read: T-028 makes the log-safety gate recognise this feature's content class and T-029
-produces the evidence the security test cites.
+Sequential effort on this chain is roughly 19–22 days, and it is the longest chain because the
+routing predicate is single-sourced with the About-you Next gate (T-097 must exist first), the
+step views must compile before the exhaustive `stepContent` switch gains its cases (T-099 before
+T-102), and the release evidence cannot run before the gate covers the final sources (T-104 before
+T-105). The **second-critical chain** is the reply track:
+`T-090 → T-091 → T-092 → T-103 → T-104 → T-105` (~16–19.5 days), which the store work clusters
+behind. The ack track (`T-095 → T-096 → T-105`) is the shortest of the three and must land on the
+other developer.
 
 ### Key risks
 
-1. **CRITICAL — tier-2 retry can re-issue after a consent withdrawal (T-019, AM-1/CL-2; evidence in
-   T-029).** A cancelled transport surfaces as a transient-looking error, so the single retry is the
-   one genuine consent-evasion window in the design. The task must treat a cancellation-shaped error
-   as terminal, re-read the consent decision immediately before the second attempt, and deny on
-   anything but `granted`. `security-test` cannot return `SECURITY-GO` while this is open.
-2. **HIGH — the release log-safety gate does not recognise recognised or translated text today
-   (T-028, AM-5).** The gate's shipped rules match transcript shapes and raw error objects only, so a
-   content print in the new sources would pass. The extension must add a rule family for this
-   feature's content class over the new scan roots, and the gate must exit 0. Gates both
-   `security-test` and `final-sign-off`.
-3. **HIGH — the consent evidence does not survive the bus today (T-003, AM-2/CL-5).** Every
-   count-shaped and closed-vocabulary metadata key this feature introduces is dropped by
-   `LogSanitiser.allowedKeys` today, so the auditability evidence NFR-LCT-007 requires would not
-   exist. Additive allow-list extension plus a per-key test.
-4. **HIGH — consent withdrawal write failure leaves egress open (T-014, AM-4/SD-1).** A failed
-   withdrawal currently leaves the record granted. The gate must deny in memory first, verify the
-   delete by reading back, surface a failure as a failure, and never silently re-grant on relaunch.
-5. **HIGH — cache-at-rest integrity (T-012, AM-6/SD-3).** The stored ordering field must be a
-   monotone counter, not a wall-clock timestamp: a wall-clock value written on lookup is scene-derived
-   and fails NFR-LCT-008's "no scene timestamp" criterion literally.
-6. **HIGH — in-flight dedupe has no stated terminal outcome (T-019, AM-8/CL-1).** A second observer
-   of an already-claimed key must receive the in-flight request's terminal outcome, or the region sits
-   pending forever — an unbounded pending state (NFR-LCT-001) and a de-facto silent drop
-   (NFR-LCT-010).
-7. **HIGH — shared-component regression (T-013, T-011, T-003, T-004; NFR-LCT-012).** Four tasks edit
-   files the shipped appliance helper and voice pipeline depend on. All four changes must be additive;
-   T-013 owns the helper-presentation regression test (dictionary hit, cache hit, localizer
-   precedence) and T-011 pins the 47 shipped dictionary entries.
-8. **MEDIUM — measure-vs-render divergence in the in-place predicate (T-020, R2).** The placement
-   measurer and the view renderer must go through one shared measurer, pinned by a Devanagari and a
-   Latin case, or a D1 in-place bubble can clip its own translation.
-9. **MEDIUM — nominal device values unmeasured (T-030, OD1/OD2/OD5/R10).** Cadence, declutter
-   thresholds, in-place default and microphone/speech arbitration ship as the design's nominal values
-   and are confirmed at a human device run; T-030 delivers the protocol and the results record.
-10. **MEDIUM — shared day cap with the voice pipeline (FR-LCT-013 / R7, accepted).** A heavy voice
-    day can exhaust translation mid-session; the honest degraded state is the requirement's own
-    authorised outcome. The latch task must not degrade anything else.
+1. **HIGH — seed/template drift on a one-byte boundary (T-094, R3/R11).** The seed ends with an
+   extra newline today (2,699 vs 2,698 bytes); the template edit, the seed edit, the renderer
+   default and the new build-blocking gate must land as one unit, or byte equality breaks in the
+   middle of the change. The worst-case composition (2,586 of the pinned 3,000 Characters) is
+   re-measured in the same task so the next trim starts from truth.
+2. **HIGH — the capture-start extraction must be behavior-preserving (T-095, NFR-PI-010).** Moving
+   the capture-start body into `beginCapture` changes the pipeline's most safety-adjacent path;
+   the nil-seam path must equal today's code exactly and the existing seam suites must stay green
+   unchanged. AM-3 additionally requires the racing-detection window to be covered.
+3. **HIGH — acknowledgement latency vs the activation budget (T-096, T-105, OD-A1, R1/R5).** The
+   detection-to-first-audio budget (≤ 1 s) is unmeasured on device; the hold bound is injectable
+   and the design's fallback ladder (warm engine, memory-only pre-synthesis, shorter copy) is the
+   lever. No default changes without the T-105 measurement and a recorded decision.
+4. **HIGH — corrupt-store removal semantics (T-090, R7, FR-PI-015).** A present-but-undecodable
+   payload is removed exactly once and cached; any retry loop or partial application would turn a
+   corrupt record into a startup hazard. Absent vs unreadable must stay distinct through the
+   tri-state probe.
+5. **HIGH — guard policy boundary for instruction-shaped terms (T-091, T-094, SD-1/AM-1).** The
+   shared marker table is English/transliterated by design, so out-of-table shapes (including the
+   requirement's own example) pass as quoted data; the containment statement and the split fixtures
+   (in-table vs out-of-table, with an A/B routing assertion) make the boundary explicit and
+   evidenced rather than silently assumed.
+6. **MEDIUM — guard false positives reject a legitimate term (T-091, R9).** A benign term phrased
+   like a marker is dropped for that turn only: no crash, no user error, the event makes it
+   visible, and the acknowledgement still speaks the stored term verbatim.
+7. **MEDIUM — Devanagari grapheme handling in clamps (T-091, T-098, R10).** Every clamp goes
+   through `Character` prefixes and the tests pin a Devanagari conjunct fixture, where a naive
+   count would split a cluster.
+8. **MEDIUM — cold-start routing repeats until the interview is completed (T-102, R13).** The
+   repetition is the owner's amendment, not an implementation choice; the soft-skip and the
+   dismissible presentation guarantee the user is never trapped, and the decision is once per
+   process (no foreground re-check).
+9. **MEDIUM — shared-file regressions in the coordinator and the shell (T-092, T-102,
+   NFR-PI-010).** Both edits must be additive; the existing coordinator and wizard suites keep
+   passing, and the boot guard keeps hosted unit tests on today's behavior.
+10. **MEDIUM — log-safety coverage gap in shared files (T-104, SD-4/AM-4).** The strict gate rules
+    cover the feature's dedicated sources (including the dedicated step-view file); the coordinator
+    edits remain best-effort by the amendment's own wording, contained by the runtime
+    redaction/allow-list choke point; the gate exit-0 obligation is carried in the release
+    checklist (T-105).
 
 ### Owner actions (not agent work — these gate `final-sign-off`)
 
 These are recorded here as owner-held, and no task in this plan performs them:
 
-- **OD-13 amendment.** Already recorded in `constitution.md` (2026-09-16) and verified at
-  `final-sign-off`. **No agent may edit Open Decision 13 or `constitution.md`** — hash-locked.
-- **Consent/disclosure copy review.** T-005 drafts the copy and the camera purpose string; the
-  review and approval of that copy is the owner's, before the first App Store submission (OD3,
-  2026-10-13 window). Changing the approved copy is a data change plus a `disclosureVersion` bump,
-  owned by T-001.
-- **Device demo confirmation** of the in-place default (OD2) and the declutter thresholds (OD5), and
-  the device spike for the OCR cadence (OD1): T-030 delivers the protocol and the results record;
-  the run itself is human.
-- **SD-5** (two cloud paths, one indicator, when the cloud voice engine is active) is an input to the
-  joint Open Decision 12 / 13 review — recorded, not scheduled here.
-- **SR-1** (the provider block-reason token on the shared log surface) is a ruled residual; the
-  feature adds no new emission of it. T-029 asserts zero upstream-derived `error_code` values on this
-  feature's path.
+- **OD-A2 — English ack copy eyeball.** The en template `Yes, %@` is confirmed by the owner at
+  review of the T-093 / T-096 changes; the term is never translated or reformatted.
+- **App Store privacy-disclosure update** for the new profile fields (NFR-PI-011 item 2) — an
+  owner/compliance action inside the 2026-10-13 window; named in the T-105 bundle so it is not
+  lost.
+- **Accepted residual (OD-PI-5 / SD-6): plain Settings editor, no biometric gate.** Owner-accepted
+  2026-10-05; the project-wide gate remains a recorded follow-up outside this feature. T-103
+  references the record; no agent work re-litigates it.
+- **Optional, not scheduled:** extending the shared injection-marker family is a project-level
+  decision recorded by SD-1; this feature neither requires nor performs it.
 
-### Security blockers and mandatory amendments (AM-1 … AM-10)
+### Security findings and mandatory amendments (AM-1 … AM-4, SD-1 … SD-7)
 
-| Amendment | Landed in | Also required by |
+| Amendment / finding | Landed in | Also required by |
 |---|---|---|
-| AM-1 cancellation is terminal; consent re-read before the retry; withdrawal-between-attempts evidence | **T-019** | T-029 (evidence) |
-| AM-2 additive `LogSanitiser.allowedKeys` extension + per-key survival test | **T-003** | T-029 |
-| AM-3 single-sourced detect-only marker accessor shared with the transcript sanitiser | **T-004** | T-017 (consumer) |
-| AM-4 withdrawal write failure denies in memory, delete verified by read-back, failure surfaced | **T-014** | — |
-| AM-5 release log-safety gate rule family for this feature's content class | **T-028** | T-029, `final-sign-off` |
-| AM-6 monotone ordering counter replaces the stored wall-clock field | **T-012** | — (owner carve-out not needed) |
-| AM-7 single-caller invariant; consent proof as a parameter of the request builder | **T-018** | T-019 |
-| AM-8 terminal outcome for an already-claimed in-flight key + test | **T-019** | — |
-| AM-9 single text channel with a delimited data block; absent tool set named as the load-bearing control | **T-018** | T-019 |
-| AM-10 `security-test` assertion set | **T-029** | `security-test` |
+| AM-1 containment statement + split fixtures for in-table vs out-of-table terms (SD-1) | **T-091** (documentation + in-table fixtures), **T-094** (A/B routing assertion) | T-105 (evidence index) |
+| AM-2 quote-family neutralisation incl. U+2018 / U+2019 / U+201C / U+201D and backtick (SD-2) | **T-091** | — |
+| AM-3 correct the "closes the gate synchronously" claim + racing-detection test (SD-3) | **T-095** (documentation + seam test), **T-096** (supersede test) | — |
+| AM-4 step views inside the strict gate rules via a dedicated file; keep the gate exit-0 obligation in the release checklist (SD-4) | **T-104** (scan roots), **T-099 / T-100 / T-101** (dedicated file), **T-105** (checklist item) | T-105 |
+| SD-5 ack temp WAV evidence | T-096 (pin), T-105 (device run) | evidence obligation 5 |
+| SD-6 plain editor residual | T-103 (referenced, accepted) | owner action above |
+| SD-7 routing tampering/corrupt map accepted | T-102 (documented, stores nothing) | evidence obligation 9 |
 
-**Blocker status:** `security-test` cannot return `SECURITY-GO` while AM-1, AM-2 or AM-5 is open;
-`final-sign-off` additionally requires AM-5. No amendment is an owner decision, and none changes the
-architecture or the scope.
+**Blocker status:** none. `security-design-review` returned `SECURITY-GO` with no blocker; every
+amendment is a non-blocking precision or coverage item and is folded into the tasks above. No
+non-blocking finding was turned into a gate.
 
-### Review clarifications folded into tasks (CL-1 … CL-8)
+### Security evidence obligations → task and DoD line
 
-| Clarification | Landed in |
+| # | Obligation (from the security review) | Task(s) | Where the DoD line lives |
+|---|---|---|---|
+| 1 | In-table marker term: quarantine fires, un-personalized turn, byte-identical prompt, content-free event | T-091, T-094 | T-091 "Evidence (obligation 1)"; T-094 "Evidence (obligation 1, clause half)" |
+| 2 | Out-of-table payloads (the requirement's example + a Nepali instruction-shaped term) with the A/B routing assertion | T-091, T-094 | T-091 "Evidence (obligation 2)"; T-094 "Evidence (obligation 2, clause half)" |
+| 3 | Quote-family break attempts + grapheme-boundary truncation against the 24-grapheme bound and the pinned budget | T-091, T-094 | T-091 "Evidence (obligation 3, guard half)"; T-094 "Evidence (obligation 3, clause half)" |
+| 4 | Personalized Release session: zero profile values in console, logs, telemetry; extended gate exits 0 | T-104, T-105 | T-104 "Evidence (obligation 4, gate half)"; T-105 "Evidence (obligation 4)" |
+| 5 | Container inspection: no plaintext anywhere; ack WAV gone after playback; key material required | T-090, T-096, T-105 | T-090 "Evidence (obligation 5, store half)"; T-096 "Evidence (obligation 5, WAV half)"; T-105 "Evidence (obligation 5)" |
+| 6 | Corrupt-payload run: removed once, never partially applied, no loop, startup unaffected | T-090 | T-090 "Evidence (obligation 6)" |
+| 7 | Offline full journey: zero feature-attributable network | T-105 | T-105 "Evidence (obligation 7)" |
+| 8 | Ack failure injection: unresolved template, timeout, cancel — silent start, completion exactly once, balanced bookkeeping | T-096 | T-096 "Evidence (obligation 8)" |
+| 9 | Cold-start routing: corrupt map and unreadable profile — no crash, stall, loop or trap; skip/dismiss present | T-102 | T-102 "Evidence (obligation 9)" |
+| 10 | Voice fingerprint: diff-level mechanism/storage/permission non-change; no biometric value in the new store, logs or payloads | T-101 | T-101 "Nothing about the mechanism changed" scenario + DoD |
+
+### Review observations folded into tasks (OB-1 … OB-5)
+
+| Observation | Landed in |
 |---|---|
-| CL-1 dedupe terminal outcome in the batch result | T-019, T-026 |
-| CL-2 consent re-read and cancellation handling on the retry | T-019, T-029 |
-| CL-3 origin → tier mapping (a persisted entry is never tier 0 and never drawn in place) | T-019 (the mapper), T-026 (enforces it when publishing) |
-| CL-4 error → unavailable-reason conversion table | T-002 |
-| CL-5 event-metadata allow-list | T-003 |
-| CL-6 detect-only marker seam | T-004 |
-| CL-7 wording tightening + the helper-presentation regression test (three cases) | T-013, T-011 |
-| CL-8 cosmetic sweep (`cloudRequestTimeout` derived or removed; the real Gemini extension path; the retryability table reference; the toggle's touch entry point; `repeatLast` traced; mapper-math test cases; the speech interface named) | T-001, T-018, T-019, T-022, T-023, T-020, T-024 |
+| OB-1 `WakeAcknowledging` "always calls completion exactly once" refined by the state machine's cancel exception | T-096 (contract documented incl. the cancel path) |
+| OB-2 wizard merge base for `.absent` / `.unreadable` spelled out as the empty record | T-097 (documented in the helpers) |
+| OB-3 FR-PI-013's "No force-migration" scenario superseded for the app-start path | Context only — no task; the supersession is recorded in FR-PI-016 and design-l2, and an annotation on FR-PI-013 rides the next touch of the set |
+| OB-4 §9.2's "byte-identical" phrasing made precise | T-094 (the renderer-default equality is asserted directly, not only through the gate) |
+| OB-5 OD-A1 and OD-A2 carried as evidence/eyeball items | T-105 (OD-A1 protocol) + the owner action for OD-A2 above |
 
 ### Out-of-scope guardrails (absent, not stubbed)
 
-No task creates a tier-1 branch, a direction flag, a world-anchored placement path, an
-auto-speak observer, a full-scene explanation call, a configuration surface for this feature, or any
-change on the feed path. Tasks T-002 (no on-device tier case exists to return), T-020 (no world-space
-input), T-024 (the only two speech construction sites are the tap handler and the command handler)
-and T-027 (the plugin holds no cross-session state) each carry an acceptance scenario that would fail
-if the absent capability were introduced.
+No task creates: a step that blocks the interview (every step stays skippable; the About-you gate
+applies to its Next button only); any new persisted state for routing; a background-to-foreground
+re-check; a second profile store or any plaintext copy; new egress, permissions or plist changes;
+prompt changes beyond the one clause and its seed mirror; per-language fine-tuned models; or any
+Android work. Tasks T-100 (emergency-call path unchanged), T-101 (mechanism unchanged), T-102
+(stores nothing, grants nothing), T-103 (no new authentication) and T-096 (single bookkeeping
+owner) each carry an acceptance scenario that would fail if the absent capability were introduced.
 
 ### Planning assumptions for the driver to flag
 
-1. **No subtasks were used.** The feature is a single iOS codebase with no platform split, so the
-   second tracker level would add navigation without enabling parallelism. If the driver prefers the
-   parent/subtask shape, the natural candidates are T-019 (tier orchestration) and T-029.
-2. **The design names a `LiveTranslationPipeline` actor** in its data-flow and isolation sections
-   (§5, §7 — the pipeline actor owns the stabiliser) but the C01 … C15 inventory gives it no ID. It
-   is planned as **T-026** under the plugin/session model. If the owner wants a component ID for it,
-   that is a design amendment, not new scope.
-3. **The `NSCameraUsageDescription` update and the consent copy** are drafted by T-005 as
-   implementation work (the shipped string does not mention live translation at all, so the feature
-   cannot meet FR-LCT-002 without it); the **review** is the owner action above.
-4. **`disclosureVersion`** ships with the draft-copy value from T-001 and is bumped when the owner
-   approves the reviewed copy. Consent records are version-stamped, so a copy change invalidates a
-   stale grant without a logic change.
-5. **AM-6 is resolved by the counter option** (not by requesting an owner carve-out in the
-   requirement text), so no read-only file needs to change.
-6. **`repeatLast` is kept** among the session commands (permitted by FR-LCT-022's "at minimum"
-   clause) and is traced explicitly in T-023.
-7. **`SpokenOutput`** appears once in the design and is otherwise undefined (CL-8). No such type is
-   introduced: T-024 uses the shipped `Announcement` plus `SpeakQueue` path and the design's
-   `LiveTranslateSpeech.orderedForReading` helper.
-8. **Build and test gate** is `ios/build.sh` (it runs `xcodebuild test`; a bare `xcodebuild build` is
-   not the gate on this project). New sources under `Services/LiveTranslate/` are mirrored by
-   `ElderlyAssistantTests/` `Services/LiveTranslate/`, so the project's test-impact mapping covers the
-   new suites without a mapping change.
+1. **No subtasks were used.** The feature is a single iOS codebase with no platform split; the repo
+   precedent for this shape uses leaf tasks only. If the driver prefers the parent/subtask shape,
+   the natural candidates are T-090 (store) and T-102 (enum + routing).
+2. **ID numbering continues the global maxima** (T-089 → this plan starts at T-090; TG-13 → starts
+   at TG-14), per the dispatch convention; the pre-existing TG-01 … TG-13 files and folders are
+   untouched, and only the two replaced files carry the new feature's content.
+3. **The step views land in a dedicated `App/ProfileInterviewSteps.swift`** (AM-4's option) even
+   though design-l2 sketched them inside the wizard file; AM-4's text is the binding one and the
+   dedicated file is what puts them inside the strict gate rules.
+4. **The seed, template, renderer and mirror gate land as one task (T-094)** per design-l2's
+   hand-off note; splitting them would break byte equality mid-landing.
+5. **`implement` is a single sequential dispatch** — numeric order is a valid topological order
+   (every dependency points at a lower id), so the driver can execute top-to-bottom without
+   re-planning.
+6. **`ios/build.sh` is the build/test gate** (it runs `xcodebuild test`); the new suites live under
+   `ElderlyAssistantTests/` mirroring the source paths, so the project's test-impact mapping covers
+   them without a mapping change.
+7. **OD-A1's fallback ladder is invoked only if the T-105 measurement misses the budget**; any
+   default change is a recorded decision (`wakeAckMaxHoldSeconds` is injectable by design), not a
+   silent edit.
+8. **No new observability metadata keys are introduced**; every event the feature emits uses
+   `outcome` / `error_code` / `duration_ms`, all already in the shipped allow-list, and the five
+   profile field names are added to the redaction set only (fail-closed).
 
 ## Contents
 
 - [tasks/index.md](tasks/index.md) — all task groups
-- [tasks/TG-01-foundations/index.md](tasks/TG-01-foundations/index.md) — foundations: types, configuration, observability and copy
-- [tasks/TG-02-camera-and-detection/index.md](tasks/TG-02-camera-and-detection/index.md) — camera capture and on-device text detection
-- [tasks/TG-03-region-stabilisation/index.md](tasks/TG-03-region-stabilisation/index.md) — region stabilisation and decluttering
-- [tasks/TG-04-dictionary-and-cache/index.md](tasks/TG-04-dictionary-and-cache/index.md) — tier-0 dictionary and the persistent translation cache
-- [tasks/TG-05-consent-and-disclosure/index.md](tasks/TG-05-consent-and-disclosure/index.md) — consent gate, prompt, revocation and the cloud-activity indicator
-- [tasks/TG-06-cloud-translation-tier/index.md](tasks/TG-06-cloud-translation-tier/index.md) — sanitising, the client method and the tier orchestration
-- [tasks/TG-07-overlay/index.md](tasks/TG-07-overlay/index.md) — smart-mix placement, overlay rendering and the toggle
-- [tasks/TG-08-voice-and-session-commands/index.md](tasks/TG-08-voice-and-session-commands/index.md) — session commands, spoken output and in-session capture
-- [tasks/TG-09-plugin-session-pipeline/index.md](tasks/TG-09-plugin-session-pipeline/index.md) — pipeline, session model, plugin entry and session view
-- [tasks/TG-10-release-gates-and-evidence/index.md](tasks/TG-10-release-gates-and-evidence/index.md) — release gate, security evidence and device validation
+- [tasks/TG-14-profile-foundations/index.md](tasks/TG-14-profile-foundations/index.md) — store, guard, coordinator seams and strings
+- [tasks/TG-15-personalization-paths/index.md](tasks/TG-15-personalization-paths/index.md) — prompt clause, seed mirror gate, wake acknowledgement
+- [tasks/TG-16-interview-wizard-and-startup-routing/index.md](tasks/TG-16-interview-wizard-and-startup-routing/index.md) — drafts, steps and app-start routing
+- [tasks/TG-17-settings-release-and-evidence/index.md](tasks/TG-17-settings-release-and-evidence/index.md) — Settings editor, log-safety coverage and the release evidence bundle
 
-Requirement IDs referenced by the tasks resolve under `specs/define-requirements/` (`FR/` and `NFR/`
-per-requirement files); the design's component IDs (C01 … C15) and parameter names are used verbatim
-from `specs/design-component.md`.
+Requirement IDs referenced by the tasks resolve under `specs/define-requirements/` (`FR/` and
+`NFR/` per-requirement files); component IDs (C01 … C13) and parameter names are used verbatim from
+`specs/design-l2.md`; amendment and finding IDs come from `specs/security-design-review.md`;
+observation IDs come from `specs/review-l2.md`.
 
 ### Task groups
 
 | Group | Title | Tasks | Effort | Critical for |
 |---|---|---|---|---|
-| [TG-01](tasks/TG-01-foundations/index.md) | Foundations — types, configuration, observability, copy | 5 | ~4–5 days | every other group |
-| [TG-02](tasks/TG-02-camera-and-detection/index.md) | Camera capture and on-device text detection | 3 | ~5–7 days | FR-LCT-001 … 004 |
-| [TG-03](tasks/TG-03-region-stabilisation/index.md) | Region stabilisation and decluttering | 2 | ~3–4 days | the traffic gate |
-| [TG-04](tasks/TG-04-dictionary-and-cache/index.md) | Tier-0 dictionary and persistent cache | 3 | ~4–7 days | offline behaviour |
-| [TG-05](tasks/TG-05-consent-and-disclosure/index.md) | Consent gate, prompt, revocation, indicator | 3 | ~4–5 days | `security-test` |
-| [TG-06](tasks/TG-06-cloud-translation-tier/index.md) | Sanitiser, client method, tier orchestration | 3 | ~6–7.5 days | `security-test` |
-| [TG-07](tasks/TG-07-overlay/index.md) | Smart-mix placement, rendering, toggle | 3 | ~5–6.5 days | FR-LCT-015 … 018 |
-| [TG-08](tasks/TG-08-voice-and-session-commands/index.md) | Session commands, spoken output, capture | 3 | ~3–5 days | FR-LCT-021, 022 |
-| [TG-09](tasks/TG-09-plugin-session-pipeline/index.md) | Pipeline, session model, plugin, session view | 2 | ~5–7 days | the join point |
-| [TG-10](tasks/TG-10-release-gates-and-evidence/index.md) | Release gate, security evidence, device protocol | 3 | ~5–6 days | `security-test`, `final-sign-off` |
+| [TG-14](tasks/TG-14-profile-foundations/index.md) | Profile Foundations — store, guard, seams, strings | 4 | ~9.5–12 days | every other group |
+| [TG-15](tasks/TG-15-personalization-paths/index.md) | Personalization Paths — prompt clause, seed mirror, wake ack | 3 | ~9.5–12 days | FR-PI-008 … 011 |
+| [TG-16](tasks/TG-16-interview-wizard-and-startup-routing/index.md) | Interview Wizard and Startup Routing | 6 | ~14.5–18 days | FR-PI-001 … 007, 013, 016 |
+| [TG-17](tasks/TG-17-settings-release-and-evidence/index.md) | Settings, Log Safety and Release Evidence | 3 | ~8–10 days | `security-test`, `final-sign-off` |
 
 ### All tasks
 
 | ID | Title | Group | Depends on | Scope (one line) | Effort | Risk |
 |---|---|---|---|---|---|---|
-| [T-001](tasks/TG-01-foundations/T-001-live-translate-config.md) | `LiveTranslateConfig` and `LiveTranslateSettings` | TG-01 | — | every operational parameter and the two persisted settings, one owner of every default | S | LOW |
-| [T-002](tasks/TG-01-foundations/T-002-translation-outcome-and-errors.md) | Outcome, tier and error taxonomy (C04) | TG-01 | — | `TranslationOutcome` as the single source of truth, `LiveTranslateError`, the error → reason table | M | MEDIUM |
-| [T-003](tasks/TG-01-foundations/T-003-observability-keys-allowlist.md) | Event catalogue and log allow-list (AM-2) | TG-01 | — | content-free event catalogue plus the additive `LogSanitiser.allowedKeys` extension and a per-key test | M | MEDIUM |
-| [T-004](tasks/TG-01-foundations/T-004-input-sanitiser-detect-only-seam.md) | Detect-only marker seam (AM-3) | TG-01 | — | a single-sourced marker accessor on the shipped sanitiser, both call sites pinned | S | MEDIUM |
-| [T-005](tasks/TG-01-foundations/T-005-localisation-catalog-and-purpose-string.md) | String Catalog entries and camera purpose string | TG-01 | — | all new user-visible strings externalised with Nepali first, plus the draft camera purpose string | M | MEDIUM |
-| [T-006](tasks/TG-02-camera-and-detection/T-006-live-camera-session.md) | `LiveCameraSession` (C01) | TG-02 | T-001, T-003 | preview with no photo output, throttled frame tap with drop-not-queue, thermal cadence, lifecycle | L | HIGH |
-| [T-007](tasks/TG-02-camera-and-detection/T-007-live-text-detector.md) | `LiveTextDetector` (C02) | TG-02 | T-001, T-003, T-006 | the OCR pass and the geometry-only tracking pass; a failed pass is dropped, tracking loss falls back | L | HIGH |
-| [T-008](tasks/TG-02-camera-and-detection/T-008-camera-permission-surfaces.md) | Camera permission and denial surfaces | TG-02 | T-005, T-006 | explanation before the system permission prompt, denial screen with a Settings link, no dead end | S | MEDIUM |
-| [T-009](tasks/TG-03-region-stabilisation/T-009-text-region-stabilizer.md) | `TextRegionStabilizer` (C03) | TG-03 | T-001, T-007 | geometry + string matching, two-sided hysteresis, change-only events | M | HIGH |
-| [T-010](tasks/TG-03-region-stabilisation/T-010-decluttering-merge-and-cap.md) | Decluttering — merge and region cap (C03) | TG-03 | T-001, T-009 | same-string merge keeping the longest string, deterministic eight-region cap, one overlay per region | M | HIGH |
-| [T-011](tasks/TG-04-dictionary-and-cache/T-011-curated-dictionary-extension.md) | Curated dictionary extension (C06, data only) | TG-04 | — | ~120 EN→NE entries, 47 shipped entries pinned, exact match, not reversible | M | MEDIUM |
-| [T-012](tasks/TG-04-dictionary-and-cache/T-012-label-translation-cache.md) | `LabelTranslationCache` (C05, AM-6) | TG-04 | T-001, T-003, T-011 | encrypted single-key store, the key format, curated keys non-evicting, touch coalescing, self-healing | L | HIGH |
-| [T-013](tasks/TG-04-dictionary-and-cache/T-013-appliance-helper-shared-cache-seam.md) | Appliance-helper label presentation seam | TG-04 | T-011, T-012 | localizer precedence over the shared cache, unchanged helper behaviour, three-case regression test | M | HIGH |
-| [T-014](tasks/TG-05-consent-and-disclosure/T-014-consent-gate.md) | `LiveTranslateConsentGate` (C09, AM-4) | TG-05 | T-001, T-002, T-003 | version-stamped record, fail-closed read, revocation that takes effect in memory first | L | CRITICAL |
-| [T-015](tasks/TG-05-consent-and-disclosure/T-015-consent-prompt-and-revocation.md) | Consent prompt and revocation surfaces | TG-05 | T-005, T-014 | prompt at the first cloud need with no timeout, revocation from the session view and Settings | M | CRITICAL |
-| [T-016](tasks/TG-05-consent-and-disclosure/T-016-cloud-activity-indicator.md) | `CloudActivityIndicatorModel` (C10) | TG-05 | T-001, T-003 | indicator driven only by the in-flight counter, not suppressible, no dwell timer | S | MEDIUM |
-| [T-017](tasks/TG-06-cloud-translation-tier/T-017-scene-text-sanitiser.md) | `SceneTextSanitiser` (C07) | TG-06 | T-001, T-004 | grapheme-safe truncation, per-string and per-batch bounds, detect-only quarantine verdicts | M | HIGH |
-| [T-018](tasks/TG-06-cloud-translation-tier/T-018-gemini-translate-client-and-prompt.md) | `GeminiClient.translateStrings` and prompt handling (C08, AM-7, AM-9) | TG-06 | T-001, T-002, T-014, T-017 | text-only request builder on the existing chokepoint, items keyed by id, no tools, validated response | L | CRITICAL |
-| [T-019](tasks/TG-06-cloud-translation-tier/T-019-cloud-translation-tier.md) | `CloudTranslationTier` orchestration (C08, C15) | TG-06 | T-001, T-002, T-012, T-014, T-016, T-017, T-018 | consent, cost latch, in-flight dedupe, one batch, retry ≤ 1, deadline, response validation | XL | CRITICAL |
-| [T-020](tasks/TG-07-overlay/T-020-overlay-placement.md) | `LiveOverlayPlacement` (C11) | TG-07 | T-001, T-002, T-009, T-010 | the four-condition in-place predicate, callouts that never cover their own region | L | HIGH |
-| [T-021](tasks/TG-07-overlay/T-021-overlay-view-and-states.md) | Overlay view, states and accessibility | TG-07 | T-005, T-020 | pending / resolved / degraded rendering, 44 pt targets, 18 pt bold, VoiceOver labels | L | HIGH |
-| [T-022](tasks/TG-07-overlay/T-022-always-show-original-toggle.md) | "Always show original text" toggle | TG-07 | T-001, T-020, T-021 | the persisted setting, touch and voice reachability, effect on the next frame | M | MEDIUM |
-| [T-023](tasks/TG-08-voice-and-session-commands/T-023-session-command-parser.md) | `LiveTranslateCommandParser` (C12) | TG-08 | T-005 | deterministic English and Nepali phrase table for the five commands, a miss re-prompts once | M | MEDIUM |
-| [T-024](tasks/TG-08-voice-and-session-commands/T-024-spoken-output.md) | Tap-to-hear and "read this to me" | TG-08 | T-002, T-005, T-017, T-020, T-021 | the two explicit speech entry points, top-to-bottom ordering, no auto-speak, no retry loop | M | MEDIUM |
-| [T-025](tasks/TG-08-voice-and-session-commands/T-025-in-session-capture-and-audio-arbitration.md) | In-session capture and audio arbitration | TG-08 | T-006, T-023, T-024 | single-utterance capture, microphone paused while speaking, no always-on listening | M | MEDIUM |
-| [T-026](tasks/TG-09-plugin-session-pipeline/T-026-translation-pipeline-and-session-model.md) | Pipeline and session model (C13) | TG-09 | T-002, T-003, T-006, T-007, T-009, T-010, T-012, T-013, T-014, T-015, T-016, T-017, T-019, T-020, T-021, T-022, T-023, T-024, T-025 | owns the stabiliser, walks the tier ladder, publishes one coherent outcome set per cycle, resume recovery | XL | CRITICAL |
-| [T-027](tasks/TG-09-plugin-session-pipeline/T-027-plugin-entry-and-session-view.md) | Plugin entry, registration and session view (C13) | TG-09 | T-005, T-006, T-008, T-015, T-021, T-025, T-026 | registry entry with no provider-availability guard, the full-bleed view, one close control | L | HIGH |
-| [T-028](tasks/TG-10-release-gates-and-evidence/T-028-release-log-safety-gate-extension.md) | Release log-safety gate extension (AM-5) | TG-10 | T-003, T-019, T-027 | a content rule family over the new roots, the gate exits 0, documented limitations corrected | M | HIGH |
-| [T-029](tasks/TG-10-release-gates-and-evidence/T-029-security-evidence-suite.md) | Security evidence suite (AM-10) | TG-10 | T-003, T-012, T-014, T-017, T-018, T-019, T-026, T-027, T-028 | the instrumented evidence set `security-test` cites, negative cases included | L | HIGH |
-| [T-030](tasks/TG-10-release-gates-and-evidence/T-030-device-validation-protocol.md) | Device validation protocol (OD1, OD2, OD5, R10) | TG-10 | T-028, T-029 | fixture-image OCR plus the manual protocol: cadence and thermal, in-place default, declutter, arbitration | M | HIGH |
+| [T-090](tasks/TG-14-profile-foundations/T-090-user-profile-store.md) | `UserProfileStore` — encrypted profile record (C01) | TG-14 | — | one encrypted record, whole-record decode, tri-state absent/unreadable discrimination, atomic writes, content-free events | L | HIGH |
+| [T-091](tasks/TG-14-profile-foundations/T-091-profile-prompt-guard-and-personalization.md) | `ProfilePromptTextGuard` + `ProfilePersonalization` (C07, AM-1, AM-2) | TG-14 | T-090 | the guard pipeline, quote-family neutralisation, grapheme clamp, and the guarded/verbatim read seam | M | HIGH |
+| [T-092](tasks/TG-14-profile-foundations/T-092-coordinator-profile-seams.md) | Coordinator profile seams — writer, snapshot, personalization (C01) | TG-14 | T-090, T-091 | the single writer, the cached snapshot and the `init()`-built personalization seam | M | MEDIUM |
+| [T-093](tasks/TG-14-profile-foundations/T-093-l10n-catalog-additions.md) | L10n catalogue additions (C09) | TG-14 | — | every new string keyed in en + ne, the ack template included; data never catalogued | M | MEDIUM |
+| [T-094](tasks/TG-15-personalization-paths/T-094-prompt-clause-and-seed-mirror-gate.md) | Prompt clause + seed mirror + build gate (C06, C08) | TG-15 | T-091, T-092 | the clause at its three anchors, the seed placeholder, the renderer default and the build-blocking mirror gate as one unit | L | HIGH |
+| [T-095](tasks/TG-15-personalization-paths/T-095-capture-extraction-and-ack-seam.md) | `VoicePipeline.beginCapture` extraction + ack seam (C05) | TG-15 | — | behavior-preserving extraction, the nil-default seam, the `stop()` cancel and the epoch protection | M | HIGH |
+| [T-096](tasks/TG-15-personalization-paths/T-096-wake-acknowledgment-service.md) | `WakeAcknowledgmentService` + coordinator wiring (C05) | TG-15 | T-092, T-093, T-095 | the two-state ack machine, phrase composition, the timeout/cancel paths and the base-speaker wiring | L | HIGH |
+| [T-097](tasks/TG-16-interview-wizard-and-startup-routing/T-097-onboarding-drafts-and-bounds.md) | Onboarding drafts, bounds and mandatory predicate (C02) | TG-16 | T-090 | pure draft/merge helpers, entry bounds and the single-sourced trimmed-non-empty predicate | S | MEDIUM |
+| [T-098](tasks/TG-16-interview-wizard-and-startup-routing/T-098-address-as-field.md) | `AddressAsField` — chips + custom entry (C03) | TG-16 | T-091, T-093, T-097 | preset chips as data plus a grapheme-clamped free-text field, shared by wizard and Settings | M | MEDIUM |
+| [T-099](tasks/TG-16-interview-wizard-and-startup-routing/T-099-about-you-step.md) | About-you step (C02) | TG-16 | T-092, T-093, T-097, T-098 | name, address-as and optional component-only DOB with the gated Next and the open Skip | M | MEDIUM |
+| [T-100](tasks/TG-16-interview-wizard-and-startup-routing/T-100-emergency-contacts-step.md) | Emergency contacts step + family list (C02, C11) | TG-16 | T-092, T-093, T-097 | singular kin designation through existing APIs, GP/hospital, and the family-step confirmation list | M | MEDIUM |
+| [T-101](tasks/TG-16-interview-wizard-and-startup-routing/T-101-voice-fingerprint-step.md) | Voice fingerprint step (C12) | TG-16 | T-093 | hosts the existing enrollment session as an optional skippable step — a call site only | M | MEDIUM |
+| [T-102](tasks/TG-16-interview-wizard-and-startup-routing/T-102-step-enum-and-cold-start-routing.md) | Step enum extension + cold-start routing + shell wiring (C02, C13) | TG-16 | T-092, T-097, T-099, T-100, T-101 | the three enum cases, the exhaustive switch, the route rule and its once-per-process consumption | L | HIGH |
+| [T-103](tasks/TG-17-settings-release-and-evidence/T-103-profile-settings-editor.md) | Profile Settings editor + destination row (C04) | TG-17 | T-092, T-093, T-097, T-098 | the post-interview editor, the destination row and the updated Settings expectations | M | MEDIUM |
+| [T-104](tasks/TG-17-settings-release-and-evidence/T-104-log-safety-coverage.md) | Log-safety coverage — redacted keys + feature roots (C10) | TG-17 | T-102, T-103 | fail-closed redaction for the five field names and strict gate coverage for the feature's sources | M | HIGH |
+| [T-105](tasks/TG-17-settings-release-and-evidence/T-105-release-evidence-and-device-validation.md) | Release evidence bundle + device validation (obligations 4, 5, 7; OD-A1) | TG-17 | T-094, T-096, T-102, T-103, T-104 | the Release-session, container and offline-journey evidence plus the device latency measurement | L | HIGH |
 
 ### Requirement → task trace
 
 | Requirement | Tasks |
 |---|---|
-| FR-LCT-001 | T-006, T-027 |
-| FR-LCT-002 | T-005, T-006, T-008 |
-| FR-LCT-003 | T-007 |
-| FR-LCT-004 | T-007 |
-| FR-LCT-005 | T-009 |
-| FR-LCT-006 | T-009, T-010 |
-| FR-LCT-007 | T-011, T-012 |
-| FR-LCT-008 | T-002 (the taxonomy owns truthful attribution; T-019 and T-026 consume it) |
-| FR-LCT-009 | T-019 |
-| FR-LCT-010 | T-012, T-014 |
-| FR-LCT-011 | T-016 |
-| FR-LCT-012 | T-012, T-014, T-015 |
-| FR-LCT-013 | T-014, T-015, T-019 |
-| FR-LCT-014 | T-017, T-018, T-029 |
-| FR-LCT-015 | T-015, T-020 |
-| FR-LCT-016 | T-017, T-020 |
-| FR-LCT-017 | T-001, T-022 |
-| FR-LCT-018 | T-002, T-019, T-021, T-026 |
-| FR-LCT-019 | T-012 |
-| FR-LCT-020 | T-012, T-013 |
-| FR-LCT-021 | T-023, T-024, T-025 |
-| FR-LCT-022 | T-023, T-026, T-027 |
-| FR-LCT-023 | T-024, T-026, T-027 |
-| NFR-LCT-001 | T-007, T-011, T-018, T-019, T-029, T-030 |
-| NFR-LCT-002 | T-001, T-006, T-007, T-009, T-010, T-012, T-020, T-021, T-030 |
-| NFR-LCT-003 | T-021 |
-| NFR-LCT-004 | T-001, T-005, T-008, T-015, T-021, T-023, T-024, T-027 |
-| NFR-LCT-005 | T-006, T-007, T-018, T-021, T-025, T-029, T-030 |
-| NFR-LCT-006 | T-003, T-028, T-029 |
-| NFR-LCT-007 | T-003, T-014, T-016, T-028, T-029 |
-| NFR-LCT-008 | T-012, T-029 |
-| NFR-LCT-009 | T-004, T-017, T-018, T-024 |
-| NFR-LCT-010 | T-002, T-009, T-010, T-019, T-021, T-026 |
-| NFR-LCT-011 | T-001, T-015, T-025, T-026, T-027, T-030 |
-| NFR-LCT-012 | T-004, T-006, T-011, T-013, T-022, T-027, T-028, T-030 |
-| NFR-LCT-013 | T-003, T-028, T-029, plus the owner actions above |
+| FR-PI-001 | T-099, T-100, T-101, T-102 |
+| FR-PI-002 | T-097, T-098, T-099, T-102 |
+| FR-PI-003 | T-090, T-092 |
+| FR-PI-004 | T-099, T-100, T-101, T-102 |
+| FR-PI-005 | T-100 |
+| FR-PI-006 | T-100 |
+| FR-PI-007 | T-101 |
+| FR-PI-008 | T-095, T-096 |
+| FR-PI-009 | T-094 |
+| FR-PI-010 | T-091, T-094, T-096, T-098, T-099, T-103 |
+| FR-PI-011 | T-090, T-091, T-095, T-096, T-103 |
+| FR-PI-012 | T-092, T-103 |
+| FR-PI-013 | T-102 (the resume mechanics; FR-PI-016 supersedes its "No force-migration" scenario for the app-start path, recorded in FR-PI-016) |
+| FR-PI-014 | T-090, T-100 |
+| FR-PI-015 | T-090, T-092, T-102 |
+| FR-PI-016 | T-097 (predicate), T-102 (route + shell) |
+| NFR-PI-001 | T-090, T-096, T-100, T-105 |
+| NFR-PI-002 | T-090, T-091, T-096, T-104 |
+| NFR-PI-003 | T-090, T-105 |
+| NFR-PI-004 | T-091, T-094 |
+| NFR-PI-005 | T-094 |
+| NFR-PI-006 | T-093, T-098, T-103 |
+| NFR-PI-007 | T-098, T-099, T-103 |
+| NFR-PI-008 | T-096 |
+| NFR-PI-009 | T-101, T-105 |
+| NFR-PI-010 | T-090, T-092, T-095, T-096, T-101, T-102 |
+| NFR-PI-011 | T-104, T-105, plus the owner action above |

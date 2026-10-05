@@ -1,505 +1,349 @@
-# Requirements lock — live camera translation (v1)
+# Requirements lock — profile interview + address-as (v1)
 #
 # Contract: requirements_lock (ai-sdd task define-requirements).
 # Snapshot of the feature requirements set produced from
 # specs/define-requirements.md + specs/define-requirements/ (FR/ and NFR/).
-# Downstream tasks (design-component, review-l2, security-design-review,
+# Downstream tasks (design-l1, design-l2, review-l2, security-design-review,
 # plan-tasks, implement, security-test, final-sign-off) consume this file to
 # stay in scope and to detect drift: if a requirement file's sha256 no longer
 # matches, the requirement set has changed since this lock.
 #
-# Status: snapshot presented for the owner HIL sign-off gate on
-# define-requirements. Re-lock after any sign-off change; the hashes below are
-# the drift-detection baseline.
+# Status: re-baselined 2026-10-05 after the owner HIL sign-off on
+# define-requirements (risk tier T1) and the owner amendment of the same date
+# (adds FR-PI-016, app-start interview-status routing). Re-lock after any
+# further sign-off change; the hashes below are the drift-detection baseline.
 #
-# Re-lock 2026-09-16T23:42:56Z (security-test gate). One owner-signed amendment:
-# FR-LCT-003 is narrowed to English source text only, with Nepali/Devanagari
-# source recorded as an explicit v1 non-goal and the reason given as a measured
-# platform fact (specs/hi-in-probe-notes.md) rather than an assumption. All 36
-# hashes were re-derived; FR-LCT-003 is the only one that changed, so the other
-# 35 requirement files are unchanged by this re-lock.
-#
-# Re-lock 2026-09-17T08:59:34Z. One owner directive, recorded as an amendment:
-# FR-LCT-008's deferred-tier clause is retired and the on-device brain lands as
-# tier 1 of the cascade, between the curated dictionary (tier 0) and the
-# consent-gated cloud (tier 2) — no consent, no egress, and the same truthful
-# attribution it always required. All 36 hashes were re-derived; FR-LCT-008 is
-# the only one that changed, so the other 35 requirement files are unchanged by
-# this re-lock.
-#
-# Re-lock 2026-09-19T20:06:46Z (owner date 2026-09-20, the owner's local
-# calendar). One owner-approved amendment: FR-LCT-008's tier ORDER is narrowed
-# by string class. The device leads for the class the round-1/2/3 gate data
-# shows it is exact on (short labels, menus, pharmaceutical names — at most
-# four words, at most forty characters, no clause punctuation); the sentence
-# class leads with the cloud when the cloud can lead (the household's switch on
-# AND a live network path), and anything the cloud does not answer falls back to
-# the device rather than degrading. What the requirement protects is unchanged:
-# no success without translation, no attribution to a tier that did not
-# translate, consent still read at the point of need. All 36 hashes were
-# re-derived; FR-LCT-008 is the only one that changed, and the aggregate
-# snapshot specs/define-requirements.md is unchanged, so the other 35
-# requirement files are untouched by this re-lock.
-#
-# Re-lock 2026-09-20T00:00:00Z (owner date 2026-09-20). No new owner decision:
-# the AGGREGATE was brought back into agreement with the two FR-LCT-008
-# amendments recorded above. specs/define-requirements.md still published the
-# retired clause ("the on-device NMT tier (tier 1) must be absent from v1") and
-# its retired acceptance scenario, plus the pre-amendment D2 divergence row, the
-# open-decision row and the out-of-scope row that carried the same wording — so
-# a downstream reader of the aggregate would have believed a tier was out of
-# scope that the lock (and the FR file) already records as in v1. Only
-# specs/define-requirements.md changed: its snapshot_sha256 below is re-derived
-# (d284a0bb… -> d6003ba5…), FR-LCT-008's own file is byte-identical to the
-# previous re-lock and keeps its sha256 and its 7 acceptance scenarios, and all
-# 35 other requirement files are untouched.
+# Note on scope: the FR/ and NFR/ folders also still contain the previously
+# shipped live-camera-translation files (FR-LCT-NNN-*, NFR-LCT-NNN-*); they are
+# left in place and are NOT part of this lock. This lock covers the
+# profile-interview set only (FR-PI-* / NFR-PI-*).
 
 version: "1"
 task: define-requirements
-feature: live-camera-translation
+feature: profile-interview
 agent: ba
 contract: requirements_lock
-locked_at: "2026-09-16T06:37:01Z"
+locked_at: "2026-10-05T10:06:53Z"
 snapshot_of: "specs/define-requirements.md"
-snapshot_sha256: d6003ba587f56528a7ce1b62f063b6a9c2b8d8211802120f23f7a6f727bc3ccc
+snapshot_sha256: 27c31d4b1b872b1de77a782171bab89c1b7661ac360ec6e2fd724d8f67492386
 index: "specs/define-requirements/index.md"
 counts:
-  functional_requirements: 23
-  non_functional_requirements: 13
+  functional_requirements: 16
+  non_functional_requirements: 11
 
 requirements:
-  - id: FR-LCT-001
-    title: "Live camera preview without photo capture"
+  - id: FR-PI-001
+    title: "Interview step order in the first-run wizard"
     kind: FR
-    area: "Camera Capture"
+    area: "Onboarding Wizard"
     priority: MUST
-    file: specs/define-requirements/FR/FR-LCT-001-live-camera-preview.md
-    sha256: f7952d97801de79d0498c8fbc07391178696023d733306e2a6bfbd30f2cf21c5
+    file: specs/define-requirements/FR/FR-PI-001-interview-step-order.md
+    sha256: 41d1065bc2909243ae53e1f46fb0f20492f852ae17808874b4a5f9a61c970325
     acceptance_scenarios: 2
-  - id: FR-LCT-002
-    title: "Camera permission and purpose disclosure"
+  - id: FR-PI-002
+    title: "About-you mandatory fields gate Next"
     kind: FR
-    area: "Camera Capture / Compliance"
+    area: "Onboarding Wizard / About-you"
     priority: MUST
-    file: specs/define-requirements/FR/FR-LCT-002-camera-permission-and-disclosure.md
-    sha256: eea2a35464b2edf3649532b661b4216d4c880a542c9265b9c94a2dad1d31ff47
+    file: specs/define-requirements/FR/FR-PI-002-about-you-mandatory-fields.md
+    sha256: ff1315b8b80155e2d79f9627592df319df8ea800e4b5a64e75d29220fa6b5649
     acceptance_scenarios: 3
-  - id: FR-LCT-003
-    title: "On-device OCR with automatic language detection"
+  - id: FR-PI-003
+    title: "Encrypted profile store"
     kind: FR
-    area: "Text Detection"
+    area: "Profile Storage"
     priority: MUST
-    file: specs/define-requirements/FR/FR-LCT-003-on-device-ocr-language-detection.md
-    sha256: b1b3206a74b21d9df8bf8fd96fceca3bf4e77ef67afe33484a86f16973388877
+    file: specs/define-requirements/FR/FR-PI-003-encrypted-profile-store.md
+    sha256: cfbcaba792bc1d1217586810d3ff7dd73d644dc870faa2fd21f1663e26c797cf
     acceptance_scenarios: 3
-    amended: "2026-09-16T23:42:56Z"
-    amendment: >-
-      Owner-signed at the security-test gate: v1 accepts English source text only
-      (Nepali/Devanagari source is an explicit v1 non-goal). Third acceptance scenario
-      narrowed to a Latin-script non-English sample, which the English control proves
-      is testable. Reason is measured, not assumed — see specs/hi-in-probe-notes.md.
-  - id: FR-LCT-004
-    title: "Region tracking between OCR passes"
+  - id: FR-PI-004
+    title: "Optional steps remain skippable with pending status"
     kind: FR
-    area: "Text Detection"
-    priority: SHOULD
-    file: specs/define-requirements/FR/FR-LCT-004-region-tracking-between-ocr-passes.md
-    sha256: 6b22f3cae2b754f237c8bc0edf24739f15e37ab14db4a0586a31d7d887b926eb
+    area: "Onboarding Wizard"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-PI-004-optional-step-skippable-pattern.md
+    sha256: 1f2a38b0b9b1abb7801a8128d551211dfe19a06b95a6a59d7b6a511792f8b1dd
+    acceptance_scenarios: 3
+  - id: FR-PI-005
+    title: "Family & friends step extension"
+    kind: FR
+    area: "Family & Friends"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-PI-005-family-and-friends-step.md
+    sha256: fadb01924a6ffdb56ae5b503c623b70ebeef2ed34750486ff113385c33e61968
     acceptance_scenarios: 2
-  - id: FR-LCT-005
-    title: "Stable text regions with hysteresis and change-only events"
+  - id: FR-PI-006
+    title: "Emergency contacts step"
     kind: FR
-    area: "Region Stabilisation"
+    area: "Emergency Contacts"
     priority: MUST
-    file: specs/define-requirements/FR/FR-LCT-005-region-stabilisation-hysteresis.md
-    sha256: 1c87d1200501b889f588e8207bd8dbe43f1a401ac5a67a0f2e7a1decf4b7293b
-    acceptance_scenarios: 4
-  - id: FR-LCT-006
-    title: "Decluttering for dense multi-region scenes"
+    file: specs/define-requirements/FR/FR-PI-006-emergency-contacts-step.md
+    sha256: 9be60680722a66818dae7d3169e33ccd14e9d64c7ad3f278fe28b8affb203598
+    acceptance_scenarios: 3
+  - id: FR-PI-007
+    title: "Voice fingerprint step (reuse of existing enrollment)"
     kind: FR
-    area: "Region Stabilisation"
+    area: "Voice Fingerprint"
     priority: MUST
-    file: specs/define-requirements/FR/FR-LCT-006-decluttering-dense-scenes.md
-    sha256: 1b47f854ac4df88cc112e4a40d8f654fadaebddccee5eba776783f431c95b023
+    file: specs/define-requirements/FR/FR-PI-007-voice-fingerprint-step.md
+    sha256: 83d70d8b695ba58a469e55f252b48a5c3630d40c9350d68599fc52330918af66
     acceptance_scenarios: 2
-  - id: FR-LCT-007
-    title: "Tier 0 curated dictionary translation"
+  - id: FR-PI-008
+    title: "Personalized wake acknowledgment"
     kind: FR
-    area: "Translation"
+    area: "Wake Acknowledgment / Address-as"
     priority: MUST
-    file: specs/define-requirements/FR/FR-LCT-007-dictionary-tier-0.md
-    sha256: 18aef0b6b29ac878b315cae7b303f30426eb94ab1f6def16f1af1efa2f9c1699
+    file: specs/define-requirements/FR/FR-PI-008-wake-acknowledgment-address-as.md
+    sha256: 7fd0ea8a75731f96c9117b9c5a85d45299af4d598c26a6d0b423366a9685151d
     acceptance_scenarios: 3
-  - id: FR-LCT-008
-    title: "Truthful tier attribution and no success without translation"
+  - id: FR-PI-009
+    title: "Address-as in brain reply-style rules (cloud and on-device)"
     kind: FR
-    area: "Translation"
+    area: "Brain Personalization"
     priority: MUST
-    file: specs/define-requirements/FR/FR-LCT-008-truthful-tier-attribution.md
-    sha256: e107fd252e3809d2990884808f84940551fec8e6516a35095899c96b1d33120e
-    acceptance_scenarios: 7
-    amended: "2026-09-19T20:06:46Z"
-    amendment: >-
-      Owner-approved 2026-09-20 (owner's local date), superseding nothing: the tier ORDER above is
-      narrowed by string class. The device leads for the class the round-1/2/3 gate data shows it is
-      exact on — short labels, menus, pharmaceutical names (at most four words, at most forty
-      characters, no clause punctuation) — and the sentence class leads with the cloud when, and
-      only when, the cloud can lead: the household's switch on AND a live network path. Whatever the
-      cloud does not answer for that class is translated on the device rather than degraded, which is
-      why the narrow order is allowed at all. What the requirement protects is unchanged and still
-      pinned: no success without translation, no result attributed to a tier that did not translate
-      it, consent read immediately before each attempt. The rule is one class discriminator keyed on
-      measured reliability (TranslationReliabilityRouter), not on negation or keywords.
-      Earlier amendment, 2026-09-17: the deferred-tier clause (the on-device tier "must be absent
-      from v1") is retired, and the tier lands as tier 1 — the app's own installed Nepali brain,
-      between the curated dictionary and the consent-gated cloud. The reason is the owner's
-      complaint, not a preference: with only a ~120-label dictionary and a consent-gated cloud in
-      the cascade, every string the dictionary misses degrades to "can't translate" offline or
-      after a declined prompt, and the model that fixes it is already on the device. No consent and
-      no egress on that tier, so Open Decision 13 is untouched.
-  - id: FR-LCT-009
-    title: "Tier 2 text-only cloud translation"
-    kind: FR
-    area: "Translation"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-LCT-009-cloud-tier-text-only-translation.md
-    sha256: 0727fa0ea28a5f9f0b6f5f2bd942dad2cdd5ff22cc44205aabe25b02de7913eb
+    file: specs/define-requirements/FR/FR-PI-009-brain-reply-style-address-as.md
+    sha256: f1845c3de496a7734a748f6508b3d916e1692687120534b491d5811b09e4e879
     acceptance_scenarios: 4
-  - id: FR-LCT-010
-    title: "Consent gate before any cloud translation"
+  - id: FR-PI-010
+    title: "Address-as spoken verbatim (never translated)"
     kind: FR
-    area: "Privacy & Consent"
+    area: "Address-as Data Handling"
     priority: MUST
-    file: specs/define-requirements/FR/FR-LCT-010-consent-gate.md
-    sha256: 3631b838036bcc77bdd4a94bab242dfd69b3fb9c9f71100ffcfc7e7288f3ba91
-    acceptance_scenarios: 4
-  - id: FR-LCT-011
-    title: "Visible cloud-activity indicator"
-    kind: FR
-    area: "Privacy & Consent"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-LCT-011-cloud-activity-indicator.md
-    sha256: b3473db26fde6e3057fda225770d6e3875b7ea029683529a9f53054e717c6684
-    acceptance_scenarios: 3
-  - id: FR-LCT-012
-    title: "Consent revocation degrades to dictionary-only offline mode"
-    kind: FR
-    area: "Privacy & Consent"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-LCT-012-consent-revocation-offline-mode.md
-    sha256: ebefffb01848cb15c38649d73623ea6596515592585d6744c028bbd5ab695452
-    acceptance_scenarios: 3
-  - id: FR-LCT-013
-    title: "Cost governor bound and fail-closed behaviour"
-    kind: FR
-    area: "Cost Governance"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-LCT-013-cost-governor-fails-closed.md
-    sha256: f284e1dbd007f0e2eb9c3f4402c3aa727020f77a786aed644cb90f1c6bd7b0a4
-    acceptance_scenarios: 3
-  - id: FR-LCT-014
-    title: "Text-only egress guarantee"
-    kind: FR
-    area: "Privacy & Consent"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-LCT-014-text-only-egress.md
-    sha256: 43e4d524680340ce1ff8dffbf6d257d09a683c6278510d90c6394890259f26f1
-    acceptance_scenarios: 3
-  - id: FR-LCT-015
-    title: "Smart-mix in-place replacement (bounded)"
-    kind: FR
-    area: "Overlay"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-LCT-015-smart-mix-in-place-replacement.md
-    sha256: 70d2f227ebac4252f724faa5d25504c897e52a1b748cc2da90473f5241664db1
-    acceptance_scenarios: 3
-  - id: FR-LCT-016
-    title: "Anchored callouts that never obscure the original"
-    kind: FR
-    area: "Overlay"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-LCT-016-anchored-callouts.md
-    sha256: 13376cfc6d9ef07b387966ddc70cd75669376fa396574bb59a6be155bc6a1f2b
+    file: specs/define-requirements/FR/FR-PI-010-address-as-spoken-verbatim.md
+    sha256: 9b71dba28a256141879f868901cac40c97c5cfe6a6ab0e9d322a5bae54a3cd76
     acceptance_scenarios: 2
-  - id: FR-LCT-017
-    title: "\"Always show original text\" toggle"
+  - id: FR-PI-011
+    title: "Un-personalized path behaves exactly as today"
     kind: FR
-    area: "Overlay"
+    area: "No-Regression"
     priority: MUST
-    file: specs/define-requirements/FR/FR-LCT-017-always-show-original-toggle.md
-    sha256: 4bbc621a2eaab05c838edde03f14270f9c08d55c39361bcfcefe3afe446f9aac
+    file: specs/define-requirements/FR/FR-PI-011-unpersonalized-path-unchanged.md
+    sha256: da44fffc39a36ef751bb9c94297c2e313048bbbf8bcd812478e7aeb6a81d1536
     acceptance_scenarios: 2
-  - id: FR-LCT-018
-    title: "Pending and failed translation states in the overlay"
+  - id: FR-PI-012
+    title: "Settings profile editor"
     kind: FR
-    area: "Overlay"
+    area: "Settings"
     priority: MUST
-    file: specs/define-requirements/FR/FR-LCT-018-overlay-progress-and-failure-states.md
-    sha256: 2d32d065621a229d4f61730c640d7fc036ff959d0f3df6e066e0d0db6727fe15
+    file: specs/define-requirements/FR/FR-PI-012-settings-profile-editor.md
+    sha256: 84fb9f08ac9391cd6c812ee6e23368516fb17ade704ef33580ecdefb73a5c13c
     acceptance_scenarios: 3
-  - id: FR-LCT-019
-    title: "Persistent encrypted translation cache"
+  - id: FR-PI-013
+    title: "Wizard reopen path for existing users"
     kind: FR
-    area: "Caching"
+    area: "Onboarding Wizard"
     priority: MUST
-    file: specs/define-requirements/FR/FR-LCT-019-persistent-encrypted-cache.md
-    sha256: 854709b51187ac1b853314ae65de2a2f24033e0978ab47c00d05e3c983a3a98f
-    acceptance_scenarios: 4
-  - id: FR-LCT-020
-    title: "Shared dictionary and translation cache with the appliance helper"
-    kind: FR
-    area: "Caching"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-LCT-020-shared-cache-and-dictionary.md
-    sha256: bf942e4a53141f7a033745832bfe2a73b6fa6918f93b69c54d9ea965cd5ed32d
+    file: specs/define-requirements/FR/FR-PI-013-wizard-reopen-for-existing-users.md
+    sha256: 7268b073db1dbe99240c7dce29a455c6296e48b22e06c8cc5e940d6399ddc834
     acceptance_scenarios: 3
-  - id: FR-LCT-021
-    title: "Tap-to-hear and \"read this to me\""
+  - id: FR-PI-014
+    title: "Profile data available to existing safety paths"
     kind: FR
-    area: "Voice Output"
+    area: "Safety Integration"
     priority: MUST
-    file: specs/define-requirements/FR/FR-LCT-021-tap-to-hear-and-read-this-to-me.md
-    sha256: 5955648f5e53660b4dfa07fbda3448963ebd3d90733efe686248acb77f44a028
-    acceptance_scenarios: 4
-  - id: FR-LCT-022
-    title: "LiveTranslatePlugin voice entry and session lifecycle"
-    kind: FR
-    area: "Plugin & Session"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-LCT-022-plugin-voice-entry-and-session.md
-    sha256: 69267da2ab4a107a14dc9c1d1b09a5f4e5b225f09879b3af0237438e0c7d51e6
-    acceptance_scenarios: 3
-  - id: FR-LCT-023
-    title: "Honest degradation — never silently report success"
+    file: specs/define-requirements/FR/FR-PI-014-safety-path-data-availability.md
+    sha256: 4a8dad1ef5acc327f137550d7f5f039447680f13b684d3596f295b5bb860308d
+    acceptance_scenarios: 2
+  - id: FR-PI-015
+    title: "Profile read failures degrade to the un-personalized path"
     kind: FR
     area: "Error Handling"
     priority: MUST
-    file: specs/define-requirements/FR/FR-LCT-023-honest-degradation-and-offline.md
-    sha256: 1d93be3b0c7e2ed1fb381b2ec785eddf354a3af0e1c63ba837a8233f8553dd36
+    file: specs/define-requirements/FR/FR-PI-015-profile-read-failure-fallback.md
+    sha256: 4fe69aad133075beaf46d5ef665768f21e54a6c4f0fecb61d45d4b48947a28e2
     acceptance_scenarios: 3
-  - id: NFR-LCT-001
-    title: "Overlay responsiveness and translation latency"
-    kind: NFR
-    area: "Performance"
+  - id: FR-PI-016
+    title: "App-start interview-status routing (resume where the user left off)"
+    kind: FR
+    area: "Onboarding Wizard / App Start"
     priority: MUST
-    file: specs/define-requirements/NFR/NFR-LCT-001-overlay-responsiveness.md
-    sha256: 11490b416821793e9fddfab53b227b519289187c89b7f3ffab236b0123aeb1ba
-    acceptance_scenarios: 3
-  - id: NFR-LCT-002
-    title: "OCR cadence, battery and thermal budget"
+    file: specs/define-requirements/FR/FR-PI-016-app-start-interview-routing.md
+    sha256: 8195b534374faddc932d8eacf3cb5f78282132e3142fdc145301446c8dd6e434
+    acceptance_scenarios: 4
+  - id: NFR-PI-001
+    title: "Profile encryption at rest"
     kind: NFR
-    area: "Performance"
+    area: "Security"
     priority: MUST
-    file: specs/define-requirements/NFR/NFR-LCT-002-ocr-cadence-and-thermal-budget.md
-    sha256: 89bf0cb207b83360bceac64eaab3e080b68944aed4b374093f5635a516cdfa7c
-    acceptance_scenarios: 3
-  - id: NFR-LCT-003
-    title: "Accessibility — tap targets, overlay text, contrast"
+    file: specs/define-requirements/NFR/NFR-PI-001-profile-encryption-at-rest.md
+    sha256: 5ebe506b9e67c0a3255f45ba089e5f5d33b441f1c09a5a9093d4bec1e38d3f23
+    acceptance_scenarios: 2
+  - id: NFR-PI-002
+    title: "Log safety — no new PII in logs"
     kind: NFR
-    area: "Accessibility"
+    area: "Privacy / Security"
     priority: MUST
-    file: specs/define-requirements/NFR/NFR-LCT-003-accessibility-standards.md
-    sha256: 57040c44850b60e6b5dad1cfcaf70e72e3b64c7a1ece0456ac6f83ef750cb801
+    file: specs/define-requirements/NFR/NFR-PI-002-log-safety.md
+    sha256: 9df8ccfdaa924480ac7cfe80a8816d75cfc2c16de435113a8f81c7845cf927d6
     acceptance_scenarios: 3
-  - id: NFR-LCT-004
+  - id: NFR-PI-003
+    title: "No new network egress or cloud processing"
+    kind: NFR
+    area: "Privacy"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-PI-003-no-new-egress.md
+    sha256: 9805f989085241a4772073538abde6a58c5be411a496a252978e9b5e5f778b97
+    acceptance_scenarios: 3
+  - id: NFR-PI-004
+    title: "Untrusted profile-string hardening (injection)"
+    kind: NFR
+    area: "Security"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-PI-004-profile-string-injection-hardening.md
+    sha256: 63a6609b96d73c83c1983e5af0c45e992849c60cdc0659da082e6f5a53a20a7c
+    acceptance_scenarios: 3
+  - id: NFR-PI-005
+    title: "Prompt token budget and seed mirror preserved"
+    kind: NFR
+    area: "Reliability / Maintainability"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-PI-005-prompt-budget-and-seed-mirror.md
+    sha256: 3b465c80bd8f43b2d4eb903a405cdd853ac9940d310494116575ab05971b2d3c
+    acceptance_scenarios: 2
+  - id: NFR-PI-006
     title: "Localisation of new UI strings"
     kind: NFR
     area: "Localisation"
     priority: MUST
-    file: specs/define-requirements/NFR/NFR-LCT-004-localisation.md
-    sha256: 8b589641a932b88c3ac6732b1941d1a6c63e07413be217ee5ef4beb845450374
+    file: specs/define-requirements/NFR/NFR-PI-006-localisation.md
+    sha256: 94ff807fd8c033ce01b243fcf928c96ce1d417bdb25083f3770003495e8fdaab
     acceptance_scenarios: 2
-  - id: NFR-LCT-005
-    title: "Privacy — no image or unrelated-content egress"
+  - id: NFR-PI-007
+    title: "Accessibility of the new interview UI"
     kind: NFR
-    area: "Privacy"
+    area: "Accessibility"
     priority: MUST
-    file: specs/define-requirements/NFR/NFR-LCT-005-no-image-or-unrelated-content-egress.md
-    sha256: f34b0d4808f266cd5530f18ade52ce5a9579f021f7307dfbb9823cc452efb526
+    file: specs/define-requirements/NFR/NFR-PI-007-accessibility.md
+    sha256: 3c5cab04d282c5b7d34283f28560f70ca9cb0c3e98e4fcf91ee9b8ba5e56787e
     acceptance_scenarios: 2
-  - id: NFR-LCT-006
-    title: "Log safety — no recognized or translated text in logs"
+  - id: NFR-PI-008
+    title: "Wake-acknowledgment latency and failure fallback"
     kind: NFR
-    area: "Privacy / Security"
+    area: "Performance / Reliability"
     priority: MUST
-    file: specs/define-requirements/NFR/NFR-LCT-006-log-safety.md
-    sha256: 65785f5da79625730d6940a6bd08e078b529d1378017f7e923da22ca537bbf6f
+    file: specs/define-requirements/NFR/NFR-PI-008-wake-ack-latency-and-fallback.md
+    sha256: 5d9eeb935b8b46fa1d7a8d8478e63e94aeaa0b98c50aa1adeff67fd48d617f05
     acceptance_scenarios: 2
-  - id: NFR-LCT-007
-    title: "Consent enforcement and auditability"
+  - id: NFR-PI-009
+    title: "Voice-biometric mechanism unchanged"
     kind: NFR
-    area: "Compliance / Security"
+    area: "Security / Compliance"
     priority: MUST
-    file: specs/define-requirements/NFR/NFR-LCT-007-consent-enforcement-and-auditability.md
-    sha256: f7a6f3569f49674245aba1630cb0dda98303fc32ca5febcbec7c2cb518f8e3bf
-    acceptance_scenarios: 3
-  - id: NFR-LCT-008
-    title: "Cache at rest — encrypted, keyed, bounded"
-    kind: NFR
-    area: "Security / Privacy"
-    priority: MUST
-    file: specs/define-requirements/NFR/NFR-LCT-008-cache-at-rest.md
-    sha256: 4a5d7a593a00ff3735254104121d6af305a0ce6303b3f09d09575afb21a2149f
-    acceptance_scenarios: 3
-  - id: NFR-LCT-009
-    title: "Untrusted scene text hardening (injection)"
-    kind: NFR
-    area: "Security"
-    priority: MUST
-    file: specs/define-requirements/NFR/NFR-LCT-009-untrusted-scene-text-hardening.md
-    sha256: fe80664845098c0dcc897d767a8e95ffb7b61684d37c4d525acb75f2460d4011
-    acceptance_scenarios: 3
-  - id: NFR-LCT-010
-    title: "Offline degradation integrity — no false success"
+    file: specs/define-requirements/NFR/NFR-PI-009-voice-biometric-unchanged.md
+    sha256: 5a4c9c5d7feeae63d5935672412d9d92f08c99878e4e5fb12bc27433d27e6043
+    acceptance_scenarios: 2
+  - id: NFR-PI-010
+    title: "No regression to existing behaviours"
     kind: NFR
     area: "Reliability"
     priority: MUST
-    file: specs/define-requirements/NFR/NFR-LCT-010-offline-degradation-integrity.md
-    sha256: 59d3bba40d1aa206847c7e02f945c58c68e8eaa7d06ebb72babd02d7be254852
-    acceptance_scenarios: 2
-  - id: NFR-LCT-011
-    title: "Configurable parameters — no hardcoded operational constants"
-    kind: NFR
-    area: "Reliability / Maintainability"
-    priority: SHOULD
-    file: specs/define-requirements/NFR/NFR-LCT-011-configurable-parameters.md
-    sha256: a942aac1baad41ea43c4e24be4031f20be59a9d67f3a714c104bbffcd2d3da06
-    acceptance_scenarios: 2
-  - id: NFR-LCT-012
-    title: "Shared-component integrity — no regression to the appliance helper"
-    kind: NFR
-    area: "Reliability"
-    priority: MUST
-    file: specs/define-requirements/NFR/NFR-LCT-012-shared-component-integrity.md
-    sha256: c5c5fdc4bafafefcc947bb3c51f518d2e744ac2b1514487aade3b55f906bc3ed
+    file: specs/define-requirements/NFR/NFR-PI-010-no-regression-existing-flows.md
+    sha256: 761d3b52b6d184667130b0502b9b79adbe0c88f6e1f1a0f8fc4958cac93621a9
     acceptance_scenarios: 3
-  - id: NFR-LCT-013
+  - id: NFR-PI-011
     title: "Compliance and release gates"
     kind: NFR
     area: "Compliance"
     priority: MUST
-    file: specs/define-requirements/NFR/NFR-LCT-013-compliance-and-release-gates.md
-    sha256: c2ca92821659fa8516170b3fbfb37d27aaec72949097d234a343f5df47571ad2
+    file: specs/define-requirements/NFR/NFR-PI-011-compliance-and-release-gates.md
+    sha256: 4e3f4efa483686a74c21d06bfd8c0fc8e59c76b50e09917afa972583ffda7229
     acceptance_scenarios: 2
 
 assumptions:
   - id: A1
-    statement: "v1 target language is the app's active language (Nepali at launch) and v1 source text is English; the pipeline stays direction- and language-agnostic so wider source languages and the reverse direction are model/prompt work, not architecture work."
-    source: "design §0, §1; feature constitution rule 9"
+    statement: "The existing integration surfaces named in the feature constitution and scaffold probe exist and are reused: OnboardingState / OnboardingWizardView, FamilyContactStore (with isEmergencyContact), SpeakerBiometricService / VoiceEnrollmentRecorder / VoiceSettingsView, VoicePipeline.handleWakeDetected, the shared IntentPrompt builder for the cloud (Gemini) and on-device (LLaMA) brains, and the EncryptedFileStorage storage pattern."
+    source: "feature constitution Integration Surfaces; specs/profile-interview/init-report.md (scaffold probe)"
   - id: A2
-    statement: "The cloud tier (Gemini) is the only translation egress and it ships under the recorded project-constitution exception Open Decision 13 (2026-09-16), consent-gated, text-only, bounded by GeminiCostGovernor."
-    source: "constitution Open Decision 13; design §7"
+    statement: "The wake-detection path (VoicePipeline.handleWakeDetected) is the hook for the acknowledgment; wake-word recognition itself is unchanged and out of scope."
+    source: "feature constitution Address-as Behaviour Contract and Out of scope"
   - id: A3
-    statement: "Vision (VNRecognizeTextRequest with automatic language detection) on the app's existing deployment target provides on-device OCR with no model download."
-    source: "design §4.2"
+    statement: "InputSanitiser discipline (quarantine level) exists and is the required treatment for the user-entered profile strings before they enter any prompt."
+    source: "feature constitution Feature Constraint 4; project constitution Standards (Injection detection at quarantine level)"
   - id: A4
-    statement: "Piper voices, SpeakQueue, DesignTokens, StoragePlacement/encrypted storage, String Catalog localisation and the plugin registry already exist and are reused."
-    source: "design §3, §6; feature constitution Known integration surface"
+    statement: "IntentPrompt templates run in a 1,024-token on-device context, are pinned by IntentPromptTests' character ceiling, and are byte-mirrored by tools/train-intent/seeds/prompt_template.txt."
+    source: "feature constitution Feature Constraints 1–2"
   - id: A5
-    statement: "Accessibility standards of the project constitution (44 pt targets, 18 pt body text, high contrast) bind this feature."
-    source: "project constitution Standards (Accessibility); feature constitution rule 6"
+    statement: "A helping family member may fill the interview in on the primary user's behalf at the device; no remote-companion flow is in scope for this feature."
+    source: "feature constitution Feature Purpose & Scope; init-report owner brief"
+  - id: A6
+    statement: "Date of birth is captured for the profile record only; no behaviour in this feature reads it. Recorded so the field is not silently consumed."
+    source: "feature constitution Field Contract (DOB optional); elicitation"
+  - id: A7
+    statement: "The project build/test gate is ios/build.sh; the release-build log-surface gate is ios/tools/check-release-log-safety.sh (wired into ios/build.sh)."
+    source: "project constitution Release gates; workflow.yaml final-sign-off comment"
 
 constraints:
   - id: C1
-    statement: "Architecture Constraint 1 (all AI inference on-device) applies; the tier-2 cloud text call exists only under the recorded exception in Open Decision 13, with consent, indicator and revocation."
-    source: "constitution Architecture Constraint 1; Open Decision 13"
+    statement: "Architecture Constraint 1 (all AI inference on-device) applies; the feature adds no new cloud processing and no new network egress. Existing recorded exceptions (Open Decisions 12 and 13) are untouched."
+    source: "constitution Architecture Constraint 1; feature constitution Out of scope"
   - id: C2
-    statement: "No agent may add a cloud call path that is not behind the consent gate; no agent may weaken the contract of ApplianceOverlayMapper or ApplianceLabelLocalizer (extended, not modified)."
-    source: "feature constitution Agent Principles"
+    statement: "The address-as term and name are untrusted user input composed into prompts: they must pass the InputSanitiser discipline and must not be able to alter reply-style rules, tool/intent routing, authentication or safety behaviour."
+    source: "feature constitution Feature Constraint 4; workflow.yaml security-design-review focus"
   - id: C3
-    statement: "Deferred work must be absent, not a silent stub: TranslationResult.sourceTier always reports the tier that produced the string and no tier may return success when it did not translate."
-    source: "feature constitution v1 non-goals"
+    statement: "Profile PII at rest (name, address-as, DOB, GP, hospital, next of kin) must be in encrypted local storage (Keychain, Data Protection Complete) and must not appear in logs (log sanitiser covers the new fields)."
+    source: "feature constitution Feature Constraint 5; project constitution Standards (Security, Privacy)"
   - id: C4
-    statement: "Every operational constant this feature adds (OCR throttle, declutter thresholds, hysteresis, timeouts, retry counts, cache bound) is a configurable parameter with a documented default."
-    source: "constitution Agent Principles; feature constitution rule 7"
+    statement: "All new UI strings are externalised to the L10n string catalogs; the address-as term is user data spoken verbatim and is never localized or routed through the catalogs."
+    source: "feature constitution Feature Constraint 3; project constitution Standards (Localisation)"
   - id: C5
-    statement: "Build and test gate is ios/build.sh (which runs xcodebuild test); release log-safety gate is ios/tools/check-release-log-safety.sh."
-    source: "feature constitution Standards"
+    statement: "Prompt edits preserve the pinned token budget and keep IntentPromptTests passing; tools/train-intent/seeds/prompt_template.txt is updated byte-identically in the same change."
+    source: "feature constitution Feature Constraints 1–2"
+  - id: C6
+    statement: "The voice-biometric enrollment/verification mechanism is reused as-is: no mechanism change, biometric data exclusively in Secure Enclave storage, no new permissions, existing threat model unchanged."
+    source: "feature constitution Feature Constraint 6 and Out of scope"
 
 open_decisions:
-  - id: OD1
-    statement: "OCR throttle rate: ~4 fps nominal needs a device spike on mid-range hardware before commitment; must land as a configurable parameter."
-    resolves_at: "implementation on device"
-  - id: OD2
-    statement: "In-place replacement default: smart mix approved; the 'always show original text' toggle ships with it; confirm the default at the first device demo."
-    resolves_at: "first device demo"
-  - id: OD3
-    statement: "Consent/disclosure copy: the exception amendment is recorded (Open Decision 13, 2026-09-16); drafting and reviewing the copy remains, alongside the Open Decision 12 review window (2026-10-13)."
-    resolves_at: "before final-sign-off"
+  - id: OD-F1
+    statement: "Next-of-kin data shape: standalone field in the new profile store, or a designation on an existing FamilyContact via the existing isEmergencyContact flag. Both data paths already exist; the choice must be reflected in the field table and the emergency-contacts step design."
+    resolves_at: "design-l1 / design-l2"
+  - id: OD-F2
+    statement: "Wake-acknowledgment phrasing and locale handling: TTS of a hajur-<address-as> template vs pre-rendered AckFastLane variants, and how the surrounding acknowledgment copy is localized when the term is in a different script/language from the active app language. The term itself must always be spoken verbatim."
+    resolves_at: "design-l1 / design-l2"
+  - id: OD-F3
+    statement: "About-you skip affordance vs the wizard's 'no hard gate' contract: keep the header Skip on first run (soft gate, deferral via the Home reminder card) or disable Skip (hard gate). Either way the reminder-card reopen + Settings editor path applies to already-onboarded users."
+    resolves_at: "design-l1 / design-l2"
+  - id: OD-PI-4
+    statement: "Address-as input affordance (raised in elicitation): free-text entry vs a preset list of common terms, and what counts as 'filled' beyond non-blank after trimming. Requirements bind 'required, gates Next' only."
+    resolves_at: "design-l1 / design-l2"
+  - id: OD-PI-5
+    statement: "Settings editor authentication (raised in elicitation): requirements.md FR-042 requires in-app configuration behind voice-biometric or PIN authentication, while the biometric/PIN gate is recorded as unwired with accepted residual risk (project constitution Open Decision 11, B3). FR-PI-012 binds the editor's existence, reachability, persistence and effect — not the auth gate."
+    resolves_at: "owner review at the define-requirements HIL gate / design-l1"
     owner: "Anjan Poudel"
-  - id: OD4
-    statement: "A dedicated on-device NMT model (v1.1 candidate, NLLB-200 distilled 600M): requires revisiting addendum §13.5's non-goal before any model work. The tier itself is no longer deferred — owner directive 2026-09-17 landed tier 1 as the on-device brain (the app's installed Nepali language model), so what is left open is the dedicated model, not the tier."
-    resolves_at: "v1.1 planning (not this workflow)"
-  - id: OD5
-    statement: "Menu-mode declutter thresholds (IoU >= 0.3, centroid distance 0.06, 8-region cap, longest-string merge): nominal, validate on device; may become per-scene settings."
-    resolves_at: "manual device testing"
-  - id: OD6
-    statement: "Reverse phrase-card mode (user language -> scene language): out of v1 scope; v1.x extension reusing this pipeline."
-    resolves_at: "not in this workflow"
-  - id: OD7
-    statement: "Cost governor scope: design §4.4 and Open Decision 13 say per-session while the shipped GeminiCostGovernor counts calls per day with a family-editable cap; requirements bind fail-closed behaviour, the mechanism is a design decision."
-    resolves_at: "design-component"
-  - id: OD8
-    statement: "Shared cache ownership: the design names the store LabelTranslationCache while the feature constitution records that the shared translation cache does not exist yet and is new work; requirements state behaviour (one persistent encrypted shared store) without fixing a type name."
-    resolves_at: "design-component"
 
 out_of_scope:
-  - "NE->EN direction (v1 is English source -> Nepali target; no reversed translation delivered)"
-  - "Reverse phrase-card mode (user language -> scene language)"
-  - "ARKit world-anchored 3D rendering (screen-space overlay only)"
-  - "Auto-speak of every new translation (tap-to-hear and \"read this to me\" only)"
-  - "Live full-scene explanation (remains the appliance helper's one-shot identifyAppliance call)"
-  - "A dedicated on-device NMT model (NLLB-200 distilled 600M) - v1.1 candidate, blocked until addendum §13.5's non-goal is revisited. The tier it was once the only shape of is in v1 as the on-device brain (FR-LCT-008, amended 2026-09-17)."
-  - "Family/caregiver configuration surface for this feature"
-  - "Changes to the existing feed translation path"
-  - "Devanagari source text (Nepali source -> any target, and Nepali/Devanagari OCR). Explicit v1 non-goal, owner-signed at the security-test gate. The pipeline stays language-agnostic by design (FR-LCT-003), but v1 makes no recognition claim for Devanagari. Reason is measured, not assumed: on iOS 26.5 Vision resolves to revision 3 with 30 supported languages and no Devanagari-capable code, a rendered Nepali frame yields zero observations under both the platform default and an explicit hi-IN request, and the API reports no error for an unsupported language. Record: specs/hi-in-probe-notes.md."
-
-divergences:
-  - id: D1
-    prior: "Addendum §13.3/§13.5: callout only, no text replacement"
-    now: "Smart mix: in-place replacement only for short dictionary-known labels whose translation fits at >= 18 pt; anchored callouts otherwise; always-show-original toggle ships with it (FR-LCT-015/016/017)"
-    status: "owner-approved 2026-09-16"
-  - id: D2
-    prior: "Addendum §13.5: no on-device translation model"
-    now: "Diverged by owner directive, 2026-09-17: tier 1 is in v1 as the on-device brain — the app's own installed Nepali language model, running entirely on the device with no egress and no consent (FR-LCT-008, amended; the 'must be absent' clause is retired). A dedicated on-device NMT model (NLLB-200 distilled 600M) remains a v1.1 candidate against the addendum's non-goal"
-    status: "owner-approved 2026-09-17; revisit the dedicated model before v1.1"
-  - id: D3
-    prior: "Addendum §13.2: LabelTranslationCache in-memory, no LRU"
-    now: "Persistent encrypted cache with LRU for general text (~200 entries); labels effectively non-evicting (FR-LCT-019)"
-    status: "new requirement"
-  - id: D4
-    prior: "Base design §0/§5.1: never obscure/redraw reality"
-    now: "Preserved for all non-in-place cases; in-place bounded by D1's rule (FR-LCT-016)"
-    status: "consequence of D1"
-  - id: D5
-    prior: "Addendum scope: appliance labels"
-    now: "Any printed text, including dense multi-region scenes such as a menu page (FR-LCT-006)"
-    status: "owner requirement (abroad scenario)"
+  - "Wake-word recognition changes (the wake word and its detection are untouched; only the post-detection acknowledgment is added)"
+  - "Any new cloud processing / new network egress (only name/address-as may enter the existing prompt paths)"
+  - "Emergency-call logic changes (collected data becomes available to the existing safety paths; their logic, triggers and stubs are unchanged)"
+  - "Forcing address-as into every sentence (natural use only)"
+  - "New permissions, HealthKit use, or changes to the existing voice-biometric enrollment/verification mechanisms"
+  - "Scheduled auto-activation / daily-briefing and reminder copy (unchanged by this feature)"
+  - "Remote companion-app push of profile fields (interview completed at the device; a helping family member may fill it in on the user's behalf)"
+  - "Profile export/deletion flows (GDPR deferred, project constitution Open Decision 2; the store must not block future erasure/export)"
 
 security_surfaces:
-  - surface: "Untrusted OCR scene text reaching the cloud prompt (instruction injection)"
-    requirements: ["NFR-LCT-009", "FR-LCT-009"]
-  - surface: "Consent-gate enforcement (no tier-2 call without recorded, explicit, revocable consent)"
-    requirements: ["NFR-LCT-007", "FR-LCT-010", "FR-LCT-012"]
-  - surface: "Egress leakage (images never leave the device; never health/contacts/profile content)"
-    requirements: ["NFR-LCT-005", "FR-LCT-014", "FR-LCT-001"]
-  - surface: "Persistent cache = user content at rest (encrypted, keyed, evictable)"
-    requirements: ["NFR-LCT-008", "FR-LCT-019"]
-  - surface: "Cloud indicator present and not spoofable while tier 2 is active"
-    requirements: ["FR-LCT-011"]
-  - surface: "Offline degradation never silently reports success"
-    requirements: ["NFR-LCT-010", "FR-LCT-023", "FR-LCT-008"]
-  - surface: "Cost governor cap must fail closed"
-    requirements: ["FR-LCT-013"]
-  - surface: "Log surface (no raw OCR or translation text, no upstream error body)"
-    requirements: ["NFR-LCT-006"]
+  - surface: "User-entered profile strings (address-as, name) reaching the shared cloud/on-device prompt (instruction injection)"
+    requirements: ["NFR-PI-004", "FR-PI-009"]
+  - surface: "Profile PII at rest (name, address-as, DOB, GP, hospital, next of kin) in encrypted local storage"
+    requirements: ["NFR-PI-001", "FR-PI-003"]
+  - surface: "Log surface (no name/term/DOB/emergency-contact values in any build)"
+    requirements: ["NFR-PI-002", "FR-PI-015"]
+  - surface: "Egress leakage (zero new calls; only name/term may be composed into prompts; no other profile fields leave the device)"
+    requirements: ["NFR-PI-003", "FR-PI-009", "FR-PI-008"]
+  - surface: "Voice fingerprint enrollment data (Secure Enclave only; mechanism unchanged; existing threat model)"
+    requirements: ["NFR-PI-009", "FR-PI-007"]
+  - surface: "Un-personalized fallback integrity (no placeholder, no partial application, no regression)"
+    requirements: ["FR-PI-011", "FR-PI-015", "NFR-PI-010"]
 
 traceability:
+  - gate: design-l1
+    checks: "Resolve OD-F1, OD-F2, OD-F3, OD-PI-4, OD-PI-5; feature architecture for store, wizard, prompt-injection point, wake-ack path"
+  - gate: design-l2
+    checks: "Component design against this set; interface contracts for the profile store, the sanitised prompt composition and the wake-ack path"
   - gate: review-l2
-    checks: "L2 design folds in D1/D2 and resolves OD1, OD2, OD5, OD7, OD8 where resolvable on paper"
+    checks: "review.decision == GO against the component design and this set"
   - gate: security-design-review
-    checks: "STRIDE for the camera + cloud-egress surface (security_surfaces above)"
+    checks: "STRIDE for the security_surfaces above (profile-string injection, PII at rest, voice-fingerprint reuse, wake-ack path); SECURITY-GO required"
   - gate: security-test
-    checks: "Evidence for consent enforcement, text-only egress, log surface, degradation integrity, governor fail-closed"
+    checks: "Evidence for NFR-PI-001 (encryption), NFR-PI-002 (log surface), NFR-PI-003 (no new egress), NFR-PI-004 (injection), NFR-PI-009 (biometric data at rest); SECURITY-GO required"
   - gate: final-sign-off
-    checks: "Recorded exception amendment (Open Decision 13), consent copy review, camera purpose string, log-safety gate"
+    checks: "T2 + HIL; ios/tools/check-release-log-safety.sh exits 0 (NFR-PI-002/NFR-PI-011); privacy disclosure update recorded"
