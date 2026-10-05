@@ -114,6 +114,10 @@ final class ApplianceHelperSession: ObservableObject {
         locale.language.languageCode?.identifier ?? "ne"
     }
 
+    /// Only fresh photo analysis requires a cloud key. Saved and bundled
+    /// manuals must remain reachable even when analysis is unavailable.
+    var canAnalyzePhotos: Bool { geminiClient.isAvailable }
+
     /// Entry point from the camera picker.
     func handleCapturedPhoto(_ image: UIImage) {
         guard !inFlight else { return }
@@ -336,6 +340,10 @@ final class ApplianceHelperSession: ObservableObject {
     /// and "can't help" are different situations and must not share one
     /// generic message.
     static func failureMessage(for error: Error, locale: Locale) -> String {
+        if let gemini = error as? GeminiClient.GeminiClientError,
+           case .notConfigured = gemini {
+            return L10n.str("plugin.applianceHelper.notConfigured", locale: locale)
+        }
         let nsError = error as NSError
         if nsError.domain == NSURLErrorDomain {
             switch nsError.code {

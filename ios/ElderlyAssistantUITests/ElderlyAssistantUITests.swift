@@ -107,6 +107,34 @@ final class ElderlyAssistantUITests: XCTestCase {
                       "Idle status should be Nepali")
     }
 
+    /// No Gemini key is configured on the clean UI-test installation.
+    /// The Home tile must still open offline manuals, not just speak a
+    /// refusal. Opening a guide also proves the nested library dismisses
+    /// back into the helper instead of losing the app-wide presentation.
+    func testApplianceHelpWithoutCloudOpensBundledManualAndDismisses() throws {
+        let app = launchToHome()
+        let appliance = app.buttons.matching(NSPredicate(
+            format: "label CONTAINS %@", "उपकरण सहायता")).firstMatch
+        let manuals = app.buttons.matching(NSPredicate(
+            format: "label CONTAINS %@", "म्यानुअलहरू")).firstMatch
+        tap(appliance, expecting: manuals, within: 15, in: app)
+        XCTAssertTrue(app.staticTexts[
+            "सहायक अझै सेटअप भएको छैन, त्यसैले अहिले फोटो हेर्न सक्दिनँ।"].exists,
+            "Cloud analysis must be visibly unavailable, without hiding manuals")
+
+        let iphone = app.buttons.matching(NSPredicate(
+            format: "label CONTAINS %@", "आइफोन सुरुवात")).firstMatch
+        tap(manuals, expecting: iphone, within: 10, in: app)
+        let firstStep = app.descendants(matching: .any).matching(NSPredicate(
+            format: "label CONTAINS %@",
+            "तपाईंको फोन सुतिरहेको छ। ब्युँझाउन दायाँपट्टिको बटन थिच्नुहोस्।")).firstMatch
+        tap(iphone, expecting: firstStep, within: 10, in: app)
+        XCTAssertFalse(manuals.exists, "Opening a bundled guide must leave the library")
+
+        tap(app.buttons["बन्द गर्नुहोस्"].firstMatch,
+            expecting: app.buttons["बोल्नुहोस्"], within: 10, in: app)
+    }
+
     func testTalkButtonStartsListening() throws {
         let app = launchToHome()
 
