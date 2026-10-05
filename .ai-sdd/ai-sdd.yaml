@@ -80,3 +80,34 @@ constitution:
 
 observability:
   log_level: INFO
+
+plugins:
+  - name: "@ai-sdd/messaging"
+    config:
+      provider: slack
+      slack:
+        bot_token_env: SLACK_BOT_TOKEN      # env var holding xoxb-… (default name)
+        app_token_env: SLACK_APP_TOKEN      # env var holding xapp-… (Socket Mode)
+        transport: auto                     # auto | socket | polling
+        channel_prefix: ai-sdd-             # per-session channels: #ai-sdd-<session>
+        channel_override: null              # or pin one channel for everything
+        fallback_channel: "C0C6CEVV8R4"     # #ai-sdd-notifications — catch-all for messages not yet associated with a channel (pre-run announce, ask, hook) when no feature resolves
+        operator_allowlist: ["U0C6DTHDMV0"] # anzaan — owner's real Slack id
+        invitees: ["U0C6DTHDMV0"]           # auto-invited into each per-session channel (idempotent, fail-open)
+        mentions:
+          escalate: ["U0C6DTHDMV0"]         # mention the owner on escalations
+        poll_mode: auto                     # auto: use Simple Poll when available
+        poll_app: simple_poll               # the poll app to probe (null = none)
+      bridge:
+        batch_window_ms: 10000              # batch rapid events into one post
+        post_timeout_ms: 10000
+        post_max_attempts: 3
+        subscription_poll_interval_s: 5     # polling fallback interval
+      questions:
+        default_timeout_ms: 3600000
+  # Multi-agent review overlay: makes the review step declared by
+  # `implement-with-review` workflows actually run the reviewer child.
+  # (Without it the engine logs "Available overlay plugins (not configured):
+  # review" and quickfix gates run dev-only.)
+  - name: "review"
+    enabled: true
