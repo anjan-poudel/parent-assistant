@@ -59,7 +59,7 @@ final class IntentRouterLocalFailureFallbackTests: XCTestCase {
         router.cloudBrain = cloud
 
         let result = interpret(router, "मौसम कस्तो छ")
-        XCTAssertEqual(callCount(), 2, "the interpreter retried once before reporting the failure")
+        XCTAssertEqual(callCount(), 1, "truncated JSON is deterministic — a single attempt, no retry")
         XCTAssertEqual(result, cloudAnswer, "the failed local brain escalates to the cloud")
         XCTAssertEqual(cloud.callCount, 1)
 
@@ -69,8 +69,17 @@ final class IntentRouterLocalFailureFallbackTests: XCTestCase {
         XCTAssertEqual(events[0].metadata["reason"], "local_failed_fallback")
     }
 
-    func testRetrySuccessNeverTouchesCloud() {
-        // The retry recovers on its own — the cloud is never called.
+    func testTruncatedJSONIsASingleHonestFailureAndNeverTouchesTheCloud() {
+        // [TRUNCATION-FIX] (c0d3a75, #23) The "the retry recovers on its
+        // own" premise is unreachable: a brace-led partial emission is a
+        // budget cut — deterministic under temp 0 + fixed seed — so the
+        // interpreter makes exactly ONE attempt and reports the honest
+        // `truncated_json` failure instead of replaying. The output below
+        // still offers the valid second payload the old retry would have
+        // consumed; the pinned contract is that it is never asked for — a
+        // single attempt, the honest reason surfaced on the interpreter,
+        // and no cloud call (the ladder's cloud consent is off here: the
+        // escalation half is the first test's subject).
         let bus = RecordingObservabilityBus()
         let (local, callCount) = makeFailingLocalInterpreter({ calls in
             if calls == 1 { return "{\"action\": \"query\", \"conf" }
@@ -84,15 +93,20 @@ final class IntentRouterLocalFailureFallbackTests: XCTestCase {
         let router = IntentRouter(cache: IntentCommandCache(storage: StubEncryptedStorage()),
                                   observabilityBus: bus)
         router.cloudFirstEnabled = false
-        router.cloudEnabled = true
+        router.cloudEnabled = false
         router.localBrain = local
         let cloud = StubCommandInterpreter(result: makeCommand(action: .query, confidence: 0.9))
         router.cloudBrain = cloud
 
         let result = interpret(router, "मौसम कस्तो छ")
-        XCTAssertEqual(result?.action, .query)
-        XCTAssertEqual(callCount(), 2)
-        XCTAssertEqual(cloud.callCount, 0, "the retry answered — no cloud call")
+        XCTAssertNil(result, "the one deterministic attempt fails — nothing replays or answers")
+        XCTAssertEqual(callCount(), 1,
+                       "truncated JSON is deterministic — a single attempt, no retry")
+        XCTAssertEqual(local.lastInferenceFailureReason, "truncated_json",
+                       "the honest failure reason is surfaced for the router")
+        XCTAssertTrue(bus.contains("inference_truncated"),
+                      "…and the failure reaches the trail, never swallowed")
+        XCTAssertEqual(cloud.callCount, 0, "the cloud is never touched")
         XCTAssertTrue(selectionEvents(bus).isEmpty)
     }
 

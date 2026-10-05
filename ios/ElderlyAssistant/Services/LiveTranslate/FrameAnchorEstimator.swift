@@ -627,9 +627,18 @@ struct FrameAnchorEstimator {
         let registrationStarted = clock()
         let measured = registration.motion(from: anchor, to: current)
         let measuredSeconds = clock() - registrationStarted
+        // [MASTER-REPAIR] The FIRST sample is excluded from the running
+        // means: it carries the session's cold-start cost (framework
+        // warm-up, buffer allocation), which is paid once and would
+        // otherwise poison the steady-state estimate the anchor budget is
+        // decided from. `samples` still counts it, so the telemetry shows
+        // the full picture; the mean reflects the cost a REUSED anchor pays.
         cost.samples += 1
-        cost.registrationSeconds += (measuredSeconds - cost.registrationSeconds) / Double(cost.samples)
-        cost.prepSeconds += ((registrationStarted - started) - cost.prepSeconds) / Double(cost.samples)
+        if cost.samples > 1 {
+            let meanWeight = Double(cost.samples - 1)
+            cost.registrationSeconds += (measuredSeconds - cost.registrationSeconds) / meanWeight
+            cost.prepSeconds += ((registrationStarted - started) - cost.prepSeconds) / meanWeight
+        }
 
         guard let motion = measured else {
             // Vision could not measure this pair (a frozen frame, a scene with

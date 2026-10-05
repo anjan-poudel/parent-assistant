@@ -72,6 +72,10 @@ enum DesignTokens {
 
     enum BadgeTint {
         case meds, reminders, call, appliance, settings, apps, feeds, emergency, directions
+        /// "About me" on the home hub (home-profile-icon, 2026-10-06) —
+        /// a soft indigo of its own so the hub's two leading icons read
+        /// as two different places (see `AppAppearance.badgeTint`).
+        case profile
 
     }
 

@@ -7116,6 +7116,23 @@
         }
       }
     },
+    "home.hub.profile" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "About me"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "मेरो बारेमा"
+          }
+        }
+      }
+    },
     "home.hub.reminders" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10927,6 +10944,222 @@
         }
       }
     },
+    "onboarding.aboutYou.addressAs" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "What should I call you?"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "मैले तपाईंलाई कसरी बोलाउनु?"
+          }
+        }
+      }
+    },
+
+    "onboarding.aboutYou.body" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This helps me speak to you the way your family does."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "यसले तपाईंको परिवारले जस्तै गरी बोल्न मद्दत गर्छ।"
+          }
+        }
+      }
+    },
+
+    "onboarding.aboutYou.dateOfBirthToggle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Add birthday"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "जन्मदिन थप्नुहोस्"
+          }
+        }
+      }
+    },
+
+    "onboarding.aboutYou.name" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your name"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "तपाईंको नाम"
+          }
+        }
+      }
+    },
+
+    "onboarding.aboutYou.photoUnavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The camera is not available on this phone"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "यो फोनमा क्यामेरा उपलब्ध छैन"
+          }
+        }
+      }
+    },
+
+    "onboarding.aboutYou.takePhoto" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Take a photo"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "फोटो खिच्नुहोस्"
+          }
+        }
+      }
+    },
+
+    "onboarding.aboutYou.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "About you"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "तपाईंको बारेमा"
+          }
+        }
+      }
+    },
+
+    "onboarding.emergency.body" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "If something happens, these help me reach the right person."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "केही भयो भने, सही व्यक्तिलाई भेट्न यसले मद्दत गर्छ।"
+          }
+        }
+      }
+    },
+
+    "onboarding.emergency.doctor" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Doctor's name"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "डाक्टरको नाम"
+          }
+        }
+      }
+    },
+
+    "onboarding.emergency.hospital" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hospital or clinic"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "अस्पताल वा क्लिनिक"
+          }
+        }
+      }
+    },
+
+    "onboarding.emergency.kinTitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tap the person I should reach first"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "पहिले सम्पर्क गर्नुपर्ने व्यक्तिमा थिच्नुहोस्"
+          }
+        }
+      }
+    },
+
+    "onboarding.emergency.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Emergency contacts"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "आपत्कालीन सम्पर्कहरू"
+          }
+        }
+      }
+    },
+
     "onboarding.next" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11284,6 +11517,114 @@
         }
       }
     },
+    "onboarding.stepVoiceFingerprint.body" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "I can learn your voice so I know it is you speaking. You can skip this and set it up later."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "तपाईंको आवाज सिकेर मैले बोल्ने तपाईं नै हो भनी चिन्न सक्छु। यो छाडेर पछि पनि मिलाउन सकिन्छ।"
+          }
+        }
+      }
+    },
+
+    "onboarding.stepVoiceFingerprint.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your voice"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "तपाईंको आवाज"
+          }
+        }
+      }
+    },
+
+    "onboarding.voiceFingerprint.done" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Voice saved"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "आवाज सुरक्षित भयो"
+          }
+        }
+      }
+    },
+
+    "onboarding.voiceFingerprint.progress" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Voice sample %d of %d"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "आवाज नमुना %d / %d"
+          }
+        }
+      }
+    },
+
+    "onboarding.voiceFingerprint.record" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Start recording"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "रेकर्ड सुरु गर्नुहोस्"
+          }
+        }
+      }
+    },
+
+    "onboarding.voiceFingerprint.stop" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stop"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "रोक्नुहोस्"
+          }
+        }
+      }
+    },
+
     "plugin.appLauncher.name" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -11862,6 +12203,186 @@
         }
       }
     },
+    "profile.error.saveFailed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could not save. Please try again."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "राख्न सकिएन। फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+
+    "profile.field.addressAs" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "What should I call you?"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "मैले तपाईंलाई कसरी बोलाउनु?"
+          }
+        }
+      }
+    },
+
+    "profile.field.dateOfBirth" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Birthday"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "जन्मदिन"
+          }
+        }
+      }
+    },
+
+    "profile.field.doctor" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Doctor"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "डाक्टर"
+          }
+        }
+      }
+    },
+
+    "profile.field.hospital" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hospital or clinic"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "अस्पताल वा क्लिनिक"
+          }
+        }
+      }
+    },
+
+    "profile.field.name" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Name"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "नाम"
+          }
+        }
+      }
+    },
+
+    "profile.field.photo" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your photo"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "तपाईंको फोटो"
+          }
+        }
+      }
+    },
+
+    "profile.kin.note" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Family and friends can be changed in the Family section."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "परिवार र साथीहरू 'परिवार' खण्डमा परिवर्तन गर्न सकिन्छ।"
+          }
+        }
+      }
+    },
+
+    "profile.save" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "राख्नुहोस्"
+          }
+        }
+      }
+    },
+
+    "profile.saved" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Saved"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "सुरक्षित भयो"
+          }
+        }
+      }
+    },
+
     "quickApps.add" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12181,6 +12702,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "म त्यसको जवाफ अहिले दिन सक्दिनँ — मेरो दिमाग सेटअप भएको छैन। कृपया परिवारको कसैलाई भन्नुहोस्, सेटिङ खोलेर दिमागको मोडेल डाउनलोड गर्नुहोस् वा जेमिनी कुञ्जी राख्नुहोस्।"
+          }
+        }
+      }
+    },
+    "router.chatLowConfidence" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "I'm not confident about this — I can't answer that well."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "मलाई यसमा विश्वास छैन — म यो राम्ररी जवाफ दिन सक्दिनँ।"
           }
         }
       }
@@ -16129,6 +16667,42 @@
         }
       }
     },
+    "settings.profile.explanation" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your name, what I call you, and who to reach in an emergency."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "तपाईंको नाम, मैले तपाईंलाई बोलाउने तरिका, र आपत्कालमा सम्पर्क गर्ने व्यक्ति।"
+          }
+        }
+      }
+    },
+
+    "settings.profile.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "About me"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "मेरो बारेमा"
+          }
+        }
+      }
+    },
+
     "settings.quickApps.title" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -20940,6 +21514,24 @@
         }
       }
     },
+    "wakeAck.personalized" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Yes, %@"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "हजुर %@"
+          }
+        }
+      }
+    },
+
     "wakeWord.active.detail" : {
       "extractionState" : "manual",
       "localizations" : {

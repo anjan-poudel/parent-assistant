@@ -66,6 +66,10 @@ final class StubCommandInterpreter: CommandInterpreter {
     var available: Bool
     private(set) var callCount = 0
     private(set) var lastTranscript: String?
+    /// [PROFILE-INTERVIEW T-094] The context the router composed for this
+    /// turn — the A/B clause test compares the `addressAs` field across
+    /// runs (absent vs hostile term) through this record.
+    private(set) var lastContext: InterpreterContext?
     /// [TRUNCATION-FIX] The cascade must drop the preferred brain's
     /// resident model before the stand-in takes the turn.
     private(set) var unloadCount = 0
@@ -82,6 +86,7 @@ final class StubCommandInterpreter: CommandInterpreter {
                    completion: @escaping (InterpretedCommand?) -> Void) {
         callCount += 1
         lastTranscript = transcript
+        lastContext = context
         DispatchQueue.main.async { completion(self.nextResult) }
     }
 
@@ -215,6 +220,11 @@ final class StubCoordinator: VoiceCommandCoordinating {
     func handleConfirmationResponse(_ response: ConfirmationResponse) {}
     func noteSpeakingStarted() {}
     func noteSpeakingEnded() {}
+    /// [PROFILE-INTERVIEW T-094] Opt-in override for the read seam — the
+    /// extension default is nil (un-personalized turn); tests that script
+    /// personalization set this and the router reads it through the
+    /// protocol reference, exactly like production.
+    var profilePersonalization: ProfilePersonalizationReading?
     /// [CLOUD-CASCADE] Records what the router handed the speaker. The
     /// cue's own speech is asynchronous (the reply lane), but
     /// `noteAssistantSpoke` is called SYNCHRONOUSLY on the way in — so

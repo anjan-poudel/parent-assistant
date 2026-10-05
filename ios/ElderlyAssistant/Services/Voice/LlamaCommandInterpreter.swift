@@ -95,6 +95,26 @@ protocol InterpreterFailureReporting: AnyObject {
 struct InterpreterContext {
     let pendingMedications: [String]   // display names only
     let userLanguageHint: String       // "ne" or "en"
+    /// [PROFILE-INTERVIEW T-094] The GUARDED address-as term for prompt
+    /// composition; nil = un-personalized (absent / unreadable / empty /
+    /// quarantined — FR-PI-011). Read-seam-produced: the value arrives
+    /// already bounded to the prompt bound and neutralised by
+    /// `ProfilePromptTextGuard` (ADR-09 — the prompt side takes the
+    /// guarded term; the spoken side takes the verbatim one). Immutable
+    /// per turn: the context is a value, so the cloud and on-device
+    /// paths can read it without coordination.
+    let addressAs: String?
+
+    /// Explicit initializer (not the memberwise one) so `addressAs`
+    /// carries a default: every pre-feature construction site compiles
+    /// unchanged, and the clause is opt-in per turn.
+    init(pendingMedications: [String],
+         userLanguageHint: String,
+         addressAs: String? = nil) {
+        self.pendingMedications = pendingMedications
+        self.userLanguageHint = userLanguageHint
+        self.addressAs = addressAs
+    }
 }
 
 /// Structured command emitted by the LLM. Matches the GBNF grammar exactly

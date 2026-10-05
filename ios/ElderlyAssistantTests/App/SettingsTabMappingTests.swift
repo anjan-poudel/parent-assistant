@@ -28,8 +28,10 @@ final class SettingsTabMappingTests: XCTestCase {
         // household's reading order.
         XCTAssertEqual(Section.voice.rows,
                        [.wakeWord, .voicePersonalization, .ttsVoices])
+        // [PROFILE-INTERVIEW T-103] About me joins the Family tab between
+        // Family and friends and Notify caregivers (design-l2 §5.7).
         XCTAssertEqual(Section.family.rows,
-                       [.family, .caregiverNotifications, .calling])
+                       [.family, .profile, .caregiverNotifications, .calling])
         XCTAssertEqual(Section.reminders.rows,
                        [.meds, .routines, .alarms, .events, .calendar, .calendarSharing])
         XCTAssertEqual(Section.tools.rows,
@@ -53,7 +55,7 @@ final class SettingsTabMappingTests: XCTestCase {
         XCTAssertEqual(Set(flattened).count, flattened.count,
                        "a row is listed on two tabs: "
                        + duplicates(in: flattened).map(\.rawValue).joined(separator: ", "))
-        XCTAssertEqual(flattened.count, 20, "the hub's visible row count changed")
+        XCTAssertEqual(flattened.count, 21, "the hub's visible row count changed")
     }
 
     func testTheVisibleAndHiddenHalvesPartitionEveryDestination() {

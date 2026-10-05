@@ -129,6 +129,16 @@ Rules:
    change to that mechanism.
 7. Safety delta: none beyond the existing profile baseline. Emergency/profile data is
    made available to the safety paths; their logic is untouched.
+8. **App-start routing (owner amendment, 2026-10-05):** whenever the app starts it
+   must check the interview's completion status and route accordingly — if interview
+   data is missing or incomplete, the user is sent to the interview screen (the
+   wizard) at the first pending step, resuming where they left off. Mandatory fields
+   missing (name, address-as) route on start; pending optional interview steps also
+   route, with the OD-F3 soft-skip affordance preserved so the user is never trapped.
+   The existing `OnboardingState.pendingSteps`/`firstPendingStep` mechanism and the
+   wizard's `startingAt:` reopen path are the resume mechanism. Whether a foreground
+   (background→active) transition re-checks is the architect's call; cold start is
+   the minimum.
 
 ## Open Decisions
 
@@ -156,3 +166,16 @@ Next disabled until both are filled. Does the About-you step keep the header Ski
 first run (soft gate — deferral via the Home reminder card) or is Skip disabled
 (hard gate)? Either way the reminder-card reopen + Settings editor path applies to
 already-onboarded users. Architect decides so implementation and tests agree.
+
+### OD-PI-4 — Address-as input affordance (RESOLVED — owner, 2026-10-05)
+
+**Presets + custom field.** The About-you step offers chips with common terms of
+address per language (आमा, ममी, बुबा, …) plus a free-text field for any other term.
+Rationale: lowest typing burden for the primary user, still fully flexible.
+
+### OD-PI-5 — Settings profile editor authentication (RESOLVED — owner, 2026-10-05)
+
+**Plain editor for now.** The profile editor behaves like other Settings rows today —
+no biometric/PIN gate. The project-wide biometric/PIN gate on sensitive settings
+(requirements.md FR-042) is recorded but unwired (constitution Open Decision 11 B3);
+wiring it app-wide is out of scope for this feature and tracked as a follow-up.

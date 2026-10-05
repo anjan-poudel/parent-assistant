@@ -10,6 +10,11 @@ enum LeafDestination: Identifiable {
     case call
     case history
     case settings
+    /// "About me" (home-profile-icon, 2026-10-06): the profile editor,
+    /// reached from its own icon on the home hub next to Settings — the
+    /// SAME `ProfileSettingsView` the Settings family tab pushes, just
+    /// one tap from Home.
+    case profile
     /// Directions (directions-screen task, 2026-09-07): the saved-targets
     /// map leaf, docked next to Appliance per the task brief.
     case directions
@@ -38,6 +43,7 @@ enum LeafDestination: Identifiable {
         case .call: return "call"
         case .history: return "history"
         case .settings: return "settings"
+        case .profile: return "profile"
         case .directions: return "directions"
         case .briefing: return "briefing"
         case .updates: return "updates"
@@ -64,6 +70,13 @@ struct HomeView: View {
 
     @State private var showWizard = false
     @State private var showHistory = false
+    /// [PROFILE-INTERVIEW T-102] Where the wizard opens when presented —
+    /// captured by BOTH entry points: the reminder card at tap time, the
+    /// cold-start one-shot at route time. The cover renders this value,
+    /// never a live re-read of the step map.
+    @State private var wizardStart: OnboardingState.Step?
+    /// The cold-start check runs once per process (first `onAppear`).
+    @State private var didCheckStartupRoute = false
     /// Programmatic push target for voice-driven contact search
     /// (voice-contact-search, 2026-09-07): the router's keyword pre-route
     /// publishes `pendingContactSearchRequest`; this onChange appends the
@@ -205,8 +218,26 @@ struct HomeView: View {
                     navPath.append(LeafDestination.call)
                 }
             }
+            // [PROFILE-INTERVIEW T-102] The cold-start interview route
+            // (FR-PI-016, design-l2 §4 C13): ONE evaluation per process,
+            // on the first appear only; `scenePhase` is deliberately not
+            // observed (no foreground re-check in v1 — it could pop the
+            // interview over a live capture). The route is captured into
+            // `wizardStart` so the cover renders a stable step. Honours
+            // the hosted-test boot guard: unit tests see the behavior
+            // they always had; UI tests run the real shell.
+            .onAppear {
+                guard !didCheckStartupRoute else { return }
+                didCheckStartupRoute = true
+                guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"]
+                        == nil else { return }
+                if let route = coordinator.coldStartInterviewRoute() {
+                    wizardStart = route
+                    showWizard = true
+                }
+            }
             .fullScreenCover(isPresented: $showWizard) {
-                OnboardingWizardView(startingAt: coordinator.onboardingState.firstPendingStep)
+                OnboardingWizardView(startingAt: wizardStart)
                     .environmentObject(coordinator)
                     .environmentObject(session)
                     .environmentObject(coordinator.modelDownloadService)
@@ -369,7 +400,13 @@ struct HomeView: View {
                        caption: coordinator.livePartialTranscript ?? coordinator.lastTranscript,
                        outcome: coordinator.lastOutcome,
                        setup: homePresentation.setup,
-                       onResumeSetup: { showWizard = true },
+                       onResumeSetup: {
+                           // Same value the old direct read produced —
+                           // now captured at tap so the cover stays
+                           // stable while the wizard runs.
+                           wizardStart = coordinator.onboardingState.firstPendingStep
+                           showWizard = true
+                       },
                        onOpenHistory: { showHistory = true },
                        onDismissOutcome: coordinator.dismissOutcome)
     }
@@ -443,6 +480,12 @@ struct HomeView: View {
             // before a download surface exists.
             SettingsView()
                 .environmentObject(coordinator.modelDownloadService)
+        case .profile:
+            // The "About me" editor, pushed from the hub's profile icon
+            // (home-profile-icon, 2026-10-06). The coordinator is passed
+            // explicitly (its init contract — the view also reads it
+            // from the environment for the locale/appearance it needs).
+            ProfileSettingsView(coordinator: coordinator)
         case .directions:
             DirectionsView()
         case .briefing:

@@ -1,1977 +1,1312 @@
-# Requirements — Live Camera Translation
+# Requirements — Profile Interview + Address-as
 
-**Project:** Elderly AI Assistant · **Feature:** `live-camera-translation` (v1) ·
-**Branch:** `worktree-live-camera-translation`
+**Project:** Elderly AI Assistant · **Feature:** `profile-interview` (v1) ·
+**Branch:** `feat/profile-interview` (worktree `elderly-ai-assistant-profile-interview`)
 **Task:** `define-requirements` (agent `ba`; contracts `requirements_doc` + `requirements_lock`)
-**Date:** 2026-09-16 · **Status:** awaiting owner HIL sign-off — the task carries a HIL gate, and
-the locked snapshot in `define-requirements.lock.yaml` is presented for that sign-off.
+**Date:** 2026-10-05 · **Status:** owner-approved — the HIL gate at risk tier T1 was approved
+2026-10-05, and the owner amendment of the same date (adds FR-PI-016, app-start interview-status
+routing) is incorporated; the locked snapshot in `define-requirements.lock.yaml` is
+re-baselined.
 
 This is the consolidated, human-readable copy of the feature requirements. The structured source
 of the same set is the folder [`define-requirements/`](define-requirements/index.md): one file per
 requirement, with index files at each level. Both are generated from the same content; the
 per-requirement files are the unit of change, this document plus the lock file are the snapshot
-downstream tasks (`design-component`, `review-l2`, `security-design-review`, `plan-tasks`) consume.
+downstream tasks (`design-l1`, `design-l2`, `review-l2`, `security-design-review`, `plan-tasks`,
+`implement`, `security-test`, `final-sign-off`) consume.
 
-**ID convention.** Requirement IDs are namespaced `FR-LCT-NNN` / `NFR-LCT-NNN`. The project-level
+**ID convention.** Requirement IDs are namespaced `FR-PI-NNN` / `NFR-PI-NNN`. The project-level
 stakeholder brief (`requirements.md`) already uses the bare `FR-NNN` / `NFR-NNN` series, so a
 feature-scoped namespace avoids collisions in downstream traceability — the same convention the
-dementia supplement uses (`FR-D01`…). One file per requirement; every requirement carries at
-least one Gherkin scenario, and every security-relevant requirement carries a failure scenario.
+dementia supplement uses (`FR-DNN`) and live-camera-translation used (`FR-LCT-NNN`). One file per
+requirement; every requirement carries at least one Gherkin scenario, and every security-relevant
+requirement carries a failure scenario.
 
 ## Summary
 
-- **Functional requirements: 23** (`FR-LCT-001` … `FR-LCT-023`)
-- **Non-functional requirements: 13** (`NFR-LCT-001` … `NFR-LCT-013`)
-- **Areas covered:** Camera Capture, Text Detection, Region Stabilisation, Translation,
-  Privacy & Consent, Cost Governance, Overlay, Caching, Voice Output, Plugin & Session,
-  Error Handling. NFR categories: Performance, Accessibility, Localisation, Privacy, Security,
-  Reliability, Compliance.
-- **v1 scope:** English source → Nepali target; live `AVCaptureSession` preview with no photo
-  output configured; on-device OCR (Vision, automatic language detection); translation via tier 0
-  curated dictionary → tier 1 on-device brain (the installed Nepali language model, no egress) →
-  tier 2 text-only cloud call (consent-gated); smart-mix overlay
-  (in-place replacement for short dictionary-known labels, anchored callouts otherwise);
-  tap-to-hear and "read this to me" via the existing Piper voices; persistent translation cache;
-  ships as a new voice-invokable plugin `LiveTranslatePlugin` sibling to the appliance helper,
-  sharing its label dictionary and translation cache; must work on dense multi-region scenes
-  (a menu page).
-- **Primary source of truth:** `docs/superpowers/specs/2026-09-16-live-camera-translation-design.md`
-  (first-pass component design, owner-approved 2026-09-16, awaiting spec review) — its §10 Open
-  Decisions and §11 divergences (D1, D2) are carried forward below.
-- **Governing rules:** `constitution.md` (project — Architecture Constraint 1, Open Decision 13
-  recorded 2026-09-16 for the cloud text-translation exception with its consent amendment),
-  `specs/live-camera-translation/constitution.md` (feature constitution), and the inherited
-  base design + addendum §13.
+- **Functional requirements: 16** (`FR-PI-001` … `FR-PI-016`)
+- **Non-functional requirements: 11** (`NFR-PI-001` … `NFR-PI-011`)
+- **Areas covered:** Onboarding Wizard (including About-you and the reopen path), Profile Storage,
+  Family & Friends, Emergency Contacts, Voice Fingerprint, Wake Acknowledgment, Brain
+  Personalization, Address-as Data Handling, Settings, Safety Integration, No-Regression, Error
+  Handling. NFR categories: Security, Privacy, Performance, Reliability, Maintainability,
+  Localisation, Accessibility, Compliance.
+- **v1 scope:** three new first-run interview steps — about-you (name + address-as required, DOB
+  optional), emergency contacts (next of kin, GP, hospital — all optional), voice fingerprint
+  (optional, reusing the existing enrollment) — plus the extension of the family & friends step, a
+  new encrypted profile store, address-as injected into the wake acknowledgment
+  (`हजुर <address-as>`) and the brain reply-style rules (`IntentPrompt.build` / `buildChat` /
+  `buildUnderstanding` + interpreter context, cloud Gemini and on-device LLaMA), a Settings
+  editor, the wizard reopen path for existing users, and the rule that the assistant behaves
+  exactly as today until a term is recorded.
+- **Primary sources of truth:** owner brief (2026-10-05, recorded in
+  `specs/profile-interview/init-report.md`); `specs/profile-interview/constitution.md` (feature
+  constitution — Field Contract, Address-as Behaviour Contract, Open Decisions OD-F1/OD-F2/OD-F3,
+  out-of-scope list); `specs/profile-interview/workflow.yaml` (the `define-requirements` scope
+  comment); project `constitution.md` (Architecture Constraints, Standards, release gates).
+- **Read-only stakeholder briefs:** `requirements.md` (baseline; its FR-042 in-app configuration
+  clause and NFR-003 wake-latency target are cited) and `requirements-dementia-supplement.md`
+  (context only; its personalized-copy examples already presuppose the assistant knows the user's
+  form of address).
 
 ## Contents
 
 - [`define-requirements/index.md`](define-requirements/index.md) — top-level feature index
-- [`define-requirements/FR/index.md`](define-requirements/FR/index.md) — functional requirement list
-  (23 files: `define-requirements/FR/FR-LCT-NNN-*.md`)
-- [`define-requirements/NFR/index.md`](define-requirements/NFR/index.md) — non-functional requirement list
-  (13 files: `define-requirements/NFR/NFR-LCT-NNN-*.md`)
+- [`define-requirements/FR/index.md`](define-requirements/FR/index.md) — functional requirement
+  list (16 files: `define-requirements/FR/FR-PI-NNN-*.md`)
+- [`define-requirements/NFR/index.md`](define-requirements/NFR/index.md) — non-functional
+  requirement list (11 files: `define-requirements/NFR/NFR-PI-NNN-*.md`)
 - [`define-requirements.lock.yaml`](define-requirements.lock.yaml) — locked snapshot with
   per-requirement content hashes (contract `requirements_lock`)
 - Sections below: [Functional requirements](#functional-requirements) ·
   [Non-functional requirements](#non-functional-requirements) ·
   [Open decisions](#open-decisions) · [Out of scope](#out-of-scope) ·
-  [Divergences carried forward](#divergences-carried-forward)
+  [How this set is verified downstream](#how-this-set-is-verified-downstream)
+
+The `define-requirements/FR/` and `define-requirements/NFR/` folders also still contain the
+previously shipped live-camera-translation files (`FR-LCT-NNN-*`, `NFR-LCT-NNN-*`), left in place;
+the indexes and this document cover the `profile-interview` set only.
 
 ### Requirement index
 
 | ID | Title | Area / Category | Priority | File |
 |----|-------|-----------------|----------|------|
-| [FR-LCT-001](define-requirements/FR/FR-LCT-001-live-camera-preview.md) | Live camera preview without photo capture | Camera Capture | MUST | `FR-LCT-001-live-camera-preview.md` |
-| [FR-LCT-002](define-requirements/FR/FR-LCT-002-camera-permission-and-disclosure.md) | Camera permission and purpose disclosure | Camera Capture / Compliance | MUST | `FR-LCT-002-camera-permission-and-disclosure.md` |
-| [FR-LCT-003](define-requirements/FR/FR-LCT-003-on-device-ocr-language-detection.md) | On-device OCR with automatic language detection | Text Detection | MUST | `FR-LCT-003-on-device-ocr-language-detection.md` |
-| [FR-LCT-004](define-requirements/FR/FR-LCT-004-region-tracking-between-ocr-passes.md) | Region tracking between OCR passes | Text Detection | SHOULD | `FR-LCT-004-region-tracking-between-ocr-passes.md` |
-| [FR-LCT-005](define-requirements/FR/FR-LCT-005-region-stabilisation-hysteresis.md) | Stable text regions with hysteresis and change-only events | Region Stabilisation | MUST | `FR-LCT-005-region-stabilisation-hysteresis.md` |
-| [FR-LCT-006](define-requirements/FR/FR-LCT-006-decluttering-dense-scenes.md) | Decluttering for dense multi-region scenes | Region Stabilisation | MUST | `FR-LCT-006-decluttering-dense-scenes.md` |
-| [FR-LCT-007](define-requirements/FR/FR-LCT-007-dictionary-tier-0.md) | Tier 0 curated dictionary translation | Translation | MUST | `FR-LCT-007-dictionary-tier-0.md` |
-| [FR-LCT-008](define-requirements/FR/FR-LCT-008-truthful-tier-attribution.md) | Truthful tier attribution and no success without translation | Translation | MUST | `FR-LCT-008-truthful-tier-attribution.md` |
-| [FR-LCT-009](define-requirements/FR/FR-LCT-009-cloud-tier-text-only-translation.md) | Tier 2 text-only cloud translation | Translation | MUST | `FR-LCT-009-cloud-tier-text-only-translation.md` |
-| [FR-LCT-010](define-requirements/FR/FR-LCT-010-consent-gate.md) | Consent gate before any cloud translation | Privacy & Consent | MUST | `FR-LCT-010-consent-gate.md` |
-| [FR-LCT-011](define-requirements/FR/FR-LCT-011-cloud-activity-indicator.md) | Visible cloud-activity indicator | Privacy & Consent | MUST | `FR-LCT-011-cloud-activity-indicator.md` |
-| [FR-LCT-012](define-requirements/FR/FR-LCT-012-consent-revocation-offline-mode.md) | Consent revocation degrades to dictionary-only offline mode | Privacy & Consent | MUST | `FR-LCT-012-consent-revocation-offline-mode.md` |
-| [FR-LCT-013](define-requirements/FR/FR-LCT-013-cost-governor-fails-closed.md) | Cost governor bound and fail-closed behaviour | Cost Governance | MUST | `FR-LCT-013-cost-governor-fails-closed.md` |
-| [FR-LCT-014](define-requirements/FR/FR-LCT-014-text-only-egress.md) | Text-only egress guarantee | Privacy & Consent | MUST | `FR-LCT-014-text-only-egress.md` |
-| [FR-LCT-015](define-requirements/FR/FR-LCT-015-smart-mix-in-place-replacement.md) | Smart-mix in-place replacement (bounded) | Overlay | MUST | `FR-LCT-015-smart-mix-in-place-replacement.md` |
-| [FR-LCT-016](define-requirements/FR/FR-LCT-016-anchored-callouts.md) | Anchored callouts that never obscure the original | Overlay | MUST | `FR-LCT-016-anchored-callouts.md` |
-| [FR-LCT-017](define-requirements/FR/FR-LCT-017-always-show-original-toggle.md) | "Always show original text" toggle | Overlay | MUST | `FR-LCT-017-always-show-original-toggle.md` |
-| [FR-LCT-018](define-requirements/FR/FR-LCT-018-overlay-progress-and-failure-states.md) | Pending and failed translation states in the overlay | Overlay | MUST | `FR-LCT-018-overlay-progress-and-failure-states.md` |
-| [FR-LCT-019](define-requirements/FR/FR-LCT-019-persistent-encrypted-cache.md) | Persistent encrypted translation cache | Caching | MUST | `FR-LCT-019-persistent-encrypted-cache.md` |
-| [FR-LCT-020](define-requirements/FR/FR-LCT-020-shared-cache-and-dictionary.md) | Shared dictionary and translation cache with the appliance helper | Caching | MUST | `FR-LCT-020-shared-cache-and-dictionary.md` |
-| [FR-LCT-021](define-requirements/FR/FR-LCT-021-tap-to-hear-and-read-this-to-me.md) | Tap-to-hear and "read this to me" | Voice Output | MUST | `FR-LCT-021-tap-to-hear-and-read-this-to-me.md` |
-| [FR-LCT-022](define-requirements/FR/FR-LCT-022-plugin-voice-entry-and-session.md) | LiveTranslatePlugin voice entry and session lifecycle | Plugin & Session | MUST | `FR-LCT-022-plugin-voice-entry-and-session.md` |
-| [FR-LCT-023](define-requirements/FR/FR-LCT-023-honest-degradation-and-offline.md) | Honest degradation — never silently report success | Error Handling | MUST | `FR-LCT-023-honest-degradation-and-offline.md` |
-| [NFR-LCT-001](define-requirements/NFR/NFR-LCT-001-overlay-responsiveness.md) | Overlay responsiveness and translation latency | Performance | MUST | `NFR-LCT-001-overlay-responsiveness.md` |
-| [NFR-LCT-002](define-requirements/NFR/NFR-LCT-002-ocr-cadence-and-thermal-budget.md) | OCR cadence, battery and thermal budget | Performance | MUST | `NFR-LCT-002-ocr-cadence-and-thermal-budget.md` |
-| [NFR-LCT-003](define-requirements/NFR/NFR-LCT-003-accessibility-standards.md) | Accessibility — tap targets, overlay text, contrast | Accessibility | MUST | `NFR-LCT-003-accessibility-standards.md` |
-| [NFR-LCT-004](define-requirements/NFR/NFR-LCT-004-localisation.md) | Localisation of new UI strings | Localisation | MUST | `NFR-LCT-004-localisation.md` |
-| [NFR-LCT-005](define-requirements/NFR/NFR-LCT-005-no-image-or-unrelated-content-egress.md) | Privacy — no image or unrelated-content egress | Privacy | MUST | `NFR-LCT-005-no-image-or-unrelated-content-egress.md` |
-| [NFR-LCT-006](define-requirements/NFR/NFR-LCT-006-log-safety.md) | Log safety — no recognized or translated text in logs | Privacy / Security | MUST | `NFR-LCT-006-log-safety.md` |
-| [NFR-LCT-007](define-requirements/NFR/NFR-LCT-007-consent-enforcement-and-auditability.md) | Consent enforcement and auditability | Compliance / Security | MUST | `NFR-LCT-007-consent-enforcement-and-auditability.md` |
-| [NFR-LCT-008](define-requirements/NFR/NFR-LCT-008-cache-at-rest.md) | Cache at rest — encrypted, keyed, bounded | Security / Privacy | MUST | `NFR-LCT-008-cache-at-rest.md` |
-| [NFR-LCT-009](define-requirements/NFR/NFR-LCT-009-untrusted-scene-text-hardening.md) | Untrusted scene text hardening (injection) | Security | MUST | `NFR-LCT-009-untrusted-scene-text-hardening.md` |
-| [NFR-LCT-010](define-requirements/NFR/NFR-LCT-010-offline-degradation-integrity.md) | Offline degradation integrity — no false success | Reliability | MUST | `NFR-LCT-010-offline-degradation-integrity.md` |
-| [NFR-LCT-011](define-requirements/NFR/NFR-LCT-011-configurable-parameters.md) | Configurable parameters — no hardcoded operational constants | Reliability / Maintainability | SHOULD | `NFR-LCT-011-configurable-parameters.md` |
-| [NFR-LCT-012](define-requirements/NFR/NFR-LCT-012-shared-component-integrity.md) | Shared-component integrity — no regression to the appliance helper | Reliability | MUST | `NFR-LCT-012-shared-component-integrity.md` |
-| [NFR-LCT-013](define-requirements/NFR/NFR-LCT-013-compliance-and-release-gates.md) | Compliance and release gates | Compliance | MUST | `NFR-LCT-013-compliance-and-release-gates.md` |
-
+| [FR-PI-001](define-requirements/FR/FR-PI-001-interview-step-order.md) | Interview step order in the first-run wizard | Onboarding Wizard | MUST | `FR-PI-001-interview-step-order.md` |
+| [FR-PI-002](define-requirements/FR/FR-PI-002-about-you-mandatory-fields.md) | About-you mandatory fields gate Next | Onboarding Wizard / About-you | MUST | `FR-PI-002-about-you-mandatory-fields.md` |
+| [FR-PI-003](define-requirements/FR/FR-PI-003-encrypted-profile-store.md) | Encrypted profile store | Profile Storage | MUST | `FR-PI-003-encrypted-profile-store.md` |
+| [FR-PI-004](define-requirements/FR/FR-PI-004-optional-step-skippable-pattern.md) | Optional steps remain skippable with pending status | Onboarding Wizard | MUST | `FR-PI-004-optional-step-skippable-pattern.md` |
+| [FR-PI-005](define-requirements/FR/FR-PI-005-family-and-friends-step.md) | Family & friends step extension | Family & Friends | MUST | `FR-PI-005-family-and-friends-step.md` |
+| [FR-PI-006](define-requirements/FR/FR-PI-006-emergency-contacts-step.md) | Emergency contacts step | Emergency Contacts | MUST | `FR-PI-006-emergency-contacts-step.md` |
+| [FR-PI-007](define-requirements/FR/FR-PI-007-voice-fingerprint-step.md) | Voice fingerprint step (reuse of existing enrollment) | Voice Fingerprint | MUST | `FR-PI-007-voice-fingerprint-step.md` |
+| [FR-PI-008](define-requirements/FR/FR-PI-008-wake-acknowledgment-address-as.md) | Personalized wake acknowledgment | Wake Acknowledgment / Address-as | MUST | `FR-PI-008-wake-acknowledgment-address-as.md` |
+| [FR-PI-009](define-requirements/FR/FR-PI-009-brain-reply-style-address-as.md) | Address-as in brain reply-style rules (cloud and on-device) | Brain Personalization | MUST | `FR-PI-009-brain-reply-style-address-as.md` |
+| [FR-PI-010](define-requirements/FR/FR-PI-010-address-as-spoken-verbatim.md) | Address-as spoken verbatim (never translated) | Address-as Data Handling | MUST | `FR-PI-010-address-as-spoken-verbatim.md` |
+| [FR-PI-011](define-requirements/FR/FR-PI-011-unpersonalized-path-unchanged.md) | Un-personalized path behaves exactly as today | No-Regression | MUST | `FR-PI-011-unpersonalized-path-unchanged.md` |
+| [FR-PI-012](define-requirements/FR/FR-PI-012-settings-profile-editor.md) | Settings profile editor | Settings | MUST | `FR-PI-012-settings-profile-editor.md` |
+| [FR-PI-013](define-requirements/FR/FR-PI-013-wizard-reopen-for-existing-users.md) | Wizard reopen path for existing users | Onboarding Wizard | MUST | `FR-PI-013-wizard-reopen-for-existing-users.md` |
+| [FR-PI-014](define-requirements/FR/FR-PI-014-safety-path-data-availability.md) | Profile data available to existing safety paths | Safety Integration | MUST | `FR-PI-014-safety-path-data-availability.md` |
+| [FR-PI-015](define-requirements/FR/FR-PI-015-profile-read-failure-fallback.md) | Profile read failures degrade to the un-personalized path | Error Handling | MUST | `FR-PI-015-profile-read-failure-fallback.md` |
+| [FR-PI-016](define-requirements/FR/FR-PI-016-app-start-interview-routing.md) | App-start interview-status routing (resume where the user left off) | Onboarding Wizard / App Start | MUST | `FR-PI-016-app-start-interview-routing.md` |
+| [NFR-PI-001](define-requirements/NFR/NFR-PI-001-profile-encryption-at-rest.md) | Profile encryption at rest | Security | MUST | `NFR-PI-001-profile-encryption-at-rest.md` |
+| [NFR-PI-002](define-requirements/NFR/NFR-PI-002-log-safety.md) | Log safety — no new PII in logs | Privacy / Security | MUST | `NFR-PI-002-log-safety.md` |
+| [NFR-PI-003](define-requirements/NFR/NFR-PI-003-no-new-egress.md) | No new network egress or cloud processing | Privacy | MUST | `NFR-PI-003-no-new-egress.md` |
+| [NFR-PI-004](define-requirements/NFR/NFR-PI-004-profile-string-injection-hardening.md) | Untrusted profile-string hardening (injection) | Security | MUST | `NFR-PI-004-profile-string-injection-hardening.md` |
+| [NFR-PI-005](define-requirements/NFR/NFR-PI-005-prompt-budget-and-seed-mirror.md) | Prompt token budget and seed mirror preserved | Reliability / Maintainability | MUST | `NFR-PI-005-prompt-budget-and-seed-mirror.md` |
+| [NFR-PI-006](define-requirements/NFR/NFR-PI-006-localisation.md) | Localisation of new UI strings | Localisation | MUST | `NFR-PI-006-localisation.md` |
+| [NFR-PI-007](define-requirements/NFR/NFR-PI-007-accessibility.md) | Accessibility of the new interview UI | Accessibility | MUST | `NFR-PI-007-accessibility.md` |
+| [NFR-PI-008](define-requirements/NFR/NFR-PI-008-wake-ack-latency-and-fallback.md) | Wake-acknowledgment latency and failure fallback | Performance / Reliability | MUST | `NFR-PI-008-wake-ack-latency-and-fallback.md` |
+| [NFR-PI-009](define-requirements/NFR/NFR-PI-009-voice-biometric-unchanged.md) | Voice-biometric mechanism unchanged | Security / Compliance | MUST | `NFR-PI-009-voice-biometric-unchanged.md` |
+| [NFR-PI-010](define-requirements/NFR/NFR-PI-010-no-regression-existing-flows.md) | No regression to existing behaviours | Reliability | MUST | `NFR-PI-010-no-regression-existing-flows.md` |
+| [NFR-PI-011](define-requirements/NFR/NFR-PI-011-compliance-and-release-gates.md) | Compliance and release gates | Compliance | MUST | `NFR-PI-011-compliance-and-release-gates.md` |
 
 ## Functional requirements
 
-
-### FR-LCT-001: Live camera preview without photo capture
+### FR-PI-001: Interview step order in the first-run wizard
 
 #### Metadata
-- **Area:** Camera Capture
+- **Area:** Onboarding Wizard
 - **Priority:** MUST
-- **Source:** Design §1 (scope), §4.1; feature constitution "Scope" (no photo output configured); addendum §13.3
+- **Source:** Feature constitution "Feature Purpose & Scope" (ordered step list) and "Integration Surfaces" (`OnboardingState.swift`); owner brief 2026-10-05; workflow `define-requirements` scope comment
 
 #### Description
-The system **must** present a live, full-bleed camera preview from an `AVCaptureSession` +
-`AVCaptureVideoPreviewLayer` (`.resizeAspect`) as the whole surface of the live translation view.
-The capture session **must not** configure any photo output: no `AVCapturePhotoOutput`, no
-`UIImagePickerController`, no frame written to photo library, app storage, or any temporary file.
-A sampled video frame is used in memory for OCR only and is discarded.
+The first-run wizard **must** be extended with three new interview steps inserted in the owner-brief order, so the full sequence is: language, permissions, **about-you**, family & friends (the existing step, extended), **emergency contacts**, **voice fingerprint**, models. About-you is placed after permissions and before family & friends; emergency contacts after family & friends; voice fingerprint before models.
 
-The preview **must** remain the primary surface: overlays are drawn screen-space on top of it and
-must never replace the camera feed with a synthetic view.
+The new steps are `OnboardingState.Step` cases with the same per-step status semantics as the existing steps (per-step status persisted; `pendingSteps` / `firstPendingStep` ordering unchanged in mechanism). The existing steps keep their positions relative to each other and their behaviour. The wizard presents one step at a time with the existing step chrome and navigation affordances.
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: Live camera preview
+Feature: Interview step order in the first-run wizard
 
-  Scenario: Live preview starts with no photo output configured
-    Given the elder opens live translation
-    When the capture session starts
-    Then a live, full-bleed camera preview is displayed
-    And the capture session has no photo output configured
-    And no still image or video frame is written to storage
+  Scenario: Fresh install presents the steps in the required order
+    Given a fresh installation with no onboarding status
+    When the wizard is opened
+    Then the steps are presented in the order: language, permissions, about-you, family & friends, emergency contacts, voice fingerprint, models
+    And the existing steps keep their positions relative to each other
 
-  Scenario: The elder leaves the view while the camera is live
-    Given the live translation view is open and the preview is running
-    When the elder closes the view
-    Then the capture session stops
-    And no captured frame remains on disk
+  Scenario: New step status persists like existing steps
+    Given the user moves through the new steps
+    When the wizard is closed and reopened
+    Then each new step's status is persisted and restored through the existing per-step status mechanism
 ```
 
 #### Related
-- NFR: NFR-LCT-005 (no image egress), NFR-LCT-002 (OCR cadence and thermal budget)
-- Depends on: FR-LCT-002 (camera permission)
-
-
-### FR-LCT-002: Camera permission and purpose disclosure
-
-#### Metadata
-- **Area:** Camera Capture / Compliance
-- **Priority:** MUST
-- **Source:** Design §4.1, §7; feature constitution "Standards → Release gates"; project constitution Compliance constraints; Open Decision 13 (recorded 2026-09-16)
-
-#### Description
-The system **must** request camera permission at the point of use with a plain-language
-explanation in the active language, and **shall** handle every permission state without leaving
-the elder at a dead end:
-
-- **Not yet asked** — the explanation is shown before the system prompt.
-- **Denied** — an explanatory screen with a Settings deep link (the existing permission-denied
-  pattern used for the microphone), never a silent blank view.
-- **Granted** — the live translation view opens directly.
-
-`ios/ElderlyAssistant/Info.plist` `NSCameraUsageDescription` **must** disclose the live
-translation use and the conditional text-to-cloud send, in addition to the existing medication
-verification and appliance photo uses (the final consent/disclosure copy is reviewed before the
-first App Store submission — design §10 Open Decision 3).
-
-#### Acceptance criteria
-
-```gherkin
-Feature: Camera permission and purpose disclosure
-
-  Scenario: Permission granted on first use
-    Given the elder has not yet granted camera permission
-    When the elder invokes live translation
-    Then a plain-language explanation of the camera use is shown in the active language
-    And on granting, the live translation view opens
-
-  Scenario: Permission denied
-    Given the elder has denied camera permission
-    When the elder invokes live translation
-    Then an explanatory screen is shown in the active language with a link to Settings
-    And the elder can return to the assistant without being trapped in the view
-
-  Scenario: Purpose string discloses live translation and the cloud text send
-    Given the shipped Info.plist
-    When the camera purpose string is inspected
-    Then it states that live translation uses the camera
-    And it states that recognized text (never images) may be sent to the assistant's cloud service when the dictionary cannot translate it
-```
-
-#### Related
-- NFR: NFR-LCT-013 (compliance and release gates)
+- NFR: NFR-PI-010 (no regression to existing flows)
 - Depends on: —
 
 
-### FR-LCT-003: On-device OCR with automatic language detection
+### FR-PI-002: About-you mandatory fields gate Next
 
 #### Metadata
-- **Area:** Text Detection
+- **Area:** Onboarding Wizard / About-you
 - **Priority:** MUST
-- **Source:** Design §1, §4.2; feature constitution "Scope" (on-device OCR with automatic language detection)
+- **Source:** Feature constitution "Field Contract" and "Rules" (mandatory gates Next; Skip affordance is OD-F3); owner brief 2026-10-05; workflow scope comment ("About-you: name + address-as REQUIRED, DOB optional")
 
 #### Description
-The system **must** recognize printed text from the sampled camera frames entirely on-device
-using Vision (`VNRecognizeTextRequest` with `automaticallyDetectsLanguage = true`), producing for
-each observation: the recognized string, a normalized bounding box, the recognized source
-language, and a confidence value. No OCR model may be downloaded and no image or text may leave
-the device for recognition.
+The About-you step **must** collect three fields: **name** (required), **address-as term** (required), **date of birth** (optional). The step's Next button **must** stay disabled until both name and address-as are filled (non-empty after trimming whitespace). DOB **must not** gate Next.
 
-v1 quality focus is **English source text**; the pipeline must not hard-code the source language,
-because the same path serves the any-language → user-language roadmap without architectural change
-(feature rule 9).
-
-When no text is recognized in the frame, the system **must** show an empty-state hint ("point at
-some writing") and **must not** surface an error.
+The address-as term is what the assistant will call the user; it is stored and spoken verbatim (FR-PI-010). Whether the step's header Skip affordance also changes on first run is OD-F3 (open, architect) — whichever way it resolves, the mandatory gate binds the Next path, and already-onboarded users reach the step through the wizard reopen (FR-PI-013) and the Settings editor (FR-PI-012).
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: On-device OCR with automatic language detection
+Feature: About-you mandatory fields
 
-  Scenario: Text in frame is recognized on-device
-    Given the camera preview shows printed text
-    When a frame is sampled
-    Then each recognized region carries its text, normalized bounding box, detected language and confidence
-    And no network request is made to perform recognition
+  Scenario: Next stays disabled until both required fields are filled
+    Given the About-you step is shown with both required fields empty
+    When the user enters a name only
+    Then Next remains disabled
+    When the user also enters an address-as term
+    Then Next is enabled
 
-  Scenario: No text in frame
-    Given the camera preview shows no readable text
-    When frames are sampled
-    Then an empty-state hint is shown in the active language
-    And no error state is presented to the elder
+  Scenario: Date of birth is optional
+    Given name and address-as are filled
+    When the user leaves date of birth empty
+    Then Next is enabled and the step can be completed
 
-  Scenario: A non-English sample is still recognized
-    Given the camera preview shows printed text in a language other than English
-    When a frame is sampled
-    Then the observation reports the detected source language rather than assuming English
+  Scenario: Required values are persisted
+    Given the user has entered name and address-as and completes the step
+    Then both values are persisted to the new profile store (FR-PI-003)
+    And the address-as value is stored exactly as entered
 ```
 
 #### Related
-- NFR: NFR-LCT-002 (OCR cadence), NFR-LCT-009 (untrusted text hardening)
-- Depends on: FR-LCT-001 (live preview)
+- FR: FR-PI-003 (profile store), FR-PI-010 (spoken verbatim), FR-PI-012 (Settings editor), FR-PI-013 (wizard reopen)
+- Depends on: FR-PI-001 (step order)
 
 
-### FR-LCT-004: Region tracking between OCR passes
-
-#### Metadata
-- **Area:** Text Detection
-- **Priority:** SHOULD
-- **Source:** Design §2, §4.2; addendum §13.3 (VNTrackRectangleRequest between OCR passes)
-
-#### Description
-The system **should** carry detected text-region screen positions between OCR passes with
-`VNTrackRectangleRequest`, so that a region's overlay follows the camera movement smoothly
-instead of jumping at the OCR cadence. Tracking runs on intermediate frames at a lower cost than
-OCR and **must not** be treated as a source of recognized text: a tracked region's text changes
-only when OCR confirms it.
-
-If tracking fails or loses a region, the system **must** fall back to the last confirmed OCR
-geometry for that region rather than dropping or misplacing the overlay.
-
-#### Acceptance criteria
-
-```gherkin
-Feature: Region tracking between OCR passes
-
-  Scenario: Overlay follows the scene between OCR passes
-    Given a stable region has a confirmed translation
-    When the camera moves between OCR passes
-    Then the overlay is repositioned from tracking observations without waiting for the next OCR pass
-
-  Scenario: Tracking loses the region
-    Given a region is being tracked
-    When tracking reports no observation for that region
-    Then the overlay keeps the last confirmed OCR geometry
-    And no new text is attributed to the region without OCR confirmation
-```
-
-#### Related
-- NFR: NFR-LCT-002 (OCR cadence)
-- Depends on: FR-LCT-003 (OCR), FR-LCT-005 (stable regions)
-
-
-### FR-LCT-005: Stable text regions with hysteresis and change-only events
+### FR-PI-003: Encrypted profile store
 
 #### Metadata
-- **Area:** Region Stabilisation
+- **Area:** Profile Storage
 - **Priority:** MUST
-- **Source:** Design §4.3, §5; addendum §13.3
+- **Source:** Feature constitution "In scope" (new profile store under `Services/Storage/` following the `EncryptedFileStorage` pattern), "Field Contract" (storage column), Feature Constraint 5; project constitution Standards (Security: encrypted app storage, Keychain, Data Protection Complete)
 
 #### Description
-The system **must** stabilise OCR observations into stable text regions with stable identifiers,
-by matching an observation to an existing region on geometry (IoU ≥ 0.3 or centroid distance)
-combined with normalized string equality. Anti-flicker hysteresis is mandatory in both
-directions: a region appears only after **2 consecutive detections** and is removed only after
-**2 consecutive misses**.
+A new profile store **must** exist under `ios/ElderlyAssistant/Services/Storage/`, following the existing `EncryptedFileStorage` pattern, holding the new profile fields: **name**, **address-as term**, **date of birth**, **emergency doctor / GP**, **local hospital**, and **next of kin** (data shape per OD-F1 — standalone field in this store, or the existing `isEmergencyContact` designation on a family contact).
 
-The stabiliser **must** emit a change event only when a region's recognized text actually
-changes (including first appearance). This is the gate that bounds translation traffic: an
-unchanged scene must not re-enter the translation tiers.
+Rules:
+
+- The store is the single source of truth for these fields; the wake path (FR-PI-008), the prompt builders (FR-PI-009) and the Settings editor (FR-PI-012) read from it.
+- Family members remain in the existing `FamilyContactStore` (FR-PI-005) and voice-fingerprint data remains in the existing Secure Enclave mechanism (FR-PI-007) — neither is duplicated into this store.
+- Reads and writes are durable and consistent: an interruption must never leave a half-written profile that breaks the assistant.
+- A missing, corrupt or undecryptable payload degrades per FR-PI-015 — never fabricated, never partially applied.
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: Region stabilisation
+Feature: Encrypted profile store
 
-  Scenario: A region appears only after two consecutive detections
-    Given no regions are visible
-    When the same text is detected in one OCR pass only
-    Then no stable region is emitted and no translation is requested
+  Scenario: All interview fields persist and read back
+    Given the user completes About-you and the emergency contacts step
+    When the profile store is read after an app relaunch
+    Then it returns name, address-as, date of birth (if entered), GP, hospital, and next of kin per the recorded OD-F1 shape
 
-  Scenario: A region survives a single missed pass
-    Given a stable region exists
-    When it is missed in one OCR pass
-    Then the region is retained with its translation
+  Scenario: Store content is not readable as plaintext
+    Given profile data has been written
+    When the app container is inspected
+    Then no file contains the name, address-as, date of birth, GP, hospital or next-of-kin values in readable form (NFR-PI-001)
 
-  Scenario: A region is removed after two consecutive misses
-    Given a stable region exists
-    When it is missed in two consecutive OCR passes
-    Then the region and its overlay are removed
-
-  Scenario: Repeated identical text does not re-trigger translation
-    Given a stable region with a resolved translation
-    When subsequent OCR passes return the same normalized text
-    Then no change event is emitted
-    And no new translation request is made for that region
+  Scenario: A corrupt payload does not break the assistant
+    Given the stored profile payload is unreadable
+    When the assistant starts
+    Then it runs un-personalized exactly as today (FR-PI-015)
+    And it does not crash or stall
 ```
 
 #### Related
-- NFR: NFR-LCT-001 (responsiveness), NFR-LCT-010 (no false success)
-- Depends on: FR-LCT-003 (OCR)
+- NFR: NFR-PI-001 (encryption at rest), NFR-PI-002 (log safety)
+- Depends on: FR-PI-002 (About-you)
 
 
-### FR-LCT-006: Decluttering for dense multi-region scenes
+### FR-PI-004: Optional steps remain skippable with pending status
 
 #### Metadata
-- **Area:** Region Stabilisation
+- **Area:** Onboarding Wizard
 - **Priority:** MUST
-- **Source:** Design §4.3 (answers addendum Open Decision 12); Design §1 scope ("text-dense scenes (a menu page)")
+- **Source:** Feature constitution "Field Contract" rules (every other new field optional; existing skippable-step + Home reminder-card pattern; no hard gate on those steps) and "Integration Surfaces" (`OnboardingState` pendingSteps/firstPendingStep); owner brief 2026-10-05
 
 #### Description
-The system **must** remain legible on text-dense scenes, including a full menu page. Before
-rendering, regions **must** be decluttered:
+Every new field other than name and address-as is optional. The new steps — family & friends (extended), emergency contacts, voice fingerprint — **must** follow the existing skippable-step pattern:
 
-1. Duplicate regions with the same normalized string whose normalized centroids are closer than
-   **0.06** on either axis are merged into one region whose text is the longest string of the
-   merged set.
-2. When more than **8** regions are visible after merging, the 8 highest-confidence regions are
-   kept.
-3. Every kept region must still produce exactly one overlay (never overlapping duplicate
-   callouts for the same text).
-
-The decluttering thresholds are nominal values that are validated on a real device against a dense
-menu page and may become per-scene settings (design §10 Open Decision 5); they **must** be
-implemented as configurable parameters, not hardcoded constants (constitution Agent Principles).
+- no hard gate beyond About-you's Next gate; Skip completes the step;
+- per-step status is persisted in `OnboardingState` with stable step IDs;
+- a skipped or incomplete step remains pending in `pendingSteps`, which drives the Home reminder card and the wizard reopen position (FR-PI-013);
+- the user is never blocked from finishing the wizard, and a partially filled optional step (for example a GP but no hospital) completes without requiring all fields.
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: Decluttering for dense scenes
+Feature: Optional steps remain skippable
 
-  Scenario: Same label repeated across the scene merges into one overlay
-    Given two detected regions carry the same normalized text with centroids closer than 0.06 on either axis
-    When the overlay is rendered
-    Then a single overlay is shown carrying the longest of the merged strings
+  Scenario: Skipping an optional step advances the wizard
+    Given the emergency contacts step is shown
+    When the user skips it
+    Then the wizard advances with no hard gate
+    And the step's pending status follows the existing skippable-step pattern
 
-  Scenario: A dense menu page is bounded to the region cap
-    Given more than 8 distinct regions are visible in a menu page
-    When the overlay is rendered
-    Then at most 8 overlays are shown
-    And the kept regions are the 8 highest-confidence ones
+  Scenario: Partial fill is accepted
+    Given the user fills only the GP in the emergency contacts step
+    When the user continues
+    Then the GP is persisted and the other optional fields remain empty without blocking
+
+  Scenario: Pending optional steps drive the reminder card
+    Given one or more new optional steps remain incomplete
+    When the user returns Home
+    Then the reminder card reflects the pending new steps through the existing pendingSteps ordering
 ```
 
 #### Related
-- NFR: NFR-LCT-001 (responsiveness), NFR-LCT-003 (accessibility)
-- Depends on: FR-LCT-005 (stable regions)
+- FR: FR-PI-002 (the only hard gate), FR-PI-005, FR-PI-006, FR-PI-007, FR-PI-013
+- Depends on: FR-PI-001
 
 
-### FR-LCT-007: Tier 0 curated dictionary translation
+### FR-PI-005: Family & friends step extension
 
 #### Metadata
-- **Area:** Translation
+- **Area:** Family & Friends
 - **Priority:** MUST
-- **Source:** Design §2, §4.4 (tier 0), §3; feature constitution "Binding feature rule" on exact whole-label match
+- **Source:** Feature constitution "In scope" (family & friends extends the existing step + `FamilyContactStore`) and "Integration Surfaces" (`FamilyContactStore.swift`; `isEmergencyContact` already exists — OD-F1); "Field Contract" (family members optional, existing store)
 
 #### Description
-The system **must** resolve recognized text through a curated, on-device dictionary (tier 0)
-before any other tier is considered. The dictionary is the existing
-`ApplianceLabelLocalizer`, **extended** to a target of ~120 curated English→Nepali entries
-covering appliance and remote vocabulary. The extension **must** keep the existing conservative
-rules: exact whole-label match after normalization, **no fuzzy matching**, pass-through of text
-that is already in the active language, and the existing `Display(primary:secondary:)` shape with
-its locale gating (`isNepali`). The contract of `ApplianceLabelLocalizer` must not be weakened —
-it is shared with the shipped appliance helper.
+The existing family & friends step **must** be extended to collect and confirm family members into the existing `FamilyContactStore`, using its existing model. It **must not** fork, duplicate or replace the store. Existing step and store behaviour (add, edit, remove family members and everything else the store serves today) is preserved; the step remains optional and skippable per FR-PI-004.
 
-A tier-0 hit is resolved with **zero network access** and must be available with the device in
-airplane mode.
+If OD-F1 resolves to the designation shape, next of kin is expressed through the existing `isEmergencyContact` flag on a family contact. If OD-F1 resolves to a standalone field, the next-of-kin value lives in the new profile store (FR-PI-006) and this step is unaffected.
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: Tier 0 dictionary translation
+Feature: Family & friends step extension
 
-  Scenario: Known label resolves without network
-    Given the device has no network connection
-    When a recognized label exactly matches a curated dictionary entry
-    Then the translation is resolved by tier 0
-    And the result reports sourceTier = dictionary
+  Scenario: Family members are recorded through the existing store
+    Given the user adds a family member in the family & friends step
+    When the step completes
+    Then the member is persisted in the existing FamilyContactStore using the existing model
+    And the member is visible wherever family contacts are shown today
 
-  Scenario: Near-miss is not translated as if exact
-    Given a recognized string differs from a dictionary entry (case, spacing or wording)
-    When the dictionary is consulted
-    Then no tier-0 match is claimed unless the normalized whole-label match is exact
-
-  Scenario: Text already in the active language passes through
-    Given the recognized text is already Nepali
-    When the dictionary is consulted
-    Then the text is passed through unchanged
-    And it is never re-translated
+  Scenario: The step remains optional
+    Given the family & friends step is shown
+    When the user skips it
+    Then the wizard advances and no hard gate is introduced
 ```
 
 #### Related
-- NFR: NFR-LCT-012 (shared-component integrity), NFR-LCT-010 (no false success)
-- Depends on: FR-LCT-003 (OCR)
+- FR: FR-PI-004 (skippable pattern), FR-PI-006 (emergency contacts — OD-F1)
+- NFR: NFR-PI-010 (no regression)
+- Depends on: FR-PI-001
 
 
-### FR-LCT-008: Truthful tier attribution and no success without translation
+### FR-PI-006: Emergency contacts step
 
 #### Metadata
-- **Area:** Translation
+- **Area:** Emergency Contacts
 - **Priority:** MUST
-- **Source:** Feature constitution "v1 non-goals" (deferred work must be absent, not a silent stub); Design §4.4, §11 (D2).
-  **Amended 2026-09-17** by owner directive (see "Amendment" below): the deferred-tier clause is
-  superseded by the on-device brain tier.
-  **Amended 2026-09-20** by owner-approved reliability routing (see "Amendment" below): the tier
-  order above is narrowed **by string class** — the device leads for the short forms the gate data
-  shows it is exact on, the cloud leads for the sentence class when it can lead, and anything the
-  cloud does not answer falls back to the device.
+- **Source:** Feature constitution "In scope" (emergency contacts: next of kin, emergency doctor/GP, local hospital) and "Field Contract" (all optional; next of kin per OD-F1); owner brief 2026-10-05; workflow scope comment
 
 #### Description
-Every translated string **must** carry the tier that actually produced it
-(`TranslationResult.sourceTier`), and a tier **must not** return success when it did not translate.
+A new emergency contacts step **must** collect three optional contact types:
 
-- The tiers that may produce a translation, in the order the pipeline consults them, are
-  **tier 0 (dictionary)**, **tier 1 (on-device brain, no egress)** and **tier 2 (cloud,
-  consent-gated)**. A string is asked of the next tier only when the tier before it did not
-  answer it, and a result is always attributed to the tier that produced it — never to a tier
-  that did not run.
-- The **on-device brain tier is the app's own installed Nepali language model**, running entirely
-  on the device. It is "tier 1 in spirit": a device-local translation stage between the curated
-  dictionary and the consent-gated cloud. It is not a dedicated NMT model, and it is not a stub,
-  a passthrough or a "translate later" placeholder: it either produces a translation from a model
-  that is installed, or it reports an honest reason and the string continues down the cascade.
-- **It requires no consent and no network.** Nothing about this tier leaves the device, so
-  Open Decision 13 (consent/disclosure) is untouched by it, and the consent prompt still appears
-  at the point of first **cloud** need — not over a scene the device could answer by itself.
-- A tier that cannot be used **must not** hold the cycle open or answer silently: an unavailable
-  model, a failed load, a failed generation and a generation that outlives its configured deadline
-  are each recorded with a closed-vocabulary reason, and the unresolved strings fall through to
-  the next tier.
-- When no tier produced a translation, the result **must** report the failure honestly:
-  `isFinal = true`, `degraded = true`, and the text shown is the original recognized text — never a
-  fabricated or unmarked string.
+- **Next of kin** — data shape per OD-F1 (standalone field in the new profile store, or an `isEmergencyContact` designation on a family contact).
+- **Emergency doctor / GP** — stored in the new profile store.
+- **Local hospital contact** — stored in the new profile store.
+
+All three are optional and skippable with no hard gate (FR-PI-004); partial fill is accepted; values persist per FR-PI-003. The step adds no emergency-call logic: the collected data becomes available to the existing safety paths but their behaviour is unchanged (FR-PI-014).
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: Truthful tier attribution
+Feature: Emergency contacts step
 
-  Scenario: A dictionary hit is attributed to tier 0
-    Given a recognized label matches the curated dictionary
-    When the translation resolves
-    Then sourceTier reports dictionary
-    And isFinal is true and degraded is false
+  Scenario: Contact values are collected and persist
+    Given the user fills next of kin, GP, and local hospital in the emergency contacts step
+    When the step completes
+    Then each value is persisted per the recorded OD-F1 shape and the new profile store
+    And each value survives an app relaunch
 
-  Scenario: An on-device brain translation is attributed to tier 1
-    Given a recognized string is unresolved by the dictionary and a brain model is installed
-    When the on-device brain returns a translation
-    Then sourceTier reports the on-device brain tier
-    And the cloud tier is never asked
-    And no consent is required and no network request is made
+  Scenario: The step is optional and skippable
+    Given the emergency contacts step is shown
+    When the user skips it entirely
+    Then the wizard advances with no hard gate
+    And the profile store simply holds no emergency-contact values
 
-  Scenario: A cloud translation is attributed to tier 2
-    Given a recognized string is unresolved by the dictionary and the brain
-    And consent is recorded
-    When the cloud tier returns a translation
-    Then sourceTier reports cloud
-    And degraded is false
-
-  Scenario: No tier can translate
-    Given the dictionary cannot resolve the string, the brain cannot be used, and the cloud tier is unavailable
-    When the resolution completes
-    Then sourceTier does not claim a tier that did not translate
-    And degraded is true
-    And the text shown is the original recognized text
-
-  Scenario: An unavailable brain is reported rather than stubbed
-    Given the on-device brain tier cannot run (no model installed, no runtime, or a failed attempt)
-    When the resolution completes
-    Then the reason is recorded with a closed-vocabulary outcome
-    And the string is left unresolved for the next tier rather than answered with a fabricated, empty or echoed string
-
-  Scenario: The sentence class leads with the cloud when the cloud can lead
-    Given a recognized sentence-class string is unresolved by the dictionary
-    And the household's cloud switch is on and a network path exists
-    And the cloud tier is consent-gated and consent is recorded
-    When the cloud returns a translation
-    Then sourceTier reports cloud
-    And the device brain tier was not asked for this string
-
-  Scenario: A string the cloud cannot answer falls back to the device
-    Given a recognized sentence-class string led with the cloud
-    And the cloud produced no translation for it
-    When the resolution completes
-    Then the string is translated on the device rather than degraded
-    And sourceTier reports the on-device brain tier
+  Scenario: Partial fill is accepted
+    Given only the GP is entered
+    When the step completes
+    Then the GP is persisted and the other fields remain empty without blocking
 ```
 
-#### Amendment
-**2026-09-17, owner directive (supersedes the deferred-tier clause of Design §11 D2 for v1).**
-The original text required the on-device tier to be *absent* from v1 — not a stub, not a
-placeholder. The owner's directive re-opens that non-goal and lands the tier as **tier 1 (the
-on-device brain)**, because the shipped cascade (dictionary → consent-gated cloud) degrades every
-string the ~120-label dictionary misses to "can't translate" the moment the elder is offline or
-has declined the cloud — and the model that fixes that is already installed on the device.
-
-What the original requirement existed to protect is unchanged and is what the amended acceptance
-criteria still pin: **no success without translation**, and **no result attributed to a tier that
-did not translate it**. The prohibition was never on the tier existing; it was on the tier lying.
-The narrow "must be absent" clause is what this amendment retires.
-
-**2026-09-20, owner-approved reliability routing (narrows the order in the description by string
-class).** The order in the description — tier 1 then tier 2, for every string — is the order the
-pipeline runs for the class the round-1/2/3 gate data shows the device model is **exact** on:
-short labels, menu items and pharmaceutical names (at most four words, at most forty characters,
-no clause punctuation). For the **sentence class** — instructions, sentences, anything longer —
-the same gate data does not show that, and the owner approved leading with the cloud for that
-class **when and only when the cloud can lead**: the household's switch on and a live network
-path. Whatever the cloud does not answer for those strings comes back to the device, so the
-routing trades a *tier order* for reliability and never trades a translation away.
-
-What this narrowing keeps is the whole of what the requirement protects: **no success without
-translation** (a string the cloud fails is translated on the device rather than degraded) and **no
-result attributed to a tier that did not translate it** (the router decides only the *order*; the
-tier that answers is always the tier named). The cloud stays consent-gated at the point of need
-(FR-LCT-011, FR-LCT-020), and a string the device answers still costs no request and no egress.
-
-The rule lives in one place, `TranslationReliabilityRouter`, and it is keyed on **measured
-reliability** — the class the gate data separates — deliberately not on negation, keywords or any
-other shape a translator could game.
-
 #### Related
-- NFR: NFR-LCT-010 (offline degradation integrity)
-- Depends on: FR-LCT-007 (tier 0), FR-LCT-009 (tier 2), FR-LCT-020 (consent at the point of cloud need)
+- FR: FR-PI-003 (profile store), FR-PI-004 (skippable), FR-PI-014 (data available to safety paths)
+- Open decision: OD-F1 (next-of-kin data shape)
+- Depends on: FR-PI-001
 
 
-### FR-LCT-009: Tier 2 text-only cloud translation
+### FR-PI-007: Voice fingerprint step (reuse of existing enrollment)
 
 #### Metadata
-- **Area:** Translation
+- **Area:** Voice Fingerprint
 - **Priority:** MUST
-- **Source:** Design §2, §4.4 (tier 2), §7; project constitution Open Decision 13 (recorded 2026-09-16)
+- **Source:** Feature constitution "In scope" (voice fingerprint — optional enrollment) and "Field Contract" (existing `SpeakerBiometricService` / `VoiceEnrollmentRecorder` flow); "Out of scope" (no changes to the existing voice-biometric mechanisms)
 
 #### Description
-Strings the dictionary cannot resolve **may** be translated by the cloud tier (tier 2) through
-the existing `GeminiClient` request chokepoint, subject to FR-LCT-010 (consent), FR-LCT-013 (cost
-governor) and FR-LCT-014 (text-only egress).
+A new voice fingerprint step **must** offer the existing on-device voice-biometric enrollment flow (`SpeakerBiometricService` / `VoiceEnrollmentRecorder`, as surfaced today in `VoiceSettingsView`) as an optional, skippable step. The step is an entry point, not a modification:
 
-- The request is **text-only**: the unresolved strings plus the target language and the detected
-  source language per string. No image, no `inlineData` part, no photo, ever.
-- Unresolved strings from one scene **must** be sent as **one batched request** where the batch
-  size permits, not one request per string.
-- **In-flight deduplication is mandatory**: while a key is pending, no second request may be
-  fired for it.
-- A transient provider error is retried at most once; a provider block/policy error is not
-  retried. Timeouts are configurable parameters, not hardcoded constants.
-- The tier **must** fail honestly on any failure (FR-LCT-008, FR-LCT-023); it must never silently
-  drop a string or report success without a translation.
+- the enrollment and verification mechanism **must not** change;
+- biometric data **must** remain exclusively in the existing Secure Enclave storage (NFR-PI-009) — never in the new profile store, never transmitted, never logged;
+- no new permission is introduced.
+
+If enrollment is skipped, declined or fails, the step **must not** block the wizard; the fingerprint remains available later through the existing Settings surface.
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: Tier 2 cloud translation
+Feature: Voice fingerprint step
 
-  Scenario: Unresolved strings from one scene are batched into a single call
-    Given consent is recorded and the dictionary cannot resolve 8 recognized strings
-    When the cloud tier resolves them
-    Then exactly one request is sent carrying all 8 strings
-    And the request carries text only
+  Scenario: Enrollment runs through the existing flow
+    Given the user chooses to enroll in the voice fingerprint step
+    When enrollment runs
+    Then it uses the existing VoiceEnrollmentRecorder / SpeakerBiometricService flow
+    And the biometric data is stored exactly as the existing flow stores it
+    And no new permission or mechanism is introduced
 
-  Scenario: A pending key does not fire a duplicate request
-    Given a string is already in flight to the cloud tier
-    When the same string is observed again before the reply arrives
-    Then no second request is sent for that string
-
-  Scenario: Transient failure is retried once then reported honestly
-    Given the cloud tier returns a transient error
-    When the retry also fails
-    Then the region is reported as degraded (original text plus an offline indication)
-    And no further retries are attempted for that region
-
-  Scenario: Provider policy block
-    Given the cloud tier refuses the request under its policy
-    When the response is received
-    Then no retry is attempted
-    And the region is reported as degraded
+  Scenario: Skip or failure does not block the wizard
+    Given the user skips enrollment, or enrollment fails
+    When the step ends
+    Then the wizard advances with no hard gate
+    And the assistant continues to work without a fingerprint
 ```
 
 #### Related
-- FR: FR-LCT-010 (consent), FR-LCT-013 (cost governor), FR-LCT-014 (text-only egress), FR-LCT-018 (overlay states)
-- NFR: NFR-LCT-009 (untrusted text hardening), NFR-LCT-001 (latency)
-- Depends on: FR-LCT-003 (OCR), FR-LCT-007 (tier 0)
+- NFR: NFR-PI-009 (voice-biometric mechanism unchanged), NFR-PI-010 (no regression)
+- Depends on: FR-PI-001
 
 
-### FR-LCT-010: Consent gate before any cloud translation
+### FR-PI-008: Personalized wake acknowledgment
 
 #### Metadata
-- **Area:** Privacy & Consent
+- **Area:** Wake Acknowledgment / Address-as
 - **Priority:** MUST
-- **Source:** Feature constitution binding rules 2 and 3; project constitution Open Decision 13 (recorded 2026-09-16); design §4.6, §7
+- **Source:** Feature constitution "Address-as Behaviour Contract" (wake acknowledgment; `VoicePipeline.handleWakeDetected`) and "Integration Surfaces"; workflow scope comment ("hajur <address-as>")
 
 #### Description
-No tier-2 (cloud) translation request **may** be made unless the user has given recorded, explicit
-consent for text-to-cloud translation. The gate is the feature's compliance basis.
+When the wake word is detected and an address-as term is recorded, `VoicePipeline.handleWakeDetected` **must** speak a wake acknowledgment that includes the term, following the form `हजुर <address-as>` (exact phrasing and the mechanism — TTS of a template vs pre-rendered `AckFastLane` variants — are OD-F2, the architect's call). The term is spoken verbatim (FR-PI-010).
 
-- The consent request is presented at the **first cloud need**, not buried in settings, in
-  plain language in the active language, before any request is sent.
-- Consent is **recorded** on-device and is **revocable** (FR-LCT-012).
-- The gate **must fail closed**: a missing, unreadable or absent consent record denies the call.
-  There is no default-on path, no "implicit consent by using the feature", and no configuration
-  that reaches tier 2 without a recorded consent.
-- The data sent is limited to what Open Decision 13 records: OCR'd text strings only (FR-LCT-014).
+Wake-word recognition itself is untouched and out of scope. When no term is recorded, or the profile read fails, the path **must** behave exactly as today — today it starts listening with no spoken greeting; no neutral placeholder is invented (FR-PI-011, FR-PI-015).
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: Consent gating of cloud translation
+Feature: Personalized wake acknowledgment
 
-  Scenario: First cloud need asks for consent
-    Given the dictionary cannot resolve a recognized string
-    And no consent has been recorded
-    When the translation tiers select a tier
-    Then a plain-language consent request is shown before any request is sent
-    And no network request to the cloud provider is made while consent is absent
+  Scenario: Term recorded — the acknowledgment speaks it
+    Given an address-as term is recorded
+    When the wake word is detected
+    Then the assistant speaks the wake acknowledgment containing the term exactly as recorded (for example "हजुर <address-as>")
+    And the existing listening flow continues as today
 
-  Scenario: Recording consent enables the cloud tier
-    Given the elder gives consent
-    When the consent is recorded
-    Then the unresolved strings may be sent to the cloud tier
-    And the consent decision persists across app launches
+  Scenario: No term recorded — behaves exactly as today
+    Given no address-as term is recorded
+    When the wake word is detected
+    Then no new spoken greeting is introduced
+    And the assistant starts listening exactly as today, with no placeholder term
 
-  Scenario: Consent denied
-    Given the elder declines consent
-    When unresolved strings remain
-    Then no cloud request is made
-    And the affected regions keep their original text with an honest unavailable indication
-    And the feature remains usable with the dictionary alone
-
-  Scenario: Consent record missing or unreadable at the point of use
-    Given the stored consent record cannot be read
-    When a cloud translation would otherwise be needed
-    Then the gate denies the request (fails closed)
-    And no cloud request is made
+  Scenario: Speech failure does not block listening
+    Given the acknowledgment cannot be spoken (TTS unavailable)
+    When the wake word is detected
+    Then the assistant proceeds to listen without the greeting
+    And no crash or retry loop occurs
 ```
 
 #### Related
-- FR: FR-LCT-011 (cloud indicator), FR-LCT-012 (revocation), FR-LCT-014 (text-only egress)
-- NFR: NFR-LCT-007 (consent enforcement and auditability), NFR-LCT-013 (compliance gates)
-- Depends on: FR-LCT-009 (tier 2)
+- FR: FR-PI-010 (verbatim), FR-PI-011 (un-personalized path), FR-PI-015 (read-failure fallback)
+- NFR: NFR-PI-008 (latency and fallback)
+- Open decision: OD-F2 (phrasing and locale handling)
+- Depends on: FR-PI-003 (term recorded)
 
 
-### FR-LCT-011: Visible cloud-activity indicator
+### FR-PI-009: Address-as in brain reply-style rules (cloud and on-device)
 
 #### Metadata
-- **Area:** Privacy & Consent
+- **Area:** Brain Personalization
 - **Priority:** MUST
-- **Source:** Feature constitution binding rule 2; project constitution Open Decision 12 (indicator precedent) and Open Decision 13; design §4.6
+- **Source:** Feature constitution "Address-as Behaviour Contract" (brain replies; `IntentPrompt.build/buildChat/buildUnderstanding` plus interpreter context; cloud Gemini and on-device LLaMA) and "Integration Surfaces"; workflow scope comment ("yes <address-as>")
 
 #### Description
-While the cloud tier is active — that is, from the moment a tier-2 request is issued until its
-result (or failure) has been applied — the system **must** show a visible indicator in the live
-translation view that text is being translated by the cloud service.
+The reply-style rules in `IntentPrompt.build` / `buildChat` / `buildUnderstanding`, plus the interpreter context, **must** receive the recorded address-as term so replies can use it naturally — for example "yes <address-as>" instead of "yes". The contract:
 
-- The indicator's state **must** be driven by actual tier-2 activity, not by settings or by a
-  static decoration: it appears only when a request is in flight and disappears when the tier is
-  idle.
-- The indicator **must not** be spoofable or suppressible by any state that does not reflect
-  cloud activity (e.g. it must not be hidden by the "always show original text" toggle, by a
-  dictionary-only session, or by an overlay mode).
-- The indicator must be understandable to the elder: a symbol plus a plain-language label in the
-  active language, not an icon alone (pending final consent/disclosure copy review — design §10
-  Open Decision 3).
+- **Both reply paths.** The personalization applies to the cloud (Gemini) engine and the on-device (LLaMA) brain through the one shared prompt builder — the term is composed in the shared path, not in per-engine forks.
+- **Untrusted input.** The user-entered term and name **must** pass the project's `InputSanitiser` discipline before entering any prompt (NFR-PI-004); the term must not be able to alter reply-style rules, tool/intent routing, or safety behaviour.
+- **Natural use only.** The rules must instruct natural use where it fits and **must not** contain a rule that forces the term into every sentence. Exact phrasing is the architect's call; the term itself is spoken verbatim (FR-PI-010).
+- **Budget and mirror.** Prompt edits preserve the pinned token budget and the byte-identical seed mirror (NFR-PI-005).
+- **No term recorded.** The prompt paths behave exactly as today — no term, no placeholder (FR-PI-011, FR-PI-015).
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: Cloud-activity indicator
+Feature: Address-as in brain reply-style rules
 
-  Scenario: Indicator appears while a cloud request is in flight
-    Given consent is recorded
-    When a tier-2 request is issued
-    Then a visible indicator states that text is being translated by the cloud service
-    And the indicator remains visible until the request resolves or fails
+  Scenario: Both engines compose the term from the shared builder
+    Given an address-as term is recorded
+    When replies are generated through the cloud (Gemini) path and through the on-device (LLaMA) path
+    Then both compose the term into the shared reply-style context from the one shared prompt builder
 
-  Scenario: Indicator is absent when the cloud tier is idle
-    Given no tier-2 request is in flight
-    When the elder uses live translation offline with the dictionary
-    Then no cloud-activity indicator is shown
+  Scenario: Replies may use the term naturally
+    Given a term is recorded
+    When a reply where a form of address fits is generated
+    Then the reply may include the term naturally (for example "yes <address-as>")
+    And the term is spoken verbatim
 
-  Scenario: Indicator cannot be suppressed while the cloud tier is active
-    Given a tier-2 request is in flight
-    When the overlay mode is changed (for example the always-show-original toggle)
-    Then the cloud-activity indicator remains visible
+  Scenario: Natural use only — no mechanical insertion rule
+    Given the prompt templates
+    When the reply-style rules are inspected
+    Then they instruct natural use and contain no rule that forces the term into every sentence
+    And a reply that omits the term remains valid
+
+  Scenario: No term recorded — prompt changes are inert
+    Given no term is recorded
+    When prompts are built
+    Then they behave as today with no term and no placeholder
 ```
 
 #### Related
-- FR: FR-LCT-010 (consent gate), FR-LCT-013 (cost governor)
-- NFR: NFR-LCT-007 (consent enforcement and auditability)
-- Depends on: FR-LCT-009 (tier 2)
+- FR: FR-PI-010 (verbatim), FR-PI-011 (un-personalized path), FR-PI-015 (read-failure fallback)
+- NFR: NFR-PI-003 (no new egress), NFR-PI-004 (injection hardening), NFR-PI-005 (budget and mirror)
+- Depends on: FR-PI-003 (term recorded)
 
 
-### FR-LCT-012: Consent revocation degrades to dictionary-only offline mode
+### FR-PI-010: Address-as spoken verbatim (never translated)
 
 #### Metadata
-- **Area:** Privacy & Consent
+- **Area:** Address-as Data Handling
 - **Priority:** MUST
-- **Source:** Feature constitution binding rule 2; project constitution Open Decision 13 ("revoking degrades the feature to offline mode, never blocks it"); design §7
+- **Source:** Feature constitution "Address-as Behaviour Contract" (stored and spoken verbatim; never translated; never routed through the L10n string catalogs) and Feature Constraint 3; "Field Contract" (Address-as term)
 
 #### Description
-The elder (or a family member on their behalf) **must** be able to revoke consent for cloud
-translation at any time. Revocation **must** take effect for subsequent tier-2 activity without a
-reinstall and **must never block the feature**:
+The address-as term is user data. It **must** be stored and spoken exactly as entered, in every surface where it is used (the wake acknowledgment, FR-PI-008, and brain replies, FR-PI-009). It **must not** be translated, transliterated, substituted for, or routed through the L10n string catalogs. The surrounding acknowledgment/reply copy may be localized in the active app language — the term itself is emitted verbatim. The name follows the same rule wherever it is spoken.
 
-- After revocation the feature continues with tier 0 (dictionary) and cached translations.
-- Unresolved strings keep the original text with an honest unavailable indication (FR-LCT-018,
-  FR-LCT-023) — the elder always sees the recognized text.
-- Cached translations remain usable (they are already on the device and require no egress), so
-  prior scenes keep working.
+Script/language mixing between the term and the active app language is handled by the localized surrounding copy; the acknowledgment phrasing and per-language templates are OD-F2 (architect).
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: Consent revocation
+Feature: Address-as spoken verbatim
 
-  Scenario: Revocation stops cloud traffic
-    Given consent was recorded and a cloud request is not in flight
-    When the elder revokes consent
-    Then no further tier-2 request is made
-    And the cloud-activity indicator is not shown
+  Scenario: Verbatim in both surfaces
+    Given the term is recorded as entered
+    When the wake acknowledgment is spoken and when a reply uses the term
+    Then each utterance/text contains exactly the recorded string, with no translation or transliteration
 
-  Scenario: The feature still works after revocation
-    Given consent has been revoked
-    When the elder points the camera at a dictionary-known label
-    Then the translation is resolved by tier 0
-    And the feature remains usable without any error blocking the view
-
-  Scenario: Cached translations survive revocation
-    Given a string was translated before revocation and is in the persistent cache
-    When the same string is recognized after revocation
-    Then the cached translation is shown
-    And no cloud request is made
+  Scenario: The term is data, not a catalog string
+    Given the L10n string catalogs and the personalization code paths
+    When they are inspected
+    Then the term does not appear as a catalog entry
+    And no code path passes the term through a localization lookup
 ```
 
 #### Related
-- FR: FR-LCT-010 (consent gate), FR-LCT-019 (persistent cache), FR-LCT-023 (degradation)
-- NFR: NFR-LCT-007 (consent enforcement and auditability)
-- Depends on: FR-LCT-010
+- NFR: NFR-PI-006 (localisation of UI strings)
+- Open decision: OD-F2 (acknowledgment phrasing and locale handling)
+- Depends on: FR-PI-003 (profile store)
 
 
-### FR-LCT-013: Cost governor bound and fail-closed behaviour
+### FR-PI-011: Un-personalized path behaves exactly as today
 
 #### Metadata
-- **Area:** Cost Governance
+- **Area:** No-Regression
 - **Priority:** MUST
-- **Source:** Design §4.4 (tier 2), §5, §8; feature constitution binding rule 7; project constitution Open Decision 13 ("bounded per-session by the existing GeminiCostGovernor")
+- **Source:** Feature constitution "Address-as Behaviour Contract" (final bullet: until a term is recorded — step skipped, existing user not yet re-interviewed, including any fallback path — the assistant behaves exactly as today; no neutral placeholder is invented); workflow non-goals comment
 
 #### Description
-Tier-2 activity **must** be bounded by the existing cost governor (`GeminiCostGovernor`), through
-which every cloud call in this app already passes. When the governor refuses a call:
+Until an address-as term is recorded — because the step was skipped, because an existing user has not yet been re-interviewed, or because of any profile read failure — the assistant **must** behave exactly as today:
 
-- the tier **must fail closed**: no request is issued and the affected regions show the original
-  text with the honest unavailable/offline indication;
-- after the cap is reached, the failure applies **for the rest of the session** — the system
-  **must not** enter a silent retry loop or fall back to a different unmetered request shape;
-- the refusal **must not** degrade any other feature or leave the elder without the camera view.
+- wake detection starts listening with no spoken greeting, exactly as the pre-feature baseline (FR-PI-008);
+- prompts and replies contain no term and no substitute: no "default name", no placeholder, no neutral invented form of address (FR-PI-009);
+- no other behaviour changes.
 
-**Known inconsistency to be resolved by design (recorded open decision):** the shipped
-`GeminiCostGovernor` counts calls **per day** with a family-editable cap, while design §4.4
-describes a "per-session" cap. The requirement binds the *behaviour* (bounded calls, fail closed,
-no retry loop); whether v1 adds a per-session sub-cap inside the per-day governor or relies on the
-per-day cap is for `design-component` to decide and record. Either way the cap value must be a
-configurable parameter, not a hardcoded constant.
+The feature adds personalization; it **must not** regress the un-personalized path, and there is no state in which an invented term is spoken or composed into a prompt.
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: Cost governor fails closed
+Feature: Un-personalized path behaves exactly as today
 
-  Scenario: The cap is reached mid-session
-    Given the cost governor reports no budget remaining
-    When an unresolved string would otherwise be sent to the cloud tier
-    Then no request is issued
-    And the affected regions show the original text with an honest unavailable indication
-    And the camera view and dictionary translations keep working
+  Scenario: Fresh install without a recorded term
+    Given a fresh installation with no address-as term recorded
+    When the wake word is detected and replies are generated
+    Then behaviour is identical to the pre-feature baseline
+    And no placeholder term is spoken or composed into any prompt
 
-  Scenario: No silent retry loop after the cap
-    Given the cap has been reached
-    When the scene changes and new unresolved strings appear
-    Then no cloud request is issued for the rest of the session
-    And no repeated retry attempts are made for the same key
-
-  Scenario: Attempts refused by the governor are not counted as translations
-    Given a cloud request is refused by the cost governor
-    When the region's result is reported
-    Then the result reports degraded (no tier produced a translation)
+  Scenario: Existing user not yet re-interviewed
+    Given an installation that completed onboarding before this feature
+    And the user has not completed the new steps
+    When the assistant runs
+    Then the same today-behaviour holds, with no term and no placeholder
 ```
 
 #### Related
-- FR: FR-LCT-008 (truthful attribution), FR-LCT-009 (tier 2), FR-LCT-023 (degradation)
-- NFR: NFR-LCT-010 (offline degradation integrity), NFR-LCT-011 (configurable parameters)
-- Depends on: FR-LCT-009
+- FR: FR-PI-008 (wake ack), FR-PI-009 (reply style), FR-PI-015 (read-failure fallback)
+- NFR: NFR-PI-010 (no regression to existing flows)
+- Depends on: —
 
 
-### FR-LCT-014: Text-only egress guarantee
+### FR-PI-012: Settings profile editor
 
 #### Metadata
-- **Area:** Privacy & Consent
+- **Area:** Settings
 - **Priority:** MUST
-- **Source:** Feature constitution binding rule 1; project constitution Open Decision 13 (Scope); design §7
+- **Source:** Feature constitution "In scope" (a Settings editor) and "Rules" (existing users reach the new steps via the wizard reopen and the Settings editor) and "Integration Surfaces"; "Field Contract" (existing users are not force-migrated)
 
 #### Description
-The live translation feature **must** send **only OCR'd text strings and the language parameters
-needed to translate them**. It **must never** send:
+A Settings editor **must** let the user, or a helping family member, view and edit the profile after onboarding: name, address-as term, date of birth, emergency contacts (GP, hospital, next of kin per OD-F1). Family members are edited through the existing family contacts surface. Edits persist to the same stores (FR-PI-003) and take effect on subsequent use without a reinstall or a wizard re-run — the next wake acknowledgment and subsequent replies use the updated term.
 
-- any image, frame, photo, thumbnail, or `inlineData`/media part — the camera session configures no
-  photo output at all (FR-LCT-001) and no translation request may attach image data;
-- health, contacts, profile, calendar, medication, or any other personal content from the app;
-- metadata beyond what the translation request needs (no device identifiers, no location).
-
-The guarantee **must** hold on every path that reaches the cloud tier, including retries and
-batched requests, and must be verifiable by inspection of the request construction (a single
-chokepoint) and by test evidence at `security-test`.
+The editor is reachable for already-onboarded users. Whether the editor sits behind voice-biometric or PIN authentication is an open decision raised in elicitation (OD-PI-2: `requirements.md` FR-042 requires in-app configuration behind authentication, while the biometric/PIN gate is recorded as unwired with accepted residual risk in project constitution Open Decision 11, B3). This requirement binds the editor's existence, reachability, persistence and effect — not the authentication gate.
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: Text-only egress
+Feature: Settings profile editor
 
-  Scenario: A translation request carries text only
-    Given consent is recorded and unresolved strings exist
-    When the tier-2 request is constructed
-    Then the request contains text parts only
-    And no image, media or inline data part is present
-    And no health, contacts or profile content is present
+  Scenario: Edit takes effect without re-onboarding
+    Given an onboarded user opens the Settings profile editor and changes the address-as term
+    When the change is saved
+    Then the next wake acknowledgment and subsequent replies use the new term
+    And no reinstall or wizard re-run is required
 
-  Scenario: No photo output means no image can be attached
-    Given the live translation camera session
-    When the session configuration is inspected
-    Then no photo output is configured
-    And the translation path has no source of image bytes to attach
+  Scenario: Reachable for existing users
+    Given an installation that completed onboarding before this feature
+    When the user opens Settings
+    Then the profile editor is reachable and the profile fields are editable
 
-  Scenario: The guarantee holds on retry and on batched requests
-    Given a tier-2 request is retried after a transient error
-    When the retry is constructed
-    Then the retry carries the same text-only payload shape
+  Scenario: Edits persist
+    Given a profile field is edited in Settings
+    When the app relaunches and the store is read
+    Then the edited value is returned
+    And no field is silently lost
 ```
 
 #### Related
-- NFR: NFR-LCT-005 (no image or unrelated-content egress), NFR-LCT-007 (consent enforcement)
-- Depends on: FR-LCT-009 (tier 2), FR-LCT-001 (no photo output)
+- FR: FR-PI-003 (profile store), FR-PI-013 (wizard reopen)
+- NFR: NFR-PI-007 (accessibility), NFR-PI-002 (log safety)
+- Open decision: OD-PI-2 (editor authentication gate)
+- Depends on: FR-PI-003
 
 
-### FR-LCT-015: Smart-mix in-place replacement (bounded)
+### FR-PI-013: Wizard reopen path for existing users
 
 #### Metadata
-- **Area:** Overlay
+- **Area:** Onboarding Wizard
 - **Priority:** MUST
-- **Source:** Design §4.5, §11 D1 (owner-approved divergence from addendum §13.3/§13.5); feature constitution binding rule 6
+- **Source:** Feature constitution "In scope" (the wizard's reminder-card reopen path; new step IDs are pending by definition for existing users — absent from the persisted status map) and "Rules" (existing users are not force-migrated); "Integration Surfaces" (`pendingSteps` drives the reminder card and the reopen position)
 
 #### Description
-The overlay **may** replace the original printed text **in place** (opaque high-contrast
-background sized to the region) only when **all** of these conditions hold:
+For users who completed onboarding before this feature, the new step IDs are absent from the persisted status map and are therefore pending by definition. The existing reminder-card reopen path **must** surface them:
 
-1. the translation came from **tier 0** (the curated dictionary), and
-2. the source string is **short** (≤ 3 words), and
-3. the translated string **fits** the region at a minimum of **18 pt**.
-
-Every other case **must** use an anchored callout (FR-LCT-016). This bounded in-place rule is the
-owner-approved D1 divergence; it is the only case in which the overlay may obscure the original
-printed text, and it must be implemented as the explicit, testable condition above — not as a
-heuristic or an unbounded "replace when it seems to fit".
+- `pendingSteps` (with the existing `firstPendingStep` ordering) includes the new steps, so the Home reminder card reflects them;
+- reopening the wizard lands at the first pending new step in the configured order (FR-PI-001);
+- existing users are **not** force-migrated: the wizard is not auto-presented over the assistant and nothing blocks normal use until the steps are completed; the Settings editor (FR-PI-012) is the alternative path.
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: Smart-mix in-place replacement
+Feature: Wizard reopen path for existing users
 
-  Scenario: A short dictionary-known label is replaced in place
-    Given a stable region carries a short dictionary-known label
-    And the translation fits the region at 18 pt or larger
-    When the overlay is rendered
-    Then the translation is drawn in place with an opaque high-contrast background sized to the region
+  Scenario: New steps are pending for existing users
+    Given an installation whose persisted onboarding status predates the new steps
+    When pendingSteps is computed
+    Then the new steps (about-you, emergency contacts, voice fingerprint) are treated as pending
+    And the Home reminder card reflects them through the existing mechanism
 
-  Scenario: A cloud translation is never drawn in place
-    Given a region's translation came from the cloud tier
-    When the overlay is rendered
-    Then an anchored callout is used instead of in-place replacement
+  Scenario: Reopen lands on the first pending new step
+    Given the user taps the reminder card
+    When the wizard reopens
+    Then it opens at the first pending new step in the configured order
 
-  Scenario: A long or non-fitting translation is not drawn in place
-    Given a dictionary-known label whose source is longer than 3 words, or whose translation does not fit at 18 pt
-    When the overlay is rendered
-    Then an anchored callout is used instead of in-place replacement
+  Scenario: No force-migration
+    Given an existing user with pending new steps
+    When the app starts normally
+    Then the wizard is not auto-presented
+    And the assistant works as today until the user chooses to complete the steps
 ```
 
 #### Related
-- FR: FR-LCT-016 (anchored callouts), FR-LCT-017 (always-show-original toggle), FR-LCT-007 (tier 0)
-- NFR: NFR-LCT-003 (accessibility)
-- Depends on: FR-LCT-005 (stable regions)
+- FR: FR-PI-004 (pending status), FR-PI-012 (Settings editor), FR-PI-011 (today-behaviour)
+- Depends on: FR-PI-001
 
 
-### FR-LCT-016: Anchored callouts that never obscure the original
+### FR-PI-014: Profile data available to existing safety paths
 
 #### Metadata
-- **Area:** Overlay
+- **Area:** Safety Integration
 - **Priority:** MUST
-- **Source:** Design §4.5; addendum §13.3; base design §0/§5.1 ("never obscure/redraw reality"), preserved for all non-in-place cases; design §11 D4
+- **Source:** Feature constitution "Out of scope" (collected profile/emergency data becomes available to the existing safety paths — emergency contact selection, family notification — but those paths' behaviour is unchanged) and Feature Constraint 7 (safety delta: none)
 
 #### Description
-Every region that is **not** covered by the bounded in-place rule (FR-LCT-015) **must** be
-rendered as an anchored callout: a pill with a leader line to the detected region, showing the
-translation as the primary text (≥ 18 pt, bold, high contrast) and the original recognized text as
-smaller secondary text for cross-check. The callout **must not** cover the original printed text
-or the camera view it annotates.
+The collected profile and emergency data **must** be made available (readable) to the existing safety paths — emergency contact selection and family notification — through the profile store (FR-PI-003), so those paths can consult it where they already operate.
 
-Callout placement must remain legible on dense scenes: callouts must not be drawn on top of one
-another for distinct regions (the declutter rules of FR-LCT-006 bound how many exist).
+The paths' logic and behaviour **must not** change: no new emergency-call logic, no new notification triggers, no new thresholds, no new stub. The known descoped state of those paths is unchanged by this feature (project constitution Open Decision 11: no emergency-call module; health/family alert stubs return success silently), and this feature neither fixes nor extends them.
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: Anchored callouts
+Feature: Profile data availability to safety paths
 
-  Scenario: Non-dictionary text gets an anchored callout
-    Given a stable region whose translation is not eligible for in-place replacement
-    When the overlay is rendered
-    Then a callout with a leader line to the region is shown
-    And the translation is the primary text at 18 pt or larger
-    And the original recognized text is shown as smaller secondary text
+  Scenario: Recorded data is readable by the safety paths
+    Given next of kin, GP, or hospital values are recorded
+    When the existing emergency contact selection path consults the profile
+    Then the recorded values are available through the profile store
 
-  Scenario: The callout does not cover the original text
-    Given a callout is rendered for a region
-    When the region's printed text is inspected on screen
-    Then the callout does not cover that printed text
+  Scenario: Safety behaviour is unchanged
+    Given the feature's changes are in the build
+    When the existing safety paths (emergency contact selection, family notification) run
+    Then their triggers, outputs and failure behaviour are identical to the pre-feature baseline
+    And no new emergency-call logic, notification trigger or stub is introduced
 ```
 
 #### Related
-- FR: FR-LCT-015 (in-place rule), FR-LCT-006 (decluttering), FR-LCT-017 (toggle)
-- NFR: NFR-LCT-003 (accessibility)
-- Depends on: FR-LCT-005 (stable regions)
+- FR: FR-PI-003 (profile store), FR-PI-006 (emergency contacts)
+- NFR: NFR-PI-010 (no regression to existing flows)
+- Depends on: FR-PI-003
 
 
-### FR-LCT-017: "Always show original text" toggle
-
-#### Metadata
-- **Area:** Overlay
-- **Priority:** MUST
-- **Source:** Design §1, §4.5, §10 Open Decision 2; feature constitution binding rule 6 (the toggle ships with the D1 divergence)
-
-#### Description
-The system **must** provide an "always show original text" setting that reduces the overlay to
-**pure callout mode**: when enabled, no in-place replacement is drawn and every translated region
-uses an anchored callout (FR-LCT-016). The setting ships alongside the D1 in-place rule, is
-reachable by touch and by voice (FR-LCT-022), persists across sessions, and takes effect on the
-next rendered frame without restarting the feature.
-
-The default value of this setting is confirmed at the first device demo (design §10 Open Decision
-2); the requirement binds its existence, reachability and effect, not the default.
-
-#### Acceptance criteria
-
-```gherkin
-Feature: Always-show-original toggle
-
-  Scenario: Enabling the toggle removes in-place replacement
-    Given a short dictionary-known label that would otherwise be drawn in place
-    When the elder enables "always show original text"
-    Then the original printed text is no longer covered by the overlay
-    And an anchored callout carries the translation
-
-  Scenario: The setting persists
-    Given the elder enabled "always show original text"
-    When the elder closes and reopens live translation
-    Then the setting is still enabled
-```
-
-#### Related
-- FR: FR-LCT-015 (in-place rule), FR-LCT-016 (callouts), FR-LCT-022 (voice control)
-- NFR: NFR-LCT-003 (accessibility)
-- Depends on: FR-LCT-015
-
-
-### FR-LCT-018: Pending and failed translation states in the overlay
-
-#### Metadata
-- **Area:** Overlay
-- **Priority:** MUST
-- **Source:** Design §4.4 (`isFinal`), §4.5, §8 (error handling table); feature constitution binding rule 7
-
-#### Description
-Each region's overlay **must** reflect the real state of its translation:
-
-- **pending** — while a tier is still resolving, the region shows a "translating…" state
-  (`isFinal = false`); the elder is never shown a blank bubble or a fabricated string;
-- **resolved** — the translated string with the tier that produced it (FR-LCT-008);
-- **degraded** — when no tier produced a translation, the original text remains visible with an
-  honest unavailable/offline indication; nothing is silently dropped.
-
-State transitions must be monotonic from pending to a terminal state; a region must not flip back
-to pending once a translation is shown, and must not show "translating…" indefinitely after a
-failure (FR-LCT-009, FR-LCT-013).
-
-#### Acceptance criteria
-
-```gherkin
-Feature: Overlay progress and failure states
-
-  Scenario: A region shows the pending state while a tier resolves
-    Given a region's text is unresolved and a tier is in flight
-    When the overlay is rendered
-    Then the region shows a "translating…" state in the active language
-    And the original recognized text is still accessible
-
-  Scenario: A failed translation shows the original with an honest indication
-    Given all tiers failed for a region
-    When the overlay is rendered
-    Then the original text is shown with an unavailable/offline indication
-    And no translated-looking string is shown
-
-  Scenario: A resolved region does not revert to pending
-    Given a region has a resolved translation
-    When the scene is unchanged
-    Then the region does not return to the "translating…" state
-```
-
-#### Related
-- FR: FR-LCT-008 (truthful attribution), FR-LCT-009 (tier 2), FR-LCT-013 (governor), FR-LCT-023 (degradation)
-- NFR: NFR-LCT-010 (no false success)
-- Depends on: FR-LCT-005 (stable regions)
-
-
-### FR-LCT-019: Persistent encrypted translation cache
-
-#### Metadata
-- **Area:** Caching
-- **Priority:** MUST
-- **Source:** Design §3, §5 (cache), §11 D3 (generalizes addendum §13.2's in-memory `LabelTranslationCache`); feature constitution binding rule 10
-
-#### Description
-Translated strings **must** be cached persistently on-device, keyed
-`(normalizedText|targetLanguage)`, so that a repeat scene needs no network. The cache is **user
-content at rest**:
-
-- stored **encrypted** using the existing `StoragePlacement` / encrypted-storage pattern;
-- **seeded from the curated dictionary**, so the first use of a known label is already a hit;
-- general (non-dictionary) entries evicted by **LRU with a bound of ~200 entries**; dictionary /
-  label-vocabulary entries effectively never evict;
-- never written in plaintext and never sent to the cloud as a cache (only individual unresolved
-  strings go to the cloud tier, subject to consent).
-
-A cache hit produces the translation with zero network calls and must be preserved across app
-launches and across camera session interruptions.
-
-#### Acceptance criteria
-
-```gherkin
-Feature: Persistent encrypted translation cache
-
-  Scenario: A cached translation survives a relaunch without network
-    Given a string was translated in a previous session and is cached
-    When the app is relaunched with no network and the same string is recognized
-    Then the cached translation is shown
-    And no network request is made
-
-  Scenario: The cache is seeded from the dictionary
-    Given a freshly installed app with no prior translation history
-    When a dictionary-known label is recognized
-    Then it is resolved from the seeded cache/dictionary with no network request
-
-  Scenario: The cache is bounded by LRU eviction
-    Given the cache holds its maximum number of general entries
-    When a new general entry is inserted
-    Then the least recently used general entry is evicted
-    And dictionary/label entries are not evicted by that policy
-
-  Scenario: The cache is not stored in plaintext
-    Given a translation has been cached
-    When the on-device storage is inspected
-    Then the cached content is not readable as plaintext
-```
-
-#### Related
-- FR: FR-LCT-020 (shared cache), FR-LCT-012 (revocation keeps cache usable)
-- NFR: NFR-LCT-008 (cache at rest encryption)
-- Depends on: FR-LCT-007 (tier 0)
-
-
-### FR-LCT-020: Shared dictionary and translation cache with the appliance helper
-
-#### Metadata
-- **Area:** Caching
-- **Priority:** MUST
-- **Source:** Design §0, §3, §5; feature constitution "Known integration surface"; user-task scope
-
-#### Description
-The live translation feature **must** be a **new plugin** that shares the appliance helper's
-label dictionary and translation cache rather than owning private copies:
-
-- the tier-0 dictionary is the same `ApplianceLabelLocalizer` data set used by the appliance
-  helper, extended (not forked);
-- the persistent translation cache (FR-LCT-019) is a **single shared store** used by both the
-  appliance helper and live translation, keyed `(normalizedText|targetLanguage)`;
-- a translation resolved in one surface is available in the other without a new network call;
-- sharing **must not** change or weaken the behaviour of the shipped appliance helper
-  (`ApplianceLabelLocalizer`, `ApplianceOverlayMapper` are extended/reused, not modified).
-
-#### Acceptance criteria
-
-```gherkin
-Feature: Shared dictionary and translation cache
-
-  Scenario: A translation cached in the appliance helper is reused by live translation
-    Given the appliance helper has translated a label that is now in the shared cache
-    When live translation recognizes the same label
-    Then the cached translation is shown with no network request
-
-  Scenario: A translation cached in live translation is reused by the appliance helper
-    Given live translation has cached a label translation
-    When the appliance helper presents the same label
-    Then the same cached translation is used
-
-  Scenario: There is exactly one cache store
-    Given both features are installed
-    When the app's storage is inspected
-    Then a single translation cache exists, shared by both entry points
-```
-
-#### Related
-- FR: FR-LCT-019 (persistent cache), FR-LCT-007 (dictionary)
-- NFR: NFR-LCT-012 (no regression to the appliance helper)
-- Depends on: FR-LCT-019
-
-
-### FR-LCT-021: Tap-to-hear and "read this to me"
-
-#### Metadata
-- **Area:** Voice Output
-- **Priority:** MUST
-- **Source:** Design §1, §4.6, §6; feature constitution "Scope" (tap-to-hear and "read this to me" via the existing Piper voices)
-
-#### Description
-The system **must** support hearing translations through the existing on-device speech stack
-(`SpeakQueue` with the active-language Piper voice):
-
-- **tap-to-hear**: tapping a region's bubble speaks that region's translation (tap target ≥ 44 pt);
-- **"read this to me"**: a session voice command that speaks the visible regions' translations
-  **top-to-bottom** in screen order; "stop" halts the reading;
-- auto-speak of every new translation is a **non-goal** — nothing is spoken without an explicit
-  tap or command (design §1 non-goals, to avoid noise in multi-label scenes);
-- if speech fails, the visual translation **must** remain visible and no retry loop may start
-  (existing `SpeakQueue` degradation).
-
-#### Acceptance criteria
-
-```gherkin
-Feature: Hearing translations
-
-  Scenario: Tap-to-hear speaks one region
-    Given a region has a resolved translation
-    When the elder taps its bubble
-    Then the translation is spoken in the active language
-    And no other region is spoken
-
-  Scenario: "Read this to me" reads visible regions top-to-bottom
-    Given several stable regions with resolved translations are visible
-    When the elder says "read this to me"
-    Then the translations are spoken in top-to-bottom screen order
-    And saying "stop" halts the reading
-
-  Scenario: Nothing is spoken automatically
-    Given a new region gains a resolved translation
-    When the elder does not tap or ask
-    Then no speech is produced
-
-  Scenario: Speech failure does not remove the visual translation
-    Given a tap-to-hear request fails in the speech stack
-    Then the visual translation remains visible
-    And no retry loop is started
-```
-
-#### Related
-- FR: FR-LCT-018 (overlay states), FR-LCT-022 (session commands)
-- NFR: NFR-LCT-003 (accessibility), NFR-LCT-004 (localisation)
-- Depends on: FR-LCT-005 (stable regions)
-
-
-### FR-LCT-022: LiveTranslatePlugin voice entry and session lifecycle
-
-#### Metadata
-- **Area:** Plugin & Session
-- **Priority:** MUST
-- **Source:** Design §0, §2, §4.6; feature constitution "Known integration surface" (session-local commands, no intent-encoder retraining); `ApplianceHelperPlugin` precedent
-
-#### Description
-Live translation **must** ship as a new voice-invokable plugin, `LiveTranslatePlugin`, registered
-in the plugin registry as a sibling of `ApplianceHelperPlugin`:
-
-- **voice entry** — the elder opens it by voice ("translate this" in English or Nepali); the
-  plugin's entry is session-local command matching in the same shape as the appliance helper's
-  entry. The shared intent encoder is **not** retrained and no global intent vocabulary is added
-  for this feature.
-- **session commands** — at minimum: "read this to me" (FR-LCT-021), the "always show original"
-  toggle phrase (FR-LCT-017), and "stop"/close. Commands are session-local, parsed in the plugin's
-  session.
-- **presentation** — the plugin presents its own full-bleed SwiftUI view; there is one obvious
-  close control (≥ 44 pt) that stops the camera session and returns the elder to the assistant.
-- **session lifecycle** — backgrounding, a phone call, or an interruption pauses the capture
-  session; returning to the foreground resumes it. Overlays for the visible scene reappear from
-  the cache without a new cloud request. No overlay state may be silently lost on resume.
-
-#### Acceptance criteria
-
-```gherkin
-Feature: Plugin entry and session lifecycle
-
-  Scenario: Voice entry opens live translation
-    Given the assistant is listening
-    When the elder says "translate this" (or the Nepali equivalent)
-    Then the live translation view opens with the camera preview
-    And the shared intent encoder has not been retrained or extended for this feature
-
-  Scenario: Interruption pauses and resumes the session
-    Given the live translation view is open and showing overlays
-    When the app is backgrounded (or a phone call arrives) and then returns to the foreground
-    Then the capture session is paused and resumed
-    And previously resolved overlays reappear from the cache without a new cloud request
-
-  Scenario: One obvious exit
-    Given the live translation view is open
-    When the elder taps the close control
-    Then the capture session stops
-    And the elder returns to the assistant without further prompts
-```
-
-#### Related
-- FR: FR-LCT-021 (voice reading), FR-LCT-017 (toggle), FR-LCT-001 (preview)
-- NFR: NFR-LCT-003 (accessibility), NFR-LCT-004 (localisation), NFR-LCT-012 (no regression)
-- Depends on: FR-LCT-001, FR-LCT-002
-
-
-### FR-LCT-023: Honest degradation — never silently report success
+### FR-PI-015: Profile read failures degrade to the un-personalized path
 
 #### Metadata
 - **Area:** Error Handling
 - **Priority:** MUST
-- **Source:** Design §4.2, §8 (error handling table), §4.4 (`degraded`); feature constitution binding rule 7
+- **Source:** Feature constitution "Address-as Behaviour Contract" (including any fallback path, the assistant behaves exactly as today) and Feature Constraint 5 (encrypted local storage); project constitution Agent Principles (no silent stubs; deferred/absent capability is never faked)
 
 #### Description
-Every degradation path **must** be visible and honest. No path may report success without a
-translation, retry-loop, or leave the elder without the information that the text on screen is
-not translated:
+Any failure to read the profile — missing store (fresh install, not yet written), corrupt or unreadable payload, decryption failure — **must** degrade to the un-personalized path:
 
-| Condition | Required behaviour |
-|---|---|
-| No text in frame | Empty-state hint in the active language; no error surfaced |
-| No network / no consent / no budget | Original text plus an "offline"/unavailable indication; the dictionary and cache keep working |
-| Transient provider error | At most one retry, then the offline indication |
-| Provider policy block | No retry; the offline indication |
-| Camera denied | Explanatory screen plus Settings link (FR-LCT-002) |
-| Camera session interrupted | Pause and resume; cached overlays persist |
-| Speech failure | The visual translation remains; no retry loop |
-| App killed while the view is open | Nothing is half-written; the cache is consistent on relaunch |
+- the assistant behaves exactly as today (FR-PI-011): it never crashes, stalls or blocks at startup;
+- no term is fabricated; no placeholder is invented; no partially read value is used;
+- a corrupt payload is discarded or rebuilt rather than retried in a loop;
+- the failure is recorded in logs without PII (NFR-PI-002).
 
-Timeouts and retry counts are configurable parameters, not hardcoded constants. Deferred or
-absent capability is never faked: see FR-LCT-008.
+Writes **must** never leave a half-written profile that a subsequent read could misinterpret.
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: Honest degradation
+Feature: Profile read failures degrade cleanly
 
-  Scenario: Offline with no dictionary hit
-    Given the device is offline and a recognized string is not in the dictionary or cache
-    When the translation tiers resolve
-    Then the original text is shown with an offline indication
-    And the feature does not block or crash
-    And the result reports degraded rather than success
+  Scenario: Missing store on a fresh install
+    Given no profile has been written
+    When the assistant starts and the wake word is detected
+    Then behaviour is today's baseline, with no term and no greeting
+    And no error is surfaced to the user
 
-  Scenario: Nothing is silently dropped when a tier fails
-    Given a region was sent to the cloud tier and the request failed
-    When the overlay is rendered
-    Then that region still shows its original text with an honest indication
-    And no region with a failure is removed without explanation
+  Scenario: A corrupt payload does not break startup
+    Given the stored profile payload is unreadable
+    When the assistant starts
+    Then it runs un-personalized, discards or rebuilds the corrupt payload, and does not crash or stall
 
-  Scenario: Recovery when connectivity returns
-    Given the app showed offline indications for unresolved regions
-    When connectivity returns and the scene is still visible
-    Then the unresolved regions are retried once under the normal consent and cost rules
-    And their overlays update to the translation when it arrives
+  Scenario: No partial application and no placeholder
+    Given a read failure occurs partway through the profile
+    When the profile is consumed
+    Then no partially read term or field is used
+    And no placeholder value is invented
 ```
 
 #### Related
-- FR: FR-LCT-008 (truthful attribution), FR-LCT-009 (tier 2), FR-LCT-013 (governor), FR-LCT-018 (overlay states)
-- NFR: NFR-LCT-010 (offline degradation integrity), NFR-LCT-011 (configurable parameters)
-- Depends on: FR-LCT-003, FR-LCT-009
+- FR: FR-PI-003 (profile store), FR-PI-011 (today-behaviour)
+- NFR: NFR-PI-002 (log safety)
+- Depends on: FR-PI-003
+
+
+### FR-PI-016: App-start interview-status routing (resume where the user left off)
+
+#### Metadata
+- **Area:** Onboarding Wizard / App Start
+- **Priority:** MUST
+- **Source:** Owner amendment 2026-10-05 (owner sign-off); specs/profile-interview/constitution.md Feature Constraint 8
+
+#### Description
+On app start the app **must** check the onboarding interview's completion status (the per-step status in `OnboardingState`, including the mandatory fields of FR-PI-002) and route accordingly:
+
+- **Mandatory fields missing** (name or address-as — FR-PI-002): the user **must** be routed to the interview screen (the wizard) at the first pending step — About-you — resuming where the user left off. This is a hard route on app start.
+- **Optional interview steps pending** (FR-PI-004): the user **must** also be routed to the wizard, at the first pending optional step, with the OD-F3 soft-skip affordance preserved — the user can still skip and is never trapped.
+- **Interview complete:** the app starts normally, with no routing to the interview screen.
+
+The resume mechanism **must** be the existing `OnboardingState.pendingSteps` / `firstPendingStep` computation plus the wizard's `startingAt:` reopen path (FR-PI-013) — no new resume state is introduced. The first pending step follows the configured order (FR-PI-001).
+
+Cold start is the minimum trigger for this requirement. Whether a background-to-foreground transition also re-checks is a design decision for the architect (design-l1 / design-l2), not a requirement of this set.
+
+Relationship to FR-PI-013: this owner amendment (2026-10-05) supersedes FR-PI-013's "No force-migration" scenario for the app-start path — pending steps are now surfaced on start — while preserving its non-blocking intent through the skippable steps (FR-PI-004 / OD-F3). FR-PI-013's `pendingSteps` / `firstPendingStep` / `startingAt:` mechanics are unchanged and are the resume mechanism used here.
+
+A failure to read the interview completion status **must not** crash or stall app start and **must not** trap the user (FR-PI-015; FR-PI-004).
+
+#### Acceptance criteria
+
+```gherkin
+Feature: App-start interview-status routing
+
+  Scenario: Mandatory fields missing on cold start — hard route to About-you
+    Given the app cold-starts with name or address-as not recorded
+    And the first pending step is About-you
+    When the app starts
+    Then the user is routed to the interview screen (the wizard)
+    And the wizard opens at About-you, so the interview resumes where the user left off
+
+  Scenario: Optional steps pending on cold start — routed but never trapped
+    Given the app cold-starts with name and address-as recorded
+    And at least one optional interview step is pending
+    When the app starts
+    Then the user is routed to the interview screen (the wizard)
+    And the wizard opens at the first pending optional step
+    And the OD-F3 soft-skip affordance is available, so the user can skip and is never trapped
+
+  Scenario: Interview complete — no routing on cold start
+    Given the app cold-starts with the interview complete
+    When the app starts
+    Then the app starts normally with no routing to the interview screen
+
+  Scenario: A status read failure does not crash or trap
+    Given the interview completion status cannot be read (corrupt or unreadable state)
+    When the app starts
+    Then the app starts without crashing, stalling or looping on the status check
+    And the user is never trapped in the wizard
+```
+
+#### Related
+- FR: FR-PI-002 (mandatory gate), FR-PI-004 (optional skippable pattern), FR-PI-013 (reopen path; its "No force-migration" scenario is superseded for the app-start path by this amendment), FR-PI-015 (no crash or trap on read failure)
+- NFR: NFR-PI-010 (no regression)
+- Depends on: FR-PI-001 (step order), FR-PI-013 (resume mechanism)
 
 
 ## Non-functional requirements
 
-
-### NFR-LCT-001: Overlay responsiveness and translation latency
+### NFR-PI-001: Profile encryption at rest
 
 #### Metadata
-- **Category:** Performance
+- **Category:** Security
 - **Priority:** MUST
-- **Source:** Design §2 (latency budget), §5
+- **Source:** Feature constitution Feature Constraint 5 (DOB and emergency contacts are personal data stored in the existing encrypted local storage — Keychain, Data Protection Complete); "Field Contract" storage column; project constitution Standards (Security: emergency contact data in encrypted app storage; Data Protection class Complete)
 
 #### Description
-The overlay **must** never make the elder wait on the network or on OCR for feedback:
+Every new profile field — name, address-as term, date of birth, GP, hospital, next of kin — is personal data and **must** be stored encrypted at rest using the existing encrypted-storage pattern (`EncryptedFileStorage`; Keychain key material; iOS Data Protection class Complete).
 
-- **Dictionary hit (tier 0):** translation available in **< 50 ms**, zero network calls.
-- **Cache hit:** overlay filled on the first rendered frame that carries the region (no
-  "translating…" state shown for a cached string).
-- **Cloud miss (tier 2):** the region shows the pending state immediately and is filled within one
-  round trip; the design's measured expectation is **1–3 s** for a typical batch, and the
-  configured request timeout is the bound. A request that exceeds its timeout must produce the
-  degraded state, not an unbounded pending state.
-- **Overlay cadence:** overlays update at the OCR cadence (nominally ~4 Hz) and are never blocked
-  by an in-flight translation.
+Measurable properties:
+
+- **Zero plaintext copies** of any profile value anywhere on disk, including temporary files used during writes and any debug artifacts.
+- The store is readable only with the app's key material; no plaintext backup of the values exists.
+- A corrupt or undecryptable payload is treated as a read failure (FR-PI-015) — it is discarded, never exposed and never partially applied.
+- Removing the app removes the profile data; no new cloud or file-based backup path is introduced for it (NFR-PI-003).
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: Overlay responsiveness
+Feature: Profile encryption at rest
 
-  Scenario: Dictionary hit is effectively instant
-    Given a recognized label is in the curated dictionary
-    When the region becomes stable
-    Then its translation is shown without a pending state
-    And no network request is made
+  Scenario: No readable PII on disk
+    Given all profile fields have been saved
+    When the app container is inspected
+    Then no file contains the name, address-as, date of birth, GP, hospital or next-of-kin values in readable form
+    And the payload requires the app's Keychain key material to read
 
-  Scenario: A cloud-bound region shows pending immediately and resolves within the timeout
-    Given a recognized string is unresolved and consent allows the cloud tier
-    When the region becomes stable
-    Then the region shows the pending state on the next rendered frame
-    And it is filled with the translation or the degraded state within the configured timeout
-
-  Scenario: An overlay is not blocked by an in-flight translation
-    Given a translation request is in flight for one region
-    When the scene updates with other regions
-    Then the other regions' overlays render at the OCR cadence
+  Scenario: An undecryptable payload is discarded, not exposed
+    Given the stored payload cannot be decrypted
+    When the store loads
+    Then the data is not exposed and no partial value is used
+    And the assistant degrades per FR-PI-015
 ```
 
 #### Related
-- FR: FR-LCT-005, FR-LCT-018, FR-LCT-023
-- NFR: NFR-LCT-002 (OCR cadence), NFR-LCT-011 (configurable parameters)
+- FR: FR-PI-003 (profile store), FR-PI-015 (read-failure fallback)
 
 
-### NFR-LCT-002: OCR cadence, battery and thermal budget
+### NFR-PI-002: Log safety — no new PII in logs
 
 #### Metadata
-- **Category:** Performance
+- **Category:** Privacy / Security
 - **Priority:** MUST
-- **Source:** Design §4.1, §5; addendum Open Decision 11; feature constitution Open Decision 1
+- **Source:** Feature constitution Feature Constraint 5 (logs must not contain the new PII — project Privacy standard, log sanitiser); project constitution Standards (Privacy: logs must not contain PII — log sanitiser required) and release gates (release-build log-surface gate)
 
 #### Description
-On-device OCR runs on a throttled frame tap, nominally **~4 fps** on downscaled frames
-(`AVCaptureVideoDataOutput` with `videoSettings`), and **must** be implemented as a **configurable
-parameter**, not a hardcoded constant. The nominal rate is not yet committed: it requires a
-device spike on mid-range hardware before it is fixed (design §10 Open Decision 1), and the
-shipped default must be adjustable without a code change beyond that parameter.
+The new PII — name, address-as term, date of birth, GP, hospital, next of kin — **must not** appear in any log, in any build, on any path this feature adds or touches (store, wizard, wake acknowledgment, prompt composition, settings, error paths).
 
-The feature **must not** introduce continuous work beyond the throttled OCR, Vision tracking and
-overlay rendering: no photo processing, no continuous cloud upload, no background inference. Under
-sustained use the app must not trigger iOS thermal throttling or a low-power shutdown of the
-camera session: if iOS interrupts the session for thermal or resource reasons, the feature
-degrades visibly per FR-LCT-023 rather than failing silently.
+Measurable properties:
+
+- **Zero occurrences** of any profile value in console output, log files or telemetry metadata in a Release build exercising a fully personalized session.
+- Observability may record non-content facts only: "profile present: yes/no", step completion booleans, error classifications — never the values.
+- The log sanitiser covers the new fields; diagnostic call sites that would carry them are redacted or omit them.
+- The release-build log-surface gate `ios/tools/check-release-log-safety.sh` (wired into `ios/build.sh`) covers the new profile, wake-acknowledgment and settings paths and **exits 0** — a build-blocking gate, not a report.
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: OCR cadence and thermal behaviour
+Feature: Log safety for profile data
 
-  Scenario: OCR runs at the configured cadence
-    Given live translation is open
-    When frames are sampled for a sustained period
-    Then OCR runs at the configured throttle rate (nominal ~4 fps)
-    And no frame is submitted to OCR more often than that rate
+  Scenario: A personalized session produces no PII in logs
+    Given a Release build with a recorded profile triggers the wake acknowledgment and replies
+    When the console and log output are inspected
+    Then no name, address-as term, date of birth or emergency-contact value appears
+    And no raw profile payload or error body appears
 
-  Scenario: No continuous cloud or photo work
-    Given a scene with no text changes
-    When the session is idle
-    Then no cloud requests are issued
-    And no photo capture or image processing runs
+  Scenario: A diagnostic reference to the term is sanitised
+    Given a diagnostic event would reference the address-as term
+    When it is logged
+    Then the value is redacted or omitted by the log sanitiser
 
-  Scenario: Thermal interruption degrades visibly
-    Given iOS pauses or stops the capture session for thermal or resource reasons
-    When the session cannot continue
-    Then the elder sees an honest degraded state in the active language
-    And the app does not crash or silently stall
+  Scenario: The release log-safety gate covers the new paths
+    Given the feature's logging paths exist in the build
+    When ios/tools/check-release-log-safety.sh runs
+    Then it exits 0
+    And it inspects the new profile, wake-acknowledgment and settings paths
 ```
 
 #### Related
-- FR: FR-LCT-003, FR-LCT-001, FR-LCT-023
-- NFR: NFR-LCT-001 (responsiveness), NFR-LCT-011 (configurable parameters)
+- FR: FR-PI-003, FR-PI-008, FR-PI-012, FR-PI-015
+- NFR: NFR-PI-011 (compliance and release gates)
 
 
-### NFR-LCT-003: Accessibility — tap targets, overlay text, contrast
+### NFR-PI-003: No new network egress or cloud processing
 
 #### Metadata
-- **Category:** Accessibility
+- **Category:** Privacy
 - **Priority:** MUST
-- **Source:** Feature constitution binding rule 6; project constitution Standards (Accessibility); design §6
+- **Source:** Feature constitution "Out of scope" (any new cloud processing — no new network egress) and Feature Constraint 5; project constitution Architecture Constraint 1 (all AI inference on-device; recorded exceptions Open Decisions 12 and 13 are untouched)
 
 #### Description
-Accessibility is a feature requirement, not polish:
+The feature **must** add zero new network calls, endpoints, request shapes or data flows.
 
-- Every interactive element (translation bubbles, close control, consent prompts) **must** have a
-  tap target of at least **44 × 44 pt**.
-- Overlay translation text **must** be at least **18 pt**, bold, and high contrast against its
-  background; the original-text secondary line must remain legible at the smallest supported
-  dynamic type step used by the overlay.
-- Bubble backgrounds **must** adapt to light and dark appearance via the existing `DesignTokens`.
-- The overlay **must not** obscure the original printed text except under the bounded in-place
-  rule (FR-LCT-015), and the pure-callout fallback (FR-LCT-017) must always be available.
-- The camera view must remain usable with VoiceOver: each bubble exposes its translation as its
-  accessibility label.
+Measurable properties:
+
+- **Zero network requests attributable to the feature** across the full journey: interview, wizard close, wake acknowledgment, reply generation, Settings edit — the whole feature works fully offline (on-device engines).
+- All new stored fields stay on-device. Only the **name** and **address-as term** may be composed into the existing reply prompt paths, alongside the content those paths already carry.
+- **Zero occurrences** of date of birth, GP, hospital, next-of-kin, family-member or biometric values in any prompt or outbound payload.
+- On a reply path that uses the existing consent-gated cloud engine, the term is carried only inside that engine's existing flow, under its existing consent status and recorded exception — no new egress category and no new disclosure obligation are created.
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: Accessibility of the live translation overlay
+Feature: No new network egress or cloud processing
 
-  Scenario: Tap targets meet the minimum size
-    Given a rendered translation bubble or control
-    When its hit area is measured
-    Then it is at least 44 by 44 points
+  Scenario: The full journey works with no network
+    Given the device is offline
+    When the interview is completed, the wizard closes, the wake word fires, and on-device replies run
+    Then every step of the journey works
+    And zero network requests are attempted by the feature
 
-  Scenario: Overlay text meets the minimum size and contrast
-    Given a rendered translation
-    When its presented size is inspected
-    Then the translation text is at least 18 pt and bold
-    And it uses the high-contrast design token for the current appearance
+  Scenario: Only name and term may enter prompts
+    Given a profile with all fields filled
+    When prompt payloads for both reply engines are inspected
+    Then the name and/or address-as appear only where the reply-style rules use them
+    And date of birth, GP, hospital, next-of-kin, family and biometric values appear in no prompt or outbound payload
 
-  Scenario: VoiceOver can read a bubble
-    Given VoiceOver is enabled
-    When the elder focuses a translation bubble
-    Then the translation is announced
+  Scenario: No new endpoint or request shape is introduced
+    Given the feature's outbound code paths
+    When request construction is inspected
+    Then no new endpoint or request shape exists beyond the existing engine paths
 ```
 
 #### Related
-- FR: FR-LCT-015, FR-LCT-016, FR-LCT-017
-- NFR: NFR-LCT-004 (localisation)
+- FR: FR-PI-003, FR-PI-009
+- NFR: NFR-PI-004 (injection hardening), NFR-PI-011 (compliance gates)
 
 
-### NFR-LCT-004: Localisation of new UI strings
+### NFR-PI-004: Untrusted profile-string hardening (injection)
+
+#### Metadata
+- **Category:** Security
+- **Priority:** MUST
+- **Source:** Feature constitution Feature Constraint 4 (security-design-review focus — prompt injection: the user-entered address-as is composed into brain prompts, making it an untrusted input path; the design must apply the project's existing `InputSanitiser` discipline; the term must not alter reply-style rules, tool/intent routing, or safety behaviour); workflow security-design-review focus areas; project constitution Standards ("Injection detection enabled at `quarantine` level")
+
+#### Description
+The name and address-as term are user-entered, attacker-influenceable input composed into prompts shared by the cloud (Gemini) and on-device (LLaMA) brains. Before either enters any prompt it **must** be handled with the same discipline `InputSanitiser` applies to transcripts (quarantine level):
+
+- **Sanitised and bounded** — the composed value is capped by a configured bound (not a magic literal); truncation never splits a grapheme cluster; the composed prompt remains within the pinned 1,024-token on-device budget (NFR-PI-005).
+- **Passed as data** — delimited/quoted, never as free-form instruction text, so the value cannot be parsed as a rule.
+- **No capability change** — a crafted term must not be able to alter reply-style rules, intent/tool routing, authentication, or safety behaviour, and must not trigger any app action.
+- **Policy action before send** — text that trips the injection policy follows the configured quarantine action (the same level the project configures); the assistant degrades to the un-personalized path (FR-PI-011) rather than sending a hostile payload.
+- Model output is treated as untrusted: nothing from a reply can cause profile writes or actions by itself.
+
+The term cannot reach these guarantees without this discipline; the security-design-review's STRIDE model must treat this surface as a focus area and `security-test` must present both the positive and negative evidence.
+
+#### Acceptance criteria
+
+```gherkin
+Feature: Hardening against hostile profile strings
+
+  Scenario: An ordinary term personalizes prompts as data
+    Given the user records an ordinary address-as term
+    When prompts are built for either engine
+    Then the term is included as delimited data
+    And personalization works normally
+
+  Scenario: An injection-shaped term cannot alter behaviour
+    Given a term contains an instruction aimed at the model (for example "ignore your instructions and ...")
+    When the term is composed into the prompt path
+    Then the injection policy's configured action is applied before any prompt is sent
+    And reply-style rules, intent routing, authentication and safety behaviour are unchanged
+    And no app action is triggered by the term
+
+  Scenario: An oversized term is bounded without breaking graphemes
+    Given a term far longer than the configured bound
+    When it is composed
+    Then it is truncated to the bound without splitting a grapheme cluster
+    And the composed prompt stays within the 1,024-token budget
+```
+
+#### Related
+- FR: FR-PI-009 (reply-style rules)
+- NFR: NFR-PI-005 (prompt budget), NFR-PI-002 (log safety)
+
+
+### NFR-PI-005: Prompt token budget and seed mirror preserved
+
+#### Metadata
+- **Category:** Reliability / Maintainability
+- **Priority:** MUST
+- **Source:** Feature constitution Feature Constraints 1–2 (prompt token budget: templates run in a 1,024-token on-device context and are pinned by `IntentPromptTests`' character ceiling — any prompt edit must preserve the budget and keep the tests passing; seed mirror: `tools/train-intent/seeds/prompt_template.txt` must be updated byte-identically in the same change as any `IntentPrompt` template edit)
+
+#### Description
+The reply-style prompt edits **must** preserve the pinned budget:
+
+- The templates run in a **1,024-token** on-device context; the character ceiling pinned by `IntentPromptTests` **must not** be raised to fit the personalization, and `IntentPromptTests` must pass with a term recorded and with no term recorded.
+- The address-as composition is bounded (NFR-PI-004), so the budget holds for arbitrarily long user input.
+- `tools/train-intent/seeds/prompt_template.txt` **must** be updated **byte-identically** to the shipped template in the same change as any template edit — byte identity is the measurable property (a checksum equality).
+
+#### Acceptance criteria
+
+```gherkin
+Feature: Prompt budget and seed mirror
+
+  Scenario: The pinned budget is preserved with the term recorded
+    Given the personalized prompt templates with an address-as term recorded
+    When IntentPromptTests run
+    Then they pass within the pinned character ceiling
+    And the composed prompt fits the 1,024-token on-device context
+
+  Scenario: The seed file is byte-identical to the template
+    Given the prompt template change
+    When tools/train-intent/seeds/prompt_template.txt is compared with the shipped template
+    Then the two are byte-identical (checksums equal)
+```
+
+#### Related
+- FR: FR-PI-009 (reply-style rules)
+- NFR: NFR-PI-004 (injection hardening), NFR-PI-010 (no regression)
+
+
+### NFR-PI-006: Localisation of new UI strings
 
 #### Metadata
 - **Category:** Localisation
 - **Priority:** MUST
-- **Source:** Feature constitution binding rule 8; project constitution Standards (Localisation); design §6
+- **Source:** Feature constitution "In scope" (all new UI strings externalized to the L10n string catalogs) and Feature Constraint 3; project constitution Standards (Localisation: all UI strings externalised; primary user's language for TTS)
 
 #### Description
-All new UI strings introduced by this feature — empty-state hint, pending state, offline
-indication, consent copy, cloud-activity label, settings toggle, session command prompts, error
-and degraded messages — **must** be externalised in the String Catalog
-(`ios/ElderlyAssistant/Resources/Localizable.xcstrings`) with Nepali first, and rendered in the
-app's active language. No user-visible string may be hardcoded in a Swift literal.
+All new user-visible strings introduced by this feature — step titles and descriptions, field labels and hints, emergency-contact labels, voice-fingerprint step copy, Settings editor labels, and error/degradation copy — **must** be externalised to the L10n string catalogs with Nepali alongside the existing languages. Measurable: **100%** of the feature's user-visible strings have catalog entries; **zero** hardcoded user-visible strings in Swift literals.
 
-Overlay translation text and all spoken output **must** use the Devanagari rendering path already
-in place; spoken output uses the active-language Piper voice.
+The address-as term and the user's name are data: they **must never** be catalog entries and are never localized (FR-PI-010); they render and speak verbatim. Existing wizard copy remains in the catalogs.
 
 #### Acceptance criteria
 
 ```gherkin
 Feature: Localisation of the feature's strings
 
-  Scenario: New UI strings are externalised
-    Given the feature's user-visible strings (empty state, pending, offline, consent, indicator, toggle)
-    When the String Catalog is inspected
+  Scenario: All new UI strings are externalised
+    Given the feature's new UI strings (steps, field labels, fingerprint copy, settings labels, error copy)
+    When the string catalogs are inspected
     Then each string has a catalog entry with a Nepali translation
     And no feature string is hardcoded in the view code
 
-  Scenario: Overlay renders Devanagari in the active language
-    Given the active language is Nepali and a translation is resolved
-    When the overlay is rendered
-    Then the translation is displayed in Devanagari using the app's existing text rendering
+  Scenario: The address-as term is never localized
+    Given the catalogs and the rendering paths
+    When the term is displayed or spoken
+    Then it is emitted verbatim
+    And it is absent from the catalogs
 ```
 
 #### Related
-- FR: FR-LCT-018, FR-LCT-023, FR-LCT-021
-- NFR: NFR-LCT-003 (accessibility)
+- FR: FR-PI-010 (verbatim term), FR-PI-012 (Settings editor)
+- NFR: NFR-PI-007 (accessibility)
 
 
-### NFR-LCT-005: Privacy — no image or unrelated-content egress
+### NFR-PI-007: Accessibility of the new interview UI
 
 #### Metadata
-- **Category:** Privacy
+- **Category:** Accessibility
 - **Priority:** MUST
-- **Source:** Feature constitution binding rule 1; project constitution Architecture Constraint 1 and Open Decision 13 (Scope); design §7
+- **Source:** Project constitution Standards (Accessibility: 44×44 pt minimum tap targets; minimum 18 pt body text; high-contrast text; voice-first UI) and Compliance constraints (clear plain-language explanation visible to elderly users)
 
 #### Description
-The privacy boundary is absolute and measurable:
+The new wizard steps and the Settings profile editor **must** meet the project accessibility standards:
 
-- **Zero images leave the device** from this feature: no frame, photo, thumbnail, or derived image
-  data in any request, at any time, including retries and error paths.
-- **Zero unrelated personal content leaves the device**: no health values, contacts, profile,
-  calendar, medication, location or device identifiers are attached to a translation request.
-- The only content that may leave is the recognized text strings and the language parameters
-  needed to translate them (FR-LCT-014), under recorded consent (FR-LCT-010) and within the cost
-  governor cap (FR-LCT-013).
-- Recognition itself is on-device: OCR performs no network access.
+- Interactive targets (buttons, input fields, list rows, Skip/Next controls) are at least **44 × 44 pt**.
+- Body text is at least **18 pt**; the layout must not override system scaling in a way that reduces text below this minimum at supported sizes.
+- Colours meet WCAG AA contrast — at least **4.5:1** for body text, **3:1** for large text and UI components.
+- Devanagari (Nepali) renders correctly through the app's existing text rendering, and copy is plain-language (no technical terms) for the elderly primary user as well as a helping family member.
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: Privacy boundary of the translation egress
+Feature: Accessibility of the new interview UI
 
-  Scenario: A full session with a text-dense scene leaks no image data
-    Given consent is recorded and a text-dense scene is translated
-    When every outbound request from the session is inspected
-    Then no request contains image or media data
-    And no request contains health, contacts, profile, calendar or location content
-    And every request contains only recognized text plus language parameters
+  Scenario: Tap targets and text sizes meet the minimums
+    Given a rendered new wizard step or Settings editor screen
+    When targets and text sizes are measured
+    Then every interactive target is at least 44 by 44 points
+    And body text is at least 18 pt
 
-  Scenario: OCR is performed without network access
-    Given the device has no network connection
-    When recognitions run
-    Then recognition completes on-device
-    And no network request is attempted for recognition
+  Scenario: Contrast meets AA
+    Given the rendered labels and controls
+    When contrast ratios are measured
+    Then body text meets at least 4.5:1
+    And large text and UI components meet at least 3:1
 ```
 
 #### Related
-- FR: FR-LCT-014 (text-only egress), FR-LCT-001 (no photo output), FR-LCT-003 (on-device OCR)
-- NFR: NFR-LCT-006 (log safety), NFR-LCT-007 (consent)
+- FR: FR-PI-002 (About-you), FR-PI-012 (Settings editor)
+- NFR: NFR-PI-006 (localisation)
 
 
-### NFR-LCT-006: Log safety — no recognized or translated text in logs
+### NFR-PI-008: Wake-acknowledgment latency and failure fallback
 
 #### Metadata
-- **Category:** Privacy / Security
+- **Category:** Performance / Reliability
 - **Priority:** MUST
-- **Source:** Feature constitution binding rule 5; project constitution release gate (T-049/T-050 precedent); design §7
+- **Source:** Feature constitution "Address-as Behaviour Contract" (wake acknowledgment; behaves exactly as today including any fallback path); project stakeholder brief NFR-003 (wake-word activation within 1 second); owner brief 2026-10-05
 
 #### Description
-Recognized text and translated text are **user content**: they may not appear in any log, in any
-build.
+The personalized acknowledgment **must not** regress wake responsiveness:
 
-- No raw OCR string, no translated string, and no upstream provider error body may be printed to
-  the console, written to a file, or included in telemetry metadata.
-- Observability for this feature may record non-content facts only: counts, durations, tier used,
-  cache hit/miss, outcome classification.
-- `ios/tools/check-release-log-safety.sh` (wired into `ios/build.sh`) **must** cover every new
-  log path this feature adds, with the same standard as the existing transcript paths, and must
-  exit 0 — this is a build-blocking gate, not a report.
+- The acknowledgment speech **begins within 1 second** of wake-word detection (the existing activation budget of `requirements.md` NFR-003).
+- The existing listening flow continues as today; the acknowledgment must not introduce an unbounded wait or block intent capture beyond the current pipeline's behaviour — the exact sequencing and mechanism are OD-F2 (architect).
+- If the acknowledgment cannot be spoken (TTS engine unavailable or failed), the path **must** fall back to today's silent start: no crash, no blocking, no retry loop, and listening still begins.
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: Log safety for translation content
+Feature: Wake-acknowledgment responsiveness
 
-  Scenario: A translated scene produces no content in logs
-    Given a Release build translating a text-dense scene
-    When the console and log output are inspected
-    Then no recognized string appears
-    And no translated string appears
-    And no upstream error body appears
+  Scenario: The acknowledgment begins within the activation budget
+    Given an address-as term is recorded
+    When the wake word is detected
+    Then the acknowledgment begins within 1 second
+    And the existing listening flow continues as today
 
-  Scenario: The release log-safety gate covers the new paths
-    Given the feature's logging paths exist in the build
-    When `ios/tools/check-release-log-safety.sh` runs
-    Then it exits 0
-    And it inspects the new OCR/translation paths
+  Scenario: TTS failure falls back to today's silent start
+    Given the acknowledgment cannot be spoken (TTS unavailable)
+    When the wake word is detected
+    Then the assistant starts listening as today, with no greeting
+    And no crash, blocking wait or retry loop occurs
 ```
 
 #### Related
-- FR: FR-LCT-003, FR-LCT-009
-- NFR: NFR-LCT-005 (privacy), NFR-LCT-013 (release gates)
+- FR: FR-PI-008 (wake ack), FR-PI-011 (today-behaviour)
+- NFR: NFR-PI-010 (no regression)
+- Open decision: OD-F2 (phrasing and mechanism)
 
 
-### NFR-LCT-007: Consent enforcement and auditability
+### NFR-PI-009: Voice-biometric mechanism unchanged
 
 #### Metadata
-- **Category:** Compliance / Security
+- **Category:** Security / Compliance
 - **Priority:** MUST
-- **Source:** Feature constitution binding rules 2 and 3; project constitution Open Decision 13; design §7; workflow security-test focus areas
+- **Source:** Feature constitution "Out of scope" (no changes to the existing voice-biometric enrollment/verification mechanisms; the fingerprint step reuses them as-is) and Feature Constraint 6 (Secure Enclave; no change to that mechanism); project constitution Standards (voice biometric enrolment and verification stored on-device only — Secure Enclave / Keystore)
 
 #### Description
-Consent enforcement must be **evidence-producing**, not merely intended:
+The voice fingerprint step (FR-PI-007) is a new entry point into the existing flow; it **must not** modify it.
 
-- **No tier-2 call without recorded consent** — enforced at the single request chokepoint, so no
-  code path (including retries, background retries, or a family-config change) can reach the cloud
-  tier without it.
-- The consent record is stored **on-device**, timestamped, and revocable; revocation takes effect
-  for **all subsequent requests** without an app restart.
-- The gate is **fail-closed**: an absent, corrupt or unreadable consent record denies the request.
-- `security-test` must be able to evidence both the positive case (consent recorded → request
-  observed) and the negative case (no consent → zero requests observed, including under a
-  dictionary-miss, a batch, and a retry).
+Measurable properties:
+
+- **Zero changes** to `SpeakerBiometricService` / `VoiceEnrollmentRecorder` behaviour, contracts or algorithm (the diff adds a call site, not modifications).
+- Biometric data remains **exclusively** in the existing Secure Enclave / secure storage: zero biometric values in the new profile store, in logs, or in any outbound payload.
+- **Zero new permissions** or purpose strings for the fingerprint step (`Info.plist` unchanged for it).
+- The existing voice-biometric threat model applies unchanged; `security-design-review` covers it by reference (workflow focus: "voice fingerprint enrollment spoofing/replay — reuse existing threat model").
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: Consent enforcement is evidenced
+Feature: Voice-biometric mechanism unchanged
 
-  Scenario: Without consent, zero cloud requests are observed
-    Given no consent is recorded
-    When a scene full of unresolved strings is processed, including a forced retry path
-    Then zero requests reach the cloud provider
+  Scenario: Enrollment uses the existing mechanism and storage
+    Given the fingerprint step runs an enrollment
+    When the enrollment completes
+    Then the biometric data is stored exactly as the existing flow stores it (Secure Enclave)
+    And no behaviour, contract or algorithm change to the enrollment/verification code is introduced
 
-  Scenario: With consent, the request is observed and attributed
-    Given consent is recorded
-    When an unresolved string is processed
-    Then a request is observed at the single request chokepoint
-    And consent state at request time is auditable
-
-  Scenario: Revocation is enforced immediately
-    Given consent is revoked while the feature is open
-    When a new unresolved string appears
-    Then no request is made
+  Scenario: No new permission and no biometric leakage
+    Given the shipped Info.plist and the feature's storage paths
+    When they are inspected
+    Then no new permission or purpose string is added for the fingerprint step
+    And no biometric value appears in the profile store, logs or outbound payloads
 ```
 
 #### Related
-- FR: FR-LCT-010 (consent gate), FR-LCT-011 (indicator), FR-LCT-012 (revocation)
-- NFR: NFR-LCT-005 (privacy), NFR-LCT-013 (compliance gates)
+- FR: FR-PI-007 (voice fingerprint step), FR-PI-014 (safety paths)
+- NFR: NFR-PI-011 (compliance and release gates)
 
 
-### NFR-LCT-008: Cache at rest — encrypted, keyed, bounded
-
-#### Metadata
-- **Category:** Security / Privacy
-- **Priority:** MUST
-- **Source:** Feature constitution binding rule 10; design §3, §5; workflow security-design-review focus ("persistent cache = user content at rest")
-
-#### Description
-The persistent translation cache is user content and must be protected accordingly:
-
-- **Encrypted at rest** using the app's existing `StoragePlacement` / encrypted-storage pattern
-  (the same classes used for other user content); no plaintext cache file may exist on disk,
-  including temporary files used during writes.
-- **Keyed** `(normalizedText|targetLang)` so entries are addressable without storing scene context;
-  no image, bounding box, timestamp of the scene, or location is stored alongside the translation.
-- **Bounded and evictable**: the general-entry LRU bound (~200 entries) is enforced, so the cache
-  cannot grow without limit; dictionary/label entries are effectively non-evicting by policy
-  (a recorded policy choice, not an accident of size).
-- **Deletable**: removing the feature's stored data (or the app) removes the cache; a corrupt cache
-  must be discarded and rebuilt, never crash the feature.
-
-#### Acceptance criteria
-
-```gherkin
-Feature: Cache at rest
-
-  Scenario: No plaintext cache on disk
-    Given translations have been cached
-    When the app container is inspected
-    Then no file contains readable translation text
-
-  Scenario: Stored entries carry no scene metadata
-    Given a translation is cached
-    When the stored entry is inspected
-    Then it contains the normalized source text, the target language and the translation only
-    And it contains no image, bounding box, scene timestamp or location
-
-  Scenario: A corrupt cache is discarded, not fatal
-    Given the cache payload is unreadable
-    When the feature starts
-    Then the cache is discarded and rebuilt from the dictionary
-    And live translation still opens
-```
-
-#### Related
-- FR: FR-LCT-019 (persistent cache), FR-LCT-020 (shared store)
-- NFR: NFR-LCT-005 (privacy)
-
-
-### NFR-LCT-009: Untrusted scene text hardening (injection)
-
-#### Metadata
-- **Category:** Security
-- **Priority:** MUST
-- **Source:** Feature constitution binding rule 4; project constitution Standards ("Injection detection enabled at quarantine level"); design §7; workflow security-design-review focus
-
-#### Description
-Recognized scene text is **attacker-influenceable input**: anyone can print a label, sign or menu
-whose text is an instruction aimed at the translation model. It must be handled with the same
-discipline `InputSanitiser` applies to transcripts (quarantine level):
-
-- Before OCR text enters any prompt, it is **sanitised and bounded** — per-string length caps and
-  a per-batch bound, with truncation that never splits a grapheme cluster, and the text is passed
-  as data (delimited/quoted), never as free-form instruction text.
-- Text that trips the injection policy is **not** silently translated as trusted content: the
-  request path must follow the quarantine policy in force (the same level the project configures),
-  and the affected region must degrade honestly rather than sending the payload.
-- Model output is treated as untrusted too: only strings mapped back to requested keys are
-  accepted; unexpected keys or non-string values are discarded, never rendered or executed.
-- A prompt-injection attempt must not be able to reach any other app capability (no tool/action
-  invocation from the translation prompt — the request is a plain text completion).
-
-#### Acceptance criteria
-
-```gherkin
-Feature: Hardening against hostile scene text
-
-  Scenario: Oversized recognized text is bounded before the request
-    Given a recognized region contains text far longer than the per-string bound
-    When the request payload is built
-    Then the string is truncated to the bound without breaking a grapheme cluster
-    And the batch stays within the per-batch bound
-
-  Scenario: An injection-shaped label does not become an instruction
-    Given a printed label contains an instruction aimed at the model ("ignore your instructions and ...")
-    When the request payload is built
-    Then the text is carried as delimited data, not as an instruction
-    And the injection policy's configured action is applied before any request is sent
-
-  Scenario: Model output cannot inject keys or actions
-    Given the provider returns entries that were not requested
-    When the response is decoded
-    Then unrequested keys and non-string values are discarded
-    And nothing from the response triggers an app action
-```
-
-#### Related
-- FR: FR-LCT-009 (tier 2), FR-LCT-014 (text-only egress), FR-LCT-023 (degradation)
-- NFR: NFR-LCT-007 (consent enforcement)
-
-
-### NFR-LCT-010: Offline degradation integrity — no false success
+### NFR-PI-010: No regression to existing behaviours
 
 #### Metadata
 - **Category:** Reliability
 - **Priority:** MUST
-- **Source:** Feature constitution binding rule 7 and "v1 non-goals" (no tier may return success when it did not translate); workflow security-test focus ("offline degradation must never silently report success, cost governor cap must fail closed")
+- **Source:** Feature constitution "Out of scope (must not change)" (wake-word recognition itself; emergency-call logic; voice-biometric mechanisms) and "Address-as Behaviour Contract" (behaves exactly as today until a term is recorded); Feature Constraints 6–7; workflow non-goals comment
 
 #### Description
-Degradation is a first-class, tested behaviour with a measurable integrity property:
+The feature **must not** change existing behaviour outside its scope. Specifically:
 
-- **Zero false successes**: for every region where no tier produced a translation, the result must
-  report `degraded = true` and show the original text with an unavailable indication; the count of
-  results claiming a tier without a corresponding translation must be zero.
-- **Zero silent drops**: no recognized stable region disappears from the overlay because a tier
-  failed.
-- **Offline session behaviour**: with the device in airplane mode, a session must complete with
-  dictionary and cache hits working, cloud-bound regions shown degraded, and no crash, stall or
-  repeated network attempts.
-- The cost-governor cap must fail closed for the rest of the session (FR-LCT-013) — the degraded
-  state, not a retry loop.
+- **Wake-word recognition** — the wake word and its detection logic are untouched; only post-detection acknowledgment behaviour is added.
+- **Existing wizard steps** — their behaviour and their positions relative to each other are preserved; new steps are insertions.
+- **Family contacts store** — `FamilyContactStore` behaviour is preserved; the feature extends its use, not its contract.
+- **Safety paths** — emergency contact selection and family notification logic is unchanged (FR-PI-014); no new emergency-call logic, trigger or stub.
+- **Voice-biometric mechanisms** — unchanged (NFR-PI-009).
+- **Un-personalized baseline** — identical to today (FR-PI-011).
+
+Measurable: the affected existing test suites stay green under the project's build/test gate, and shared components touched by the feature (`OnboardingState`, `VoicePipeline`, `IntentPrompt`) keep their existing contracts — additions are extensions, not modifications.
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: Degradation integrity
+Feature: No regression to existing behaviours
 
-  Scenario: A full offline session with zero false successes
-    Given the device is in airplane mode and consent is recorded
-    When a mixed scene (dictionary-known and unknown strings) is processed
-    Then dictionary-known strings are translated
-    And unknown strings report degraded with the original text shown
-    And no result claims a tier that did not produce a translation
-    And no network request is attempted
-
-  Scenario: Cost cap reached
-    Given the cost governor refuses further calls
-    When new unresolved strings appear for the rest of the session
-    Then each reports degraded
-    And no retry loop or new request is observed
-```
-
-#### Related
-- FR: FR-LCT-008, FR-LCT-013, FR-LCT-018, FR-LCT-023
-- NFR: NFR-LCT-007 (consent), NFR-LCT-011 (configurable parameters)
-
-
-### NFR-LCT-011: Configurable parameters — no hardcoded operational constants
-
-#### Metadata
-- **Category:** Reliability / Maintainability
-- **Priority:** SHOULD
-- **Source:** Project constitution Agent Principles (design agents: timeouts are configurable parameters, not hardcoded constants); feature constitution binding rule 7; design §8 ("All timeouts configurable parameters")
-
-#### Description
-Every operational constant this feature introduces **must** be a named, configurable parameter
-with a documented default — not a literal buried in the pipeline. At minimum:
-
-| Parameter | Nominal default | Source |
-|---|---|---|
-| OCR throttle rate | ~4 fps (device spike gate) | design §10 OD-1 |
-| Declutter thresholds (IoU ≥ 0.3, centroid 0.06, region cap 8, merge rule) | as designed | design §10 OD-5 |
-| Hysteresis (2 detections / 2 misses) | as designed | design §4.3 |
-| Cloud request timeout & retry count (1 retry) | existing `GeminiClient.Config.default` semantics | design §8 |
-| In-place rule bounds (≤ 3 words, ≥ 18 pt minimum) | as designed | design §4.5 |
-| Cache LRU bound (~200 general entries) | as designed | design §5 |
-
-Changing a parameter must not require editing multiple modules; the same constant must not be
-duplicated with divergent values in different layers.
-
-#### Acceptance criteria
-
-```gherkin
-Feature: Configurable operational parameters
-
-  Scenario: Changing the OCR cadence requires only the parameter
-    Given the OCR throttle rate parameter
-    When its value is changed
-    Then the sampler uses the new rate with no other code change
-
-  Scenario: Timeouts are not hardcoded
-    Given the tier-2 request path
-    When the timeout and retry settings are inspected
-    Then they resolve from configuration with documented defaults
-    And no magic literal for them exists in the request code
-```
-
-#### Related
-- FR: FR-LCT-006, FR-LCT-009, FR-LCT-013, FR-LCT-005
-- NFR: NFR-LCT-001, NFR-LCT-002
-
-
-### NFR-LCT-012: Shared-component integrity — no regression to the appliance helper
-
-#### Metadata
-- **Category:** Reliability
-- **Priority:** MUST
-- **Source:** Feature constitution "Agent Principles" (no agent may weaken `ApplianceOverlayMapper` or `ApplianceLabelLocalizer`); design §3
-
-#### Description
-This feature extends components that the shipped appliance helper already depends on. It **must
-not** change their contracts or behaviour:
-
-- `ApplianceLabelLocalizer` — extended data set only; its exact-match rules, `Display(primary:
-  secondary:)` shape and locale gating remain intact. No fuzzy matching is introduced.
-- `ApplianceOverlayMapper` — reused unchanged for OCR normalized box → screen point conversion;
-  its function contract is not modified.
-- `GeminiClient` — the new text-only translation method goes through the existing `send(_:)`
-  chokepoint (auth, timeout, observability, cost governor); no parallel request path is added.
-- The appliance helper's existing behaviour and tests stay green; the shared cache addition must
-  not change its observable outputs.
-
-#### Acceptance criteria
-
-```gherkin
-Feature: No regression to the shipped appliance helper
-
-  Scenario: The appliance helper's existing tests still pass
+  Scenario: Existing tests stay green
     Given the feature's changes are in the build
-    When the appliance helper's existing unit tests run under `ios/build.sh`
+    When the affected existing test suites run under the project's build/test gate
     Then they pass unchanged
 
-  Scenario: The shared components' contracts are unchanged
-    Given `ApplianceOverlayMapper` and `ApplianceLabelLocalizer` as used by the appliance helper
-    When the feature's changes are inspected
-    Then their existing public functions and behaviour are unchanged
-    And the feature's additions are extensions (new entries, new callers), not modifications
+  Scenario: Wake-word recognition is untouched
+    Given the feature's diff
+    When the wake-word detection path is inspected
+    Then the wake word and its detection logic are unchanged
+    And only the post-detection acknowledgment behaviour is added
 
-  Scenario: One request chokepoint
-    Given the new translation request path
-    When outbound requests are traced
-    Then they pass through the existing `GeminiClient.send(_:)` chokepoint
-    And no alternate request construction bypasses it
+  Scenario: Shared components keep their contracts
+    Given OnboardingState, VoicePipeline and IntentPrompt as used by existing features
+    When the feature's changes are inspected
+    Then their existing behaviour is unchanged
+    And the feature's additions are extensions (new cases, new parameters, new call sites), not modifications
 ```
 
 #### Related
-- FR: FR-LCT-007, FR-LCT-020, FR-LCT-009
-- NFR: NFR-LCT-005 (privacy)
+- FR: FR-PI-011 (un-personalized path), FR-PI-014 (safety paths)
+- NFR: NFR-PI-005 (seed mirror), NFR-PI-009 (voice biometrics)
 
 
-### NFR-LCT-013: Compliance and release gates
+### NFR-PI-011: Compliance and release gates
 
 #### Metadata
 - **Category:** Compliance
 - **Priority:** MUST
-- **Source:** Project constitution Open Decision 13 (recorded 2026-09-16) and release gates; feature constitution "Gates"; design §7, §9
+- **Source:** Project constitution Compliance constraints (App Store guidelines 5.1.1/5.1.3; permissions at point of use) and release gates; workload gates (security-design-review STRIDE, security-test, final-sign-off T2 + HIL); Feature Constraints 4–5
 
 #### Description
 The feature may ship only with the following gates satisfied and evidenced:
 
-1. **Recorded exception amendment** — Open Decision 13 "Cloud text-translation exception (live
-   camera translation)", recorded 2026-09-16 (Owner: Anjan Poudel), exists in the project
-   constitution and covers OCR'd text only; the default configuration must not reach tier 2
-   without recorded consent.
-2. **Consent/disclosure copy reviewed** — the plain-language consent text and the
-   `NSCameraUsageDescription` update are drafted and reviewed before the first App Store
-   submission, alongside the Open Decision 12 review window (2026-10-13); this half is still open
-   (design §10 Open Decision 3).
-3. **Release log-safety gate** — `ios/tools/check-release-log-safety.sh` exits 0 and covers the
-   new OCR/translation text paths (NFR-LCT-006).
-4. **App Store compliance** — camera permission requested at the point of use with plain-language
-   explanation; no health data policy exposure (the feature touches no health data).
-5. **Security evidence** — `security-design-review` returns `SECURITY-GO` with a STRIDE threat
-   model for the camera + cloud-egress surface, and `security-test` returns `SECURITY-GO`
-   evidencing consent enforcement, text-only egress and a clean log surface.
+1. **No new permissions / no HealthKit** — zero new permission requests or purpose strings; permissions remain requested at point of use with plain-language explanation (FR-PI-007/NFR-PI-009).
+2. **Privacy disclosure updated** — the app's data-collection disclosure covers the new profile fields (name, address-as, date of birth, emergency contacts) per App Store Guideline 5.1.1; the update is drafted and reviewed before the first App Store submission, alongside the existing Open Decision 11/12/13 review window (2026-10-13).
+3. **STRIDE threat model** — `security-design-review` returns `SECURITY-GO` with a STRIDE model covering the workflow's focus areas: profile-string prompt injection (NFR-PI-004), profile PII at rest (NFR-PI-001), and the voice-fingerprint reuse (NFR-PI-009).
+4. **Security evidence** — `security-test` returns `SECURITY-GO` evidencing injection hardening (NFR-PI-004), PII-free logs (NFR-PI-002), encrypted storage (NFR-PI-001), and no new egress (NFR-PI-003).
+5. **Release gates** — `ios/tools/check-release-log-safety.sh` exits 0 (NFR-PI-002); the `ios/build.sh` test scope passes; the T2 final-sign-off gate (HIL) is recorded.
 
 #### Acceptance criteria
 
 ```gherkin
 Feature: Compliance and release gates
 
-  Scenario: The recorded exception amendment covers the shipped behaviour
-    Given the project constitution's Open Decisions
-    When the amendment for the cloud text-translation tier is inspected
-    Then it is recorded with scope (OCR'd text only), consent, revocation and review terms
-    And the shipped default does not reach tier 2 without recorded consent
-
-  Scenario: Release gates are evidenced before sign-off
+  Scenario: Gates are evidenced before sign-off
     Given the feature is ready for sign-off
     When the release checklist is assembled
-    Then the log-safety script has exited 0
-    And the security reviews have returned SECURITY-GO
-    And the consent/disclosure copy review is recorded (or explicitly open for the deadline)
+    Then the log-safety gate has exited 0
+    And the security reviews have returned SECURITY-GO for the focus areas above
+    And the privacy disclosure update is recorded (or explicitly open for the 2026-10-13 review window)
+
+  Scenario: No new permission is introduced
+    Given the shipped app
+    When Info.plist and the permission flows are inspected
+    Then no new permission or purpose string was added by this feature
 ```
 
 #### Related
-- FR: FR-LCT-002, FR-LCT-010, FR-LCT-014
-- NFR: NFR-LCT-006 (log safety), NFR-LCT-007 (consent)
+- NFR: NFR-PI-001, NFR-PI-002, NFR-PI-003, NFR-PI-004, NFR-PI-009
 
 
 ## Open decisions
 
-Carried forward from the design's §10 and the feature constitution; two additional items were
-raised during requirements elicitation. None blocks design work; each has an owner-visible
-resolution point.
+Carried forward from the feature constitution (verbatim) plus two raised during elicitation. None
+blocks design work; each has an owner-visible resolution point.
 
-| # | Decision | Status in this requirement set | Resolve at |
-|---|---|---|---|
-| 1 | **OCR throttle rate** — ~4 fps nominal needs a device spike on mid-range hardware before commitment | Required as a configurable parameter; nominal value not frozen (NFR-LCT-002, NFR-LCT-011) | implementation on device |
-| 2 | **In-place replacement default** — owner approved smart mix with the "always show original text" toggle; default to be confirmed | Requirement binds the toggle's existence and effect, not the default (FR-LCT-017) | first device demo |
-| 3 | **Consent/disclosure copy** — the exception amendment is settled and recorded (Open Decision 13, 2026-09-16); drafting and reviewing the copy is outstanding | Recorded as a release gate with the 2026-10-13 review window (NFR-LCT-013, FR-LCT-002) | before `final-sign-off` |
-| 4 | **Tier-1 on-device NMT timing** — a *dedicated* NMT model (NLLB-200 distilled 600M) is a v1.1 candidate; the tier itself is not | The tier landed in v1 as the on-device **brain** — the app's own installed Nepali language model, no egress, no consent — by owner directive 2026-09-17 (FR-LCT-008's amendment, which retires the original "must be absent" clause). The dedicated NMT model stays deferred until addendum §13.5's non-goal is revisited | v1.1 planning for the dedicated model — not this workflow |
-| 5 | **Menu-mode declutter thresholds** — validated on device; may become per-scene settings | Required as configurable parameters with nominal values (FR-LCT-006, NFR-LCT-011) | manual device testing |
-| 6 | **Reverse "phrase card" mode** — out of v1 scope; natural v1.x extension reusing this pipeline | Recorded as out of scope; the pipeline must not assume direction (FR-LCT-003) | not in this workflow |
-| 7 | **Cost governor scope** (raised in elicitation) — design §4.4 and Open Decision 13 say "per-session"; the shipped `GeminiCostGovernor` counts calls **per day** with a family-editable cap | Requirement binds the behaviour (bounded calls, fail closed, no retry loop); the mechanism (per-session sub-cap vs per-day cap) is a design decision (FR-LCT-013) | `design-component` |
-| 8 | **Shared cache ownership** (raised in elicitation) — the design names the shared store `LabelTranslationCache` (addendum §13.2's in-memory shape), while the feature constitution records that the shared cache does not exist yet and is new work | Requirement states the behaviour (one persistent, encrypted, shared store with the documented key and eviction policy) without fixing a type name (FR-LCT-019, FR-LCT-020) | `design-component` |
+### Carried from the feature constitution
+
+**OD-F1 — Next-of-kin data shape (OPEN — architect).** *Verbatim:*
+
+> Standalone next-of-kin field in the new profile store, or a designation on an existing
+> `FamilyContact` via the existing `isEmergencyContact` flag? Both data paths already exist.
+> Architect decides in design-l1/design-l2; the choice must be reflected in the field table above
+> and the emergency-contacts step design.
+
+Status in this requirement set: both paths remain open by design; the requirements are written to
+hold either way — FR-PI-005 (family & friends), FR-PI-006 (emergency contacts), FR-PI-003 (profile
+store). Resolve at: design-l1 / design-l2.
+
+**OD-F2 — Wake-acknowledgment phrasing and locale handling (OPEN — architect).** *Verbatim:*
+
+> Exact phrasing and mechanism of the spoken wake acknowledgment (TTS of a `हजुर <address-as>`
+> template vs. pre-rendered `AckFastLane` variants), and locale handling: how the surrounding
+> acknowledgment copy is localized when the user's term (user data, spoken verbatim) is in a
+> different script/language from the active app language, and how the per-language acknowledgment
+> templates are managed. The term itself must always be spoken verbatim; exact phrasing is the
+> architect's call.
+
+Status in this requirement set: the requirements bind the term spoken verbatim (FR-PI-010), the
+acknowledgment including the term (FR-PI-008), and the ≤ 1 s activation budget with a TTS-failure
+fallback (NFR-PI-008); phrasing and mechanism are the architect's call. Resolve at: design-l1 /
+design-l2.
+
+**OD-F3 — About-you skip affordance vs. the wizard's "no hard gate" contract (OPEN — architect).**
+*Verbatim:*
+
+> The existing wizard is documented as "every step is skippable — there is no hard gate anywhere"
+> (`OnboardingState`), while the brief makes name + address-as mandatory with Next disabled until
+> both are filled. Does the About-you step keep the header Skip on first run (soft gate — deferral
+> via the Home reminder card) or is Skip disabled (hard gate)? Either way the reminder-card reopen +
+> Settings editor path applies to already-onboarded users. Architect decides so implementation and
+> tests agree.
+
+Status in this requirement set: the mandatory Next gate binds either way (FR-PI-002); the
+skippable pattern for all other steps is FR-PI-004; the reopen and Settings paths are FR-PI-013
+and FR-PI-012. Resolve at: design-l1 / design-l2.
+
+### Raised during elicitation (this requirements pass)
+
+**OD-PI-4 — Address-as input affordance (OPEN — architect).** Free-text entry vs a preset list of
+common terms (for example आमा / बुबा / दाइ), and what counts as "filled" beyond non-blank after
+trimming. The requirements bind "required, gates Next" (FR-PI-002); the input widget, help copy
+and any additional validation are design decisions. Resolve at: design-l1 / design-l2.
+
+**OD-PI-5 — Settings editor authentication (OPEN — owner/architect).** `requirements.md` FR-042
+requires in-app configuration to sit behind voice-biometric or PIN authentication, while the
+biometric/PIN gate is recorded as unwired with accepted residual risk (project constitution Open
+Decision 11, finding B3; review 2026-10-13). Does editing the profile in Settings require
+authentication in this release? FR-PI-012 binds the editor's existence, reachability, persistence
+and effect — not the authentication gate. Resolve at: owner review at this HIL gate / design-l1.
 
 ## Out of scope
 
-Explicit v1 non-goals, recorded so they are **not** silently half-built (absent, not stubbed):
+Explicitly not in scope (feature constitution "Out of scope (must not change)", plus elicitation
+clarifications) — recorded so nothing is silently half-built:
 
 | Non-goal | Why it is stated |
 |---|---|
-| NE→EN direction | v1 is English source → Nepali target. The pipeline must not hardcode the direction (FR-LCT-003), but no reversed translation is delivered. |
-| Reverse "phrase card" mode (user language → scene language) | Later v1.x mode reusing this pipeline; out of v1 (design §10 OD-6). |
-| ARKit world-anchored 3D rendering | Screen-space overlay only; the pipeline stays render-agnostic so a 3D renderer can be added later without touching detection/stabilisation/translation. |
-| Auto-speak of every new translation | Noise in multi-label scenes; tap-to-hear and "read this to me" only (FR-LCT-021). |
-| Live full-scene explanation ("what does this panel do") | Remains the appliance helper's one-shot `identifyAppliance` call. |
-| A dedicated on-device NMT model (NLLB-200 distilled 600M) | v1.1 candidate, blocked until addendum §13.5's non-goal is revisited. The *tier* it was once the only shape of is in v1 as the on-device brain (FR-LCT-008, amended 2026-09-17), and what the deferral protects is unchanged: deferred work must be absent, not a silent stub — `TranslationResult.sourceTier` must always report the tier that actually produced the string, and no tier may return success when it did not translate. |
-| Family/caregiver configuration surface for this feature | 100 percent elder-initiated, in the moment. |
-| Feed translation changes | The existing feed translation path is untouched by this feature. |
-
-## Divergences carried forward
-
-| # | Prior spec says | This set carries | Status |
-|---|---|---|---|
-| D1 | Addendum §13.3/§13.5: callout only, no text replacement | Smart mix: in-place replacement only for short dictionary-known labels whose translation fits at ≥ 18 pt; anchored callouts everywhere else; "always show original text" toggle ships with it (FR-LCT-015, FR-LCT-016, FR-LCT-017) | Owner-approved 2026-09-16 |
-| D2 | Addendum §13.5: no on-device translation model | **Diverged by owner directive, 2026-09-17**: tier 1 is in v1 as the on-device brain — the app's own installed Nepali language model, running entirely on the device with no egress and no consent (FR-LCT-008, amended; the "must be absent" clause is retired). A *dedicated* on-device NMT model remains a v1.1 candidate against the addendum's non-goal | Owner-approved 2026-09-17; revisit the dedicated model before v1.1 |
-| D3 | Addendum §13.2: `LabelTranslationCache` in-memory, no LRU | Persistent encrypted cache, LRU for general text (~200 entries); label-vocabulary entries effectively non-evicting (FR-LCT-019) | New requirement (abroad strings worth persistence) |
-| D4 | Base design §0/§5.1: "never obscure/redraw reality" | Preserved for all non-in-place cases; in-place bounded by D1's rule (FR-LCT-016) | Consequence of D1 |
-| D5 | Addendum scope: appliance labels | Any printed text, including dense multi-region scenes (a menu page) (FR-LCT-006) | Owner requirement (abroad scenario) |
+| Wake-word recognition changes | The wake word and its detection are untouched; only the post-detection acknowledgment is added (FR-PI-008, NFR-PI-010). |
+| Any new cloud processing / new network egress | The feature adds zero new calls; only name/address-as may enter the existing prompt paths (NFR-PI-003). |
+| Emergency-call logic changes | Collected data becomes available to the existing safety paths; their logic, triggers and stubs are unchanged (FR-PI-014). |
+| Forcing address-as into every sentence | Natural use only — "hajur <address-as>", "yes <address-as>" (FR-PI-009). |
+| New permissions, HealthKit use, voice-biometric mechanism changes | The fingerprint step reuses the existing enrollment as-is (FR-PI-007, NFR-PI-009). |
+| Scheduled auto-activation / daily-briefing and reminder copy | Surfaces that already reference the user by name in the dementia supplement's examples are unchanged; the injection surfaces are the wake acknowledgment and reply-style rules only. |
+| Remote companion-app push of profile fields | The interview is completed at the device; a helping family member may fill it in on the user's behalf (feature purpose). |
+| Profile export/deletion flows | GDPR deferred (project constitution Open Decision 2); the store must not block future erasure/export, but no flow ships here. |
 
 ## How this set is verified downstream
 
 | Gate | What it checks against this set |
 |---|---|
-| `review-l2` | L2 component design folds in D1/D2 and resolves Open Decisions 1, 2, 5, 7, 8 where resolvable on paper |
-| `security-design-review` | STRIDE for the camera + cloud-egress surface; focus areas map to NFR-LCT-005/007/008/009 and FR-LCT-010/011/013/014 |
-| `security-test` | Evidence: consent enforcement (NFR-LCT-007), text-only egress (NFR-LCT-005/FR-LCT-014), clean log surface (NFR-LCT-006), offline degradation never reporting success (NFR-LCT-010/FR-LCT-023), governor cap failing closed (FR-LCT-013) |
-| `final-sign-off` | Recorded exception amendment (Open Decision 13), consent copy review, camera purpose string (FR-LCT-002), log-safety gate (NFR-LCT-006/NFR-LCT-013) |
+| `design-l1` / `design-l2` | Resolve OD-F1, OD-F2, OD-F3, OD-PI-4, OD-PI-5; design the store, wizard, prompt-injection point and wake-ack path. |
+| `review-l2` | `review.decision == GO` against the component design and this set. |
+| `security-design-review` | STRIDE focus: profile-string prompt injection (NFR-PI-004, FR-PI-009), PII at rest (NFR-PI-001, FR-PI-003), voice-fingerprint reuse (NFR-PI-009, FR-PI-007), wake-ack path (FR-PI-008, NFR-PI-008); `SECURITY-GO` required. |
+| `security-test` | Evidence: injection hardening (NFR-PI-004), PII-free logs (NFR-PI-002), encrypted storage (NFR-PI-001), no new egress (NFR-PI-003), voice-biometric data at rest (NFR-PI-009); `SECURITY-GO` required. |
+| `final-sign-off` | T2 + HIL; release gate `ios/tools/check-release-log-safety.sh` exits 0 (NFR-PI-002, NFR-PI-011); privacy disclosure update recorded. |

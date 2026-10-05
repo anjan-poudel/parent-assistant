@@ -60,20 +60,21 @@ final class IntentEncoderArtifactTests: XCTestCase {
             ModelCatalog.entry(for: ModelCatalog.intentEncoderSpike))
         XCTAssertEqual(entry.kind, .intentEncoder)
         XCTAssertEqual(entry.filename, "t033-encoder-int8.mlmodelc")
-        XCTAssertEqual(entry.sizeBytes, 109_086_647)
+        XCTAssertEqual(entry.sizeBytes, 109_079_441)
         XCTAssertEqual(entry.sha256.count, 64, "a full SHA-256 hex digest")
-        XCTAssertTrue(entry.sha256.hasPrefix("e0ff09231843"),
-                      "the T-036 v0 export's measured zip hash")
-        // No machine-specific path is committed, and no environment
-        // variable is required: with the process environment this test runs
-        // under (no override), the entry points at the app's own Documents
-        // copy — `devicectl`/AirDrop is the whole handshake.
-        if ProcessInfo.processInfo.environment["INTENT_ENCODER_SPIKE_ZIP"] == nil {
-            XCTAssertEqual(entry.downloadURL,
-                           ModelCatalog.intentEncoderSpikeDocumentsZipURL())
-            XCTAssertEqual(entry.downloadURL.lastPathComponent,
-                           "t033-encoder-int8-mlmodelc.zip")
-        }
+        XCTAssertTrue(entry.sha256.hasPrefix("d8f549ec"),
+                      "the re-provisioned T-036 v3 export's measured zip hash")
+        // No machine-specific path is committed. The entry carries the
+        // PUBLISHED remote zip (models-repo release v4) — the self-healing
+        // path the standard downloader fetches when the tester's staged
+        // `Documents/` copy is gone (an app update that replaced the
+        // container wiped it, and the encoder silently stopped serving).
+        // The local Documents/env handshake stays the installer's
+        // preferred source (`intentEncoderSpikeZipURL`).
+        XCTAssertEqual(entry.downloadURL.absoluteString,
+                       "https://github.com/anjan-poudel/elderly-ai-assistant-models/releases/download/v4/t033-encoder-int8-mlmodelc.zip")
+        XCTAssertEqual(entry.downloadURL.lastPathComponent,
+                       "t033-encoder-int8-mlmodelc.zip")
         XCTAssertFalse(entry.downloadURL.absoluteString.contains("/Users/"),
                        "a personal home-directory path must not be committed")
         let override = ModelCatalog.intentEncoderSpikeZipURL(

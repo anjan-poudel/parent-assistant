@@ -96,7 +96,7 @@ enum IntentPrompt {
 
         EXACTLY TWO MODES: (1) INTENT DECIPHERING — want something DONE; extract intent + entities. (2) OPEN-FORM ANSWERING — question or feelings; nothing runs, "response" IS the answer.
 
-        "response" is SPOKEN ALOUD: non-empty, their language, plain and simple, short sentences, warm, respectful. In Nepali, say "हजुर", one short idea per sentence.
+        "response" is SPOKEN ALOUD: non-empty, their language, plain and simple, short sentences, warm, respectful. In Nepali, say "हजुर", one short idea per sentence.\(addressAsClause(context.addressAs))
         Fill ONLY slots you heard — never invent a name, time, or message; unheard slots stay null.
 
         Reply with ONLY one JSON object (no fences, no other text):
@@ -125,6 +125,23 @@ enum IntentPrompt {
 
         """
         + pluginSections(activePlugins)
+    }
+
+    /// [PROFILE-INTERVIEW T-094] The address-as clause (design-l2 §5.5,
+    /// settled wording): appended directly after the reply-style pinning
+    /// sentence in each builder. nil AND empty compose to the empty
+    /// string — the no-term output stays byte-identical to the
+    /// pre-feature baseline (pinned digest in `IntentPromptTests`; the
+    /// mirror gate pins the template half). The term arrives ALREADY
+    /// GUARDED and bounded at the read seam
+    /// (`ProfilePersonalization.addressAsForPrompt` — ADR-09: the prompt
+    /// side takes the guarded term, the spoken side the verbatim one);
+    /// the clause frames it as quoted DATA, never as an instruction. The
+    /// static half is 56 Characters; the term is at most the prompt
+    /// bound (24), so the worst-case addition is 80 Characters.
+    private static func addressAsClause(_ term: String?) -> String {
+        guard let term, !term.isEmpty else { return "" }
+        return " Address them as \"\(term)\" where it fits, never every sentence."
     }
 
     /// Schema addendum appended when any plugin is active (cloud path):
@@ -182,7 +199,7 @@ enum IntentPrompt {
         return """
         You are Sahayak, a warm companion talking with an elderly speaker. This turn is SMALL TALK — a greeting, thanks, a goodbye, or how they feel. Nothing is being asked for, so nothing runs: "reply" IS the whole answer.
 
-        "reply" is SPOKEN ALOUD: non-empty, in their own language (hint: \(context.userLanguageHint)), plain and simple, short sentences, warm, respectful. In Nepali, say "हजुर", one short idea per sentence. Never invent a fact, a name, a time or an appointment, and promise nothing you cannot do.
+        "reply" is SPOKEN ALOUD: non-empty, in their own language (hint: \(context.userLanguageHint)), plain and simple, short sentences, warm, respectful. In Nepali, say "हजुर", one short idea per sentence.\(addressAsClause(context.addressAs)) Never invent a fact, a name, a time or an appointment, and promise nothing you cannot do.
 
         Reply with ONLY one JSON object (no fences, no other text):
         {"intent": "chat", "reply": the spoken reply, "confidence": 0-1}
@@ -246,7 +263,7 @@ enum IntentPrompt {
 
         Reply style:
         - "query"/"none": "response" IS the actual answer — a real, SUBSTANTIVE reply from your own knowledge (typical weather, facts, advice). Do NOT deflect them to another app, website, or device: you are their only assistant. Feelings (loneliness, sadness, worry): warmth and empathy first.
-        - When the reply is Nepali, address them warmly as "हजुर" and keep one short idea per sentence.
+        - When the reply is Nepali, address them warmly as "हजुर" and keep one short idea per sentence.\(addressAsClause(context.addressAs))
         - every other intent: a short FUNCTIONAL acknowledgment in their language (call placed, reminder set, dose recorded).
         """
     }

@@ -1,25 +1,26 @@
-# Implementation Tasks — Live Camera Translation (EN → NE, v1)
+# Implementation Tasks — Profile Interview (FR-PI v1)
 
 | Group | Title | Tasks | Total Effort | Status |
 |-------|-------|-------|-------------|--------|
-| [TG-01](TG-01-foundations/index.md) | Foundations — types, configuration, observability, copy | 5 | ~4–5 days | PENDING |
-| [TG-02](TG-02-camera-and-detection/index.md) | Camera capture and on-device text detection | 3 | ~5–7 days | PENDING |
-| [TG-03](TG-03-region-stabilisation/index.md) | Region stabilisation and decluttering | 2 | ~2–2.5 days | PENDING |
-| [TG-04](TG-04-dictionary-and-cache/index.md) | Tier-0 dictionary and persistent cache | 3 | ~4–7 days | PENDING |
-| [TG-05](TG-05-consent-and-disclosure/index.md) | Consent gate, prompt, revocation and indicator | 3 | ~4–5 days | PENDING |
-| [TG-06](TG-06-cloud-translation-tier/index.md) | Sanitiser, client method, tier orchestration | 3 | ~6–7.5 days | PENDING |
-| [TG-07](TG-07-overlay/index.md) | Smart-mix placement, overlay rendering, toggle | 3 | ~5–6.5 days | PENDING |
-| [TG-08](TG-08-voice-and-session-commands/index.md) | Session commands, spoken output, in-session capture | 3 | ~3–5 days | PENDING |
-| [TG-09](TG-09-plugin-session-pipeline/index.md) | Pipeline, session model, plugin and session view | 2 | ~4–6 days | PENDING |
-| [TG-10](TG-10-release-gates-and-evidence/index.md) | Release gate, security evidence, device protocol | 3 | ~5–7 days | PENDING |
+| [TG-14](TG-14-profile-foundations/index.md) | Profile Foundations — store, guard, seams, strings | 4 | ~9.5–12 days | PENDING |
+| [TG-15](TG-15-personalization-paths/index.md) | Personalization Paths — prompt clause, seed mirror, wake ack | 3 | ~9.5–12 days | PENDING |
+| [TG-16](TG-16-interview-wizard-and-startup-routing/index.md) | Interview Wizard and Startup Routing | 6 | ~14.5–18 days | PENDING |
+| [TG-17](TG-17-settings-release-and-evidence/index.md) | Settings, Log Safety and Release Evidence | 3 | ~8–10 days | PENDING |
 
-**Totals:** 30 tasks (T-001 … T-030), all leaf tasks, ~42–58 developer-days sequential.
+**Totals:** 16 tasks (T-090 … T-105), all leaf tasks, ~41–52 developer-days sequential.
 
-Execution order is T-001 → T-030 in numeric order; every dependency points at a lower task ID, so a
-subagent executing top-to-bottom never assumes an unbuilt component. The recommended parallel packing
-is in [../plan.md](../plan.md) (`## Summary` → recommended execution order).
+**ID numbering convention.** This plan continues after the accumulated global maxima: the highest
+pre-existing task id is T-089 and the highest pre-existing group is TG-13 (computed before writing
+via the prescribed scan over `specs/plan-tasks` plus the ai-sdd outputs). Profile Interview
+therefore uses **T-090 … T-105** and **TG-14 … TG-17**; no existing T-NNN or TG-NN file or folder
+was reused, overwritten or deleted. `specs/plan-tasks/plan.md` and this file are the two files the
+established pattern replaces with the current feature's content.
 
-Requirement IDs (FR-LCT-NNN / NFR-LCT-NNN) resolve under `../../define-requirements/`; component IDs
-(C01 … C15) and parameter names are used verbatim from `../../design-component.md`; amendment IDs
-(AM-1 … AM-10) come from `../../security-design-review.md` and clarification IDs (CL-1 … CL-8) from
-`../../review-l2.md`.
+Execution order is T-090 → T-105 in numeric order; every dependency points at a lower task ID, so a
+subagent executing top-to-bottom never assumes an unbuilt component. The recommended parallel
+packing is in the plan file (`## Summary` → recommended execution order).
+
+Requirement IDs (FR-PI-NNN / NFR-PI-NNN) resolve under `specs/define-requirements/`; component IDs
+(C01 … C13) and parameter names are used verbatim from `specs/design-l2.md`; amendment IDs
+(AM-1 … AM-4) and finding IDs (SD-1 … SD-7) come from `specs/security-design-review.md`;
+observation IDs (OB-1 … OB-5) come from `specs/review-l2.md`.

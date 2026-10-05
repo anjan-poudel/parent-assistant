@@ -554,7 +554,7 @@ enum ModelCatalog {
             // the internal-testing install needs no environment variable.
             return intentEncoderSpikeDocumentsZipURL()
         }
-        let path = raw.trimmingCharacters(in: .whitespaces)
+        let path = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         // Explicitly blank: the tester switched the install off.
         guard !path.isEmpty else { return nil }
         // Absolute: the tester's own staging location, used unchanged.

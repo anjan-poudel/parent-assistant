@@ -22,7 +22,8 @@ final class LiveTranslateConfigTests: XCTestCase {
         // Tracking / stabilisation
         XCTAssertTrue(config.trackingEnabled)
         XCTAssertEqual(config.regionMatchIoU, 0.3)
-        XCTAssertEqual(config.regionMatchCentroidDistance, 0.35)
+        // De-collided from the overlay's device-pinned 0.35 (2026-10-06).
+        XCTAssertEqual(config.regionMatchCentroidDistance, 0.36)
         XCTAssertEqual(config.regionAppearPasses, 2)
         XCTAssertEqual(config.regionMissPasses, 2)
         // The departure bound (owner device verdict, 2026-09-17): above the
