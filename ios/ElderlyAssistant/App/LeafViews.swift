@@ -53,6 +53,7 @@ struct LeafScreen<Content: View>: View {
                     .font(DesignTokens.greetingFont(size: appearance.typography.titlePointSize))
                     .foregroundStyle(appearance.colors.textPrimary)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier(titleKey)
                     .padding(.horizontal, 20)
                     .padding(.top, 8)
                     .padding(.bottom, 12)

@@ -682,8 +682,8 @@ private struct SetupStrip: View {
 
 // MARK: - Dock (redesign spec §3.1)
 
-/// Four daily actions above a contrasting utility rail. Adaptive columns
-/// and wrapping labels keep all seven destinations reachable at larger type.
+/// Reference action dock: help/translation/news/maps above phone/medicine/reminders.
+/// Larger accessibility text reflows inside Home's scroll area.
 struct HomeDock: View {
     @Environment(\.appAppearance) private var appearance
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -691,23 +691,21 @@ struct HomeDock: View {
     let onAppliance: () -> Void
     let onLiveTranslate: () -> Void
 
-    private var dailyColumns: [GridItem] {
-        [GridItem(.adaptive(minimum: dynamicTypeSize.isAccessibilitySize ? 140 : 72), spacing: 8)]
+    private var topColumns: [GridItem] {
+        dynamicTypeSize.isAccessibilitySize
+            ? [GridItem(.adaptive(minimum: 140), spacing: 8)]
+            : Array(repeating: GridItem(.flexible(minimum: 44), spacing: 8), count: 4)
     }
 
-    private var utilityColumns: [GridItem] {
-        [GridItem(.adaptive(minimum: dynamicTypeSize.isAccessibilitySize ? 140 : 88), spacing: 8)]
+    private var bottomColumns: [GridItem] {
+        dynamicTypeSize.isAccessibilitySize
+            ? [GridItem(.adaptive(minimum: 140), spacing: 8)]
+            : Array(repeating: GridItem(.flexible(minimum: 44), spacing: 8), count: 3)
     }
 
     var body: some View {
-        VStack(spacing: 12) {
-            LazyVGrid(columns: dailyColumns, alignment: .center, spacing: 8) {
-                callItem
-                dockItem(.meds, icon: "pills.fill", tint: .meds, titleKey: "home.hub.meds")
-                dockItem(.directions, icon: "map.fill", tint: .directions, titleKey: "home.hub.directions")
-                dockItem(.feed, icon: "rectangle.stack.fill", tint: .feeds, titleKey: "home.hub.feeds")
-            }
-            LazyVGrid(columns: utilityColumns, alignment: .center, spacing: 8) {
+        VStack(spacing: 8) {
+            LazyVGrid(columns: topColumns, alignment: .center, spacing: 8) {
                 Button(action: onAppliance) {
                     tile(icon: "camera.viewfinder", tint: .appliance,
                          titleKey: "plugin.applianceHelper.name", utility: true)
@@ -718,12 +716,21 @@ struct HomeDock: View {
                          titleKey: LiveTranslateEntry.labelKey, utility: true)
                 }
                 .buttonStyle(.plain)
+                dockItem(.feed, icon: "rectangle.stack.fill", tint: .feeds,
+                         titleKey: "home.hub.feeds", utility: true)
+                dockItem(.directions, icon: "map.fill", tint: .directions,
+                         titleKey: "home.hub.directions", utility: true)
+            }
+            LazyVGrid(columns: bottomColumns, alignment: .center, spacing: 8) {
+                callItem
+                dockItem(.meds, icon: "pills.fill", tint: .meds,
+                         titleKey: "home.hub.meds", utility: true)
                 dockItem(.reminders, icon: "clock.fill", tint: .reminders,
                          titleKey: "home.hub.reminders", utility: true)
             }
-            .padding(10)
-            .appSurface(role: .dock)
         }
+        .padding(10)
+        .appSurface(role: .dock)
     }
 
     private func dockItem(_ destination: LeafDestination, icon: String,
@@ -743,12 +750,11 @@ struct HomeDock: View {
                 } else {
                     IconBadge(systemImage: "phone.fill", tint: .call, diameter: 44)
                 }
-                tileLabel("home.hub.call", utility: false)
+                tileLabel("home.hub.call", utility: true)
             }
             .padding(.horizontal, 4)
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity, minHeight: 88)
-            .appSurface()
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

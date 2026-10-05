@@ -30,7 +30,7 @@
       "• Tap once when ready: starts listening. • Tap while working or speaking: cancels the turn. • Press and hold for 2 seconds: resets the voice completely — a white ring fills up, then you hear “Voice reset. I'm ready.”",
       "Three sentences that always work: “Set a timer for 5 minutes” (टाइमर ५ मिनेट), “Read me the news” (समाचार सुनाऊ), and “Call my daughter” (छोरीलाई फोन गर — Sahayak asks you to confirm before dialing; the person must be saved in Family & friends first).",
       "Home screen tour, top to bottom: the top bar holds the Settings gear, today's date and tithi (tap to open Calendar), the bell (opens Updates, badge always matches), and the red-edged Emergency triangle — which is on every screen. Under the Talk button a small pill rotates example phrases you can imitate. After each exchange a card shows what you said and what Sahayak replied (folds into a chip after a few seconds; some actions have Undo).",
-      "Home has seven task buttons: Phone, Medication, Directions and Feeds in the daily row; Appliance help, Live translation and Reminders in the contrasting utility rail. With larger text these controls join the home scroll area so every task stays reachable.",
+      "Home has seven task buttons in the coloured dock: Appliance help, Live translation, Feeds and Maps in the top row; Phone, Medication and Reminders in the bottom row. In Nepali, Feeds is labelled समाचार. Matching actions use the supplied coloured icon artwork. With larger accessibility text these controls reflow in the home scroll area so every task stays reachable.",
       "Updates (the bell): three sections — Notifications (today's briefing, medication status and other active panels), Today (the Nepali date with tithi and festivals, plus “Next: … at …” — the very next thing you must not miss), and Activity (a read-only log of recent conversations, newest first)."
     ],
     "paragraphsNe": [
@@ -44,7 +44,7 @@
       "• तयार हुँदा एक पटक थिच्नुहोस्: सुन्न सुरु हुन्छ। • काम वा बोलाइ चल्दा थिच्नुहोस्: त्यो पालो रद्द हुन्छ। • २ सेकेन्ड थिचिराख्नुहोस्: आवाज पूरै रिसेट हुन्छ — सेतो घेरा भरिन्छ, अनि 'आवाज रिसेट भयो। म तयार छु।' सुनिन्छ।",
       "सधैं काम गर्ने तीन वाक्य: 'टाइमर ५ मिनेट' (Set a timer for 5 minutes), 'समाचार सुनाऊ' (Read me the news), र 'छोरीलाई फोन गर' (Call my daughter — सहायकले फोन गर्नुअघि पुष्टि सोध्छ; मान्छे पहिले परिवार र साथीहरूमा बचत भएको हुनुपर्छ)।",
       "होम स्क्रिनको भ्रमण, माथिदेखि तलसम्म: माथिको पट्टीमा सेटिङको गियर, आजको मिति र तिथि (थिच्दा पात्रो खुल्छ), घण्टी (अपडेटहरू खोल्छ; संख्याको चिन्ह सधैं मिल्छ), र रातो किनारा भएको आपतकालीन त्रिकोण — जुन हरेक स्क्रिनमा हुन्छ। बोल्ने बटनमुनि सानो पिल्लामा भन्न सकिने उदाहरण वाक्यहरू घुमिरहन्छन्। हरेक कुराकानीपछि एउटा कार्डले तपाईंले भनेको र सहायकले भनेको देखाउँछ (केही सेकेन्डपछि एउटा पङ्क्तिमा खुम्चिन्छ; कुनै काममा 'पूर्ववत' (Undo) पनि हुन्छ)।",
-      "होममा सातवटा कामका बटन छन्: दैनिक कामका लागि फोन, औषधि, बाटो र फिड; तलको छुट्टै पट्टीमा उपकरण सहायता, लाइभ अनुवाद र सम्झना। अक्षर ठूलो भए यी बटनहरू होमको स्क्रोल हुने भागमा देखिन्छन्, ताकि सबै काममा पुग्न सकियोस्।",
+      "होमको रङ्गीन पट्टीमा सातवटा कामका बटन छन्: माथिल्लो पङ्क्तिमा उपकरण सहायता, लाइभ अनुवाद, समाचार र नक्सा; तल्लो पङ्क्तिमा फोन, औषधि र सम्झना। पहुँचयोग्यताका लागि अक्षर ठूलो भए यी बटनहरू होमको स्क्रोल हुने भागमा पुनः मिलेर देखिन्छन्, ताकि सबै काममा पुग्न सकियोस्।",
       "अपडेटहरू (घण्टी): तीन खण्ड — सूचनाहरू (आजको ब्रीफिङ, औषधिको अवस्था र अरू सक्रिय सूचनाहरू), आज (तिथि र चाडपर्वसहितको नेपाली मिति, साथै 'अर्को: … बजे' — सबैभन्दा पहिले नछुटाउनुपर्ने कुरा), र गतिविधि (हालैका कुराकानीहरूको पढ्ने-मात्र लग, नयाँ पहिला)।"
     ],
     "images": [
@@ -256,7 +256,7 @@
       "सुरुका स्रोत (परिवारले आफ्नो नराखेसम्म): BBC World, NPR News, The Guardian (अंग्रेजी) र अनलाइन खबर, रातोपाटी, सेतोपाटी (नेपाली) — सबै जाँचिएका।",
       "बदल्ने नियम: सेटिङमा एउटा पनि स्रोत राखिएपछि सारांशले ठ्याक्कै राखिएका स्रोत मात्र पढ्छ — सुरुका सूची पहिलो पटकका लागि मात्र हो। परिवारले बचत गरेकै कुरा पढिन्छ।",
       "सारांशको आकार: 'म समाचार ल्याउँदैछु।' → स्रोतअनुसार, 'BBC World बाट: शीर्षक। शीर्षक। शीर्षक।' — हरेकबाट बढीमा ३ शीर्षक, सबै स्रोत एकैचोटि उही ८-सेकेन्डको सीमाभित्र। नयाँ केही नभएको स्रोत: 'X बाट नयाँ समाचार छैन।' नखुल्ने स्रोत: 'X बाट समाचार लिन सकिएन।' सबै बिग्रे: एउटै इमानदार 'अहिले समाचार लिन सकिएन।' — छवटा असफलताका पङ्क्ति होइनन्, नक्कली सारांश होइन।",
-      "सेटिङ → फिड → समाचार स्रोतहरू: सूची मेट्ने बटनसहित, र एउटा-क्षेत्रको थप्ने फारम (फिडको लिङ्क टाँस्नुहोस्; नाम ठेगानाबाटै बन्छ)। परिवारकै लागि बनाइएको — वृद्ध प्रयोगकर्तालाई लिङ्क लेख्न कहिल्यै भनिँदैन।",
+      "सेटिङ → समाचार → समाचार स्रोतहरू: सूची मेट्ने बटनसहित, र एउटा-क्षेत्रको थप्ने फारम (फिडको लिङ्क टाँस्नुहोस्; नाम ठेगानाबाटै बन्छ)। परिवारकै लागि बनाइएको — वृद्ध प्रयोगकर्तालाई लिङ्क लेख्न कहिल्यै भनिँदैन।",
       "कहिल्यै के गर्दैन: नल्याएको समाचार सारांशमा बनाउँदैन, कुनै स्रोतले नछापेको शीर्षक त्यसका नाममा भन्दैन, र बोलिसकेपछि कुनै शीर्षक कतै बचत गर्दैन (समाचार क्षणिक हो)।"
     ],
     "images": []
@@ -264,7 +264,7 @@
   {
     "id": "feeds",
     "titleEn": "Feeds — the mixed-content feed",
-    "titleNe": "फिड — मिश्रित सामग्रीको फिड",
+    "titleNe": "समाचार — मिश्रित सामग्रीको फिड",
     "paragraphsEn": [
       "The Feeds screen (dock tile) turns RSS/Atom sources into a social-feed-style card list — text, picture, audio and video items mixed together, newest first, filtered by the family's topic keywords.",
       "Default sources: BBC World (text), BBC नेपाली (text in Devanagari), NPR News (audio), NASA Image of the Day (images) — one per kind so the mixed feed shows its whole range out of the box. Up to 10 sources and 20 topics.",
@@ -275,12 +275,12 @@
       "What it will never do: rewrite an item's text (the card shows the feed's own title and summary, sanitized), autoplay anything, or guess a date an item didn't publish. An automatic Translate button for feed items is under development but not yet part of the screen — items currently appear in their original language."
     ],
     "paragraphsNe": [
-      "फिड स्क्रिन (डकको बटन) ले RSS/Atom स्रोतहरूलाई सामाजिक-फिडजस्तो कार्ड-सूचीमा बदल्छ — लेख, तस्बिर, अडियो र भिडियो मिसिएर, नयाँ पहिला, परिवारका विषय-शब्दले छानिएर।",
+      "समाचार स्क्रिन (डकको बटन) ले RSS/Atom स्रोतहरूलाई सामाजिक-फिडजस्तो कार्ड-सूचीमा बदल्छ — लेख, तस्बिर, अडियो र भिडियो मिसिएर, नयाँ पहिला, परिवारका विषय-शब्दले छानिएर।",
       "सुरुका स्रोत: BBC World (लेख), BBC नेपाली (देवनागरी लेख), NPR News (अडियो), NASA Image of the Day (तस्बिर) — हरेक किसिमको एक, ताकि मिश्रित फिडले आफ्नो पूरा रूप देखाओस्। बढीमा १० स्रोत र २० विषय।",
       "कार्ड र त्यसको एउटा काम: लेख-कार्ड → 'पढेर सुनाउनुहोस्' (शीर्षक + सारांश सहायककै आवाजमा); तस्बिर-कार्ड → तस्बिर आफैं (कुनै काम छैन); अडियो/भिडियो कार्ड → 'चलाउनुहोस्' (एपभित्रकै प्लेयर)। केही पनि आफैं चल्दैन — तपाईंको थिचाइबाट मात्र, त्यही नै तपाईंको स्वीकृति हो।",
       "विषयहरू: शीर्षक वा सारांशमा विषय-शब्द भएका कुरा मात्र देखिन्छन् (अक्षर-संवेदनशीलता बिना, नेपाली लिपिमा सुरक्षित); विषयको सूची खाली भए सबै देखिन्छ।",
       "इमानदारी: 'केही स्रोतहरू खुल्न सकेनन्: …' कार्डले ठ्याक्कै कुन स्रोत बिग्रे भन्छ, बाँकी सबै चलिरहन्छ; सफा खाली फिड सामान्य अवस्था हो, त्रुटि होइन; पुराना कुरा (सबै स्रोत बिग्रे पनि बचत भएका देखाउँदा) असफलताको चिन्हसहित मात्र देखाइन्छ। फिड बढीमा १५ मिनेटमा एक पटक ताजा हुन्छ।",
-      "सेटिङ → फिड मा स्रोत (लिङ्कबाट थप्ने, एउटा क्षेत्र), विषय (शब्द-चिप्स), र समाचार स्रोतहरूको सम्पादक छन्।",
+      "सेटिङ → समाचार मा स्रोत (लिङ्कबाट थप्ने, एउटा क्षेत्र), विषय (शब्द-चिप्स), र समाचार स्रोतहरूको सम्पादक छन्।",
       "कहिल्यै के गर्दैन: कुनै कुराको लेख आफैं लेख्दैन वा सारांश बनाउँदैन (कार्डमा स्रोतकै शीर्षक/सारांश, सफा गरेर), केही पनि आफैं चलाउँदैन, नछापिएको मिति अनुमान गर्दैन। (फिडको कुरा स्वतः अनुवाद गर्ने बटन बन्दैछ तर अहिले स्क्रिनमा छैन — कुरा अहिले आफ्नै भाषामा देखिन्छ।)"
     ],
     "images": [
@@ -464,7 +464,7 @@
       "• क्यालेन्डर साझा — परिवारको आफ्नै गुगल क्यालेन्डरमा यिनै सम्झनाहरू राख्छ; कार्डले साझा चालु छ कि छैन इमानदारीपूर्वक देखाउँछ, र बन्द गर्नु एक पटक पुष्टि गरेर मात्र हुन्छ।",
       "उपकरणहरू ट्याब:",
       "• द्रुत एपहरू — होमको द्रुत-पङ्क्तिका लागि बढीमा ८ मनपर्ने एप; स्थापित एपहरू इमानदारीपूर्वक चिनिन्छन् (नभएका छुट्टै चिन्ह लाग्छ)।",
-      "• फिड — फिडका स्रोत (लिङ्कबाट थप्ने, 'सुरुको' चिन्हसहित), विषय-चिप्स, र समाचार स्रोतहरूको सम्पादक।",
+      "• समाचार — फिडका स्रोत (लिङ्कबाट थप्ने, 'सुरुको' चिन्हसहित), विषय-चिप्स, र समाचार स्रोतहरूको सम्पादक।",
       "• म्यानुअलहरू — साथमा आएका पाँच पुस्तिका (आइफोन, फोन, म्यासेज, मेसेन्जर, युट्युब) अंग्रेजी + नेपाली, ठूलो बनाउन मिल्ने चिन्हित चरणसहित।",
       "• ठाउँ र नक्सा — बचत गरिएका ठाउँ (घर + महत्त्वपूर्ण ठाउँ, पूर्वनिर्धारित-घरको चिन्हसहित), आवाजको बाटो कुन नक्सा एपमा खोल्ने (स्वतः / गुगल नक्सा / एप्पल नक्सा / यही एपभित्र), ठाउँ थप्ने/सम्पादन/मेट्ने।",
       "प्रणाली ट्याब:",
