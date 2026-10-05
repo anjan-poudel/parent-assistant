@@ -41,11 +41,7 @@ final class ElderlyAssistantUITests: XCTestCase {
             } else {
                 break
             }
-            app.tap()  // lets interruption monitors fire
         }
-        // The pipeline start (post-wizard) re-requests mic; if the alert
-        // is still up, one more tap lets the monitor accept it.
-        app.tap()
     }
 
     private func launchToHome() -> XCUIApplication {
@@ -107,7 +103,7 @@ final class ElderlyAssistantUITests: XCTestCase {
                       "Idle status should be Nepali")
     }
 
-    /// No Gemini key is configured on the clean UI-test installation.
+    /// Precondition: the simulator has no Gemini key and uses Nepali.
     /// The Home tile must still open offline manuals, not just speak a
     /// refusal. Opening a guide also proves the nested library dismisses
     /// back into the helper instead of losing the app-wide presentation.
@@ -118,9 +114,11 @@ final class ElderlyAssistantUITests: XCTestCase {
         let manuals = app.buttons.matching(NSPredicate(
             format: "label CONTAINS %@", "म्यानुअलहरू")).firstMatch
         tap(appliance, expecting: manuals, within: 15, in: app)
-        XCTAssertTrue(app.staticTexts[
-            "सहायक अझै सेटअप भएको छैन, त्यसैले अहिले फोटो हेर्न सक्दिनँ।"].exists,
-            "Cloud analysis must be visibly unavailable, without hiding manuals")
+        let takePhoto = app.buttons["फोटो खिच्नुहोस्"]
+        XCTAssertTrue(takePhoto.exists)
+        XCTAssertFalse(takePhoto.isEnabled,
+                       "Fresh cloud analysis must be unavailable without a key")
+        XCTAssertTrue(manuals.isEnabled, "Offline manuals must remain usable")
 
         let iphone = app.buttons.matching(NSPredicate(
             format: "label CONTAINS %@", "आइफोन सुरुवात")).firstMatch
