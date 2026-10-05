@@ -8,6 +8,7 @@ import SwiftUI
 /// same rule the digest fetch uses, so what this editor shows is exactly
 /// what the voice digest reads.
 struct NewsSourcesSettingsView: View {
+    @Environment(\.appAppearance) private var appearance
     @ObservedObject var store: NewsSourceStore
 
     @State private var nameDraft = ""
@@ -20,21 +21,20 @@ struct NewsSourcesSettingsView: View {
                 if store.configuredSources.isEmpty {
                     Text("settings.feeds.sourcesEmpty")
                         .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .foregroundStyle(appearance.colors.textSecondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(16)
-                        .background(DesignTokens.card)
-                        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+                        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
                 } else {
                     ForEach(store.configuredSources) { source in
                         HStack(spacing: 12) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(source.name)
                                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                                    .foregroundStyle(DesignTokens.textPrimary)
+                                    .foregroundStyle(appearance.colors.textPrimary)
                                 Text(source.urlString)
                                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                                    .foregroundStyle(DesignTokens.textSecondary)
+                                    .foregroundStyle(appearance.colors.textSecondary)
                                     .lineLimit(2)
                             }
                             Spacer()
@@ -48,8 +48,7 @@ struct NewsSourcesSettingsView: View {
                             .accessibilityLabel(Text("settings.feeds.removeSource"))
                         }
                         .padding(14)
-                        .background(DesignTokens.card)
-                        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+                        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
                     }
                 }
 
@@ -58,7 +57,7 @@ struct NewsSourcesSettingsView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("settings.feeds.sourcesHint")
                         .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .foregroundStyle(appearance.colors.textSecondary)
                     TextField("settings.feeds.sourcePlaceholder", text: $urlDraft)
                         .keyboardType(.URL)
                         .autocapitalization(.none)
@@ -88,8 +87,7 @@ struct NewsSourcesSettingsView: View {
                                 .foregroundStyle(.white)
                                 .frame(minHeight: DesignTokens.minTapTargetSize)
                                 .frame(maxWidth: .infinity)
-                                .background(DesignTokens.accent)
-                                .clipShape(Capsule())
+                                .appSurface(role: .accent, cornerRadius: 999)
                         }
                         .buttonStyle(.plain)
                     }
@@ -100,8 +98,7 @@ struct NewsSourcesSettingsView: View {
                     }
                 }
                 .padding(16)
-                .background(DesignTokens.card)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+                .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
             }
         }
     }

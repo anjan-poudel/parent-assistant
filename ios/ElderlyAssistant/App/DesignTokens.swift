@@ -1,24 +1,10 @@
 import SwiftUI
 import UIKit
 
-/// Shared design tokens for the VoiceBridge visual language.
-///
-/// The supplied identity uses deep navy, burgundy, coral and pale blush
-/// on spacious white surfaces. Functional voice states keep their distinct
-/// semantic colours so listening, speaking and failure never rely on the
-/// brand gradient alone. All views consume these constants so the ≥18pt
-/// body floor, ≥44pt targets and contrast guarantees remain centralized.
+/// Shared accessibility, layout and invariant operational colours.
+/// Skin colours belong to the environment's AppAppearance palette.
 enum DesignTokens {
 
-    // MARK: Palette (VoiceBridge)
-
-    static let background = Color.white                                      // #FFFFFF
-    static let card = Color(red: 0.973, green: 0.980, blue: 0.988)            // #F8FAFC
-    static let accent = Color(red: 0.733, green: 0.118, blue: 0.302)          // #BB1E4D
-    static let textPrimary = Color(red: 0.043, green: 0.122, blue: 0.267)     // #0B1F44
-    static let textSecondary = Color(red: 0.420, green: 0.447, blue: 0.502)   // #6B7280
-    static let userBubble = Color(red: 1.000, green: 0.941, blue: 0.957)      // #FFF0F4
-    static let setupReminder = Color(red: 1.000, green: 0.941, blue: 0.957)   // #FFF0F4
 
     // Voice-session state colors preserve the manual's traffic-light model:
     //   REST (.idle, .stopped) → navy/blue
@@ -28,22 +14,6 @@ enum DesignTokens {
     // Brand magenta is deliberately absent from this table. Every fill keeps
     // ≥4.5:1 white-glyph contrast and ≥3:1 against the warm-white background.
     static let stateIdle = Color(red: 0.086, green: 0.239, blue: 0.451)      // #163D73 — rest blue
-    /// Deep VoiceBridge magenta used for branded loading surfaces. It is
-    /// intentionally separate from `stateError`: brand never means failure.
-    static let brandPink = Color(red: 0.733, green: 0.118, blue: 0.302)      // #BB1E4D
-    static let brandWine = Color(red: 0.722, green: 0.118, blue: 0.302)      // #B81E4D
-    static let brandCoral = Color(red: 1.000, green: 0.302, blue: 0.478)     // #FF4D7A
-    static let brandBlush = Color(red: 1.000, green: 0.839, blue: 0.882)     // #FFD6E1
-    // Reference Home background: warm white with broad dusty-rose ribbons.
-    static let brandCanvasTop = Color(red: 0.988, green: 0.969, blue: 0.961) // #FCF7F5
-    static let brandCanvasBottom = Color(red: 0.973, green: 0.918, blue: 0.929) // #F8EAED
-    static let brandDustyRose = Color(red: 0.863, green: 0.647, blue: 0.706) // #DCA5B4
-    static let brandDeepRose = Color(red: 0.678, green: 0.325, blue: 0.435) // #AD536F
-
-    // Glossy idle/loading Talk face from the supplied Home design.
-    static let talkHighlight = Color(red: 0.945, green: 0.455, blue: 0.518) // #F17484
-    static let talkMid = Color(red: 0.659, green: 0.071, blue: 0.278) // #A81247
-    static let talkDeep = Color(red: 0.396, green: 0.012, blue: 0.161) // #650329
     /// "Voice is off" (visual-polish 2026-09-08): the honest dimmed-blue
     /// sibling of `stateIdle` — same hue family, clearly darker, so an
     /// off/stopped hero never reads as an alarm (red is reserved for
@@ -94,72 +64,12 @@ enum DesignTokens {
     /// device check may want a heavier or lighter wash without touching the
     /// token table.
     static let overlayHighlight = Color(red: 0.204, green: 0.659, blue: 0.325) // #34A853
+    /// Fixed ink for text drawn over camera/photograph highlight washes.
+    static let overlayText = Color(red: 0.043, green: 0.122, blue: 0.267)
 
-    // MARK: - Brand glow
-    //
-    // The reference artwork layers coral, crimson and burgundy ribbons.
-    // These colors are reserved for identity, primary actions and the
-    // assistant's glow; semantic status fills above remain unambiguous.
-    static let warmGlowStart = brandCoral
-    static let warmGlowEnd = brandWine
-
-    static let brandGradient = LinearGradient(
-        colors: [brandWine, brandCoral],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing)
-
-    /// Icon-badge tints collapse app categories onto four semantic roles:
-    ///
-    ///   • `brandAction` — medication, phone and reminders use VoiceBridge
-    ///                     magenta on blush.
-    ///   • `voiceState` — launchers use the hero's calm rest blue.
-    ///   • `emergency` — stop red is reserved for urgency.
-    ///   • `neutralCategory` — supporting destinations use brand navy.
-    ///
-    /// Case names remain semantic at call sites even where categories share
-    /// one color role; strong color communicates priority, not decoration.
     enum BadgeTint {
         case meds, reminders, call, appliance, settings, apps, feeds, emergency, directions
 
-        /// The four semantic colour roles. `CaseIterable` so
-        /// `DesignTokensTests` can pin that no fifth role creeps back in.
-        enum Role: CaseIterable {
-            case brandAction, voiceState, emergency, neutralCategory
-        }
-
-        /// Which role this category's badge wears. This mapping IS the
-        /// consolidation — the colour tables below switch on it, so a
-        /// category can never drift to its own hue again.
-        var role: Role {
-            switch self {
-            case .meds, .reminders, .call:
-                return .brandAction
-            case .apps:
-                return .voiceState
-            case .emergency:
-                return .emergency
-            case .appliance, .settings, .feeds, .directions:
-                return .neutralCategory
-            }
-        }
-
-        var background: Color {
-            switch role {
-            case .brandAction: return DesignTokens.brandBlush
-            case .voiceState: return DesignTokens.stateVoiceRestWash
-            case .emergency: return DesignTokens.card
-            case .neutralCategory: return DesignTokens.brandBlush.opacity(0.72)
-            }
-        }
-
-        var tint: Color {
-            switch role {
-            case .brandAction: return DesignTokens.accent
-            case .voiceState: return DesignTokens.stateIdle
-            case .emergency: return DesignTokens.stateError
-            case .neutralCategory: return DesignTokens.textPrimary
-            }
-        }
     }
 
     /// Pale blue-white wash behind the voice-state badge role.

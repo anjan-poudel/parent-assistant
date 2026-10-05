@@ -10,6 +10,7 @@ import SwiftUI
 /// with the pushed leaf). Tap target is the full 44pt frame, not the
 /// 32pt glyph.
 struct NotificationBellButton: View {
+    @Environment(\.appAppearance) private var appearance
     let count: Int
     let action: () -> Void
 
@@ -29,14 +30,15 @@ struct NotificationBellButton: View {
                         .padding(.horizontal, 6)
                         .padding(.vertical, 1)
                         .frame(minWidth: 22, minHeight: 22)
-                        .background(DesignTokens.accent)
-                        .clipShape(Capsule())
+                        .appSurface(role: .accent, cornerRadius: 999)
                         .offset(x: 2, y: -2)
                 }
             }
+            .frame(minWidth: DesignTokens.minTapTargetSize,
+                   minHeight: DesignTokens.minTapTargetSize)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .frame(minWidth: 44, minHeight: 44)
         .accessibilityLabel(Text("notifications.bell"))
     }
 

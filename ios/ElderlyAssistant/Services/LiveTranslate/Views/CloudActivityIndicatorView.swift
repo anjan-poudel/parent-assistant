@@ -45,6 +45,7 @@ struct CloudActivityIndicatorSurface: Equatable {
 
 /// The elder-facing indicator: a small card with a glyph and a sentence.
 struct CloudActivityIndicatorView: View {
+    @Environment(\.appAppearance) private var appearance
 
     let surface: CloudActivityIndicatorSurface
 
@@ -53,16 +54,15 @@ struct CloudActivityIndicatorView: View {
             HStack(spacing: 8) {
                 Image(systemName: CloudActivityIndicatorSurface.symbolName)
                     .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .foregroundColor(appearance.colors.textPrimary)
                 Text(surface.label)
                     .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .foregroundColor(appearance.colors.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+            .appSurface(cornerRadius: DesignTokens.bubbleCornerRadius)
             .accessibilityElement(children: .combine)
             .accessibilityLabel(Text(surface.label))
             .accessibilityIdentifier("livetranslate.cloudIndicator")

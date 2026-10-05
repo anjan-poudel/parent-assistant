@@ -21,10 +21,10 @@ import AVFoundation
 extension VoiceBiometricPresentation {
     var statusColor: Color {
         switch self {
-        case .enrolled: return DesignTokens.accent
+        case .enrolled: return DesignTokens.stateSpeaking
         case .needsReenrollment, .templateUnreadable: return DesignTokens.stateListening
         case .disabled: return DesignTokens.stateStopped
-        case .notEnrolled: return DesignTokens.textSecondary
+        case .notEnrolled: return DesignTokens.stateStopped
         }
     }
 
@@ -50,6 +50,7 @@ extension VoiceBiometricPresentation {
 }
 
 struct VoicePersonalizationSettingsView: View {
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject private var coordinator: AppCoordinator
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var settings: VoiceSettingsModel
@@ -88,7 +89,7 @@ struct VoicePersonalizationSettingsView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     Text("voiceSettings.explanation")
                         .font(.system(size: DesignTokens.minBodyPointSize))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .foregroundStyle(appearance.colors.textSecondary)
 
                     noiseFilterCard
                     accentBiasCard
@@ -98,7 +99,7 @@ struct VoicePersonalizationSettingsView: View {
 
                     Text("voiceSettings.privacy")
                         .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .foregroundStyle(appearance.colors.textSecondary)
                         .padding(.horizontal, 4)
                 }
                 .padding(.horizontal, 20)
@@ -138,18 +139,17 @@ struct VoicePersonalizationSettingsView: View {
             Toggle(isOn: $settings.noiseFilterEnabled) {
                 Text("voiceSettings.noise.title")
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .foregroundStyle(appearance.colors.textPrimary)
             }
-            .tint(DesignTokens.accent)
+            .tint(appearance.colors.accent)
             .frame(minHeight: DesignTokens.minTapTargetSize)
             Text("voiceSettings.noise.caption")
                 .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     // MARK: - Accent biasing (default ON)
@@ -159,18 +159,17 @@ struct VoicePersonalizationSettingsView: View {
             Toggle(isOn: $settings.accentBiasEnabled) {
                 Text("voiceSettings.accent.title")
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .foregroundStyle(appearance.colors.textPrimary)
             }
-            .tint(DesignTokens.accent)
+            .tint(appearance.colors.accent)
             .frame(minHeight: DesignTokens.minTapTargetSize)
             Text("voiceSettings.accent.caption")
                 .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     // MARK: - Warm start (default ON)
@@ -180,18 +179,17 @@ struct VoicePersonalizationSettingsView: View {
             Toggle(isOn: $settings.warmStartEnabled) {
                 Text("voiceSettings.warmStart.title")
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .foregroundStyle(appearance.colors.textPrimary)
             }
-            .tint(DesignTokens.accent)
+            .tint(appearance.colors.accent)
             .frame(minHeight: DesignTokens.minTapTargetSize)
             Text("voiceSettings.warmStart.caption")
                 .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     private var timingDebugCard: some View {
@@ -199,18 +197,17 @@ struct VoicePersonalizationSettingsView: View {
             Toggle(isOn: $settings.timingDebugEnabled) {
                 Text("voiceSettings.timing.title")
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .foregroundStyle(appearance.colors.textPrimary)
             }
-            .tint(DesignTokens.accent)
+            .tint(appearance.colors.accent)
             .frame(minHeight: DesignTokens.minTapTargetSize)
             Text("voiceSettings.timing.caption")
                 .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     // MARK: - Voice fingerprint: status + enroll + clear
@@ -219,7 +216,7 @@ struct VoicePersonalizationSettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("voiceSettings.biometric.title")
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .foregroundStyle(appearance.colors.textPrimary)
                 .padding(.top, 8)
 
             statusCard
@@ -235,8 +232,7 @@ struct VoicePersonalizationSettingsView: View {
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
                         .frame(minHeight: DesignTokens.minTapTargetSize)
-                        .background(DesignTokens.accent)
-                        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                        .appSurface(role: .accent, cornerRadius: DesignTokens.bubbleCornerRadius)
                 }
                 .buttonStyle(.plain)
             } else {
@@ -249,10 +245,10 @@ struct VoicePersonalizationSettingsView: View {
 
             Text("voiceSettings.biometric.privacy")
                 .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
             Text("voiceSettings.biometric.battery")
                 .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
         }
     }
 
@@ -265,23 +261,22 @@ struct VoicePersonalizationSettingsView: View {
                     .frame(width: 12, height: 12)
                 Text(LocalizedStringKey(presentation.statusTitleKey))
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .foregroundStyle(appearance.colors.textPrimary)
             }
             if case .enrolled(let count) = presentation {
                 Text(L10n.fmt("voiceSettings.biometric.status.enrolled.detail",
                               locale: coordinator.activeLocale, count))
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
             } else if let detailKey = presentation.statusDetailKey {
                 Text(LocalizedStringKey(detailKey))
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
             }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     // MARK: - Enrollment panel (press-to-record, 3 samples)
@@ -298,7 +293,7 @@ struct VoicePersonalizationSettingsView: View {
                               locale: coordinator.activeLocale,
                               sampleNumber, VoiceEnrollmentSession.requiredSampleCount))
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
             }
 
             switch enrollment.phase {
@@ -311,14 +306,14 @@ struct VoicePersonalizationSettingsView: View {
                     ProgressView()
                     Text("voiceSettings.biometric.enroll.processing")
                         .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .foregroundStyle(appearance.colors.textSecondary)
                 }
             case .failed(let failure):
                 failureLine(failure)
             case .idle:
                 Text("voiceSettings.biometric.enroll.hint")
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
             case .ready:
                 HStack(spacing: 8) {
                     Image(systemName: "checkmark.circle.fill")
@@ -326,10 +321,10 @@ struct VoicePersonalizationSettingsView: View {
                         // floor and Dynamic Type aware, like the label it
                         // sits beside — was a fixed 16pt.
                         .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundStyle(DesignTokens.accent)
+                        .foregroundStyle(appearance.colors.accent)
                     Text("voiceSettings.biometric.enroll.done")
                         .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                        .foregroundStyle(DesignTokens.accent)
+                        .foregroundStyle(appearance.colors.accent)
                 }
             }
 
@@ -346,8 +341,7 @@ struct VoicePersonalizationSettingsView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// 1-based number of the sample being recorded next (or the one just
@@ -386,7 +380,7 @@ struct VoicePersonalizationSettingsView: View {
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
-                .background(isRecording ? DesignTokens.stateError : DesignTokens.accent)
+                .background(isRecording ? DesignTokens.stateError : appearance.colors.accent)
                 .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
         }
         .buttonStyle(.plain)
@@ -454,7 +448,7 @@ struct VoicePersonalizationSettingsView: View {
                 .foregroundStyle(DesignTokens.stateError)
             Text(failureText(failure))
                 .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .foregroundStyle(appearance.colors.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
         }
@@ -515,11 +509,11 @@ struct VoicePersonalizationSettingsView: View {
         VStack(spacing: 12) {
             Text("voiceSettings.mic.askTitle")
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .foregroundStyle(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
             Text("voiceSettings.mic.askBody")
                 .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
                 .multilineTextAlignment(.center)
             Button {
                 grantMicAndRecord()
@@ -529,15 +523,13 @@ struct VoicePersonalizationSettingsView: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 20)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.accent)
-                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                    .appSurface(role: .accent, cornerRadius: DesignTokens.bubbleCornerRadius)
             }
             .buttonStyle(.plain)
         }
         .padding(16)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.background)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .control, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// Denied: the honest blocked line — only the system Settings screen
@@ -547,11 +539,11 @@ struct VoicePersonalizationSettingsView: View {
         VStack(spacing: 12) {
             Text("voiceSettings.mic.deniedTitle")
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .foregroundStyle(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
             Text("voiceSettings.mic.deniedBody")
                 .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
                 .multilineTextAlignment(.center)
             Button {
                 guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
@@ -562,15 +554,13 @@ struct VoicePersonalizationSettingsView: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 20)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.accent)
-                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                    .appSurface(role: .accent, cornerRadius: DesignTokens.bubbleCornerRadius)
             }
             .buttonStyle(.plain)
         }
         .padding(16)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.background)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .control, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     // MARK: - Remove voice

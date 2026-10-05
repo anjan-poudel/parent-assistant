@@ -45,6 +45,7 @@ import SwiftUI
 /// (`LiveTranslateResultsCardSurface`), so what is listed here is exactly what
 /// was placed on the crop, in the order the placement put it in.
 struct LiveTranslateFocusResultView: View {
+    @Environment(\.appAppearance) private var appearance
 
     /// The packed crop: the picture, the rows and the placement.
     let capture: LiveTranslateFocusedCapture
@@ -130,7 +131,7 @@ struct LiveTranslateFocusResultView: View {
             .padding(.trailing, insets.trailing)
             .overlay(alignment: .topLeading) { backControl }
         }
-        .background(DesignTokens.background)
+        .background(appearance.colors.background)
         .accessibilityIdentifier(Self.identifier)
     }
 
@@ -257,12 +258,11 @@ struct LiveTranslateFocusResultView: View {
                                                 weight: .semibold))
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .foregroundColor(DesignTokens.textPrimary)
+            .foregroundColor(appearance.colors.textPrimary)
             .padding(.horizontal, DesignTokens.interElementSpacing)
             .frame(minWidth: DesignTokens.minTapTargetSize,
                    minHeight: DesignTokens.minTapTargetSize)
-            .background(DesignTokens.card)
-            .clipShape(Capsule())
+            .appSurface(role: .control, cornerRadius: 100)
         }
         .accessibilityIdentifier(Self.backIdentifier)
         .padding(DesignTokens.interElementSpacing)

@@ -524,8 +524,8 @@ struct LiveTranslateOverlaySurface: Equatable {
     /// colour at a call site, and a device check can change how heavy the wash
     /// is without touching the token table.
     ///
-    /// The ink drawn *inside* it is `DesignTokens.textPrimary`, the app's
-    /// darkest type colour, for the reason stated at the in-place branch: dark
+    /// The ink drawn *inside* it is `DesignTokens.overlayText`, the invariant
+    /// dark operational colour, for the reason stated at the in-place branch: dark
     /// on green is what the owner asked to see, and it clears the wash by
     /// roughly 10:1 where the old pair (white on navy) could only be read by
     /// covering the sign up.
@@ -807,7 +807,7 @@ struct TranslateAllSurface: Equatable {
 /// indicator: which view is on screen changes nothing about what leaves the
 /// device).
 struct TranslateAllControl: View {
-
+    @Environment(\.appAppearance) private var appearance
     let surface: TranslateAllSurface
     /// The value the elder is asking for — an explicit set, not a flip, so the
     /// write says what the tap meant even if the surface it was drawn from is
@@ -831,12 +831,12 @@ struct TranslateAllControl: View {
             // control's are: the on-state's label is the app background (the
             // token, not a bare `.white`), so nothing here introduces a second
             // place a colour is spelled.
-            .foregroundColor(surface.isTranslatingOn ? DesignTokens.background : DesignTokens.textPrimary)
+            .foregroundColor(surface.isTranslatingOn ? appearance.colors.onAccent : appearance.colors.textPrimary)
             .padding(.horizontal, DesignTokens.interElementSpacing * 2)
             .frame(minHeight: DesignTokens.minTapTargetSize)
             .frame(maxWidth: .infinity)
-            .background(surface.isTranslatingOn ? DesignTokens.accent : DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+            .appSurface(role: surface.isTranslatingOn ? .accent : .control,
+                        cornerRadius: DesignTokens.bubbleCornerRadius)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -854,7 +854,7 @@ struct TranslateAllControl: View {
 /// function of its surface, so nothing here can start a translation, await
 /// one, or hold a stale copy of one.
 struct LiveTranslateOverlayView: View {
-
+    @Environment(\.appAppearance) private var appearance
     let surface: LiveTranslateOverlaySurface
     /// Tap-to-hear (C12): speaks this region's translation. Only resolved
     /// bubbles offer it, because only they have something to say.
@@ -956,7 +956,7 @@ struct LiveTranslateOverlayView: View {
                         path.addLine(to: anchor)
                     }
                 }
-                .stroke(DesignTokens.textSecondary, lineWidth: Self.leaderLineWidth)
+                .stroke(appearance.colors.textSecondary, lineWidth: Self.leaderLineWidth)
 
                 ForEach(presentations) { presentation in
                     bubble(presentation)
@@ -1158,14 +1158,14 @@ struct LiveTranslateOverlayView: View {
             //
             // Laid out with the *same* policy values the pill was sized with.
             VStack(spacing: surface.policy.lineSpacing) {
-                line(presentation.lines.first, colour: DesignTokens.background)
+                line(presentation.lines.first, colour: .white)
                 if presentation.lines.count > 1 {
                     stateRow(presentation)
                 }
             }
             .padding(surface.policy.pillPadding)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(DesignTokens.textPrimary)
+            .background(DesignTokens.overlayText)
             .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
         }
     }
@@ -1195,7 +1195,7 @@ struct LiveTranslateOverlayView: View {
     private func panelRows(_ presentation: RegionPresentation) -> some View {
         VStack(spacing: surface.policy.lineSpacing) {
             ForEach(Array(presentation.lines.enumerated()), id: \.offset) { _, textLine in
-                line(textLine, colour: DesignTokens.textPrimary)
+                line(textLine, colour: DesignTokens.overlayText)
             }
         }
     }
@@ -1210,7 +1210,7 @@ struct LiveTranslateOverlayView: View {
                 Image(systemName: symbol)
                     .font(LiveOverlayTextMetrics.font(pointSize: supporting.pointSize,
                                                       weight: supporting.weight))
-                    .foregroundColor(DesignTokens.brandBlush)
+                    .foregroundColor(.white.opacity(0.9))
             }
             Text(supporting.text)
                 .font(LiveOverlayTextMetrics.font(pointSize: supporting.pointSize,
@@ -1218,7 +1218,7 @@ struct LiveTranslateOverlayView: View {
                 // The supporting line on a dark pill: the brand's light tone,
                 // which clears the fill by a wide margin where the grey
                 // secondary ink would not.
-                .foregroundColor(DesignTokens.brandBlush)
+                .foregroundColor(.white.opacity(0.9))
                 .multilineTextAlignment(.center)
         }
         .fixedSize(horizontal: false, vertical: true)
@@ -1243,12 +1243,12 @@ struct LiveTranslateOverlayView: View {
     private var emptyState: some View {
         Text(surface.emptyHint)
             .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize))
-            .foregroundColor(DesignTokens.textPrimary)
+            .foregroundColor(appearance.colors.textPrimary)
             .multilineTextAlignment(.center)
             .fixedSize(horizontal: false, vertical: true)
             .padding(DesignTokens.interElementSpacing * 2)
             .frame(maxWidth: .infinity)
-            .background(DesignTokens.card)
+            .background(appearance.colors.card)
             .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
             .padding(DesignTokens.interElementSpacing * 2)
             // The one element not positioned by a rect: centred in the
@@ -1285,7 +1285,7 @@ struct LiveTranslateOverlayView: View {
 /// No state, no task, no decision — the surface's `state` is the whole of
 /// what changes.
 struct PointAskOverlayBoxView: View {
-
+    @Environment(\.appAppearance) private var appearance
     let surface: PointAskOverlaySurface
     let presentation: LiveCameraPresentation
     let onChipTap: () -> Void
@@ -1328,7 +1328,7 @@ struct PointAskOverlayBoxView: View {
                 // over it would hide it (the green overlay's own lesson:
                 // an opaque cover is the failure, not the style).
                 RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius)
-                    .stroke(DesignTokens.accent,
+                    .stroke(appearance.colors.accent,
                             style: StrokeStyle(lineWidth: Self.boxLineWidth))
                     .frame(width: boxRect.width, height: boxRect.height)
                     .offset(x: boxRect.minX, y: boxRect.minY)
@@ -1437,15 +1437,14 @@ struct PointAskOverlayBoxView: View {
             Text(label)
                 .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize,
                                             weight: .semibold))
-                .foregroundColor(DesignTokens.textPrimary)
+                .foregroundColor(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, DesignTokens.interElementSpacing * 2)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
         }
         .buttonStyle(.plain)
-        .background(DesignTokens.card)
-        .clipShape(Capsule())
+        .appSurface(role: .control, cornerRadius: 999)
         .accessibilityIdentifier(identifier)
     }
 
@@ -1468,11 +1467,10 @@ struct PointAskOverlayBoxView: View {
         Image(systemName: Self.pendingSymbolName)
             .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize,
                                         weight: .semibold))
-            .foregroundColor(DesignTokens.textPrimary)
+            .foregroundColor(appearance.colors.textPrimary)
             .padding(.horizontal, DesignTokens.interElementSpacing * 2)
             .frame(minHeight: DesignTokens.minTapTargetSize)
-            .background(DesignTokens.card)
-            .clipShape(Capsule())
+            .appSurface(role: .control, cornerRadius: 999)
             .frame(width: chipRect.width, height: chipRect.height)
             .offset(x: chipRect.minX, y: chipRect.minY)
             .accessibilityIdentifier("pointask.chip.pending")
@@ -1486,14 +1484,14 @@ struct PointAskOverlayBoxView: View {
             ForEach(Array(surface.cardLines.enumerated()), id: \.offset) { _, line in
                 Text(line)
                     .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .foregroundColor(appearance.colors.textPrimary)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(DesignTokens.interElementSpacing * 2)
         .frame(maxWidth: DesignTokens.minTapTargetSize * 6, alignment: .leading)
-        .background(DesignTokens.card)
+        .background(appearance.colors.card)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
         .offset(x: min(max(anchorRect.minX, DesignTokens.interElementSpacing),
                        anchorRect.minX),
