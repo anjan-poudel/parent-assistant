@@ -17,12 +17,12 @@ struct MessageComposeView: UIViewControllerRepresentable {
         controller.recipients = draft.recipients
         controller.body = draft.body
         controller.messageComposeDelegate = context.coordinator
-        controller.view.tintColor = UIColor(appearance.colors.accent)
+        controller.view.tintColor = UIColor(appearance.colors.accentForeground)
         return controller
     }
 
     func updateUIViewController(_ uiViewController: MFMessageComposeViewController, context: Context) {
-        uiViewController.view.tintColor = UIColor(appearance.colors.accent)
+        uiViewController.view.tintColor = UIColor(appearance.colors.accentForeground)
     }
 
     func makeCoordinator() -> Coordinator {

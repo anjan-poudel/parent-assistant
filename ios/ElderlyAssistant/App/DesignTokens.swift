@@ -42,6 +42,9 @@ enum DesignTokens {
     /// that read this token gets the better contrast for free.
     static let stateError = Color(red: 0.753, green: 0.184, blue: 0.165)     // #C02F2A
 
+    /// Opaque call actions keep white glyph contrast in every skin.
+    static let callActionFill = Color(red: 0.075, green: 0.365, blue: 0.235)
+
     // MARK: - Live camera translation highlight
 
     /// The green the live overlay's boxes are washed with — the owner's own

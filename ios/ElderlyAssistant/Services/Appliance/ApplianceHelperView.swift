@@ -75,7 +75,7 @@ struct ApplianceHelperView: View {
                 }
             }
         }
-        .tint(appearance.colors.accent)
+        .tint(appearance.colors.accentForeground)
         .onAppear {
             // Auto-open belongs to a live capture session only: an ARMED
             // session (bundled default manuals opened from the library or
@@ -134,8 +134,7 @@ struct ApplianceHelperView: View {
         VStack(spacing: 20) {
             Spacer()
             Image(systemName: "camera.viewfinder")
-                .font(.system(size: 64))
-                .foregroundColor(appearance.colors.accent)
+                .font(.system(size: 64)).foregroundColor(appearance.colors.accentForeground)
             Text(LocalizedStringKey(session.canAnalyzePhotos
                  ? "plugin.applianceHelper.cameraPrompt"
                  : "plugin.applianceHelper.notConfigured"))
@@ -164,8 +163,7 @@ struct ApplianceHelperView: View {
             } label: {
                 HStack(spacing: 14) {
                     Image(systemName: "books.vertical.fill")
-                        .font(.system(size: 24))
-                        .foregroundColor(appearance.colors.accent)
+                        .font(.system(size: 24)).foregroundColor(appearance.colors.accentForeground)
                         .frame(width: 40)
                     VStack(alignment: .leading, spacing: 3) {
                         Text("appliance.manual.title")
@@ -208,8 +206,7 @@ struct ApplianceHelperView: View {
         VStack(spacing: 20) {
             Spacer()
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 44))
-                .foregroundColor(DesignTokens.stateListening)
+                .font(.system(size: 44)).foregroundColor(appearance.statusForeground(DesignTokens.stateListening))
             Text(message)
                 .font(.system(size: appearance.typography.bodyPointSize))
                 .foregroundColor(appearance.colors.textPrimary)
@@ -255,8 +252,7 @@ struct ApplianceHelperView: View {
                         session.retake()
                     } label: {
                         Label("appliance.retake", systemImage: "camera.rotate.fill")
-                            .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
-                            .foregroundColor(appearance.colors.accent)
+                            .font(.system(size: appearance.typography.captionPointSize, weight: .semibold)).foregroundColor(appearance.colors.accentForeground)
                             .frame(minHeight: DesignTokens.minTapTargetSize)
                     }
                 }
@@ -268,8 +264,7 @@ struct ApplianceHelperView: View {
 
     private var hedgeBanner: some View {
         HStack(spacing: 10) {
-            Image(systemName: "questionmark.circle.fill")
-                .foregroundColor(DesignTokens.stateListening)
+            Image(systemName: "questionmark.circle.fill").foregroundColor(appearance.statusForeground(DesignTokens.stateListening))
             Text("appliance.hedgeNotice")
                 .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                 .foregroundColor(appearance.colors.textPrimary)
@@ -281,8 +276,7 @@ struct ApplianceHelperView: View {
 
     private var closerPhotoHint: some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: "viewfinder")
-                .foregroundColor(appearance.colors.accent)
+            Image(systemName: "viewfinder").foregroundColor(appearance.colors.accentForeground)
             Text("appliance.closerPhotoHint")
                 .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundColor(appearance.colors.textPrimary)

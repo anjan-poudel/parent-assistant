@@ -403,6 +403,29 @@ final class ElderlyAssistantUITests: XCTestCase {
                        "The restored size must preserve visible text dimensions")
         capture("Glass + Sage restored after relaunch")
 
+        for (skin, name) in [("midnight", "Midnight"), ("darkRose", "Dark Rose")] {
+            let identifier = "appearance.skin.\(skin)"
+            choose(identifier)
+            assertSelected("appearance.style.glass")
+            assertSelected("textSize.xl")
+            reveal(previewText)
+            XCTAssertEqual(previewText.frame.height, xlTextHeight, accuracy: 1,
+                           "Choosing a dark skin must preserve the visible text size")
+            capture("Glass + \(name) + XL preview")
+            returnHome()
+            capture("\(name) returned Home", preview: false)
+            app.terminate()
+            app.launch()
+            completeOnboardingIfNeeded(app)
+            XCTAssertTrue(app.buttons["home.settings"].firstMatch.waitForExistence(timeout: 15))
+            capture("\(name) Home after relaunch", preview: false)
+            openAppearance()
+            assertSelected(identifier)
+            assertSelected("appearance.style.glass")
+            assertSelected("textSize.xl")
+            capture("\(name) restored selection and preview")
+        }
+
         choose("appearance.skin.sky")
         assertSelected("appearance.style.glass")
         choose("appearance.style.soft")

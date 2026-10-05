@@ -301,8 +301,7 @@ struct TalkStage: View {
             }
         } label: {
             Label("state.error.openSettings", systemImage: "gear")
-                .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .semibold))
-                .foregroundColor(appearance.colors.accent)
+                .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .semibold)).foregroundColor(appearance.colors.accentForeground)
                 .padding(.horizontal, 16)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
                 .padding(.vertical, 8)
@@ -389,8 +388,7 @@ struct HomeTimerChipView: View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             chipLayout {
                 Image(systemName: "timer")
-                    .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(appearance.colors.accent)
+                    .font(.system(size: 24, weight: .semibold)).foregroundStyle(appearance.colors.accentForeground)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(LocalizedStringKey("homeTimer.remaining"))
                         .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
@@ -418,8 +416,7 @@ struct HomeTimerChipView: View {
                     viewModel.stopNearest()
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 30))
-                        .foregroundStyle(DesignTokens.stateError)
+                        .font(.system(size: 30)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
                         .frame(minWidth: DesignTokens.minTapTargetSize,
                                minHeight: DesignTokens.minTapTargetSize)
                 }
@@ -440,8 +437,7 @@ struct HomeTimerChipView: View {
         let text = HomeTimerChipModel.devanagari("+\(more)")
         return Text(isNepali ? text : "+\(more)")
             .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
-                                        weight: .semibold))
-            .foregroundStyle(appearance.colors.accent)
+                                        weight: .semibold)).foregroundStyle(appearance.colors.accentForeground)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
             .background(appearance.colors.accent.opacity(0.12))
@@ -652,10 +648,7 @@ private struct SetupStrip: View {
                 Image(systemName: setup.needsAttention
                       ? "exclamationmark.triangle.fill"
                       : "checklist")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(setup.needsAttention
-                                     ? DesignTokens.stateError
-                                     : appearance.colors.accent)
+                    .font(.system(size: 18, weight: .semibold)).foregroundStyle(setup.needsAttention ? appearance.statusForeground(DesignTokens.stateError) : appearance.colors.accentForeground)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(L10n.fmt("home.setupOptionalCount",
                                   locale: locale,

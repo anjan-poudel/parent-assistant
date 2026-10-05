@@ -257,7 +257,7 @@ struct VoicePersonalizationSettingsView: View {
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
                 Circle()
-                    .fill(presentation.statusColor)
+                    .fill(appearance.statusForeground(presentation.statusColor))
                     .frame(width: 12, height: 12)
                 Text(LocalizedStringKey(presentation.statusTitleKey))
                     .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
@@ -299,8 +299,7 @@ struct VoicePersonalizationSettingsView: View {
             switch enrollment.phase {
             case .recording:
                 Text("voiceSettings.biometric.enroll.recordingHint")
-                    .font(.system(size: appearance.typography.captionPointSize))
-                    .foregroundStyle(DesignTokens.stateListening)
+                    .font(.system(size: appearance.typography.captionPointSize)).foregroundStyle(appearance.statusForeground(DesignTokens.stateListening))
             case .processing:
                 HStack(spacing: 10) {
                     ProgressView()
@@ -320,11 +319,9 @@ struct VoicePersonalizationSettingsView: View {
                         // Caption-token status glyph (DESIGN-REVIEW): 18pt
                         // floor and Dynamic Type aware, like the label it
                         // sits beside — was a fixed 16pt.
-                        .font(.system(size: appearance.typography.captionPointSize))
-                        .foregroundStyle(appearance.colors.accent)
+                        .font(.system(size: appearance.typography.captionPointSize)).foregroundStyle(appearance.colors.accentForeground)
                     Text("voiceSettings.biometric.enroll.done")
-                        .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
-                        .foregroundStyle(appearance.colors.accent)
+                        .font(.system(size: appearance.typography.captionPointSize, weight: .semibold)).foregroundStyle(appearance.colors.accentForeground)
                 }
             }
 
@@ -444,8 +441,7 @@ struct VoicePersonalizationSettingsView: View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
                 // Caption-token failure glyph (DESIGN-REVIEW) — was 16pt.
-                .font(.system(size: appearance.typography.captionPointSize))
-                .foregroundStyle(DesignTokens.stateError)
+                .font(.system(size: appearance.typography.captionPointSize)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
             Text(failureText(failure))
                 .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textPrimary)
@@ -572,8 +568,7 @@ struct VoicePersonalizationSettingsView: View {
                 showClearConfirm = true
             } label: {
                 Text("voiceSettings.biometric.remove")
-                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.stateError)
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
             }
             .buttonStyle(.plain)
             Spacer()

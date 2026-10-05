@@ -61,8 +61,7 @@ struct OnboardingWizardView: View {
             Spacer(minLength: 8)
             Button(action: skipCurrentStep) {
                 Text("onboarding.skip")
-                    .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
-                    .foregroundStyle(appearance.colors.accent)
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .semibold)).foregroundStyle(appearance.colors.accentForeground)
                     .padding(.horizontal, 12)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
             }
@@ -86,7 +85,7 @@ struct OnboardingWizardView: View {
         HStack(spacing: 10) {
             ForEach(Array(steps.enumerated()), id: \.element.id) { index, _ in
                 Circle()
-                    .fill(index == stepIndex ? appearance.colors.accent : appearance.colors.textSecondary.opacity(0.35))
+                    .fill(index == stepIndex ? appearance.colors.accentForeground : appearance.colors.textSecondary.opacity(0.35))
                     .frame(width: index == stepIndex ? 14 : 10,
                            height: index == stepIndex ? 14 : 10)
             }
@@ -178,8 +177,7 @@ private struct LanguageStep: View {
                 Spacer()
                 if isSelected {
                     Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 26))
-                        .foregroundStyle(appearance.colors.accent)
+                        .font(.system(size: 26)).foregroundStyle(appearance.colors.accentForeground)
                 }
             }
             .padding(18)
@@ -187,7 +185,7 @@ private struct LanguageStep: View {
             .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
             .overlay(
                 RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius)
-                    .stroke(isSelected ? appearance.colors.accent : Color.clear, lineWidth: 2)
+                    .stroke(isSelected ? appearance.colors.accentForeground : Color.clear, lineWidth: 2)
             )
         }
         .buttonStyle(.plain)
@@ -242,8 +240,7 @@ private struct PermissionsStep: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 10) {
                 Image(systemName: icon)
-                    .font(.system(size: 24))
-                    .foregroundStyle(appearance.colors.accent)
+                    .font(.system(size: 24)).foregroundStyle(appearance.colors.accentForeground)
                 Text(LocalizedStringKey(bodyKey))
                     .font(.system(size: appearance.typography.bodyPointSize))
                     .foregroundStyle(appearance.colors.textPrimary)
@@ -262,12 +259,10 @@ private struct PermissionsStep: View {
                 .buttonStyle(.plain)
             case .granted:
                 Label("model.ready", systemImage: "checkmark.circle.fill")
-                    .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
-                    .foregroundStyle(appearance.colors.accent)
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .semibold)).foregroundStyle(appearance.colors.accentForeground)
             case .denied:
                 Text("onboarding.stepPermissions.deniedHint")
-                    .font(.system(size: appearance.typography.captionPointSize))
-                    .foregroundStyle(DesignTokens.stateError)
+                    .font(.system(size: appearance.typography.captionPointSize)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
             }
         }
         .padding(16)
@@ -427,8 +422,7 @@ private struct ModelsStep: View {
                     .autocorrectionDisabled()
                 if coordinator.geminiConfigStore.isConfigured {
                     Label("settings.gemini.statusConnected", systemImage: "checkmark.circle.fill")
-                        .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
-                        .foregroundStyle(appearance.colors.accent)
+                        .font(.system(size: appearance.typography.captionPointSize, weight: .semibold)).foregroundStyle(appearance.colors.accentForeground)
                 }
             }
             .padding(16)

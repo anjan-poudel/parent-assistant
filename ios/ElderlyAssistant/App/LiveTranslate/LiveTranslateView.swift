@@ -410,8 +410,7 @@ struct LiveTranslateView: View {
         } label: {
             Image(systemName: zoom.isFocusLocked ? Self.focusLockedSymbolName
                                                  : Self.focusUnlockedSymbolName)
-                .font(DesignTokens.warmFont(size: 21, weight: .semibold))
-                .foregroundColor(zoom.isFocusLocked ? appearance.colors.accent : appearance.colors.textPrimary)
+                .font(DesignTokens.warmFont(size: 21, weight: .semibold)).foregroundColor(zoom.isFocusLocked ? appearance.colors.accentForeground : appearance.colors.textPrimary)
                 .frame(width: Self.zoomControlDiameter, height: Self.zoomControlDiameter)
                 .appSurface(role: .control, cornerRadius: 999)
         }
@@ -884,8 +883,7 @@ struct LiveTranslateResultsCardView: View {
             }
             Spacer(minLength: 0)
             if row.speaksTranslation {
-                Image(systemName: Self.speakSymbolName)
-                    .foregroundColor(appearance.colors.accent)
+                Image(systemName: Self.speakSymbolName).foregroundColor(appearance.colors.accentForeground)
             }
         }
         .padding(DesignTokens.interElementSpacing)

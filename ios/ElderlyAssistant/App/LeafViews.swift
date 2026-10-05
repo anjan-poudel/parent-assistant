@@ -234,8 +234,7 @@ struct MedicalView: View {
                 coordinator.removeAppointment(id: appointment.id)
             } label: {
                 Image(systemName: "trash.fill")
-                    .font(.system(size: 22))
-                    .foregroundStyle(DesignTokens.stateError)
+                    .font(.system(size: 22)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
                     .frame(minWidth: DesignTokens.minTapTargetSize,
                            minHeight: DesignTokens.minTapTargetSize)
             }
@@ -287,8 +286,7 @@ struct MedicalView: View {
                 handlePasteTap()
             } label: {
                 Label("medical.pasteAppointment", systemImage: "doc.text.fill")
-                    .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
-                    .foregroundStyle(appearance.colors.accent)
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold)).foregroundStyle(appearance.colors.accentForeground)
                     .frame(maxWidth: .infinity)
                     .frame(minHeight: DesignTokens.chipHeight)
                     .fixedSize(horizontal: false, vertical: true)
@@ -297,8 +295,7 @@ struct MedicalView: View {
 
             if showPasteFailed {
                 Text("medical.pasteFailed")
-                    .font(.system(size: appearance.typography.captionPointSize))
-                    .foregroundStyle(DesignTokens.stateError)
+                    .font(.system(size: appearance.typography.captionPointSize)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity, alignment: .center)
             }
@@ -481,8 +478,7 @@ struct MedicalView: View {
                     viewingDoseAids = aids
                 } label: {
                     Image(systemName: "photo.fill")
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(appearance.colors.accent)
+                        .font(.system(size: 22, weight: .semibold)).foregroundStyle(appearance.colors.accentForeground)
                         .frame(minWidth: DesignTokens.minTapTargetSize,
                                minHeight: DesignTokens.minTapTargetSize)
                 }
@@ -708,9 +704,7 @@ struct RemindersView: View {
     private func todayRowView(_ row: TodayRow) -> some View {
         HStack(spacing: 12) {
             Image(systemName: row.systemImage)
-                .font(.system(size: 24))
-                .foregroundStyle(row.isDimmed || row.external != nil
-                                 ? appearance.colors.textSecondary : appearance.colors.accent)
+                .font(.system(size: 24)).foregroundStyle(row.isDimmed || row.external != nil ? appearance.colors.textSecondary : appearance.colors.accentForeground)
             VStack(alignment: .leading, spacing: 4) {
                 Text(row.title)
                     .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
@@ -733,8 +727,7 @@ struct RemindersView: View {
             // body runs, which this screen never does.
             if !row.visualAids.isEmpty {
                 Image(systemName: "photo.fill")
-                    .font(.system(size: 22))
-                    .foregroundStyle(appearance.colors.accent)
+                    .font(.system(size: 22)).foregroundStyle(appearance.colors.accentForeground)
                     .frame(minWidth: DesignTokens.minTapTargetSize,
                            minHeight: DesignTokens.minTapTargetSize)
                     .accessibilityHidden(true)
@@ -876,13 +869,12 @@ struct RemindersView: View {
     private var showMoreUpcomingLink: some View {
         NavigationLink(value: LeafDestination.calendar) {
             Text("history.showMore")
-                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
-                .foregroundStyle(appearance.colors.accent)
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold)).foregroundStyle(appearance.colors.accentForeground)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
                 .appSurface(role: .card, cornerRadius: 999)
                 .overlay(
-                    Capsule().stroke(appearance.colors.accent.opacity(0.35),
+                    Capsule().stroke(appearance.colors.accentForeground.opacity(0.35),
                                      lineWidth: 1.5)
                 )
         }
@@ -1117,8 +1109,7 @@ struct CallView: View {
                 Image(systemName: systemImage)
                     // Caption-token glyph (DESIGN-REVIEW) beside the
                     // button's 18pt title — scales with Dynamic Type.
-                    .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
-                    .foregroundStyle(appearance.colors.accent)
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .semibold)).foregroundStyle(appearance.colors.accentForeground)
                 Text(LocalizedStringKey(titleKey))
                     .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                     .foregroundStyle(appearance.colors.textPrimary)
@@ -1215,7 +1206,9 @@ struct CallView: View {
                 // aware — the circle below uses minWidth/minHeight so the
                 // glyph can never clip at Accessibility XXXL.
                 .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
-                .foregroundStyle(listening ? DesignTokens.overlayText : appearance.colors.accent)
+                .foregroundStyle(listening
+                    ? (appearance.skin.isDark ? appearance.colors.onAccent : DesignTokens.overlayText)
+                    : appearance.colors.accentForeground)
                 .frame(minWidth: 30, minHeight: 30)
                 .background(listening ? DesignTokens.stateListening : appearance.colors.background)
                 .clipShape(Circle())
@@ -1234,8 +1227,7 @@ struct CallView: View {
         switch micPhase {
         case .listening:
             Text(L10n.str("call.search.micListening", locale: coordinator.activeLocale))
-                .font(.system(size: appearance.typography.captionPointSize))
-                .foregroundStyle(appearance.colors.accent)
+                .font(.system(size: appearance.typography.captionPointSize)).foregroundStyle(appearance.colors.accentForeground)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 6)
         case .failed:
@@ -1283,8 +1275,7 @@ struct CallView: View {
     private var searchOpenButton: some View {
         Button(action: openSearch) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(appearance.colors.accent)
+                .font(.system(size: 20, weight: .semibold)).foregroundStyle(appearance.colors.accentForeground)
                 .frame(minWidth: DesignTokens.minTapTargetSize,
                        minHeight: DesignTokens.minTapTargetSize)
                 .appSurface(role: .card, cornerRadius: 999)
@@ -1798,13 +1789,12 @@ struct CallView: View {
                 if activity.count > Self.recentActivityLimit {
                     NavigationLink(value: LeafDestination.history) {
                         Text(LocalizedStringKey("history.showMore"))
-                            .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
-                            .foregroundStyle(appearance.colors.accent)
+                            .font(.system(size: appearance.typography.bodyPointSize, weight: .bold)).foregroundStyle(appearance.colors.accentForeground)
                             .frame(maxWidth: .infinity)
                             .frame(minHeight: DesignTokens.minTapTargetSize)
                             .appSurface(role: .card, cornerRadius: 999)
                             .overlay(
-                                Capsule().stroke(appearance.colors.accent.opacity(0.35),
+                                Capsule().stroke(appearance.colors.accentForeground.opacity(0.35),
                                                  lineWidth: 1.5)
                             )
                     }
@@ -2189,8 +2179,7 @@ private struct WhatsAppSyncHintCard: View {
     var body: some View {
         VStack(spacing: 12) {
             Image(systemName: "person.2.badge.gearshape")
-                .font(.system(size: appearance.typography.bodyPointSize))
-                .foregroundStyle(appearance.colors.accent)
+                .font(.system(size: appearance.typography.bodyPointSize)).foregroundStyle(appearance.colors.accentForeground)
             Text(LocalizedStringKey("call.waSyncHint"))
                 .font(.system(size: appearance.typography.bodyPointSize))
                 .foregroundStyle(appearance.colors.textPrimary)
@@ -2420,8 +2409,7 @@ private struct UnifiedContactResultRow: View {
     /// the caption already says who this person is.
     private var familyChip: some View {
         Text(L10n.str("call.search.familyChip", locale: locale))
-            .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
-            .foregroundStyle(appearance.colors.accent)
+            .font(.system(size: appearance.typography.captionPointSize, weight: .bold)).foregroundStyle(appearance.colors.accentForeground)
             .padding(.horizontal, 10)
             .padding(.vertical, 3)
             .background(appearance.colors.accent.opacity(0.12))
@@ -2520,8 +2508,7 @@ private struct UnifiedContactResultRow: View {
     private var addHandleButton: some View {
         Button(action: addHandle) {
             Image(systemName: "person.crop.circle.badge.plus")
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(appearance.colors.accent)
+                .font(.system(size: 20, weight: .semibold)).foregroundStyle(appearance.colors.accentForeground)
                 .frame(minWidth: DesignTokens.minTapTargetSize, minHeight: DesignTokens.minTapTargetSize)
                 .appSurface(role: .control, cornerRadius: 999)
         }
@@ -2549,7 +2536,7 @@ private struct UnifiedContactResultRow: View {
     private func circleColor(for app: CallApp) -> Color {
         switch app {
         case .phone: return appearance.colors.accent
-        case .faceTime: return appearance.badgeTint(.call)
+        case .faceTime: return DesignTokens.callActionFill
         case .whatsApp: return Self.whatsAppGreen
         case .messenger: return Self.messengerBlue
         }
@@ -2634,7 +2621,7 @@ struct ContactTile: View {
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(minWidth: DesignTokens.minTapTargetSize, minHeight: DesignTokens.minTapTargetSize)
-                    .background(appearance.badgeTint(.call))
+                    .background(DesignTokens.callActionFill)
                     .clipShape(Circle())
             }
             .buttonStyle(.plain)
@@ -2733,8 +2720,7 @@ struct CalendarView: View {
                     .multilineTextAlignment(.center)
                 // Tithi overlay — every day, per product requirement.
                 Text(overlay.tithi.displayNepali)
-                    .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
-                    .foregroundStyle(appearance.colors.accent)
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold)).foregroundStyle(appearance.colors.accentForeground)
                 Text(Date().formatted(.dateTime.day().month(.wide).year().locale(coordinator.activeLocale)))
                     .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
@@ -2758,8 +2744,7 @@ struct CalendarView: View {
                 .foregroundStyle(appearance.colors.textSecondary)
             ForEach(festivals, id: \.id) { festival in
                 HStack(spacing: 10) {
-                    Image(systemName: "sparkles")
-                        .foregroundStyle(appearance.colors.accent)
+                    Image(systemName: "sparkles").foregroundStyle(appearance.colors.accentForeground)
                     Text(festival.nameNepali)
                         .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                         .foregroundStyle(appearance.colors.textPrimary)
@@ -2801,8 +2786,7 @@ struct CalendarView: View {
                     }
                     Spacer()
                     Text(daysAwayText(item.daysAway))
-                        .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
-                        .foregroundStyle(appearance.colors.accent)
+                        .font(.system(size: appearance.typography.captionPointSize, weight: .semibold)).foregroundStyle(appearance.colors.accentForeground)
                 }
             }
         }

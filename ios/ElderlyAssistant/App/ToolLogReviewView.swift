@@ -49,8 +49,7 @@ struct ToolLogReviewView: View {
                         Image(systemName: "square.and.arrow.up")
                         Text("toolLog.export")
                     }
-                    .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
-                    .foregroundStyle(appearance.colors.accent)
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .semibold)).foregroundStyle(appearance.colors.accentForeground)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
                 }
             }
@@ -75,8 +74,7 @@ struct ToolLogReviewView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Image(systemName: kindIcon(for: entry.kind))
-                    .font(.system(size: appearance.typography.captionPointSize))
-                    .foregroundStyle(appearance.colors.accent)
+                    .font(.system(size: appearance.typography.captionPointSize)).foregroundStyle(appearance.colors.accentForeground)
                 Text(kindLabel(for: entry.kind))
                     .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                     .foregroundStyle(appearance.colors.textSecondary)
