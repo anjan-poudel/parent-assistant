@@ -216,3 +216,21 @@ final class EncryptedFileStorage: MigratableFileStorage {
         try? mutable.setResourceValues(resource)
     }
 }
+
+// MARK: - ProfilePayloadStorage (profile-interview, T-090)
+//
+// Additive conformance only — no existing method changes. The extension
+// lives in this file for file-scoped access to the private URL builder;
+// `readRawData` is already the `RawEncryptedStorage` method above.
+
+extension EncryptedFileStorage: ProfilePayloadStorage {
+    /// nil only when the store has no root (Application Support
+    /// unavailable) — the load path must not read that as "absent".
+    /// A file that exists but does not decode as this key's envelope
+    /// still counts as present here: the raw read reports nil and the
+    /// store maps probe-true + read-nil to `.unreadable`, not `.absent`.
+    func hasPayload(key: String) -> Bool? {
+        guard let url = url(for: key) else { return nil }
+        return fileManager.fileExists(atPath: url.path)
+    }
+}

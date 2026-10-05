@@ -61,6 +61,13 @@ struct HomeView: View {
 
     @State private var showWizard = false
     @State private var showHistory = false
+    /// [PROFILE-INTERVIEW T-102] Where the wizard opens when presented —
+    /// captured by BOTH entry points: the reminder card at tap time, the
+    /// cold-start one-shot at route time. The cover renders this value,
+    /// never a live re-read of the step map.
+    @State private var wizardStart: OnboardingState.Step?
+    /// The cold-start check runs once per process (first `onAppear`).
+    @State private var didCheckStartupRoute = false
     /// Programmatic push target for voice-driven contact search
     /// (voice-contact-search, 2026-09-07): the router's keyword pre-route
     /// publishes `pendingContactSearchRequest`; this onChange appends the
@@ -205,8 +212,26 @@ struct HomeView: View {
                     navPath.append(LeafDestination.call)
                 }
             }
+            // [PROFILE-INTERVIEW T-102] The cold-start interview route
+            // (FR-PI-016, design-l2 §4 C13): ONE evaluation per process,
+            // on the first appear only; `scenePhase` is deliberately not
+            // observed (no foreground re-check in v1 — it could pop the
+            // interview over a live capture). The route is captured into
+            // `wizardStart` so the cover renders a stable step. Honours
+            // the hosted-test boot guard: unit tests see the behavior
+            // they always had; UI tests run the real shell.
+            .onAppear {
+                guard !didCheckStartupRoute else { return }
+                didCheckStartupRoute = true
+                guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"]
+                        == nil else { return }
+                if let route = coordinator.coldStartInterviewRoute() {
+                    wizardStart = route
+                    showWizard = true
+                }
+            }
             .fullScreenCover(isPresented: $showWizard) {
-                OnboardingWizardView(startingAt: coordinator.onboardingState.firstPendingStep)
+                OnboardingWizardView(startingAt: wizardStart)
                     .environmentObject(coordinator)
                     .environmentObject(session)
                     .environmentObject(coordinator.modelDownloadService)
@@ -369,7 +394,13 @@ struct HomeView: View {
                        caption: coordinator.livePartialTranscript ?? coordinator.lastTranscript,
                        outcome: coordinator.lastOutcome,
                        setup: homePresentation.setup,
-                       onResumeSetup: { showWizard = true },
+                       onResumeSetup: {
+                           // Same value the old direct read produced —
+                           // now captured at tap so the cover stays
+                           // stable while the wizard runs.
+                           wizardStart = coordinator.onboardingState.firstPendingStep
+                           showWizard = true
+                       },
                        onOpenHistory: { showHistory = true },
                        onDismissOutcome: coordinator.dismissOutcome)
     }

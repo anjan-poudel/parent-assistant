@@ -326,10 +326,27 @@ struct LogSanitiser {
     /// The redaction here is wholesale, and it runs **before** the allow-list
     /// filter — the fail-closed direction: no future edit to `allowedKeys`
     /// can turn one of these keys back into a pass-through.
-    private static let redactedKeys: Set<String> = [
+    ///
+    /// [PROFILE-INTERVIEW T-104] The five profile field-name keys join the
+    /// set (design-l2 §7.4): their values are the profile record's own
+    /// content, and no shipped event carries them — so they are
+    /// deliberately NOT declared in `allowedKeys`. The redacted token is
+    /// kept only for keys the allow-list also carries; for these five the
+    /// pair is dropped whole (see `sanitise`). Redaction still runs first,
+    /// so no future edit to `allowedKeys` can turn one into a pass-through
+    /// either way.
+    /// Declared internal (not private) so the tests can pin membership
+    /// directly — the same visibility the sibling `allowedKeys` and
+    /// `redactionToken` already have; the set is read-only either way.
+    static let redactedKeys: Set<String> = [
         "recognized_text",
         "source_text",
-        "translated_text"
+        "translated_text",
+        "profile_name",
+        "address_as",
+        "date_of_birth",
+        "emergency_doctor",
+        "local_hospital"
     ]
 
     /// What a redacted value is replaced by. The same token the PII scrub
@@ -452,8 +469,15 @@ struct LogSanitiser {
             // [SANITISED-DEBUG-LANE] Content-bearing by declaration: the value
             // is dropped in favour of the token before anything else looks at
             // the key, so the redaction cannot depend on the allow-list.
+            // [PROFILE-INTERVIEW T-104] The redacted token is KEPT only for
+            // keys the allow-list also declares (the live-camera trio — the
+            // pair's existence stays visible). A key that is redacted and
+            // NOT allow-listed (the five profile field names) is dropped
+            // whole: the design's fail-closed direction (§7.4).
             if Self.redactedKeys.contains(key) {
-                cleanMetadata[key] = Self.redactionToken
+                if Self.allowedKeys.contains(key) {
+                    cleanMetadata[key] = Self.redactionToken
+                }
                 continue
             }
             guard Self.allowedKeys.contains(key) else { continue }

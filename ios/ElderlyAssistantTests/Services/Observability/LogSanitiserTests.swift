@@ -337,4 +337,54 @@ final class LogSanitiserTests: XCTestCase {
                            LogSanitiser.redactionToken)
         }
     }
+
+    // MARK: - Profile field names are dropped whole (profile-interview T-104)
+
+    /// [PROFILE-INTERVIEW T-104] The five profile field-name keys are
+    /// redacted first and then dropped by the allow-list (design-l2 §7.4):
+    /// no shipped event carries them, so the pair does not survive
+    /// sanitisation at all — not its value, and not even the token. The
+    /// values below hold no PII shape, which makes the disappearance a
+    /// property of the KEY, not of the scrub happening to match.
+    func testProfileFieldKeysAreDroppedWholeAndNeverCarryTheirValue() {
+        let values: [String: String] = [
+            "profile_name": "Maya Gurung",
+            "address_as": "Mum",
+            "date_of_birth": "1943-07-21",
+            "emergency_doctor": "Dr. Sharma",
+            "local_hospital": "Teaching Hospital",
+        ]
+        for (key, value) in values {
+            let clean = sanitiser.sanitise(event(metadata: [key: value]))
+            XCTAssertNil(clean.metadata[key],
+                         "\(key) must not survive the allow-list filter")
+            var fields = [clean.eventType, clean.outcome,
+                          clean.errorCode ?? "", clean.component]
+            fields.append(contentsOf: clean.metadata.map { "\($0.key)=\($0.value)" })
+            for field in fields {
+                XCTAssertFalse(field.contains(value),
+                               "the value of \(key) survived on the "
+                               + "sanitised event in '\(field)'")
+            }
+        }
+    }
+
+    /// The mechanism, not just the outcome: all five keys are members of
+    /// `redactedKeys`, so the redaction runs BEFORE the allow-list — and
+    /// none of them is allow-listed, which is what makes the drop whole.
+    /// Together these pin the design's fail-closed direction: a future
+    /// edit that allow-lists one of them cannot turn it into a
+    /// pass-through (the token would be substituted first), and a future
+    /// emitter that writes one cannot leak it (the allow-list drops it).
+    func testTheProfileFieldKeysAreRedactedByDeclarationAndNotAllowListed() {
+        for key in ["profile_name", "address_as", "date_of_birth",
+                    "emergency_doctor", "local_hospital"] {
+            XCTAssertTrue(LogSanitiser.redactedKeys.contains(key),
+                          "\(key) must be redacted by declaration")
+            XCTAssertFalse(LogSanitiser.allowedKeys.contains(key),
+                           "\(key) must NOT be allow-listed — no shipped "
+                           + "event carries it, and the drop-whole "
+                           + "behaviour is the pin (design-l2 §7.4)")
+        }
+    }
 }

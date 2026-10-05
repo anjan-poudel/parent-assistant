@@ -84,7 +84,11 @@ Usage: $0 {build|ipa|test|test:unit|test:ui|test:impact|test-clean|generate|help
               Incremental on build/DerivedData — no clean.
   ipa         build + archive + export an .ipa.
   test        Full gate: unit + UI tests (merge/nightly). Warm DerivedData.
-  test:unit   Fast: unit tests only (skips ElderlyAssistantUITests).
+  test:unit [Class…]
+              Fast: unit tests only (skips ElderlyAssistantUITests).
+              Extra class names scope the run with
+              -only-testing:ElderlyAssistantTests/<Class> per name; a
+              scoped run does not advance the impact-gate baseline.
   test:ui     UI tests only, parallel-testing enabled.
   test:impact Impact-aware unit gate: only suites whose source areas changed
               since the last recorded green run (ios/build/.last-tested-sha),
@@ -112,6 +116,7 @@ Environment:
 Examples:
   cd ios
   ./build.sh test:unit            # fast local check (minutes on warm dir)
+  ./build.sh test:unit ClassA ClassB   # scoped classes only (foreground gate)
   ./build.sh test:impact          # only suites hit by your edits + safety net
   ./build.sh test                 # full gate incl. UI tests
   IOS_TEST_CLONES=2 ./build.sh test:ui   # UI suite split over 2 sim clones
@@ -416,6 +421,18 @@ run_tests() {
         exit 1
     }
 
+    # [PROFILE-INTERVIEW T-094] Training/inference prompt identity: the
+    # Swift prompt template must stay byte-identical (modulo the four
+    # renderer placeholders) to the QLoRA seed copy. Same
+    # before-every-test-scope discipline as the privacy guard above — a
+    # drifted prompt must fail the gate, never ride along silently.
+    echo ""
+    echo "Checking intent-prompt mirror..."
+    "${PROJECT_DIR}/tools/check-prompt-mirror.sh" || {
+        echo "ERROR: intent-prompt mirror guard failed — see above." >&2
+        exit 1
+    }
+
     case "${scope}" in
         unit) label="unit tests"
               testing_args=(-skip-testing:ElderlyAssistantUITests) ;;
@@ -501,10 +518,21 @@ case "${1:-build}" in
     test:unit)
         check_prereqs
         generate_project
-        run_tests unit
+        # Extra args after the mode are forwarded as scoped -only-testing
+        # classes (run_tests documents the form). Without the "${@:2}"
+        # the dispatch never reaches run_tests and the gate silently
+        # widens to the whole unit bundle — the exact defect this
+        # forwarding fixes.
+        run_tests unit "${@:2}"
         echo ""
-        echo "=== Unit tests passed ==="
-        record_green "$(git -C "${REPO_ROOT}" rev-parse HEAD)"
+        if [ "$#" -le 1 ]; then
+            echo "=== Unit tests passed ==="
+            record_green "$(git -C "${REPO_ROOT}" rev-parse HEAD)"
+        else
+            # Scoped runs never advance the full-coverage green baseline
+            # (same rule test:impact already follows for partial runs).
+            echo "=== Scoped unit tests passed (green baseline not advanced) ==="
+        fi
         ;;
     test:ui)
         check_prereqs

@@ -25,6 +25,13 @@ replaced with the case directory, so a case can point the engine at a
 fixture-local allow-list. Fixture trees are *not* compiled and are not under
 `ios/ElderlyAssistant`, so the shipped gate never scans them.
 
+A case directory may also contain an `expect` file: whitespace-separated
+tokens that the gate's output must contain for a **positive** case to pass.
+Naming the rule is not enough when a tree plants violations in several
+places — `expect` is how a fixture pins WHICH file the gate caught (e.g.
+that a planted violation in a newly added scan root is the one reported,
+not its older sibling).
+
 `--falsify` is the second, optional discipline: for every rule, the engine is
 re-run over that rule's *positive* fixture with `--disable-rule <rule>`, and
 the case passes only if the gate **stops catching the tree at all** (exit 0).
@@ -89,6 +96,15 @@ def fixture_arguments(directory):
     return [token.replace("{fixture}", directory) for token in tokens]
 
 
+def expectation_tokens(directory):
+    """The optional `expect` file's tokens — output the gate must contain."""
+    path = os.path.join(directory, "expect")
+    if not os.path.isfile(path):
+        return []
+    with open(path, encoding="utf-8") as handle:
+        return handle.read().split()
+
+
 def swift_file_count(directory):
     count = 0
     for _root, _dirs, files in os.walk(directory):
@@ -118,7 +134,14 @@ def run_case(rule, kind, directory):
             case.detail = (f"the gate failed but did not name the rule "
                            f"({process.returncode}): {output.strip()}")
         else:
-            case.passed = True
+            missing = [token for token in expectation_tokens(directory)
+                       if token not in output]
+            if missing:
+                case.detail = (f"the gate fired but did not name {missing} — "
+                               f"the planted file was not the one caught: "
+                               f"{output.strip()}")
+            else:
+                case.passed = True
     else:
         if process.returncode != 0:
             case.detail = ("the gate failed a tree it must pass (a rule fired "

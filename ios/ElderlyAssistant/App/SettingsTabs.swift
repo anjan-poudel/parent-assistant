@@ -43,8 +43,12 @@ extension SettingsView {
                 // "Wake word, Talk & listen, TTS voices" (spec §3).
                 return [.wakeWord, .voicePersonalization, .ttsVoices]
             case .family:
-                // "Family & friends, caregiver notifications, calling apps".
-                return [.family, .caregiverNotifications, .calling]
+                // "Family & friends, About me, caregiver notifications,
+                // calling apps" — [PROFILE-INTERVIEW T-103] the profile
+                // editor sits with the family rows (design-l2 §5.7:
+                // tab .family — rows become [.family, .profile,
+                // .caregiverNotifications, .calling]).
+                return [.family, .profile, .caregiverNotifications, .calling]
             case .reminders:
                 // "Medications, daily routines, alarms & timers, events,
                 // calendar, calendar sharing" — the household's own time
@@ -75,15 +79,16 @@ extension SettingsView {
         }
     }
 
-    /// Every leaf screen the hub can push. The first 19 are the visible
+    /// Every leaf screen the hub can push. The first 21 are the visible
     /// rows across the five tabs; the last six are the technical settings
     /// the hidden sheet carries (spec §2 decision 2; YouTube joined them
-    /// in the menu-deepening pass, 2026-09-17).
+    /// in the menu-deepening pass, 2026-09-17; About me joined the
+    /// visible rows in the profile-interview pass, 2026-10-05).
     enum SettingsDestination: String, CaseIterable, Identifiable {
         // Voice
         case wakeWord, voicePersonalization, ttsVoices
         // Family
-        case family, caregiverNotifications, calling
+        case family, profile, caregiverNotifications, calling
         // Reminders
         case meds, routines, alarms, events, calendar, calendarSharing
         // Tools
@@ -105,6 +110,7 @@ extension SettingsView {
             case .voicePersonalization: return "voiceSettings.title"
             case .ttsVoices: return "settings.voices.title"
             case .family: return "settings.family.title"
+            case .profile: return "settings.profile.title"
             case .caregiverNotifications: return "settings.notifyCaregivers.title"
             case .calling: return "settings.calling.title"
             case .meds: return "settings.meds.title"
@@ -140,6 +146,7 @@ extension SettingsView {
             case .voicePersonalization: return "waveform"
             case .ttsVoices: return "speaker.waveform.2.fill"
             case .family: return "person.2.fill"
+            case .profile: return "person.text.rectangle"
             case .caregiverNotifications: return "bell.badge.fill"
             case .calling: return "phone.badge.plus"
             case .meds: return "pills.fill"
@@ -374,6 +381,11 @@ struct SettingsDestinationView: View {
         case .calling: CallingSettingsView()
         case .places: PlacesSettingsView()
         case .family: FamilyContactsSettingsView()
+        // [PROFILE-INTERVIEW T-103] The About-me editor (design-l2 §5.7):
+        // same leaf pattern as VoicePersonalizationSettingsView — the
+        // coordinator is passed in rather than looked up, so the model's
+        // save path is the same single writer the wizard uses.
+        case .profile: ProfileSettingsView(coordinator: coordinator)
         case .meds: MedicationScheduleSettingsView()
         // Daily routines (routine-settings move, 2026-09-17) — the
         // enable/disable toggles and photo management that used to live

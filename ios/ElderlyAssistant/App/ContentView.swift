@@ -12,7 +12,12 @@ struct ContentView: View {
             if coordinator.onboardingState.hasSeenOnboarding {
                 HomeView()
             } else {
-                OnboardingWizardView()
+                // [PROFILE-INTERVIEW T-102] The cold-start route (C13):
+                // .language for an untouched fresh install (identical to
+                // today), the first pending step for a quit-mid-wizard
+                // relaunch, and .aboutYou when the record is missing
+                // (edge table, design-l2 §4 C13).
+                OnboardingWizardView(startingAt: coordinator.coldStartInterviewRoute())
             }
         }
         .onAppear {
