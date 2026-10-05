@@ -14,6 +14,7 @@ import SwiftUI
 /// third-party apps write into the built-in Clock app, so an alarm rings
 /// as the app's own daily notification, and the note says exactly that.
 struct AlarmsTimersSettingsView: View {
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
 
     @State private var time = Date()
@@ -25,12 +26,11 @@ struct AlarmsTimersSettingsView: View {
                 if coordinator.alarms.isEmpty && coordinator.activeTimers.isEmpty {
                     Text("alarms.empty")
                         .font(.system(size: DesignTokens.minBodyPointSize))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .foregroundStyle(appearance.colors.textSecondary)
                         .multilineTextAlignment(.center)
                         .padding(32)
                         .frame(maxWidth: .infinity)
-                        .background(DesignTokens.card)
-                        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+                        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
                 }
                 if !coordinator.alarms.isEmpty {
                     ForEach(coordinator.alarms) { alarm in
@@ -49,7 +49,7 @@ struct AlarmsTimersSettingsView: View {
                 // notifications.
                 Text(honestyNoteKey)
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.textSecondary.opacity(0.8))
+                    .foregroundColor(appearance.colors.textSecondary.opacity(0.8))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 8)
                 // [ALARMKIT-ALARMS] (2026-09-10) A denied alarm
@@ -69,7 +69,7 @@ struct AlarmsTimersSettingsView: View {
                 // states plainly what happens on each path.
                 Text("timerAlarm.settingsCaption")
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary.opacity(0.8))
+                    .foregroundStyle(appearance.colors.textSecondary.opacity(0.8))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 8)
             }
@@ -84,16 +84,16 @@ struct AlarmsTimersSettingsView: View {
         HStack(spacing: 12) {
             Image(systemName: alarm.isEnabled ? "alarm.fill" : "alarm")
                 .font(.system(size: 22))
-                .foregroundStyle(alarm.isEnabled ? DesignTokens.accent
-                                                 : DesignTokens.textSecondary)
+                .foregroundStyle(alarm.isEnabled ? appearance.colors.accent
+                                                 : appearance.colors.textSecondary)
             VStack(alignment: .leading, spacing: 4) {
                 Text(timeText(alarm.time))
                     .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .foregroundStyle(appearance.colors.textPrimary)
                 if let label = alarm.label {
                     Text(label)
                         .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .foregroundStyle(appearance.colors.textSecondary)
                         .lineLimit(2)
                 }
                 // [ALARMKIT-ALARMS] (2026-09-10) Honest per-row status:
@@ -101,7 +101,7 @@ struct AlarmsTimersSettingsView: View {
                 // own notification before.
                 Text(backendStatusKey)
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.textSecondary.opacity(0.8))
+                    .foregroundColor(appearance.colors.textSecondary.opacity(0.8))
             }
             Spacer()
             Toggle("", isOn: Binding(
@@ -109,7 +109,7 @@ struct AlarmsTimersSettingsView: View {
                 set: { newValue in coordinator.toggleAlarm(id: alarm.id, enabled: newValue) }
             ))
             .labelsHidden()
-            .tint(DesignTokens.accent)
+            .tint(appearance.colors.accent)
             .accessibilityLabel(Text("settings.alarms.title"))
             Button {
                 coordinator.removeAlarm(id: alarm.id)
@@ -125,8 +125,7 @@ struct AlarmsTimersSettingsView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     // MARK: Timer row — live countdown (ticks every second via
@@ -137,16 +136,16 @@ struct AlarmsTimersSettingsView: View {
             HStack(spacing: 12) {
                 Image(systemName: "timer")
                     .font(.system(size: 22))
-                    .foregroundStyle(DesignTokens.accent)
+                    .foregroundStyle(appearance.colors.accent)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(countdownText(remaining: timer.endsAt.timeIntervalSince(context.date)))
                         .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                        .foregroundStyle(DesignTokens.textPrimary)
+                        .foregroundStyle(appearance.colors.textPrimary)
                         .monospacedDigit()
                     if let label = timer.label {
                         Text(label)
                             .font(.system(size: DesignTokens.minCaptionPointSize))
-                            .foregroundStyle(DesignTokens.textSecondary)
+                            .foregroundStyle(appearance.colors.textSecondary)
                             .lineLimit(2)
                     }
                 }
@@ -165,8 +164,7 @@ struct AlarmsTimersSettingsView: View {
             }
             .padding(16)
             .frame(maxWidth: .infinity)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+            .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
         }
     }
 
@@ -176,12 +174,12 @@ struct AlarmsTimersSettingsView: View {
         VStack(spacing: 10) {
             Text("alarms.new")
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .foregroundStyle(appearance.colors.textPrimary)
                 .frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: 12) {
                 Text("alarms.time")
                     .font(.system(size: DesignTokens.minBodyPointSize))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .foregroundStyle(appearance.colors.textPrimary)
                 Spacer()
                 DatePicker("", selection: $time, displayedComponents: .hourAndMinute)
                     .labelsHidden()
@@ -193,8 +191,7 @@ struct AlarmsTimersSettingsView: View {
             // Accessibility XXXL instead of clipping them.
             .frame(minHeight: 56)
             .fixedSize(horizontal: false, vertical: true)
-            .background(DesignTokens.background)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+            .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
 
             if let errorKey {
                 Text(LocalizedStringKey(errorKey))
@@ -215,15 +212,13 @@ struct AlarmsTimersSettingsView: View {
                     // than clipping at Accessibility XXXL.
                     .frame(minHeight: DesignTokens.chipHeight)
                     .fixedSize(horizontal: false, vertical: true)
-                    .background(DesignTokens.accent)
-                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                    .appSurface(role: .accent, cornerRadius: DesignTokens.bubbleCornerRadius)
             }
             .buttonStyle(.plain)
         }
         .padding(16)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     private func saveNewAlarm() {

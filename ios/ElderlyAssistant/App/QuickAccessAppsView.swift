@@ -15,6 +15,7 @@ import SwiftUI
 /// (favourites, with removal) and the full catalog with installed badges
 /// and add buttons.
 struct QuickAccessAppsView: View {
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
 
     @State private var searchText = ""
@@ -54,17 +55,15 @@ struct QuickAccessAppsView: View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
             TextField("quickApps.search.placeholder", text: $searchText)
                 .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .foregroundStyle(appearance.colors.textPrimary)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
         }
         .padding(.horizontal, 16)
-        .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
-        .background(DesignTokens.card)
-        .clipShape(Capsule())
+        .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize).appSurface(role: .card, cornerRadius: 999)
     }
 
     private var searchResults: some View {
@@ -109,7 +108,7 @@ struct QuickAccessAppsView: View {
             Text("apps.probeNote")
         }
         .font(.system(size: DesignTokens.minCaptionPointSize))
-        .foregroundStyle(DesignTokens.textSecondary)
+        .foregroundStyle(appearance.colors.textSecondary)
     }
 
     private var atCap: Bool {
@@ -119,7 +118,7 @@ struct QuickAccessAppsView: View {
     private func sectionHeader(_ key: String) -> some View {
         Text(LocalizedStringKey(key))
             .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-            .foregroundStyle(DesignTokens.textSecondary)
+            .foregroundStyle(appearance.colors.textSecondary)
     }
 
     // MARK: - Rows
@@ -154,7 +153,7 @@ struct QuickAccessAppsView: View {
             if isFavourite {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 26))
-                    .foregroundStyle(DesignTokens.accent)
+                    .foregroundStyle(appearance.colors.accent)
                     .accessibilityLabel(Text("quickApps.added"))
             } else if isInstalledHere && !atCap {
                 addButton(app)
@@ -167,11 +166,11 @@ struct QuickAccessAppsView: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(LocalizedStringKey(app.nameKey))
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .foregroundStyle(appearance.colors.textPrimary)
             if let captionKey {
                 Text(LocalizedStringKey(captionKey))
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
             }
         }
     }
@@ -193,9 +192,7 @@ struct QuickAccessAppsView: View {
             .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
             .foregroundStyle(.white)
             .padding(.horizontal, 14)
-            .frame(minHeight: DesignTokens.minTapTargetSize)
-            .background(DesignTokens.accent)
-            .clipShape(Capsule())
+            .frame(minHeight: DesignTokens.minTapTargetSize).appSurface(role: .accent, cornerRadius: 999)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text(L10n.fmt("quickApps.addFor",
@@ -216,7 +213,7 @@ struct QuickAccessAppsView: View {
                           locale: coordinator.activeLocale,
                           appDisplayName(app)))
                 .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                .foregroundStyle(DesignTokens.accent)
+                .foregroundStyle(appearance.colors.accent)
                 .padding(.horizontal, 14)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
         }
@@ -248,9 +245,6 @@ private extension View {
     func rowCard() -> some View {
         self
             .padding(14)
-            .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-            .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+            .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize).appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 }

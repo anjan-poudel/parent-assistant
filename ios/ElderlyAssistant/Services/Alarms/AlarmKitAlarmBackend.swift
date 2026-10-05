@@ -89,9 +89,11 @@ final class ProductionSystemAlarmManager: SystemAlarmManaging {
         // LocalizedStringResource literals carry the pre-localized text
         // with no catalog lookup in the system process (L10n.str already
         // resolved them for the app language).
+        // AlarmKit owns this persistent system surface outside SwiftUI's
+        // appearance environment. Calm operational blue is skin-independent.
         let snoozeButton = AlarmKit.AlarmButton(
             text: LocalizedStringResource(stringLiteral: snoozeLabel),
-            textColor: DesignTokens.accent,
+            textColor: DesignTokens.stateIdle,
             systemImageName: "zzz"
         )
         let attributes = AlarmKit.AlarmAttributes<AlarmKitMetadata>(
@@ -100,7 +102,7 @@ final class ProductionSystemAlarmManager: SystemAlarmManaging {
                 snoozeButton: snoozeButton
             )),
             metadata: AlarmKitMetadata(),
-            tintColor: DesignTokens.accent
+            tintColor: DesignTokens.stateIdle
         )
         let configuration = AlarmKit.AlarmManager.AlarmConfiguration<AlarmKitMetadata>(
             countdownDuration: .init(preAlert: nil,

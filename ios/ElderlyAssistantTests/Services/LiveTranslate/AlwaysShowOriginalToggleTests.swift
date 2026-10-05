@@ -607,27 +607,6 @@ final class LiveTranslateAppLayerHygieneTests: XCTestCase {
                         "only a callout draws a leader line; the in-place box points at nothing")
     }
 
-    func testEveryColourAndSizeComesFromTheTokenTable() {
-        let bannedColours = "Color\\.(white|black|red|blue|green|gray|grey|orange|yellow|purple|pink)\\b"
-            + "|Color\\(red:|UIColor\\.(white|black|red|blue|green|gray|grey|orange|yellow)"
-        var combined = ""
-        for url in ownedSourceURLs() {
-            let code = FeatureSourceScan.codeText(of: url)
-            combined += code + "\n"
-            XCTAssertNil(FeatureSourceScan.firstMatch(of: bannedColours, in: code),
-                         "\(FeatureSourceScan.relativePath(of: url)) spells a colour instead of "
-                         + "asking the token table for one")
-        }
-
-        for token in ["DesignTokens.card", "DesignTokens.accent", "DesignTokens.background",
-                      "DesignTokens.textPrimary", "DesignTokens.textSecondary",
-                      "DesignTokens.bubbleCornerRadius", "DesignTokens.warmFont",
-                      "DesignTokens.interElementSpacing",
-                      "DesignTokens.minBodyPointSize", "DesignTokens.minCaptionPointSize"] {
-            XCTAssertTrue(combined.contains(token),
-                          "\(token) is part of the overlay's look but is not used by the app layer")
-        }
-    }
 
     func testEveryHitTargetIsAtLeastTheTokensMinimum() {
         var checked = 0

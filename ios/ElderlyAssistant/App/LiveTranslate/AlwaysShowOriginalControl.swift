@@ -48,7 +48,7 @@ struct AlwaysShowOriginalSurface: Equatable {
 /// The elder-facing control: a labelled button that shows its state without
 /// relying on colour alone.
 struct AlwaysShowOriginalControl: View {
-
+    @Environment(\.appAppearance) private var appearance
     let surface: AlwaysShowOriginalSurface
     /// The value the elder is asking for — an explicit set, not a flip, so the
     /// write says what the tap meant even if the surface it was drawn from is
@@ -71,12 +71,12 @@ struct AlwaysShowOriginalControl: View {
             // Both states are token colours: the on-state's label is the app
             // background (the token, not a bare `.white`), so nothing here
             // introduces a second place a colour is spelled.
-            .foregroundColor(surface.isOn ? DesignTokens.background : DesignTokens.textPrimary)
+            .foregroundColor(surface.isOn ? appearance.colors.onAccent : appearance.colors.textPrimary)
             .padding(.horizontal, DesignTokens.interElementSpacing * 2)
             .frame(minHeight: DesignTokens.minTapTargetSize)
             .frame(maxWidth: .infinity)
-            .background(surface.isOn ? DesignTokens.accent : DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+            .appSurface(role: surface.isOn ? .accent : .control,
+                        cornerRadius: DesignTokens.bubbleCornerRadius)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

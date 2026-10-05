@@ -214,6 +214,7 @@ enum HiddenSettingsSheetUsage {
 /// The card chrome every settings row shares — one implementation, so the
 /// tab rows and the hidden sheet's rows cannot drift apart.
 struct SettingsRowChrome: View {
+    @Environment(\.appAppearance) private var appearance
     let icon: String
     let titleKey: LocalizedStringKey
     /// Live status dot + label (e.g. "जेमिनी AI, जोडिएको") for the rows
@@ -224,11 +225,11 @@ struct SettingsRowChrome: View {
         HStack(spacing: 14) {
             Image(systemName: icon)
                 .font(.system(size: 26))
-                .foregroundStyle(DesignTokens.accent)
+                .foregroundStyle(appearance.colors.accent)
                 .frame(width: 40)
             Text(titleKey)
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .foregroundStyle(appearance.colors.textPrimary)
             Spacer()
             if let status {
                 HStack(spacing: 6) {
@@ -237,18 +238,15 @@ struct SettingsRowChrome: View {
                         .frame(width: 8, height: 8)
                     Text(status.label)
                         .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .foregroundStyle(appearance.colors.textSecondary)
                 }
             }
             Image(systemName: "chevron.right")
                 .font(.system(size: 20, weight: .bold))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
         }
         .padding(18)
-        .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+        .frame(maxWidth: .infinity).appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 }
 
@@ -257,6 +255,7 @@ struct SettingsRowChrome: View {
 /// verbatim from the pre-reorg hub — the row can never disagree with the
 /// screen it opens.
 struct SettingsSectionRow: View {
+    @Environment(\.appAppearance) private var appearance
     let destination: SettingsView.SettingsDestination
 
     @EnvironmentObject private var coordinator: AppCoordinator
@@ -268,6 +267,7 @@ struct SettingsSectionRow: View {
                               status: statusBadge)
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("settings.\(destination.rawValue)")
     }
 
     /// (dot color, short label) for the rows that show status.
@@ -275,11 +275,11 @@ struct SettingsSectionRow: View {
         switch destination {
         case .geminiAI:
             let configured = coordinator.geminiConfigStore.isConfigured
-            return (configured ? DesignTokens.accent : DesignTokens.stateError,
+            return (configured ? appearance.colors.accent : DesignTokens.stateError,
                     configured ? "settings.gemini.statusConnected"
                                : "settings.gemini.statusMissing")
         case .voiceEngine:
-            return (DesignTokens.accent,
+            return (appearance.colors.accent,
                     coordinator.voiceEngineStack == .gemini
                     ? "settings.voiceEngine.statusGemini"
                     : "settings.voiceEngine.statusOnDevice")
@@ -288,7 +288,7 @@ struct SettingsSectionRow: View {
             return (status.presentationColor, status.shortTitleKey)
         case .ttsVoices:
             let summary = ttsVoiceSummary
-            return (summary.ok ? DesignTokens.accent : DesignTokens.stateError,
+            return (summary.ok ? appearance.colors.accent : DesignTokens.stateError,
                     summary.key)
         default:
             return nil
@@ -321,6 +321,7 @@ struct SettingsSectionRow: View {
 /// fit one screen width. Swiping the pages works too — the pills and the
 /// `TabView` share one selection binding.
 struct SettingsTabBar: View {
+    @Environment(\.appAppearance) private var appearance
     @Binding var selection: SettingsView.SettingsSection
 
     @Environment(\.locale) private var locale
@@ -337,17 +338,16 @@ struct SettingsTabBar: View {
                         Text(title)
                             .font(.system(size: DesignTokens.minBodyPointSize,
                                           weight: .semibold))
-                            .foregroundStyle(selected ? .white : DesignTokens.textPrimary)
+                            .foregroundStyle(selected ? appearance.colors.onAccent : appearance.colors.textPrimary)
                             .lineLimit(1)
                             .padding(.horizontal, 20)
                             .frame(minHeight: DesignTokens.minTapTargetSize)
-                            .background(selected ? DesignTokens.accent : DesignTokens.card)
-                            .clipShape(Capsule())
-                            .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+                            .appSurface(role: selected ? .accent : .control, cornerRadius: 999)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(Text(title))
                     .accessibilityAddTraits(selected ? [.isSelected] : [])
+                    .accessibilityIdentifier("settings.tab.\(tab.rawValue)")
                 }
             }
             .padding(.horizontal, 20)
@@ -362,6 +362,7 @@ struct SettingsTabBar: View {
 /// `navigationDestination` and the hidden sheet's resolve through this, so
 /// the two can never route the same row to different screens.
 struct SettingsDestinationView: View {
+    @Environment(\.appAppearance) private var appearance
     let destination: SettingsView.SettingsDestination
 
     @EnvironmentObject private var coordinator: AppCoordinator
@@ -431,6 +432,7 @@ struct SettingsDestinationView: View {
 /// the household lands back on the sheet when it pops — not on a Settings
 /// tab they did not choose.
 struct HiddenSettingsSheet: View {
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject private var coordinator: AppCoordinator
     /// [DEVSCREEN-DOWNLOAD] The persisted bypass switch
     /// (`ModelDownloadDebugSettings`). `@AppStorage` writes the same
@@ -504,20 +506,20 @@ struct HiddenSettingsSheet: View {
                         Toggle(isOn: $ignoreFitPolicyForDownloads) {
                             Text("settings.hidden.ignoreFitPolicy.label")
                                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                                .foregroundStyle(DesignTokens.textPrimary)
+                                .foregroundStyle(appearance.colors.textPrimary)
                         }
-                        .tint(DesignTokens.accent)
+                        .tint(appearance.colors.accent)
                         .frame(minHeight: DesignTokens.minTapTargetSize)
                         Text("settings.hidden.ignoreFitPolicy.hint")
                             .font(.system(size: DesignTokens.minCaptionPointSize))
-                            .foregroundStyle(DesignTokens.textSecondary)
+                            .foregroundStyle(appearance.colors.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                     Text("settings.hidden.note")
                         .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundStyle(DesignTokens.textSecondary.opacity(0.8))
+                        .foregroundStyle(appearance.colors.textSecondary.opacity(0.8))
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity)

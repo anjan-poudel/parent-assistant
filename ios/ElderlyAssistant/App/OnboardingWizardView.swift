@@ -10,6 +10,7 @@ import UserNotifications
 /// The wizard runs before voice engages: `coordinator.start()` is only
 /// called on the final "घर जानुहोस्" (or by Home once onboarding is seen).
 struct OnboardingWizardView: View {
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
     @Environment(\.dismiss) private var dismiss
 
@@ -50,11 +51,10 @@ struct OnboardingWizardView: View {
             Button(action: goBack) {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 24, weight: .bold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .foregroundStyle(appearance.colors.textPrimary)
                     .frame(minWidth: DesignTokens.minTapTargetSize,
                            minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.card)
-                    .clipShape(Circle())
+                    .appSurface(role: .card, cornerRadius: 999)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(Text("common.back"))
@@ -62,7 +62,7 @@ struct OnboardingWizardView: View {
             Button(action: skipCurrentStep) {
                 Text("onboarding.skip")
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.accent)
+                    .foregroundStyle(appearance.colors.accent)
                     .padding(.horizontal, 12)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
             }
@@ -86,7 +86,7 @@ struct OnboardingWizardView: View {
         HStack(spacing: 10) {
             ForEach(Array(steps.enumerated()), id: \.element.id) { index, _ in
                 Circle()
-                    .fill(index == stepIndex ? DesignTokens.accent : DesignTokens.textSecondary.opacity(0.35))
+                    .fill(index == stepIndex ? appearance.colors.accent : appearance.colors.textSecondary.opacity(0.35))
                     .frame(width: index == stepIndex ? 14 : 10,
                            height: index == stepIndex ? 14 : 10)
             }
@@ -136,6 +136,7 @@ struct OnboardingWizardView: View {
 // MARK: - Step 1: Language
 
 private struct LanguageStep: View {
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
     let onNext: (OnboardingState.Step) -> Void
 
@@ -146,11 +147,11 @@ private struct LanguageStep: View {
             VStack(spacing: 10) {
                 Text("onboarding.stepLanguage.title")
                     .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .foregroundStyle(appearance.colors.textPrimary)
                     .multilineTextAlignment(.center)
                 Text("onboarding.stepLanguage.body")
                     .font(.system(size: DesignTokens.minBodyPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
                     .multilineTextAlignment(.center)
             }
             VStack(spacing: 12) {
@@ -173,21 +174,20 @@ private struct LanguageStep: View {
             HStack {
                 Text(LocalizedStringKey(language.displayNameKey))
                     .font(.system(size: 22, weight: .bold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .foregroundStyle(appearance.colors.textPrimary)
                 Spacer()
                 if isSelected {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 26))
-                        .foregroundStyle(DesignTokens.accent)
+                        .foregroundStyle(appearance.colors.accent)
                 }
             }
             .padding(18)
             .frame(maxWidth: .infinity)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+            .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
             .overlay(
                 RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius)
-                    .stroke(isSelected ? DesignTokens.accent : Color.clear, lineWidth: 2)
+                    .stroke(isSelected ? appearance.colors.accent : Color.clear, lineWidth: 2)
             )
         }
         .buttonStyle(.plain)
@@ -197,6 +197,7 @@ private struct LanguageStep: View {
 // MARK: - Step 2: Permissions
 
 private struct PermissionsStep: View {
+    @Environment(\.appAppearance) private var appearance
     let onNext: (OnboardingState.Step) -> Void
 
     @State private var micStatus: PermissionStatus = .notAsked
@@ -211,7 +212,7 @@ private struct PermissionsStep: View {
             VStack(spacing: 10) {
                 Text("onboarding.stepPermissions.title")
                     .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .foregroundStyle(appearance.colors.textPrimary)
                     .multilineTextAlignment(.center)
             }
             VStack(spacing: 16) {
@@ -242,10 +243,10 @@ private struct PermissionsStep: View {
             HStack(spacing: 10) {
                 Image(systemName: icon)
                     .font(.system(size: 24))
-                    .foregroundStyle(DesignTokens.accent)
+                    .foregroundStyle(appearance.colors.accent)
                 Text(LocalizedStringKey(bodyKey))
                     .font(.system(size: DesignTokens.minBodyPointSize))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .foregroundStyle(appearance.colors.textPrimary)
             }
             switch status {
             case .notAsked:
@@ -256,14 +257,13 @@ private struct PermissionsStep: View {
                         .frame(maxWidth: .infinity)
                         .frame(minHeight: DesignTokens.chipHeight)
                         .fixedSize(horizontal: false, vertical: true)
-                        .background(DesignTokens.accent)
-                        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                        .appSurface(role: .accent, cornerRadius: DesignTokens.bubbleCornerRadius)
                 }
                 .buttonStyle(.plain)
             case .granted:
                 Label("model.ready", systemImage: "checkmark.circle.fill")
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.accent)
+                    .foregroundStyle(appearance.colors.accent)
             case .denied:
                 Text("onboarding.stepPermissions.deniedHint")
                     .font(.system(size: DesignTokens.minCaptionPointSize))
@@ -272,8 +272,7 @@ private struct PermissionsStep: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     private func requestMic() {
@@ -321,6 +320,7 @@ private struct PermissionsStep: View {
 // `FamilyContactStore.maxContacts`.
 
 private struct FamilyContactStep: View {
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
     let onNext: (OnboardingState.Step) -> Void
 
@@ -334,11 +334,11 @@ private struct FamilyContactStep: View {
             VStack(spacing: 10) {
                 Text("onboarding.stepFamily.title")
                     .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .foregroundStyle(appearance.colors.textPrimary)
                     .multilineTextAlignment(.center)
                 Text("onboarding.stepFamily.body")
                     .font(.system(size: DesignTokens.minBodyPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
                     .multilineTextAlignment(.center)
             }
             VStack(spacing: 12) {
@@ -352,7 +352,7 @@ private struct FamilyContactStep: View {
                     .autocorrectionDisabled()
                 Text("onboarding.stepFamily.messengerHint")
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 4)
             }
@@ -371,7 +371,7 @@ private struct FamilyContactStep: View {
                 }
                 Text("onboarding.stepFamily.laterNote")
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
                     .multilineTextAlignment(.center)
             }
         }
@@ -383,8 +383,7 @@ private struct FamilyContactStep: View {
             .padding(16)
             .frame(minHeight: 60)
             .fixedSize(horizontal: false, vertical: true)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+            .appSurface(role: .card, cornerRadius: DesignTokens.bubbleCornerRadius)
     }
 }
 
@@ -392,6 +391,7 @@ private struct FamilyContactStep: View {
 // step; see docs/superpowers/specs/2026-09-03-v2-gemini-pivot-design.md)
 
 private struct ModelsStep: View {
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
     let onFinish: () -> Void
 
@@ -402,40 +402,38 @@ private struct ModelsStep: View {
             VStack(spacing: 10) {
                 Text("onboarding.stepModels.title")
                     .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .foregroundStyle(appearance.colors.textPrimary)
                     .multilineTextAlignment(.center)
                 Text("onboarding.stepModels.body")
                     .font(.system(size: DesignTokens.minBodyPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
                     .multilineTextAlignment(.center)
             }
 
             VStack(alignment: .leading, spacing: 10) {
                 Text("settings.gemini.fieldLabel")
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
                 SecureField("settings.gemini.fieldPlaceholder", text: $draftKey)
                     .font(.system(size: DesignTokens.minBodyPointSize, design: .monospaced))
                     .padding(14)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.background)
-                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                    .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
                     .overlay(
                         RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius)
-                            .stroke(DesignTokens.textSecondary.opacity(0.25), lineWidth: 1)
+                            .stroke(appearance.colors.textSecondary.opacity(0.25), lineWidth: 1)
                     )
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                 if coordinator.geminiConfigStore.isConfigured {
                     Label("settings.gemini.statusConnected", systemImage: "checkmark.circle.fill")
                         .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                        .foregroundStyle(DesignTokens.accent)
+                        .foregroundStyle(appearance.colors.accent)
                 }
             }
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+            .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
 
             primaryButton(key: "onboarding.stepModels.goHome") {
                 if !draftKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -457,10 +455,7 @@ private func primaryButton(key: String, action: @escaping () -> Void) -> some Vi
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
             .frame(minHeight: 64)
-            .fixedSize(horizontal: false, vertical: true)
-            .background(DesignTokens.accent)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
-            .shadow(color: DesignTokens.accent.opacity(0.35), radius: 8, y: 3)
+            .fixedSize(horizontal: false, vertical: true).appSurface(role: .accent, cornerRadius: DesignTokens.bubbleCornerRadius)
     }
     .buttonStyle(.plain)
 }

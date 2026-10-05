@@ -506,6 +506,7 @@ final class ConsentPromptAndRevocationTests: XCTestCase {
     private func render(_ surface: ConsentPromptSurface, width: CGFloat = 360) -> UIImage? {
         let renderer = ImageRenderer(
             content: ConsentPromptView(surface: surface, onGrant: {}, onDecline: {})
+                .environment(\.appAppearance, AppAppearance(skin: .sky, style: .classic))
                 .frame(width: width))
         renderer.scale = 2
         return renderer.uiImage
@@ -517,8 +518,13 @@ final class ConsentPromptAndRevocationTests: XCTestCase {
     /// geometry the elder actually gets.
     private func accentRowRuns(in image: UIImage) throws -> [Int] {
         let pixels = try pixelBytes(of: image)
-        // #BB1E4D — `DesignTokens.accent`, the fill both choices share.
-        let accent = (r: 187, g: 30, b: 77)
+        // Measure the choices' shared fill, independent of the selected skin.
+        var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+        XCTAssertTrue(UIColor(AppAppearance.default.colors.accent)
+            .getRed(&red, green: &green, blue: &blue, alpha: &alpha))
+        let accent = (r: Int((red * 255).rounded()),
+                      g: Int((green * 255).rounded()),
+                      b: Int((blue * 255).rounded()))
         var runs: [Int] = []
         var current = 0
         for row in 0..<pixels.height {

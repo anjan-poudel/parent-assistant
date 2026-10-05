@@ -391,6 +391,7 @@ enum UpdatesAlarmsComposer {
 /// their text live every second through the house `TimelineView`
 /// pattern (updates-alarms task, 2026-09-10).
 struct UpdatesRowButton: View {
+    @Environment(\.appAppearance) private var appearance
     let row: UpdatesRow
 
     /// The app locale (set at the app root) — drives the Devanagari
@@ -426,7 +427,7 @@ struct UpdatesRowButton: View {
                 if let secondaryText = row.secondaryText {
                     Text(secondaryText)
                         .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .foregroundStyle(appearance.colors.textSecondary)
                         .lineLimit(2)
                 }
             }
@@ -436,15 +437,14 @@ struct UpdatesRowButton: View {
                     // Caption-token disclosure chevron (DESIGN-REVIEW) —
                     // 18pt floor, Dynamic Type aware; was a fixed 15pt.
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize,
                alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+        .appSurface(cornerRadius: DesignTokens.bubbleCornerRadius)
     }
 
     /// The row's primary line — monospaced digits on live countdowns so
@@ -453,7 +453,7 @@ struct UpdatesRowButton: View {
     private func primaryText(_ value: String, monospaced: Bool) -> some View {
         let base = Text(value)
             .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-            .foregroundStyle(DesignTokens.textPrimary)
+            .foregroundStyle(appearance.colors.textPrimary)
             .multilineTextAlignment(.leading)
         if monospaced {
             base.monospacedDigit()
@@ -508,6 +508,7 @@ private extension UpdatesRow {
 /// `LeafScreen` chrome (back button + title) is this leaf's chrome, and
 /// the leaves pushed from it have theirs.
 struct UpdatesScreen: View {
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
 
     /// The SAME registry instance Home renders its bell badge from — the
@@ -538,12 +539,12 @@ struct UpdatesScreen: View {
         VStack(alignment: .leading, spacing: 10) {
             Text(LocalizedStringKey(section.titleKey))
                 .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
             if section.rows.isEmpty {
                 if let emptyTextKey = section.emptyTextKey {
                     Text(LocalizedStringKey(emptyTextKey))
                         .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .foregroundStyle(appearance.colors.textSecondary)
                         .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize,
                                alignment: .leading)
                 }

@@ -9,6 +9,7 @@ import SwiftUI
 /// camera, no network. Deletion is per-manual and confirmed before it
 /// happens (an elder's accidental delete would be hard to undo).
 struct ApplianceManualLibraryView: View {
+    @Environment(\.appAppearance) private var appearance
 
     @ObservedObject var session: ApplianceHelperSession
     @ObservedObject var model: ApplianceManualLibraryModel
@@ -28,7 +29,7 @@ struct ApplianceManualLibraryView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                DesignTokens.background.ignoresSafeArea()
+                appearance.colors.background.ignoresSafeArea()
                 content
             }
             .navigationBarTitleDisplayMode(.inline)
@@ -36,13 +37,13 @@ struct ApplianceManualLibraryView: View {
                 ToolbarItem(placement: .principal) {
                     Text("appliance.manual.title")
                         .font(DesignTokens.greetingFont(size: 20))
-                        .foregroundColor(DesignTokens.textPrimary)
+                        .foregroundColor(appearance.colors.textPrimary)
                 }
                 ToolbarItem(placement: .topBarLeading) {
                     Button { dismiss() } label: {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 24, weight: .bold))
-                            .foregroundStyle(DesignTokens.textPrimary)
+                            .foregroundStyle(appearance.colors.textPrimary)
                             .accessibilityHidden(true)
                     }
                     .buttonStyle(.plain)
@@ -79,6 +80,7 @@ struct ApplianceManualLibraryView: View {
                 Button("appliance.manual.cancel", role: .cancel) {}
             }
         }
+        .tint(appearance.colors.accent)
         .task {
             bundled = ApplianceManualLibraryModel.bundledManuals()
             model.reload()
@@ -128,17 +130,16 @@ struct ApplianceManualLibraryView: View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 18, weight: .semibold))
-                .foregroundColor(DesignTokens.textSecondary)
+                .foregroundColor(appearance.colors.textSecondary)
             TextField("appliance.manual.searchPlaceholder", text: $model.query)
                 .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundColor(DesignTokens.textPrimary)
+                .foregroundColor(appearance.colors.textPrimary)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
         }
         .padding(.horizontal, 16)
         .frame(minHeight: DesignTokens.minTapTargetSize)
-        .background(DesignTokens.card)
-        .clipShape(Capsule())
+        .appSurface(role: .control, cornerRadius: 100)
     }
 
     @ViewBuilder
@@ -181,7 +182,7 @@ struct ApplianceManualLibraryView: View {
     private var bundledSectionHeader: some View {
         Text("appliance.manual.bundled")
             .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-            .foregroundColor(DesignTokens.textSecondary)
+            .foregroundColor(appearance.colors.textSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 4)
     }
@@ -202,28 +203,28 @@ struct ApplianceManualLibraryView: View {
             HStack(spacing: 14) {
                 Image(systemName: "book.fill")
                     .font(.system(size: 22))
-                    .foregroundColor(.white)
+                    .foregroundStyle(appearance.colors.onAccent)
                     .frame(width: DesignTokens.iconBadgeDiameter,
                            height: DesignTokens.iconBadgeDiameter)
-                    .background(DesignTokens.accent)
+                    .background(appearance.colors.accent)
                     .clipShape(Circle())
                 VStack(alignment: .leading, spacing: 4) {
                     Text("settings.manuals.userManual")
                         .font(.system(size: DesignTokens.minBodyPointSize,
                                       weight: .semibold))
-                        .foregroundColor(DesignTokens.textPrimary)
+                        .foregroundColor(appearance.colors.textPrimary)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                     Text("settings.manuals.userManualHint")
                         .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundColor(DesignTokens.textSecondary)
+                        .foregroundColor(appearance.colors.textSecondary)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                 }
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(DesignTokens.textSecondary)
+                    .foregroundColor(appearance.colors.textSecondary)
             }
             .contentShape(Rectangle())
         }
@@ -231,9 +232,7 @@ struct ApplianceManualLibraryView: View {
         .frame(minHeight: DesignTokens.minTapTargetSize)
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+        .appSurface()
     }
 
     private var noResults: some View {
@@ -241,10 +240,10 @@ struct ApplianceManualLibraryView: View {
             Spacer()
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 44))
-                .foregroundColor(DesignTokens.textSecondary)
+                .foregroundColor(appearance.colors.textSecondary)
             Text("appliance.manual.noResults")
                 .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundColor(DesignTokens.textPrimary)
+                .foregroundColor(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 24)
             Spacer()
@@ -267,7 +266,7 @@ struct ApplianceManualLibraryView: View {
                         HStack(spacing: 8) {
                             Text(manual.title)
                                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                                .foregroundColor(DesignTokens.textPrimary)
+                                .foregroundColor(appearance.colors.textPrimary)
                                 .lineLimit(2)
                                 .multilineTextAlignment(.leading)
                             // The star marks the manual the assistant will
@@ -279,13 +278,13 @@ struct ApplianceManualLibraryView: View {
                         if let question = manual.question, !question.isEmpty {
                             Text(question)
                                 .font(.system(size: DesignTokens.minCaptionPointSize))
-                                .foregroundColor(DesignTokens.textSecondary)
+                                .foregroundColor(appearance.colors.textSecondary)
                                 .lineLimit(2)
                                 .multilineTextAlignment(.leading)
                         }
                         Text(manual.createdAt.formatted(date: .abbreviated, time: .shortened))
                             .font(.system(size: DesignTokens.minCaptionPointSize))
-                            .foregroundColor(DesignTokens.textSecondary)
+                            .foregroundColor(appearance.colors.textSecondary)
                     }
                     Spacer(minLength: 0)
                 }
@@ -308,9 +307,7 @@ struct ApplianceManualLibraryView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+        .appSurface()
     }
 
     /// The star that marks a category's default manual (2026-09-13,
@@ -323,9 +320,9 @@ struct ApplianceManualLibraryView: View {
     private var defaultBadge: some View {
         Image(systemName: "star.fill")
             .font(.system(size: 13, weight: .semibold))
-            .foregroundColor(.white)
+            .foregroundStyle(appearance.colors.onAccent)
             .frame(width: 24, height: 24)
-            .background(DesignTokens.accent)
+            .background(appearance.colors.accent)
             .clipShape(Circle())
             .accessibilityLabel(Text("appliance.manual.defaultBadge"))
     }
@@ -342,10 +339,10 @@ struct ApplianceManualLibraryView: View {
                     .scaledToFill()
             } else {
                 ZStack {
-                    DesignTokens.userBubble
+                    appearance.colors.userBubble
                     Image(systemName: "photo")
                         .font(.system(size: 22))
-                        .foregroundColor(DesignTokens.textSecondary)
+                        .foregroundColor(appearance.colors.textSecondary)
                 }
             }
         }
@@ -385,6 +382,7 @@ struct ApplianceManualLibraryView: View {
 /// card is the open target. Shared by the library's "Default manuals"
 /// section and the Settings browse leaf.
 struct BundledManualRow: View {
+    @Environment(\.appAppearance) private var appearance
     let manual: BundledManual
     let open: () -> Void
 
@@ -399,19 +397,19 @@ struct BundledManualRow: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(BundledManualCatalog.localized(manual.title, locale: locale))
                         .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                        .foregroundColor(DesignTokens.textPrimary)
+                        .foregroundColor(appearance.colors.textPrimary)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                     Text(BundledManualCatalog.localized(manual.overview, locale: locale))
                         .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundColor(DesignTokens.textSecondary)
+                        .foregroundColor(appearance.colors.textSecondary)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                 }
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(DesignTokens.textSecondary)
+                    .foregroundColor(appearance.colors.textSecondary)
             }
             .contentShape(Rectangle())
         }
@@ -419,9 +417,7 @@ struct BundledManualRow: View {
         .frame(minHeight: DesignTokens.minTapTargetSize)
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+        .appSurface()
     }
 
     /// The manual's overview image, or a book placeholder while the
@@ -435,10 +431,10 @@ struct BundledManualRow: View {
                     .scaledToFill()
             } else {
                 ZStack {
-                    DesignTokens.userBubble
+                    appearance.colors.userBubble
                     Image(systemName: "book.closed.fill")
                         .font(.system(size: 22))
-                        .foregroundColor(DesignTokens.textSecondary)
+                        .foregroundColor(appearance.colors.textSecondary)
                 }
             }
         }

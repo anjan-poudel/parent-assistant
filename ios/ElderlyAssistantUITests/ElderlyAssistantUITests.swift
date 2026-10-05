@@ -130,7 +130,7 @@ final class ElderlyAssistantUITests: XCTestCase {
         XCTAssertFalse(manuals.exists, "Opening a bundled guide must leave the library")
 
         tap(app.buttons["बन्द गर्नुहोस्"].firstMatch,
-            expecting: app.buttons["बोल्नुहोस्"], within: 10, in: app)
+            expecting: app.buttons["home.talk"], within: 10, in: app)
     }
 
     func testTalkButtonStartsListening() throws {
@@ -283,6 +283,112 @@ final class ElderlyAssistantUITests: XCTestCase {
             }
         }
     }
+
+    /// Exercises genuine selectors, navigation and process restart without preference fixtures.
+    func testAppearanceSelectionsAreIndependentAndSurviveRelaunch() throws {
+        let app = launchToHome()
+
+        func reveal(_ element: XCUIElement) {
+            let viewport = app.scrollViews["leaf.content"].firstMatch
+            for attempt in 0..<24 {
+                if isOnScreen(element, in: app), element.isHittable { return }
+                let upward = element.exists
+                    ? element.frame.midY > viewport.frame.midY
+                    : attempt < 12
+                let start = viewport.coordinate(withNormalizedOffset:
+                    CGVector(dx: 0.5, dy: upward ? 0.75 : 0.25))
+                let end = viewport.coordinate(withNormalizedOffset:
+                    CGVector(dx: 0.5, dy: upward ? 0.45 : 0.55))
+                start.press(forDuration: 0.05, thenDragTo: end)
+            }
+            XCTFail("Appearance control must be reachable: \(element), bounds \(element.frame), viewport \(viewport.frame)")
+        }
+
+        func openAppearance() {
+            let settings = app.buttons["home.settings"].firstMatch
+            let systemTab = app.buttons["settings.tab.system"].firstMatch
+            tap(settings, expecting: systemTab, within: 15, in: app)
+            if !isOnScreen(systemTab, in: app) {
+                app.buttons["settings.tab.voice"].firstMatch.swipeLeft()
+            }
+            for _ in 0..<5 where !isOnScreen(systemTab, in: app) {
+                systemTab.swipeLeft()
+            }
+            let appearanceRow = app.buttons["settings.appearance"].firstMatch
+            tap(systemTab, expecting: appearanceRow, within: 10, in: app)
+            tap(appearanceRow, expecting: app.buttons["appearance.style.classic"], within: 10, in: app)
+        }
+
+        func choose(_ identifier: String) {
+            let row = app.buttons[identifier]
+            reveal(row)
+            row.tap()
+            XCTAssertTrue(row.isSelected, "The chosen appearance option must expose selected state")
+        }
+
+        func assertSelected(_ identifier: String) {
+            let row = app.buttons[identifier]
+            reveal(row)
+            XCTAssertTrue(row.isSelected, "Changing the other option must preserve this selection")
+        }
+
+        func capture(_ name: String, preview: Bool = true) {
+            if preview {
+                let panel = app.descendants(matching: .any)["appearance.preview"].firstMatch
+                let viewport = app.scrollViews["leaf.content"].firstMatch
+                for _ in 0..<10 {
+                    let bounds = panel.frame
+                    let visible = viewport.frame
+                    if bounds.minY >= visible.minY, bounds.maxY <= visible.maxY { break }
+                    viewport.swipeDown()
+                }
+            }
+            let attachment = XCTAttachment(screenshot: app.screenshot())
+            attachment.name = name
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+
+        func returnHome() {
+            let back = app.buttons["settings.back"].firstMatch
+            tap(back, expecting: app.buttons["settings.tab.system"].firstMatch, within: 10, in: app)
+            tap(back, expecting: app.buttons["home.settings"].firstMatch, within: 10, in: app)
+        }
+
+        openAppearance()
+        choose("appearance.style.classic")
+        choose("appearance.skin.cream")
+        assertSelected("appearance.style.classic")
+        capture("Classic + Warm Cream preview")
+        choose("appearance.style.glass")
+        assertSelected("appearance.skin.cream")
+        choose("appearance.skin.sage")
+        assertSelected("appearance.style.glass")
+        capture("Glass + Sage preview")
+        returnHome()
+        capture("Glass + Sage returned Home", preview: false)
+
+        openAppearance()
+        assertSelected("appearance.style.glass")
+        assertSelected("appearance.skin.sage")
+        app.terminate()
+        app.launch()
+        completeOnboardingIfNeeded(app)
+        openAppearance()
+        assertSelected("appearance.style.glass")
+        assertSelected("appearance.skin.sage")
+        capture("Glass + Sage restored after relaunch")
+
+        choose("appearance.skin.sky")
+        assertSelected("appearance.style.glass")
+        choose("appearance.style.soft")
+        assertSelected("appearance.skin.sky")
+        capture("Soft + Sky preview")
+        returnHome()
+        capture("Soft + Sky returned Home", preview: false)
+    }
+
+
 
     /// Quick-access picker interaction: search field filters the catalog.
     func testQuickAccessPickerSearchWorks() throws {

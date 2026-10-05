@@ -99,6 +99,7 @@ struct LiveTranslateSnapshotSurface: Equatable {
 
 /// The elder-facing control: a labelled button in the session view's top strip.
 struct LiveTranslateSnapshotControl: View {
+    @Environment(\.appAppearance) private var appearance
 
     let surface: LiveTranslateSnapshotSurface
     /// One tap, one meaning: the model decides which way the toggle goes, so
@@ -123,7 +124,7 @@ struct LiveTranslateSnapshotControl: View {
                     // default wheel is too small to read as "working" from
                     // across a room, which is the room this is for.
                     ProgressView()
-                        .tint(DesignTokens.accent)
+                        .tint(appearance.colors.accent)
                         .controlSize(.large)
                 } else {
                     Image(systemName: surface.symbolName)
@@ -133,12 +134,11 @@ struct LiveTranslateSnapshotControl: View {
                                                 weight: .semibold))
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .foregroundColor(DesignTokens.textPrimary)
+            .foregroundColor(appearance.colors.textPrimary)
             .padding(.horizontal, DesignTokens.interElementSpacing)
             .frame(minWidth: DesignTokens.minTapTargetSize,
                    minHeight: DesignTokens.minTapTargetSize)
-            .background(DesignTokens.card)
-            .clipShape(Capsule())
+            .appSurface(role: .control, cornerRadius: 100)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

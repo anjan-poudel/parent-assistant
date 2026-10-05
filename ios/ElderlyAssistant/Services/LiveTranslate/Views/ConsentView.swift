@@ -80,6 +80,7 @@ struct ConsentPromptSurface: Equatable {
 /// The elder-facing prompt: one card, one explanation, two equally weighted
 /// choices.
 struct ConsentPromptView: View {
+    @Environment(\.appAppearance) private var appearance
 
     let surface: ConsentPromptSurface
     let onGrant: () -> Void
@@ -89,14 +90,14 @@ struct ConsentPromptView: View {
         VStack(spacing: 16) {
             Text(surface.title)
                 .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                .foregroundColor(DesignTokens.textPrimary)
+                .foregroundColor(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("livetranslate.consent.heading")
 
             Text(surface.message)
                 .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize))
-                .foregroundColor(DesignTokens.textPrimary)
+                .foregroundColor(appearance.colors.textPrimary)
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("livetranslate.consent.message")
@@ -104,7 +105,7 @@ struct ConsentPromptView: View {
             if let failure = surface.failureMessage {
                 Text(failure)
                     .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .foregroundColor(appearance.colors.textPrimary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("livetranslate.consent.failure")
@@ -118,8 +119,7 @@ struct ConsentPromptView: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface()
     }
 
     /// The one button construction in this file: both choices come through it,
@@ -133,12 +133,11 @@ struct ConsentPromptView: View {
         } label: {
             Text(action.title)
                 .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                .foregroundColor(.white)
+                .foregroundStyle(appearance.colors.onAccent)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 20)
                 .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
-                .background(DesignTokens.accent)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                .appSurface(role: .accent, cornerRadius: DesignTokens.bubbleCornerRadius)
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(action.accessibilityIdentifier)
@@ -192,6 +191,7 @@ struct ConsentControlSurface: Equatable {
 
 /// The elder-facing control for both surfaces.
 struct ConsentControlView: View {
+    @Environment(\.appAppearance) private var appearance
 
     let surface: ConsentControlSurface
     let onGrant: () -> Void
@@ -212,13 +212,13 @@ struct ConsentControlView: View {
         VStack(spacing: 16) {
             Text(title)
                 .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                .foregroundColor(DesignTokens.textPrimary)
+                .foregroundColor(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
 
             Text(message)
                 .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize))
-                .foregroundColor(DesignTokens.textPrimary)
+                .foregroundColor(appearance.colors.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
 
             // The one action here is the elder's way out; it is never a
@@ -226,19 +226,17 @@ struct ConsentControlView: View {
             Button(action: onRevoke) {
                 Text(revokeTitle)
                     .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundStyle(appearance.colors.onAccent)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 20)
                     .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.accent)
-                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                    .appSurface(role: .accent, cornerRadius: DesignTokens.bubbleCornerRadius)
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("livetranslate.consent.revokeControl")
         }
         .padding(20)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface()
     }
 }
