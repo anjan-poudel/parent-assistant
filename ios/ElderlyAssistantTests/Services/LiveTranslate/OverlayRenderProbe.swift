@@ -217,9 +217,10 @@ enum OverlayRenderProbe {
 
     /// Asserts that everything drawn lies inside `rect` (union with any
     /// `allowed` extras, like the overlay's own chrome strip), within a
-    /// one-and-a-half point antialiasing tolerance. Fails loudly when nothing
-    /// was drawn at all: an empty rendering must never satisfy a containment
-    /// check.
+    /// one-and-a-half point antialiasing tolerance — plus the shadow bleed of
+    /// the appSurface restyle, which is a drawn edge and not a leak (see
+    /// `tolerance` below). Fails loudly when nothing was drawn at all: an
+    /// empty rendering must never satisfy a containment check.
     static func assertInkInside(_ image: UIImage,
                                 rect: CGRect,
                                 allowed: [CGRect] = [],
@@ -234,7 +235,13 @@ enum OverlayRenderProbe {
         var bounds = rect
         for extra in allowed { bounds = bounds.union(extra) }
         let scale = image.scale
-        let tolerance = 1.5 * scale
+        // The antialiasing half, plus the appSurface restyle's shadow: the
+        // soft shadow a capsule casts (10% ink, radius 8, offset down 3)
+        // stays above the ink threshold for about four and a half points past
+        // the edge it is drawn against, and a shadow the elder can see is
+        // part of what was drawn — the containment claim is about the
+        // surface's own geometry, not about the shadow's falloff.
+        let tolerance = (1.5 + 4.5) * scale
         XCTAssertGreaterThanOrEqual(CGFloat(drawn.minX), (bounds.minX * scale) - tolerance,
                                     message, file: file, line: line)
         XCTAssertGreaterThanOrEqual(CGFloat(drawn.minY), (bounds.minY * scale) - tolerance,

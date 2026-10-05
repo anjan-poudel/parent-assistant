@@ -172,7 +172,9 @@ final class CameraPermissionSurfaceTests: XCTestCase {
             .appendingPathComponent("Views/CameraPermissionView.swift")
         let code = FeatureSourceScan.codeText(of: file)
 
-        XCTAssertNotNil(FeatureSourceScan.firstMatch(of: "DesignTokens\\.card", in: code),
+        // The restyle (88e1554) replaced the card token with the theme's
+        // surface, whose default role *is* the card.
+        XCTAssertNotNil(FeatureSourceScan.firstMatch(of: "appSurface\\(\\)", in: code),
                         "the states are a card over the session surface, not a replacement for it")
         for wholeScreen in ["fullScreenCover", "ignoresSafeArea", "sheet\\("] {
             XCTAssertNil(FeatureSourceScan.firstMatch(of: wholeScreen, in: code),
