@@ -113,6 +113,7 @@ struct LiveTranslateFocusResultView: View {
             let layout = Self.layout(for: available,
                                      capture: capture,
                                      panelContentHeight: panelContentHeight,
+                                     typography: appearance.typography,
                                      rule: rule)
             VStack(spacing: DesignTokens.interElementSpacing) {
                 crop(height: layout.imageHeight, width: available.width)
@@ -156,27 +157,22 @@ struct LiveTranslateFocusResultView: View {
     static func layout(for containerSize: CGSize,
                        capture: LiveTranslateFocusedCapture,
                        panelContentHeight: CGFloat,
+                       typography: AppTypography,
                        rule: LiveTranslateFocusLayout.Rule = .shipped) -> LiveTranslateFocusLayout {
         LiveTranslateFocusLayout.resolve(containerSize: containerSize,
                                          imageSize: capture.framePixelSize,
                                          panelContentHeight: panelContentHeight,
-                                         minimumPanelHeight: minimumPanelHeight,
+                                         minimumPanelHeight: minimumPanelHeight(typography: typography),
                                          columnSpacing: DesignTokens.interElementSpacing,
                                          rule: rule)
     }
 
-    /// The floor the picture may not eat into: one row of the panel at the
-    /// app's own type floors — the original line's caption size, the
-    /// translation's body size, the row's own padding inside the card
-    /// (`DesignTokens.interElementSpacing * 4` covers the row's and the card's
-    /// padding together).
-    ///
-    /// Computed, never stored: both type floors are dynamic-type-scaled, so an
-    /// elder who has turned text size up gets a taller floor — and with it a
-    /// taller panel — without this rule being re-decided anywhere.
-    static var minimumPanelHeight: CGFloat {
-        DesignTokens.minCaptionPointSize
-            + DesignTokens.minBodyPointSize
+    /// Room for one readable row at the selected sizes. This changes only
+    /// the answer panel's legibility floor; capture pixels, crop geometry and
+    /// the live placement/font-fitting pass never consume app typography.
+    static func minimumPanelHeight(typography: AppTypography) -> CGFloat {
+        typography.captionPointSize
+            + typography.bodyPointSize
             + DesignTokens.interElementSpacing * 4
     }
 
@@ -254,7 +250,7 @@ struct LiveTranslateFocusResultView: View {
             HStack(spacing: DesignTokens.interElementSpacing) {
                 Image(systemName: Self.backSymbolName)
                 Text(L10n.str(Self.backKey, locale: locale))
-                    .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize,
+                    .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize,
                                                 weight: .semibold))
                     .fixedSize(horizontal: false, vertical: true)
             }

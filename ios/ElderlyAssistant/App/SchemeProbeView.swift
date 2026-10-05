@@ -76,7 +76,7 @@ struct SchemeProbeView: View {
                     .keyboardType(.URL)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
-                    .font(.system(size: DesignTokens.minBodyPointSize))
+                    .font(.system(size: appearance.typography.bodyPointSize))
                     .padding(14)
                     .frame(minHeight: 56)
                     .appSurface(role: .card, cornerRadius: DesignTokens.bubbleCornerRadius)
@@ -94,7 +94,7 @@ struct SchemeProbeView: View {
                             ? .registered : .notRegistered
                     } label: {
                         Text(LocalizedStringKey("settings.schemeProbe.probe"))
-                            .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                            .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 18)
                             .frame(minHeight: DesignTokens.minTapTargetSize)
@@ -110,7 +110,7 @@ struct SchemeProbeView: View {
                         }
                     } label: {
                         Text(LocalizedStringKey("settings.schemeProbe.open"))
-                            .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                            .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                             .foregroundStyle(appearance.colors.textPrimary)
                             .padding(.horizontal, 18)
                             .frame(minHeight: DesignTokens.minTapTargetSize)
@@ -121,7 +121,7 @@ struct SchemeProbeView: View {
                 outcomeRow
 
                 Text("settings.schemeProbe.chipsHeader")
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                     .foregroundStyle(appearance.colors.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, 6)
@@ -133,7 +133,7 @@ struct SchemeProbeView: View {
                 }
 
                 Text("settings.schemeProbe.whitelistNote")
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textSecondary.opacity(0.8))
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -146,7 +146,7 @@ struct SchemeProbeView: View {
     private var outcomeRow: some View {
         if let probeResult {
             Text(probeKey(probeResult))
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                 .foregroundStyle(probeResult == .registered
                                  ? DesignTokens.stateSpeaking : DesignTokens.stateError)
                 .fixedSize(horizontal: false, vertical: true)
@@ -155,7 +155,7 @@ struct SchemeProbeView: View {
             Text(openResult == .opened
                  ? L10n.str("settings.schemeProbe.opened", locale: coordinator.activeLocale)
                  : L10n.str("settings.schemeProbe.openFailed", locale: coordinator.activeLocale))
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                 .foregroundStyle(openResult == .opened
                                  ? DesignTokens.stateSpeaking : DesignTokens.stateError)
                 .fixedSize(horizontal: false, vertical: true)
@@ -188,7 +188,7 @@ private struct FlowChips: View {
                     onPick(item)
                 } label: {
                     Text(item)
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .font(.system(size: appearance.typography.captionPointSize))
                         .foregroundStyle(appearance.colors.textPrimary)
                         .padding(.horizontal, 10)
                         .frame(minHeight: DesignTokens.minTapTargetSize)

@@ -53,12 +53,12 @@ struct CaregiverNotifySettingsView: View {
                       isOn: $settings.calendarEvents)
 
             Text("settings.notifyCaregivers.channelHint")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             Text("settings.notifyCaregivers.hint")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -70,7 +70,7 @@ struct CaregiverNotifySettingsView: View {
             // the family long after the alert would have been — so the
             // screen says so instead of leaving it to be discovered.
             Text("caregiverNotify.shareHint")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -88,7 +88,7 @@ struct CaregiverNotifySettingsView: View {
                            isOn: Binding<Bool>) -> some View {
         Toggle(isOn: isOn) {
             Label(LocalizedStringKey(key), systemImage: icon)
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                 .foregroundStyle(appearance.colors.textPrimary)
         }
         .tint(appearance.colors.accent)

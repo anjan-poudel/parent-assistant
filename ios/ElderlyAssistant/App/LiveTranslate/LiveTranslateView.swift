@@ -374,7 +374,7 @@ struct LiveTranslateView: View {
             zoom.zoom(direction)
         } label: {
             Image(systemName: isCloser ? Self.zoomInSymbolName : Self.zoomOutSymbolName)
-                .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .font(DesignTokens.warmFont(size: 21, weight: .semibold))
                 .foregroundColor(appearance.colors.textPrimary)
                 .frame(width: Self.zoomControlDiameter, height: Self.zoomControlDiameter)
                 .appSurface(role: .control, cornerRadius: 999)
@@ -391,7 +391,7 @@ struct LiveTranslateView: View {
     /// pinned, and arithmetic on session state is not copy.
     private var zoomReadout: some View {
         Text(zoom.model.label)
-            .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .semibold))
+            .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize, weight: .semibold))
             .monospacedDigit()
             .foregroundColor(appearance.colors.textPrimary)
             .padding(.horizontal, DesignTokens.interElementSpacing)
@@ -410,7 +410,7 @@ struct LiveTranslateView: View {
         } label: {
             Image(systemName: zoom.isFocusLocked ? Self.focusLockedSymbolName
                                                  : Self.focusUnlockedSymbolName)
-                .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .font(DesignTokens.warmFont(size: 21, weight: .semibold))
                 .foregroundColor(zoom.isFocusLocked ? appearance.colors.accent : appearance.colors.textPrimary)
                 .frame(width: Self.zoomControlDiameter, height: Self.zoomControlDiameter)
                 .appSurface(role: .control, cornerRadius: 999)
@@ -486,7 +486,7 @@ struct LiveTranslateView: View {
                     // elder's text size (NFR-LCT-011). The overlay's text
                     // metrics are for text the placement measures, which this
                     // is not.
-                    .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize, weight: .semibold))
                     .fixedSize(horizontal: false, vertical: true)
             }
             .foregroundColor(appearance.colors.textPrimary)
@@ -736,7 +736,7 @@ struct LiveTranslateWardenNoticeBanner: View {
 
     var body: some View {
         Text(surface.copy)
-            .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .semibold))
+            .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize, weight: .semibold))
             .foregroundColor(appearance.colors.textPrimary)
             .multilineTextAlignment(.leading)
             .fixedSize(horizontal: false, vertical: true)
@@ -817,7 +817,7 @@ struct LiveTranslateResultsCardView: View {
     /// line the overlay's empty state uses: one situation, one sentence.
     private var emptyState: some View {
         Text(surface.emptyHint)
-            .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize))
+            .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize))
             .foregroundColor(appearance.colors.textPrimary)
             .multilineTextAlignment(.center)
             .fixedSize(horizontal: false, vertical: true)
@@ -863,7 +863,7 @@ struct LiveTranslateResultsCardView: View {
                 // lands where the answer is.
                 if let source = row.source, !source.isEmpty {
                     Text(source)
-                        .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize))
+                        .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize))
                         .foregroundColor(appearance.colors.textSecondary)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
@@ -875,7 +875,7 @@ struct LiveTranslateResultsCardView: View {
                             .foregroundColor(appearance.colors.textSecondary)
                     }
                     Text(row.translation)
-                        .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize,
+                        .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize,
                                                     weight: .semibold))
                         .foregroundColor(appearance.colors.textPrimary)
                         .multilineTextAlignment(.leading)
@@ -1182,14 +1182,14 @@ struct PointAskConsentPromptView: View {
     var body: some View {
         VStack(spacing: 16) {
             Text(surface.title)
-                .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize, weight: .semibold))
                 .foregroundColor(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("pointask.consent.heading")
 
             Text(surface.message)
-                .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize))
+                .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize))
                 .foregroundColor(appearance.colors.textPrimary)
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
@@ -1197,7 +1197,7 @@ struct PointAskConsentPromptView: View {
 
             if let failure = surface.failureMessage {
                 Text(failure)
-                    .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize))
+                    .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize))
                     .foregroundColor(appearance.colors.textPrimary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1226,7 +1226,7 @@ struct PointAskConsentPromptView: View {
             }
         } label: {
             Text(action.title)
-                .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize, weight: .semibold))
                 .foregroundColor(.white)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 20)
@@ -1254,10 +1254,10 @@ struct PointAskCloudIndicatorView: View {
     var body: some View {
         HStack(spacing: DesignTokens.interElementSpacing / 2) {
             Image(systemName: Self.symbolName)
-                .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
                                             weight: .semibold))
             Text(L10n.str("pointask.cloudIndicator.label", locale: locale))
-                .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
                                             weight: .semibold))
                 .fixedSize(horizontal: false, vertical: true)
         }

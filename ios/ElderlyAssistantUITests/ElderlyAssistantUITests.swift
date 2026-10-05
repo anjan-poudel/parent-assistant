@@ -316,7 +316,7 @@ final class ElderlyAssistantUITests: XCTestCase {
             }
             let appearanceRow = app.buttons["settings.appearance"].firstMatch
             tap(systemTab, expecting: appearanceRow, within: 10, in: app)
-            tap(appearanceRow, expecting: app.buttons["appearance.style.classic"], within: 10, in: app)
+            tap(appearanceRow, expecting: app.buttons["textSize.system"], within: 10, in: app)
         }
 
         func choose(_ identifier: String) {
@@ -364,6 +364,25 @@ final class ElderlyAssistantUITests: XCTestCase {
         assertSelected("appearance.skin.cream")
         choose("appearance.skin.sage")
         assertSelected("appearance.style.glass")
+        for identifier in ["textSize.system", "textSize.medium", "textSize.large", "textSize.xxl"] {
+            choose(identifier)
+        }
+        assertSelected("appearance.skin.sage")
+        assertSelected("appearance.style.glass")
+        choose("textSize.small")
+        let previewText = app.staticTexts["appearance.preview.talk"].firstMatch
+        reveal(previewText)
+        let smallTextHeight = previewText.frame.height
+        XCTAssertGreaterThan(smallTextHeight, 0)
+        capture("Glass + Sage + Small preview")
+        choose("textSize.xl")
+        reveal(previewText)
+        expectation(for: NSPredicate { _, _ in previewText.frame.height > smallTextHeight },
+                    evaluatedWith: previewText)
+        waitForExpectations(timeout: 5)
+        let xlTextHeight = previewText.frame.height
+        assertSelected("appearance.skin.sage")
+        assertSelected("appearance.style.glass")
         capture("Glass + Sage preview")
         returnHome()
         capture("Glass + Sage returned Home", preview: false)
@@ -371,18 +390,25 @@ final class ElderlyAssistantUITests: XCTestCase {
         openAppearance()
         assertSelected("appearance.style.glass")
         assertSelected("appearance.skin.sage")
+        assertSelected("textSize.xl")
         app.terminate()
         app.launch()
         completeOnboardingIfNeeded(app)
         openAppearance()
         assertSelected("appearance.style.glass")
         assertSelected("appearance.skin.sage")
+        assertSelected("textSize.xl")
+        reveal(previewText)
+        XCTAssertEqual(previewText.frame.height, xlTextHeight, accuracy: 1,
+                       "The restored size must preserve visible text dimensions")
         capture("Glass + Sage restored after relaunch")
 
         choose("appearance.skin.sky")
         assertSelected("appearance.style.glass")
         choose("appearance.style.soft")
         assertSelected("appearance.skin.sky")
+        assertSelected("textSize.xl")
+        choose("textSize.system")
         capture("Soft + Sky preview")
         returnHome()
         capture("Soft + Sky returned Home", preview: false)

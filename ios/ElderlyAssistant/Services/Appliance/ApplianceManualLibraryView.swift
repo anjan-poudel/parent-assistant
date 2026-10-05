@@ -36,7 +36,7 @@ struct ApplianceManualLibraryView: View {
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Text("appliance.manual.title")
-                        .font(DesignTokens.greetingFont(size: 20))
+                        .font(DesignTokens.greetingFont(size: appearance.typography.scaled(20)))
                         .foregroundColor(appearance.colors.textPrimary)
                 }
                 ToolbarItem(placement: .topBarLeading) {
@@ -132,7 +132,7 @@ struct ApplianceManualLibraryView: View {
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundColor(appearance.colors.textSecondary)
             TextField("appliance.manual.searchPlaceholder", text: $model.query)
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .foregroundColor(appearance.colors.textPrimary)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
@@ -181,7 +181,7 @@ struct ApplianceManualLibraryView: View {
     /// Small caps label above the bundled rows.
     private var bundledSectionHeader: some View {
         Text("appliance.manual.bundled")
-            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+            .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
             .foregroundColor(appearance.colors.textSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 4)
@@ -210,13 +210,13 @@ struct ApplianceManualLibraryView: View {
                     .clipShape(Circle())
                 VStack(alignment: .leading, spacing: 4) {
                     Text("settings.manuals.userManual")
-                        .font(.system(size: DesignTokens.minBodyPointSize,
+                        .font(.system(size: appearance.typography.bodyPointSize,
                                       weight: .semibold))
                         .foregroundColor(appearance.colors.textPrimary)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                     Text("settings.manuals.userManualHint")
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .font(.system(size: appearance.typography.captionPointSize))
                         .foregroundColor(appearance.colors.textSecondary)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
@@ -242,7 +242,7 @@ struct ApplianceManualLibraryView: View {
                 .font(.system(size: 44))
                 .foregroundColor(appearance.colors.textSecondary)
             Text("appliance.manual.noResults")
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .foregroundColor(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 24)
@@ -265,7 +265,7 @@ struct ApplianceManualLibraryView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 8) {
                             Text(manual.title)
-                                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                                .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                                 .foregroundColor(appearance.colors.textPrimary)
                                 .lineLimit(2)
                                 .multilineTextAlignment(.leading)
@@ -277,13 +277,13 @@ struct ApplianceManualLibraryView: View {
                         }
                         if let question = manual.question, !question.isEmpty {
                             Text(question)
-                                .font(.system(size: DesignTokens.minCaptionPointSize))
+                                .font(.system(size: appearance.typography.captionPointSize))
                                 .foregroundColor(appearance.colors.textSecondary)
                                 .lineLimit(2)
                                 .multilineTextAlignment(.leading)
                         }
                         Text(manual.createdAt.formatted(date: .abbreviated, time: .shortened))
-                            .font(.system(size: DesignTokens.minCaptionPointSize))
+                            .font(.system(size: appearance.typography.captionPointSize))
                             .foregroundColor(appearance.colors.textSecondary)
                     }
                     Spacer(minLength: 0)
@@ -396,12 +396,12 @@ struct BundledManualRow: View {
                 thumbnail
                 VStack(alignment: .leading, spacing: 4) {
                     Text(BundledManualCatalog.localized(manual.title, locale: locale))
-                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                        .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                         .foregroundColor(appearance.colors.textPrimary)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                     Text(BundledManualCatalog.localized(manual.overview, locale: locale))
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .font(.system(size: appearance.typography.captionPointSize))
                         .foregroundColor(appearance.colors.textSecondary)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)

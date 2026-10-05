@@ -61,7 +61,7 @@ struct OnboardingWizardView: View {
             Spacer(minLength: 8)
             Button(action: skipCurrentStep) {
                 Text("onboarding.skip")
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                     .foregroundStyle(appearance.colors.accent)
                     .padding(.horizontal, 12)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
@@ -146,11 +146,11 @@ private struct LanguageStep: View {
         VStack(spacing: 24) {
             VStack(spacing: 10) {
                 Text("onboarding.stepLanguage.title")
-                    .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
+                    .font(DesignTokens.greetingFont(size: appearance.typography.titlePointSize))
                     .foregroundStyle(appearance.colors.textPrimary)
                     .multilineTextAlignment(.center)
                 Text("onboarding.stepLanguage.body")
-                    .font(.system(size: DesignTokens.minBodyPointSize))
+                    .font(.system(size: appearance.typography.bodyPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
                     .multilineTextAlignment(.center)
             }
@@ -159,7 +159,7 @@ private struct LanguageStep: View {
                     languageCard(language)
                 }
             }
-            primaryButton(key: "onboarding.next") {
+            primaryButton(key: "onboarding.next", typography: appearance.typography) {
                 coordinator.appLanguage = selection
                 onNext(.language)
             }
@@ -173,7 +173,7 @@ private struct LanguageStep: View {
         } label: {
             HStack {
                 Text(LocalizedStringKey(language.displayNameKey))
-                    .font(.system(size: 22, weight: .bold))
+                    .font(.system(size: appearance.typography.scaled(22), weight: .bold))
                     .foregroundStyle(appearance.colors.textPrimary)
                 Spacer()
                 if isSelected {
@@ -211,7 +211,7 @@ private struct PermissionsStep: View {
         VStack(spacing: 24) {
             VStack(spacing: 10) {
                 Text("onboarding.stepPermissions.title")
-                    .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
+                    .font(DesignTokens.greetingFont(size: appearance.typography.titlePointSize))
                     .foregroundStyle(appearance.colors.textPrimary)
                     .multilineTextAlignment(.center)
             }
@@ -229,7 +229,7 @@ private struct PermissionsStep: View {
                     action: requestNotifications
                 )
             }
-            primaryButton(key: "onboarding.next") {
+            primaryButton(key: "onboarding.next", typography: appearance.typography) {
                 onNext(.permissions)
             }
         }
@@ -245,14 +245,14 @@ private struct PermissionsStep: View {
                     .font(.system(size: 24))
                     .foregroundStyle(appearance.colors.accent)
                 Text(LocalizedStringKey(bodyKey))
-                    .font(.system(size: DesignTokens.minBodyPointSize))
+                    .font(.system(size: appearance.typography.bodyPointSize))
                     .foregroundStyle(appearance.colors.textPrimary)
             }
             switch status {
             case .notAsked:
                 Button(action: action) {
                     Text("onboarding.stepPermissions.allow")
-                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                        .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
                         .frame(minHeight: DesignTokens.chipHeight)
@@ -262,11 +262,11 @@ private struct PermissionsStep: View {
                 .buttonStyle(.plain)
             case .granted:
                 Label("model.ready", systemImage: "checkmark.circle.fill")
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                     .foregroundStyle(appearance.colors.accent)
             case .denied:
                 Text("onboarding.stepPermissions.deniedHint")
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(DesignTokens.stateError)
             }
         }
@@ -333,11 +333,11 @@ private struct FamilyContactStep: View {
         VStack(spacing: 24) {
             VStack(spacing: 10) {
                 Text("onboarding.stepFamily.title")
-                    .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
+                    .font(DesignTokens.greetingFont(size: appearance.typography.titlePointSize))
                     .foregroundStyle(appearance.colors.textPrimary)
                     .multilineTextAlignment(.center)
                 Text("onboarding.stepFamily.body")
-                    .font(.system(size: DesignTokens.minBodyPointSize))
+                    .font(.system(size: appearance.typography.bodyPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
                     .multilineTextAlignment(.center)
             }
@@ -351,13 +351,13 @@ private struct FamilyContactStep: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                 Text("onboarding.stepFamily.messengerHint")
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 4)
             }
             VStack(spacing: 14) {
-                primaryButton(key: "onboarding.stepFamily.save") {
+                primaryButton(key: "onboarding.stepFamily.save", typography: appearance.typography) {
                     if !name.trimmingCharacters(in: .whitespaces).isEmpty {
                         let handle = messengerHandle.trimmingCharacters(in: .whitespacesAndNewlines)
                         coordinator.addFamilyContact(
@@ -370,7 +370,7 @@ private struct FamilyContactStep: View {
                     onNext(.familyContact)
                 }
                 Text("onboarding.stepFamily.laterNote")
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
                     .multilineTextAlignment(.center)
             }
@@ -379,7 +379,7 @@ private struct FamilyContactStep: View {
 
     private func field(placeholderKey: String, text: Binding<String>) -> some View {
         TextField(LocalizedStringKey(placeholderKey), text: text)
-            .font(.system(size: DesignTokens.minBodyPointSize))
+            .font(.system(size: appearance.typography.bodyPointSize))
             .padding(16)
             .frame(minHeight: 60)
             .fixedSize(horizontal: false, vertical: true)
@@ -401,21 +401,21 @@ private struct ModelsStep: View {
         VStack(spacing: 24) {
             VStack(spacing: 10) {
                 Text("onboarding.stepModels.title")
-                    .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
+                    .font(DesignTokens.greetingFont(size: appearance.typography.titlePointSize))
                     .foregroundStyle(appearance.colors.textPrimary)
                     .multilineTextAlignment(.center)
                 Text("onboarding.stepModels.body")
-                    .font(.system(size: DesignTokens.minBodyPointSize))
+                    .font(.system(size: appearance.typography.bodyPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
                     .multilineTextAlignment(.center)
             }
 
             VStack(alignment: .leading, spacing: 10) {
                 Text("settings.gemini.fieldLabel")
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
                     .foregroundStyle(appearance.colors.textSecondary)
                 SecureField("settings.gemini.fieldPlaceholder", text: $draftKey)
-                    .font(.system(size: DesignTokens.minBodyPointSize, design: .monospaced))
+                    .font(.system(size: appearance.typography.bodyPointSize, design: .monospaced))
                     .padding(14)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
                     .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
@@ -427,7 +427,7 @@ private struct ModelsStep: View {
                     .autocorrectionDisabled()
                 if coordinator.geminiConfigStore.isConfigured {
                     Label("settings.gemini.statusConnected", systemImage: "checkmark.circle.fill")
-                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                        .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                         .foregroundStyle(appearance.colors.accent)
                 }
             }
@@ -435,7 +435,7 @@ private struct ModelsStep: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
 
-            primaryButton(key: "onboarding.stepModels.goHome") {
+            primaryButton(key: "onboarding.stepModels.goHome", typography: appearance.typography) {
                 if !draftKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     coordinator.geminiConfigStore.save(draftKey)
                 }
@@ -448,10 +448,10 @@ private struct ModelsStep: View {
 // MARK: - Shared pieces
 
 /// Big primary button used across the wizard — ≥60pt tall (spec §4.2).
-private func primaryButton(key: String, action: @escaping () -> Void) -> some View {
+private func primaryButton(key: String, typography: AppTypography, action: @escaping () -> Void) -> some View {
     Button(action: action) {
         Text(LocalizedStringKey(key))
-            .font(.system(size: 22, weight: .bold))
+            .font(.system(size: typography.scaled(22), weight: .bold))
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
             .frame(minHeight: 64)

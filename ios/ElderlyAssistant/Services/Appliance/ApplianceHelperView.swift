@@ -58,7 +58,7 @@ struct ApplianceHelperView: View {
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Text("plugin.applianceHelper.name")
-                        .font(DesignTokens.greetingFont(size: 20))
+                        .font(DesignTokens.greetingFont(size: appearance.typography.scaled(20)))
                         .foregroundColor(appearance.colors.textPrimary)
                 }
                 ToolbarItem(placement: .topBarLeading) {
@@ -139,7 +139,7 @@ struct ApplianceHelperView: View {
             Text(LocalizedStringKey(session.canAnalyzePhotos
                  ? "plugin.applianceHelper.cameraPrompt"
                  : "plugin.applianceHelper.notConfigured"))
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .foregroundColor(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 24)
@@ -147,7 +147,7 @@ struct ApplianceHelperView: View {
                 showCamera = true
             } label: {
                 Label("appliance.takePhoto", systemImage: "camera.fill")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                     .padding(.horizontal, 28)
                     .padding(.vertical, 14)
                     .foregroundStyle(appearance.colors.onAccent)
@@ -169,10 +169,10 @@ struct ApplianceHelperView: View {
                         .frame(width: 40)
                     VStack(alignment: .leading, spacing: 3) {
                         Text("appliance.manual.title")
-                            .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                            .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                             .foregroundColor(appearance.colors.textPrimary)
                         Text("appliance.manual.openHint")
-                            .font(.system(size: DesignTokens.minCaptionPointSize))
+                            .font(.system(size: appearance.typography.captionPointSize))
                             .foregroundColor(appearance.colors.textSecondary)
                     }
                     Spacer(minLength: 0)
@@ -198,7 +198,7 @@ struct ApplianceHelperView: View {
             ProgressView()
                 .scaleEffect(1.6)
             Text("appliance.working")
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .foregroundColor(appearance.colors.textSecondary)
             Spacer()
         }
@@ -211,7 +211,7 @@ struct ApplianceHelperView: View {
                 .font(.system(size: 44))
                 .foregroundColor(DesignTokens.stateListening)
             Text(message)
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .foregroundColor(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 24)
@@ -219,7 +219,7 @@ struct ApplianceHelperView: View {
                 session.retake()
             } label: {
                 Label("appliance.retry", systemImage: "arrow.clockwise")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                     .padding(.horizontal, 28)
                     .padding(.vertical, 14)
                     .foregroundStyle(appearance.colors.onAccent)
@@ -255,7 +255,7 @@ struct ApplianceHelperView: View {
                         session.retake()
                     } label: {
                         Label("appliance.retake", systemImage: "camera.rotate.fill")
-                            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                            .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                             .foregroundColor(appearance.colors.accent)
                             .frame(minHeight: DesignTokens.minTapTargetSize)
                     }
@@ -271,7 +271,7 @@ struct ApplianceHelperView: View {
             Image(systemName: "questionmark.circle.fill")
                 .foregroundColor(DesignTokens.stateListening)
             Text("appliance.hedgeNotice")
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                 .foregroundColor(appearance.colors.textPrimary)
             Spacer(minLength: 0)
         }
@@ -284,7 +284,7 @@ struct ApplianceHelperView: View {
             Image(systemName: "viewfinder")
                 .foregroundColor(appearance.colors.accent)
             Text("appliance.closerPhotoHint")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundColor(appearance.colors.textPrimary)
             Spacer(minLength: 0)
         }
@@ -299,12 +299,12 @@ struct ApplianceHelperView: View {
             let name = presentation.guidance.identity.displayName
             if !name.isEmpty {
                 Text(name)
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundColor(appearance.colors.textPrimary)
             }
             if !presentation.guidance.spokenSummary.isEmpty {
                 Text(presentation.guidance.spokenSummary)
-                    .font(.system(size: DesignTokens.minBodyPointSize))
+                    .font(.system(size: appearance.typography.bodyPointSize))
                     .foregroundColor(appearance.colors.textPrimary)
             }
         }
@@ -334,13 +334,14 @@ struct ApplianceHelperView: View {
                 ZStack {
                     Circle().fill(appearance.colors.accent)
                     Text(stepNumberText(card.number))
-                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                        .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                         .foregroundStyle(appearance.colors.onAccent)
                         .accessibilityLabel(Text(stepAccessibilityLabel(card.number)))
                 }
-                .frame(width: 42, height: 42)
+                .frame(width: max(42, appearance.typography.bodyPointSize * 2),
+                       height: max(42, appearance.typography.bodyPointSize * 2))
                 Text(card.text)
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                     .foregroundColor(appearance.colors.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 9)
@@ -400,11 +401,11 @@ struct ApplianceHelperView: View {
     private func buttonLabel(_ display: ApplianceLabelLocalizer.Display) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(display.primary)
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                 .foregroundColor(appearance.colors.textPrimary)
             if let secondary = display.secondary {
                 Text(secondary)
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundColor(appearance.colors.textSecondary)
             }
         }
@@ -512,6 +513,8 @@ private struct ZoomableStepImage: View {
                 .position(ringCenter)
             ZStack {
                 Circle().fill(DesignTokens.stateListening)
+                // Evidence annotation: retain the camera's operational floor and
+                // fixed badge geometry, independently of the readable UI preference.
                 Text(badgeText)
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
                     .foregroundColor(.white)

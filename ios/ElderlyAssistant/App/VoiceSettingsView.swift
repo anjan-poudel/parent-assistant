@@ -88,7 +88,7 @@ struct VoicePersonalizationSettingsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     Text("voiceSettings.explanation")
-                        .font(.system(size: DesignTokens.minBodyPointSize))
+                        .font(.system(size: appearance.typography.bodyPointSize))
                         .foregroundStyle(appearance.colors.textSecondary)
 
                     noiseFilterCard
@@ -98,7 +98,7 @@ struct VoicePersonalizationSettingsView: View {
                     biometricSection
 
                     Text("voiceSettings.privacy")
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .font(.system(size: appearance.typography.captionPointSize))
                         .foregroundStyle(appearance.colors.textSecondary)
                         .padding(.horizontal, 4)
                 }
@@ -138,13 +138,13 @@ struct VoicePersonalizationSettingsView: View {
         VStack(alignment: .leading, spacing: 10) {
             Toggle(isOn: $settings.noiseFilterEnabled) {
                 Text("voiceSettings.noise.title")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                     .foregroundStyle(appearance.colors.textPrimary)
             }
             .tint(appearance.colors.accent)
             .frame(minHeight: DesignTokens.minTapTargetSize)
             Text("voiceSettings.noise.caption")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
         }
         .padding(16)
@@ -158,13 +158,13 @@ struct VoicePersonalizationSettingsView: View {
         VStack(alignment: .leading, spacing: 10) {
             Toggle(isOn: $settings.accentBiasEnabled) {
                 Text("voiceSettings.accent.title")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                     .foregroundStyle(appearance.colors.textPrimary)
             }
             .tint(appearance.colors.accent)
             .frame(minHeight: DesignTokens.minTapTargetSize)
             Text("voiceSettings.accent.caption")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
         }
         .padding(16)
@@ -178,13 +178,13 @@ struct VoicePersonalizationSettingsView: View {
         VStack(alignment: .leading, spacing: 10) {
             Toggle(isOn: $settings.warmStartEnabled) {
                 Text("voiceSettings.warmStart.title")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                     .foregroundStyle(appearance.colors.textPrimary)
             }
             .tint(appearance.colors.accent)
             .frame(minHeight: DesignTokens.minTapTargetSize)
             Text("voiceSettings.warmStart.caption")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
         }
         .padding(16)
@@ -196,13 +196,13 @@ struct VoicePersonalizationSettingsView: View {
         VStack(alignment: .leading, spacing: 10) {
             Toggle(isOn: $settings.timingDebugEnabled) {
                 Text("voiceSettings.timing.title")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                     .foregroundStyle(appearance.colors.textPrimary)
             }
             .tint(appearance.colors.accent)
             .frame(minHeight: DesignTokens.minTapTargetSize)
             Text("voiceSettings.timing.caption")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
         }
         .padding(16)
@@ -215,7 +215,7 @@ struct VoicePersonalizationSettingsView: View {
     private var biometricSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("voiceSettings.biometric.title")
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 .foregroundStyle(appearance.colors.textPrimary)
                 .padding(.top, 8)
 
@@ -228,7 +228,7 @@ struct VoicePersonalizationSettingsView: View {
                     enrollFlowVisible = true
                 } label: {
                     Text("voiceSettings.biometric.enrollButton")
-                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                        .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
                         .frame(minHeight: DesignTokens.minTapTargetSize)
@@ -244,10 +244,10 @@ struct VoicePersonalizationSettingsView: View {
             }
 
             Text("voiceSettings.biometric.privacy")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
             Text("voiceSettings.biometric.battery")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
         }
     }
@@ -260,17 +260,17 @@ struct VoicePersonalizationSettingsView: View {
                     .fill(presentation.statusColor)
                     .frame(width: 12, height: 12)
                 Text(LocalizedStringKey(presentation.statusTitleKey))
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(appearance.colors.textPrimary)
             }
             if case .enrolled(let count) = presentation {
                 Text(L10n.fmt("voiceSettings.biometric.status.enrolled.detail",
                               locale: coordinator.activeLocale, count))
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
             } else if let detailKey = presentation.statusDetailKey {
                 Text(LocalizedStringKey(detailKey))
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
             }
         }
@@ -292,27 +292,27 @@ struct VoicePersonalizationSettingsView: View {
                 Text(L10n.fmt("voiceSettings.biometric.enroll.progress",
                               locale: coordinator.activeLocale,
                               sampleNumber, VoiceEnrollmentSession.requiredSampleCount))
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                     .foregroundStyle(appearance.colors.textSecondary)
             }
 
             switch enrollment.phase {
             case .recording:
                 Text("voiceSettings.biometric.enroll.recordingHint")
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(DesignTokens.stateListening)
             case .processing:
                 HStack(spacing: 10) {
                     ProgressView()
                     Text("voiceSettings.biometric.enroll.processing")
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .font(.system(size: appearance.typography.captionPointSize))
                         .foregroundStyle(appearance.colors.textSecondary)
                 }
             case .failed(let failure):
                 failureLine(failure)
             case .idle:
                 Text("voiceSettings.biometric.enroll.hint")
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
             case .ready:
                 HStack(spacing: 8) {
@@ -320,10 +320,10 @@ struct VoicePersonalizationSettingsView: View {
                         // Caption-token status glyph (DESIGN-REVIEW): 18pt
                         // floor and Dynamic Type aware, like the label it
                         // sits beside — was a fixed 16pt.
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .font(.system(size: appearance.typography.captionPointSize))
                         .foregroundStyle(appearance.colors.accent)
                     Text("voiceSettings.biometric.enroll.done")
-                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                        .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                         .foregroundStyle(appearance.colors.accent)
                 }
             }
@@ -376,7 +376,7 @@ struct VoicePersonalizationSettingsView: View {
                                     : isRecording
                                         ? "voiceSettings.biometric.enroll.stop"
                                         : "voiceSettings.biometric.enroll.record"))
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
@@ -444,10 +444,10 @@ struct VoicePersonalizationSettingsView: View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
                 // Caption-token failure glyph (DESIGN-REVIEW) — was 16pt.
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(DesignTokens.stateError)
             Text(failureText(failure))
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
@@ -508,18 +508,18 @@ struct VoicePersonalizationSettingsView: View {
     private var askMicCard: some View {
         VStack(spacing: 12) {
             Text("voiceSettings.mic.askTitle")
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 .foregroundStyle(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
             Text("voiceSettings.mic.askBody")
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
                 .multilineTextAlignment(.center)
             Button {
                 grantMicAndRecord()
             } label: {
                 Text("voiceSettings.mic.allow")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 20)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
@@ -538,11 +538,11 @@ struct VoicePersonalizationSettingsView: View {
     private var blockedMicCard: some View {
         VStack(spacing: 12) {
             Text("voiceSettings.mic.deniedTitle")
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 .foregroundStyle(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
             Text("voiceSettings.mic.deniedBody")
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
                 .multilineTextAlignment(.center)
             Button {
@@ -550,7 +550,7 @@ struct VoicePersonalizationSettingsView: View {
                 UIApplication.shared.open(url)
             } label: {
                 Text("call.search.openSettings")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 20)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
@@ -572,7 +572,7 @@ struct VoicePersonalizationSettingsView: View {
                 showClearConfirm = true
             } label: {
                 Text("voiceSettings.biometric.remove")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(DesignTokens.stateError)
             }
             .buttonStyle(.plain)

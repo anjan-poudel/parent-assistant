@@ -103,7 +103,7 @@ private struct TranslateTestBody: View {
             }
 
             Text(L10n.str("settings.translateTest.note", locale: locale))
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -167,14 +167,14 @@ private struct TranslateTestComposerCard: View {
                 ZStack(alignment: .topLeading) {
                     if model.inputText.isEmpty {
                         Text(L10n.str("settings.translateTest.input.placeholder", locale: locale))
-                            .font(.system(size: DesignTokens.minBodyPointSize))
+                            .font(.system(size: appearance.typography.bodyPointSize))
                             .foregroundStyle(appearance.colors.textSecondary.opacity(0.6))
                             .padding(.top, 8)
                             .padding(.leading, 5)
                             .allowsHitTesting(false)
                     }
                     TextEditor(text: $model.inputText)
-                        .font(.system(size: DesignTokens.minBodyPointSize))
+                        .font(.system(size: appearance.typography.bodyPointSize))
                         .foregroundStyle(appearance.colors.textPrimary)
                         .scrollContentBackground(.hidden)
                         .frame(minHeight: 120)
@@ -193,7 +193,7 @@ private struct TranslateTestComposerCard: View {
             // person a sentence about why the tap did nothing.
             if let notice = model.micNotice {
                 Text(L10n.str(notice.captionKey, locale: locale))
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     // Busy is not a fault — the button is live again — so it
                     // is stated plainly rather than in the error colour.
                     .foregroundStyle(notice == .busy ? appearance.colors.textSecondary
@@ -247,7 +247,7 @@ private struct TranslateTestControlsCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(L10n.str("settings.translateTest.model.label", locale: locale))
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                 .foregroundStyle(appearance.colors.textPrimary)
 
             // A MENU picker, not a segmented control: the rows are model
@@ -275,7 +275,7 @@ private struct TranslateTestControlsCard: View {
             .frame(minHeight: DesignTokens.minTapTargetSize)
 
             Text(readinessLine)
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(readinessColor)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -286,7 +286,7 @@ private struct TranslateTestControlsCard: View {
                               ? "settings.translateTest.state.running"
                               : "settings.translateTest.action.translate",
                               locale: locale))
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
                     .background(model.canRun ? appearance.colors.accent
@@ -423,7 +423,7 @@ private struct TranslateTestResultCard: View {
                           ? "settings.translateTest.result.degraded"
                           : "settings.translateTest.result.title",
                           locale: locale))
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                 .foregroundStyle(result.degraded ? DesignTokens.stateError
                                                  : appearance.colors.textPrimary)
 
@@ -431,7 +431,7 @@ private struct TranslateTestResultCard: View {
             // translation to show, the honest thing is the input plus the
             // token that says why, never a blank card.
             Text(result.text)
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .foregroundStyle(appearance.colors.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -520,10 +520,10 @@ private struct TranslateTestResultCard: View {
     private func fact(_ label: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
             Text(value)
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                 .foregroundStyle(appearance.colors.textPrimary)
         }
     }
@@ -578,7 +578,7 @@ private struct TranslateTestInstallCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(L10n.fmt("settings.translateTest.install.section", locale: locale, option.displayName))
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                 .foregroundStyle(appearance.colors.textPrimary)
 
             if let entry = TranslateTestModel.offeredEntry(for: option.id) {
@@ -617,7 +617,7 @@ private struct TranslateTestInstallCard: View {
                     availability: ModelLifecycleManager.shared.availability(of: entry),
                     bypassEnabled: ignoresFitPolicy) {
                     Text(L10n.str(noteKey, locale: locale))
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .font(.system(size: appearance.typography.captionPointSize))
                         .foregroundStyle(appearance.colors.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -637,7 +637,7 @@ private struct TranslateTestInstallCard: View {
                 // fetch, and the honest answer is the sentence, not the row.
                 Text(L10n.str(TranslateTestModel.unofferedInstallNoteKey(for: option.id),
                               locale: locale))
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

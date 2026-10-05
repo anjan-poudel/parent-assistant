@@ -75,26 +75,13 @@ enum DesignTokens {
     /// Pale blue-white wash behind the voice-state badge role.
     static let stateVoiceRestWash = Color(red: 0.910, green: 0.941, blue: 0.980) // #E8F0FA
 
-    // MARK: Type scale (spec §3.1, redesign spec §7)
+    // MARK: Operational camera typography
     //
-    // These are computed, not stored: `UIFontMetrics` scales the base value
-    // against the user's current Dynamic Type setting, so 18pt/15pt become
-    // the floor at the *default* content size category, not a hard ceiling
-    // that ignores a user who's turned their system text size up. Every
-    // existing call site (`DesignTokens.minBodyPointSize`, etc.) picks this
-    // up automatically — no per-view changes needed.
-
-    /// Minimum body size — accessibility floor, not a suggestion.
+    // These system-scaled floors are ONLY for camera/evidence annotation geometry
+    // and headless rendering fixtures. They do not represent the app's UI preference:
+    // readable UI text must use the environment's AppAppearance.typography.
     static var minBodyPointSize: CGFloat { scaled(21) }
-    /// Minimum caption/label size — captions are "secondary" text, still ≥15pt.
     static var minCaptionPointSize: CGFloat { scaled(18) }
-    static var titlePointSize: CGFloat { scaled(32) }
-    static var greetingPointSize: CGFloat { scaled(33) }
-    /// [HOME-TIMER-CHIP] The ticking digits of the home timer chip — a
-    /// step above the body floor (elderly legibility: the remaining time
-    /// is the ONE number on Home that must be readable at a glance),
-    /// below the title sizes so the chip stays a chip.
-    static var homeTimerDigitPointSize: CGFloat { scaled(28) }
 
     private static func scaled(_ base: CGFloat) -> CGFloat {
         UIFontMetrics.default.scaledValue(for: base)
@@ -104,8 +91,8 @@ enum DesignTokens {
     /// serif ("New York") display face gave way to rounded SF — friendlier
     /// and warmer for short human-facing words ("Good morning", leaf
     /// titles). Body/list text stays on the regular sans design for dense
-    /// reading. Same scale behavior as before: callers pass a token size.
-    static func greetingFont(size: CGFloat = DesignTokens.greetingPointSize) -> Font {
+    /// reading. Callers pass the environment-resolved point size explicitly.
+    static func greetingFont(size: CGFloat) -> Font {
         .system(size: size, weight: .bold, design: .rounded)
     }
 

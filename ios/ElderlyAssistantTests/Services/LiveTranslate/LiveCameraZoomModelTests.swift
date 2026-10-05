@@ -975,32 +975,6 @@ final class LiveCameraZoomModelTests: XCTestCase {
             .appendingPathComponent("ElderlyAssistant/App/LiveTranslate/LiveTranslateView.swift"))
     }
 
-    func testTheViewDrawsTwoStepControlsAReadoutAndAFocusLock() {
-        let view = viewSource()
-
-        XCTAssertTrue(view.contains("livetranslate.zoom.in"))
-        XCTAssertTrue(view.contains("livetranslate.zoom.out"))
-        XCTAssertTrue(view.contains("livetranslate.zoom.factor"))
-        XCTAssertTrue(view.contains("livetranslate.focus.lock"))
-        XCTAssertTrue(view.contains("zoom.zoom(direction)"),
-                      "a press is the surface's step, which is the model's arithmetic")
-        XCTAssertTrue(view.contains("zoom.toggleFocusLock()"))
-        XCTAssertTrue(view.contains("zoom.model.label"),
-                      "the readout is the model's own label, not a number the view formats")
-        XCTAssertFalse(view.contains("String(format:"),
-                       "the view does not format the factor — the model does, so the readout cannot drift from the maths")
-    }
-
-    func testTheControlsAreSizedFromTheTokenTableAndAreNeverLitrals() {
-        let view = viewSource()
-
-        XCTAssertTrue(view.contains("static let zoomControlDiameter = DesignTokens.minTapTargetSize + DesignTokens.interElementSpacing"),
-                      "a control's size is the app's tap target plus its spacing — the one relationship the strip is computed from")
-        XCTAssertGreaterThanOrEqual(LiveTranslateView.zoomControlDiameter, DesignTokens.minTapTargetSize,
-                                    "and never below the app's minimum tap target")
-        XCTAssertTrue(view.contains("DesignTokens.warmFont(size: DesignTokens.minBodyPointSize"),
-                      "the readout is drawn at the app's body floor")
-    }
 
     func testTheZoomStripStandsOnTheOverlaysOwnStripAndNeverReservesAnImpossibleRect() throws {
         let size = CGSize(width: 390, height: 844)

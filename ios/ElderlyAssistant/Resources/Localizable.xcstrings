@@ -18883,6 +18883,244 @@
         }
       }
     },
+    "appearance.textSize" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Text Size"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "अक्षरको आकार"
+          }
+        }
+      }
+    },
+    "textSize.independentChoices" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Change text size without changing your colours or visual style. Changes apply throughout the app immediately."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "रङ वा दृश्य शैली नबदली अक्षरको आकार बदल्नुहोस्। परिवर्तन पूरै एपमा तुरुन्तै लागू हुन्छ।"
+          }
+        }
+      }
+    },
+    "textSize.system" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "System"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "सिस्टम"
+          }
+        }
+      }
+    },
+    "textSize.system.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Follow your iPhone text size, including larger accessibility sizes."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ठूला पहुँचयोग्य आकारहरूसहित आइफोनको अक्षर आकारअनुसार चल्छ।"
+          }
+        }
+      }
+    },
+    "textSize.small" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Small"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "सानो"
+          }
+        }
+      }
+    },
+    "textSize.small.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Smaller text in this app, with a readable minimum size."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "यो एपमा साना अक्षर, पढ्न मिल्ने न्यूनतम आकार कायम राखेर।"
+          }
+        }
+      }
+    },
+    "textSize.medium" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Medium"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "मध्यम"
+          }
+        }
+      }
+    },
+    "textSize.medium.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Medium text in this app, independent of iPhone settings."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "आइफोनको सेटिङबाट स्वतन्त्र, यो एपमा मध्यम अक्षर।"
+          }
+        }
+      }
+    },
+    "textSize.large" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Large"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ठूलो"
+          }
+        }
+      }
+    },
+    "textSize.large.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Large text in this app, independent of iPhone settings."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "आइफोनको सेटिङबाट स्वतन्त्र, यो एपमा ठूला अक्षर।"
+          }
+        }
+      }
+    },
+    "textSize.xl" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "XL"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "अझ ठूलो"
+          }
+        }
+      }
+    },
+    "textSize.xl.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Extra-large text for easier reading in this app."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "यो एपमा सजिलोसँग पढ्न अझ ठूला अक्षर।"
+          }
+        }
+      }
+    },
+    "textSize.xxl" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "XXL"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "अत्यन्त ठूलो"
+          }
+        }
+      }
+    },
+    "textSize.xxl.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The largest app text size. Scroll to see all content."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "एपको सबैभन्दा ठूलो अक्षर आकार। सबै सामग्री हेर्न स्क्रोल गर्नुहोस्।"
+          }
+        }
+      }
+    },
     "theme.cream" : {
       "extractionState" : "manual",
       "localizations" : {

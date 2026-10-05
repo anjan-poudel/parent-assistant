@@ -228,7 +228,7 @@ struct SettingsRowChrome: View {
                 .foregroundStyle(appearance.colors.accent)
                 .frame(width: 40)
             Text(titleKey)
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                 .foregroundStyle(appearance.colors.textPrimary)
             Spacer()
             if let status {
@@ -237,7 +237,7 @@ struct SettingsRowChrome: View {
                         .fill(status.color)
                         .frame(width: 8, height: 8)
                     Text(status.label)
-                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                        .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                         .foregroundStyle(appearance.colors.textSecondary)
                 }
             }
@@ -336,7 +336,7 @@ struct SettingsTabBar: View {
                         selection = tab
                     } label: {
                         Text(title)
-                            .font(.system(size: DesignTokens.minBodyPointSize,
+                            .font(.system(size: appearance.typography.bodyPointSize,
                                           weight: .semibold))
                             .foregroundStyle(selected ? appearance.colors.onAccent : appearance.colors.textPrimary)
                             .lineLimit(1)
@@ -505,20 +505,20 @@ struct HiddenSettingsSheet: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Toggle(isOn: $ignoreFitPolicyForDownloads) {
                             Text("settings.hidden.ignoreFitPolicy.label")
-                                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                                .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                                 .foregroundStyle(appearance.colors.textPrimary)
                         }
                         .tint(appearance.colors.accent)
                         .frame(minHeight: DesignTokens.minTapTargetSize)
                         Text("settings.hidden.ignoreFitPolicy.hint")
-                            .font(.system(size: DesignTokens.minCaptionPointSize))
+                            .font(.system(size: appearance.typography.captionPointSize))
                             .foregroundStyle(appearance.colors.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                     Text("settings.hidden.note")
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .font(.system(size: appearance.typography.captionPointSize))
                         .foregroundStyle(appearance.colors.textSecondary.opacity(0.8))
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)

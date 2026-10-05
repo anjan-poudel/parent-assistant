@@ -177,14 +177,14 @@ struct ReminderVisualAidScreen<Footer: View>: View {
 
                 VStack(spacing: 10) {
                     Text(title)
-                        .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
+                        .font(DesignTokens.greetingFont(size: appearance.typography.titlePointSize))
                         .foregroundStyle(appearance.colors.textPrimary)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 24)
 
                     if let caption = display.currentCaption {
                         Text(caption)
-                            .font(.system(size: DesignTokens.minBodyPointSize))
+                            .font(.system(size: appearance.typography.bodyPointSize))
                             .foregroundStyle(appearance.colors.textSecondary)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal, 32)
@@ -197,7 +197,7 @@ struct ReminderVisualAidScreen<Footer: View>: View {
                     if let indicator = display.indicatorText(locale: locale),
                        currentImage != nil {
                         Text(indicator)
-                            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                            .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                             .foregroundStyle(appearance.colors.textSecondary)
                             .accessibilityLabel(Text(indicator))
                     }
@@ -362,7 +362,7 @@ struct ReminderVisualAidEditorView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     if aids.isEmpty {
                         Text("visualAid.addHint")
-                            .font(.system(size: DesignTokens.minBodyPointSize))
+                            .font(.system(size: appearance.typography.bodyPointSize))
                             .foregroundStyle(appearance.colors.textSecondary)
                     }
                     ForEach(aids) { aid in
@@ -384,7 +384,7 @@ struct ReminderVisualAidEditorView: View {
                         onClose()
                     } label: {
                         Text("common.close")
-                            .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                            .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                     }
                 }
             }
@@ -437,7 +437,7 @@ struct ReminderVisualAidEditorView: View {
                             get: { captionDrafts[aid.id] ?? "" },
                             set: { captionDrafts[aid.id] = $0 }
                           ))
-                    .font(.system(size: DesignTokens.minBodyPointSize))
+                    .font(.system(size: appearance.typography.bodyPointSize))
                     .textFieldStyle(.roundedBorder)
 
                 Button {
@@ -463,7 +463,7 @@ struct ReminderVisualAidEditorView: View {
                 Image(systemName: "photo.badge.plus")
                     .font(.system(size: 24, weight: .semibold))
                 Text("visualAid.add")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
             }
             .foregroundStyle(appearance.colors.accent)
             .frame(maxWidth: .infinity)
