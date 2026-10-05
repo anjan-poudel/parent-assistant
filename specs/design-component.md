@@ -1345,7 +1345,7 @@ struct LiveTranslateConfig: Equatable {
     // Tracking / stabilisation
     var trackingEnabled: Bool                        = true
     var regionMatchIoU: Double                       = 0.3
-    var regionMatchCentroidDistance: Double          = 0.35
+    var regionMatchCentroidDistance: Double          = 0.36
     var regionAppearPasses: Int                      = 2
     var regionMissPasses: Int                        = 2
 
@@ -1426,7 +1426,7 @@ value that already covers the slowest curated model.
 |---|---|---|---|
 | `ocrSampleInterval` | 0.25 s (≈4 fps) — OD1, device spike | OCR load, thermal, battery | the parameter only |
 | `thermalCadenceFactor` | 2.0 | thermal escalation | the parameter only |
-| `regionMatchIoU` / `regionMatchCentroidDistance` | 0.3 / 0.35 | region identity churn | the parameter only |
+| `regionMatchIoU` / `regionMatchCentroidDistance` | 0.3 / 0.36 — de-collided from the overlay's device-pinned `positionSmoothingSeconds` 0.35 (2026-10-06; ~3% wider, imperceptible) | region identity churn | the parameter only |
 | `regionAppearPasses` / `regionMissPasses` | 2 / 2 | overlay flicker, translation churn | the parameter only |
 | `declutterMergeCentroidDistance` / `declutterMaxRegions` | 0.06 / 8 — OD5 | unreadable dense scenes | the parameter only |
 | `inPlaceMaxSourceWordCount` / `overlayMinPointSize` | 3 / 18 pt — D1 | in-place legibility | the parameter only |

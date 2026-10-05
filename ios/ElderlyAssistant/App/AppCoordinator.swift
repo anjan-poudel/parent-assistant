@@ -777,6 +777,19 @@ final class AppCoordinator: ObservableObject {
     /// and cannot tell which channel it is on.
     private let storage: MigratingEncryptedStorage
     private let observabilityBus: ObservabilityBus
+    /// [PROFILE-INTERVIEW T-092] The app's ONE profile store — the only
+    /// writer of the encrypted five-field record (design-l2 §5.6;
+    /// FR-PI-003). Composed in init next to the storage it writes
+    /// through; construction is a lock and a cache, no I/O — nothing is
+    /// read until the first `load()`. The wizard and the Settings editor
+    /// reach it only through `saveProfile` / `currentProfileSnapshot`
+    /// (single writer by contract).
+    private let profileStore: UserProfileStore
+    /// [PROFILE-INTERVIEW T-092] The read seam the interpreters and the
+    /// wake acknowledgment consume (design-l2 §5.6). Created in init();
+    /// nil means "not wired" (a test-configured coordinator) and is
+    /// consumed nil-safe everywhere.
+    private(set) var profilePersonalization: ProfilePersonalizationReading?
     /// [LIVE-TRANSLATE T-013] The app's ONE label-translation store: the
     /// live camera-translation pipeline resolves and records through it, and
     /// the appliance helper's label seam reads the same instance, which is
@@ -1026,6 +1039,12 @@ final class AppCoordinator: ObservableObject {
     private var voiceStateCancellable: AnyCancellable?
     private var geminiSwapCancellable: AnyCancellable?
     private var speaker: Speaker?
+    /// [PROFILE-INTERVIEW T-096] The wake-acknowledgment seam (C05,
+    /// design-l2 §5.4/§5.6): built in `start()` on the BASE speaker
+    /// instance, handed to the pipeline that same boot. Nil until then —
+    /// and in any construction that never starts the coordinator, the
+    /// pipeline's seam stays nil (today's synchronous capture path).
+    private var wakeAcknowledgmentService: WakeAcknowledgmentService?
 
     // Voice-OS shell v1 (composition — built in `start()`, nil until then
     // like `speaker` itself): the speak queue that now owns all speech,
@@ -2408,7 +2427,16 @@ final class AppCoordinator: ObservableObject {
         }
     }
 
-    init() {
+    /// - Parameters:
+    ///   - profileStorage: the encrypted channel the profile store writes
+    ///     through. nil (the app's own construction) = the real
+    ///     `MigratingEncryptedStorage`; tests inject an in-memory fake.
+    ///   - wireProfilePersonalization: whether the personalization seam is
+    ///     built. The app always wires it (the wizard needs it); a test
+    ///     exercising the nil-safe consumers passes false and reads
+    ///     `profilePersonalization` as nil (design-l2 §5.6).
+    init(profileStorage: ProfilePayloadStorage? = nil,
+         wireProfilePersonalization: Bool = true) {
         // [BOOT-REVIEW P0 item 1] `bootstrap-init` — the composition root's
         // own cost, measured separately from every other startup metric:
         // this is what runs before the app exists at all (the App struct's
@@ -2426,6 +2454,20 @@ final class AppCoordinator: ObservableObject {
         let storage = MigratingEncryptedStorage()
         self.storage = storage
         self.observabilityBus = bus
+        // [PROFILE-INTERVIEW T-092] Store → guard → seam, composed here
+        // next to the storage they write through (design-l2 §5.6): the
+        // wizard runs BEFORE start(), so the seam must exist the moment
+        // init returns; only the ack service (which needs the speaker) is
+        // built in start(). Construction performs no I/O.
+        let profileStore = UserProfileStore(
+            storage: profileStorage ?? storage,
+            observabilityBus: bus)
+        self.profileStore = profileStore
+        self.profilePersonalization = wireProfilePersonalization
+            ? ProfilePersonalization(storage: profileStore,
+                                     promptGuard: ProfilePromptTextGuard(),
+                                     observabilityBus: bus)
+            : nil
         // [LIVE-TRANSLATE T-032] The feature's two payloads (the translation
         // cache and the consent record) are sealed with AES-GCM before they
         // reach the file channel — Data Protection Complete alone is "locked
@@ -3385,6 +3427,29 @@ final class AppCoordinator: ObservableObject {
         } onEnded: { [weak self] in
             self?.noteSpeakingEnded()
         }
+        // [PROFILE-INTERVIEW T-096] The wake acknowledgment (C05): built
+        // here on the BASE speaker instance — never the forwarding
+        // `speechNoter` wrapper (§6) — so its begin/end notes reach the
+        // same coordinator hooks reply speech uses: the wake gate closes
+        // and the session shows `.speaking` while the greeting plays. The
+        // term and locale are read per-utterance; the guarded prompt term
+        // is a different accessor (`addressAsForPrompt`).
+        self.wakeAcknowledgmentService = WakeAcknowledgmentService(
+            speaker: speaker,
+            termProvider: { [weak self] in
+                self?.profilePersonalization?.addressAsVerbatim
+            },
+            localeProvider: { [weak self] in
+                self?.activeLocale ?? Locale(identifier: "ne-NP")
+            },
+            onSpeakingStarted: { [weak self] in
+                self?.noteSpeakingStarted()
+            },
+            onSpeakingEnded: { [weak self] in
+                self?.noteSpeakingEnded()
+            },
+            observabilityBus: observabilityBus
+        )
         let queue = SpeakQueue(speaker: speechNoter, observability: observabilityBus)
         let notificationReader = NotificationReader(queue: queue, observability: observabilityBus)
         let briefing = MorningBriefing(
@@ -3607,8 +3672,12 @@ final class AppCoordinator: ObservableObject {
         // STT, ONE understand call does STT + intent; the command half is
         // waiting in `intentRouter` when the transcript half routes.
         geminiSpeechRecognizer.collapseContextProvider = { [weak self] in
+            // [PROFILE-INTERVIEW T-094] Same guarded term as the text path
+            // (design-l2 §5.5): the collapse provider reads the seam
+            // directly; nil grows the clause out of the prompt entirely.
             InterpreterContext(pendingMedications: [],
-                               userLanguageHint: self?.activeLocale.languageCode ?? "ne")
+                               userLanguageHint: self?.activeLocale.languageCode ?? "ne",
+                               addressAs: self?.profilePersonalization?.addressAsForPrompt)
         }
         geminiSpeechRecognizer.onUnderstanding = { [weak self] transcript, command in
             self?.intentRouter?.noteCloudPreparsed(transcript: transcript, command: command)
@@ -4434,6 +4503,13 @@ self.noteTalkContractChanged()
         // [NOISE-FILTER] Attach the restored A/B stage (nil when OFF —
         // the hot-swap seam emits the honest engine name either way).
         voicePipeline?.setNoiseSuppressor(makeNoiseSuppressor())
+        // [PROFILE-INTERVIEW T-096] Hand the wake ack to the pipeline it
+        // belongs to (C05, §5.4). This is the pipeline's single
+        // construction site, and the service exists by the time this
+        // runs (`start()` builds it before any boot phase); nil in
+        // constructions that never started the coordinator leaves the
+        // synchronous path byte-identical.
+        voicePipeline?.wakeAcknowledger = wakeAcknowledgmentService
         voiceStateCancellable = voicePipeline.$state
             .receive(on: DispatchQueue.main)
             .sink { [weak self] state in
@@ -10998,5 +11074,67 @@ extension AppCoordinator: VoicePipelineSuspending {
                 self.noteVoicePipelineStartFailed(err)
             }
         }
+    }
+}
+
+// MARK: - [PROFILE-INTERVIEW] Profile seams (T-092)
+
+extension AppCoordinator {
+
+    /// The only writer for the profile record (design-l2 §5.6): the
+    /// wizard and the Settings editor call it and nothing else touches
+    /// the store. The values are written as the COMPLETE new record;
+    /// callers merge by reading `currentProfileSnapshot()` first
+    /// (the merge helpers live in `OnboardingDrafts`). Main-thread by
+    /// contract — the store asserts it. Failure is explicit
+    /// (`.failure(.writeFailed)`) and changes nothing (E3).
+    ///
+    /// `photoFilename` (about-you selfie, 2026-10-06) is the file name
+    /// the capture step stored via `contactPhotoStore` — the step writes
+    /// the file first and this call is the record commit point (the
+    /// same split the family-contact editor uses). It has no default on
+    /// purpose: every caller passes the MERGED record's value, so a
+    /// call site added later cannot silently erase a stored selfie.
+    @discardableResult
+    func saveProfile(name: String,
+                     addressAs: String,
+                     dateOfBirth: DateComponents?,
+                     emergencyDoctor: String?,
+                     localHospital: String?,
+                     photoFilename: String?) -> Result<Void, ProfileStoreError> {
+        profileStore.save(UserProfile(
+            name: name,
+            addressAs: addressAs,
+            dateOfBirth: dateOfBirth,
+            emergencyDoctor: emergencyDoctor,
+            localHospital: localHospital,
+            photoFilename: photoFilename))
+    }
+
+    /// The store's cached load result; no disk I/O after the first read.
+    /// Any queue (the store's lock serves it). Empty strings are legal
+    /// and mean "not recorded yet" — clearing returns to the
+    /// un-personalized path (FR-PI-011).
+    func currentProfileSnapshot() -> ProfileLoadResult {
+        profileStore.load()
+    }
+
+    /// Cold-start interview routing (T-102 / C13, FR-PI-016): the pure
+    /// rule composed with THIS coordinator's inputs — its own step map
+    /// and its own cached snapshot. `.loaded` with trimmed non-empty name
+    /// AND address-as counts as recorded; `.absent` and `.unreadable`
+    /// count as missing (the unreadable-route repair path, edge table).
+    /// nil → the app starts normally.
+    func coldStartInterviewRoute() -> OnboardingState.Step? {
+        let mandatoryRecorded: Bool
+        switch currentProfileSnapshot() {
+        case .loaded(let profile):
+            mandatoryRecorded = AboutYouDraft.mandatoryFieldsRecorded(in: profile)
+        case .absent, .unreadable:
+            mandatoryRecorded = false
+        }
+        return OnboardingState.coldStartInterviewStep(
+            firstPending: onboardingState.firstPendingStep,
+            mandatoryFieldsRecorded: mandatoryRecorded)
     }
 }

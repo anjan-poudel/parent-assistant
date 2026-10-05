@@ -395,6 +395,21 @@ protocol VoiceCommandCoordinating: AnyObject {
     /// caption and the honest fallback. Same
     /// requirement-with-extension-default pattern as the members above.
     func showMedicationPhoto(entryId: UUID) -> String?
+
+    /// [PROFILE-INTERVIEW T-094] The profile-personalization read seam the
+    /// interpreter contexts compose from (design-l2 §5.5): nil = "not
+    /// wired" (tests, pre-onboarding, or wiring disabled), and the prompt's
+    /// address-as clause composes to the byte-identical baseline. The
+    /// router READS the seam each turn and passes only the guarded prompt
+    /// term (`addressAsForPrompt`) into `InterpreterContext.addressAs` —
+    /// the verbatim spoken term never crosses this boundary (ADR-09).
+    /// Requirement-with-extension-default pattern like the tool surfaces
+    /// above: `CommandRouter` holds its coordinator as
+    /// `VoiceCommandCoordinating?`, so an extension-only member would bind
+    /// statically and `AppCoordinator`'s stored property could never be
+    /// reached (the exact failure mode the [INTENT-TOOLS] doc warns
+    /// about).
+    var profilePersonalization: ProfilePersonalizationReading? { get }
 }
 
 /// [INTENT-TOOLS] (2026-09-07) Tool-capability default. The default keeps
@@ -491,6 +506,11 @@ extension VoiceCommandCoordinating {
     // (AppCoordinator, and the scripted mock under test) shows a photo.
     var medicationVoiceEntries: [MedicationEntry] { [] }
     func showMedicationPhoto(entryId: UUID) -> String? { nil }
+    // [PROFILE-INTERVIEW T-094] Inert default — a conformer that does not
+    // opt in (every mock/double) has no personalization seam, so the
+    // prompt composes exactly as it did before the feature and every
+    // pre-feature expectation (pinned digests, byte-identity tests) holds.
+    var profilePersonalization: ProfilePersonalizationReading? { nil }
 }
 
 /// Turns a raw transcript into a coordinator call and a spoken reply.
@@ -1409,9 +1429,15 @@ final class CommandRouter {
         // Fast path — the LLM interpreter. Falls through to keyword when
         // the interpreter is unavailable or not confident.
         if interpreter.isAvailable {
+            // [PROFILE-INTERVIEW T-094] Compose the guarded address-as term
+            // through the coordinator's read seam (design-l2 §5.5). The
+            // seam is nil-safe end to end: no coordinator, no seam, or an
+            // absent/unreadable profile all yield nil here and the prompt
+            // stays byte-identical to the pre-feature baseline.
             let context = InterpreterContext(
                 pendingMedications: [],
-                userLanguageHint: coordinator?.activeLocale.languageCode ?? "en"
+                userLanguageHint: coordinator?.activeLocale.languageCode ?? "en",
+                addressAs: coordinator?.profilePersonalization?.addressAsForPrompt
             )
             // [REST-DIP-FIX] (2026-09-08) The interpreter round-trip is
             // ASYNC: this route returns before the reply exists, and the

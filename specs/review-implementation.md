@@ -1,89 +1,66 @@
-# Review — implementation, live-camera-translation (EN→NE, v1)
+# Review — implementation, profile-interview (re-issued after rework pass 1)
 
-Artifact under review: `specs/implement-notes.md`, for task `review-implementation`.
-Read with: `specs/LCT-security-evidence-index.md`, `specs/security-design-review.md`, `specs/design-component.md`, `specs/plan-tasks/plan.md` and the task files, the group notes, and `specs/LCT-device-validation-results.md`.
-Method: the notes were treated as claims. Every cheap check was re-derived rather than trusted — result bundles via xcresulttool, the two log-safety script gates re-run in this worktree, and source and diff spot checks against the branch merge base. No build was run.
+Artifact under review: the profile-interview worktree (`feat/profile-interview`) and `specs/implement-notes.md` (final, including section 8 for rework pass 1), for task `review-implementation`.
+Read with: `specs/design-l2.md`, `specs/review-l2.md`, `specs/security-design-review.md`, the task files T-090 ... T-105, the feature constitution and the requirements lock.
+Method: verification re-derived, not taken on trust — sources read directly, result bundles re-read with xcresulttool, both static gates re-run read-only from this worktree. No build was run.
 
 ## Summary
 
-The phase satisfies the feature constitution's Standards. The required pure-logic and integration coverage exists and is green in retained result bundles; the security-relevant behaviour matches the binding amendments at the source level; the release log-safety gate passes and is demonstrably load-bearing. The verdict is GO, with four corrections carried forward that do not block this gate (section 6).
+Re-issued decision after rework pass 1. The single blocking defect from the first review (D-1: the voice-fingerprint step had no mid-recording teardown) is closed at the source, the recommended T-100 test is in place and green, the notes corrections are applied, and the re-run gates reproduce green. Nothing reviewed now requires rework.
 
-### 1. Gates re-verified from the result bundles (observed, not asserted)
+### 1. D-1 closure (verified)
 
-| Bundle | Observed | Notes' claim |
-| --- | --- | --- |
-| T033-gate | 307 passed, 0 failed, 0 skipped, 18 suites, every suite non-zero | 307 / 18 suites |
-| TG10-gate | 205 passed, 0 failed, 14 suites (boundary 7, index 5, OCR fixture 1) | 205 / 14 suites |
-| TG10-evidence | 13 passed (7 + 5 + 1) | 13 |
-| TG09-gate | 92 passed across the seven named suites | 92 / 7 suites |
-| TG05-gate / TG07-gate / TG02-gate | 144 / 99 / 68, 0 failed | 144 / 99 / 68 |
-| TG06-pinned | 57 passed (tier 25, client translate 15, sanitiser 17) | 57 |
-| TG08-parser-gate / TG08b-gate-final | 49 / 59, 0 failed | 49 / 59 |
-| T032-gate / T032-adjacent | 136 across 9 suites / 108 | 136 / 108 |
-| TG10-ocr | 0 tests, result unknown | declared unusable |
+- The step now carries the canonical hygiene in exact form: `.onDisappear { Task { await enrollment.stopRecording() } }` on the enrollment host in `ProfileInterviewSteps.swift` (lines 466-474, with the rationale comment). Same call as the canonical site (`VoiceSettingsView.swift` lines 119-124); `stopRecording()` guards on `.recording` (no-op when idle) and is the normal resume path.
+- All exits fire it: step swap Next/Skip/Back replaces the switch branch in the wizard shell (view identity changes, so the outgoing step disappears); completing the interview removes the whole wizard branch in `ContentView.swift`; dismissing the Home cover tears its content down.
+- Behavioral corroboration: the scoped UI cold-start walk (which skips through the voice step on the live path) is green — re-read from the bundle (Passed 1/1, 2m 17s). The walk does not itself exercise a record-then-leave sequence; the mid-recording guarantee rests on the canonical call form plus the session's unit-tested no-op and resume semantics. Recorded as the declared verification basis, matching the notes.
 
-Three points that matter more than the totals:
+### 2. T-100 test and the extraction (verified)
 
-- Every suite inside every bundle I read reports a non-zero count, so the false-green hazard (a suite absent from the generated project runs nothing and still reports success) is not present in the cited evidence.
-- `TG10-ocr.xcresult` holds zero tests and is declared unusable; it is not cited as evidence anywhere. The OCR fixture test did run inside `TG10-gate.xcresult` (1 test, passed) and its activity tree carries the `ocr-fixture-measurement` attachment.
-- `TG10-evidence.xcresult` carries the boundary and index evidence suites plus the OCR fixture, 13 tests, all green.
+- `KinDesignationTests.swift` (4 tests) pins the singular designation: tapped flagged true, other currently-flagged cleared, unflagged never written, values carried verbatim, a same-id edited snapshot planned once.
+- `KinDesignation.plan` is the pure helper (clear flagged others excluding the tapped id, then set the tapped); `EmergencyContactsStep.designate` executes exactly that plan through `updateFamilyContact`, one call per entry with the entry's values and flag, aggregating failure into the inline copy.
+- The extraction is semantics-verified against the T-100 definition of done; the step file is untracked in this worktree, so no pre/post byte-diff exists — the basis is the plan's tests plus the designate path read directly.
+- The reworked unit gate ran the class: bundle re-read shows 188 passed, 0 failed, 0 skipped, result Passed, with `KinDesignationTests` present in the result.
 
-### 2. Script gates re-run from this worktree (all green)
+### 3. Gate evidence re-read (observed, not asserted)
 
-- The release log-safety gate (`ios/tools/check-release-log-safety.sh`) — exit 0, 24 fixtures over 12 rules.
-- Its fixture harness (`ios/tools/check-release-log-safety-fixtures.py`) — exit 0.
-- The same with `--falsify` — exit 0, 36 cases, 12 of 12 rules proven load-bearing. This independently confirms the AM-5 claim rather than reading it from the notes.
-- The gate is genuinely wired ahead of every test scope inside `run_tests` in `ios/build.sh`, as AM-5 requires.
+| Evidence | Observed |
+| --- | --- |
+| Unit gate (02-29-58) | 188 passed, 0 failed, 0 skipped, Passed; KinDesignationTests in the result |
+| Scoped UI (pi_rework_scoped) | the cold-start wizard test Passed 1/1, 2m 17s |
+| Prompt-mirror gate | re-run here: exit 0, 2717 bytes, 4 placeholders, all six drift classes rejected |
+| Log-safety gate | re-run here: exit 0, 24 fixtures over 12 rules, positive and negative per rule |
+| Flake record | two intermediate ack-suite flakes documented (the same two wall-clock tests as the pre-rework session, green 10/10 isolated, no source change between attempts); accepted as declared |
 
-### 3. Source spot checks against the binding rules
+### 4. Working-tree check (nothing else moved)
 
-- Consent cannot be skipped: `translateStrings` requires a `Grant` whose initialiser is fileprivate, so the gate's `authorize()` is its only producer, and the tier mints a fresh proof before every attempt including the retry (AM-1, AM-7).
-- Text only, never media: one text part, `tools` explicitly nil, no image, media or attachment parameter on any signature, and no field on the request item an image could travel in. Tests decode every recorded request including the retry; no live network is used (the transport seam is a test double). OD-13 and AM-9/AM-10 hold by construction.
-- Withdrawal: deny-in-memory precedes storage, the delete is verified by read-back, a surviving grant is tombstoned, an unverifiable one is reported as a failure; a revocation cancels registered in-flight work and a cancellation-shaped error is terminal and never retried (AM-1, AM-4).
-- Cache at rest: AES-GCM via CryptoKit, Keychain key with WhenUnlockedThisDeviceOnly and not synchronised, versioned envelope, storage key as authenticated data, key loss recovers as an empty cache without trapping (T-032). The type name `LabelTranslationCache` is kept and generalised (OD8); the stored ordering field is a monotone counter (AM-6).
-- Camera: one `AVCaptureVideoDataOutput`; the capture protocol has no entry point that could construct a photo output. The snapshot path holds one CGImage in memory, writes nothing, and reuses the one detector, tier and renderer.
-- OD7: the shipped governor and the overlay mapper are untouched against the merge base; the config explicitly refuses to own a cap; the tier consumes the governor as shipped and latches for the session when the cap is reached.
-- Additive-only shared edits: the sanitiser allow-list differs from the base by a comma and one conditional; the localizer adds entries; the transcript sanitiser gains a detect-only accessor with the anti-copy prohibition; the speech queue gains a source-scoped drain.
-- No print, NSLog or os_log in the feature sources; no hardcoded timeout — the deadline is derived from the shipped client timeout plus a configured grace.
-- The camera purpose string now discloses live translation and the conditional text-only send.
+- Files touched in the rework window: `ProfileInterviewSteps.swift`, `KinDesignationTests.swift` (new), `specs/implement-notes.md` — as declared.
+- Two further files carry rework-window mtimes with no undeclared content: the project file gained exactly the KinDesignationTests build-file, file-reference and group/sources wiring (the project uses explicit wiring, no synchronized groups), and the shared scheme was rewritten byte-identically to HEAD (clean against git, no diff) at the same timestamp. Both are the consequence of wiring the new test; recorded as a declaration nit only.
+- No other feature-path file changed; the two concurrently updated spec files are this review and the security report.
 
-### 4. Role checklist
+### 5. Notes corrections (verified)
+
+- Section 7 now carries the exact save-failure coverage map and retires the earlier overclaim.
+- Section 8 records D-1, the fix, the verification basis, the flake record, and the pruned-bundle annotations; sections 3 and 6 keep the 4-of-7 full-suite claim as a recorded claim with the retention note.
+
+### 6. Residuals carried (declared, not blockers)
+
+- Device-only obligations (Release-session inspection, container and WAV checks, offline journey, OD-A1) remain not-run with reasons; they belong to security-test and final-sign-off.
+- OD-A2 owner copy and the App Store disclosure remain open owner items.
+- The three pre-existing UI tests remain red with base-and-master evidence, unmodified and declared.
+- The optional T-099 step-prefill test was not added (the prefill semantics are draft-layer tested; the remainder is view glue on par with the other steps). Acceptable.
+
+### 7. Role checklist
 
 | Item | Verdict | Basis |
 | --- | --- | --- |
-| Every interface method has an explicit error return type | Pass | Typed Swift enums and Result throughout; no untyped escape hatch; no failure case collapsed into another |
-| Every async or external call documents a failure mode and recovery path | Pass | A retryability policy exhaustive with no default, per-region degradation, and failure isolation asserted in the pipeline tests |
-| Timeouts and retry limits are configurable | Pass | Retry budget, deadline grace, cadence and thresholds live in one config type; the deadline is derived so no second value can diverge; the consent prompt has no timeout by design (it is a prompt, not a call) |
-| Every element traces to an FR or NFR | Pass | The plan maps all 23 FR and 13 NFR; the evidence index maps amendments to tests; non-goals are absent by construction with tests that would fail if introduced |
-| The design describes what the operator sees on success and failure | Pass | Pending, resolved and degraded rendering with the original text always shown; unavailable and quarantined copy with Nepali first; the consent prompt and its failure note; the cloud indicator |
-
-### 5. Owner directives and amendments
-
-- OD7 — the shipped per-day governor remains the spending bound. Verified: no new budget mechanism, the governor file is unmodified against the merge base.
-- OD8 — `LabelTranslationCache` kept as the name, generalised in place. Verified.
-- OD-13 — never images, including on the retry. Verified by type (nothing to serialise an image into) and by test (every recorded request decoded, one text part, no media).
-- AM-1 … AM-10 — each has an implementing site and at least one named test that ran green in a retained bundle. AM-5's enforcement point is the build gate, which I re-ran including falsification. T-031's drop is correct: no Devanagari recogniser shipped, and the English-source re-lock is explicitly deferred to the security-test gate.
-
-### 6. Declared gaps, accepted at this gate, with reasons
-
-- No device validation; every DV-1 … DV-16 check is NOT RUN, carried as owner actions OA-1 … OA-5. Accepted: the constitution's Open Decisions 1, 2 and 5 resolve on a device and at the first device demo, i.e. after this gate. T-030's deliverable was the protocol and the results record; both exist, the reasons are stated per row, and nothing is presented as a device run.
-- Device-only behaviour unverified. Accepted on the same basis; the record names the simulator as a simulator.
-- Red unit baseline on master (about 21 pre-existing failures). Accepted: gates were scoped with explicit selections and the unrelated red was documented, not hidden, and no claimed suite rides on it.
-- One load-sensitive determinism test. Accepted: the failing diff is characterised as a wall-clock race against a fixed sleep in the pipeline's synchronisation, the test passed in both retained final gates, and the fix is assigned to the file's owning task. Reported, not papered over.
-- Two DRAFT copy keys for the snapshot control. Accepted: they are pinned by the copy suite and listed for the owner's review, which the workflow already makes a final-sign-off condition.
-- The stale cache-encryption invariant row in the design document. Accepted as a documentation defect with a scheduled correction; the shipped mechanism is stronger than the row describes.
-- The log-safety gate cannot see through indirection. Accepted: stated in the script itself and in the evidence index, with the runtime allow-list as the primary safeguard.
-- The snapshot view coverage figure. Accepted as a selection artefact, declared rather than dressed up.
-
-### 7. Corrections carried forward (recorded, non-blocking)
-
-1. `specs/implement-notes.md` section 1 maps groups to the wrong task IDs from TG-02 onward (for example it gives TG-03 as T-011 … T-013 where the plan and the task tree assign T-009 and T-010, and TG-09 as T-028 … T-030 where it is T-026 and T-027). The plan and the task files are correct; the notes' summary table is stale. No evidence depends on it; fix it alongside item 2.
-2. Correct the declared stale invariant row in the design document before the security-test re-lock, naming the T-032 cipher rather than Data Protection alone.
-3. Evidence retention: the TG-06 gate bundle cannot be read by xcresulttool (item missing) and no TG-01 or TG-03-04 bundles are retained, so those three group counts rest on the notes. The suites themselves are covered by retained bundles; keep the next gate's bundles intact.
-4. Integration note: the branch is well behind the local master, and master has since touched the shared observability allow-list. Merge master before the security-test gate and re-run the allow-list, sanitiser and cache suites, because the additive-extension tests pin the exact set they know.
+| Every interface method has an explicit error return type | Pass | `Result<Void, ProfileStoreError>` and typed enums throughout; no untyped escape hatch |
+| Every async or external call documents failure mode and recovery | Pass | store, guard, ack paths as before; the wizard backout path now closes the loop |
+| Timeouts and retry limits are configurable | Pass | hold bound, term bound and entry bounds are parameters with defaults; keys are design constants |
+| Every element traces to an FR or NFR | Pass | all 16 FR and 11 NFR anchored; the T-100 definition-of-done gap is now covered by tests |
+| The design shows what the operator sees on success and failure | Pass | inline failure copy, saved state, ack silent and failed paths, cold-start presentation |
 
 ## Decision
 
 decision: GO
 
-All criteria in the feature constitution's Standards are met and were re-verified where verification was cheap. The four corrections in section 7 are record-keeping and integration hygiene: none weakens the evidence for OD7, OD8, OD-13 or AM-1 … AM-10, and none is a scope violation. The declared gaps are accepted for the reasons given, with the device run remaining an owner action that neither security-test nor final-sign-off may treat as done.
+All criteria met. The D-1 defect is fixed with the canonical teardown, verified at source across every exit path; the recommended T-100 coverage is added and green; the gates re-run green and were re-read from their bundles; the notes corrections are applied. The declared residuals (device obligations, owner items, the pre-existing red UI trio) carry to the remaining gates and do not block review-implementation. The workflow exit condition (review GO) is met.

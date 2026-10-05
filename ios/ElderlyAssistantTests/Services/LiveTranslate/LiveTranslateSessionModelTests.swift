@@ -152,7 +152,13 @@ final class LiveTranslateSessionModelTests: XCTestCase {
         let pts = CMTime(value: CMTimeValue(harness.clock.now * 600), timescale: 600)
         let buffer = try SampleBufferFactory.make(width: width, height: height, pts: pts)
         harness.capture.deliver(buffer)
-        await waitUntil("the delivered frame to be recognised", file: file, line: line) {
+        // A ten-second ceiling on this first hop, double the helper's default:
+        // a purely environmental allowance — the pass is handed across actors
+        // and pays for a pooled frame buffer and Vision's first call, which can
+        // run long on a loaded machine — not a semantic change. What is waited
+        // for (the pass this frame triggered has started) is unchanged; the
+        // remaining waits keep the default.
+        await waitUntil("the delivered frame to be recognised", timeout: 10, file: file, line: line) {
             harness.engine.recognizeCallCount > passesBefore
         }
         // The recognition call marks the *start* of the pass, and the tap drops

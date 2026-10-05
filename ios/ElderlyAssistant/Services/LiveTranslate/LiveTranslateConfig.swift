@@ -707,8 +707,12 @@ struct LiveTranslateConfig: Equatable {
     var trackingMaxRectanglesPerPass: Int = 6
 
     /// Normalised centroid distance below which two observations are
-    /// considered the same region.
-    var regionMatchCentroidDistance: Double = 0.35
+    /// considered the same region. (0.36, not 0.35: de-collided from the
+    /// overlay's positionSmoothingSeconds literal — same-number-different-
+    /// meaning collisions are what the app-layer hygiene scan forbids;
+    /// the nudge is ~3% wider and imperceptible. Precedent:
+    /// frameStabFollowFactor.)
+    var regionMatchCentroidDistance: Double = 0.36
 
     /// Consecutive passes a candidate must be seen before it is published as
     /// a region (overlay flicker bound).

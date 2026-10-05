@@ -902,13 +902,26 @@ final class TurnLatencyReporter {
         }
     }
 
+    /// The ASR span under `VoiceTurnLatencyTracer`'s trailing-mark
+    /// semantics: each entry's `ms` is the gap from its own mark to the
+    /// NEXT mark, so the span that ENDS at the `asr_done` mark lives on
+    /// the entry immediately preceding `asr_done`. Single-sourced here so
+    /// the reporter and the tests can never re-derive it differently.
+    static func asrSpanMs(in stages: [VoiceTurnLatencyTracer.StageTiming]) -> Int? {
+        guard let idx = stages.firstIndex(where: { $0.stage == Self.sttStageToken }) else {
+            return nil
+        }
+        let source = idx > 0 ? stages[idx - 1] : stages[idx]
+        return max(0, source.ms)
+    }
+
     /// Assembles the finalized turn's breakdown and emits the ONE event
     /// for it. Returns the breakdown (empty when instrumentation is off),
     /// which is also what `onReported` receives.
     ///
-    /// The STT stage is the tracer's `asr_done` span REUSED, not
-    /// re-measured: the recognizers already time it, and the tracer's
-    /// stage list is the chronological record of the turn.
+    /// The STT stage is the tracer's ASR span REUSED, not re-measured:
+    /// the recognizers already time it, and the tracer's stage list is
+    /// the chronological record of the turn.
     @discardableResult
     func report(tracerStages: [VoiceTurnLatencyTracer.StageTiming],
                 totalMs: Int) -> TurnTimingBreakdown {
@@ -918,8 +931,7 @@ final class TurnLatencyReporter {
 
         // The tracer's own ASR span, reused for both readouts: the STT
         // row's duration in the trace, and the breakdown's `stt_total`.
-        let sttMs = tracerStages.first(where: { $0.stage == Self.sttStageToken })
-            .map { max(0, $0.ms) }
+        let sttMs = Self.asrSpanMs(in: tracerStages)
         // [PIPELINE-TRACE] Closed on the same edge, before the
         // instrumentation guard: a disabled reporter still ends the
         // trace's turn, so a flip cannot leave stale rows behind.

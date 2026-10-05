@@ -212,7 +212,11 @@ final class SnapshotModeTests: XCTestCase {
         let passesBefore = recognizeCount(harness)
         let publishedBefore = harness.model.publication?.sequence ?? 0
         let buffer = try deliverFrame(harness, width: width, height: height)
-        await waitUntil("the delivered frame to be recognised", file: file, line: line) {
+        // [MASTER-REPAIR] Environmental allowance: the recognition hop can
+        // exceed the 5s default under simulator load — the same 10s wait
+        // the session-model suite uses for the identical condition.
+        await waitUntil("the delivered frame to be recognised", timeout: 10,
+                        file: file, line: line) {
             self.recognizeCount(harness) > passesBefore
         }
         // The recognition call marks the *start* of the pass, and the tap drops

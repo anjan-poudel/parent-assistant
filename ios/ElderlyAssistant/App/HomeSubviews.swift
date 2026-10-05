@@ -23,10 +23,11 @@ import UIKit
 
 // MARK: - Top bar (redesign spec §3.1)
 
-/// Settings (leading), the date line doubling as the calendar's entry
-/// point (centered), the notifications bell and the emergency button
-/// (trailing). At larger type the full date moves below the controls;
-/// every entrypoint retains a minimum 44pt target.
+/// Settings and "About me" (leading, home-profile-icon 2026-10-06), the
+/// date line doubling as the calendar's entry point (centered), the
+/// notifications bell and the emergency button (trailing). At larger type
+/// the full date moves below the controls; every entrypoint retains a
+/// minimum 44pt target.
 struct HomeTopBar: View {
     @Environment(\.appAppearance) private var appearance
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -54,6 +55,14 @@ struct HomeTopBar: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(Text("home.hub.settings"))
                 .accessibilityIdentifier("home.settings")
+                NavigationLink(value: LeafDestination.profile) {
+                    IconBadge(systemImage: "person.crop.circle.fill", tint: .profile, diameter: 32)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text("home.hub.profile"))
+                .accessibilityIdentifier("home.profile")
                 if dynamicTypeSize <= .large {
                     calendarButton
                         .frame(maxWidth: .infinity)

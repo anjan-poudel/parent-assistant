@@ -295,7 +295,15 @@ final class LocalBrainChain: CommandInterpreter, InterpreterFailureReporting,
     /// its `original` — the sanitised transcript — instead).
     private static func plainText(for pair: IntentTranscriptPair,
                                   raw: String) -> String {
-        pair.isIdentity ? raw : pair.pickerBrainInput
+        // [MASTER-REPAIR] Decide by the TEXT, not the bookkeeping flag:
+        // `isIdentity` reflects whether the canonicalization LAYERS ran
+        // (applications/correction), so a hand-built pair whose
+        // `canonical` was rewritten without layer bookkeeping (the seam
+        // tests' RecordingInputSeam shape) read as identity and plain
+        // brains got the raw text — the switch appearing to do nothing.
+        // Compare against `original` (the sanitised transcript), never
+        // `raw` (which may be unsanitised).
+        pair.pickerBrainInput == pair.original ? raw : pair.pickerBrainInput
     }
 
     private func interpret(turn: TurnInput,

@@ -570,6 +570,7 @@ final class VoiceTurnTimingSeamTests: XCTestCase {
                                            isInstrumentationEnabled: true)
         let reported = expectation(description: "breakdown reported")
         reporter.onReported = { _ in reported.fulfill() }
+        reporter.attach(to: h.tracer)
 
         h.pipeline.debugEnterIdleForTesting()
         h.pipeline.simulateWakeWordDetection()
@@ -786,7 +787,7 @@ final class VoiceTurnTimingSeamTests: XCTestCase {
         let tracerStages = (try? JSONDecoder()
             .decode([VoiceTurnLatencyTracer.StageTiming].self,
                     from: Data(raw.utf8))) ?? []
-        let asrMs = tracerStages.first { $0.stage == "asr_done" }?.ms
+        let asrMs = TurnLatencyReporter.asrSpanMs(in: tracerStages)
         XCTAssertNotNil(asrMs, "the tracer timed the recognizer")
         XCTAssertEqual(stt.durationMs, asrMs ?? -1,
                        "the STT row reuses the tracer's asr_done span")

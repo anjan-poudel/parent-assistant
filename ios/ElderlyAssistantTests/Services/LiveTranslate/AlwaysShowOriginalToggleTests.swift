@@ -500,14 +500,22 @@ final class LiveTranslateAppLayerHygieneTests: XCTestCase {
     /// can neither await a tier nor keep a translation alive after the model
     /// dropped it (NFR-LCT-002).
     ///
-    /// One piece of state **is** allowed, and it is exactly one: the geometry
-    /// memory that holds a box still while its string is unchanged (the owner
-    /// device verdict, 2026-09-17). It holds rects — see
-    /// `testTheGeometryMemoryHoldsRectsAndNothingElse` — so it is not a second
-    /// source of truth for what a region *says*.
+    /// Two pieces of state **are** allowed, and they are exactly two: the
+    /// geometry memory that holds a box still while its string is unchanged
+    /// (the owner device verdict, 2026-09-17), and the action row's measured
+    /// height — the `measuredActionRowHeight` the text-size work (670a36c)
+    /// gave the view so the copy can wrap in any language. Both hold geometry
+    /// — see `testTheGeometryMemoryHoldsRectsAndNothingElse` — so neither is a
+    /// second source of truth for what a region *says*.
     func testTheRenderPathHoldsNoStateAndStartsNoWork() {
         let patterns = [
-            "@StateObject", "@ObservedObject", "@EnvironmentObject", "@Environment\\(",
+            "@StateObject", "@ObservedObject", "@EnvironmentObject",
+            // The theme system's one sanctioned read: every surface takes the
+            // active appearance, so `@Environment(\.appAppearance)` is the
+            // exception the injection needs — any other environment read is
+            // still forbidden. (The lookahead must escape the SOURCE text's
+            // literal backslash: `\\\.` matches the characters `\` + `.`.)
+            "@Environment\\((?!\\\\.appAppearance)",
             "\\.task\\b", "onAppear", "onDisappear", "onReceive",
             "\\bawait\\b", "\\basync\\b", "\\bTask\\b",
             "DispatchQueue", "\\bTimer\\b", "URLSession", "NotificationCenter", "FileManager",
@@ -528,13 +536,18 @@ final class LiveTranslateAppLayerHygieneTests: XCTestCase {
         let declarations = code.split(separator: "\n")
             .map(String.init)
             .filter { $0.contains("@State") }
-        XCTAssertEqual(declarations.count, 1,
-                       "the render path may own one piece of state — the geometry memory — and no "
-                       + "more: saw \(declarations)")
+        XCTAssertEqual(declarations.count, 2,
+                       "the render path may own two pieces of state — the geometry memory and the "
+                       + "action row's measured height — and no more: saw \(declarations)")
         XCTAssertEqual(declarations.first?.trimmingCharacters(in: .whitespaces),
                        "@State private var geometry = LiveOverlayGeometryMemory()",
-                       "and the one piece of state it owns is the memory, not a value the "
+                       "the first piece of state it owns is the memory, not a value the "
                        + "placement should be the only source of")
+        XCTAssertEqual(declarations.last?.trimmingCharacters(in: .whitespaces),
+                       "@State private var measuredActionRowHeight: CGFloat = DesignTokens.minTapTargetSize",
+                       "and the second is the action row's own measured height: a layout "
+                       + "measurement the row takes of itself so the copy may wrap in any "
+                       + "language, not a value the placement should be the source of")
     }
 
     /// The geometry memory is geometry: no translation, no outcome, no tier, so
@@ -579,9 +592,15 @@ final class LiveTranslateAppLayerHygieneTests: XCTestCase {
         XCTAssertNotNil(FeatureSourceScan.firstMatch(of: "geometry\\.held\\(surface\\.presentations", in: code),
                         "and the list it draws is the one the geometry memory resolved: the rects on "
                         + "screen are the memory's answer, not a second computation")
-        let occurrences = code.components(separatedBy: "ForEach(").count - 1
-        XCTAssertEqual(occurrences, 1,
-                       "a second ForEach over anything that accumulates is how the view cost grows")
+        // The other ForEaches draw the lines *inside* one presentation or one
+        // card — each bounded by the thing it draws — while
+        // `ForEach(presentations` is the one list keyed by region identity. A
+        // second region-keyed list over placements, outcomes or regions would
+        // be the one that accumulates: the view cost grows with the frame.
+        for accumulating in ["ForEach\\(placements", "ForEach\\(outcomes", "ForEach\\(regions"] {
+            XCTAssertNil(FeatureSourceScan.firstMatch(of: accumulating, in: code),
+                         "a second ForEach over anything that accumulates is how the view cost grows")
+        }
     }
 
     /// The in-place box is drawn as a *replacement*, not as a bubble: its inset

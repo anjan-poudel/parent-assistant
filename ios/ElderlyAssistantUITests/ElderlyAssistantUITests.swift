@@ -27,21 +27,102 @@ final class ElderlyAssistantUITests: XCTestCase {
         let skip = app.buttons["छाड्नुहोस्"]
         let next = app.buttons["अर्को"]
         let allow = app.buttons["दिनुहोस्"].firstMatch
-        for _ in 0..<8 {
+        // [PROFILE-INTERVIEW T-102] The wizard now has 7 steps (the
+        // interview steps inserted after permissions) and a cold start
+        // with pending steps auto-presents it (FR-PI-016). The Home-side
+        // presentation is asynchronous (a one-shot on Home's first
+        // appearance) and step transitions leave brief gaps with no
+        // wizard element in the tree, so a single empty probe no longer
+        // means "no wizard present". The walk therefore stands down only
+        // after four consecutive quiet probes, each itself waiting up to
+        // 6 s for a late presentation (~18 s of confirmed quiet; the
+        // presentation appeared well within this window on a starved
+        // simulator during the T-102 validation run). A fresh install
+        // can still walk the wizard TWICE (ContentView's pass, then
+        // Home's one-shot on the preserved skipped-steps state); 40
+        // iterations leave headroom over the worst case (two passes x
+        // 7 steps + permission taps).
+        var quietProbes = 0
+        for _ in 0..<40 {
             // Permissions step: tap the allow buttons so the system
-            // alerts appear and the interruption monitor accepts them —
-            // skipping this step leaves mic undetermined and the voice
-            // pipeline lands in .error ("Try again" dead button).
+            // alerts appear and are accepted — skipping this step
+            // leaves mic undetermined and the voice pipeline lands in
+            // .error ("Try again" dead button).
             if allow.exists {
                 allow.tap()
+                quietProbes = 0
+                acceptPermissionAlertIfPresent(wait: 2)
             } else if skip.exists {
                 skip.tap()
+                quietProbes = 0
+                acceptPermissionAlertIfPresent()
             } else if next.exists {
                 next.tap()
+                quietProbes = 0
+                acceptPermissionAlertIfPresent()
             } else {
-                break
+                quietProbes += 1
+                if quietProbes >= 4 { break }
+                _ = skip.waitForExistence(timeout: 6)
+                continue
             }
         }
+        // The pipeline start (finishOnboarding -> coordinator.start) can
+        // raise the mic prompt a beat after the walk settles; give that
+        // alert a bounded window and accept it.
+        acceptPermissionAlertIfPresent(wait: 5)
+    }
+
+    /// Accepts a pending SpringBoard permission alert, polling for it
+    /// directly instead of synthesizing an app tap to fire the
+    /// registered interruption monitor. The old monitor-firing tap
+    /// delivered a blind app-coordinate tap on every iteration; with
+    /// the interview pending, Home carries a live "optional setup"
+    /// strip whose activation re-opens the wizard at the first pending
+    /// step — a tap settling into it re-presented the wizard after
+    /// every dismissal, so the walk never went quiet (2026-10-06 run:
+    /// 40 skip taps, one full pass every ~19 s). Polling SpringBoard
+    /// needs no in-app tap at all; the registered monitor stays as the
+    /// net for alerts that appear while later test code taps app
+    /// elements.
+    private func acceptPermissionAlertIfPresent(wait: TimeInterval = 0.3) {
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let alert = springboard.alerts.firstMatch
+        guard alert.waitForExistence(timeout: wait) else { return }
+        for label in ["Allow", "OK", "Allow While Using App"] {
+            let button = alert.buttons[label]
+            if button.exists {
+                button.tap()
+                return
+            }
+        }
+    }
+
+    /// Titles of the wizard's steps (the pilot locale), in wizard order.
+    /// Lets a test read which step a presented wizard is on without
+    /// assuming anything about the persisted state.
+    private static let stepTitles = ["भाषा छान्नुहोस्",
+                                     "अनुमति दिनुहोस्",
+                                     "तपाईंको बारेमा",
+                                     "परिवार र साथीहरू",
+                                     "आपत्कालीन सम्पर्कहरू",
+                                     "तपाईंको आवाज",
+                                     "जेमिनी AI जोड्नुहोस्"]
+
+    /// Waits for a presented wizard and returns the title of the step it
+    /// is on. Fails the test if no step title ever appears.
+    private func presentedStepTitle(in app: XCUIApplication,
+                                    file: StaticString = #filePath,
+                                    line: UInt = #line) -> String {
+        for _ in 0..<15 {
+            for title in Self.stepTitles {
+                if app.staticTexts[title].firstMatch.exists { return title }
+            }
+            _ = app.buttons["छाड्नुहोस्"].waitForExistence(timeout: 1)
+        }
+        XCTFail("No wizard step title appeared. Hierarchy:\n"
+                + app.debugDescription, file: file, line: line)
+        return ""
     }
 
     private func launchToHome() -> XCUIApplication {
@@ -99,10 +180,55 @@ final class ElderlyAssistantUITests: XCTestCase {
         XCTAssertTrue(talk.waitForExistence(timeout: 15),
                       "Home should show the Nepali talk button. Hierarchy:\n"
                       + app.debugDescription)
-        XCTAssertTrue(app.staticTexts["तयार छु"].exists,
+        // Bounded wait: the idle status is an asynchronous readiness
+        // signal (pipeline start after the wizard walk and boot); the
+        // previous immediate `.exists` silently depended on the walk
+        // having consumed exactly the boot window, which no longer holds
+        // reliably on a loaded simulator.
+        XCTAssertTrue(app.staticTexts["तयार छु"].waitForExistence(timeout: 20),
                       "Idle status should be Nepali")
     }
 
+    /// [PROFILE-INTERVIEW T-102] FR-PI-016's startup presentation
+    /// (design-l2 test table, "Startup presentation"): with onboarding
+    /// seen and the interview still pending — skipped steps stay pending
+    /// by design — a COLD START presents the wizard over Home at the
+    /// first pending step, with the skip affordance, so the user is
+    /// never trapped.
+    ///
+    /// The shared simulator's persisted state can carry steps an older
+    /// run already completed, so the test does not assume the interview
+    /// starts at language: it records the title of the step the wizard
+    /// first presents at, then asserts the cold start resumes at the
+    /// SAME step. The walk only ever SKIPS steps (never completes one),
+    /// so the first pending step is invariant across the relaunch by
+    /// construction. (The exact first-pending rule itself is pinned
+    /// state-free by ColdStartRoutingTests.)
+    func testColdStartWithPendingInterviewPresentsTheWizard() throws {
+        // First launch: record the step the wizard presents at, then
+        // consume the wizard (the helper walks a presented wizard) and
+        // land on Home.
+        let app = XCUIApplication()
+        app.launch()
+        let firstStep = presentedStepTitle(in: app)
+        completeOnboardingIfNeeded(app)
+        app.terminate()
+
+        // Cold start again: the pending interview must resurface at the
+        // same first pending step, still skippable.
+        app.launch()
+        let skip = app.buttons["छाड्नुहोस्"]
+        XCTAssertTrue(skip.waitForExistence(timeout: 15),
+                      "A cold start with pending steps must present the "
+                      + "interview wizard. Hierarchy:\n" + app.debugDescription)
+        XCTAssertEqual(presentedStepTitle(in: app), firstStep,
+                       "The cold start must resume the interview at the "
+                       + "first pending step")
+
+        // Leave the app on Home for the rest of the suite (skipped stays
+        // pending — the state this test just exercised).
+        completeOnboardingIfNeeded(app)
+    }
     /// Precondition: the simulator has no Gemini key and uses Nepali.
     /// The Home tile must still open offline manuals, not just speak a
     /// refusal. Opening a guide also proves the nested library dismisses
@@ -230,6 +356,11 @@ final class ElderlyAssistantUITests: XCTestCase {
                       ("आवाज निजीकरण", "आवाज निजीकरण"),
                       ("आवाजहरू", "आवाजहरू")]),
             ("परिवार", [("परिवार र साथीहरू", "परिवार र साथीहरू"),
+                        // [PROFILE-INTERVIEW T-103] The profile editor's
+                        // row (design-l2 §5.7: tab .family — rows become
+                        // [.family, .profile, .caregiverNotifications,
+                        // .calling]).
+                        ("मेरो बारेमा", "मेरो बारेमा"),
                         ("परिवारलाई खबर गर्ने", "परिवारलाई खबर गर्ने"),
                         ("कलिङ", "कलिङ")]),
             ("सम्झनाहरू", [("औषधि तालिका", "औषधि तालिका"),

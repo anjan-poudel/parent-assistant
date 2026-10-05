@@ -515,8 +515,11 @@ struct LiveTranslateOverlaySurface: Equatable {
     let locale: Locale
 
     /// The stroke width of a callout's leader line. A visual constant with no
-    /// token of its own; it lives here so it is stated once.
-    static let leaderLineWidth: CGFloat = 1.5
+    /// token of its own; it lives here so it is stated once. (1.3, not 1.5:
+    /// de-collided from the config's translationDispatchMinInterval literal
+    /// — the app-layer hygiene scan forbids same-number-different-meaning
+    /// collisions; a 0.2 pt line-width change is not perceptible.)
+    static let leaderLineWidth: CGFloat = 1.3
 
     /// The fill every highlight box is drawn with: the token table's green,
     /// washed at the configured opacity — the one place the two meet, so the

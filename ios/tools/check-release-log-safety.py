@@ -148,6 +148,22 @@ FEATURE_ROOTS = [
     # user content and may never reach a console or an event field.
     "Services/PointAsk",
     "Services/Gemini/GeminiClient+PointAsk.swift",
+    # [PROFILE-INTERVIEW T-104 / AM-4] The interview profile feature's own
+    # sources: the name, the address-as term, the birthday, the doctor and
+    # the hospital are household data. A Release console write or an
+    # unlisted metadata key anywhere in these files fails the gate — the
+    # dedicated step-view file is listed so wizard code cannot bypass it
+    # (SD-4: the coordinator's own additions stay best-effort; the runtime
+    # choke point already contains the event channel there).
+    "Services/Storage/UserProfileStore.swift",
+    "Services/Voice/WakeAcknowledgment.swift",
+    "Services/Voice/ProfilePromptTextGuard.swift",
+    "Services/Voice/ProfilePersonalization.swift",
+    "App/Components/AddressAsField.swift",
+    "App/ProfileSettingsView.swift",
+    "App/ProfileSettingsModel.swift",
+    "App/OnboardingDrafts.swift",
+    "App/ProfileInterviewSteps.swift",
 ]
 
 # The shipped allow-list the feature's metadata keys must be declared in.

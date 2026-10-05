@@ -59,6 +59,25 @@ final class VoicePipeline {
     /// the gate's `allowsWakeDetection` half (speaking), never the
     /// enable half. Nil = always open, exactly the pre-wake-word behavior.
     private let wakeWordGate: WakeWordActivityGate?
+    /// [PROFILE-INTERVIEW T-095] The wake-acknowledgment seam (C05,
+    /// design-l2 §5.4): when set, a detection begins the ack and the
+    /// capture starts from its completion — the pipeline stays `.idle`
+    /// while the greeting plays; nil = today's exact synchronous path,
+    /// byte-identical behavior. Wired once by `AppCoordinator.start()`
+    /// with the BASE speaker instance — never a forwarding wrapper — so
+    /// the ack's speaking bookkeeping reaches the same notes the reply
+    /// path uses.
+    ///
+    /// AM-3 (racing detection): the coordinator's `noteSpeakingStarted`
+    /// closes the wake gate on an ASYNC hop — its body is dispatched to
+    /// the main queue — so a detection arriving between `begin` and that
+    /// hop still passes `handleWakeDetected`'s gate guard. That race is
+    /// owned the same way as any second detection: the service's
+    /// supersede teardown cancels the in-flight ack and `beginCapture`'s
+    /// generation guard makes the stale completion inert — the worst
+    /// outcome is a restarted greeting, never a doubled capture start.
+    /// This is why the seam, not the gate, is the correctness boundary.
+    var wakeAcknowledger: WakeAcknowledging?
     private var speechRecognizer: SpeechRecognizerProtocol
     private var vad: VoiceActivityDetector?
     /// [NOISE-FILTER] Denoising stage applied to the capture stream only
@@ -461,6 +480,12 @@ final class VoicePipeline {
         // synchronously) must not run the post-capture tail against a
         // stopped pipeline — see `captureGeneration` (TALK-CRASH-FIX).
         captureGeneration += 1
+        // [PROFILE-INTERVIEW T-095] Stop any in-flight acknowledgment
+        // BEFORE the engine teardown below (design-l2 §5.4): playback is
+        // cut, the speaking bookkeeping is balanced, and the pending
+        // completion is dropped — stale by definition after the two
+        // bumps above. Emits no event.
+        wakeAcknowledger?.cancel()
         // [REST-DIP-FIX] Disarm any deferred return to idle: the hold
         // belongs to the cancelled turn. (Its generation is already stale
         // after the bump above, but cancelling the safety work and
@@ -740,13 +765,45 @@ final class VoicePipeline {
         vadFrameLatencyReported = false
         silenceCounter = 0
         vadHeardSpeech = false
-        // [NOISE-FILTER] Capture bookend (start) — see
-        // `beginNoiseFilterCapture` for the contract.
-        beginNoiseFilterCapture()
         emit("wake_word_detected", outcome: "success")
         // [TURN-TIMING] One voice turn starts here.
         turnTracer?.beginTurn()
 
+        // [PROFILE-INTERVIEW T-095] Acknowledgment-first: with the seam
+        // configured, capture starts from the ack's completion while the
+        // pipeline stays `.idle`; the coordinator's `noteSpeakingStarted`
+        // closes the wake gate a main-queue hop later (AM-3), and the
+        // supersede path plus `beginCapture`'s generation guard own any
+        // detection that slips into that window. Without the seam, the
+        // exact synchronous path this method has always had. The
+        // completion carries the generation captured above, so a stale
+        // one — a stop(), or a superseded capture — is inert in
+        // `beginCapture`'s guard.
+        if let ack = wakeAcknowledger {
+            ack.begin { [weak self] in
+                self?.beginCapture(generation: generation)
+            }
+        } else {
+            beginCapture(generation: generation)
+        }
+    }
+
+    /// [PROFILE-INTERVIEW T-095] The capture-start half of a wake
+    /// detection (design-l2 §5.4), behind the acknowledgment seam: runs
+    /// synchronously when no seam is configured, or from the ack's
+    /// completion otherwise. The noise-filter bookend opens HERE — after
+    /// the greeting — so the ack's own audio never reaches the ambient
+    /// noise profile this capture computes for the user's utterance.
+    ///
+    /// Guard: the generation captured at detection must still be current
+    /// AND the pipeline idle. Anything else — a stop(), a superseded
+    /// capture, a racing second detection whose completion lost the
+    /// order — is dropped whole: a capture starts exactly once.
+    private func beginCapture(generation: Int) {
+        guard captureGeneration == generation, state == .idle else { return }
+        // [NOISE-FILTER] Capture bookend (start) — see
+        // `beginNoiseFilterCapture` for the contract.
+        beginNoiseFilterCapture()
         if speechRecognizer.ownsAudioCapture {
             // Legacy path: STT owns the input node. Tear down our tap and
             // let it install its own. This is what happens when no VAD is
