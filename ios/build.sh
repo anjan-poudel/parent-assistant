@@ -433,6 +433,18 @@ run_tests() {
         exit 1
     }
 
+    # [PROFILE-INTERVIEW T-094] Training/inference prompt identity: the
+    # Swift prompt template must stay byte-identical (modulo the four
+    # renderer placeholders) to the QLoRA seed copy. Same
+    # before-every-test-scope discipline as the privacy guard above — a
+    # drifted prompt must fail the gate, never ride along silently.
+    echo ""
+    echo "Checking intent-prompt mirror..."
+    "${PROJECT_DIR}/tools/check-prompt-mirror.sh" || {
+        echo "ERROR: intent-prompt mirror guard failed — see above." >&2
+        exit 1
+    }
+
     case "${scope}" in
         unit) label="unit tests"
               testing_args=(-skip-testing:ElderlyAssistantUITests) ;;

@@ -2,10 +2,15 @@ import SwiftUI
 import AVFoundation
 import UserNotifications
 
-/// First-run onboarding (spec §4.2): four steps, EVERY step skippable —
-/// no hard gate anywhere. Skipped steps surface as a Home reminder card.
+/// First-run onboarding (spec §4.2): seven steps (profile-interview
+/// T-102 inserted the three interview steps after permissions), EVERY
+/// step skippable — no hard gate anywhere, though About-you gates its OWN
+/// Next button while name/address-as are missing (FR-PI-002, soft-skip
+/// preserved through the shell's Skip). Skipped steps surface as a Home
+/// reminder card.
 ///
-/// भाषा → अनुमति → परिवारको सम्पर्क → तयारी
+/// भाषा → अनुमति → तपाईंको बारेमा → परिवारको सम्पर्क → आपत्कालीन सम्पर्क
+/// → तपाईंको आवाज → तयारी
 ///
 /// The wizard runs before voice engages: `coordinator.start()` is only
 /// called on the final "घर जानुहोस्" (or by Home once onboarding is seen).
@@ -77,7 +82,16 @@ struct OnboardingWizardView: View {
         switch currentStep {
         case .language: LanguageStep(onNext: advanceAfterCompleting)
         case .permissions: PermissionsStep(onNext: advanceAfterCompleting)
+        // [PROFILE-INTERVIEW T-099/T-100/T-101] The three interview steps
+        // (bodies in ProfileInterviewSteps.swift). About-you saves through
+        // the coordinator's single writer; emergency-contacts designates
+        // kin at tap and saves GP/hospital on Next; voice fingerprint runs
+        // the existing enrollment session and always allows Next.
+        case .aboutYou: AboutYouStep(onNext: advanceAfterCompleting)
         case .familyContact: FamilyContactStep(onNext: advanceAfterCompleting)
+        case .emergencyContacts: EmergencyContactsStep(onNext: advanceAfterCompleting)
+        case .voiceFingerprint: VoiceFingerprintStep(coordinator: coordinator,
+                                                     onNext: advanceAfterCompleting)
         case .models: ModelsStep(onFinish: finishOnboarding)
         }
     }
@@ -356,6 +370,39 @@ private struct FamilyContactStep: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 4)
             }
+            // [PROFILE-INTERVIEW T-100] The store's contacts, read-only —
+            // a confirmation of who is already in the list (or the empty
+            // copy when the list is still empty). Writes stay unchanged:
+            // only the form above adds.
+            VStack(alignment: .leading, spacing: 8) {
+                if coordinator.familyContacts.isEmpty {
+                    Text("settings.family.empty")
+                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .foregroundStyle(appearance.colors.textSecondary)
+                } else {
+                    ForEach(coordinator.familyContacts) { contact in
+                        HStack(spacing: 10) {
+                            Image(systemName: "person.crop.circle.fill")
+                                .font(.system(size: 22))
+                                .foregroundStyle(appearance.colors.accent)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(contact.name)
+                                    .font(.system(size: DesignTokens.minBodyPointSize,
+                                                  weight: .semibold))
+                                    .foregroundStyle(appearance.colors.textPrimary)
+                                if !contact.relationship.isEmpty {
+                                    Text(contact.relationship)
+                                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                                        .foregroundStyle(appearance.colors.textSecondary)
+                                }
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
             VStack(spacing: 14) {
                 primaryButton(key: "onboarding.stepFamily.save", typography: appearance.typography) {
                     if !name.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -448,7 +495,10 @@ private struct ModelsStep: View {
 // MARK: - Shared pieces
 
 /// Big primary button used across the wizard — ≥60pt tall (spec §4.2).
-private func primaryButton(key: String, typography: AppTypography, action: @escaping () -> Void) -> some View {
+/// Internal (not private) since T-099/100/101: the interview steps in
+/// ProfileInterviewSteps.swift share it, so every step's Next/Save is
+/// the same button.
+func primaryButton(key: String, typography: AppTypography, action: @escaping () -> Void) -> some View {
     Button(action: action) {
         Text(LocalizedStringKey(key))
             .font(.system(size: typography.scaled(22), weight: .bold))

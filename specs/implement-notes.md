@@ -1,197 +1,161 @@
-# Implement phase — live-camera-translation (English → Nepali, v1)
+# Profile-Interview — Implementation Notes (T-090 … T-105)
 
-description: Implementation record for the live-camera-translation feature. Thirty planned tasks
-(T-001 … T-030) across ten task groups, plus two owner-directed additions — T-032 (authenticated,
-encrypted at-rest storage for the translation cache and the consent record) and T-033 (snapshot /
-freeze-frame mode). Task T-031 was dropped by owner directive. All work was carried out in the git
-worktree `worktree-live-camera-translation`; every gate was scoped with `-only-testing:` and every
-per-suite count was read from the result bundle rather than from the exit code.
+- **Description:** Implementation record for the profile-interview feature — the encrypted profile store, guarded prompt personalization, the wake-acknowledgment seam, the three interview wizard steps, cold-start routing, and the Settings editor — with per-task status, test evidence, security evidence obligations, decisions and open items.
+- **Feature:** profile-interview (ai-sdd run, direct dispatch)
+- **Worktree:** the dedicated git worktree for this feature; the main checkout was not used for task work.
+- **Date:** 2026-10-05
+- **Scope honoured:** iOS only; no new permissions; no new network egress; no Android work; no secrets or real PII in any file (tests use synthetic values only).
 
-## 1. Scope and task inventory
+## 1. Per-task status
 
-The plan (`specs/plan-tasks/plan.md`) groups the thirty tasks into ten groups:
+| Task | Status | Evidence summary |
+|---|---|---|
+| T-090 user-profile-store | DONE | `ios/` `ElderlyAssistant/` `Services/Storage/` `UserProfileStore.swift` + payload probe in the encrypted-storage chain; `UserProfileStoreTests` (12) and `EncryptedFileStorageProbeTests` (5) green. |
+| T-091 profile-prompt-guard-and-personalization | DONE | `ProfilePromptTextGuard.swift` + `ProfilePersonalization.swift`; `ProfilePromptTextGuardTests` (12) and `ProfilePersonalizationTests` (10) green. |
+| T-092 coordinator-profile-seams | DONE | Coordinator seams (single writer, snapshot seam, verbatim accessor); `ProfileCoordinatorSeamTests` (4) green. |
+| T-093 l10n-catalog-additions | DONE | 28 new catalog keys (en + ne) in `Localizable.xcstrings` (now 1298 keys); `L10nCatalogCoverageTests` (3) green. |
+| T-094 prompt-clause-and-seed-mirror-gate | DONE | Address-as clause at the three builders; seed + `tools/train-intent` mirror updated; mirror gate: seed mirrors `IntentPrompt.build` byte-for-byte (2717 bytes, 4 placeholders), all 6 drift classes rejected; `IntentPromptTests` green in the gate. |
+| T-095 capture-extraction-and-ack-seam | DONE | Wake seam extracted out of the pipeline; `wakeAcknowledger` seam (nil = the synchronous baseline path); `WakeAcknowledgmentSeamTests` (6) green. |
+| T-096 wake-acknowledgment-service | DONE | `WakeAcknowledgment.swift` service; built in `start()` on the base speaker; per-ack epoch + hold bound; `WakeAcknowledgmentServiceTests` (10) green. |
+| T-097 onboarding-drafts-and-bounds | DONE | `OnboardingDrafts.swift` (About-you + emergency drafts, merge/trim/DOB semantics, mandatory predicate) + entry bounds; `OnboardingDraftsTests` (9) green. |
+| T-098 address-as-field | DONE | `Components/` address-as field (shipped presets, exact bound, ≥44 pt chips); `AddressAsFieldTests` (7) green. |
+| T-099 about-you-step | DONE | `AboutYouStep` in `ProfileInterviewSteps.swift`: name clamp, address-as field, optional DOB, Next gated on the shared completeness rule, save through the single writer with merge base and inline failure copy. |
+| T-100 emergency-contacts-step | DONE | `EmergencyContactsStep`: kin designation at tap (singular flag write, current values preserved — plan pinned by `KinDesignationTests`, 4, added in rework pass 1), inline add when empty, GP/hospital saved on Next through the same writer. |
+| T-101 voice-fingerprint-step | DONE | `VoiceFingerprintStep`: enrollment session constructed exactly as the Settings screen does (same embedder selection, Keychain-backed store, coordinator recorder and pipeline suspender); skippable like every step. |
+| T-102 step-enum-and-cold-start-routing | DONE — UI confirmation green on scoped runs; three pre-existing UI tests remain red in this environment (section 3) | Step enum extended in the required order; `coldStartInterviewStep` pure rule; `ContentView` passes the route on the not-finished path; `HomeView` one-shot captures it once per process (boot-guard honoured); `OnboardingStateTests` (8, incl. the legacy-map scenario) and `ColdStartRoutingTests` (12) green; the new cold-start UI test passed twice on scoped runs (186.075 s and 144.760 s). |
+| T-103 profile-settings-editor | DONE | `ProfileSettingsView.swift` + `ProfileSettingsModel.swift`; Family-tab row added (`SettingsTabs.swift`); manual tour gains the About-me bullet (en + ne); `ProfileSettingsModelTests` (6) and `SettingsTabMappingTests` green. |
+| T-104 log-safety-coverage | DONE | Five profile field-name keys redacted-by-declaration and dropped whole (not allow-listed); `FEATURE_ROOTS` extended to the interview files; extended log-safety gate exits 0 (24 fixtures, 12 rules, positives and negatives per rule; the gate's own self-test rejects every drift class). |
+| T-105 release-evidence-and-device-validation | NOT RUN on device — honest declaration | No physical device was attached in this environment, so the four device-side scenarios (Release-session leak inspection, container/WAV/keystore inspection, offline journey capture, OD-A1 latency) are recorded as not-run with reasons (section 4). Simulator-side evidence (unit gate 184/184 green; UI suite result below) is attached instead. OD-A2 owner copy confirmation and the App Store disclosure item remain open (section 5). |
 
-| Group | Theme | Tasks |
-| --- | --- | --- |
-| TG-01 | Foundations — config, errors, observability keys, sanitiser seam, catalog | T-001 … T-005 |
-| TG-02 | Camera and text detection | T-006 … T-008 |
-| TG-03 | Region stabilisation | T-009, T-010 |
-| TG-04 | Dictionary and translation cache | T-011 … T-013 |
-| TG-05 | Consent and disclosure | T-014 … T-016 |
-| TG-06 | Cloud translation tier | T-017 … T-019 |
-| TG-07 | Overlay | T-020 … T-022 |
-| TG-08 | Voice and session commands | T-023 … T-025 |
-| TG-09 | Plugin session pipeline | T-026, T-027 |
-| TG-10 | Release gates and evidence | T-028 … T-030 |
+## 2. Files created / changed (repo-relative)
 
-Two tasks sit outside the original plan, both owner-directed:
+Created (new files):
+- `ios/` `ElderlyAssistant/` `App/` `OnboardingDrafts.swift` (T-097)
+- `ios/` `ElderlyAssistant/` `App/` `ProfileInterviewSteps.swift` (T-099/100/101; AM-4's dedicated file)
+- `ios/` `ElderlyAssistant/` `App/` `ProfileSettingsView.swift`, `ProfileSettingsModel.swift` (T-103)
+- `ios/` `ElderlyAssistant/` `App/` `Components/` (T-098 address-as field)
+- `ios/` `ElderlyAssistant/` `Services/Storage/` `UserProfileStore.swift` (T-090)
+- `ios/` `ElderlyAssistant/` `Services/Voice/` `ProfilePersonalization.swift` (T-091), `ProfilePromptTextGuard.swift` (T-091), `WakeAcknowledgment.swift` (T-095/096)
+- Tests: `ios/` `ElderlyAssistantTests/` `App/` `AddressAsFieldTests.swift`, `ColdStartRoutingTests.swift`, `L10nCatalogCoverageTests.swift`, `OnboardingDraftsTests.swift`, `ProfileCoordinatorSeamTests.swift`, `ProfileSettingsModelTests.swift`, `KinDesignationTests.swift` (rework pass 1)
+- Tests: `ios/` `ElderlyAssistantTests/` `Services/Storage/` `EncryptedFileStorageProbeTests.swift`, `UserProfileStoreTests.swift`
+- Tests: `ios/` `ElderlyAssistantTests/` `Services/Voice/` `ProfilePersonalizationTests.swift`, `ProfilePromptTextGuardTests.swift`, plus the seam/service suites under the existing voice test group.
 
-- **T-032** — cipher-backed storage. Before this task, `EncryptedFileStorage` wrote its
-  `Envelope { key, payload }` as JSON with the payload in the clear, relying on Data Protection
-  (`.completeFileProtection`) alone. T-032 introduces AES-GCM (CryptoKit) with a Keychain-stored
-  symmetric key and a versioned envelope (magic / nonce / ciphertext / tag). Key loss is a
-  recoverable condition: the key is regenerated and the cache starts empty; the path never traps.
-  The translation cache **and** the consent record both sit on the same `RawEncryptedStorage` seam
-  and are both covered.
-- **T-033** — snapshot (freeze-frame) mode. A single capture control in the reserved top strip
-  holds the current camera buffer in memory only, runs the existing `LiveTextDetector` over that
-  frame at full resolution, and renders the existing smart-mix overlay on the frozen frame with
-  identical tap-to-hear behaviour. It reuses the detector, tier ladder, cache and overlay renderer;
-  it does **not** construct or consult the region stabiliser. The frozen frame is never sent to the
-  cloud — only OCR'd text enters the text-only tier (OD-13, "never images").
+Changed (existing files):
+- `ios/` `ElderlyAssistant/` `App/` `AppCoordinator.swift` (profile seams, ack service wiring, route seam), `ContentView.swift` (route on the not-finished path), `HomeView.swift` (one-shot presentation), `OnboardingState.swift` (step enum + routing rule), `OnboardingWizardView.swift` (three interview cases, internal primary button), `SettingsTabs.swift` (About-me row)
+- `ios/` `ElderlyAssistant/` `Resources/` `Localizable.xcstrings` (28 keys), `ManualText/` `userManual.json` (tour bullet, en + ne)
+- `ios/` `ElderlyAssistant/` `Services/Observability/` `LogSanitiser.swift` (redacted keys + drop-whole order)
+- `ios/` `ElderlyAssistant/` `Services/Storage/` `EncryptedFileStorage.swift`, `MigratingEncryptedStorage.swift` (probe + profile payload path)
+- `ios/` `ElderlyAssistant/` `Services/Voice/` `CommandRouter.swift`, `IntentPrompt.swift`, `LlamaCommandInterpreter.swift`, `VoicePipeline.swift` (clause, seam, ack hand-off, AM-3 phrasing)
+- `ios/` `build.sh` (mirror-gate call), `ios/tools/` `check-release-log-safety.py` and its fixtures, `ios/` `ElderlyAssistantTests/` `App/` `OnboardingStateTests.swift` and `SettingsTabMappingTests.swift`, `ElderlyAssistantTests/` `Services/Observability/` `LogSanitiserTests.swift`, `ElderlyAssistantTests/` `Services/Voice/` `IntentPromptTests.swift`, `ElderlyAssistantTests/` `Services/Storage/` `MigratingEncryptedStorageTests.swift`, `ios/` `ElderlyAssistantUITests/` `ElderlyAssistantUITests.swift`
+- `tools/train-intent/` seed template + `src/intent_prompt.py` (placeholder mirror)
 
-**T-031 was dropped.** v1 is English source → Nepali target. Nepali/Devanagari OCR is not v1 scope,
-so no custom Devanagari recogniser task was implemented. FR-LCT-003 is to be amended to
-English-source-only at the security-test re-lock.
+## 3. Test evidence
 
-## 2. Group results
+### Focused unit gate (16 classes, final run)
 
-Each row is the gate that group ran, with the counts taken from the result bundle.
+Command: `ios/build.sh test:unit` with the 16 feature classes. Result: **184 tests executed, 0 failures, 0 skipped; exit 0** — "Scoped unit tests passed (green baseline not advanced)" (pre-rework revision; the reworked revision re-ran green at 188/188 — section 8). Device: iPhone 17 Pro simulator, `id=0D2CED77`. The gate was re-verified green at 01:54 on 2026-10-06 (the original 23:35 artifact was later pruned by Xcode's log retention, so the gate was re-run for a live artifact); Xcresult: `ios/` `build/DerivedDataTests/Logs/Test/` `Test-ElderlyAssistant-2026.10.06_01-54-03-+1100.xcresult` (confirmed present on disk at the start of rework pass 1; subsequently pruned by the same Xcode log retention once the rework runs wrote newer bundles — the reworked revision's live artifact is cited in section 8).
 
-| Group | Gate result | Notes |
-| --- | --- | --- |
-| TG-01 | 106 tests, 0 failures, exit 0 | Scoped to the group's suites. Baseline-wide run recorded 3340 tests / 21 pre-existing failures, none in this group. |
-| TG-02 | 68 tests, 0 failures | 3408 / 3380 passed / 21 failed / 7 skipped baseline-wide; no TG-02 suite among the 21. |
-| TG-03-04 | Gate 1: 107 tests, 0 failures. Gate 2: 137 tests (shipped appliance area, unedited) | Gate 2 is the NFR-LCT-012 evidence that shipped behaviour is unchanged. |
-| TG-05 | 144/144, exit 0 | `./build.sh build` → BUILD SUCCEEDED. |
-| TG-06 | 57 tests, 0 failures | CloudTranslationTier 25, GeminiClientTranslate 15, SceneTextSanitiser 17. |
-| TG-07 | 99/99, 74 new | LiveOverlayPlacement 28, Geometry 10, OverlayView 14, Toggle 11, AppLayerHygiene 11. |
-| TG-08 | Parser 49/49; voice 59/59 | Parser suite 24/24 new; speech 33/33 and command capture 26/26. Wide run 205/205. |
-| TG-09 | 92/92 across seven suites | Build SUCCEEDED; log-safety exit 0; coverage 98.6 / 91.4 / 100 / 74.4 percent across the touched files. |
-| TG-10 | 205/205 across 14 suites | Log-safety gate 24 fixtures over 12 rules; falsification run 36 cases with 12/12 rules load-bearing; `./build.sh build` exit 0. |
-| T-032 | 136/136 across nine suites | Adjacent shipped suites 108 tests, 0 failures. |
-| T-033 | 307/307 across 18 suites | SnapshotModeTests 25/25. Build SUCCEEDED; log-safety exit 0. |
+Re-verification note (honest): two retries between the green runs flaked in the wall-clock-sensitive acknowledgment tests under machine churn (Spotlight indexing and audio-analytics processes at 27-53% CPU, straight after the UI gate): first `testARecordedTermIsSpokenVerbatimAndSettlesOnce` (settlement observed at 6.59 s against its 2.5 s playback budget; eight assertion reports from that one unsettled state), then `testASupersedingBeginDropsTheOldAckAndProceeds` (the hold bound cut a fake playback the test expected to be spoken). Both tests assert wall-clock budgets around a fake speaker by construction. The class passed 10/10 in isolation (0.385 s) and the full 16-class gate returned to 184/184 green on the retry under the same command; no source changed between runs.
 
-The T-033 figure was re-verified independently from `ios/build/T033-gate.xcresult` after the run
-(`result: Passed`, 307 total, 0 failed, 0 skipped, 18 suites, no suite with failures).
+Classes and new-suite counts: `IntentPromptTests` (T-094 clause/digest/routing additions, in the 184), `WakeAcknowledgmentSeamTests` (6), `WakeAcknowledgmentServiceTests` (10), `AddressAsFieldTests` (7), `KinDesignationTests` (4, rework pass 1), `OnboardingDraftsTests` (9), `UserProfileStoreTests` (12), `ProfilePromptTextGuardTests` (12), `ProfilePersonalizationTests` (10), `ProfileCoordinatorSeamTests` (4), `ColdStartRoutingTests` (12), `ProfileSettingsModelTests` (6), `L10nCatalogCoverageTests` (3), `OnboardingStateTests` (8), `SettingsTabMappingTests`, `LogSanitiserTests` (26, incl. the two new profile-field tests), `EncryptedFileStorageProbeTests` (5).
 
-## 3. Verification practice held across the phase
+Scenario mapping (design-l2 test table):
+- Fresh install routes to language → `ColdStartRoutingTests.testFreshInstallRoutesToLanguage`; the all-pending state is also pinned by `OnboardingStateTests.testFreshStateHasAllStepsPending`.
+- Pre-finish relaunch resumes at the first pending step → `testPreFinishRelaunchResumesAtTheFirstPendingStep`; legacy status maps → `OnboardingStateTests.testLegacyStatusMapLeavesTheNewStepsPending` (the new ids read as pending by construction; `firstPendingStep` reflects the new order).
+- Complete interview routes nowhere → `testInterviewCompleteRoutesNowhere`.
+- Mandatory missing → About-you hard route (incl. completed-About-you-but-missing-record, never past About-you, corrupt and wrong-typed maps, unreadable record) → the remaining `ColdStartRoutingTests` scenarios; composition through the coordinator's own inputs → the seam tests at the end of that suite.
+- Optional steps pending keep the soft-skip → `testOptionalStepPendingRoutesWithTheSoftSkipPreserved`.
+- Hosted unit tests see no routing → the one-shot honours the same `XCTestConfigurationFilePath` boot guard `ContentView` uses (the design's edge-table row; exercised implicitly by every unit run, and explicitly by the UI suite running the real shell).
+- About-you Next gate and routing predicate are one rule → `OnboardingDraftsTests.testTheNextGateAndTheRoutingPredicateAreOneRule` + `testIsCompleteMirrorsTheStaticPredicate`; trim parity → `testMandatoryPredicateTrimsLikeTheAboutYouNextGate`.
+- DOB toggle semantics → `testDateOfBirthIsComponentOnlyAndFollowsTheToggle`; merge base per load state → `testMergeBaseIsEmptyForAbsentAndUnreadableAndVerbatimForLoaded`; absent-base repair → `testAbsentBaseSaveRepairsTheRecord`.
+- Guard pipeline (in-table marker, reformed marker, out-of-table example as bounded data, Nepali instruction shape, quote family, Devanagari-safe clamp, configurable bound) → `ProfilePromptTextGuardTests`.
+- Verbatim vs guarded asymmetry, per-read event, content-free metadata → `ProfilePersonalizationTests`.
+- Store round trip, absent/unreadable/discard-once, partial record, failed delete/write, probe tri-state → `UserProfileStoreTests` + `EncryptedFileStorageProbeTests`.
+- Ack: verbatim term, Nepali template, no-term silent completion, unresolvable template failure, hold bound, cancel, supersede; seam: nil seam synchronous, capture waits, talk button route, stop cancel, racing detection → `WakeAcknowledgmentServiceTests` + `WakeAcknowledgmentSeamTests`.
+- Settings editor: prefill, save, clearing allowed, failure reporting, stale-state reset → `ProfileSettingsModelTests`; Family-tab mapping (21 visible rows), title resolution in both languages, and the manual tour naming every visible row → `SettingsTabMappingTests`.
+- Log safety: the five keys dropped whole and never carrying their value; redacted-by-declaration and not allow-listed (the fail-closed direction) → the two new `LogSanitiserTests`.
 
-Three controls were applied to every gate, because the obvious signal is not trustworthy here:
+### UI suite (T-102 startup presentation)
 
-1. **XcodeGen before every gate.** `./build.sh generate` runs before each gate, and
-   `project.pbxproj` is never hand-edited. The reason is a false-green hazard: a test suite whose
-   class is absent from the generated project runs nothing at all and still reports success.
-2. **Per-suite counts from the bundle, never the log or the exit code.**
-   `xcrun xcresulttool get test-results summary --path <bundle>` is the authority; every suite in a
-   selection is confirmed to have run a non-zero number of tests. `-resultBundlePath` refuses to
-   overwrite an existing bundle, so bundles are removed before each run.
-3. **Scoped gates against an honest baseline.** The unit-test baseline on `master` is red: roughly
-   21 pre-existing failures across about eleven suites, unrelated to this feature. Those were
-   neither chased nor "fixed". Every gate in this phase was scoped with `-only-testing:` to the
-   suites the group owns or can affect.
+All runs pinned to one destination — the iPhone 17 Pro simulator, `id=0D2CED77` — via `IOS_TEST_DESTINATION`, so a second simulator booted by a concurrent session cannot be picked. Scoped runs use `ios/` `build.sh test:ui` with `-only-testing`.
 
-One concrete instance of the value of (3): an early run of TG-05's task reported TEST SUCCEEDED with
-78 tests while all 66 newly written tests had never executed. The bundle showed it; the log did not.
+Scoped runs on 2026-10-06, after the shared walk helper was redesigned (decision 6 in section 5):
+- `testColdStartWithPendingInterviewPresentsTheWizard` (the T-102 Gherkin path: a relaunch with skipped steps pending re-presents the wizard at the first pending step, skippable): passed twice in a row — 186.075 s (run at 00:54, `/tmp/pi_scoped2.xcresult`) and 144.760 s (run at 01:15, `/tmp/pi_scoped3.xcresult`).
+- `testHomeShowsNepaliTalkButton`, `testTalkButtonReturnsToIdleAfterListening`, `testTalkButtonStartsListening` (scoped3): red. Exact failures: `ElderlyAssistantUITests.swift` line 188 "Idle status should be Nepali" (XCTAssertTrue failed); lines 241 and 256 "Tapping talk should flip the button to the listening state" (XCTAssertTrue failed). Three XCTAssertTrue failures, one per test.
 
-## 4. Owner directives honoured
+Environment alignment: the test clones start the voice pipeline successfully in these runs — the exported test diagnostics (per-process stdout inside the xcresult bundle) show, in every clone app process, `pipeline_started outcome=success`, `manual_talk_ready outcome=success`, `kws_hot_swap outcome=success` and the "voice pipeline idle — KWS build eligible" line, so T-102's startup presentation ran against a genuinely started pipeline. The speech-recognition TCC row was granted directly in the destination simulator's `TCC.db` (`simctl privacy grant speech-recognition` is refused with "Operation not permitted"); test clones inherit `TCC.db`, which is why the pipeline path completes there.
 
-- **OD7** — the shipped per-day `GeminiCostGovernor` remains the spending bound for the cloud tier.
-  No new budget mechanism was introduced.
-- **OD8** — the name `LabelTranslationCache` is kept. The type was generalised to the persistent,
-  encrypted, dictionary-seeded cache described in the design, without a rename.
-- **OD-13** — never images. The cloud tier's request type carries text only; see section 5.
+The three red tests are pre-existing; this feature neither causes nor touches them:
+1. The feature's test-file diff contains only: the shared walk helper redesign, the new cold-start test, a bounded wait on the home test's existing idle-status assertion (immediate `.exists` to `waitForExistence(timeout: 20)` — strictly more patience, not less), and the About-me row in the settings walk. The three failing test bodies are otherwise byte-identical to the base.
+2. The rendering the home test asserts does not exist at the feature base or at master's tip: the hero's under-hero status line returns the empty string for `.idle` (`case .idle, …: return ""`), so no `तयार छु` StaticText is rendered at idle. Master's own test file still carries the same assertion (checked with `git show master` for `ios/` `ElderlyAssistantUITests/` `ElderlyAssistantUITests.swift`, line 102). The assertion predates this feature (introduced in `9b70d6d`, 2026-09-02); the under-hero idle status was removed by the later talk-hero redesign.
+3. The listening taps are healthy: the diagnostics show `wake_word_detected outcome=success` right after each tap, then `capture_ended_no_vad_speech` (chunks 6 and 7) with `recognition_failed` roughly 0.65-0.70 s later and a 678 ms turn total. The no-speech early capture end is pre-existing simulator behaviour (the `[VAD-REGRESSION]` commit `3be6d70`, an ancestor of the base): the simulator delivers silence, the VAD never crosses its threshold, and the capture ends as soon as the recogniser gives up. XCUITest's polling therefore misses the sub-second `सुन्दै छु…` window — every hierarchy captured during the failing waits shows the app back at idle.
+4. The suite's recorded baseline is red independently of this feature: all pre-existing UI tests were failing on master as of 2026-09-16 (project memory), and the first full run of this gate — executed with the pre-redesign helper — failed all seven tests, cold-start included.
 
-## 5. Never-images enforcement (OD-13, AM-10)
+The three assertions were deliberately left unmodified (no relaxing, no skipping): making them pass would require either a product change to the hero's idle rendering or weakening pre-existing tests — both outside this feature's scope. They are declared in section 6 instead.
 
-The claim that no image can leave the device is enforced structurally rather than by convention,
-along four independent lines, each of which can fail on its own:
+Full-suite execution (2026-10-06, `ios/` `build.sh test:ui`, pinned destination, unscoped): **4 of 7 green** — the cold-start wizard test (126.235 s), `testEverySettingsSectionNavigates` (224.424 s), `testHubSettingsNavigationAndModelScreen` (54.100 s) and `testQuickAccessPickerSearchWorks` (58.150 s) passed; the three pre-existing tests above are the only reds, with assertion lines and messages identical to the scoped runs (188, 241, 256). The three settings/navigation tests were red in the pre-redesign pass and are green now — the walk helper was their blocker, not this feature. Artifact: `ios/` `build/DerivedDataTests/` `Logs/Test/` `Test-ElderlyAssistant-2026.10.06_01-32-46-+1100.xcresult` (the suite exits 65 because three pre-existing tests remain red; that bundle was the evidence at run time — pruned by Xcode's log retention since, confirmed in rework pass 1; the 4-of-7 claim stands on the run transcript plus the scoped result bundles).
 
-1. The cloud request item type has no image field at all, so there is nothing to serialise one into.
-2. A test walks both the built request JSON and the serialised `URLRequest` body for image, media
-   and attachment parts, and a positive control confirms the same check *does* find the real
-   `inlineData` part in the shipped vision client — so the check cannot pass by being blind.
-3. A source scan over the feature for forbidden shapes (Photos APIs, capture outputs, pickers,
-   share sheet, encoders, disk writes), with controls that fire on shipped code which legitimately
-   carries those shapes.
-4. A file-system listing delta across a real freeze, proving nothing was written.
+### Static gates (run before every test scope)
 
-## 6. Binding amendments
+- Log-safety gate: exits 0 — 24 fixtures, 12 rules, each with a positive and a negative fixture; the gate's own self-test rejects every drift class.
+- Intent-prompt mirror gate: exits 0 — the training seed mirrors the Swift builder byte-for-byte (2717 bytes, 4 placeholders); every drift class rejected.
 
-The security design review returned SECURITY-GO with mandatory amendments AM-1 … AM-10. Their
-implementation status and the test that discharges each is tabulated in
-`specs/LCT-security-evidence-index.md`. Three amendment owners called out in the review:
+## 4. Security evidence obligations (status)
 
-- **SD-1** (consent revoke fail-closed floor) — owned by the consent tasks, implemented and tested.
-- **SD-2** (log-gate extension) — owned by the release-gate work; the gate gained four feature rule
-  families and now covers console writes, content-bearing prints, unlisted metadata keys and
-  text interpolated into events. See section 7.
-- **CL-2** (cancellation-shaped errors are terminal and never retryable) — owned by the cloud-tier
-  task and pinned by test.
+- Obligation 1/2/3 (name absent from prompts; guarded term only; clause pinned): code + `IntentPromptTests` + guard/personalization suites; green in the gate.
+- Obligation 4 (personalized Release session leaks no profile value; extended gate exits 0): the static half is done (gate exit 0 on the extended feature roots). The Release-session inspection half is **not-run — no physical device attached in this environment**.
+- Obligation 5 (container holds no plaintext; ack WAV gone; payload unreadable without key material): **not-run — device-side**; the code paths are covered by `EncryptedFileStorageProbeTests` and the store's injectable probe.
+- Obligation 7 (offline journey makes no feature-attributable request): **not-run — device-side capture**; no new egress exists in code (no URLSession additions in the feature files).
+- Obligation 9 (corrupt map / unreadable profile: no crash, stall, loop or trap): covered by `ColdStartRoutingTests` (corrupt and wrong-typed maps, unreadable record) on the simulator; the device confirmation rides with T-105.
+- Obligation 10 (no biometric value enters the profile store): the voice-fingerprint step enrolls through the existing template store; `UserProfileStoreTests` payload shape contains no biometric field.
+- Log-safety drop-whole discipline (design-l2 §7.4): pinned by the two new `LogSanitiserTests`; redaction runs first, the five keys are not allow-listed, and no shipped event carries them.
 
-`specs/design-component.md` was corrected under AM-5 / SD-2 so the log-safety invariant names the
-four rules, their roots, and the instruction to treat gate-invisible indirection as a gap.
+## 5. Decisions made during implementation
 
-## 7. Release log-safety gate
+1. **AM-3 phrasing corrected to the async hop.** The wake gate closes on an async hop (`noteSpeakingStarted` dispatches to the main queue); the racing window is owned by the ack service's supersede teardown plus the pipeline generation guard. Documented in `WakeAcknowledgment.swift`, `VoicePipeline.swift` and the design's L2 sections — the seam, not the gate, is the correctness boundary.
+2. **DOB merge semantics reconciling three cases** (held date + toggle on → components stored; held date + toggle off → cleared; no held date → the stored base is preserved so an untouched toggle cannot erase a date recorded elsewhere). Documented in `OnboardingDrafts.swift`; pinned by `OnboardingDraftsTests`.
+3. **Profile field keys are redacted AND dropped whole** (not allow-listed): the fail-closed direction is pinned so a future allow-list edit converts a leak into a substitution, never a pass-through.
+4. **Cold-start presentation is in-process, once per process** (the design's normative shell wiring): a skip-all wizard finish leaves steps pending, so Home's first appearance re-presents the interview — the design's "existing Home-assuming UI tests account for the one-time presentation" is implemented by the widened helper loop; no launch argument was introduced.
+5. **iOS 16 API discipline:** the wizard/settings steps use the single-parameter `onChange` form (the two-parameter closure is iOS 17-only; deployment target is 16.0) — the same form the rest of the codebase uses.
+6. **UI-test walk helper redesigned around direct SpringBoard polling** (2026-10-06): the previous walk fired a blind in-app `app.tap()` per iteration to let the registered interruption monitor accept permission alerts; with the interview pending, Home carries a live optional-setup strip and a settling tap landed on it, re-presenting the wizard every ~19 s so the walk never went quiet (observed: 40 skip taps, one full wizard pass per ~19 s). The helper now (a) polls SpringBoard's alert directly (`acceptPermissionAlertIfPresent`, no in-app tap needed for permissions), (b) stands down only after four consecutive quiet probes (each itself waiting 6 s for a late presentation), and (c) walks up to 40 iterations for the two-pass worst case (the ContentView pass, then Home's one-shot on the skipped-steps-pending state). Rationale and bounds are commented in the test file.
+7. **The three pre-existing Home/talk UI tests were knowingly left red** — not weakened, not deleted, not skipped: their assertions no longer match the app rendering (under-hero idle status) or the simulator's sub-second listening window, and both mismatches sit outside this feature's diff (evidence in section 3). They are declared in section 6 instead of papered over.
+8. **Speech-recognition TCC granted in the destination simulator directly** as an environment alignment only — no app or product change: `simctl privacy grant speech-recognition` is unsupported on this toolchain, so the row was inserted mirroring the existing microphone row; this is what lets scoped runs exercise the real pipeline start path.
 
-`ios/tools/check-release-log-safety.sh` (implemented by `check-release-log-safety.py`, 818 lines)
-gained four rule families for this feature and a companion fixture harness:
+## 6. Open items
 
-- `feature-console-write` (Release only), `feature-content-print` (every configuration),
-  `feature-unlisted-metadata-key`, `feature-text-interpolated-into-event`.
-- `ios/tools/check-release-log-safety-fixtures.py` runs the real engine as a subprocess once per
-  fixture. A rule with no fixture is itself a failure, and `--falsify` disables each rule in turn
-  and requires its positive fixture to go red — so every rule is demonstrated to be load-bearing
-  rather than merely present. 24 fixtures over 12 rules; the falsification run exercises 36 cases
-  and reports 12/12 rules load-bearing.
-- The disabling switches are CLI-only by design, so no build setting can weaken the gate.
+- **OD-A1 (device latency):** the detection-to-first-audio measurement against the ≤ 1 s budget is owed on a physical device; no default changed.
+- **OD-A2 (owner copy):** the English acknowledgment copy ("Yes, %@") awaits the owner's eyeball in review; the Nepali template places the term verbatim.
+- **T-105 device evidence bundle:** Release-session inspection, container/WAV/keystore findings, offline journey capture — all not-run here (no device attached); to be produced on the device build, with the fallback ladder named if the latency budget is missed.
+- **NFR-PI-011 item 2:** the App Store privacy disclosure for the new fields remains an owner/compliance action in the 2026-10-13 window.
+- **UI-suite results (scoped):** the new cold-start test is green on both scoped runs (186.075 s / 144.760 s). Three pre-existing tests remain red in this simulator environment with the exact assertions itemised in section 3 — `testHomeShowsNepaliTalkButton` (the idle under-hero status copy no longer exists in any current revision) and the two listening tests (sub-second listening window vs XCUITest polling) — alongside the pre-existing settings/navigation failures. A master-side test-vs-redesign reconciliation is flagged; this feature deliberately did not touch them.
+- **Full-suite execution (unscoped, pinned):** 4 of 7 green — cold-start plus the three settings/navigation tests pass; the three reds are exactly the pre-existing tests itemised in the bullet above, with the same assertion lines (188, 241, 256) and messages as the scoped pass. Artifact at run time: `ios/` `build/DerivedDataTests/` `Logs/Test/` `Test-ElderlyAssistant-2026.10.06_01-32-46-+1100.xcresult` — pruned since by Xcode's log retention (rework pass 1); the claim rests on the run transcript and the scoped result bundles.
 
-The gate reports two honest limits, recorded in the script itself: it cannot see through
-indirection (a helper that returns a value, a metadata dictionary built in a variable, a wrapper,
-an unknown sink), and falsification is a recorded manual run rather than a per-build step. The
-runtime allow-list remains the primary safeguard; the gate is a second line.
+## 7. Honest coverage picture
 
-## 8. What the implement phase could not establish
+New-code coverage rests on the 16-class focused gate (184 tests green) plus the UI group; the feature's failure paths (unreadable/absent/corrupt payloads, failed writes and deletes, unresolvable templates, hold-bound cuts, cancelled acks) each have a dedicated test. Save-failure coverage, corrected in rework pass 1: the coordinator's failed-write result is pinned by `ProfileCoordinatorSeamTests`, the enrollment session's template-persistence `saveFailed` by `VoiceSettingsModelTests`, while the two wizard steps' inline save-failure copy is view-layer presentation without a separate unit test — and the voice-fingerprint step performs no profile write at all (the earlier "all three steps" phrasing overclaimed). The device-only obligations above and the three pre-existing red UI tests (section 3) are the only unproven or red surface; both are declared, not asserted, and the feature's own new UI test is green on scoped runs.
 
-These are carried forward as open items, not as silent gaps.
+## 8. Rework pass 1 (2026-10-06 — review NO_GO on D-1, fixed in this pass)
 
-1. **No device validation was performed.** Every check in `specs/LCT-device-validation-protocol.md`
-   (DV-1 … DV-16) is recorded as NOT RUN in `specs/LCT-device-validation-results.md`, each with its
-   reason: no physical device was available and no genuine airplane-mode run was possible. Camera,
-   paper, real light, battery, thermal envelope, real radio, real container protection class, device
-   audio path and Instruments-on-release all require hardware. Consequently the owner decisions that
-   depend on measurement (OD1, OD2, OD5) have no measurement behind them; the results file says
-   "unmeasured" rather than "probably fine" and lists them as owner actions OA-1 … OA-5.
-   Nothing in that file is presented as a device run; the simulator is named as a simulator.
-2. **Devanagari OCR is not available in v1.** A recorded capability probe found the Vision text
-   recogniser reporting revision 3 with 30 supported languages, none of them Devanagari-capable,
-   and accepting an unsupported language code silently rather than erroring. An English control
-   recognised at 1.0 confidence. This is why FR-LCT-003 is to be re-locked as English-source-only.
-3. **One load-sensitive test, attributed and not fixed.** A pipeline determinism test in T-026's
-   area failed once under heavy machine load and passed on every other run including in isolation.
-   The diff was exactly *when* a cloud answer was published relative to a fixed sleep, i.e. a
-   wall-clock race under load, in synchronisation this feature added but not in the snapshot work.
-   It is reported rather than papered over; the honest fix is a synchronisation redesign owned by
-   the task that owns the file.
-4. **A defect was found and fixed in eight existing checks.** Seven sites plus one outside the
-   feature used `range(of:options:.regularExpression)` with a Devanagari range. That API declines
-   any match whose range would split a grapheme cluster, and the `\u{0900}` escape form used in the
-   pattern is rejected by `NSRegularExpression` and was being swallowed. A leaked sentence in the
-   elder's own language could therefore have satisfied a check written to forbid exactly that. All
-   eight sites now use the scalar idiom, and a guard test scans the suite directory for a return of
-   the regex form and carries two falsifiability controls.
-5. **Two new catalogue keys are drafts** and owe the owner's copy review at final sign-off, along
-   with the rest of the elder-facing copy. They are pinned in the copy suite so a third key cannot
-   be added unreviewed.
-6. **An aborted run left an empty result bundle** (`build/TG10-ocr.xcresult`, zero tests,
-   `result: unknown`). It is flagged so that no one cites it as evidence; the real OCR evidence is
-   the attachment inside `build/TG10-gate.xcresult`.
-7. **A stale invariant row remains in `specs/design-component.md`.** The row stating that the cache
-   is encrypted at rest with no plaintext file still attributes encryption to Data Protection and
-   does not name the T-032 cipher. It should be corrected at or before the security-test re-lock so
-   the design document matches the shipped mechanism.
+### D-1 (blocking, fixed): `VoiceFingerprintStep` had no mid-recording teardown
 
-## 9. State of the tree
+Every exit path (always-enabled Next, header Skip, header Back, fullScreenCover dismissal) is live while recording, and the step had no teardown: leaving mid-recording left the pipeline suspended, `voiceWasSuspendedForEnrollmentSample` latched and the mic tap installed, and a later enrollment could then clear the latch without resuming. The step now carries the canonical hygiene that `VoiceSettingsView` already ships — `.onDisappear { Task { await enrollment.stopRecording() } }` on the enrollment host, same comment included (`ios/` `ElderlyAssistant/` `App/` `ProfileInterviewSteps.swift`); the rest of the step is unchanged. `VoiceEnrollmentSession.stopRecording()` guards on `.recording` (a no-op when idle) and is itself the normal resume path (capture teardown plus `resumeAfterSampleCapture`). The wizard's `@ViewBuilder` switch swaps step identity on Next/Skip/Back, so the handler fires there, and the cover dismissal fires it on exit.
 
-- All work is in the worktree `worktree-live-camera-translation`. Nothing was committed.
-- `project.pbxproj` was never hand-edited; it is regenerated by XcodeGen.
-- `ios/tools/**` and the fixtures tree are new or extended as described in section 7.
-- Production code lives in the app target's `Services/LiveTranslate/` directory, with the app-layer
-  view under `App/LiveTranslate/` and the plugin registration under `Services/Plugins/`.
-- Test code lives under `ios/ElderlyAssistantTests/Services/LiveTranslate/`.
+### T-100 test added (review recommendation)
 
-## 10. Evidence index
+`KinDesignationTests` (`ios/` `ElderlyAssistantTests/` `App/` `KinDesignationTests.swift`, 4 tests) pins the singular-designation rule: a tap plans the tapped contact flagged true and every other currently-flagged contact cleared; unflagged contacts are absent from the plan (no write); every planned entry carries that contact's stored values verbatim (the flag is the only delta); a same-id edited snapshot is planned once (never a clear-then-set pair). To make the view-internal decision testable, it was extracted verbatim into the pure `KinDesignation.plan(contacts:tapped:)` helper in the step file; `EmergencyContactsStep.designate` now executes exactly that plan through `updateFamilyContact` (one call per entry, the entry's contact values and flag) — the same write sequence as before (flagged others cleared first, then the set, with id-based self-exclusion).
 
-`specs/LCT-security-evidence-index.md` maps AM-1 … AM-10 to the tests that discharge them and lists
-evidence items E1 … E8, the residual security risk SR-1 (pinned, not retired) and the known
-limitations. It is the document the security-test gate should read first.
+### Verification basis for the rework (exact commands, exact results)
+
+- **Build gate:** `ios/` `build.sh build` → exit 0, `** BUILD SUCCEEDED **`. The two static gates are invoked inside every build.sh call and did not stop the build; re-run explicitly afterwards: `./tools/check-release-log-safety.sh` → exit 0 (24 fixtures over 12 rules, every rule with a positive and a negative fixture, the self-test rejects every drift class); `./tools/check-prompt-mirror.sh` → exit 0 (seed mirrors the Swift builder byte-for-byte, 2717 bytes, 4 placeholders, all six drift classes rejected).
+- **Unit (reworked revision):** `ios/` `build.sh test:unit` with the same 16 classes plus `KinDesignationTests` (17 classes) on the pinned simulator → **188 tests executed, 0 failures, exit 0**, "Scoped unit tests passed (green baseline not advanced)"; artifact `ios/` `build/DerivedDataTests/Logs/Test/` `Test-ElderlyAssistant-2026.10.06_02-29-58-+1100.xcresult` (the run that reported 188/188).
+  - Honest flake record, same signature as the pre-rework session: attempt 1 flaked with 8 assertion reports in `WakeAcknowledgmentServiceTests` `testARecordedTermIsSpokenVerbatimAndSettlesOnce` (5.412 s, unsettled state, `[]` where `wake_ack_spoken` was expected); attempt 2 flaked with 2 reports in `testASupersedingBeginDropsTheOldAckAndProceeds` (2.954 s); CPU at both attempts: `mds_stores` 26-31%, `audioanalyticsd` 25%. Between attempts the class passed 10/10 in isolation in 0.429 s; attempt 3 was green 188/188 (1.468 s of test time). No source changed between attempts; both tests assert wall-clock budgets around a fake speaker by construction.
+- **Scoped UI:** the T-102 cold-start test alone, same direct `xcodebuild test` shape as the earlier green invocations (project, scheme, pinned destination, `-derivedDataPath build/DerivedDataTests`, `-parallel-testing-enabled YES`, `-resultBundlePath /tmp/pi_rework_scoped.xcresult`), scoped to it with `-only-testing:`:
+  -only-testing: `ElderlyAssistantUITests/` `ElderlyAssistantUITests/` `testColdStartWithPendingInterviewPresentsTheWizard`
+  Result: **passed, 137.896 s** on "Clone 1 of iPhone 17 Pro"; result bundle Passed 1/1. The test walks the real wizard shell (skip included) and left the voice-fingerprint step on the live path, so the new `onDisappear` handler fired there without breaking the walk.
+- **Not re-run in this pass (basis declared):** the other six UI tests (untouched by the rework; status unchanged from section 3 — three settings/navigation green, three pre-existing reds); the T-105 device items (no device attached); security obligations 4/5/7 remain device-side not-run.
+
+**Files changed in this pass:** `ios/` `ElderlyAssistant/` `App/` `ProfileInterviewSteps.swift` (the teardown plus the `KinDesignation` plan and its use), `ios/` `ElderlyAssistantTests/` `App/` `KinDesignationTests.swift` (new), `specs/implement-notes.md` (this section plus the annotations above). Nothing committed (working tree only, per dispatch).
+
+**Simulator hygiene after the rework runs:** no lingering clones (checked); the pinned source simulator left with `onboarding.hasSeen => false` in the app preferences plist, so the cold-start precondition holds for future runs.
+
+**Corrections applied in this pass (review-flagged):** section 7's "save failures in all three steps" replaced with the exact coverage map; the full-suite UI bundle `...01-32-46...` annotated as pruned by Xcode log retention while the 4-of-7 claim is kept; the unit bundle `...01-54-03...` confirmed present on disk at the start of the pass (and since pruned by the rework runs' newer bundles, as noted in section 3).
