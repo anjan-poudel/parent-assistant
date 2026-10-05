@@ -166,9 +166,9 @@ struct HomeView: View {
                         .padding(.top, 12)
                         .padding(.bottom, 20)
                     }
+                    .clipped()
                     .accessibilityIdentifier("home.content")
                 }
-            }
             // At larger type or short landscape heights, the complete dock
             // joins the scroll region instead of consuming the viewport.
             .safeAreaInset(edge: .bottom, spacing: 16) {
@@ -177,6 +177,7 @@ struct HomeView: View {
                         .padding(.horizontal, 20)
                         .padding(.bottom, 8)
                 }
+            }
             }
             // Home paints its own top bar (HomeTopBar), so the system
             // navigation bar is hidden entirely. `.toolbar(.hidden,
