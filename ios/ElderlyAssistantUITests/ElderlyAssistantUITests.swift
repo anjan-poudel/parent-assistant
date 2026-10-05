@@ -189,6 +189,68 @@ final class ElderlyAssistantUITests: XCTestCase {
                       "Idle status should be Nepali")
     }
 
+    /// Four configured favourites must fit without a horizontal swipe; the
+    /// requested action rows stay separately ordered and reachable.
+    func testHomeKeepsConfiguredAppsAndActionRowsVisible() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-quickAccessApps", "(facebook, messenger, youtube, camera)",
+                               "-appTextSize", "medium", "-appTheme", "sky",
+                               "-appVisualStyle", "soft"]
+        app.launch()
+        completeOnboardingIfNeeded(app)
+
+        func visibleRow(_ identifiers: [String]) -> [CGRect] {
+            identifiers.map { identifier in
+                let button = app.buttons[identifier]
+                XCTAssertTrue(button.waitForExistence(timeout: 15), identifier)
+                let bounds = button.frame
+                XCTAssertGreaterThanOrEqual(bounds.minX, app.frame.minX, identifier)
+                XCTAssertLessThanOrEqual(bounds.maxX, app.frame.maxX, identifier)
+                XCTAssertGreaterThanOrEqual(bounds.minY, app.frame.minY, identifier)
+                XCTAssertLessThanOrEqual(bounds.maxY, app.frame.maxY, identifier)
+                XCTAssertTrue(button.isHittable, identifier)
+                return bounds
+            }
+        }
+
+        func orderedRow(_ frames: [CGRect]) {
+            for (left, right) in zip(frames, frames.dropFirst()) {
+                XCTAssertLessThanOrEqual(left.maxX, right.minX)
+                XCTAssertEqual(left.minY, right.minY, accuracy: 1)
+            }
+        }
+
+        let favourites = visibleRow(["facebook", "messenger", "youtube", "camera"].map {
+            "home.quickAccess.\($0)"
+        })
+        let upper = visibleRow(["home.action.appliance", "home.action.liveTranslate",
+                                "home.action.feed", "home.action.maps"])
+        let lower = visibleRow(["home.action.phone", "home.action.medication",
+                                "home.action.reminders"])
+        orderedRow(favourites)
+        orderedRow(upper)
+        orderedRow(lower)
+        for card in upper.dropFirst() {
+            XCTAssertEqual(card.height, upper[0].height, accuracy: 1,
+                           "Wrapping a label must not leave mismatched action-card heights")
+        }
+        XCTAssertLessThanOrEqual(upper.map(\.maxY).max()!, lower.map(\.minY).min()!)
+
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "Complete Home with supplied icons and separate action rows"
+        screenshot.lifetime = .keepAlways
+        add(screenshot)
+
+        tap(app.buttons["home.action.feed"], expecting: app.staticTexts["feeds.title"],
+            within: 15, in: app)
+        tap(app.buttons["leaf.back"], expecting: app.buttons["home.action.phone"],
+            within: 10, in: app)
+        tap(app.buttons["home.action.phone"], expecting: app.staticTexts["call.title"],
+            within: 15, in: app)
+        tap(app.buttons["leaf.back"], expecting: app.buttons["home.action.appliance"],
+            within: 10, in: app)
+    }
+
     /// [PROFILE-INTERVIEW T-102] FR-PI-016's startup presentation
     /// (design-l2 test table, "Startup presentation"): with onboarding
     /// seen and the interview still pending — skipped steps stay pending

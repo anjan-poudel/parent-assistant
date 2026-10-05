@@ -77,26 +77,20 @@ struct IconBadge: View {
     var diameter: CGFloat = DesignTokens.iconBadgeDiameter
 
     var body: some View {
-        Group {
-            if let name = ReferenceIconArtwork.name(for: systemImage) {
-                ReferenceIconArtwork(name: name, diameter: diameter)
-            } else {
-                Color.clear
-                    .frame(width: diameter, height: diameter)
-                    .appSurface(role: .control, cornerRadius: diameter * 0.28)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: diameter * 0.28)
-                            .fill(appearance.badgeBackground(tint).opacity(appearance.skin.isDark ? 1 : 0.55))
-                            .allowsHitTesting(false)
-                    }
-                    .overlay {
-                        Image(systemName: systemImage)
-                            .font(.system(size: diameter * 0.45, weight: .semibold))
-                            .foregroundStyle(appearance.badgeTint(tint))
-                    }
+        Color.clear
+            .frame(width: diameter, height: diameter)
+            .appSurface(role: .control, cornerRadius: diameter * 0.28)
+            .overlay {
+                RoundedRectangle(cornerRadius: diameter * 0.28)
+                    .fill(appearance.badgeBackground(tint).opacity(appearance.skin.isDark ? 1 : 0.55))
+                    .allowsHitTesting(false)
             }
-        }
-        .accessibilityHidden(true)
+            .overlay {
+                Image(systemName: systemImage)
+                    .font(.system(size: diameter * 0.45, weight: .semibold))
+                    .foregroundStyle(appearance.badgeTint(tint))
+            }
+            .accessibilityHidden(true)
     }
 }
 
