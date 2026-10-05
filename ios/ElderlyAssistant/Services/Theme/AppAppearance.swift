@@ -1,12 +1,26 @@
 import SwiftUI
+import UIKit
 
 struct AppAppearance: Equatable {
     let skin: AppTheme
     let style: AppVisualStyle
+    let textSize: AppTextSize
+    let systemContentSizeCategory: UIContentSizeCategory?
+
+    init(skin: AppTheme, style: AppVisualStyle, textSize: AppTextSize = .system,
+         systemContentSizeCategory: UIContentSizeCategory? = nil) {
+        self.skin = skin
+        self.style = style
+        self.textSize = textSize
+        self.systemContentSizeCategory = systemContentSizeCategory
+    }
 
     static let `default` = AppAppearance(skin: .sky, style: .soft)
 
     var colors: AppColors { AppColors.palette(for: skin) }
+    var typography: AppTypography {
+        AppTypography(textSize: textSize, systemContentSizeCategory: systemContentSizeCategory)
+    }
 
     func badgeTint(_ tint: DesignTokens.BadgeTint) -> Color {
         switch tint {

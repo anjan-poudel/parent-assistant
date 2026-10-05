@@ -125,7 +125,7 @@ struct CalendarShareSettingsView: View {
     private var notConfiguredCard: some View {
         card {
             Text(L10n.str("calendarShare.notConfigured", locale: locale))
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .foregroundStyle(appearance.colors.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -137,7 +137,7 @@ struct CalendarShareSettingsView: View {
         card {
             stepIndicator(current: 1)
             Text(L10n.str("calendarShare.signedOut", locale: locale))
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .foregroundStyle(appearance.colors.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
             primaryAction("calendarShare.connect") {
@@ -168,7 +168,7 @@ struct CalendarShareSettingsView: View {
             accountBanner(email: accountEmail)
             stepIndicator(current: 1)
             Text(L10n.str("calendarShare.scopesMissing", locale: locale))
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .foregroundStyle(appearance.colors.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
             // The actionable half: what the tap will show, and what to
@@ -176,7 +176,7 @@ struct CalendarShareSettingsView: View {
             // elder which of Google's screens they are being sent back
             // to, or what to tap once they are there.
             Text(L10n.str("calendarShare.scopesMissing.howTo", locale: locale))
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             primaryAction("calendarShare.scopesMissing.reconnect") {
@@ -203,19 +203,19 @@ struct CalendarShareSettingsView: View {
             accountBanner(email: accountEmail)
             stepIndicator(current: 2)
             Text(L10n.str("calendarShare.consent.title", locale: locale))
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 .foregroundStyle(appearance.colors.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
             Text(L10n.str("calendarShare.consent.body", locale: locale))
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .foregroundStyle(appearance.colors.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
             Text(L10n.str("calendarShare.consent.whoCanSee", locale: locale))
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             Text(L10n.str("calendarShare.consent.revoke", locale: locale))
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             primaryAction("calendarShare.consent.accept") {
@@ -232,7 +232,7 @@ struct CalendarShareSettingsView: View {
             accountBanner(email: accountEmail)
             stepIndicator(current: 3)
             Text(statusLine)
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
             scopeLedgerRows
@@ -270,9 +270,9 @@ struct CalendarShareSettingsView: View {
                       ? "checkmark.circle.fill" : "circle.dashed")
                     .foregroundStyle(ledger.map { $0[scope] == true } == true
                                      ? DesignTokens.stateSpeaking : appearance.colors.textSecondary)
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                 Text(L10n.str(labelKey, locale: locale))
-                    .font(.system(size: DesignTokens.minBodyPointSize))
+                    .font(.system(size: appearance.typography.bodyPointSize))
                     .foregroundStyle(appearance.colors.textPrimary)
                 Spacer()
                 if ledger?[scope] == false {
@@ -280,7 +280,7 @@ struct CalendarShareSettingsView: View {
                         run { _ = await service.grantMissingScopes() }
                     } label: {
                         Text(L10n.str("calendarShare.scope.grant", locale: locale))
-                            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                            .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
                             .foregroundStyle(appearance.colors.accent)
                             .frame(minHeight: DesignTokens.minTapTargetSize)
                     }
@@ -309,15 +309,15 @@ struct CalendarShareSettingsView: View {
     private func accountBanner(email: String?) -> some View {
         HStack(alignment: .center, spacing: 12) {
             Image(systemName: "person.crop.circle.fill")
-                .font(.system(size: DesignTokens.minBodyPointSize + 6))
+                .font(.system(size: appearance.typography.bodyPointSize + 6))
                 .foregroundStyle(appearance.colors.accent)
             VStack(alignment: .leading, spacing: 2) {
                 Text(L10n.str("calendarShare.banner.signedIn", locale: locale))
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
                 if let email {
                     Text(email)
-                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                        .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                         .foregroundStyle(appearance.colors.textPrimary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -359,19 +359,20 @@ struct CalendarShareSettingsView: View {
                     .fill(isDone ? appearance.colors.accent
                                  : (isCurrent ? appearance.colors.accent
                                               : appearance.colors.textSecondary.opacity(0.25)))
-                    .frame(width: 26, height: 26)
+                    .frame(width: max(26, appearance.typography.captionPointSize + 10),
+                           height: max(26, appearance.typography.captionPointSize + 10))
                 if isDone {
                     Image(systemName: "checkmark")
                         .font(.system(size: 13, weight: .bold))
                         .foregroundStyle(.white)
                 } else {
                     Text("\(number)")
-                        .font(.system(size: 14, weight: .bold))
+                        .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
                         .foregroundStyle(.white)
                 }
             }
             Text(L10n.str(titleKey, locale: locale))
-                .font(.system(size: DesignTokens.minCaptionPointSize,
+                .font(.system(size: appearance.typography.captionPointSize,
                               weight: isCurrent ? .bold : .regular))
                 .foregroundStyle(isCurrent ? appearance.colors.textPrimary
                                            : appearance.colors.textSecondary)
@@ -446,7 +447,7 @@ struct CalendarShareSettingsView: View {
     private func errorCard(_ error: GoogleShareError) -> some View {
         card {
             Text(L10n.str(error.settingsMessageKey, locale: locale))
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                 .foregroundStyle(DesignTokens.stateError)
                 .fixedSize(horizontal: false, vertical: true)
             if error.isActionableFromSettings {
@@ -455,7 +456,7 @@ struct CalendarShareSettingsView: View {
                 }
             }
             Text(L10n.str("calendarShare.error.generic", locale: locale))
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -479,7 +480,7 @@ struct CalendarShareSettingsView: View {
     private func primaryAction(_ key: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(L10n.str(key, locale: locale))
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 .foregroundStyle(.white)
                 .padding(.horizontal, 22)
                 .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
@@ -497,7 +498,7 @@ struct CalendarShareSettingsView: View {
                                 action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(L10n.str(key, locale: locale))
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 .foregroundStyle(tint)
                 .padding(.horizontal, 22)
                 .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
@@ -516,7 +517,7 @@ struct CalendarShareSettingsView: View {
             HStack(spacing: 10) {
                 ProgressView()
                 Text(L10n.str("calendarShare.working", locale: locale))
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)

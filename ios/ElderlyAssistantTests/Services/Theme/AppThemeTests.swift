@@ -32,4 +32,18 @@ final class AppThemeTests: XCTestCase {
             }
         }
     }
+
+    func testChangingTextSizeDoesNotChangeSkinColors() {
+        for skin in AppTheme.allCases {
+            for style in AppVisualStyle.allCases {
+                let baseline = AppAppearance(skin: skin, style: style)
+                for size in AppTextSize.allCases {
+                    let changed = AppAppearance(skin: skin, style: style, textSize: size)
+                    XCTAssertEqual(changed.colors.background, baseline.colors.background)
+                    XCTAssertEqual(changed.colors.accent, baseline.colors.accent)
+                    XCTAssertEqual(changed.colors.textPrimary, baseline.colors.textPrimary)
+                }
+            }
+        }
+    }
 }

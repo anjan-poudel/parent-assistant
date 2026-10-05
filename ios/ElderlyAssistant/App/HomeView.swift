@@ -410,7 +410,7 @@ struct HomeView: View {
                 Image(systemName: "clock.arrow.circlepath")
                     .font(DesignTokens.warmFont(size: 11, weight: .bold))
                 Text("home.conversation.title")
-                    .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                    .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .semibold))
             }
             .foregroundColor(appearance.colors.textSecondary)
             .padding(.horizontal, 14)
@@ -689,7 +689,7 @@ struct TalkButton: View {
             ))
             if dynamicTypeSize.isAccessibilitySize {
                 Text(isLoading ? loadingStageLabel : session.state.buttonText(locale: locale))
-                    .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(appearance.colors.textPrimary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
@@ -698,7 +698,7 @@ struct TalkButton: View {
 
             if !statusTextLine.isEmpty {
                 Text(statusTextLine)
-                    .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                    .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
                                                 weight: .medium))
                     .foregroundStyle(appearance.colors.textSecondary)
                     .multilineTextAlignment(.center)
@@ -747,7 +747,7 @@ struct TalkButton: View {
                 // on the solid disc.
                 if !dynamicTypeSize.isAccessibilitySize {
                     Text(loadingStageLabel)
-                        .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                        .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .bold))
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 22)
@@ -762,7 +762,7 @@ struct TalkButton: View {
                 // this audience needs.
                 if !dynamicTypeSize.isAccessibilitySize {
                     Text(session.state.buttonText(locale: locale))
-                        .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .bold))
+                        .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize, weight: .bold))
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 22)
@@ -787,7 +787,7 @@ struct TalkButton: View {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 18, weight: .semibold))
                 Text(TalkReadinessCopy.failureRecovery(locale: locale))
-                    .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                    .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
                                                 weight: .semibold))
             }
             .foregroundStyle(appearance.colors.accent)
@@ -1073,12 +1073,12 @@ struct ConfirmationChips: View {
                         .font(.system(size: 24))
                         .foregroundColor(DesignTokens.stateUnderstanding)
                     Text(LocalizedStringKey(titleKey))
-                        .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                        .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .bold))
                         .foregroundColor(appearance.colors.textSecondary)
                 }
                 if let prompt = coordinator.lastAssistantReply, !prompt.isEmpty {
                     Text(prompt)
-                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                        .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                         .foregroundColor(appearance.colors.textPrimary)
                         .multilineTextAlignment(.center)
                 }
@@ -1123,7 +1123,7 @@ struct ConfirmationChips: View {
             }
         } label: {
             Text(LocalizedStringKey(key))
-                .font(DesignTokens.warmFont(size: 24, weight: .bold))
+                .font(DesignTokens.warmFont(size: appearance.typography.scaled(24), weight: .bold))
                 .foregroundColor(isYes ? appearance.colors.accent : appearance.colors.textSecondary)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: DesignTokens.chipHeight)

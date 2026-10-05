@@ -46,7 +46,7 @@ struct RoutineSettingsView: View {
             VStack(spacing: 12) {
                 if routineEntries.isEmpty {
                     Text("settings.routines.empty")
-                        .font(.system(size: DesignTokens.minBodyPointSize))
+                        .font(.system(size: appearance.typography.bodyPointSize))
                         .foregroundStyle(appearance.colors.textSecondary)
                         .multilineTextAlignment(.center)
                         .padding(32)
@@ -96,10 +96,10 @@ struct RoutineSettingsView: View {
                 .foregroundStyle(appearance.colors.accent)
             VStack(alignment: .leading, spacing: 4) {
                 Text(entry.displayTitle(locale: coordinator.activeLocale))
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(appearance.colors.textPrimary)
                 Text(routineSummaries[entry.id] ?? "")
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
             }
             Spacer()

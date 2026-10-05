@@ -135,10 +135,11 @@ struct FaceAvatar: View {
     var body: some View {
         Circle()
             .fill(appearance.colors.brandGradient)
-            .frame(width: diameter, height: diameter)
+            .frame(width: max(diameter, appearance.typography.scaled(diameter * 0.42) + 20),
+                   height: max(diameter, appearance.typography.scaled(diameter * 0.42) + 20))
             .overlay(
                 Text(initial)
-                    .font(.system(size: diameter * 0.42, weight: .bold))
+                    .font(.system(size: appearance.typography.scaled(diameter * 0.42), weight: .bold))
                     .foregroundStyle(.white)
             )
     }
@@ -206,7 +207,7 @@ struct EmergencyIconButton: View {
                 // floor and Dynamic Type aware, was a fixed 17pt. The
                 // circle below it uses minWidth/minHeight so the glyph
                 // scales without clipping at Accessibility XXXL.
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
                 .foregroundStyle(appearance.badgeTint(.emergency))
                 .frame(minWidth: DesignTokens.minTapTargetSize, minHeight: DesignTokens.minTapTargetSize)
                 .background(appearance.badgeBackground(.emergency))
@@ -253,13 +254,13 @@ struct HintCarousel: View {
         // the old fixed amber glow).
         VStack(spacing: 6) {
             Text("home.hint.label")
-                .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .bold))
                 .foregroundStyle(appearance.colors.textSecondary)
             Text(LocalizedStringKey(Self.phraseKeys[index]))
                 // Static/rotating text under the speak button is caption-
                 // sized (home-redesign v3, 2026-09-08): this rotating
                 // phrase is an idle affordance, not reading matter.
-                .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .semibold))
                 .foregroundStyle(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 16)
@@ -322,7 +323,7 @@ struct LiveCaptionPill: View {
             // transcript BELOW stays regular (it is the user's own
             // dynamic speech — visual-polish 2026-09-08).
             Text("home.liveCaption.label")
-                .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .bold))
                 .foregroundStyle(appearance.colors.textSecondary)
             if let text = readyText {
                 // Full text, immediately — NOT a per-character typewriter.
@@ -340,7 +341,7 @@ struct LiveCaptionPill: View {
                     // 2026-09-08) — the spoken words are ephemeral
                     // under-hero text; the full exchange lives in the
                     // Updates leaf's Activity log.
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                     .foregroundStyle(appearance.colors.textPrimary)
                     .transition(.opacity)
             }
@@ -405,7 +406,7 @@ struct OutcomeCardView: View {
                         // Caption token (DESIGN-REVIEW) — was a fixed
                         // 17pt; now on the 18pt floor and Dynamic Type
                         // aware, in step with the outcome rows beside it.
-                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                        .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                         .foregroundStyle(appearance.colors.accent)
                 )
             VStack(alignment: .leading, spacing: 6) {
@@ -414,30 +415,30 @@ struct OutcomeCardView: View {
                         switch row {
                         case .user(let heard):
                             Text("home.outcome.youSaid")
-                                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                                .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
                                 .foregroundStyle(appearance.colors.textSecondary)
                             Text(heard)
                                 // Caption-sized outcome rows (home-redesign
                                 // v3, 2026-09-08): the assistant already
                                 // SPOKE this text — the visual channel is a
                                 // confirmation glance, not a read.
-                                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                                 .foregroundStyle(appearance.colors.textPrimary)
                         case .assistant(let response):
                             Text(response)
-                                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                                .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
                                 .foregroundStyle(appearance.colors.textPrimary)
                         }
                     }
                 }
                 HStack(spacing: 10) {
                     Text(outcome.timestamp.formatted(date: .omitted, time: .shortened))
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .font(.system(size: appearance.typography.captionPointSize))
                         .foregroundStyle(appearance.colors.textSecondary)
                     if let undo = outcome.undo {
                         Button(action: undo) {
                             Text("home.outcome.undo")
-                                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                                .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
                                 .foregroundStyle(appearance.badgeTint(.emergency))
                                 .frame(minHeight: DesignTokens.minTapTargetSize)
                         }
@@ -449,7 +450,7 @@ struct OutcomeCardView: View {
                     // setup strip returns for the rest of the session.
                     Button(action: onDismiss) {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                            .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                             .foregroundStyle(appearance.colors.textSecondary)
                             .frame(minWidth: DesignTokens.minTapTargetSize, minHeight: DesignTokens.minTapTargetSize)
                             .accessibilityLabel(Text("home.outcome.dismiss"))
@@ -478,11 +479,11 @@ struct OutcomeCardView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("home.activity.title")
                         .font(DesignTokens.warmFont(
-                            size: DesignTokens.minBodyPointSize,
+                            size: appearance.typography.bodyPointSize,
                             weight: .bold))
                         .foregroundStyle(appearance.colors.accent)
                     Text(outcome.text)
-                        .font(.system(size: DesignTokens.minCaptionPointSize,
+                        .font(.system(size: appearance.typography.captionPointSize,
                                       weight: .semibold))
                         .foregroundStyle(appearance.colors.textPrimary)
                         .lineLimit(2)
@@ -630,13 +631,13 @@ struct ConversationHistorySheet: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel(Text("common.close"))
                     Text("home.conversation.title")
-                        .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
+                        .font(DesignTokens.greetingFont(size: appearance.typography.titlePointSize))
                         .foregroundStyle(appearance.colors.textPrimary)
                     Spacer(minLength: 0)
                 }
                 if visibleRows.isEmpty {
                     Text("home.conversation.empty")
-                        .font(.system(size: DesignTokens.minBodyPointSize))
+                        .font(.system(size: appearance.typography.bodyPointSize))
                         .foregroundStyle(appearance.colors.textSecondary)
                         .frame(maxWidth: .infinity, alignment: .center)
                         .padding(.top, 32)
@@ -672,7 +673,7 @@ struct ConversationHistorySheet: View {
     private var showMoreButton: some View {
         Button(action: loadOlderPage) {
             Text("history.showMore")
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 .foregroundStyle(appearance.colors.accent)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
@@ -688,13 +689,13 @@ struct ConversationHistorySheet: View {
     private func row(_ exchange: AppCoordinator.Exchange) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(LocalizedStringKey(exchange.role == .user ? "home.conversation.user" : "home.conversation.assistant"))
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
                 .foregroundStyle(exchange.role == .user ? appearance.colors.textSecondary : appearance.colors.accent)
             Text(exchange.text)
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .foregroundStyle(appearance.colors.textPrimary)
             Text(exchange.timestamp.formatted(date: .omitted, time: .shortened))
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
             // [TURN-TIMING] Per-stage timing caption under the assistant's
             // reply — shown only when the Voice personalization "Show
@@ -705,7 +706,7 @@ struct ConversationHistorySheet: View {
                exchange.id == coordinator.lastTurnTimingExchangeID,
                let caption = coordinator.lastTurnTimingCaption {
                 Text(caption)
-                    .font(.system(size: DesignTokens.minCaptionPointSize, design: .monospaced))
+                    .font(.system(size: appearance.typography.captionPointSize, design: .monospaced))
                     .foregroundStyle(appearance.colors.textSecondary.opacity(0.75))
                     .padding(.top, 2)
             }

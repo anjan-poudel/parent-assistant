@@ -20,7 +20,7 @@ struct NewsSourcesSettingsView: View {
             VStack(spacing: 12) {
                 if store.configuredSources.isEmpty {
                     Text("settings.feeds.sourcesEmpty")
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .font(.system(size: appearance.typography.captionPointSize))
                         .foregroundStyle(appearance.colors.textSecondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(16)
@@ -30,10 +30,10 @@ struct NewsSourcesSettingsView: View {
                         HStack(spacing: 12) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(source.name)
-                                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                                    .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                                     .foregroundStyle(appearance.colors.textPrimary)
                                 Text(source.urlString)
-                                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                                    .font(.system(size: appearance.typography.captionPointSize))
                                     .foregroundStyle(appearance.colors.textSecondary)
                                     .lineLimit(2)
                             }
@@ -56,7 +56,7 @@ struct NewsSourcesSettingsView: View {
                 // the name is derived from the host when left blank.
                 VStack(alignment: .leading, spacing: 8) {
                     Text("settings.feeds.sourcesHint")
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .font(.system(size: appearance.typography.captionPointSize))
                         .foregroundStyle(appearance.colors.textSecondary)
                     TextField("settings.feeds.sourcePlaceholder", text: $urlDraft)
                         .keyboardType(.URL)
@@ -83,7 +83,7 @@ struct NewsSourcesSettingsView: View {
                             }
                         } label: {
                             Text("settings.feeds.addSource")
-                                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                                 .foregroundStyle(.white)
                                 .frame(minHeight: DesignTokens.minTapTargetSize)
                                 .frame(maxWidth: .infinity)
@@ -93,7 +93,7 @@ struct NewsSourcesSettingsView: View {
                     }
                     if addFailed {
                         Text("settings.feeds.addSourceFailed")
-                            .font(.system(size: DesignTokens.minCaptionPointSize))
+                            .font(.system(size: appearance.typography.captionPointSize))
                             .foregroundStyle(DesignTokens.stateError)
                     }
                 }

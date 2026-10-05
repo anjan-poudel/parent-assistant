@@ -94,10 +94,10 @@ struct HistoryView: View {
                 Text(ActivityRowText.name(for: entry,
                                           locale: coordinator.activeLocale,
                                           correlatedName: coordinator.missedCallDisplayNames[entry.id]))
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(appearance.colors.textPrimary)
                 Text(caption(for: entry))
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
                     .lineLimit(2)
             }
@@ -290,10 +290,10 @@ struct HistoryView: View {
     private var liveCallBanner: some View {
         HStack(spacing: 10) {
             Image(systemName: "phone.fill")
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                 .foregroundStyle(appearance.badgeTint(.call))
             Text("history.liveCall")
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                 .foregroundStyle(appearance.badgeTint(.call))
             Spacer(minLength: 0)
         }
@@ -306,7 +306,7 @@ struct HistoryView: View {
 
     private var emptyStateCard: some View {
         Text(LocalizedStringKey("history.empty"))
-            .font(.system(size: DesignTokens.minBodyPointSize))
+            .font(.system(size: appearance.typography.bodyPointSize))
             .foregroundStyle(appearance.colors.textSecondary)
             .multilineTextAlignment(.center)
             .padding(32)

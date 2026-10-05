@@ -68,7 +68,7 @@ struct CalendarSettingsView: View {
     private var calendarDisplayCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("calendarDisplay.sectionTitle")
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
                 .foregroundStyle(appearance.colors.textSecondary)
             VStack(spacing: 8) {
                 defaultCalendarRow(.gregorian)
@@ -79,7 +79,7 @@ struct CalendarSettingsView: View {
                 set: { coordinator.showBSOverlay = $0 }
             )) {
                 Text("calendarDisplay.bsOverlay")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                     .foregroundStyle(appearance.colors.textPrimary)
             }
             .tint(appearance.colors.accent)
@@ -89,13 +89,13 @@ struct CalendarSettingsView: View {
                 set: { coordinator.showTithiOverlay = $0 }
             )) {
                 Text("calendarDisplay.tithiOverlay")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                     .foregroundStyle(appearance.colors.textPrimary)
             }
             .tint(appearance.colors.accent)
             .frame(minHeight: DesignTokens.minTapTargetSize)
             Text("calendarDisplay.offlineNote")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
         }
         .padding(16)
@@ -112,7 +112,7 @@ struct CalendarSettingsView: View {
         } label: {
             HStack {
                 Text(LocalizedStringKey(option.labelKey))
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(appearance.colors.textPrimary)
                 Spacer()
                 if isSelected {
@@ -146,11 +146,11 @@ struct CalendarSettingsView: View {
     private var festivalReminderCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             Label("festival.reminderTitle", systemImage: "bell.badge")
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                 .foregroundStyle(appearance.colors.textPrimary)
             HStack {
                 Text("festival.reminderDays")
-                    .font(.system(size: DesignTokens.minBodyPointSize))
+                    .font(.system(size: appearance.typography.bodyPointSize))
                     .foregroundStyle(appearance.colors.textPrimary)
                 Spacer()
                 Stepper(value: Binding(
@@ -161,12 +161,12 @@ struct CalendarSettingsView: View {
                     }
                 ), in: 0...7) {
                     Text(BikramSambat.devanagariDigits(coordinator.festivalCalendar.advanceReminderDays))
-                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                        .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                         .foregroundStyle(appearance.colors.accent)
                 }
             }
             Text("festival.reminderHint")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
         }
         .padding(16)
@@ -188,7 +188,7 @@ struct CalendarSettingsView: View {
             set: { coordinator.appointmentsToCalendar = $0 }
         )) {
             Label("medical.calendarToggle", systemImage: "calendar.badge.plus")
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                 .foregroundStyle(appearance.colors.textPrimary)
         }
         .tint(appearance.colors.accent)
@@ -209,12 +209,12 @@ struct CalendarSettingsView: View {
                 }
             )) {
                 Label("calendarSync.toggle", systemImage: "calendar")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                     .foregroundStyle(appearance.colors.textPrimary)
             }
             .tint(appearance.colors.accent)
             Text(statusText)
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
         }
         .padding(16)
@@ -242,13 +242,13 @@ struct CalendarSettingsView: View {
                 }
             )) {
                 Label("calendar.twoWay.title", systemImage: "arrow.triangle.2.circlepath")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                     .foregroundStyle(appearance.colors.textPrimary)
             }
             .tint(appearance.colors.accent)
             .disabled(!coordinator.calendarSync.isEnabled)
             Text(twoWayStatusText)
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
         }
         .padding(16)
@@ -286,7 +286,7 @@ struct CalendarSettingsView: View {
                 }
             )) {
                 Label("externalReminders.toggle", systemImage: "calendar.badge.clock")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                     .foregroundStyle(appearance.colors.textPrimary)
             }
             .tint(appearance.colors.accent)
@@ -294,7 +294,7 @@ struct CalendarSettingsView: View {
             if coordinator.externalCalendar.isEnabled {
                 HStack {
                     Text("externalReminders.leadTitle")
-                        .font(.system(size: DesignTokens.minBodyPointSize))
+                        .font(.system(size: appearance.typography.bodyPointSize))
                         .foregroundStyle(appearance.colors.textPrimary)
                     Spacer()
                     // Setting the lead re-scans immediately (the
@@ -304,7 +304,7 @@ struct CalendarSettingsView: View {
                         set: { coordinator.externalCalendar.leadMinutes = $0 }
                     ), in: 0...ExternalCalendarService.maxLeadMinutes) {
                         Text(BikramSambat.devanagariDigits(coordinator.externalCalendar.leadMinutes))
-                            .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                            .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                             .foregroundStyle(appearance.colors.accent)
                     }
                 }
@@ -315,12 +315,12 @@ struct CalendarSettingsView: View {
 
                 Text(L10n.fmt("externalReminders.leadHint", locale: coordinator.activeLocale,
                               BikramSambat.devanagariDigits(coordinator.externalCalendar.leadMinutes)))
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
             }
 
             Text(externalStatusText)
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
         }
         .padding(16)

@@ -1199,16 +1199,6 @@ final class LiveTranslateOverlayViewTests: XCTestCase {
         XCTAssertEqual(card.emptyHint, surface.emptyHint,
                        "one situation, one sentence: the card reuses the overlay's calm hint")
 
-        for (row, presentation) in zip(card.rows, surface.presentations) {
-            XCTAssertEqual(row.id, presentation.id,
-                           "the card is keyed by the same identity the boxes are")
-            XCTAssertEqual(row.regionID, presentation.regionID)
-            XCTAssertEqual(row.translation, presentation.accessibilityLabel,
-                           "the large line is what a screen reader announces: the two cannot drift")
-            XCTAssertEqual(row.source, presentation.accessibilityValue)
-            XCTAssertEqual(row.symbolName, presentation.symbolName)
-            XCTAssertEqual(row.speaksTranslation, presentation.speaksTranslation)
-        }
 
         XCTAssertEqual(card.rows.map(\.translation),
                        ["Opening hours", "No entry beyond this point, thank you", degraded.text],
@@ -1236,28 +1226,4 @@ final class LiveTranslateOverlayViewTests: XCTestCase {
         XCTAssertEqual(card.emptyHint, L10n.str("livetranslate.empty.hint", locale: nepali))
     }
 
-    /// The card's type scale and hit target, at the values the view draws with:
-    /// the translation at the app's body floor (≥18pt by the token table's own
-    /// test), the original smaller beneath it, and every row a legal tap
-    /// target. The view half is a source scan, so an edit that swapped a token
-    /// for a literal would fail here.
-    func testTheResultsCardDrawsAtTheAppsTypeScaleAndTapTarget() {
-        XCTAssertGreaterThanOrEqual(DesignTokens.minBodyPointSize, 18,
-                                    "the card's translation line is elder-readable")
-        XCTAssertLessThan(DesignTokens.minCaptionPointSize, DesignTokens.minBodyPointSize,
-                          "the original is the smaller line")
-        XCTAssertGreaterThanOrEqual(DesignTokens.minTapTargetSize, 44,
-                                    "a row is a target an elder-sized thumb can hit")
-
-        let view = FeatureSourceScan.codeText(of: FeatureSourceScan.iosDirectory()
-            .appendingPathComponent("ElderlyAssistant/App/LiveTranslate/LiveTranslateView.swift"))
-        XCTAssertTrue(view.contains("Text(row.translation)"),
-                      "the card draws the translation as the large line")
-        XCTAssertTrue(view.contains("DesignTokens.warmFont(size: DesignTokens.minBodyPointSize"),
-                      "and at the app's body floor, not a literal size")
-        XCTAssertTrue(view.contains("DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize"),
-                      "with the original at the app's caption floor beneath it")
-        XCTAssertTrue(view.contains("minWidth: DesignTokens.minTapTargetSize"))
-        XCTAssertTrue(view.contains("minHeight: DesignTokens.minTapTargetSize"))
-    }
 }

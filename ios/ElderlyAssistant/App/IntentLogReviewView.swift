@@ -27,7 +27,7 @@ struct IntentLogReviewView: View {
                                     Image(systemName: "square.and.arrow.up")
                                     Text("intentLog.export")
                                 }
-                                .font(.system(size: DesignTokens.minCaptionPointSize,
+                                .font(.system(size: appearance.typography.captionPointSize,
                                               weight: .semibold))
                                 .foregroundStyle(appearance.colors.accent)
                                 .frame(minHeight: DesignTokens.minTapTargetSize)
@@ -41,7 +41,7 @@ struct IntentLogReviewView: View {
                                 Image(systemName: "trash")
                                 Text("intentLog.clear")
                             }
-                            .font(.system(size: DesignTokens.minCaptionPointSize,
+                            .font(.system(size: appearance.typography.captionPointSize,
                                           weight: .semibold))
                             .foregroundStyle(DesignTokens.stateError)
                             .frame(minHeight: DesignTokens.minTapTargetSize)
@@ -54,7 +54,7 @@ struct IntentLogReviewView: View {
                             .font(.system(size: 44))
                             .foregroundStyle(appearance.colors.textSecondary)
                         Text(L10n.str("intentLog.empty", locale: coordinator.activeLocale))
-                            .font(.system(size: DesignTokens.minBodyPointSize))
+                            .font(.system(size: appearance.typography.bodyPointSize))
                             .foregroundStyle(appearance.colors.textSecondary)
                             .multilineTextAlignment(.center)
                     }
@@ -66,7 +66,7 @@ struct IntentLogReviewView: View {
                                 Image(systemName: icon(for: record))
                                     .foregroundStyle(appearance.colors.accent)
                                 Text(summary(for: record))
-                                    .font(.system(size: DesignTokens.minBodyPointSize))
+                                    .font(.system(size: appearance.typography.bodyPointSize))
                                     .foregroundStyle(appearance.colors.textPrimary)
                                     .multilineTextAlignment(.leading)
                                 Spacer(minLength: 0)

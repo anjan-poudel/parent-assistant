@@ -50,7 +50,7 @@ struct LeafScreen<Content: View>: View {
                 .padding(.top, 8)
 
                 Text(LocalizedStringKey(titleKey))
-                    .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
+                    .font(DesignTokens.greetingFont(size: appearance.typography.titlePointSize))
                     .foregroundStyle(appearance.colors.textPrimary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 20)
@@ -213,19 +213,19 @@ struct MedicalView: View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(appointment.doctorOrPlace)
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(appearance.colors.textPrimary)
                 if let place = appointment.place {
                     Text(place)
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .font(.system(size: appearance.typography.captionPointSize))
                         .foregroundStyle(appearance.colors.textSecondary)
                 }
                 Text(appointment.date.formatted(date: .abbreviated, time: .shortened))
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
                 if let note = appointment.note {
                     Text(note)
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .font(.system(size: appearance.typography.captionPointSize))
                         .foregroundStyle(appearance.colors.textSecondary)
                 }
             }
@@ -256,7 +256,7 @@ struct MedicalView: View {
                 .foregroundStyle(appearance.colors.textSecondary)
                 .padding(.top, 2)
             Text("medical.smsNote")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
                 .multilineTextAlignment(.leading)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -287,7 +287,7 @@ struct MedicalView: View {
                 handlePasteTap()
             } label: {
                 Label("medical.pasteAppointment", systemImage: "doc.text.fill")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                     .foregroundStyle(appearance.colors.accent)
                     .frame(maxWidth: .infinity)
                     .frame(minHeight: DesignTokens.chipHeight)
@@ -297,7 +297,7 @@ struct MedicalView: View {
 
             if showPasteFailed {
                 Text("medical.pasteFailed")
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(DesignTokens.stateError)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity, alignment: .center)
@@ -311,13 +311,13 @@ struct MedicalView: View {
     private var addFormCard: some View {
         VStack(spacing: 10) {
             TextField(LocalizedStringKey("medical.appointments.doctor"), text: $doctor)
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .padding(14)
                 .frame(minHeight: 56)
                 .fixedSize(horizontal: false, vertical: true)
                 .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
             TextField(LocalizedStringKey("medical.appointments.place"), text: $clinic)
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .padding(14)
                 .frame(minHeight: 56)
                 .fixedSize(horizontal: false, vertical: true)
@@ -331,7 +331,7 @@ struct MedicalView: View {
                       selection: $appointmentDate)
 
             TextField(LocalizedStringKey("medical.appointments.note"), text: $note)
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .padding(14)
                 .frame(minHeight: 56)
                 .fixedSize(horizontal: false, vertical: true)
@@ -341,7 +341,7 @@ struct MedicalView: View {
                 addFromForm()
             } label: {
                 Text("medical.appointments.add")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .frame(minHeight: DesignTokens.chipHeight)
@@ -363,7 +363,7 @@ struct MedicalView: View {
                            selection: Binding<Date>) -> some View {
         HStack(spacing: 12) {
             Text(LocalizedStringKey(key))
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .foregroundStyle(appearance.colors.textPrimary)
             Spacer()
             DatePicker("", selection: selection, displayedComponents: components)
@@ -451,7 +451,7 @@ struct MedicalView: View {
 
     private func sectionHeader(key: String) -> some View {
         Text(LocalizedStringKey(key))
-            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+            .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
             .foregroundStyle(appearance.colors.textSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 8)
@@ -469,10 +469,10 @@ struct MedicalView: View {
         return HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(coordinator.medicationName(for: reminder.medicationEntryId))
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(appearance.colors.textPrimary)
                 Text(reminder.scheduledAt.formatted(date: .omitted, time: .shortened))
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
             }
             Spacer()
@@ -493,7 +493,7 @@ struct MedicalView: View {
                 takeDose(reminder)
             } label: {
                 Text("meds.iTookIt")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 20)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
@@ -699,7 +699,7 @@ struct RemindersView: View {
 
     private func sectionHeader(key: String) -> some View {
         Text(LocalizedStringKey(key))
-            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+            .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
             .foregroundStyle(appearance.colors.textSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 8)
@@ -713,15 +713,15 @@ struct RemindersView: View {
                                  ? appearance.colors.textSecondary : appearance.colors.accent)
             VStack(alignment: .leading, spacing: 4) {
                 Text(row.title)
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(row.isDimmed ? appearance.colors.textSecondary : appearance.colors.textPrimary)
                 Text(rowCaption(row))
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
                 // Which native calendar/reminder list the item came from.
                 if let external = row.external {
                     Text(external.calendarName)
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .font(.system(size: appearance.typography.captionPointSize))
                         .foregroundStyle(appearance.colors.textSecondary)
                 }
             }
@@ -838,13 +838,13 @@ struct RemindersView: View {
                 .foregroundStyle(appearance.colors.textSecondary)
             VStack(alignment: .leading, spacing: 4) {
                 Text(event.title)
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(appearance.colors.textPrimary)
                 Text(upcomingEventTimeText(event))
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
                 Text(event.calendarName)
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
             }
             Spacer()
@@ -876,7 +876,7 @@ struct RemindersView: View {
     private var showMoreUpcomingLink: some View {
         NavigationLink(value: LeafDestination.calendar) {
             Text("history.showMore")
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 .foregroundStyle(appearance.colors.accent)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
@@ -1117,10 +1117,10 @@ struct CallView: View {
                 Image(systemName: systemImage)
                     // Caption-token glyph (DESIGN-REVIEW) beside the
                     // button's 18pt title — scales with Dynamic Type.
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                     .foregroundStyle(appearance.colors.accent)
                 Text(LocalizedStringKey(titleKey))
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                     .foregroundStyle(appearance.colors.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
@@ -1189,7 +1189,7 @@ struct CallView: View {
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(appearance.colors.textSecondary)
             TextField("call.search.placeholder", text: $searchText)
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .foregroundStyle(appearance.colors.textPrimary)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
@@ -1214,7 +1214,7 @@ struct CallView: View {
                 // Caption token (DESIGN-REVIEW): 18pt floor, Dynamic Type
                 // aware — the circle below uses minWidth/minHeight so the
                 // glyph can never clip at Accessibility XXXL.
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                 .foregroundStyle(listening ? DesignTokens.overlayText : appearance.colors.accent)
                 .frame(minWidth: 30, minHeight: 30)
                 .background(listening ? DesignTokens.stateListening : appearance.colors.background)
@@ -1234,13 +1234,13 @@ struct CallView: View {
         switch micPhase {
         case .listening:
             Text(L10n.str("call.search.micListening", locale: coordinator.activeLocale))
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.accent)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 6)
         case .failed:
             Text(L10n.str("call.search.micFailed", locale: coordinator.activeLocale))
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 6)
@@ -1268,7 +1268,7 @@ struct CallView: View {
     private var curatedHeaderRow: some View {
         HStack(spacing: 12) {
             Text(LocalizedStringKey("settings.family.title"))
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 .foregroundStyle(appearance.colors.textPrimary)
             Spacer(minLength: 8)
             searchOpenButton
@@ -1693,7 +1693,7 @@ struct CallView: View {
                                                       recency: recency)
             if outcome.moreAvailable {
                 Text("call.search.moreAvailable")
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 4)
@@ -1788,7 +1788,7 @@ struct CallView: View {
             let shown = Array(activity.prefix(Self.recentActivityLimit))
             VStack(alignment: .leading, spacing: 12) {
                 Text(LocalizedStringKey("history.title"))
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
                     .foregroundStyle(appearance.colors.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.top, 8)
@@ -1798,7 +1798,7 @@ struct CallView: View {
                 if activity.count > Self.recentActivityLimit {
                     NavigationLink(value: LeafDestination.history) {
                         Text(LocalizedStringKey("history.showMore"))
-                            .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                            .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                             .foregroundStyle(appearance.colors.accent)
                             .frame(maxWidth: .infinity)
                             .frame(minHeight: DesignTokens.minTapTargetSize)
@@ -1856,10 +1856,10 @@ struct CallView: View {
                 Text(ActivityRowText.name(for: entry,
                                           locale: coordinator.activeLocale,
                                           correlatedName: coordinator.missedCallDisplayNames[entry.id]))
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(appearance.colors.textPrimary)
                 Text(recentActivityTimeText(entry))
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
                     .lineLimit(2)
             }
@@ -2049,15 +2049,15 @@ struct CallView: View {
         return ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 Text(L10n.fmt("messenger.handlePrompt.title", locale: locale, result.name))
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(appearance.colors.textPrimary)
                 Text(L10n.str("messenger.handleHints.title", locale: locale))
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                     .foregroundStyle(appearance.colors.textSecondary)
                 ForEach(1...3, id: \.self) { index in
                     HStack(alignment: .top, spacing: 10) {
                         Text("\(index)")
-                            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                            .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
                             .foregroundStyle(.white)
                             // DESIGN-REVIEW: minWidth/minHeight (was a
                             // fixed 22pt circle) so the scaled digit can
@@ -2065,14 +2065,14 @@ struct CallView: View {
                             .frame(minWidth: 22, minHeight: 22)
                             .appSurface(role: .accent, cornerRadius: 999)
                         Text(L10n.str("messenger.handleHints.line\(index)", locale: locale))
-                            .font(.system(size: DesignTokens.minBodyPointSize))
+                            .font(.system(size: appearance.typography.bodyPointSize))
                             .foregroundStyle(appearance.colors.textPrimary)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 TextField(L10n.str("messenger.handlePrompt.placeholder", locale: locale),
                           text: $handleText)
-                    .font(.system(size: DesignTokens.minBodyPointSize))
+                    .font(.system(size: appearance.typography.bodyPointSize))
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .padding(.horizontal, 14)
@@ -2128,16 +2128,16 @@ private struct AddressBookAccessCard: View {
     var body: some View {
         VStack(spacing: 14) {
             Text(titleKey)
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 .foregroundStyle(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
             Text(bodyKey)
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
                 .multilineTextAlignment(.center)
             Button(action: action) {
                 Text(buttonKey)
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 20)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
@@ -2189,15 +2189,15 @@ private struct WhatsAppSyncHintCard: View {
     var body: some View {
         VStack(spacing: 12) {
             Image(systemName: "person.2.badge.gearshape")
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .foregroundStyle(appearance.colors.accent)
             Text(LocalizedStringKey("call.waSyncHint"))
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .foregroundStyle(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
             Button(action: openWhatsApp) {
                 Text(LocalizedStringKey("call.openWhatsApp"))
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 20)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
@@ -2217,7 +2217,7 @@ private struct AddressBookLoadingCard: View {
         HStack(spacing: 10) {
             ProgressView()
             Text("call.search.loading")
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
         }
         .padding(16)
@@ -2233,12 +2233,12 @@ private struct AddressBookLoadFailedCard: View {
     var body: some View {
         VStack(spacing: 12) {
             Text("call.search.loadFailed")
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
                 .multilineTextAlignment(.center)
             Button(action: retry) {
                 Text("call.search.retry")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 20)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
@@ -2351,7 +2351,7 @@ private struct UnifiedContactResultRow: View {
                 avatar
                 VStack(alignment: .leading, spacing: 2) {
                     Text(result.name)
-                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                        .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                         .foregroundStyle(appearance.colors.textPrimary)
                         .multilineTextAlignment(.leading)
                     HStack(spacing: 6) {
@@ -2359,7 +2359,7 @@ private struct UnifiedContactResultRow: View {
                             familyChip
                         }
                         Text(result.caption)
-                            .font(.system(size: DesignTokens.minCaptionPointSize))
+                            .font(.system(size: appearance.typography.captionPointSize))
                             .foregroundStyle(appearance.colors.textSecondary)
                             .lineLimit(2)
                     }
@@ -2420,7 +2420,7 @@ private struct UnifiedContactResultRow: View {
     /// the caption already says who this person is.
     private var familyChip: some View {
         Text(L10n.str("call.search.familyChip", locale: locale))
-            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+            .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
             .foregroundStyle(appearance.colors.accent)
             .padding(.horizontal, 10)
             .padding(.vertical, 3)
@@ -2453,7 +2453,7 @@ private struct UnifiedContactResultRow: View {
     private var whatsAppPill: some View {
         Button(action: whatsApp) {
             Text(L10n.str("call.channel.whatsapp", locale: locale))
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
                 .foregroundStyle(.white)
                 .padding(.horizontal, 14)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
@@ -2622,10 +2622,10 @@ struct ContactTile: View {
             avatar(for: contact)
             VStack(alignment: .leading, spacing: 2) {
                 Text(contact.name)
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(appearance.colors.textPrimary)
                 Text(contact.relationship)
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
             }
             Spacer()
@@ -2725,22 +2725,22 @@ struct CalendarView: View {
         return VStack(spacing: 8) {
             if let overlay {
                 Text(overlay.weekdayNepali)
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                     .foregroundStyle(appearance.colors.textSecondary)
                 Text(BikramSambat.nepaliString(overlay.bsDate))
-                    .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
+                    .font(DesignTokens.greetingFont(size: appearance.typography.titlePointSize))
                     .foregroundStyle(appearance.colors.textPrimary)
                     .multilineTextAlignment(.center)
                 // Tithi overlay — every day, per product requirement.
                 Text(overlay.tithi.displayNepali)
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                     .foregroundStyle(appearance.colors.accent)
                 Text(Date().formatted(.dateTime.day().month(.wide).year().locale(coordinator.activeLocale)))
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
             } else {
                 Text("calendar.bsUnavailable")
-                    .font(.system(size: DesignTokens.minBodyPointSize))
+                    .font(.system(size: appearance.typography.bodyPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
             }
         }
@@ -2754,19 +2754,19 @@ struct CalendarView: View {
         let festivals = todayOverlay?.festivals ?? []
         return VStack(alignment: .leading, spacing: 8) {
             Text("calendar.festivalToday")
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
                 .foregroundStyle(appearance.colors.textSecondary)
             ForEach(festivals, id: \.id) { festival in
                 HStack(spacing: 10) {
                     Image(systemName: "sparkles")
                         .foregroundStyle(appearance.colors.accent)
                     Text(festival.nameNepali)
-                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                        .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                         .foregroundStyle(appearance.colors.textPrimary)
                     Spacer()
                     if let tithi = festival.tithiNepali {
                         Text(tithi)
-                            .font(.system(size: DesignTokens.minCaptionPointSize))
+                            .font(.system(size: appearance.typography.captionPointSize))
                             .foregroundStyle(appearance.colors.textSecondary)
                     }
                 }
@@ -2782,13 +2782,13 @@ struct CalendarView: View {
         let upcoming = coordinator.festivalCalendar.upcoming(limit: 5)
         return VStack(alignment: .leading, spacing: 10) {
             Text("calendar.upcomingFestivals")
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
                 .foregroundStyle(appearance.colors.textSecondary)
             ForEach(upcoming, id: \.festival.id) { item in
                 HStack(spacing: 10) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(item.festival.nameNepali)
-                            .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                            .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                             .foregroundStyle(appearance.colors.textPrimary)
                         // Years outside the verified panchang table are
                         // resolved by tithi astronomy (±1 day) and say so
@@ -2796,12 +2796,12 @@ struct CalendarView: View {
                         Text(item.isApproximate
                              ? "\(BikramSambat.nepaliString(item.bsDate)) · \(L10n.str("calendar.approximateDate", locale: coordinator.activeLocale))"
                              : BikramSambat.nepaliString(item.bsDate))
-                            .font(.system(size: DesignTokens.minCaptionPointSize))
+                            .font(.system(size: appearance.typography.captionPointSize))
                             .foregroundStyle(appearance.colors.textSecondary)
                     }
                     Spacer()
                     Text(daysAwayText(item.daysAway))
-                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                        .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                         .foregroundStyle(appearance.colors.accent)
                 }
             }
@@ -2857,7 +2857,7 @@ struct CalendarView: View {
         if !scheduleRows.isEmpty {
             VStack(alignment: .leading, spacing: 10) {
                 Text("calendar.todaySchedule")
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
                     .foregroundStyle(appearance.colors.textSecondary)
                 ForEach(scheduleRows) { row in
                     scheduleRowView(row)
@@ -2871,16 +2871,16 @@ struct CalendarView: View {
             IconBadge(systemImage: row.systemImage, tint: .reminders)
             VStack(alignment: .leading, spacing: 4) {
                 Text(row.title)
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(appearance.colors.textPrimary)
                 Text(row.isAllDay
                      ? L10n.str("externalReminders.allDay", locale: coordinator.activeLocale)
                      : row.scheduledAt.formatted(date: .omitted, time: .shortened))
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
                 if let calendarName = row.calendarName {
                     Text(calendarName)
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .font(.system(size: appearance.typography.captionPointSize))
                         .foregroundStyle(appearance.colors.textSecondary)
                 }
             }
@@ -2941,7 +2941,7 @@ struct BriefingView: View {
     /// medications, calendar events, weather, one line each.
     private func briefingCard(_ stored: StoredBriefing) -> some View {
         Text(stored.text)
-            .font(.system(size: DesignTokens.minBodyPointSize))
+            .font(.system(size: appearance.typography.bodyPointSize))
             .foregroundStyle(appearance.colors.textPrimary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(18)
@@ -2957,9 +2957,9 @@ struct BriefingView: View {
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: "speaker.wave.2.fill")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 Text(L10n.str("briefing.view.speakAgain", locale: coordinator.activeLocale))
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 Spacer(minLength: 0)
             }
             .foregroundStyle(.white)
@@ -2980,7 +2980,7 @@ struct BriefingView: View {
 /// look-alike.
 func emptyState(key: String, appearance: AppAppearance) -> some View {
     Text(LocalizedStringKey(key))
-        .font(.system(size: DesignTokens.minBodyPointSize))
+        .font(.system(size: appearance.typography.bodyPointSize))
         .foregroundStyle(appearance.colors.textSecondary)
         .multilineTextAlignment(.center)
         .padding(32)

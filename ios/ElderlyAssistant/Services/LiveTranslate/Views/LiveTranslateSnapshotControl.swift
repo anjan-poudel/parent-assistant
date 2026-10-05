@@ -130,7 +130,7 @@ struct LiveTranslateSnapshotControl: View {
                     Image(systemName: surface.symbolName)
                 }
                 Text(surface.label)
-                    .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize,
+                    .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize,
                                                 weight: .semibold))
                     .fixedSize(horizontal: false, vertical: true)
             }

@@ -67,13 +67,13 @@ struct DefaultManualsBrowseView: View {
                     .appSurface(role: .accent, cornerRadius: 999)
                 VStack(alignment: .leading, spacing: 4) {
                     Text("settings.manuals.userManual")
-                        .font(.system(size: DesignTokens.minBodyPointSize,
+                        .font(.system(size: appearance.typography.bodyPointSize,
                                       weight: .semibold))
                         .foregroundStyle(appearance.colors.textPrimary)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                     Text("settings.manuals.userManualHint")
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .font(.system(size: appearance.typography.captionPointSize))
                         .foregroundStyle(appearance.colors.textSecondary)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
@@ -99,7 +99,7 @@ struct DefaultManualsBrowseView: View {
                 .font(.system(size: 56))
                 .foregroundStyle(appearance.colors.textSecondary)
             Text("appliance.manual.bundledEmpty")
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .foregroundStyle(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)

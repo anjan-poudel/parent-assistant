@@ -126,7 +126,7 @@ struct LiveTranslateToggleRow: View {
         VStack(alignment: .leading, spacing: DesignTokens.interElementSpacing / 2) {
             Toggle(isOn: isOn) {
                 Text(title)
-                    .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize, weight: .semibold))
                     .foregroundColor(appearance.colors.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -135,7 +135,7 @@ struct LiveTranslateToggleRow: View {
             .accessibilityIdentifier(identifier)
 
             Text(note)
-                .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize))
+                .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize))
                 .foregroundColor(appearance.colors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
         }

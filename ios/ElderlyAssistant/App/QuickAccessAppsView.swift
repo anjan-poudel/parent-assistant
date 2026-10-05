@@ -57,7 +57,7 @@ struct QuickAccessAppsView: View {
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(appearance.colors.textSecondary)
             TextField("quickApps.search.placeholder", text: $searchText)
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .foregroundStyle(appearance.colors.textPrimary)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
@@ -107,7 +107,7 @@ struct QuickAccessAppsView: View {
             }
             Text("apps.probeNote")
         }
-        .font(.system(size: DesignTokens.minCaptionPointSize))
+        .font(.system(size: appearance.typography.captionPointSize))
         .foregroundStyle(appearance.colors.textSecondary)
     }
 
@@ -117,7 +117,7 @@ struct QuickAccessAppsView: View {
 
     private func sectionHeader(_ key: String) -> some View {
         Text(LocalizedStringKey(key))
-            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+            .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
             .foregroundStyle(appearance.colors.textSecondary)
     }
 
@@ -165,11 +165,11 @@ struct QuickAccessAppsView: View {
     private func rowLabel(_ app: AppLauncher.App, captionKey: String?) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(LocalizedStringKey(app.nameKey))
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                 .foregroundStyle(appearance.colors.textPrimary)
             if let captionKey {
                 Text(LocalizedStringKey(captionKey))
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
             }
         }
@@ -189,7 +189,7 @@ struct QuickAccessAppsView: View {
                 Image(systemName: "plus")
                 Text("quickApps.add")
             }
-            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+            .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
             .foregroundStyle(.white)
             .padding(.horizontal, 14)
             .frame(minHeight: DesignTokens.minTapTargetSize).appSurface(role: .accent, cornerRadius: 999)
@@ -212,7 +212,7 @@ struct QuickAccessAppsView: View {
             Text(L10n.fmt("quickApps.remove",
                           locale: coordinator.activeLocale,
                           appDisplayName(app)))
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                 .foregroundStyle(appearance.colors.accent)
                 .padding(.horizontal, 14)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
