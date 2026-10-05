@@ -756,19 +756,10 @@ struct HomeDock: View {
         .accessibilityIdentifier(identifier)
     }
 
-    @ViewBuilder
-    private func tile(artwork: String, titleKey: String, onRail: Bool) -> some View {
-        if onRail {
-            tileContent(artwork: artwork, titleKey: titleKey, onRail: true)
-        } else {
-            tileContent(artwork: artwork, titleKey: titleKey, onRail: false)
-                .appSurface(role: .control, cornerRadius: 12)
-        }
-    }
 
-    private func tileContent(artwork: String, titleKey: String, onRail: Bool) -> some View {
+    private func tile(artwork: String, titleKey: String, onRail: Bool) -> some View {
         VStack(spacing: 4) {
-            ReferenceIconArtwork(name: artwork, diameter: onRail ? 44 : 48)
+            ReferenceIconArtwork(name: artwork, diameter: onRail ? 56 : 32)
             Text(LocalizedStringKey(titleKey))
                 .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .semibold))
                 .foregroundStyle(onRail ? appearance.colors.onAccent : appearance.colors.textPrimary)
@@ -776,8 +767,9 @@ struct HomeDock: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 4)
-        .padding(.vertical, 6)
-        .frame(maxWidth: .infinity, minHeight: 76, maxHeight: .infinity, alignment: .top)
+        .padding(.vertical, onRail ? 4 : 2)
+        .frame(maxWidth: .infinity, minHeight: onRail ? 76 : DesignTokens.minTapTargetSize,
+               maxHeight: .infinity, alignment: .top)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }

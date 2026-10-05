@@ -234,6 +234,10 @@ final class ElderlyAssistantUITests: XCTestCase {
             XCTAssertEqual(card.height, upper[0].height, accuracy: 1,
                            "Wrapping a label must not leave mismatched action-card heights")
         }
+        XCTAssertLessThanOrEqual(upper[0].height, 96,
+                                 "The upper action strip must stay compact at ordinary text size")
+        XCTAssertLessThanOrEqual(app.scrollViews["home.content"].frame.maxY, upper[0].minY,
+                                 "Scrollable content must end above the action strip")
         XCTAssertLessThanOrEqual(upper.map(\.maxY).max()!, lower.map(\.minY).min()!)
 
         let screenshot = XCTAttachment(screenshot: app.screenshot())

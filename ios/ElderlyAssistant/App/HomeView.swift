@@ -166,6 +166,7 @@ struct HomeView: View {
                         .padding(.top, 12)
                         .padding(.bottom, 20)
                     }
+                    .clipped()
                     .accessibilityIdentifier("home.content")
                 }
             }
