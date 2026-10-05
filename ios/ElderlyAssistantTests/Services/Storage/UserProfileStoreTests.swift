@@ -348,6 +348,42 @@ final class UserProfileStoreTests: XCTestCase {
         XCTAssertNil(loaded.dateOfBirth)
         XCTAssertNil(loaded.emergencyDoctor)
         XCTAssertNil(loaded.localHospital)
+        XCTAssertNil(loaded.photoFilename)
+    }
+
+    func testPreSelfiePayloadLoadsPhotoLess() {
+        // The selfie's migration (2026-10-06): a payload written before
+        // the field existed — every pre-selfie key present, no
+        // `photoFilename` — must load with a nil filename through the
+        // custom decoder, not fail the read. The mandatory-keys contract
+        // is unchanged alongside it (the partial-record test above still
+        // pins it).
+        storage.payloads[UserProfileStore.storageKey] = Data(
+            #"{"name":"Maya","addressAs":"Mum","dateOfBirth":{"year":1943,"month":7,"day":21},"emergencyDoctor":"Dr. Sharma","localHospital":"Teaching Hospital"}"#.utf8)
+
+        guard case .loaded(let loaded) = store.load() else {
+            return XCTFail("a pre-selfie payload must load, not fail the read")
+        }
+        XCTAssertEqual(loaded.name, "Maya")
+        XCTAssertEqual(loaded.emergencyDoctor, "Dr. Sharma")
+        XCTAssertNil(loaded.photoFilename,
+                     "the missing key reads as nil — the unversioned-store rule")
+    }
+
+    func testSelfieFilenameRoundTripsThroughTheStore() {
+        var profile = UserProfile(name: "Maya", addressAs: "Mum",
+                                  dateOfBirth: nil,
+                                  emergencyDoctor: nil, localHospital: nil)
+        profile.photoFilename = "selfie-1.jpg"
+        assertSaveSucceeds(store.save(profile))
+
+        let reopened = UserProfileStore(storage: storage, observabilityBus: bus)
+        guard case .loaded(let loaded) = reopened.load() else {
+            return XCTFail("the saved record must decode from disk")
+        }
+        XCTAssertEqual(loaded.photoFilename, "selfie-1.jpg",
+                       "the selfie file name survives the disk round trip")
+        XCTAssertEqual(loaded, profile)
     }
 
     // MARK: - Events (content-free, allow-listed keys only)

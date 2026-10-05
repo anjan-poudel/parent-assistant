@@ -30,6 +30,10 @@ final class L10nCatalogCoverageTests: XCTestCase {
         "onboarding.aboutYou.name",
         "onboarding.aboutYou.addressAs",
         "onboarding.aboutYou.dateOfBirthToggle",
+        // About-you selfie (2026-10-06): the capture button + the soft
+        // no-camera note.
+        "onboarding.aboutYou.takePhoto",
+        "onboarding.aboutYou.photoUnavailable",
         // C11 — emergency contacts step: title/body + kin/GP/hospital.
         "onboarding.emergency.title",
         "onboarding.emergency.body",
@@ -51,6 +55,8 @@ final class L10nCatalogCoverageTests: XCTestCase {
         "profile.field.dateOfBirth",
         "profile.field.doctor",
         "profile.field.hospital",
+        // The stored selfie's read-only thumbnail label (2026-10-06).
+        "profile.field.photo",
         "profile.kin.note",
         "profile.save",
         "profile.saved",

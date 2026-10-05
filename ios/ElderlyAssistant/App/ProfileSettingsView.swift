@@ -1,18 +1,28 @@
 import SwiftUI
+import UIKit
 
 // MARK: - Settings: About me (profile-interview, T-103 / C08)
 //
 // The Settings-side editor for the same record the interview wizard
-// collects: name, address-as, optional DOB, GP and hospital. One Save
-// button writes the complete record through the coordinator's single
-// writer; success and failure both surface inline. The next-of-kin
-// designation is NOT edited here — it rides on the Family screen's
-// emergency flag (see the note under the fields).
+// collects: name, address-as, optional DOB, GP and hospital — plus the
+// selfie (about-you selfie, 2026-10-06), shown as a read-only thumbnail
+// here; capture lives in the About-you step. One Save button writes the
+// complete record through the coordinator's single writer; success and
+// failure both surface inline. The next-of-kin designation is NOT edited
+// here — it rides on the Family screen's emergency flag (see the note
+// under the fields).
 
 struct ProfileSettingsView: View {
     @EnvironmentObject private var coordinator: AppCoordinator
     @Environment(\.appAppearance) private var appearance
+    @Environment(\.displayScale) private var displayScale
     @StateObject private var model: ProfileSettingsModel
+    /// The stored selfie, resolved once per visit at its drawn size
+    /// (about-you selfie, 2026-10-06). Display-only — capture lives in
+    /// the About-you step; here the photo merely shows who this record
+    /// is about. nil (no photo on file, or an unreadable file) simply
+    /// renders nothing.
+    @State private var storedPhoto: UIImage?
 
     init(coordinator: AppCoordinator) {
         _model = StateObject(wrappedValue: ProfileSettingsModel(coordinator: coordinator))
@@ -24,6 +34,10 @@ struct ProfileSettingsView: View {
                 Text("settings.profile.explanation")
                     .font(.system(size: DesignTokens.minBodyPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
+
+                if let storedPhoto {
+                    storedPhotoThumbnail(storedPhoto)
+                }
 
                 nameField
                 addressAsSection
@@ -39,7 +53,36 @@ struct ProfileSettingsView: View {
             .padding(.horizontal, 20)
             .padding(.bottom, 24)
         }
-        .onAppear { model.load() }
+        .onAppear {
+            model.load()
+            storedPhoto = resolveStoredPhoto()
+        }
+    }
+
+    /// The selfie as a plain circular thumbnail — read-only, exactly the
+    /// photo the About-you step captured (the store's ≤512px JPEG).
+    private func storedPhotoThumbnail(_ image: UIImage) -> some View {
+        Image(uiImage: image)
+            .resizable()
+            .scaledToFill()
+            .frame(width: Self.photoDiameter, height: Self.photoDiameter)
+            .clipShape(Circle())
+            .overlay(Circle().stroke(appearance.colors.separator, lineWidth: 1))
+            .accessibilityLabel(Text("profile.field.photo"))
+    }
+
+    private static let photoDiameter: CGFloat = 72
+
+    /// One cached decode at the drawn size, keyed by the stored file name
+    /// (the family list's `contactFace` pattern); a missing name or an
+    /// unreadable file resolves to nil, never an error.
+    private func resolveStoredPhoto() -> UIImage? {
+        guard let filename = model.photoFilename, !filename.isEmpty else { return nil }
+        return DownsampledImageCache.shared.thumbnail(
+            forKey: "profile:\(filename)",
+            pointSize: Self.photoDiameter,
+            displayScale: displayScale
+        ) { coordinator.contactPhotoStore.load(named: filename) }
     }
 
     // MARK: fields

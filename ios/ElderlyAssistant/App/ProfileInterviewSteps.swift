@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 // MARK: - Profile-interview wizard steps (T-099, T-100, T-101)
 //
@@ -6,6 +7,7 @@ import SwiftUI
 // the step ORDER and the chrome, and this file keeps the step BODIES:
 //
 //   * `AboutYouStep`            — name + address-as + optional DOB (T-099)
+//                                 + optional selfie (2026-10-06)
 //   * `EmergencyContactsStep`   — next-of-kin designation + GP/hospital (T-100)
 //   * `VoiceFingerprintStep`    — voice enrollment, skippable like every
 //                                 step (T-101)
@@ -32,6 +34,17 @@ struct AboutYouStep: View {
     @State private var birthDate: Date = AboutYouStep.defaultBirthDate
     @State private var showSaveFailure = false
     @State private var didPrefill = false
+    /// The selfie is optional everywhere (about-you selfie, 2026-10-06):
+    /// `photoPreview` is the downsampled image the button shows,
+    /// `stagedPhotoFilename` is a file this visit captured but has not
+    /// persisted yet (cleaned up on the way out), and the two flags drive
+    /// the camera sheet / the soft "no camera" note. A failed capture, an
+    /// unavailable camera or a denied permission changes nothing and
+    /// never blocks Next.
+    @State private var photoPreview: UIImage?
+    @State private var stagedPhotoFilename: String?
+    @State private var showsCamera = false
+    @State private var cameraUnavailable = false
 
     private let bounds = ProfileEntryBounds.default
 
@@ -96,6 +109,8 @@ struct AboutYouStep: View {
                             .accessibilityLabel(Text("onboarding.aboutYou.dateOfBirthToggle"))
                     }
                 }
+
+                photoSection
             }
 
             if showSaveFailure {
@@ -110,6 +125,94 @@ struct AboutYouStep: View {
                 .opacity(draft.isComplete ? 1 : 0.45)
         }
         .onAppear(perform: prefill)
+        // The captured photo becomes the record's only at Next; a staged
+        // file from a visit that ends any other way (Skip, Back, the
+        // wizard dismissed) is cleaned up here — no orphaned selfie on
+        // disk. After a successful save the staged name is already nil,
+        // so the persisted file is never the one deleted.
+        .onDisappear {
+            if let staged = stagedPhotoFilename {
+                coordinator.contactPhotoStore.delete(named: staged)
+            }
+        }
+        .sheet(isPresented: $showsCamera) {
+            SelfieCameraPicker(onCapture: handleCapturedPhoto) { showsCamera = false }
+        }
+    }
+
+    // MARK: selfie (optional — about-you selfie, 2026-10-06)
+
+    /// A neutral secondary button (accent on the control surface, like
+    /// the family editor's photo controls): the step keeps ONE primary
+    /// accent — Next. Once a photo exists the button shows it as the
+    /// small circular thumbnail, and tapping again retakes it.
+    private var photoSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button { presentCamera() } label: {
+                HStack(spacing: 12) {
+                    if let photoPreview {
+                        Image(uiImage: photoPreview)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 36, height: 36)
+                            .clipShape(Circle())
+                    } else {
+                        Image(systemName: "camera.fill")
+                            .font(.system(size: 20, weight: .semibold))
+                    }
+                    Text("onboarding.aboutYou.takePhoto")
+                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .foregroundStyle(appearance.colors.accent)
+                .padding(.horizontal, 16)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
+                .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
+            }
+            .buttonStyle(.plain)
+
+            if cameraUnavailable {
+                // Soft, never blocking: the photo is optional, so this is
+                // a note beside the button — not an error state.
+                Text("onboarding.aboutYou.photoUnavailable")
+                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
+            }
+        }
+    }
+
+    private func presentCamera() {
+        guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
+            // No camera at all (simulator, restricted device) — say so
+            // plainly and carry on; a denied PERMISSION still presents
+            // the system camera's own guidance and cancels back here.
+            cameraUnavailable = true
+            return
+        }
+        cameraUnavailable = false
+        showsCamera = true
+    }
+
+    /// The picker's one callback. The FILE is written first (the store
+    /// downscales to a ≤512px JPEG); only a successful write claims the
+    /// filename in the draft. A failed write keeps whatever was there —
+    /// soft, like every photo path in the app.
+    private func handleCapturedPhoto(_ image: UIImage) {
+        guard let filename = coordinator.contactPhotoStore.save(image) else { return }
+        // A capture supersedes an earlier STAGED (never persisted) file:
+        // delete it now. The record's own file is only deleted after a
+        // successful save (see `saveAndAdvance`).
+        if let superseded = stagedPhotoFilename {
+            coordinator.contactPhotoStore.delete(named: superseded)
+        }
+        stagedPhotoFilename = filename
+        draft.photoFilename = filename
+        // Hold a downsampled copy for the thumbnail — the full-size
+        // capture is not needed again (same treatment as the family
+        // editor's picked photo).
+        photoPreview = DownsampledImageCache.downsampled(
+            image, maxPixelEdge: ContactPhotoStore.maxDimension) ?? image
     }
 
     /// The grapheme-safe name binding (60 Characters, same clamp helper
@@ -147,6 +250,12 @@ struct AboutYouStep: View {
             draft.hasDateOfBirth = true
             birthDate = date
         }
+        // A stored selfie shows its thumbnail again; an unreadable or
+        // vanished file simply leaves the button photo-less (soft).
+        if let filename = profile.photoFilename {
+            draft.photoFilename = filename
+            photoPreview = coordinator.contactPhotoStore.load(named: filename)
+        }
     }
 
     private func saveAndAdvance() {
@@ -158,13 +267,84 @@ struct AboutYouStep: View {
             addressAs: merged.addressAs,
             dateOfBirth: merged.dateOfBirth,
             emergencyDoctor: merged.emergencyDoctor,
-            localHospital: merged.localHospital)
+            localHospital: merged.localHospital,
+            photoFilename: merged.photoFilename)
         switch result {
         case .success:
+            // The record now points at the merged selfie: a replaced
+            // file can go (the family editor's post-persist cleanup
+            // order), and a staged file is no longer litter.
+            if let previous = base.photoFilename, previous != merged.photoFilename {
+                coordinator.contactPhotoStore.delete(named: previous)
+            }
+            stagedPhotoFilename = nil
             showSaveFailure = false
             onNext(.aboutYou)
         case .failure:
             showSaveFailure = true
+        }
+    }
+}
+
+// MARK: - Selfie capture (about-you selfie, 2026-10-06)
+
+/// Front-camera capture for the About-you seed selfie — same wrapping
+/// style as `VisualAidPhotoPicker` (VisualAidViews.swift), but
+/// `UIImagePickerController` in `.camera` mode: PHPicker cannot TAKE a
+/// photo, and the camera picker is the one built-in that presents the
+/// real system camera with no preview plumbing of our own.
+/// `NSCameraUsageDescription` already ships (live translation), so no
+/// Info.plist change was needed.
+///
+/// The picker owns nothing but capture: the returned `UIImage` goes to
+/// the step, which stores it through `ContactPhotoStore`. Cancellation
+/// just finishes — the photo is optional everywhere.
+struct SelfieCameraPicker: UIViewControllerRepresentable {
+
+    /// Called once with the captured image; never on cancel.
+    let onCapture: (UIImage) -> Void
+    /// Called for BOTH capture and cancel — the caller ends the
+    /// presentation (the SwiftUI sheet's binding owns dismissal; the
+    /// picker never dismisses itself).
+    let onFinish: () -> Void
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        // The true selfie: the front camera, by default.
+        picker.cameraDevice = .front
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ controller: UIImagePickerController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onCapture: onCapture, onFinish: onFinish)
+    }
+
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate,
+                             UINavigationControllerDelegate {
+        private let onCapture: (UIImage) -> Void
+        private let onFinish: () -> Void
+
+        init(onCapture: @escaping (UIImage) -> Void,
+             onFinish: @escaping () -> Void) {
+            self.onCapture = onCapture
+            self.onFinish = onFinish
+        }
+
+        func imagePickerController(
+            _ picker: UIImagePickerController,
+            didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+            if let image = info[.originalImage] as? UIImage {
+                onCapture(image)
+            }
+            onFinish()
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+            onFinish()
         }
     }
 }
@@ -397,7 +577,10 @@ struct EmergencyContactsStep: View {
             addressAs: merged.addressAs,
             dateOfBirth: merged.dateOfBirth,
             emergencyDoctor: merged.emergencyDoctor,
-            localHospital: merged.localHospital)
+            localHospital: merged.localHospital,
+            // This step edits no photo; the merged record carries the
+            // selfie an About-you visit stored (and never erases one).
+            photoFilename: merged.photoFilename)
         switch result {
         case .success:
             onNext(.emergencyContacts)

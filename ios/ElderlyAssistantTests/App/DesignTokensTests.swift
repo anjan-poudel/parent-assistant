@@ -133,6 +133,7 @@ extension DesignTokensTests {
     /// Every badge category, for the sweeps below.
     private static let allBadgeTints: [DesignTokens.BadgeTint] = [
         .meds, .reminders, .call, .appliance, .settings, .apps, .feeds, .emergency, .directions,
+        .profile,
     ]
 
 
@@ -152,6 +153,21 @@ extension DesignTokensTests {
                                    "\(skin) \(badge) composited badge contrast")
                 }
             }
+        }
+    }
+
+    /// The profile badge sits directly beside Settings on the home hub
+    /// (home-profile-icon, 2026-10-06) — its tone must read as its own
+    /// place in every skin, never a copy of the settings glyph's ink.
+    func testProfileBadgeToneStaysDistinctFromSettings() {
+        for skin in AppTheme.allCases {
+            let appearance = AppAppearance(skin: skin, style: .soft)
+            XCTAssertNotEqual(appearance.badgeTint(.profile),
+                              appearance.badgeTint(.settings),
+                              "\(skin): profile must not borrow the settings tint")
+            XCTAssertNotEqual(appearance.badgeBackground(.profile),
+                              appearance.badgeBackground(.settings),
+                              "\(skin): profile must not borrow the settings wash")
         }
     }
 

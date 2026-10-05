@@ -32,6 +32,10 @@ struct AboutYouDraft: Equatable {
     var addressAs: String = ""
     var dateOfBirth: Date? = nil
     var hasDateOfBirth: Bool = false
+    /// ContactPhotoStore filename of the selfie captured in the step
+    /// (about-you selfie, 2026-10-06). nil = this draft holds no photo —
+    /// the capture act writes it, and the merge below then carries it.
+    var photoFilename: String? = nil
 
     /// Trimmed non-empty name AND address-as (the Next gate, FR-PI-002) —
     /// single-sourced with `mandatoryFieldsRecorded(in:)` so the wizard
@@ -61,6 +65,12 @@ struct AboutYouDraft: Equatable {
     /// all (the field was never touched) preserves whatever `base` has —
     /// this is what keeps an About-you visit that skips the date from
     /// erasing a previously recorded birthday.
+    ///
+    /// The selfie filename follows the SAME preserve rule (it is
+    /// additive — there is no remove affordance): a draft holding a
+    /// filename writes it, a draft holding none leaves `base`'s photo
+    /// untouched. A caller that never touches the photo (the Settings
+    /// editor's draft) therefore cannot erase one.
     func merged(into base: UserProfile) -> UserProfile {
         var merged = base
         merged.name = Self.trimmed(name)
@@ -73,6 +83,9 @@ struct AboutYouDraft: Equatable {
                                                 day: parts.day)
         } else if dateOfBirth != nil {
             merged.dateOfBirth = nil
+        }
+        if let photoFilename {
+            merged.photoFilename = photoFilename
         }
         return merged
     }

@@ -10,6 +10,11 @@ enum LeafDestination: Identifiable {
     case call
     case history
     case settings
+    /// "About me" (home-profile-icon, 2026-10-06): the profile editor,
+    /// reached from its own icon on the home hub next to Settings — the
+    /// SAME `ProfileSettingsView` the Settings family tab pushes, just
+    /// one tap from Home.
+    case profile
     /// Directions (directions-screen task, 2026-09-07): the saved-targets
     /// map leaf, docked next to Appliance per the task brief.
     case directions
@@ -38,6 +43,7 @@ enum LeafDestination: Identifiable {
         case .call: return "call"
         case .history: return "history"
         case .settings: return "settings"
+        case .profile: return "profile"
         case .directions: return "directions"
         case .briefing: return "briefing"
         case .updates: return "updates"
@@ -474,6 +480,12 @@ struct HomeView: View {
             // before a download surface exists.
             SettingsView()
                 .environmentObject(coordinator.modelDownloadService)
+        case .profile:
+            // The "About me" editor, pushed from the hub's profile icon
+            // (home-profile-icon, 2026-10-06). The coordinator is passed
+            // explicitly (its init contract — the view also reads it
+            // from the environment for the locale/appearance it needs).
+            ProfileSettingsView(coordinator: coordinator)
         case .directions:
             DirectionsView()
         case .briefing:

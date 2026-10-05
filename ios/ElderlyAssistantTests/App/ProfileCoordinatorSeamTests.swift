@@ -65,7 +65,8 @@ final class ProfileCoordinatorSeamTests: XCTestCase {
             addressAs: "Mum",
             dateOfBirth: DateComponents(year: 1943, month: 7, day: 21),
             emergencyDoctor: "Dr. Sharma",
-            localHospital: "Teaching Hospital")
+            localHospital: "Teaching Hospital",
+            photoFilename: nil)
         if case .failure(let error) = saved {
             return XCTFail("expected success, got \(error)")
         }
@@ -81,6 +82,29 @@ final class ProfileCoordinatorSeamTests: XCTestCase {
         // `AppCoordinator.saveProfile`).
         XCTAssertNotNil(storage.payloads[UserProfileStore.storageKey],
                         "the record reached the injected encrypted channel")
+    }
+
+    func testSaveProfileRoundTripsTheSelfieFilename() {
+        let storage = InMemoryProfilePayloadStorage()
+        let coordinator = AppCoordinator(profileStorage: storage)
+
+        let saved = coordinator.saveProfile(
+            name: "Maya Gurung",
+            addressAs: "Mum",
+            dateOfBirth: nil,
+            emergencyDoctor: nil,
+            localHospital: nil,
+            photoFilename: "selfie-1.jpg")
+        if case .failure(let error) = saved {
+            return XCTFail("expected success, got \(error)")
+        }
+
+        guard case .loaded(let profile) = coordinator.currentProfileSnapshot() else {
+            return XCTFail("the snapshot must reflect the saved record")
+        }
+        XCTAssertEqual(profile.photoFilename, "selfie-1.jpg",
+                       "the About-you selfie's file name travels the single "
+                       + "writer path and reads back")
     }
 
     // MARK: - Scenario: The personalization seam exists before start()
@@ -149,7 +173,8 @@ final class ProfileCoordinatorSeamTests: XCTestCase {
             addressAs: "Dad",
             dateOfBirth: nil,
             emergencyDoctor: nil,
-            localHospital: nil)
+            localHospital: nil,
+            photoFilename: nil)
         guard case .failure(let error) = result else {
             return XCTFail("a failed write must surface explicitly (E3)")
         }

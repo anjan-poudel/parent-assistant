@@ -25,7 +25,7 @@ final class LiveTranslateSourceHygieneTests: XCTestCase {
         ("0.25", "ocrSampleInterval"),
         ("2.0", "thermalCadenceFactor"),
         ("0.3", "regionMatchIoU"),
-        ("0.35", "regionMatchCentroidDistance"),
+        ("0.36", "regionMatchCentroidDistance"),
         ("0.12", "declutterMergeCentroidDistance"),
         ("1.4", "inPlaceMaxGrowth"),
         ("4.0", "translationMaxLengthRatio"),

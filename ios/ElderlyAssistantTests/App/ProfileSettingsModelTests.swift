@@ -86,6 +86,7 @@ final class ProfileSettingsModelTests: XCTestCase {
         XCTAssertNil(model.dateOfBirth)
         XCTAssertEqual(model.emergencyDoctor, "")
         XCTAssertEqual(model.localHospital, "")
+        XCTAssertNil(model.photoFilename, "no record, no selfie")
     }
 
     // MARK: - Save
@@ -149,6 +150,37 @@ final class ProfileSettingsModelTests: XCTestCase {
         XCTAssertEqual(stored.emergencyDoctor, "Dr. Sharma",
                        "fields the user did not clear are preserved")
         XCTAssertEqual(stored.localHospital, "Teaching Hospital")
+    }
+
+    // MARK: - Selfie (2026-10-06)
+
+    @MainActor
+    func testLoadShowsTheStoredSelfieAndSavePreservesIt() throws {
+        let storage = InMemoryProfilePayloadStorage()
+        var record = completeRecord()
+        record.photoFilename = "selfie-1.jpg"
+        storage.payloads[UserProfileStore.storageKey] =
+            try JSONEncoder().encode(record)
+        let coordinator = AppCoordinator(profileStorage: storage)
+        let model = ProfileSettingsModel(coordinator: coordinator)
+
+        model.load()
+        XCTAssertEqual(model.photoFilename, "selfie-1.jpg",
+                       "the editor shows the stored selfie's file name")
+
+        // This editor has NO photo UI: an ordinary save of the text
+        // fields must carry the selfie through untouched — never erase
+        // it by omission.
+        model.name = "Maya G."
+        model.save()
+
+        XCTAssertEqual(model.saveState, .saved)
+        guard case .loaded(let stored) = coordinator.currentProfileSnapshot() else {
+            return XCTFail("the save must land in the store")
+        }
+        XCTAssertEqual(stored.name, "Maya G.")
+        XCTAssertEqual(stored.photoFilename, "selfie-1.jpg",
+                       "a text-only save preserves the stored selfie")
     }
 
     // MARK: - Failure
