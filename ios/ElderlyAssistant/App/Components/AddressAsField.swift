@@ -32,6 +32,7 @@ struct AddressAsField: View {
     @Binding var text: String
     let locale: Locale
     var bounds: ProfileEntryBounds = .default
+    @Environment(\.appAppearance) private var appearance
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -49,10 +50,10 @@ struct AddressAsField: View {
             }
             TextField("profile.field.addressAs", text: clampedText)
                 .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .foregroundStyle(appearance.colors.textPrimary)
                 .padding(.horizontal, 16)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
-                .background(DesignTokens.card)
+                .background(appearance.colors.card)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
                 .accessibilityLabel(Text("profile.field.addressAs"))
         }
@@ -82,13 +83,13 @@ struct AddressAsField: View {
         } label: {
             Text(term)
                 .font(.system(size: DesignTokens.minBodyPointSize, weight: .medium))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .foregroundStyle(appearance.colors.textPrimary)
                 .padding(.horizontal, 18)
                 .frame(minWidth: DesignTokens.minTapTargetSize,
                        minHeight: DesignTokens.minTapTargetSize)
-                .background(DesignTokens.card)
+                .background(appearance.colors.card)
                 .clipShape(Capsule())
-                .overlay(Capsule().stroke(DesignTokens.accent.opacity(0.35),
+                .overlay(Capsule().stroke(appearance.colors.accent.opacity(0.35),
                                           lineWidth: 1))
         }
         .buttonStyle(.plain)

@@ -378,22 +378,22 @@ private struct FamilyContactStep: View {
                 if coordinator.familyContacts.isEmpty {
                     Text("settings.family.empty")
                         .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .foregroundStyle(appearance.colors.textSecondary)
                 } else {
                     ForEach(coordinator.familyContacts) { contact in
                         HStack(spacing: 10) {
                             Image(systemName: "person.crop.circle.fill")
                                 .font(.system(size: 22))
-                                .foregroundStyle(DesignTokens.accent)
+                                .foregroundStyle(appearance.colors.accent)
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(contact.name)
                                     .font(.system(size: DesignTokens.minBodyPointSize,
                                                   weight: .semibold))
-                                    .foregroundStyle(DesignTokens.textPrimary)
+                                    .foregroundStyle(appearance.colors.textPrimary)
                                 if !contact.relationship.isEmpty {
                                     Text(contact.relationship)
                                         .font(.system(size: DesignTokens.minCaptionPointSize))
-                                        .foregroundStyle(DesignTokens.textSecondary)
+                                        .foregroundStyle(appearance.colors.textSecondary)
                                 }
                             }
                             Spacer(minLength: 0)

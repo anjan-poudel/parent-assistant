@@ -11,6 +11,7 @@ import SwiftUI
 
 struct ProfileSettingsView: View {
     @EnvironmentObject private var coordinator: AppCoordinator
+    @Environment(\.appAppearance) private var appearance
     @StateObject private var model: ProfileSettingsModel
 
     init(coordinator: AppCoordinator) {
@@ -22,7 +23,7 @@ struct ProfileSettingsView: View {
             VStack(alignment: .leading, spacing: 16) {
                 Text("settings.profile.explanation")
                     .font(.system(size: DesignTokens.minBodyPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
 
                 nameField
                 addressAsSection
@@ -31,7 +32,7 @@ struct ProfileSettingsView: View {
 
                 Text("profile.kin.note")
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
 
                 saveArea
             }
@@ -47,13 +48,13 @@ struct ProfileSettingsView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("profile.field.name")
                 .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
             TextField("profile.field.name", text: clampedName)
                 .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .foregroundStyle(appearance.colors.textPrimary)
                 .padding(.horizontal, 16)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
-                .background(DesignTokens.card)
+                .background(appearance.colors.card)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
                 .accessibilityLabel(Text("profile.field.name"))
         }
@@ -63,7 +64,7 @@ struct ProfileSettingsView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("profile.field.addressAs")
                 .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
             AddressAsField(text: $model.addressAs,
                            locale: coordinator.activeLocale,
                            bounds: model.bounds)
@@ -74,7 +75,7 @@ struct ProfileSettingsView: View {
         VStack(alignment: .leading, spacing: 8) {
             Toggle("profile.field.dateOfBirth", isOn: $model.hasDateOfBirth)
                 .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .foregroundStyle(appearance.colors.textPrimary)
                 // iOS 16 single-parameter onChange (the two-parameter
                 // closure overload is iOS 17-only; deployment target is
                 // 16.0 — same form as the rest of the codebase).
@@ -101,18 +102,18 @@ struct ProfileSettingsView: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("profile.field.doctor")
                 .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
             TextField("profile.field.doctor", text: $model.emergencyDoctor)
                 .font(.system(size: DesignTokens.minBodyPointSize))
                 .padding(.horizontal, 16)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
-                .background(DesignTokens.card)
+                .background(appearance.colors.card)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
             TextField("profile.field.hospital", text: $model.localHospital)
                 .font(.system(size: DesignTokens.minBodyPointSize))
                 .padding(.horizontal, 16)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
-                .background(DesignTokens.card)
+                .background(appearance.colors.card)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
         }
     }
@@ -129,7 +130,7 @@ struct ProfileSettingsView: View {
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
-                .background(DesignTokens.accent)
+                .background(appearance.colors.accent)
                 .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
         }
         .buttonStyle(.plain)
@@ -141,10 +142,10 @@ struct ProfileSettingsView: View {
             HStack(spacing: 8) {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.accent)
+                    .foregroundStyle(appearance.colors.accent)
                 Text("profile.saved")
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.accent)
+                    .foregroundStyle(appearance.colors.accent)
             }
         case .failed:
             Text("profile.error.saveFailed")

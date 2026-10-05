@@ -43,29 +43,29 @@ struct AboutYouStep: View {
         VStack(spacing: 24) {
             VStack(spacing: 10) {
                 Text("onboarding.aboutYou.title")
-                    .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .font(DesignTokens.greetingFont(size: appearance.typography.titlePointSize))
+                    .foregroundStyle(appearance.colors.textPrimary)
                     .multilineTextAlignment(.center)
                 Text("onboarding.aboutYou.body")
                     .font(.system(size: DesignTokens.minBodyPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
                     .multilineTextAlignment(.center)
             }
 
             VStack(alignment: .leading, spacing: 16) {
                 TextField("onboarding.aboutYou.name", text: clampedName)
                     .font(.system(size: DesignTokens.minBodyPointSize))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .foregroundStyle(appearance.colors.textPrimary)
                     .padding(.horizontal, 16)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.card)
+                    .background(appearance.colors.card)
                     .clipShape(RoundedRectangle(cornerRadius: 14))
                     .accessibilityLabel(Text("onboarding.aboutYou.name"))
 
                 VStack(alignment: .leading, spacing: 8) {
                     Text("onboarding.aboutYou.addressAs")
                         .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .foregroundStyle(appearance.colors.textSecondary)
                     AddressAsField(text: addressAsBinding,
                                    locale: coordinator.activeLocale,
                                    bounds: bounds)
@@ -75,7 +75,7 @@ struct AboutYouStep: View {
                     Toggle("onboarding.aboutYou.dateOfBirthToggle",
                            isOn: $draft.hasDateOfBirth)
                         .font(.system(size: DesignTokens.minBodyPointSize))
-                        .foregroundStyle(DesignTokens.textPrimary)
+                        .foregroundStyle(appearance.colors.textPrimary)
                         // iOS 16 single-parameter onChange (the two-
                         // parameter closure overload is iOS 17-only).
                         .onChange(of: draft.hasDateOfBirth) { isOn in
@@ -215,19 +215,19 @@ struct EmergencyContactsStep: View {
         VStack(spacing: 24) {
             VStack(spacing: 10) {
                 Text("onboarding.emergency.title")
-                    .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .font(DesignTokens.greetingFont(size: appearance.typography.titlePointSize))
+                    .foregroundStyle(appearance.colors.textPrimary)
                     .multilineTextAlignment(.center)
                 Text("onboarding.emergency.body")
                     .font(.system(size: DesignTokens.minBodyPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
                     .multilineTextAlignment(.center)
             }
 
             VStack(alignment: .leading, spacing: 10) {
                 Text("onboarding.emergency.kinTitle")
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
                 kinSection
             }
 
@@ -236,13 +236,13 @@ struct EmergencyContactsStep: View {
                     .font(.system(size: DesignTokens.minBodyPointSize))
                     .padding(.horizontal, 16)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.card)
+                    .background(appearance.colors.card)
                     .clipShape(RoundedRectangle(cornerRadius: 14))
                 TextField("onboarding.emergency.hospital", text: $draft.localHospital)
                     .font(.system(size: DesignTokens.minBodyPointSize))
                     .padding(.horizontal, 16)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.card)
+                    .background(appearance.colors.card)
                     .clipShape(RoundedRectangle(cornerRadius: 14))
             }
 
@@ -277,26 +277,26 @@ struct EmergencyContactsStep: View {
         VStack(spacing: 10) {
             Text("onboarding.stepFamily.body")
                 .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
             TextField("onboarding.stepFamily.name", text: $inlineName)
                 .font(.system(size: DesignTokens.minBodyPointSize))
                 .padding(.horizontal, 16)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
-                .background(DesignTokens.card)
+                .background(appearance.colors.card)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
             TextField("onboarding.stepFamily.phone", text: $inlinePhone)
                 .keyboardType(.phonePad)
                 .font(.system(size: DesignTokens.minBodyPointSize))
                 .padding(.horizontal, 16)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
-                .background(DesignTokens.card)
+                .background(appearance.colors.card)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
             TextField("onboarding.stepFamily.relationship", text: $inlineRelationship)
                 .font(.system(size: DesignTokens.minBodyPointSize))
                 .padding(.horizontal, 16)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
-                .background(DesignTokens.card)
+                .background(appearance.colors.card)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
         }
     }
@@ -313,27 +313,27 @@ struct EmergencyContactsStep: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(contact.name)
                         .font(.system(size: DesignTokens.minBodyPointSize, weight: .medium))
-                        .foregroundStyle(DesignTokens.textPrimary)
+                        .foregroundStyle(appearance.colors.textPrimary)
                     if !contact.phone.trimmingCharacters(in: .whitespaces).isEmpty {
                         Text(contact.phone)
                             .font(.system(size: DesignTokens.minCaptionPointSize))
-                            .foregroundStyle(DesignTokens.textSecondary)
+                            .foregroundStyle(appearance.colors.textSecondary)
                     }
                 }
                 Spacer(minLength: 8)
                 if contact.isEmergencyContact {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 24))
-                        .foregroundStyle(DesignTokens.accent)
+                        .foregroundStyle(appearance.colors.accent)
                 }
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(DesignTokens.card)
+            .background(appearance.colors.card)
             .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
             .overlay(
                 RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius)
-                    .stroke(contact.isEmergencyContact ? DesignTokens.accent : Color.clear,
+                    .stroke(contact.isEmergencyContact ? appearance.colors.accent : Color.clear,
                             lineWidth: 2)
             )
         }
@@ -437,12 +437,12 @@ struct VoiceFingerprintStep: View {
         VStack(spacing: 24) {
             VStack(spacing: 10) {
                 Text("onboarding.stepVoiceFingerprint.title")
-                    .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .font(DesignTokens.greetingFont(size: appearance.typography.titlePointSize))
+                    .foregroundStyle(appearance.colors.textPrimary)
                     .multilineTextAlignment(.center)
                 Text("onboarding.stepVoiceFingerprint.body")
                     .font(.system(size: DesignTokens.minBodyPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
                     .multilineTextAlignment(.center)
             }
 
@@ -455,7 +455,7 @@ struct VoiceFingerprintStep: View {
                     } label: {
                         Text("common.close")
                             .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                            .foregroundStyle(DesignTokens.accent)
+                            .foregroundStyle(appearance.colors.accent)
                             .frame(maxWidth: .infinity)
                             .frame(minHeight: DesignTokens.minTapTargetSize)
                     }
@@ -486,7 +486,7 @@ struct VoiceFingerprintStep: View {
                           sampleNumber,
                           VoiceEnrollmentSession.requiredSampleCount))
                 .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
         case .recording:
             Text("voiceSettings.biometric.enroll.recordingHint")
                 .font(.system(size: DesignTokens.minCaptionPointSize))
@@ -496,16 +496,16 @@ struct VoiceFingerprintStep: View {
                 ProgressView()
                 Text("voiceSettings.biometric.enroll.processing")
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
             }
         case .ready:
             HStack(spacing: 8) {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.accent)
+                    .foregroundStyle(appearance.colors.accent)
                 Text("onboarding.voiceFingerprint.done")
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.accent)
+                    .foregroundStyle(appearance.colors.accent)
             }
         }
         if case .failed(let failure) = enrollment.phase {
@@ -544,7 +544,7 @@ struct VoiceFingerprintStep: View {
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
                         .frame(minHeight: DesignTokens.minTapTargetSize)
-                        .background(isRecording ? DesignTokens.stateError : DesignTokens.accent)
+                        .background(isRecording ? DesignTokens.stateError : appearance.colors.accent)
                         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
                 }
                 .buttonStyle(.plain)
