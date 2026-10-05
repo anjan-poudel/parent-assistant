@@ -19,10 +19,10 @@ struct TimerAlarmScreen: View {
                     Button(action: onStop) {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 26, weight: .bold))
-                            .foregroundStyle(DesignTokens.stateError)
+                            .foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
                             .frame(minWidth: DesignTokens.minTapTargetSize,
                                    minHeight: DesignTokens.minTapTargetSize)
-                            .background(Color.white)
+                            .background(appearance.colors.card)
                             .clipShape(Circle())
                     }
                     .buttonStyle(.plain)
@@ -57,10 +57,10 @@ struct TimerAlarmScreen: View {
                     Text("timerAlarm.stop")
                         .font(.system(size: appearance.typography.bodyPointSize + 4,
                                       weight: .bold))
-                        .foregroundColor(DesignTokens.stateError)
+                        .foregroundColor(appearance.statusForeground(DesignTokens.stateError))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 24)
-                        .background(Color.white)
+                        .background(appearance.colors.card)
                         .clipShape(RoundedRectangle(cornerRadius: 24))
                 }
                 .padding(.horizontal, 36)

@@ -111,7 +111,7 @@ struct InAppNavigationView: View {
             Spacer()
             ProgressView()
                 .controlSize(.large)
-                .tint(appearance.colors.accent)
+                .tint(appearance.colors.accentForeground)
             Text(LocalizedStringKey(key))
                 .font(.system(size: appearance.typography.scaled(18), weight: .medium))
                 .foregroundColor(appearance.colors.textSecondary)
@@ -167,8 +167,7 @@ struct InAppNavigationView: View {
                     Text(L10n.fmt("directions.inApp.eta",
                                   locale: locale,
                                   minutes(route.expectedTravelTime)))
-                        .font(.system(size: appearance.typography.scaled(15), weight: .semibold))
-                        .foregroundColor(appearance.colors.accent)
+                        .font(.system(size: appearance.typography.scaled(15), weight: .semibold)).foregroundColor(appearance.colors.accentForeground)
                 }
             }
             .padding(.horizontal)
@@ -185,8 +184,7 @@ struct InAppNavigationView: View {
                         stepRow(index: index + 1, instruction: step.instruction)
                     }
                     Text("directions.inApp.arrival")
-                        .font(.system(size: appearance.typography.scaled(15), weight: .semibold))
-                        .foregroundColor(appearance.colors.accent)
+                        .font(.system(size: appearance.typography.scaled(15), weight: .semibold)).foregroundColor(appearance.colors.accentForeground)
                         .padding(.horizontal)
                         .padding(.top, 4)
                 }

@@ -272,7 +272,9 @@ struct DirectionsView: View {
                 // aware — the 30pt circle below grows with it via
                 // `minHeight`/`minWidth` so the glyph can never clip.
                 .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
-                .foregroundStyle(listening ? DesignTokens.overlayText : appearance.colors.accent)
+                .foregroundStyle(listening
+                    ? (appearance.skin.isDark ? appearance.colors.onAccent : DesignTokens.overlayText)
+                    : appearance.colors.accentForeground)
                 .frame(minWidth: 30, minHeight: 30)
                 .background(listening ? DesignTokens.stateListening : appearance.colors.background)
                 .clipShape(Circle())
@@ -365,8 +367,7 @@ struct DirectionsView: View {
         switch micPhase {
         case .listening:
             Text(L10n.str("directions.search.micListening", locale: coordinator.activeLocale))
-                .font(.system(size: appearance.typography.captionPointSize))
-                .foregroundStyle(appearance.colors.accent)
+                .font(.system(size: appearance.typography.captionPointSize)).foregroundStyle(appearance.colors.accentForeground)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 6)
         case .failed:
@@ -425,8 +426,7 @@ struct DirectionsView: View {
                     .lineLimit(2)
                 if let relationship = row.relationship {
                     Text(relationship)
-                        .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
-                        .foregroundStyle(appearance.colors.accent)
+                        .font(.system(size: appearance.typography.captionPointSize, weight: .semibold)).foregroundStyle(appearance.colors.accentForeground)
                         .lineLimit(2)
                 }
                 Text(row.address)

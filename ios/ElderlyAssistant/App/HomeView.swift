@@ -503,9 +503,9 @@ struct TalkButton: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
-    @ScaledMetric(relativeTo: .title) private var scaledHeroDiameter: CGFloat = 204
+    @ScaledMetric(relativeTo: .title) private var scaledHeroDiameter: CGFloat = 176
 
-    private var heroDiameter: CGFloat { min(scaledHeroDiameter, 280) }
+    private var heroDiameter: CGFloat { min(scaledHeroDiameter, 240) }
     private var usesGloss: Bool {
         appearance.style != .classic && !reduceTransparency && contrast != .increased
     }
@@ -662,6 +662,11 @@ struct TalkButton: View {
                                height: heroDiameter)
                         .shadow(color: discTint.opacity(usesGloss ? 0.34 : 0.10), radius: usesGloss ? 16 : 3, y: usesGloss ? 7 : 1)
                         .overlay(heroContent)
+                        .overlay {
+                            if appearance.skin.isDark {
+                                Circle().stroke(appearance.colors.textPrimary.opacity(0.65), lineWidth: 1.5)
+                            }
+                        }
                     if isPressingForReset {
                         resetProgressRing
                     }
@@ -718,6 +723,16 @@ struct TalkButton: View {
                 },
                 onPressingChanged: handleHoldPressing(_:)
             ))
+            .overlay {
+                HStack(spacing: 0) {
+                    waveformSide
+                    Spacer().frame(width: heroDiameter + 24)
+                    waveformSide
+                }
+                .frame(width: heroDiameter + 78, height: heroDiameter)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
             if dynamicTypeSize.isAccessibilitySize {
                 Text(isLoading ? loadingStageLabel : session.state.buttonText(locale: locale))
                     .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize, weight: .bold))
@@ -821,7 +836,7 @@ struct TalkButton: View {
                     .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
                                                 weight: .semibold))
             }
-            .foregroundStyle(appearance.colors.accent)
+            .foregroundStyle(appearance.colors.accentForeground)
             .padding(.horizontal, 18)
             .frame(minHeight: 52)
             .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
@@ -918,6 +933,19 @@ struct TalkButton: View {
                 .stroke(heroGlowTint.opacity(breathe ? 0.02 : 0.22), lineWidth: 2)
                 .frame(width: breathe ? heroDiameter + 130 : heroDiameter + 40,
                        height: breathe ? heroDiameter + 130 : heroDiameter + 40)
+        }
+    }
+
+    /// Decorative reference waveforms, not fabricated live audio levels.
+    private static let waveformHeights: [CGFloat] = [0.35, 0.65, 1.0, 0.75, 0.45]
+
+    private var waveformSide: some View {
+        HStack(alignment: .center, spacing: 3) {
+            ForEach(Self.waveformHeights.indices, id: \.self) { index in
+                Capsule()
+                    .fill(appearance.colors.accentForeground.opacity(appearance.skin.isDark ? 0.75 : 0.48))
+                    .frame(width: 3, height: heroDiameter * 0.28 * Self.waveformHeights[index])
+            }
         }
     }
 }
@@ -1102,7 +1130,7 @@ struct ConfirmationChips: View {
                 HStack(spacing: 8) {
                     Image(systemName: "questionmark.circle.fill")
                         .font(.system(size: 24))
-                        .foregroundColor(DesignTokens.stateUnderstanding)
+                        .foregroundColor(appearance.statusForeground(DesignTokens.stateUnderstanding))
                     Text(LocalizedStringKey(titleKey))
                         .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .bold))
                         .foregroundColor(appearance.colors.textSecondary)
@@ -1155,14 +1183,14 @@ struct ConfirmationChips: View {
         } label: {
             Text(LocalizedStringKey(key))
                 .font(DesignTokens.warmFont(size: appearance.typography.scaled(24), weight: .bold))
-                .foregroundColor(isYes ? appearance.colors.accent : appearance.colors.textSecondary)
+                .foregroundColor(isYes ? appearance.colors.accentForeground : appearance.colors.textSecondary)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: DesignTokens.chipHeight)
                 .padding(.vertical, 8)
                 .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
                 .overlay(
                     RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius)
-                        .stroke(isYes ? appearance.colors.accent : appearance.colors.textSecondary,
+                        .stroke(isYes ? appearance.colors.accentForeground : appearance.colors.textSecondary,
                                 lineWidth: 2)
                 )
         }

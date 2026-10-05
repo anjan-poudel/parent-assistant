@@ -444,8 +444,7 @@ struct ReminderVisualAidEditorView: View {
                     remove(aid)
                 } label: {
                     Image(systemName: "trash")
-                        .font(.system(size: 22))
-                        .foregroundStyle(DesignTokens.stateError)
+                        .font(.system(size: 22)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
                         .frame(minWidth: DesignTokens.minTapTargetSize,
                                minHeight: DesignTokens.minTapTargetSize)
                 }
@@ -464,8 +463,7 @@ struct ReminderVisualAidEditorView: View {
                     .font(.system(size: 24, weight: .semibold))
                 Text("visualAid.add")
                     .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
-            }
-            .foregroundStyle(appearance.colors.accent)
+            }.foregroundStyle(appearance.colors.accentForeground)
             .frame(maxWidth: .infinity)
             .frame(minHeight: DesignTokens.minTapTargetSize + 12)
             .background(appearance.colors.setupReminder)

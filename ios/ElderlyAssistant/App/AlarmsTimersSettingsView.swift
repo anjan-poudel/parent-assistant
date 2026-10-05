@@ -59,8 +59,7 @@ struct AlarmsTimersSettingsView: View {
                     // LocalizedStringKey wrapper — a String variable would
                     // render the KEY verbatim, not the translated line.
                     Text(LocalizedStringKey(coordinator.alarmPermissionDeniedKey))
-                        .font(.system(size: appearance.typography.captionPointSize))
-                        .foregroundColor(DesignTokens.stateError)
+                        .font(.system(size: appearance.typography.captionPointSize)).foregroundColor(appearance.statusForeground(DesignTokens.stateError))
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 8)
                 }
@@ -83,9 +82,7 @@ struct AlarmsTimersSettingsView: View {
     private func alarmRow(_ alarm: Alarm) -> some View {
         HStack(spacing: 12) {
             Image(systemName: alarm.isEnabled ? "alarm.fill" : "alarm")
-                .font(.system(size: 22))
-                .foregroundStyle(alarm.isEnabled ? appearance.colors.accent
-                                                 : appearance.colors.textSecondary)
+                .font(.system(size: 22)).foregroundStyle(alarm.isEnabled ? appearance.colors.accentForeground : appearance.colors.textSecondary)
             VStack(alignment: .leading, spacing: 4) {
                 Text(timeText(alarm.time))
                     .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
@@ -115,8 +112,7 @@ struct AlarmsTimersSettingsView: View {
                 coordinator.removeAlarm(id: alarm.id)
             } label: {
                 Image(systemName: "trash.fill")
-                    .font(.system(size: 22))
-                    .foregroundStyle(DesignTokens.stateError)
+                    .font(.system(size: 22)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
                     .frame(minWidth: DesignTokens.minTapTargetSize,
                            minHeight: DesignTokens.minTapTargetSize)
             }
@@ -135,8 +131,7 @@ struct AlarmsTimersSettingsView: View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             HStack(spacing: 12) {
                 Image(systemName: "timer")
-                    .font(.system(size: 22))
-                    .foregroundStyle(appearance.colors.accent)
+                    .font(.system(size: 22)).foregroundStyle(appearance.colors.accentForeground)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(countdownText(remaining: timer.endsAt.timeIntervalSince(context.date)))
                         .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
@@ -154,8 +149,7 @@ struct AlarmsTimersSettingsView: View {
                     coordinator.cancelTimer(id: timer.id)
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 26))
-                        .foregroundStyle(DesignTokens.stateError)
+                        .font(.system(size: 26)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
                         .frame(minWidth: DesignTokens.minTapTargetSize,
                                minHeight: DesignTokens.minTapTargetSize)
                 }
@@ -195,8 +189,7 @@ struct AlarmsTimersSettingsView: View {
 
             if let errorKey {
                 Text(LocalizedStringKey(errorKey))
-                    .font(.system(size: appearance.typography.captionPointSize))
-                    .foregroundStyle(DesignTokens.stateError)
+                    .font(.system(size: appearance.typography.captionPointSize)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
                     .multilineTextAlignment(.center)
             }
 

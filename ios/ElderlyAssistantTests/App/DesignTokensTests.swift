@@ -79,6 +79,23 @@ private extension DesignTokensTests {
                                     "\(message): measured \(String(format: "%.2f", ratio)):1", file: file, line: line)
     }
 
+    func composite(_ foreground: Color, opacity: Double, over background: Color) -> Color {
+        guard let front = sRGB(foreground), let back = sRGB(background) else {
+            XCTFail("Could not read composited surface components")
+            return background
+        }
+        return Color(.sRGB, red: front.r * opacity + back.r * (1 - opacity),
+                     green: front.g * opacity + back.g * (1 - opacity),
+                     blue: front.b * opacity + back.b * (1 - opacity), opacity: 1)
+    }
+
+    func isStopRed(_ color: Color) -> Bool {
+        guard let c = sRGB(color) else { return false }
+        let maximum = max(c.r, c.g, c.b), minimum = min(c.r, c.g, c.b)
+        guard maximum == c.r, maximum > minimum else { return false }
+        let hue = 60 * (c.g - c.b) / (maximum - minimum)
+        return abs(hue) < 10
+    }
 }
 
 extension DesignTokensTests {
@@ -99,9 +116,9 @@ extension DesignTokensTests {
         }
     }
 
-    /// Voice indicators must remain distinguishable on every selected canvas.
-    func testVoiceStateFillsSeparateFromEverySkinBackground() {
-        for skin in AppTheme.allCases {
+    /// Light canvases separate the fill itself; dark canvases use an outline and readable state ink.
+    func testVoiceStateFillsSeparateFromLightSkinBackgrounds() {
+        for skin in AppTheme.allCases where !skin.isDark {
             for color in [DesignTokens.stateIdle, DesignTokens.stateStopped,
                           DesignTokens.stateListening, DesignTokens.stateTranscribing,
                           DesignTokens.stateUnderstanding, DesignTokens.stateSpeaking,
@@ -119,14 +136,21 @@ extension DesignTokensTests {
     ]
 
 
-    /// Every badge icon is a graphical object: its fill must hold ≥3:1
-    /// against the circle it sits on (WCAG 1.4.11).
+    /// Opaque badges also carry labels; IconBadge's translucent wash carries a graphical glyph.
     func testEveryBadgeIconContrastsItsBackground() {
         for skin in AppTheme.allCases {
             let appearance = AppAppearance(skin: skin, style: .soft)
             for badge in Self.allBadgeTints {
-                assertContrast(appearance.badgeTint(badge), appearance.badgeBackground(badge),
-                               atLeast: 3.0, "\(skin) \(badge) badge contrast")
+                let foreground = appearance.badgeTint(badge)
+                let background = appearance.badgeBackground(badge)
+                assertContrast(foreground, background,
+                               atLeast: 4.5, "\(skin) \(badge) badge contrast")
+                for surface in [appearance.colors.background, appearance.colors.card,
+                                appearance.colors.brandCanvasBottom] {
+                    let wash = composite(background, opacity: 0.55, over: surface)
+                    assertContrast(foreground, wash, atLeast: skin.isDark ? 4.5 : 3.0,
+                                   "\(skin) \(badge) composited badge contrast")
+                }
             }
         }
     }
@@ -135,9 +159,11 @@ extension DesignTokensTests {
     func testEmergencyIsTheOnlyStopRedBadge() {
         for skin in AppTheme.allCases {
             let appearance = AppAppearance(skin: skin, style: .glass)
-            XCTAssertEqual(appearance.badgeTint(.emergency), DesignTokens.stateError)
+            XCTAssertTrue(isStopRed(appearance.badgeTint(.emergency)),
+                          "Emergency must retain a recognisably red hue")
             for badge in Self.allBadgeTints where badge != .emergency {
-                XCTAssertNotEqual(appearance.badgeTint(badge), DesignTokens.stateError)
+                XCTAssertFalse(isStopRed(appearance.badgeTint(badge)),
+                               "\(skin) \(badge) must not look like an emergency")
             }
         }
     }
@@ -149,8 +175,39 @@ extension DesignTokensTests {
                 assertContrast(colors.textPrimary, surface, atLeast: 4.5, "\(skin) primary text")
                 assertContrast(colors.textSecondary, surface, atLeast: 4.5, "\(skin) secondary text")
             }
-            for fill in [colors.accent, colors.talkHighlight, colors.talkMid, colors.talkDeep, colors.textPrimary] {
-                assertContrast(colors.onAccent, fill, atLeast: 4.5, "\(skin) white control ink")
+            let fills = [colors.accent, colors.talkHighlight, colors.talkMid, colors.talkDeep]
+            for start in fills {
+                for end in fills {
+                    for step in 0...20 {
+                        let fill = composite(start, opacity: Double(step) / 20, over: end)
+                        assertContrast(colors.onAccent, fill, atLeast: 4.5,
+                                       "\(skin) white ink across action gradient")
+                    }
+                }
+            }
+            if !skin.isDark {
+                assertContrast(colors.onAccent, colors.textPrimary, atLeast: 4.5,
+                               "\(skin) white ink on light skin's dark neutral action")
+            }
+        }
+    }
+
+    func testDarkAccentAndStatusForegroundsRemainReadableOnEverySurface() {
+        let states = [DesignTokens.stateIdle, DesignTokens.stateStopped,
+                      DesignTokens.stateListening, DesignTokens.stateTranscribing,
+                      DesignTokens.stateUnderstanding, DesignTokens.stateSpeaking,
+                      DesignTokens.stateError]
+        for skin in AppTheme.allCases where skin.isDark {
+            let appearance = AppAppearance(skin: skin, style: .soft)
+            let colors = appearance.colors
+            for surface in [colors.background, colors.card, colors.userBubble,
+                            colors.brandCanvasBottom] {
+                assertContrast(colors.accentForeground, surface, atLeast: 4.5,
+                               "\(skin) accent label")
+                for state in states {
+                    assertContrast(appearance.statusForeground(state), surface, atLeast: 4.5,
+                                   "\(skin) state label")
+                }
             }
         }
     }

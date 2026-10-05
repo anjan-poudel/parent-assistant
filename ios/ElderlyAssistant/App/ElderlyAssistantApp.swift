@@ -63,8 +63,8 @@ struct ElderlyAssistantApp: App {
             .environment(\.appAppearance, AppAppearance(
                 skin: appCoordinator.appTheme, style: appCoordinator.appVisualStyle,
                 textSize: appCoordinator.appTextSize))
-            .tint(AppColors.palette(for: appCoordinator.appTheme).accent)
-            .preferredColorScheme(.light)
+            .tint(AppColors.palette(for: appCoordinator.appTheme).accentForeground)
+            .preferredColorScheme(appCoordinator.appTheme.preferredColorScheme)
         }
     }
 }

@@ -93,8 +93,7 @@ struct NewsSourcesSettingsView: View {
                     }
                     if addFailed {
                         Text("settings.feeds.addSourceFailed")
-                            .font(.system(size: appearance.typography.captionPointSize))
-                            .foregroundStyle(DesignTokens.stateError)
+                            .font(.system(size: appearance.typography.captionPointSize)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
                     }
                 }
                 .padding(16)

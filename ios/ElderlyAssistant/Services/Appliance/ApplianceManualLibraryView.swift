@@ -80,7 +80,7 @@ struct ApplianceManualLibraryView: View {
                 Button("appliance.manual.cancel", role: .cancel) {}
             }
         }
-        .tint(appearance.colors.accent)
+        .tint(appearance.colors.accentForeground)
         .task {
             bundled = ApplianceManualLibraryModel.bundledManuals()
             model.reload()
@@ -297,8 +297,7 @@ struct ApplianceManualLibraryView: View {
                 pendingDeletion = manual
             } label: {
                 Image(systemName: "trash")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundColor(DesignTokens.stateListening)
+                    .font(.system(size: 20, weight: .semibold)).foregroundColor(appearance.statusForeground(DesignTokens.stateListening))
                     .accessibilityLabel(Text("appliance.manual.deleteA11y"))
             }
             .frame(minWidth: DesignTokens.minTapTargetSize,

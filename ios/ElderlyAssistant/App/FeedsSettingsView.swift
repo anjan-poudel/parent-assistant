@@ -76,8 +76,7 @@ struct FeedsSettingsView: View {
                         .foregroundStyle(appearance.colors.textPrimary)
                     if source.isCuratedDefault {
                         Text("settings.feeds.defaultTag")
-                            .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
-                            .foregroundStyle(appearance.colors.accent)
+                            .font(.system(size: appearance.typography.captionPointSize, weight: .semibold)).foregroundStyle(appearance.colors.accentForeground)
                     }
                 }
                 Text(source.urlString)
@@ -90,8 +89,7 @@ struct FeedsSettingsView: View {
                 coordinator.removeFeedSource(id: source.id)
             } label: {
                 Image(systemName: "trash.fill")
-                    .font(.system(size: 20))
-                    .foregroundStyle(DesignTokens.stateError)
+                    .font(.system(size: 20)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
                     .frame(minWidth: DesignTokens.minTapTargetSize,
                            minHeight: DesignTokens.minTapTargetSize)
             }
@@ -119,8 +117,7 @@ struct FeedsSettingsView: View {
                 .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
             if sourceAddFailed {
                 Text("settings.feeds.addSourceFailed")
-                    .font(.system(size: appearance.typography.captionPointSize))
-                    .foregroundStyle(DesignTokens.stateError)
+                    .font(.system(size: appearance.typography.captionPointSize)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity, alignment: .center)
             }
@@ -250,8 +247,7 @@ struct FeedsSettingsView: View {
                 } label: {
                     HStack(spacing: 14) {
                         Image(systemName: "newspaper.fill")
-                            .font(.system(size: 26))
-                            .foregroundStyle(appearance.colors.accent)
+                            .font(.system(size: 26)).foregroundStyle(appearance.colors.accentForeground)
                             .frame(width: 40)
                         Text("settings.feeds.newsManage")
                             .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
