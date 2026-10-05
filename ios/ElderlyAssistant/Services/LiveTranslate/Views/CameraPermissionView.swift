@@ -135,7 +135,7 @@ struct CameraPermissionView: View {
     var body: some View {
         VStack(spacing: 16) {
             Text(surface.message)
-                .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize))
+                .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize))
                 .foregroundColor(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
@@ -165,7 +165,7 @@ struct CameraPermissionView: View {
             }
         } label: {
             Text(title)
-                .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize, weight: .semibold))
                 .foregroundStyle(appearance.colors.onAccent)
                 .padding(.horizontal, 20)
                 .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)

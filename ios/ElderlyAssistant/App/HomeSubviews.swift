@@ -88,14 +88,14 @@ struct HomeTopBar: View {
         VStack(alignment: .center, spacing: 3) {
             if let line = dateLine {
                 Text(line.primary)
-                    .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                    .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
                                                 weight: .bold))
                     .foregroundStyle(appearance.colors.textPrimary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
                 if !line.overlays.isEmpty {
                     Text(line.overlays.joined(separator: " • "))
-                        .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                        .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
                                                    weight: .medium))
                         .foregroundStyle(appearance.colors.textSecondary)
                         .multilineTextAlignment(.center)
@@ -167,7 +167,7 @@ struct QuickAccessStrip: View {
                 Text(LocalizedStringKey(app.nameKey))
                     // [DESIGN-REVIEW] 18pt caption floor + wrapping —
                     // no minimumScaleFactor on localized tile labels.
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                     .foregroundColor(appearance.colors.textPrimary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
@@ -301,7 +301,7 @@ struct TalkStage: View {
             }
         } label: {
             Label("state.error.openSettings", systemImage: "gear")
-                .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .semibold))
                 .foregroundColor(appearance.colors.accent)
                 .padding(.horizontal, 16)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
@@ -393,19 +393,19 @@ struct HomeTimerChipView: View {
                     .foregroundStyle(appearance.colors.accent)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(LocalizedStringKey("homeTimer.remaining"))
-                        .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                        .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
                                                    weight: .medium))
                         .foregroundStyle(appearance.colors.textSecondary)
                     Text(HomeTimerChipModel.countdownText(
                         remaining: viewModel.snapshot.endsAt?.timeIntervalSince(context.date) ?? 0,
                         isNepali: isNepali))
-                        .font(.system(size: DesignTokens.homeTimerDigitPointSize, weight: .bold))
+                        .font(.system(size: appearance.typography.homeTimerDigitPointSize, weight: .bold))
                         .foregroundStyle(appearance.colors.textPrimary)
                         .monospacedDigit()
                 }
                 if let label = viewModel.snapshot.label {
                     Text(label)
-                        .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                        .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
                                                    weight: .regular))
                         .foregroundStyle(appearance.colors.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -439,7 +439,7 @@ struct HomeTimerChipView: View {
         let more = viewModel.snapshot.activeCount - 1
         let text = HomeTimerChipModel.devanagari("+\(more)")
         return Text(isNepali ? text : "+\(more)")
-            .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+            .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
                                         weight: .semibold))
             .foregroundStyle(appearance.colors.accent)
             .padding(.horizontal, 8)
@@ -589,17 +589,17 @@ struct HomeMissedCallTile: View {
                           diameter: 40)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(presentation.title)
-                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                        .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                         .foregroundStyle(appearance.colors.textPrimary)
                         .multilineTextAlignment(.leading)
                         .lineLimit(2)
                     Text(presentation.time)
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .font(.system(size: appearance.typography.captionPointSize))
                         .foregroundStyle(appearance.colors.textSecondary)
                 }
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.right")
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
                     .foregroundStyle(appearance.colors.textSecondary)
             }
             .padding(16)
@@ -660,11 +660,11 @@ private struct SetupStrip: View {
                     Text(L10n.fmt("home.setupOptionalCount",
                                   locale: locale,
                                   setup.pendingCount))
-                        .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                        .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
                                                     weight: .semibold))
                         .foregroundStyle(appearance.colors.textPrimary)
                     Text(L10n.str("home.setupTalkNow", locale: locale))
-                        .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                        .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
                                                     weight: .regular))
                         .foregroundStyle(appearance.colors.textSecondary)
                 }
@@ -786,7 +786,7 @@ struct HomeDock: View {
 
     private func tileLabel(_ titleKey: String, utility: Bool) -> some View {
         Text(LocalizedStringKey(titleKey))
-            .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+            .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .semibold))
             .foregroundStyle(utility ? appearance.colors.onAccent : appearance.colors.textPrimary)
             .multilineTextAlignment(.center)
             .fixedSize(horizontal: false, vertical: true)

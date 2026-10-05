@@ -67,7 +67,7 @@ struct EventsView: View {
             addingEvent = true
         } label: {
             Label("events.add", systemImage: "plus.circle.fill")
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: DesignTokens.chipHeight)
@@ -87,15 +87,15 @@ struct EventsView: View {
                     .foregroundStyle(appearance.colors.accent)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(event.title)
-                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                        .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                         .foregroundStyle(appearance.colors.textPrimary)
                         .multilineTextAlignment(.leading)
                     Text(Self.whenText(for: event, locale: coordinator.activeLocale))
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .font(.system(size: appearance.typography.captionPointSize))
                         .foregroundStyle(appearance.colors.textSecondary)
                     if let address = event.address, !address.isEmpty {
                         Text(address)
-                            .font(.system(size: DesignTokens.minCaptionPointSize))
+                            .font(.system(size: appearance.typography.captionPointSize))
                             .foregroundStyle(appearance.colors.textSecondary)
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
@@ -221,7 +221,7 @@ struct EventFormView: View {
 
     private var titleCard: some View {
         TextField(LocalizedStringKey("events.field.title"), text: $form.title)
-            .font(.system(size: DesignTokens.minBodyPointSize))
+            .font(.system(size: appearance.typography.bodyPointSize))
             .padding(14)
             .frame(minHeight: 56)
             .fixedSize(horizontal: false, vertical: true)
@@ -289,7 +289,7 @@ struct EventFormView: View {
                 }
                 PhotosPicker(selection: $photoPickerItem, matching: .images) {
                     Text(displayedPhoto == nil ? "events.photo.add" : "events.photo.change")
-                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                        .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 18)
                         .frame(minHeight: DesignTokens.minTapTargetSize)
@@ -301,7 +301,7 @@ struct EventFormView: View {
                         removingStoredPhoto = true
                     } label: {
                         Text("events.photo.remove")
-                            .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                            .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                             .foregroundStyle(appearance.colors.textPrimary)
                             .padding(.horizontal, 18)
                             .frame(minHeight: DesignTokens.minTapTargetSize)
@@ -311,7 +311,7 @@ struct EventFormView: View {
                 }
             }
             Text("events.photo.note")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -325,13 +325,13 @@ struct EventFormView: View {
         VStack(alignment: .leading, spacing: 10) {
             fieldLabel("events.field.address")
             TextField(LocalizedStringKey("events.field.addressPlaceholder"), text: $form.address)
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .padding(14)
                 .frame(minHeight: 56)
                 .fixedSize(horizontal: false, vertical: true)
                 .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
             Text("events.address.note")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -343,7 +343,7 @@ struct EventFormView: View {
 
     private var notesCard: some View {
         TextField(LocalizedStringKey("events.field.notes"), text: $form.notes)
-            .font(.system(size: DesignTokens.minBodyPointSize))
+            .font(.system(size: appearance.typography.bodyPointSize))
             .padding(14)
             .frame(minHeight: 56)
             .fixedSize(horizontal: false, vertical: true)
@@ -360,7 +360,7 @@ struct EventFormView: View {
         if coordinator.calendarShareService.status.isActive,
            coordinator.familyContacts.allSatisfy({ ($0.email ?? "").isEmpty }) {
             Text(LocalizedStringKey("events.share.noEmails"))
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 4)
@@ -373,7 +373,7 @@ struct EventFormView: View {
                 save()
             } label: {
                 Text(event == nil ? "events.save" : "events.saveChanges")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .frame(minHeight: DesignTokens.chipHeight)
@@ -389,7 +389,7 @@ struct EventFormView: View {
                 dismiss()
             } label: {
                 Text("common.cancel")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                     .foregroundStyle(appearance.colors.textPrimary)
                     .frame(maxWidth: .infinity)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
@@ -402,7 +402,7 @@ struct EventFormView: View {
 
     private func fieldLabel(_ key: String) -> some View {
         Text(LocalizedStringKey(key))
-            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+            .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
             .foregroundStyle(appearance.colors.textSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -411,7 +411,7 @@ struct EventFormView: View {
                            selection: Binding<Date>) -> some View {
         HStack(spacing: 12) {
             Text(LocalizedStringKey(key))
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .foregroundStyle(appearance.colors.textPrimary)
             Spacer()
             DatePicker("", selection: selection, displayedComponents: components)
@@ -441,7 +441,7 @@ struct EventFormView: View {
                         select(option)
                     } label: {
                         Text(label(option))
-                            .font(.system(size: DesignTokens.minBodyPointSize,
+                            .font(.system(size: appearance.typography.bodyPointSize,
                                           weight: .semibold))
                             .foregroundStyle(isSelected ? .white : appearance.colors.textPrimary)
                             .lineLimit(1)
@@ -577,22 +577,22 @@ struct EventDetailView: View {
 
         VStack(alignment: .leading, spacing: 8) {
             Text(event.title)
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 .foregroundStyle(appearance.colors.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Text(EventsView.whenText(for: event, locale: coordinator.activeLocale))
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
             if let address = event.address, !address.isEmpty {
                 Text(address)
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let notes = event.notes, !notes.isEmpty {
                 Text(notes)
-                    .font(.system(size: DesignTokens.minBodyPointSize))
+                    .font(.system(size: appearance.typography.bodyPointSize))
                     .foregroundStyle(appearance.colors.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -616,7 +616,7 @@ struct EventDetailView: View {
             coordinator.navigateToEvent(event)
         } label: {
             Label("events.navigate", systemImage: "arrow.triangle.turn.up.right.circle.fill")
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: DesignTokens.chipHeight)
@@ -631,7 +631,7 @@ struct EventDetailView: View {
             editing = true
         } label: {
             Text("events.edit")
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 .foregroundStyle(appearance.colors.textPrimary)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
@@ -645,7 +645,7 @@ struct EventDetailView: View {
             confirmingDelete = true
         } label: {
             Text("events.delete")
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 .foregroundStyle(DesignTokens.stateError)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
@@ -659,7 +659,7 @@ struct EventDetailView: View {
             onClose()
         } label: {
             Text("common.close")
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                 .foregroundStyle(appearance.colors.accent)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: DesignTokens.minTapTargetSize)

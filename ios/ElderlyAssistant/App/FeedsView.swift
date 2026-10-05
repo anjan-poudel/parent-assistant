@@ -49,14 +49,14 @@ struct FeedsView: View {
         HStack(spacing: 12) {
             Text(L10n.fmt("feeds.count", locale: coordinator.activeLocale,
                           coordinator.feedItems.count))
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                 .foregroundStyle(appearance.colors.textSecondary)
             Spacer()
             Button {
                 Task { await coordinator.refreshFeed() }
             } label: {
                 Label("feeds.refresh", systemImage: "arrow.clockwise")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(appearance.colors.accent)
                     .padding(.horizontal, 16)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
@@ -88,7 +88,7 @@ struct FeedsView: View {
         HStack(spacing: 12) {
             ProgressView()
             Text("feeds.loading")
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
         }
         .padding(20)
@@ -102,14 +102,14 @@ struct FeedsView: View {
                 .font(.system(size: 28))
                 .foregroundStyle(appearance.colors.textSecondary)
             Text("feeds.failed")
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
                 .multilineTextAlignment(.center)
             Button {
                 Task { await coordinator.refreshFeed() }
             } label: {
                 Text("feeds.retry")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 20)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
@@ -145,12 +145,12 @@ struct FeedsView: View {
             Image(systemName: "exclamationmark.circle.fill")
                 // Caption-token status glyph (DESIGN-REVIEW) — 18pt floor,
                 // Dynamic Type aware; was a fixed 16pt.
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
                 .padding(.top, 2)
             Text(L10n.fmt("feeds.partialFailure", locale: coordinator.activeLocale,
                           coordinator.feedFailedSourceNames.joined(separator: ", ")))
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -160,7 +160,7 @@ struct FeedsView: View {
 
     private var emptyCard: some View {
         Text("feeds.empty")
-            .font(.system(size: DesignTokens.minBodyPointSize))
+            .font(.system(size: appearance.typography.bodyPointSize))
             .foregroundStyle(appearance.colors.textSecondary)
             .multilineTextAlignment(.center)
             .padding(32)
@@ -210,12 +210,12 @@ struct FeedsView: View {
                 }
             }
             Text(display.title)
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 .foregroundStyle(appearance.colors.textPrimary)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if let summary = displaySummary(display) {
                 Text(summary)
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textPrimary)
                     .lineLimit(4)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -273,7 +273,7 @@ struct FeedsView: View {
                 .accessibilityHidden(true)
             }
             Text(item.title)
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 .foregroundStyle(appearance.colors.textPrimary)
                 .frame(maxWidth: .infinity, alignment: .leading)
             captionRow(item)
@@ -300,13 +300,13 @@ struct FeedsView: View {
                     .font(.system(size: 22))
                     .foregroundStyle(appearance.colors.accent)
                 Text(display.title)
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(appearance.colors.textPrimary)
                     .lineLimit(3)
             }
             if let summary = displaySummary(display) {
                 Text(summary)
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textPrimary)
                     .lineLimit(2)
             }
@@ -321,7 +321,7 @@ struct FeedsView: View {
                     playingItem = item
                 } label: {
                     Label("feeds.play", systemImage: "play.fill")
-                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                        .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 18)
                         .frame(maxWidth: .infinity)
@@ -344,7 +344,7 @@ struct FeedsView: View {
     private func captionRow(_ item: FeedItem) -> some View {
         HStack(spacing: 6) {
             Text(item.sourceName)
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                 .foregroundStyle(appearance.colors.textSecondary)
             if let date = item.publishedAt {
                 Text("·")
@@ -353,7 +353,7 @@ struct FeedsView: View {
                                                      now: Date(),
                                                      calendar: .current,
                                                      locale: coordinator.activeLocale))
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
             }
         }
@@ -385,9 +385,9 @@ struct FeedsView: View {
     private var translatedMarker: some View {
         HStack(spacing: 4) {
             Image(systemName: "sparkles")
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
             Text("feeds.translatedByAI")
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
         }
         .foregroundStyle(appearance.colors.accent)
         .padding(.horizontal, 10)
@@ -409,7 +409,7 @@ struct FeedsView: View {
                 .controlSize(.small)
                 .tint(appearance.colors.textSecondary)
             Text("feeds.translating")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
         }
         .foregroundStyle(appearance.colors.textSecondary)
         .accessibilityElement(children: .combine)
@@ -424,9 +424,9 @@ struct FeedsView: View {
     private var translationUnavailableCaption: some View {
         HStack(spacing: 6) {
             Image(systemName: "exclamationmark.circle.fill")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
             Text("feeds.translationUnavailable")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
         }
         .foregroundStyle(appearance.colors.textSecondary)
         .accessibilityElement(children: .combine)
@@ -459,7 +459,7 @@ struct FeedsView: View {
                           ? "arrow.uturn.backward" : "character.bubble.fill")
                 }
             }
-            .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+            .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
             .foregroundStyle(appearance.colors.accent)
             .padding(.horizontal, 18)
             .frame(maxWidth: .infinity)
@@ -500,7 +500,7 @@ struct FeedsView: View {
             readAloud(item)
         } label: {
             Label("feeds.readAloud", systemImage: "speaker.wave.2.fill")
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 .foregroundStyle(.white)
                 .padding(.horizontal, 18)
                 .frame(maxWidth: .infinity)
@@ -522,7 +522,7 @@ struct FeedsView: View {
             coordinator.readFeedItemArticleAloud(item)
         } label: {
             Label("feeds.readFullArticle", systemImage: "doc.text.fill")
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 .foregroundStyle(appearance.colors.accent)
                 .padding(.horizontal, 18)
                 .frame(maxWidth: .infinity)
@@ -543,7 +543,7 @@ struct FeedsView: View {
                 .fill(appearance.colors.accent)
                 .frame(width: 8, height: 8)
             Text("feeds.unread")
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
         }
         .foregroundStyle(appearance.colors.accent)
         .padding(.horizontal, 10)
@@ -561,9 +561,9 @@ struct FeedsView: View {
     private var summaryOnlyCaption: some View {
         HStack(spacing: 6) {
             Image(systemName: "text.alignleft")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
             Text("feeds.summaryOnly")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
         }
         .foregroundStyle(appearance.colors.textSecondary)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -623,10 +623,10 @@ struct FeedMediaPlayerSheet: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(Text("feeds.close"))
                 Text("feeds.playingTitle")
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
                     .foregroundStyle(appearance.colors.textSecondary)
                 Text(item.title)
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                     .foregroundStyle(appearance.colors.textPrimary)
                     .lineLimit(2)
                 Spacer(minLength: 8)

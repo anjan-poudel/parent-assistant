@@ -53,10 +53,10 @@ struct CloudActivityIndicatorView: View {
         if surface.isActive {
             HStack(spacing: 8) {
                 Image(systemName: CloudActivityIndicatorSurface.symbolName)
-                    .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize))
+                    .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize))
                     .foregroundColor(appearance.colors.textPrimary)
                 Text(surface.label)
-                    .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize))
+                    .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize))
                     .foregroundColor(appearance.colors.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
             }

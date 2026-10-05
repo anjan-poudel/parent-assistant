@@ -89,14 +89,14 @@ struct ConsentPromptView: View {
     var body: some View {
         VStack(spacing: 16) {
             Text(surface.title)
-                .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize, weight: .semibold))
                 .foregroundColor(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("livetranslate.consent.heading")
 
             Text(surface.message)
-                .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize))
+                .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize))
                 .foregroundColor(appearance.colors.textPrimary)
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
@@ -104,7 +104,7 @@ struct ConsentPromptView: View {
 
             if let failure = surface.failureMessage {
                 Text(failure)
-                    .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize))
+                    .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize))
                     .foregroundColor(appearance.colors.textPrimary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
@@ -132,7 +132,7 @@ struct ConsentPromptView: View {
             }
         } label: {
             Text(action.title)
-                .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize, weight: .semibold))
                 .foregroundStyle(appearance.colors.onAccent)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 20)
@@ -211,13 +211,13 @@ struct ConsentControlView: View {
     private func grantedCard(title: String, message: String, revokeTitle: String) -> some View {
         VStack(spacing: 16) {
             Text(title)
-                .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize, weight: .semibold))
                 .foregroundColor(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
 
             Text(message)
-                .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize))
+                .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize))
                 .foregroundColor(appearance.colors.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -225,7 +225,7 @@ struct ConsentControlView: View {
             // default, and it carries no blame.
             Button(action: onRevoke) {
                 Text(revokeTitle)
-                    .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize, weight: .semibold))
                     .foregroundStyle(appearance.colors.onAccent)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 20)

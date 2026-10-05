@@ -61,10 +61,10 @@ struct AlwaysShowOriginalControl: View {
         } label: {
             HStack(spacing: DesignTokens.interElementSpacing / 2) {
                 Image(systemName: AlwaysShowOriginalSurface.symbolName)
-                    .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize,
+                    .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize,
                                                 weight: .semibold))
                 Text(surface.label)
-                    .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize,
+                    .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize,
                                                 weight: .semibold))
                     .fixedSize(horizontal: false, vertical: true)
             }

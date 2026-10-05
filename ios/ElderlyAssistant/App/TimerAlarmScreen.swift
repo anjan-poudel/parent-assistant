@@ -5,6 +5,7 @@ import SwiftUI
 /// chevron gives every non-Home screen a consistent escape path. Neither
 /// path can dismiss the alert while leaving its bell running.
 struct TimerAlarmScreen: View {
+    @Environment(\.appAppearance) private var appearance
     let timer: TimerItem
     let onStop: () -> Void
 
@@ -12,6 +13,7 @@ struct TimerAlarmScreen: View {
         ZStack {
             DesignTokens.stateError
                 .ignoresSafeArea()
+            ScrollView {
             VStack(spacing: 20) {
                 HStack {
                     Button(action: onStop) {
@@ -35,25 +37,25 @@ struct TimerAlarmScreen: View {
                     .foregroundColor(.white)
                     .padding(.top, 32)
                 Text("timerAlarm.title")
-                    .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
+                    .font(DesignTokens.greetingFont(size: appearance.typography.titlePointSize))
                     .foregroundColor(.white)
                     .multilineTextAlignment(.center)
                 if let label = timer.label {
                     Text(label)
-                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                        .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                         .foregroundColor(.white.opacity(0.95))
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 24)
                 }
                 Text("timerAlarm.ringingNote")
-                    .font(.system(size: DesignTokens.minBodyPointSize))
+                    .font(.system(size: appearance.typography.bodyPointSize))
                     .foregroundColor(.white.opacity(0.9))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
                 Spacer()
                 Button(action: onStop) {
                     Text("timerAlarm.stop")
-                        .font(.system(size: DesignTokens.minBodyPointSize + 4,
+                        .font(.system(size: appearance.typography.bodyPointSize + 4,
                                       weight: .bold))
                         .foregroundColor(DesignTokens.stateError)
                         .frame(maxWidth: .infinity)
@@ -65,11 +67,12 @@ struct TimerAlarmScreen: View {
                 // The honest foreground/background contract, on the one
                 // screen where it matters most.
                 Text("timerAlarm.backgroundNote")
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundColor(.white.opacity(0.85))
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
                     .padding(.bottom, 40)
+            }
             }
         }
     }

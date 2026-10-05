@@ -291,6 +291,13 @@ final class AppCoordinator: ObservableObject {
     }
     private static let visualStyleKey = "appVisualStyle"
 
+    @Published var appTextSize: AppTextSize {
+        didSet {
+            UserDefaults.standard.set(appTextSize.rawValue, forKey: Self.textSizeKey)
+        }
+    }
+    private static let textSizeKey = "appTextSize"
+
     /// The app an ADDRESS-BOOK row's call button opens when the row has no
     /// per-contact channel pick saved — per-row picks live in
     /// `channelPreferenceStore`, and a row without one resolves here
@@ -2648,6 +2655,8 @@ final class AppCoordinator: ObservableObject {
             UserDefaults.standard.string(forKey: Self.themeKey))
         self.appVisualStyle = AppVisualStyle(rawOrDefault:
             UserDefaults.standard.string(forKey: Self.visualStyleKey))
+        self.appTextSize = AppTextSize(rawOrDefault:
+            UserDefaults.standard.string(forKey: Self.textSizeKey))
 
         // Calendar display (calendar-display task, 2026-09-09) — the
         // default calendar + overlay toggles behind the Home top bar's

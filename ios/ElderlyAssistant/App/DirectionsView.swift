@@ -246,7 +246,7 @@ struct DirectionsView: View {
                 .font(.system(size: 18, weight: .semibold))
                 .foregroundStyle(appearance.colors.textSecondary)
             TextField("directions.search.placeholder", text: $searchText)
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .foregroundStyle(appearance.colors.textPrimary)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
@@ -271,7 +271,7 @@ struct DirectionsView: View {
                 // Caption token (DESIGN-REVIEW): 18pt floor, Dynamic Type
                 // aware — the 30pt circle below grows with it via
                 // `minHeight`/`minWidth` so the glyph can never clip.
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                 .foregroundStyle(listening ? DesignTokens.overlayText : appearance.colors.accent)
                 .frame(minWidth: 30, minHeight: 30)
                 .background(listening ? DesignTokens.stateListening : appearance.colors.background)
@@ -365,13 +365,13 @@ struct DirectionsView: View {
         switch micPhase {
         case .listening:
             Text(L10n.str("directions.search.micListening", locale: coordinator.activeLocale))
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.accent)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 6)
         case .failed:
             Text(L10n.str("directions.search.micFailed", locale: coordinator.activeLocale))
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 6)
@@ -400,7 +400,7 @@ struct DirectionsView: View {
     private func groupSection(_ section: DirectionsScreenList.Section) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(LocalizedStringKey(section.group.headerKey))
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
                 .foregroundStyle(appearance.colors.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 4)
@@ -419,18 +419,18 @@ struct DirectionsView: View {
                 .accessibilityHidden(true)   // row texts carry the meaning
             VStack(alignment: .leading, spacing: 3) {
                 Text(row.name)
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(appearance.colors.textPrimary)
                     .multilineTextAlignment(.leading)
                     .lineLimit(2)
                 if let relationship = row.relationship {
                     Text(relationship)
-                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                        .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                         .foregroundStyle(appearance.colors.accent)
                         .lineLimit(2)
                 }
                 Text(row.address)
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
                     .multilineTextAlignment(.leading)
                     .lineLimit(2)
@@ -473,9 +473,10 @@ struct DirectionsView: View {
             }
         } label: {
             Text(LocalizedStringKey("directions.goLabel"))
-                .font(.system(size: 22, weight: .bold))
+                .font(.system(size: appearance.typography.scaled(22), weight: .bold))
                 .foregroundStyle(.white)
-                .frame(width: 56, height: 56).appSurface(role: .accent, cornerRadius: 999)
+                .padding(12)
+                .frame(minWidth: 56, minHeight: 56).appSurface(role: .accent, cornerRadius: 999)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text(L10n.fmt("directions.goAccessibility",
@@ -489,17 +490,17 @@ struct DirectionsView: View {
         VStack(spacing: 14) {
             IconBadge(systemImage: "map.fill", tint: .directions, diameter: 72)
             Text(LocalizedStringKey("settings.places.empty"))
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 .foregroundStyle(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
             Text(LocalizedStringKey("directions.empty.body"))
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
             NavigationLink(value: SettingsView.SettingsDestination.places) {
                 Text(LocalizedStringKey("settings.places.add"))
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 24)
                     .frame(minHeight: 52)
@@ -518,7 +519,7 @@ struct DirectionsView: View {
     private var noResultsCard: some View {
         Text(L10n.fmt("directions.search.noResults",
                       locale: coordinator.activeLocale, trimmedQuery))
-            .font(.system(size: DesignTokens.minBodyPointSize))
+            .font(.system(size: appearance.typography.bodyPointSize))
             .foregroundStyle(appearance.colors.textSecondary)
             .multilineTextAlignment(.center)
             .padding(24)

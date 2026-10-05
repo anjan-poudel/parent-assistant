@@ -30,7 +30,7 @@ struct CallingSettingsView: View {
                     }
                 }
                 Text("calling.defaultCaption")
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -44,7 +44,7 @@ struct CallingSettingsView: View {
         } label: {
             HStack {
                 Text(LocalizedStringKey(Self.nameKey(for: app)))
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(appearance.colors.textPrimary)
                 Spacer()
                 if isSelected {

@@ -2,18 +2,10 @@ import SwiftUI
 import XCTest
 @testable import ElderlyAssistant
 
-/// Accessibility floors are enforced at the token level (spec §8): any
-/// view consuming `DesignTokens` inherits them, and this test makes sure
-/// nobody quietly lowers a floor.
+/// Operational layout and colour invariants. UI typography is exercised by
+/// AppTypographyTests against the selected size and readable floor.
 final class DesignTokensTests: XCTestCase {
 
-    func testBodyTextFloor() {
-        XCTAssertGreaterThanOrEqual(DesignTokens.minBodyPointSize, 18)
-    }
-
-    func testCaptionTextFloor() {
-        XCTAssertGreaterThanOrEqual(DesignTokens.minCaptionPointSize, 15)
-    }
 
     func testTapTargetFloor() {
         XCTAssertGreaterThanOrEqual(DesignTokens.minTapTargetSize, 44)

@@ -89,14 +89,14 @@ struct MedicationDoseFireScreen: View {
     private var doseFooter: some View {
         VStack(spacing: 14) {
             Text("meds.firePrompt")
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                 .foregroundStyle(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
 
             if !doseText.isEmpty {
                 Text(doseText)
-                    .font(.system(size: DesignTokens.minBodyPointSize))
+                    .font(.system(size: appearance.typography.bodyPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
@@ -104,7 +104,7 @@ struct MedicationDoseFireScreen: View {
 
             Button(action: onAcknowledge) {
                 Text("meds.iTookIt")
-                    .font(.system(size: DesignTokens.minBodyPointSize + 4, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize + 4, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .frame(minHeight: DesignTokens.minTapTargetSize + 12)

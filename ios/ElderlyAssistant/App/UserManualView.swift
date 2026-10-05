@@ -23,7 +23,7 @@ import SwiftUI
 ///
 /// Phone-friendly rules: house `LeafScreen` chrome (back + title +
 /// emergency icon), ONE vertical ScrollView, one white card per section
-/// with a bold rounded header, body text at `DesignTokens.minBodyPointSize`
+/// with a bold rounded header and body text at the selected readable size
 /// with generous spacing — no horizontal scrolling.
 ///
 /// Honest fallback: a missing or malformed resource renders the dedicated
@@ -122,7 +122,7 @@ struct UserManualView: View {
                 .font(.system(size: 48))
                 .foregroundStyle(appearance.colors.textSecondary)
             Text("manual.userManual.unavailable")
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .foregroundStyle(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
         }
@@ -145,14 +145,14 @@ struct UserManualView: View {
         return VStack(alignment: .leading, spacing: 12) {
             Text(section.title(locale: locale))
                 .font(DesignTokens.greetingFont(
-                    size: DesignTokens.minBodyPointSize + 2))
+                    size: appearance.typography.bodyPointSize + 2))
                 .foregroundStyle(appearance.colors.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
             imagesBlock(section)
             VStack(alignment: .leading, spacing: 12) {
                 ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, paragraph in
                     Text(paragraph)
-                        .font(.system(size: DesignTokens.minBodyPointSize))
+                        .font(.system(size: appearance.typography.bodyPointSize))
                         .foregroundStyle(appearance.colors.textPrimary)
                         .lineSpacing(4)
                         .fixedSize(horizontal: false, vertical: true)
@@ -190,7 +190,7 @@ struct UserManualView: View {
                         .accessibilityHidden(true)
                 }
                 Text("manual.imageCaption")
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }

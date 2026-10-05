@@ -426,7 +426,7 @@ struct UpdatesRowButton: View {
                 primaryText(text, monospaced: monospaced)
                 if let secondaryText = row.secondaryText {
                     Text(secondaryText)
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .font(.system(size: appearance.typography.captionPointSize))
                         .foregroundStyle(appearance.colors.textSecondary)
                         .lineLimit(2)
                 }
@@ -436,7 +436,7 @@ struct UpdatesRowButton: View {
                 Image(systemName: "chevron.right")
                     // Caption-token disclosure chevron (DESIGN-REVIEW) —
                     // 18pt floor, Dynamic Type aware; was a fixed 15pt.
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
                     .foregroundStyle(appearance.colors.textSecondary)
             }
         }
@@ -452,7 +452,7 @@ struct UpdatesRowButton: View {
     @ViewBuilder
     private func primaryText(_ value: String, monospaced: Bool) -> some View {
         let base = Text(value)
-            .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+            .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
             .foregroundStyle(appearance.colors.textPrimary)
             .multilineTextAlignment(.leading)
         if monospaced {
@@ -538,12 +538,12 @@ struct UpdatesScreen: View {
     private func sectionView(_ section: UpdatesSection) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(LocalizedStringKey(section.titleKey))
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
                 .foregroundStyle(appearance.colors.textSecondary)
             if section.rows.isEmpty {
                 if let emptyTextKey = section.emptyTextKey {
                     Text(LocalizedStringKey(emptyTextKey))
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
+                        .font(.system(size: appearance.typography.captionPointSize))
                         .foregroundStyle(appearance.colors.textSecondary)
                         .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize,
                                alignment: .leading)

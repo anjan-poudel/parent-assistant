@@ -586,6 +586,8 @@ struct LiveTranslateOverlaySurface: Equatable {
     static func policy(config: LiveTranslateConfig,
                        alwaysShowOriginal: Bool,
                        extractionMode: Bool = false) -> LiveOverlayPlacement.Policy {
+        // Operational camera fitting floors stay independent of app chrome:
+        // measured evidence boxes and their text must retain identical geometry.
         let primary = max(config.overlayMinPointSize, DesignTokens.minBodyPointSize)
         let supporting = min(max(config.overlayMinPointSize, DesignTokens.minCaptionPointSize),
                              primary)
@@ -820,10 +822,10 @@ struct TranslateAllControl: View {
         } label: {
             HStack(spacing: DesignTokens.interElementSpacing / 2) {
                 Image(systemName: TranslateAllSurface.symbolName)
-                    .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize,
+                    .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize,
                                                 weight: .semibold))
                 Text(surface.label)
-                    .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize,
+                    .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize,
                                                 weight: .semibold))
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -1242,7 +1244,7 @@ struct LiveTranslateOverlayView: View {
     /// in the elder's language, with the toggle still reachable.
     private var emptyState: some View {
         Text(surface.emptyHint)
-            .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize))
+            .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize))
             .foregroundColor(appearance.colors.textPrimary)
             .multilineTextAlignment(.center)
             .fixedSize(horizontal: false, vertical: true)
@@ -1282,10 +1284,11 @@ struct LiveTranslateOverlayView: View {
 /// presentation as every region bubble, so the box sits on the thing the
 /// elder tapped under the same zoom, pan and stabilization; the chip's
 /// words come from the catalog in the active language (`pointask.chip.label`).
-/// No state, no task, no decision — the surface's `state` is the whole of
-/// what changes.
+/// Only the action row's measured height is held as layout state, so larger
+/// labels remain above the safe-area floor without changing camera geometry.
 struct PointAskOverlayBoxView: View {
     @Environment(\.appAppearance) private var appearance
+    @State private var measuredActionRowHeight: CGFloat = DesignTokens.minTapTargetSize
     let surface: PointAskOverlaySurface
     let presentation: LiveCameraPresentation
     let onChipTap: () -> Void
@@ -1380,11 +1383,20 @@ struct PointAskOverlayBoxView: View {
         }
         .frame(width: actionRowWidth,
                alignment: boxRect.midX < containerSize.width / 2 ? .leading : .trailing)
+        .background {
+            GeometryReader { geometry in
+                Color.clear.preference(key: PointAskActionRowHeightKey.self,
+                                       value: geometry.size.height)
+            }
+        }
+        .onPreferenceChange(PointAskActionRowHeightKey.self) { height in
+            measuredActionRowHeight = max(Self.actionRowHeight, height)
+        }
         .offset(x: DesignTokens.interElementSpacing,
                 y: Self.actionRowOriginY(below: boxRect,
                                          containerHeight: containerSize.height,
                                          bottomInset: bottomInset,
-                                         rowHeight: Self.actionRowHeight,
+                                         rowHeight: measuredActionRowHeight,
                                          spacing: DesignTokens.interElementSpacing))
     }
 
@@ -1435,7 +1447,7 @@ struct PointAskOverlayBoxView: View {
             action()
         } label: {
             Text(label)
-                .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize,
+                .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize,
                                             weight: .semibold))
                 .foregroundColor(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
@@ -1465,7 +1477,7 @@ struct PointAskOverlayBoxView: View {
     /// not awaiting an answer the chip could ask for.
     private func pendingChip(chipRect: CGRect) -> some View {
         Image(systemName: Self.pendingSymbolName)
-            .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize,
+            .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize,
                                         weight: .semibold))
             .foregroundColor(appearance.colors.textPrimary)
             .padding(.horizontal, DesignTokens.interElementSpacing * 2)
@@ -1483,7 +1495,7 @@ struct PointAskOverlayBoxView: View {
         VStack(alignment: .leading, spacing: DesignTokens.interElementSpacing / 2) {
             ForEach(Array(surface.cardLines.enumerated()), id: \.offset) { _, line in
                 Text(line)
-                    .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize))
+                    .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize))
                     .foregroundColor(appearance.colors.textPrimary)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1529,4 +1541,12 @@ struct PointAskOverlayBoxView: View {
     /// The box's stroke. A visual constant with no token of its own; it
     /// lives here so it is stated once (the leader line's precedent).
     static let boxLineWidth: CGFloat = 3
+}
+
+private struct PointAskActionRowHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = DesignTokens.minTapTargetSize
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
 }

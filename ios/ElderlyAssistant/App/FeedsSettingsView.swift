@@ -53,7 +53,7 @@ struct FeedsSettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
             sectionHeader(key: "settings.feeds.sourcesSection")
             Text("settings.feeds.sourcesHint")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if coordinator.feedSources.isEmpty {
@@ -72,16 +72,16 @@ struct FeedsSettingsView: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 8) {
                     Text(source.name)
-                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                        .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                         .foregroundStyle(appearance.colors.textPrimary)
                     if source.isCuratedDefault {
                         Text("settings.feeds.defaultTag")
-                            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                            .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                             .foregroundStyle(appearance.colors.accent)
                     }
                 }
                 Text(source.urlString)
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
                     .lineLimit(2)
             }
@@ -110,7 +110,7 @@ struct FeedsSettingsView: View {
         VStack(spacing: 10) {
             TextField(LocalizedStringKey("settings.feeds.sourcePlaceholder"),
                       text: $newSourceURL)
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .keyboardType(.URL)
@@ -119,7 +119,7 @@ struct FeedsSettingsView: View {
                 .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
             if sourceAddFailed {
                 Text("settings.feeds.addSourceFailed")
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(DesignTokens.stateError)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity, alignment: .center)
@@ -128,7 +128,7 @@ struct FeedsSettingsView: View {
                 addSource()
             } label: {
                 Text("settings.feeds.addSource")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
@@ -168,7 +168,7 @@ struct FeedsSettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
             sectionHeader(key: "settings.feeds.topicsSection")
             Text("settings.feeds.topicsHint")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if coordinator.feedTopics.isEmpty {
@@ -185,7 +185,7 @@ struct FeedsSettingsView: View {
     private func topicRow(_ topic: String) -> some View {
         HStack(spacing: 12) {
             Text(topic)
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 .foregroundStyle(appearance.colors.textPrimary)
             Spacer()
             Button {
@@ -209,7 +209,7 @@ struct FeedsSettingsView: View {
         HStack(spacing: 10) {
             TextField(LocalizedStringKey("settings.feeds.topicPlaceholder"),
                       text: $newTopic)
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .padding(14)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
                 .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
@@ -217,7 +217,7 @@ struct FeedsSettingsView: View {
                 addTopic()
             } label: {
                 Text("settings.feeds.addTopic")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 16)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
@@ -254,7 +254,7 @@ struct FeedsSettingsView: View {
                             .foregroundStyle(appearance.colors.accent)
                             .frame(width: 40)
                         Text("settings.feeds.newsManage")
-                            .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                            .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                             .foregroundStyle(appearance.colors.textPrimary)
                         Spacer()
                         Image(systemName: "chevron.right")
@@ -276,7 +276,7 @@ struct FeedsSettingsView: View {
 
     private func sectionHeader(key: String) -> some View {
         Text(LocalizedStringKey(key))
-            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+            .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
             .foregroundStyle(appearance.colors.textSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 8)
@@ -284,7 +284,7 @@ struct FeedsSettingsView: View {
 
     private func emptyLine(key: String) -> some View {
         Text(LocalizedStringKey(key))
-            .font(.system(size: DesignTokens.minBodyPointSize))
+            .font(.system(size: appearance.typography.bodyPointSize))
             .foregroundStyle(appearance.colors.textSecondary)
             .multilineTextAlignment(.leading)
             .padding(16)

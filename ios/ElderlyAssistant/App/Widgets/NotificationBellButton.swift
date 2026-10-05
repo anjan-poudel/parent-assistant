@@ -25,7 +25,7 @@ struct NotificationBellButton: View {
                         // its Dynamic Type scaling) instead of a fixed 12pt,
                         // and the capsule grows with it via minWidth/minHeight
                         // instead of clipping the digits.
-                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
+                        .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 1)
