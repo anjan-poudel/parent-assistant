@@ -6193,7 +6193,7 @@
         "ne" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "फिड"
+            "value" : "समाचार"
           }
         }
       }
@@ -7094,7 +7094,7 @@
         "ne" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "फिड"
+            "value" : "समाचार"
           }
         }
       }
@@ -14979,7 +14979,7 @@
         "ne" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "फिड"
+            "value" : "समाचार"
           }
         }
       }
