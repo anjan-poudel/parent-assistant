@@ -239,7 +239,7 @@ final class ElderlyAssistantUITests: XCTestCase {
                            ("पात्रो", "पात्रो"),
                            ("क्यालेन्डर साझा", "क्यालेन्डर साझा")]),
             ("उपकरणहरू", [("द्रुत एपहरू", "द्रुत एपहरू"),
-                           ("फिड", "फिड"),
+                           ("settings.feeds", "settings.feeds.title"),
                            ("म्यानुअलहरू", "म्यानुअलहरू"),
                            ("ठाउँ र नक्सा", "ठाउँ र नक्सा")]),
             ("प्रणाली", [("रूप", "रूप"),
@@ -271,12 +271,13 @@ final class ElderlyAssistantUITests: XCTestCase {
                 // Custom status rows compose their label ("आवाजहरू, स्थापित"),
                 // so match by containment, not exact equality.
                 let rowButton = app.buttons.matching(NSPredicate(
-                    format: "label CONTAINS %@", row)).firstMatch
+                    format: "label CONTAINS %@ OR identifier == %@", row, row)).firstMatch
                 XCTAssertTrue(rowButton.waitForExistence(timeout: 10),
                               "Settings row \"(\(row))\" should exist on tab \"(\(tab))\"")
                 if !rowButton.isHittable { app.swipeUp() }
-                tap(rowButton, expecting: app.staticTexts[title].firstMatch,
-                    within: 10, in: app)
+                let destinationTitle = app.staticTexts.matching(NSPredicate(
+                    format: "label == %@ OR identifier == %@", title, title)).firstMatch
+                tap(rowButton, expecting: destinationTitle, within: 10, in: app)
                 tap(app.buttons["पछाडि"].firstMatch,
                     expecting: app.staticTexts["सेटिङ"].firstMatch,
                     within: 8, in: app)

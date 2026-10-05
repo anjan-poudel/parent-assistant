@@ -223,9 +223,7 @@ struct SettingsRowChrome: View {
 
     var body: some View {
         HStack(spacing: 14) {
-            Image(systemName: icon)
-                .font(.system(size: 26)).foregroundStyle(appearance.colors.accentForeground)
-                .frame(width: 40)
+            IconBadge(systemImage: icon, tint: .settings, diameter: 40)
             Text(titleKey)
                 .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                 .foregroundStyle(appearance.colors.textPrimary)
