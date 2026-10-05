@@ -472,9 +472,9 @@ struct TalkButton: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @Environment(\.colorSchemeContrast) private var contrast
-    @ScaledMetric(relativeTo: .title) private var scaledHeroDiameter: CGFloat = 176
+    @ScaledMetric(relativeTo: .title) private var scaledHeroDiameter: CGFloat = 140.8
 
-    private var heroDiameter: CGFloat { min(scaledHeroDiameter, 240) }
+    private var heroDiameter: CGFloat { max(120, min(scaledHeroDiameter, 192)) }
     private var usesGloss: Bool {
         appearance.style != .classic && !reduceTransparency && contrast != .increased
     }
