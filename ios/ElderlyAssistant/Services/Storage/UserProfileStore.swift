@@ -2,7 +2,8 @@ import Foundation
 
 // MARK: - Encrypted user profile record (profile-interview, T-090)
 //
-// One encrypted single-record store for the five interview fields, on the
+// One encrypted single-record store for the interview fields (plus the
+// optional About-you selfie), on the
 // existing encrypted-file channel (`user.profile` → Application Support /
 // `EncryptedStore/`, sha256 file name, `{key, payload}` envelope, atomic +
 // complete file protection, excluded from backup — the placement policy
@@ -32,12 +33,53 @@ import Foundation
 /// `name` / `addressAs` are non-optional Strings: a payload MISSING those
 /// keys is unreadable — never defaulted. An empty string is legal and
 /// means "not recorded yet" (skip path, partial fill, Settings clear).
+///
+/// `photoFilename` (about-you selfie, 2026-10-06): the name of the
+/// person's stored selfie under Application Support/ContactPhotos (see
+/// `ContactPhotoStore`) — just a file NAME, never a path, exactly like
+/// `FamilyContact.photoFilename`. Optional with the same migration: the
+/// custom decoder reads a missing key as nil, so a payload written
+/// before the selfie existed loads photo-less instead of failing.
 struct UserProfile: Codable, Equatable {
     var name: String
     var addressAs: String
     var dateOfBirth: DateComponents?   // year/month/day only; never spoken, never prompted
     var emergencyDoctor: String?
     var localHospital: String?
+    /// ContactPhotoStore filename of the person's selfie, nil when none
+    /// is on file (the photo is optional — the capture step can be
+    /// skipped like every other field).
+    var photoFilename: String?
+
+    init(name: String,
+         addressAs: String,
+         dateOfBirth: DateComponents?,
+         emergencyDoctor: String?,
+         localHospital: String?,
+         photoFilename: String? = nil) {
+        self.name = name
+        self.addressAs = addressAs
+        self.dateOfBirth = dateOfBirth
+        self.emergencyDoctor = emergencyDoctor
+        self.localHospital = localHospital
+        self.photoFilename = photoFilename
+    }
+
+    /// Custom decode (the FamilyContact migration pattern): a payload
+    /// written BEFORE the selfie field existed must load with a nil
+    /// filename, not fail the whole store read. The mandatory keys keep
+    /// the store's contract — a payload missing `name` or `addressAs`
+    /// still throws, so it stays unreadable, never defaulted.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        addressAs = try container.decode(String.self, forKey: .addressAs)
+        dateOfBirth = try container.decodeIfPresent(DateComponents.self, forKey: .dateOfBirth)
+        emergencyDoctor = try container.decodeIfPresent(String.self, forKey: .emergencyDoctor)
+        localHospital = try container.decodeIfPresent(String.self, forKey: .localHospital)
+        // A missing key AND a malformed value both read as "no photo".
+        photoFilename = (try? container.decodeIfPresent(String.self, forKey: .photoFilename)) ?? nil
+    }
 }
 
 enum ProfileLoadResult {

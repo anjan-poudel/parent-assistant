@@ -7116,6 +7116,23 @@
         }
       }
     },
+    "home.hub.profile" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "About me"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "मेरो बारेमा"
+          }
+        }
+      }
+    },
     "home.hub.reminders" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -10999,6 +11016,42 @@
       }
     },
 
+    "onboarding.aboutYou.photoUnavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The camera is not available on this phone"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "यो फोनमा क्यामेरा उपलब्ध छैन"
+          }
+        }
+      }
+    },
+
+    "onboarding.aboutYou.takePhoto" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Take a photo"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "फोटो खिच्नुहोस्"
+          }
+        }
+      }
+    },
+
     "onboarding.aboutYou.title" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -12253,6 +12306,24 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "नाम"
+          }
+        }
+      }
+    },
+
+    "profile.field.photo" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your photo"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "तपाईंको फोटो"
           }
         }
       }

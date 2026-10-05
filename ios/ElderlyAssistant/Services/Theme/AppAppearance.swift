@@ -47,6 +47,9 @@ struct AppAppearance: Equatable {
             case .feeds, .apps: Color(hex: 0xA6C8FF)
             case .meds, .reminders: colors.accentForeground
             case .appliance, .settings: colors.textPrimary
+            // Soft indigo (home-profile-icon, 2026-10-06) — a hue of its
+            // own, clear of settings' near-white ink (≥7:1 on its wash).
+            case .profile: Color(hex: 0xB7AFF2)
             }
         }
         return switch tint {
@@ -56,6 +59,10 @@ struct AppAppearance: Equatable {
         case .feeds, .apps: Color(red: 0.086, green: 0.267, blue: 0.525)
         case .meds, .reminders: colors.accent
         case .appliance, .settings: colors.textPrimary
+        // Soft indigo (home-profile-icon, 2026-10-06): ≥5:1 on its own
+        // pale-lavender wash in every light skin — legible glyph, and a
+        // tone apart from settings' skin ink.
+        case .profile: Color(red: 0.35, green: 0.32, blue: 0.58)
         }
     }
 
@@ -68,6 +75,7 @@ struct AppAppearance: Equatable {
             case .feeds, .apps: Color(hex: 0x233349)
             case .meds, .reminders: colors.brandBlush
             case .appliance, .settings: colors.setupReminder
+            case .profile: Color(hex: 0x2A2745)
             }
         }
         return switch tint {
@@ -77,6 +85,7 @@ struct AppAppearance: Equatable {
         case .feeds, .apps: colors.userBubble
         case .meds, .reminders: colors.brandBlush
         case .appliance, .settings: colors.setupReminder
+        case .profile: Color(red: 0.878, green: 0.855, blue: 0.949)
         }
     }
 }

@@ -11083,23 +11083,32 @@ extension AppCoordinator {
 
     /// The only writer for the profile record (design-l2 §5.6): the
     /// wizard and the Settings editor call it and nothing else touches
-    /// the store. The five values are written as the COMPLETE new
-    /// record; callers merge by reading `currentProfileSnapshot()` first
+    /// the store. The values are written as the COMPLETE new record;
+    /// callers merge by reading `currentProfileSnapshot()` first
     /// (the merge helpers live in `OnboardingDrafts`). Main-thread by
     /// contract — the store asserts it. Failure is explicit
     /// (`.failure(.writeFailed)`) and changes nothing (E3).
+    ///
+    /// `photoFilename` (about-you selfie, 2026-10-06) is the file name
+    /// the capture step stored via `contactPhotoStore` — the step writes
+    /// the file first and this call is the record commit point (the
+    /// same split the family-contact editor uses). It has no default on
+    /// purpose: every caller passes the MERGED record's value, so a
+    /// call site added later cannot silently erase a stored selfie.
     @discardableResult
     func saveProfile(name: String,
                      addressAs: String,
                      dateOfBirth: DateComponents?,
                      emergencyDoctor: String?,
-                     localHospital: String?) -> Result<Void, ProfileStoreError> {
+                     localHospital: String?,
+                     photoFilename: String?) -> Result<Void, ProfileStoreError> {
         profileStore.save(UserProfile(
             name: name,
             addressAs: addressAs,
             dateOfBirth: dateOfBirth,
             emergencyDoctor: emergencyDoctor,
-            localHospital: localHospital))
+            localHospital: localHospital,
+            photoFilename: photoFilename))
     }
 
     /// The store's cached load result; no disk I/O after the first read.

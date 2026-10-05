@@ -26,6 +26,11 @@ final class ProfileSettingsModel: ObservableObject {
     @Published var dateOfBirth: Date? = nil
     @Published var emergencyDoctor: String = ""
     @Published var localHospital: String = ""
+    /// The stored selfie's file name (about-you selfie, 2026-10-06) —
+    /// display-only here (the About-you step is the capture surface);
+    /// carried so the editor can show the photo and so the save path
+    /// never erases it. Read-only, like the store field itself here.
+    @Published private(set) var photoFilename: String?
     @Published private(set) var saveState: SaveState = .idle
 
     /// Entry bounds (grapheme clamps) shared with the wizard — the view
@@ -57,6 +62,7 @@ final class ProfileSettingsModel: ObservableObject {
         }
         emergencyDoctor = base.emergencyDoctor ?? ""
         localHospital = base.localHospital ?? ""
+        photoFilename = base.photoFilename
         saveState = .idle
     }
 
@@ -65,6 +71,11 @@ final class ProfileSettingsModel: ObservableObject {
     /// save time, never cached at load time, so the merge always runs
     /// against the freshest stored record — the same behaviour as the
     /// wizard's Next-and-save.
+    ///
+    /// The selfie is NOT edited here (this editor has no photo UI): the
+    /// draft carries no filename, so the merge preserves the stored one
+    /// and the save passes it straight through — clearing a text field
+    /// never erases the photo.
     func save() {
         var aboutDraft = AboutYouDraft()
         aboutDraft.name = name
@@ -83,7 +94,8 @@ final class ProfileSettingsModel: ObservableObject {
             addressAs: merged.addressAs,
             dateOfBirth: merged.dateOfBirth,
             emergencyDoctor: merged.emergencyDoctor,
-            localHospital: merged.localHospital)
+            localHospital: merged.localHospital,
+            photoFilename: merged.photoFilename)
         switch result {
         case .success:
             saveState = .saved

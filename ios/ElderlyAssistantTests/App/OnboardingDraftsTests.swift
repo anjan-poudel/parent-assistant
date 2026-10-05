@@ -12,13 +12,15 @@ final class OnboardingDraftsTests: XCTestCase {
                          addressAs: String = "Mum",
                          year: Int? = 1955,
                          emergencyDoctor: String? = "Dr. Rai",
-                         localHospital: String? = "Patan Hospital") -> UserProfile {
+                         localHospital: String? = "Patan Hospital",
+                         photoFilename: String? = nil) -> UserProfile {
         UserProfile(
             name: name,
             addressAs: addressAs,
             dateOfBirth: year.map { DateComponents(year: $0, month: 6, day: 2) },
             emergencyDoctor: emergencyDoctor,
-            localHospital: localHospital
+            localHospital: localHospital,
+            photoFilename: photoFilename
         )
     }
 
@@ -98,6 +100,37 @@ final class OnboardingDraftsTests: XCTestCase {
         XCTAssertNil(stored?.minute)
     }
 
+    // MARK: - About-you selfie (2026-10-06)
+
+    /// A draft holding a captured file name writes it; a draft that
+    /// never touched the photo preserves whatever the base has — the
+    /// additive-only rule (no remove affordance exists).
+    func testSelfieFilenameFollowsTheDraftAndAPhotolessDraftPreservesTheBase() {
+        var captured = AboutYouDraft(name: "Maya", addressAs: "Mum")
+        captured.photoFilename = "selfie-new.jpg"
+        XCTAssertEqual(captured.merged(into: profile(photoFilename: "selfie-old.jpg"))
+                        .photoFilename,
+                       "selfie-new.jpg",
+                       "a captured file name replaces the stored one")
+
+        let untouched = AboutYouDraft(name: "Maya", addressAs: "Mum")
+        XCTAssertEqual(untouched.merged(into: profile(photoFilename: "selfie-old.jpg"))
+                        .photoFilename,
+                       "selfie-old.jpg",
+                       "a draft with no photo cannot erase a stored one")
+        XCTAssertNil(untouched.merged(into: profile()).photoFilename,
+                     "and it writes none where none was stored")
+    }
+
+    /// The emergency-contacts step edits no photo; its merge (and the
+    /// save path it feeds) must carry the stored selfie through.
+    func testSelfieFilenameRidesThroughAnEmergencyContactsSave() {
+        let merged = EmergencyContactsDraft(emergencyDoctor: "Dr. Rai")
+            .merged(into: profile(photoFilename: "selfie-1.jpg"))
+        XCTAssertEqual(merged.photoFilename, "selfie-1.jpg",
+                       "a step that edits no photo never erases one")
+    }
+
     // MARK: - OB-2 merge base
 
     func testMergeBaseIsEmptyForAbsentAndUnreadableAndVerbatimForLoaded() {
@@ -114,6 +147,7 @@ final class OnboardingDraftsTests: XCTestCase {
             XCTAssertNil(base.dateOfBirth)
             XCTAssertNil(base.emergencyDoctor)
             XCTAssertNil(base.localHospital)
+            XCTAssertNil(base.photoFilename)
         }
     }
 
