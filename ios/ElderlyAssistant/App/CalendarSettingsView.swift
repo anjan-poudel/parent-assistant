@@ -117,8 +117,7 @@ struct CalendarSettingsView: View {
                 Spacer()
                 if isSelected {
                     Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 26))
-                        .foregroundStyle(appearance.colors.accent)
+                        .font(.system(size: 26)).foregroundStyle(appearance.colors.accentForeground)
                 }
             }
             .padding(14)
@@ -126,7 +125,7 @@ struct CalendarSettingsView: View {
             .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
             .overlay(
                 RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius)
-                    .stroke(isSelected ? appearance.colors.accent : Color.clear, lineWidth: 2)
+                    .stroke(isSelected ? appearance.colors.accentForeground : Color.clear, lineWidth: 2)
             )
         }
         .buttonStyle(.plain)
@@ -161,8 +160,7 @@ struct CalendarSettingsView: View {
                     }
                 ), in: 0...7) {
                     Text(BikramSambat.devanagariDigits(coordinator.festivalCalendar.advanceReminderDays))
-                        .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
-                        .foregroundStyle(appearance.colors.accent)
+                        .font(.system(size: appearance.typography.bodyPointSize, weight: .bold)).foregroundStyle(appearance.colors.accentForeground)
                 }
             }
             Text("festival.reminderHint")
@@ -304,8 +302,7 @@ struct CalendarSettingsView: View {
                         set: { coordinator.externalCalendar.leadMinutes = $0 }
                     ), in: 0...ExternalCalendarService.maxLeadMinutes) {
                         Text(BikramSambat.devanagariDigits(coordinator.externalCalendar.leadMinutes))
-                            .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
-                            .foregroundStyle(appearance.colors.accent)
+                            .font(.system(size: appearance.typography.bodyPointSize, weight: .bold)).foregroundStyle(appearance.colors.accentForeground)
                     }
                 }
                 .padding(14)

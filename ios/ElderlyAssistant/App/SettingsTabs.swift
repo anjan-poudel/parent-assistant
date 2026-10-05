@@ -224,8 +224,7 @@ struct SettingsRowChrome: View {
     var body: some View {
         HStack(spacing: 14) {
             Image(systemName: icon)
-                .font(.system(size: 26))
-                .foregroundStyle(appearance.colors.accent)
+                .font(.system(size: 26)).foregroundStyle(appearance.colors.accentForeground)
                 .frame(width: 40)
             Text(titleKey)
                 .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
@@ -234,7 +233,7 @@ struct SettingsRowChrome: View {
             if let status {
                 HStack(spacing: 6) {
                     Circle()
-                        .fill(status.color)
+                        .fill(appearance.statusForeground(status.color))
                         .frame(width: 8, height: 8)
                     Text(status.label)
                         .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
@@ -275,11 +274,11 @@ struct SettingsSectionRow: View {
         switch destination {
         case .geminiAI:
             let configured = coordinator.geminiConfigStore.isConfigured
-            return (configured ? appearance.colors.accent : DesignTokens.stateError,
+            return (configured ? appearance.colors.accentForeground : DesignTokens.stateError,
                     configured ? "settings.gemini.statusConnected"
                                : "settings.gemini.statusMissing")
         case .voiceEngine:
-            return (appearance.colors.accent,
+            return (appearance.colors.accentForeground,
                     coordinator.voiceEngineStack == .gemini
                     ? "settings.voiceEngine.statusGemini"
                     : "settings.voiceEngine.statusOnDevice")
@@ -288,7 +287,7 @@ struct SettingsSectionRow: View {
             return (status.presentationColor, status.shortTitleKey)
         case .ttsVoices:
             let summary = ttsVoiceSummary
-            return (summary.ok ? appearance.colors.accent : DesignTokens.stateError,
+            return (summary.ok ? appearance.colors.accentForeground : DesignTokens.stateError,
                     summary.key)
         default:
             return nil

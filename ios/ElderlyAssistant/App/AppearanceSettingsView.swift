@@ -79,8 +79,7 @@ struct AppearanceSettingsView: View {
                 }
                 Spacer(minLength: 0)
                 Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(selected ? appearance.colors.accent : appearance.colors.textSecondary)
+                    .font(.system(size: 24, weight: .semibold)).foregroundStyle(selected ? appearance.colors.accentForeground : appearance.colors.textSecondary)
                     .accessibilityHidden(true)
             }
             .padding(16)
@@ -88,7 +87,7 @@ struct AppearanceSettingsView: View {
             .appSurface(role: .control)
             .overlay {
                 RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius)
-                    .strokeBorder(selected ? appearance.colors.accent : .clear, lineWidth: 2)
+                    .strokeBorder(selected ? appearance.colors.accentForeground : .clear, lineWidth: 2)
             }
         }
         .buttonStyle(.plain)

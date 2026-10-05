@@ -82,7 +82,7 @@ struct IconBadge: View {
             .appSurface(role: .control, cornerRadius: diameter * 0.28)
             .overlay {
                 RoundedRectangle(cornerRadius: diameter * 0.28)
-                    .fill(appearance.badgeBackground(tint).opacity(0.55))
+                    .fill(appearance.badgeBackground(tint).opacity(appearance.skin.isDark ? 1 : 0.55))
                     .allowsHitTesting(false)
             }
             .overlay {
@@ -271,7 +271,7 @@ struct HintCarousel: View {
             HStack(spacing: 4) {
                 ForEach(Self.phraseKeys.indices, id: \.self) { i in
                     Circle()
-                        .fill(i == index ? DesignTokens.stateIdle : appearance.colors.textSecondary.opacity(0.3))
+                        .fill(i == index ? appearance.statusForeground(DesignTokens.stateIdle) : appearance.colors.textSecondary.opacity(0.3))
                         .frame(width: 5, height: 5)
                 }
             }
@@ -406,8 +406,7 @@ struct OutcomeCardView: View {
                         // Caption token (DESIGN-REVIEW) — was a fixed
                         // 17pt; now on the 18pt floor and Dynamic Type
                         // aware, in step with the outcome rows beside it.
-                        .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
-                        .foregroundStyle(appearance.colors.accent)
+                        .font(.system(size: appearance.typography.captionPointSize, weight: .semibold)).foregroundStyle(appearance.colors.accentForeground)
                 )
             VStack(alignment: .leading, spacing: 6) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -473,15 +472,13 @@ struct OutcomeCardView: View {
                     .frame(width: 52, height: 52)
                     .overlay(
                         Image(systemName: outcome.icon)
-                            .font(.system(size: 24, weight: .semibold))
-                            .foregroundStyle(appearance.colors.accent)
+                            .font(.system(size: 24, weight: .semibold)).foregroundStyle(appearance.colors.accentForeground)
                     )
                 VStack(alignment: .leading, spacing: 4) {
                     Text("home.activity.title")
                         .font(DesignTokens.warmFont(
                             size: appearance.typography.bodyPointSize,
-                            weight: .bold))
-                        .foregroundStyle(appearance.colors.accent)
+                            weight: .bold)).foregroundStyle(appearance.colors.accentForeground)
                     Text(outcome.text)
                         .font(.system(size: appearance.typography.captionPointSize,
                                       weight: .semibold))
@@ -491,8 +488,7 @@ struct OutcomeCardView: View {
                 }
                 Spacer(minLength: 4)
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(appearance.colors.accent)
+                    .font(.system(size: 20, weight: .bold)).foregroundStyle(appearance.colors.accentForeground)
                     .frame(width: 44, height: 44)
                     .background(appearance.colors.userBubble)
                     .clipShape(Circle())
@@ -673,13 +669,12 @@ struct ConversationHistorySheet: View {
     private var showMoreButton: some View {
         Button(action: loadOlderPage) {
             Text("history.showMore")
-                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
-                .foregroundStyle(appearance.colors.accent)
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold)).foregroundStyle(appearance.colors.accentForeground)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
                 .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
                 .overlay(
-                    Capsule().stroke(appearance.colors.accent.opacity(0.35), lineWidth: 1.5)
+                    Capsule().stroke(appearance.colors.accentForeground.opacity(0.35), lineWidth: 1.5)
                 )
         }
         .buttonStyle(.plain)
@@ -689,8 +684,7 @@ struct ConversationHistorySheet: View {
     private func row(_ exchange: AppCoordinator.Exchange) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(LocalizedStringKey(exchange.role == .user ? "home.conversation.user" : "home.conversation.assistant"))
-                .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
-                .foregroundStyle(exchange.role == .user ? appearance.colors.textSecondary : appearance.colors.accent)
+                .font(.system(size: appearance.typography.captionPointSize, weight: .bold)).foregroundStyle(exchange.role == .user ? appearance.colors.textSecondary : appearance.colors.accentForeground)
             Text(exchange.text)
                 .font(.system(size: appearance.typography.bodyPointSize))
                 .foregroundStyle(appearance.colors.textPrimary)

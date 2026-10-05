@@ -152,8 +152,7 @@ struct QuickAccessAppsView: View {
             Spacer(minLength: 0)
             if isFavourite {
                 Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 26))
-                    .foregroundStyle(appearance.colors.accent)
+                    .font(.system(size: 26)).foregroundStyle(appearance.colors.accentForeground)
                     .accessibilityLabel(Text("quickApps.added"))
             } else if isInstalledHere && !atCap {
                 addButton(app)
@@ -212,8 +211,7 @@ struct QuickAccessAppsView: View {
             Text(L10n.fmt("quickApps.remove",
                           locale: coordinator.activeLocale,
                           appDisplayName(app)))
-                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
-                .foregroundStyle(appearance.colors.accent)
+                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold)).foregroundStyle(appearance.colors.accentForeground)
                 .padding(.horizontal, 14)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
         }

@@ -22045,6 +22045,74 @@
         }
       }
     },
+    "theme.midnight" : {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Midnight"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मध्यरात"
+          }
+        }
+      }
+    },
+    "theme.darkRose" : {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dark Rose"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गाढा गुलाबी"
+          }
+        }
+      }
+    },
+    "appearance.skin.midnight.description" : {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Deep midnight surfaces with crimson controls and soft, bright text."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गाढा मध्यरात रङका सतह, रातो नियन्त्रण र नरम उज्यालो अक्षर।"
+          }
+        }
+      }
+    },
+    "appearance.skin.darkRose.description" : {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Dark plum surfaces with rose controls and warm, bright text."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "गाढा बैजनी सतह, गुलाबी नियन्त्रण र न्यानो उज्यालो अक्षर।"
+          }
+        }
+      }
+    },
     "appearance.preview" : {
       "extractionState" : "manual",
       "localizations" : {

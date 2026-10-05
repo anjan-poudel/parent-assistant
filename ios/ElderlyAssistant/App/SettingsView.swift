@@ -197,8 +197,7 @@ struct SettingsView: View {
                         HStack(spacing: 10) {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .font(.system(size: appearance.typography.captionPointSize,
-                                              weight: .bold))
-                                .foregroundStyle(DesignTokens.stateError)
+                                              weight: .bold)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
                             Text(L10n.str(degradation.titleKey, locale: locale))
                                 .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
                                                            weight: .semibold))
@@ -209,8 +208,7 @@ struct SettingsView: View {
                             } label: {
                                 Text(L10n.str(degradation.recoveryKey, locale: locale))
                                     .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
-                                                               weight: .bold))
-                                    .foregroundStyle(appearance.colors.accent)
+                                                               weight: .bold)).foregroundStyle(appearance.colors.accentForeground)
                                     .frame(minHeight: DesignTokens.minTapTargetSize)
                             }
                             .buttonStyle(.plain)
@@ -281,8 +279,7 @@ struct LanguageSettingsView: View {
                 Spacer()
                 if isSelected {
                     Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 26))
-                        .foregroundStyle(appearance.colors.accent)
+                        .font(.system(size: 26)).foregroundStyle(appearance.colors.accentForeground)
                 }
             }
             .padding(18)
@@ -290,7 +287,7 @@ struct LanguageSettingsView: View {
             .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
             .overlay(
                 RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius)
-                    .stroke(isSelected ? appearance.colors.accent : Color.clear, lineWidth: 2)
+                    .stroke(isSelected ? appearance.colors.accentForeground : Color.clear, lineWidth: 2)
             )
         }
         .buttonStyle(.plain)
@@ -315,8 +312,7 @@ struct LanguageSettingsView: View {
                 Spacer()
                 if isSelected {
                     Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 26))
-                        .foregroundStyle(appearance.colors.accent)
+                        .font(.system(size: 26)).foregroundStyle(appearance.colors.accentForeground)
                 }
             }
             .padding(18)
@@ -324,7 +320,7 @@ struct LanguageSettingsView: View {
             .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
             .overlay(
                 RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius)
-                    .stroke(isSelected ? appearance.colors.accent : Color.clear, lineWidth: 2)
+                    .stroke(isSelected ? appearance.colors.accentForeground : Color.clear, lineWidth: 2)
             )
         }
         .buttonStyle(.plain)
@@ -413,8 +409,7 @@ struct GeminiAPISettingsView: View {
 
                 if coordinator.geminiConfigStore.isConfigured {
                     HStack(spacing: 8) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(appearance.colors.accent)
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(appearance.colors.accentForeground)
                         Text("settings.gemini.statusConnected")
                             .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                             .foregroundStyle(appearance.colors.textSecondary)
@@ -454,8 +449,7 @@ struct GeminiAPISettingsView: View {
                 .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                 .foregroundStyle(appearance.colors.textPrimary)
             HStack(spacing: 8) {
-                Image(systemName: configured ? "checkmark.circle.fill" : "xmark.circle.fill")
-                    .foregroundStyle(configured ? appearance.colors.accent : DesignTokens.stateError)
+                Image(systemName: configured ? "checkmark.circle.fill" : "xmark.circle.fill").foregroundStyle(configured ? appearance.colors.accentForeground : appearance.statusForeground(DesignTokens.stateError))
                 Text(LocalizedStringKey(configured
                                         ? "settings.gemini.status.configured"
                                         : "settings.gemini.status.notConfigured"))
@@ -541,9 +535,7 @@ struct GeminiAPISettingsView: View {
                         .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 }
                 .frame(maxWidth: .infinity)
-                .frame(minHeight: DesignTokens.minTapTargetSize)
-                .foregroundStyle(coordinator.geminiConfigStore.isConfigured
-                                 ? appearance.colors.accent : appearance.colors.textSecondary)
+                .frame(minHeight: DesignTokens.minTapTargetSize).foregroundStyle(coordinator.geminiConfigStore.isConfigured ? appearance.colors.accentForeground : appearance.colors.textSecondary)
                 .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
             }
             .buttonStyle(.plain)
@@ -553,13 +545,11 @@ struct GeminiAPISettingsView: View {
                 switch outcome {
                 case .success:
                     Label("settings.gemini.test.success", systemImage: "checkmark.circle.fill")
-                        .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
-                        .foregroundStyle(appearance.colors.accent)
+                        .font(.system(size: appearance.typography.captionPointSize, weight: .semibold)).foregroundStyle(appearance.colors.accentForeground)
                 case .failure(let failureClass):
                     Text(L10n.fmt("settings.gemini.test.failed", locale: locale,
                                   failureClass.spokenLine(locale: locale)))
-                        .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
-                        .foregroundStyle(DesignTokens.stateError)
+                        .font(.system(size: appearance.typography.captionPointSize, weight: .semibold)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
                 }
             }
 
@@ -626,8 +616,7 @@ struct GeminiAPISettingsView: View {
             // saving happens on submit once they've typed something.
         } label: {
             HStack(alignment: .top, spacing: 10) {
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(isSelected ? appearance.colors.accent : appearance.colors.textSecondary.opacity(0.5))
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle").foregroundStyle(isSelected ? appearance.colors.accentForeground : appearance.colors.textSecondary.opacity(0.5))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(LocalizedStringKey(labelKey))
                         .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
@@ -710,8 +699,7 @@ struct SearchSettingsView: View {
 
                 if coordinator.searchConfigStore.isConfigured {
                     HStack(spacing: 8) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(appearance.colors.accent)
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(appearance.colors.accentForeground)
                         Text("searchSettings.statusConnected")
                             .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                             .foregroundStyle(appearance.colors.textSecondary)
@@ -822,8 +810,7 @@ struct YouTubeSettingsView: View {
 
                 if coordinator.youtubeConfigStore.isConfigured {
                     HStack(spacing: 8) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(appearance.colors.accent)
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(appearance.colors.accentForeground)
                         Text("youtubeSettings.statusConnected")
                             .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
                             .foregroundStyle(appearance.colors.textSecondary)
@@ -901,7 +888,7 @@ private struct GeminiCostCard: View {
     }
 
     private var progressTint: Color {
-        count >= cap ? DesignTokens.stateError : appearance.colors.accent
+        count >= cap ? appearance.statusForeground(DesignTokens.stateError) : appearance.colors.accentForeground
     }
 
     var body: some View {
@@ -913,8 +900,7 @@ private struct GeminiCostCard: View {
                 Text(L10n.fmt("settings.gemini.cost.usage", locale: locale,
                               Self.number(count, locale: locale),
                               Self.number(cap, locale: locale)))
-                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
-                    .foregroundStyle(count >= cap ? DesignTokens.stateError : appearance.colors.textPrimary)
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold)).foregroundStyle(count >= cap ? appearance.statusForeground(DesignTokens.stateError) : appearance.colors.textPrimary)
                 Spacer()
             }
             ProgressView(value: progress)
@@ -930,18 +916,15 @@ private struct GeminiCostCard: View {
                 ), in: GeminiCostGovernor.minimumSoftDailyCap...GeminiCostGovernor.maximumSoftDailyCap,
                 step: 10) {
                     Text(Self.number(cap, locale: locale))
-                        .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
-                        .foregroundStyle(appearance.colors.accent)
+                        .font(.system(size: appearance.typography.bodyPointSize, weight: .bold)).foregroundStyle(appearance.colors.accentForeground)
                 }
             }
             if count >= cap {
                 Text("settings.gemini.cost.reachedToday")
-                    .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.stateError)
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .semibold)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
             } else if count >= warningThreshold {
                 Text("settings.gemini.cost.nearLimit")
-                    .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.stateListening)
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .semibold)).foregroundStyle(appearance.statusForeground(DesignTokens.stateListening))
             }
             Text("settings.gemini.cost.explanation")
                 .font(.system(size: appearance.typography.captionPointSize))
@@ -1065,7 +1048,7 @@ struct VoiceEngineSettingsView: View {
             .frame(minHeight: DesignTokens.minTapTargetSize)
             Text(captionKey)
                 .font(.system(size: appearance.typography.captionPointSize))
-                .foregroundStyle(captionColor)
+                .foregroundStyle(appearance.statusForeground(captionColor))
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1079,8 +1062,7 @@ struct VoiceEngineSettingsView: View {
         } label: {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 22))
-                    .foregroundStyle(isSelected ? appearance.colors.accent : appearance.colors.textSecondary.opacity(0.5))
+                    .font(.system(size: 22)).foregroundStyle(isSelected ? appearance.colors.accentForeground : appearance.colors.textSecondary.opacity(0.5))
                 VStack(alignment: .leading, spacing: 4) {
                     Text(LocalizedStringKey(titleKey))
                         .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
@@ -1096,7 +1078,7 @@ struct VoiceEngineSettingsView: View {
             .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
             .overlay(
                 RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius)
-                    .stroke(isSelected ? appearance.colors.accent : Color.clear, lineWidth: 2)
+                    .stroke(isSelected ? appearance.colors.accentForeground : Color.clear, lineWidth: 2)
             )
         }
         .buttonStyle(.plain)
@@ -1175,7 +1157,7 @@ struct WakeWordSettingsView: View {
     private func statusBlock(_ status: WakeWordStatus) -> some View {
         switch status {
         case .active:
-            statusCard(color: appearance.colors.accent,
+            statusCard(color: appearance.colors.accentForeground,
                        titleKey: "wakeWord.active.title",
                        detailKey: "wakeWord.active.detail")
         case .off:
@@ -1200,7 +1182,7 @@ struct WakeWordSettingsView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
                 Circle()
-                    .fill(color)
+                    .fill(appearance.statusForeground(color))
                     .frame(width: 12, height: 12)
                 Text(titleKey)
                     .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
@@ -1237,8 +1219,7 @@ struct WakeWordSettingsView: View {
     private func missingRow(_ key: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "xmark.circle.fill")
-                .font(.system(size: 22))
-                .foregroundStyle(DesignTokens.stateError)
+                .font(.system(size: 22)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
             Text(LocalizedStringKey(key))
                 .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textPrimary)
@@ -1286,8 +1267,7 @@ struct WakeWordSettingsView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
                 Image(systemName: "quote.bubble.fill")
-                    .font(.system(size: 18))
-                    .foregroundStyle(appearance.colors.accent)
+                    .font(.system(size: 18)).foregroundStyle(appearance.colors.accentForeground)
                 Text("wakeWord.phrase")
                     .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                     .foregroundStyle(appearance.colors.textPrimary)
@@ -1438,7 +1418,7 @@ struct FamilyContactsSettingsView: View {
                     if isDoctorRelationship(contact.relationship) {
                         roleChip(L10n.str("family.relationship.doctor",
                                           locale: coordinator.activeLocale),
-                                 tint: appearance.colors.accent)
+                                 tint: appearance.colors.accentForeground)
                     }
                     Text(contact.relationship)
                         .font(.system(size: appearance.typography.captionPointSize))
@@ -1470,8 +1450,7 @@ struct FamilyContactsSettingsView: View {
                 coordinator.removeFamilyContact(id: contact.id)
             } label: {
                 Image(systemName: "trash.fill")
-                    .font(.system(size: 22))
-                    .foregroundStyle(DesignTokens.stateError)
+                    .font(.system(size: 22)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
                     .frame(minWidth: DesignTokens.minTapTargetSize,
                            minHeight: DesignTokens.minTapTargetSize)
             }
@@ -1813,7 +1792,7 @@ private struct FamilyContactWizardSheet: View {
                 ForEach(Step.allCases, id: \.rawValue) { s in
                     Circle()
                         .fill(s.rawValue <= step.rawValue
-                            ? appearance.colors.accent
+                            ? appearance.colors.accentForeground
                             : appearance.colors.textSecondary.opacity(0.25))
                         .frame(width: 10, height: 10)
                 }
@@ -1974,8 +1953,7 @@ private struct FamilyContactWizardSheet: View {
                         } label: {
                             HStack(spacing: 10) {
                                 Image(systemName: "person.crop.circle.badge.plus")
-                                    .font(.system(size: 18))
-                                    .foregroundStyle(appearance.colors.accent)
+                                    .font(.system(size: 18)).foregroundStyle(appearance.colors.accentForeground)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(entry.name)
                                         .font(.system(size: appearance.typography.bodyPointSize,
@@ -2179,8 +2157,7 @@ private struct FamilyContactWizardSheet: View {
                             Image(systemName: "checkmark")
                                 // Caption token (DESIGN-REVIEW) — was a
                                 // fixed 15pt.
-                                .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
-                                .foregroundStyle(appearance.colors.accent)
+                                .font(.system(size: appearance.typography.captionPointSize, weight: .bold)).foregroundStyle(appearance.colors.accentForeground)
                         }
                     }
                 }
@@ -2410,8 +2387,7 @@ private struct FamilyContactWizardSheet: View {
                 .autocorrectionDisabled()
             if let issue = emailIssue {
                 Text(L10n.str(emailIssueKey(issue), locale: coordinator.activeLocale))
-                    .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.stateError)
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .semibold)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
                     .fixedSize(horizontal: false, vertical: true)
             }
             if isEmergencyContact {
@@ -2659,8 +2635,7 @@ struct PlacesSettingsView: View {
                 Spacer()
                 if isSelected {
                     Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 26))
-                        .foregroundStyle(appearance.colors.accent)
+                        .font(.system(size: 26)).foregroundStyle(appearance.colors.accentForeground)
                 }
             }
             .padding(18)
@@ -2668,7 +2643,7 @@ struct PlacesSettingsView: View {
             .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
             .overlay(
                 RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius)
-                    .stroke(isSelected ? appearance.colors.accent : Color.clear, lineWidth: 2)
+                    .stroke(isSelected ? appearance.colors.accentForeground : Color.clear, lineWidth: 2)
             )
         }
         .buttonStyle(.plain)
@@ -2716,8 +2691,7 @@ struct PlacesSettingsView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: place.category == .home ? "house.fill" : "mappin.circle.fill")
-                    .font(.system(size: 26))
-                    .foregroundStyle(appearance.colors.accent)
+                    .font(.system(size: 26)).foregroundStyle(appearance.colors.accentForeground)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(place.name)
                         .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
@@ -2743,8 +2717,7 @@ struct PlacesSettingsView: View {
                     coordinator.removePlace(id: place.id)
                 } label: {
                     Image(systemName: "trash.fill")
-                        .font(.system(size: 22))
-                        .foregroundStyle(DesignTokens.stateError)
+                        .font(.system(size: 22)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
                         .frame(minWidth: DesignTokens.minTapTargetSize,
                                minHeight: DesignTokens.minTapTargetSize)
                 }
@@ -2755,9 +2728,7 @@ struct PlacesSettingsView: View {
                 HStack(spacing: 8) {
                     Image(systemName: place.isDefaultHome
                           ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 22))
-                        .foregroundStyle(place.isDefaultHome
-                                         ? appearance.colors.accent : appearance.colors.textSecondary)
+                        .font(.system(size: 22)).foregroundStyle(place.isDefaultHome ? appearance.colors.accentForeground : appearance.colors.textSecondary)
                     Text("settings.places.defaultHome")
                         .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                         .foregroundStyle(appearance.colors.textPrimary)
@@ -2936,8 +2907,7 @@ private struct PlacesEditorSheet: View {
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: isDefaultHome ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 26))
-                    .foregroundStyle(isDefaultHome ? appearance.colors.accent : appearance.colors.textSecondary)
+                    .font(.system(size: 26)).foregroundStyle(isDefaultHome ? appearance.colors.accentForeground : appearance.colors.textSecondary)
                 Text("settings.places.defaultHomeToggle")
                     .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                     .foregroundStyle(appearance.colors.textPrimary)
@@ -3117,8 +3087,7 @@ struct MedicationScheduleSettingsView: View {
                 photoEditorEntry = entry
             } label: {
                 Image(systemName: entry.visualAids.isEmpty ? "photo.badge.plus" : "photo.fill")
-                    .font(.system(size: 22))
-                    .foregroundStyle(appearance.colors.accent)
+                    .font(.system(size: 22)).foregroundStyle(appearance.colors.accentForeground)
                     .frame(minWidth: DesignTokens.minTapTargetSize,
                            minHeight: DesignTokens.minTapTargetSize)
             }
@@ -3128,8 +3097,7 @@ struct MedicationScheduleSettingsView: View {
                 coordinator.removeMedication(id: entry.id)
             } label: {
                 Image(systemName: "trash.fill")
-                    .font(.system(size: 22))
-                    .foregroundStyle(DesignTokens.stateError)
+                    .font(.system(size: 22)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
                     .frame(minWidth: DesignTokens.minTapTargetSize,
                            minHeight: DesignTokens.minTapTargetSize)
             }
@@ -3170,8 +3138,7 @@ struct MedicationScheduleSettingsView: View {
 
             if let errorKey {
                 Text(LocalizedStringKey(errorKey))
-                    .font(.system(size: appearance.typography.captionPointSize))
-                    .foregroundStyle(DesignTokens.stateError)
+                    .font(.system(size: appearance.typography.captionPointSize)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
                     .multilineTextAlignment(.center)
             }
 
@@ -3222,8 +3189,7 @@ struct MedicationScheduleSettingsView: View {
                     .font(.system(size: 24, weight: .semibold))
                 Text("meds.scanLabel")
                     .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
-            }
-            .foregroundStyle(appearance.colors.accent)
+            }.foregroundStyle(appearance.colors.accentForeground)
             .frame(maxWidth: .infinity)
             .frame(minHeight: DesignTokens.minTapTargetSize + 12)
             .background(appearance.colors.setupReminder)
@@ -3306,8 +3272,7 @@ struct MedicationScheduleSettingsView: View {
                             draft.removeTime(at: index)
                         } label: {
                             Image(systemName: "minus.circle.fill")
-                                .font(.system(size: 22))
-                                .foregroundStyle(DesignTokens.stateError)
+                                .font(.system(size: 22)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
                                 .frame(minWidth: DesignTokens.minTapTargetSize,
                                        minHeight: DesignTokens.minTapTargetSize)
                         }
@@ -3328,8 +3293,7 @@ struct MedicationScheduleSettingsView: View {
                         .font(.system(size: 18, weight: .semibold))
                     Text("meds.addTime")
                         .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
-                }
-                .foregroundStyle(appearance.colors.accent)
+                }.foregroundStyle(appearance.colors.accentForeground)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
                 .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
@@ -3419,8 +3383,7 @@ struct MedicationScheduleSettingsView: View {
                     .font(.system(size: 18, weight: .semibold))
                 Text(isLookingUpPurpose ? "meds.lookup.searching" : "meds.purpose.lookup")
                     .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
-            }
-            .foregroundStyle(canLookUpPurpose ? appearance.colors.accent : appearance.colors.textSecondary)
+            }.foregroundStyle(canLookUpPurpose ? appearance.colors.accentForeground : appearance.colors.textSecondary)
             .frame(maxWidth: .infinity)
             .frame(minHeight: DesignTokens.minTapTargetSize)
             .appSurface(role: .card, cornerRadius: DesignTokens.bubbleCornerRadius)
@@ -3541,7 +3504,7 @@ struct AIModelsSettingsView: View {
                         }
                     }
                     .pickerStyle(.menu)
-                    .tint(appearance.colors.accent)
+                    .tint(appearance.colors.accentForeground)
                     if !hasAnySTTInstalled {
                         Text("model.notDownloaded")
                             .font(.system(size: appearance.typography.captionPointSize))
@@ -3592,7 +3555,7 @@ struct AIModelsSettingsView: View {
                         }
                     }
                     .pickerStyle(.menu)
-                    .tint(appearance.colors.accent)
+                    .tint(appearance.colors.accentForeground)
                     // `candidates` is the brains-only pool: the translation
                     // artifacts are `.llamaBase` entries that are NOT in this
                     // picker, and every one of them belongs to the translation
@@ -4423,8 +4386,7 @@ struct ModelManagementRow: View {
                 if case .completed = state {
                     Button(role: .destructive, action: onDelete) {
                         Image(systemName: "trash")
-                            .font(.system(size: 20))
-                            .foregroundStyle(DesignTokens.stateError)
+                            .font(.system(size: 20)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
                             .frame(minWidth: DesignTokens.minTapTargetSize,
                                    minHeight: DesignTokens.minTapTargetSize)
                     }
@@ -4499,8 +4461,7 @@ struct ModelManagementRow: View {
             .buttonStyle(.plain)
         case .completed:
             Label("model.active", systemImage: "bolt.fill")
-                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
-                .foregroundStyle(appearance.colors.accent)
+                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold)).foregroundStyle(appearance.colors.accentForeground)
         }
     }
 
@@ -4519,7 +4480,7 @@ struct ModelManagementRow: View {
             let ratio = total > 0 ? Double(received) / Double(total) : 0
             VStack(alignment: .leading, spacing: 4) {
                 ProgressView(value: ratio)
-                    .tint(appearance.colors.accent)
+                    .tint(appearance.colors.accentForeground)
                 Text("\(bytes(received)) / \(bytes(total))")
                     .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(appearance.colors.textSecondary)
@@ -4530,12 +4491,10 @@ struct ModelManagementRow: View {
                 .foregroundStyle(appearance.colors.textSecondary)
         case .completed:
             Text("model.ready")
-                .font(.system(size: appearance.typography.captionPointSize))
-                .foregroundStyle(appearance.colors.accent)
+                .font(.system(size: appearance.typography.captionPointSize)).foregroundStyle(appearance.colors.accentForeground)
         case .failed(let reason):
             Text(L10n.fmt("model.failed", locale: locale, reason))
-                .font(.system(size: appearance.typography.captionPointSize))
-                .foregroundStyle(DesignTokens.stateError)
+                .font(.system(size: appearance.typography.captionPointSize)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
         case .cancelled:
             Text("model.cancelled")
                 .font(.system(size: appearance.typography.captionPointSize))
@@ -4560,8 +4519,7 @@ struct PrivacySettingsView: View {
         LeafScreen(titleKey: "settings.privacy.title") {
             VStack(spacing: 16) {
                 Image(systemName: "lock.shield.fill")
-                    .font(.system(size: 44))
-                    .foregroundStyle(appearance.colors.accent)
+                    .font(.system(size: 44)).foregroundStyle(appearance.colors.accentForeground)
                 Text("settings.privacy.body")
                     .font(.system(size: appearance.typography.bodyPointSize))
                     .foregroundStyle(appearance.colors.textPrimary)
@@ -4747,8 +4705,7 @@ struct TTSVoicesSettingsView: View {
                         } label: {
                             HStack(spacing: 14) {
                                 Image(systemName: "play.circle.fill")
-                                    .font(.system(size: 26))
-                                    .foregroundStyle(appearance.colors.accent)
+                                    .font(.system(size: 26)).foregroundStyle(appearance.colors.accentForeground)
                                     .frame(width: 40)
                                 Text("settings.voices.testButton")
                                     .font(.system(size: appearance.typography.bodyPointSize,
@@ -4765,8 +4722,7 @@ struct TTSVoicesSettingsView: View {
                            let entry = ModelCatalog.entry(for: voiceID) {
                             Text(L10n.fmt("settings.voices.installFailed", locale: locale,
                                           entry.displayName))
-                                .font(.system(size: appearance.typography.captionPointSize))
-                                .foregroundStyle(DesignTokens.stateError)
+                                .font(.system(size: appearance.typography.captionPointSize)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.horizontal, 4)
                         }
@@ -4774,8 +4730,7 @@ struct TTSVoicesSettingsView: View {
                             Self.status(for: $0, modelStore: coordinator.modelStore) == .missing
                         }) {
                             Text("settings.voices.missingHint")
-                                .font(.system(size: appearance.typography.captionPointSize))
-                                .foregroundStyle(DesignTokens.stateError)
+                                .font(.system(size: appearance.typography.captionPointSize)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.horizontal, 4)
                         }
@@ -4944,16 +4899,15 @@ struct TTSVoicesSettingsView: View {
         let isCurrent = voice == currentVoice
         let (statusKey, statusColor): (LocalizedStringKey, Color) = {
             switch voiceStatus {
-            case .installed: return ("settings.voices.statusInstalled", appearance.colors.accent)
-            case .bundled:   return ("settings.voices.statusBundled", appearance.colors.accent)
+            case .installed: return ("settings.voices.statusInstalled", appearance.colors.accentForeground)
+            case .bundled:   return ("settings.voices.statusBundled", appearance.colors.accentForeground)
             case .missing:   return ("settings.voices.statusMissing", DesignTokens.stateError)
             }
         }()
         return VStack(spacing: 12) {
             HStack(spacing: 14) {
                 Image(systemName: "waveform")
-                    .font(.system(size: 26))
-                    .foregroundStyle(appearance.colors.accent)
+                    .font(.system(size: 26)).foregroundStyle(appearance.colors.accentForeground)
                     .frame(width: 40)
                 Text(optionName(voice))
                     .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
@@ -4961,7 +4915,7 @@ struct TTSVoicesSettingsView: View {
                 Spacer()
                 HStack(spacing: 6) {
                     Circle()
-                        .fill(statusColor)
+                        .fill(appearance.statusForeground(statusColor))
                         .frame(width: 8, height: 8)
                     Text(statusKey)
                         .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
@@ -4990,8 +4944,7 @@ struct TTSVoicesSettingsView: View {
                             .font(.system(size: 22))
                         Text("settings.voices.currentVoice")
                             .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
-                    }
-                    .foregroundStyle(appearance.colors.accent)
+                    }.foregroundStyle(appearance.colors.accentForeground)
                     .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
                 } else {
                     Button {
@@ -5023,15 +4976,14 @@ struct TTSVoicesSettingsView: View {
             ? "settings.voices.english" : "settings.voices.nepali"
         let (statusKey, statusColor): (LocalizedStringKey, Color) = {
             switch status {
-            case .installed: return ("settings.voices.statusInstalled", appearance.colors.accent)
-            case .bundled:   return ("settings.voices.statusBundled", appearance.colors.accent)
+            case .installed: return ("settings.voices.statusInstalled", appearance.colors.accentForeground)
+            case .bundled:   return ("settings.voices.statusBundled", appearance.colors.accentForeground)
             case .missing:   return ("settings.voices.statusMissing", DesignTokens.stateError)
             }
         }()
         return HStack(spacing: 14) {
             Image(systemName: "waveform")
-                .font(.system(size: 26))
-                .foregroundStyle(appearance.colors.accent)
+                .font(.system(size: 26)).foregroundStyle(appearance.colors.accentForeground)
                 .frame(width: 40)
             Text(LocalizedStringKey(nameKey))
                 .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
@@ -5039,7 +4991,7 @@ struct TTSVoicesSettingsView: View {
             Spacer()
             HStack(spacing: 6) {
                 Circle()
-                    .fill(statusColor)
+                    .fill(appearance.statusForeground(statusColor))
                     .frame(width: 8, height: 8)
                 Text(statusKey)
                     .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))

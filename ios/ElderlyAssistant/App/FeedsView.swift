@@ -56,8 +56,7 @@ struct FeedsView: View {
                 Task { await coordinator.refreshFeed() }
             } label: {
                 Label("feeds.refresh", systemImage: "arrow.clockwise")
-                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
-                    .foregroundStyle(appearance.colors.accent)
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold)).foregroundStyle(appearance.colors.accentForeground)
                     .padding(.horizontal, 16)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
                     .appSurface(role: .card, cornerRadius: 999)
@@ -297,8 +296,7 @@ struct FeedsView: View {
             HStack(spacing: 10) {
                 Image(systemName: item.kind == .audio
                       ? "speaker.wave.2.fill" : "play.rectangle.fill")
-                    .font(.system(size: 22))
-                    .foregroundStyle(appearance.colors.accent)
+                    .font(.system(size: 22)).foregroundStyle(appearance.colors.accentForeground)
                 Text(display.title)
                     .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(appearance.colors.textPrimary)
@@ -388,8 +386,7 @@ struct FeedsView: View {
                 .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
             Text("feeds.translatedByAI")
                 .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
-        }
-        .foregroundStyle(appearance.colors.accent)
+        }.foregroundStyle(appearance.colors.accentForeground)
         .padding(.horizontal, 10)
         .padding(.vertical, 4)
         .background(appearance.colors.accent.opacity(0.12))
@@ -451,7 +448,7 @@ struct FeedsView: View {
             Group {
                 if translating {
                     ProgressView()
-                        .tint(appearance.colors.accent)
+                        .tint(appearance.colors.accentForeground)
                 } else {
                     Label(LocalizedStringKey(display.isShowingTranslation
                                              ? "feeds.showOriginal" : "feeds.translate"),
@@ -459,13 +456,12 @@ struct FeedsView: View {
                           ? "arrow.uturn.backward" : "character.bubble.fill")
                 }
             }
-            .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
-            .foregroundStyle(appearance.colors.accent)
+            .font(.system(size: appearance.typography.bodyPointSize, weight: .bold)).foregroundStyle(appearance.colors.accentForeground)
             .padding(.horizontal, 18)
             .frame(maxWidth: .infinity)
             .frame(minHeight: DesignTokens.minTapTargetSize)
             .appSurface(role: .control, cornerRadius: 999)
-            .overlay(Capsule().stroke(appearance.colors.accent.opacity(0.4), lineWidth: 1.5))
+            .overlay(Capsule().stroke(appearance.colors.accentForeground.opacity(0.4), lineWidth: 1.5))
         }
         .buttonStyle(.plain)
         .disabled(translating)
@@ -522,13 +518,12 @@ struct FeedsView: View {
             coordinator.readFeedItemArticleAloud(item)
         } label: {
             Label("feeds.readFullArticle", systemImage: "doc.text.fill")
-                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
-                .foregroundStyle(appearance.colors.accent)
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold)).foregroundStyle(appearance.colors.accentForeground)
                 .padding(.horizontal, 18)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
                 .appSurface(role: .control, cornerRadius: 999)
-                .overlay(Capsule().stroke(appearance.colors.accent.opacity(0.4), lineWidth: 1.5))
+                .overlay(Capsule().stroke(appearance.colors.accentForeground.opacity(0.4), lineWidth: 1.5))
         }
         .buttonStyle(.plain)
     }
@@ -540,12 +535,11 @@ struct FeedsView: View {
     private var unreadMarker: some View {
         HStack(spacing: 4) {
             Circle()
-                .fill(appearance.colors.accent)
+                .fill(appearance.colors.accentForeground)
                 .frame(width: 8, height: 8)
             Text("feeds.unread")
                 .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
-        }
-        .foregroundStyle(appearance.colors.accent)
+        }.foregroundStyle(appearance.colors.accentForeground)
         .padding(.horizontal, 10)
         .padding(.vertical, 4)
         .background(appearance.colors.accent.opacity(0.12))

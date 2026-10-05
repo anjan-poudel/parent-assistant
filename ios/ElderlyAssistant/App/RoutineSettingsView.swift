@@ -92,8 +92,7 @@ struct RoutineSettingsView: View {
     private func routineManageRow(_ entry: RoutineEntry) -> some View {
         HStack(spacing: 12) {
             Image(systemName: entry.category.systemImage)
-                .font(.system(size: 24))
-                .foregroundStyle(appearance.colors.accent)
+                .font(.system(size: 24)).foregroundStyle(appearance.colors.accentForeground)
             VStack(alignment: .leading, spacing: 4) {
                 Text(entry.displayTitle(locale: coordinator.activeLocale))
                     .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
@@ -109,8 +108,7 @@ struct RoutineSettingsView: View {
                 photoEditorEntry = entry
             } label: {
                 Image(systemName: entry.visualAids.isEmpty ? "photo.badge.plus" : "photo.fill")
-                    .font(.system(size: 22))
-                    .foregroundStyle(appearance.colors.accent)
+                    .font(.system(size: 22)).foregroundStyle(appearance.colors.accentForeground)
                     .frame(minWidth: DesignTokens.minTapTargetSize,
                            minHeight: DesignTokens.minTapTargetSize)
             }

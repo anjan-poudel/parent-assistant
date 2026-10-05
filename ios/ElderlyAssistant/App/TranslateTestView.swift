@@ -197,7 +197,7 @@ private struct TranslateTestComposerCard: View {
                     // Busy is not a fault — the button is live again — so it
                     // is stated plainly rather than in the error colour.
                     .foregroundStyle(notice == .busy ? appearance.colors.textSecondary
-                                                     : DesignTokens.stateError)
+                                                     : appearance.statusForeground(DesignTokens.stateError))
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -222,7 +222,9 @@ private struct TranslateTestMicButton: View {
         } label: {
             Image(systemName: isListening ? "mic.fill" : "mic")
                 .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(isListening ? DesignTokens.overlayText : appearance.colors.textPrimary)
+                .foregroundStyle(isListening
+                    ? (appearance.skin.isDark ? appearance.statusForeground(DesignTokens.stateListening) : DesignTokens.overlayText)
+                    : appearance.colors.textPrimary)
                 .frame(minWidth: DesignTokens.minTapTargetSize,
                        minHeight: DesignTokens.minTapTargetSize)
                 .background(isListening ? DesignTokens.stateListening.opacity(0.25)
@@ -271,12 +273,12 @@ private struct TranslateTestControlsCard: View {
                     .tag(TranslateTestSelection.gemini)
             }
             .pickerStyle(.menu)
-            .tint(appearance.colors.accent)
+            .tint(appearance.colors.accentForeground)
             .frame(minHeight: DesignTokens.minTapTargetSize)
 
             Text(readinessLine)
                 .font(.system(size: appearance.typography.captionPointSize))
-                .foregroundStyle(readinessColor)
+                .foregroundStyle(appearance.statusForeground(readinessColor))
                 .fixedSize(horizontal: false, vertical: true)
 
             Button {
@@ -423,9 +425,7 @@ private struct TranslateTestResultCard: View {
                           ? "settings.translateTest.result.degraded"
                           : "settings.translateTest.result.title",
                           locale: locale))
-                .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
-                .foregroundStyle(result.degraded ? DesignTokens.stateError
-                                                 : appearance.colors.textPrimary)
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold)).foregroundStyle(result.degraded ? appearance.statusForeground(DesignTokens.stateError) : appearance.colors.textPrimary)
 
             // The original text stays on screen for a degradation: with no
             // translation to show, the honest thing is the input plus the

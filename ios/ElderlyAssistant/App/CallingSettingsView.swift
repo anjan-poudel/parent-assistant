@@ -49,8 +49,7 @@ struct CallingSettingsView: View {
                 Spacer()
                 if isSelected {
                     Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 26))
-                        .foregroundStyle(appearance.colors.accent)
+                        .font(.system(size: 26)).foregroundStyle(appearance.colors.accentForeground)
                 }
             }
             .padding(18)
@@ -58,7 +57,7 @@ struct CallingSettingsView: View {
             .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
             .overlay(
                 RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius)
-                    .stroke(isSelected ? appearance.colors.accent : Color.clear, lineWidth: 2)
+                    .stroke(isSelected ? appearance.colors.accentForeground : Color.clear, lineWidth: 2)
             )
         }
         .buttonStyle(.plain)

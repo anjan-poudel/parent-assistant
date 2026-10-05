@@ -83,8 +83,7 @@ struct EventsView: View {
         } label: {
             HStack(spacing: 12) {
                 Image(systemName: "calendar")
-                    .font(.system(size: 24))
-                    .foregroundStyle(appearance.colors.accent)
+                    .font(.system(size: 24)).foregroundStyle(appearance.colors.accentForeground)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(event.title)
                         .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
@@ -107,8 +106,7 @@ struct EventsView: View {
                     // would mean a file read per row per body pass — the
                     // rule this screen keeps (see the type's comment).
                     Image(systemName: "photo.fill")
-                        .font(.system(size: 22))
-                        .foregroundStyle(appearance.colors.accent)
+                        .font(.system(size: 22)).foregroundStyle(appearance.colors.accentForeground)
                         .accessibilityHidden(true)
                 }
                 Image(systemName: "chevron.right")
@@ -645,8 +643,7 @@ struct EventDetailView: View {
             confirmingDelete = true
         } label: {
             Text("events.delete")
-                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
-                .foregroundStyle(DesignTokens.stateError)
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
                 .appSurface(role: .card, cornerRadius: DesignTokens.bubbleCornerRadius)
@@ -659,8 +656,7 @@ struct EventDetailView: View {
             onClose()
         } label: {
             Text("common.close")
-                .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
-                .foregroundStyle(appearance.colors.accent)
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold)).foregroundStyle(appearance.colors.accentForeground)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
         }

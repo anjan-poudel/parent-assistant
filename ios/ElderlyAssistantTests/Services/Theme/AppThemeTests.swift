@@ -9,6 +9,40 @@ final class AppThemeTests: XCTestCase {
         }
     }
 
+    func testRestoredDarkSkinsKeepNativeDarkSchemeAcrossStyleAndTextSizeChanges() {
+        for raw in ["midnight", "darkRose"] {
+            let skin = AppTheme(rawOrDefault: raw)
+            XCTAssertEqual(skin.rawValue, raw)
+            for style in AppVisualStyle.allCases {
+                for size in AppTextSize.allCases {
+                    let appearance = AppAppearance(skin: skin, style: style, textSize: size)
+                    XCTAssertEqual(appearance.preferredColorScheme, .dark,
+                                   "Changing style or text size must not restore light native controls")
+                }
+            }
+        }
+    }
+
+    func testForegroundAdaptationDoesNotReinterpretUnknownColorsOrLightStates() {
+        let states = [DesignTokens.stateIdle, DesignTokens.stateStopped,
+                      DesignTokens.stateListening, DesignTokens.stateTranscribing,
+                      DesignTokens.stateUnderstanding, DesignTokens.stateSpeaking,
+                      DesignTokens.stateError]
+        let evidence = Color(.sRGB, red: 0.12, green: 0.67, blue: 0.89, opacity: 1)
+        for skin in AppTheme.allCases {
+            let appearance = AppAppearance(skin: skin, style: .soft)
+            XCTAssertEqual(appearance.statusForeground(evidence), evidence,
+                           "Unknown evidence colors must not be reclassified")
+            if !skin.isDark {
+                XCTAssertEqual(appearance.preferredColorScheme, .light)
+                for state in states {
+                    XCTAssertEqual(appearance.statusForeground(state), state,
+                                   "Light skin status colors must remain unchanged")
+                }
+            }
+        }
+    }
+
     func testInvalidSelectionsRestoreToSafeAppearance() {
         for raw in [nil, "", "unknown"] as [String?] {
             let restored = AppAppearance(skin: AppTheme(rawOrDefault: raw),

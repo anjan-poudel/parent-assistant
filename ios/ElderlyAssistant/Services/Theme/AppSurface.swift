@@ -30,7 +30,7 @@ private struct AppSurfaceModifier: ViewModifier {
         switch role {
         case .card, .control: appearance.colors.card
         case .accent: appearance.colors.accent
-        case .dock: appearance.colors.textPrimary
+        case .dock: appearance.colors.accent
         }
     }
 
@@ -55,7 +55,7 @@ private struct AppSurfaceModifier: ViewModifier {
         } else if isEmphasized {
             // Primary and dock ink must never depend on the content behind glass.
             shape.fill(LinearGradient(
-                colors: [opaqueFill, role == .accent ? appearance.colors.talkDeep : opaqueFill],
+                colors: [opaqueFill, appearance.colors.talkDeep],
                 startPoint: .topLeading, endPoint: .bottomTrailing))
         } else if appearance.style == .glass {
             if #available(iOS 26.0, *) {

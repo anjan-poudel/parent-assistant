@@ -28,8 +28,7 @@ struct IntentLogReviewView: View {
                                     Text("intentLog.export")
                                 }
                                 .font(.system(size: appearance.typography.captionPointSize,
-                                              weight: .semibold))
-                                .foregroundStyle(appearance.colors.accent)
+                                              weight: .semibold)).foregroundStyle(appearance.colors.accentForeground)
                                 .frame(minHeight: DesignTokens.minTapTargetSize)
                             }
                         }
@@ -42,8 +41,7 @@ struct IntentLogReviewView: View {
                                 Text("intentLog.clear")
                             }
                             .font(.system(size: appearance.typography.captionPointSize,
-                                          weight: .semibold))
-                            .foregroundStyle(DesignTokens.stateError)
+                                          weight: .semibold)).foregroundStyle(appearance.statusForeground(DesignTokens.stateError))
                             .frame(minHeight: DesignTokens.minTapTargetSize)
                         }
                     }
@@ -63,8 +61,7 @@ struct IntentLogReviewView: View {
                     VStack(spacing: 8) {
                         ForEach(records) { record in
                             HStack(spacing: 10) {
-                                Image(systemName: icon(for: record))
-                                    .foregroundStyle(appearance.colors.accent)
+                                Image(systemName: icon(for: record)).foregroundStyle(appearance.colors.accentForeground)
                                 Text(summary(for: record))
                                     .font(.system(size: appearance.typography.bodyPointSize))
                                     .foregroundStyle(appearance.colors.textPrimary)

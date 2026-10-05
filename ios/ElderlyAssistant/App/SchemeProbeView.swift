@@ -146,18 +146,14 @@ struct SchemeProbeView: View {
     private var outcomeRow: some View {
         if let probeResult {
             Text(probeKey(probeResult))
-                .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
-                .foregroundStyle(probeResult == .registered
-                                 ? DesignTokens.stateSpeaking : DesignTokens.stateError)
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold)).foregroundStyle(probeResult == .registered ? appearance.statusForeground(DesignTokens.stateSpeaking) : appearance.statusForeground(DesignTokens.stateError))
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         } else if let openResult {
             Text(openResult == .opened
                  ? L10n.str("settings.schemeProbe.opened", locale: coordinator.activeLocale)
                  : L10n.str("settings.schemeProbe.openFailed", locale: coordinator.activeLocale))
-                .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
-                .foregroundStyle(openResult == .opened
-                                 ? DesignTokens.stateSpeaking : DesignTokens.stateError)
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold)).foregroundStyle(openResult == .opened ? appearance.statusForeground(DesignTokens.stateSpeaking) : appearance.statusForeground(DesignTokens.stateError))
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }

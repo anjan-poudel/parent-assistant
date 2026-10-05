@@ -18,14 +18,40 @@ struct AppAppearance: Equatable {
     static let `default` = AppAppearance(skin: .sky, style: .soft)
 
     var colors: AppColors { AppColors.palette(for: skin) }
+    var preferredColorScheme: ColorScheme { skin.preferredColorScheme }
     var typography: AppTypography {
         AppTypography(textSize: textSize, systemContentSizeCategory: systemContentSizeCategory)
     }
 
+    /// State fills remain invariant; only text and standalone glyphs adapt to a dark surface.
+    func statusForeground(_ fill: Color) -> Color {
+        guard skin.isDark else { return fill }
+        return switch fill {
+        case DesignTokens.stateIdle: Color(hex: 0xA6C8FF)
+        case DesignTokens.stateStopped: Color(hex: 0xBDCCDE)
+        case DesignTokens.stateListening: Color(hex: 0xFFD18A)
+        case DesignTokens.stateTranscribing: Color(hex: 0xF5C17A)
+        case DesignTokens.stateUnderstanding: Color(hex: 0xEABF87)
+        case DesignTokens.stateSpeaking: Color(hex: 0xA6DE94)
+        case DesignTokens.stateError: Color(hex: 0xFFAAA4)
+        default: fill
+        }
+    }
+
     func badgeTint(_ tint: DesignTokens.BadgeTint) -> Color {
-        switch tint {
+        if skin.isDark {
+            return switch tint {
+            case .emergency: statusForeground(DesignTokens.stateError)
+            case .call: Color(hex: 0x9DDFB6)
+            case .directions: Color(hex: 0xFFD18A)
+            case .feeds, .apps: Color(hex: 0xA6C8FF)
+            case .meds, .reminders: colors.accentForeground
+            case .appliance, .settings: colors.textPrimary
+            }
+        }
+        return switch tint {
         case .emergency: DesignTokens.stateError
-        case .call: Color(red: 0.075, green: 0.365, blue: 0.235)
+        case .call: DesignTokens.callActionFill
         case .directions: Color(red: 0.545, green: 0.282, blue: 0.031)
         case .feeds, .apps: Color(red: 0.086, green: 0.267, blue: 0.525)
         case .meds, .reminders: colors.accent
@@ -34,7 +60,17 @@ struct AppAppearance: Equatable {
     }
 
     func badgeBackground(_ tint: DesignTokens.BadgeTint) -> Color {
-        switch tint {
+        if skin.isDark {
+            return switch tint {
+            case .emergency: Color(hex: 0x402327)
+            case .call: Color(hex: 0x1D382D)
+            case .directions: Color(hex: 0x3D3021)
+            case .feeds, .apps: Color(hex: 0x233349)
+            case .meds, .reminders: colors.brandBlush
+            case .appliance, .settings: colors.setupReminder
+            }
+        }
+        return switch tint {
         case .emergency: colors.card
         case .call: Color(red: 0.867, green: 0.949, blue: 0.890)
         case .directions: Color(red: 1.0, green: 0.914, blue: 0.780)
@@ -54,6 +90,7 @@ struct AppColors {
     let background: Color
     let card: Color
     let accent: Color
+    let accentForeground: Color
     let textPrimary: Color
     let textSecondary: Color
     let userBubble: Color
@@ -82,10 +119,12 @@ struct AppColors {
     private init(background: UInt32, card: UInt32, accent: UInt32,
                  ink: UInt32, secondary: UInt32, wash: UInt32,
                  canvasBottom: UInt32, ribbon: UInt32, deep: UInt32,
-                 highlight: UInt32, mid: UInt32, talkDeep: UInt32) {
+                 highlight: UInt32, mid: UInt32, talkDeep: UInt32,
+                 accentForeground: UInt32? = nil) {
         self.background = Color(hex: background)
         self.card = Color(hex: card)
         self.accent = Color(hex: accent)
+        self.accentForeground = Color(hex: accentForeground ?? accent)
         textPrimary = Color(hex: ink)
         textSecondary = Color(hex: secondary)
         userBubble = Color(hex: wash)
@@ -115,6 +154,8 @@ struct AppColors {
         case .lavender: lavender
         case .dusk: dusk
         case .lightPink: pink
+        case .midnight: midnight
+        case .darkRose: darkRose
         }
     }
 
@@ -148,6 +189,18 @@ struct AppColors {
         ink: 0x482335, secondary: 0x654453, wash: 0xF8D8E4,
         canvasBottom: 0xEDC5D5, ribbon: 0xDCA0B6, deep: 0x9C486B,
         highlight: 0xAD3B60, mid: 0x94234C, talkDeep: 0x5E1B37)
+    private static let midnight = AppColors(
+        background: 0x111722, card: 0x1D2634, accent: 0xAD1741,
+        ink: 0xF3F6FC, secondary: 0xBDCADD, wash: 0x293448,
+        canvasBottom: 0x182333, ribbon: 0x364962, deep: 0x91ACD1,
+        highlight: 0xBE3452, mid: 0xA3163B, talkDeep: 0x630F2A,
+        accentForeground: 0xFFB0C5)
+    private static let darkRose = AppColors(
+        background: 0x21151D, card: 0x30212B, accent: 0x9E2850,
+        ink: 0xFFF3F7, secondary: 0xDFC0CE, wash: 0x422B38,
+        canvasBottom: 0x2B1A25, ribbon: 0x614052, deep: 0xDAA0B9,
+        highlight: 0xAD3B60, mid: 0x94234C, talkDeep: 0x5E1B37,
+        accentForeground: 0xFFB6D0)
 }
 
 private extension Color {
