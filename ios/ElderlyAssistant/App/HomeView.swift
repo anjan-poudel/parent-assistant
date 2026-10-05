@@ -96,10 +96,8 @@ struct HomeView: View {
     }
 
     private var homeDock: some View {
-        HomeDock(contactName: homePresentation.primaryContactName,
-                 onAppliance: { coordinator.presentApplianceHelper(question: nil) },
+        HomeDock(onAppliance: { coordinator.presentApplianceHelper(question: nil) },
                  onLiveTranslate: { coordinator.presentLiveTranslate() })
-            .equatable()
     }
 
     var body: some View {
@@ -293,7 +291,6 @@ struct HomeView: View {
             dateLine: coordinator.homeDateLine,
             notificationCount: activeNotificationCount,
             favoriteApps: coordinator.favoriteApps,
-            primaryContactName: coordinator.familyContacts.first?.name,
             setup: SetupPresentation(
                 pendingCount: coordinator.onboardingState.pendingSteps.count,
                 // Warning styling is reserved for a capability that is

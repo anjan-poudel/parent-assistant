@@ -41,8 +41,6 @@ struct HomePresentationState: Equatable {
     var notificationCount: Int
     /// The user's quick-access favourites (empty hides the strip).
     var favoriteApps: [AppLauncher.App]
-    /// The top family contact's name, for the dock's call tile avatar.
-    var primaryContactName: String?
     /// The optional-setup strip's inputs.
     var setup: SetupPresentation
     /// The last missed call to surface as an activity tile, or nil when
@@ -54,7 +52,6 @@ struct HomePresentationState: Equatable {
         dateLine: nil,
         notificationCount: 0,
         favoriteApps: [],
-        primaryContactName: nil,
         setup: .hidden,
         lastMissedCall: nil)
 }

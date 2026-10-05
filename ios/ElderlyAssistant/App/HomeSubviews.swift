@@ -48,7 +48,7 @@ struct HomeTopBar: View {
         VStack(spacing: 8) {
             HStack(spacing: 8) {
                 NavigationLink(value: LeafDestination.settings) {
-                    IconBadge(systemImage: "gearshape.fill", tint: .settings, diameter: 32)
+                    ReferenceIconArtwork(name: "settings", diameter: 32)
                         .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
@@ -136,72 +136,73 @@ extension HomeTopBar: Equatable {
 /// favourite exists (the caller's `if`).
 struct QuickAccessStrip: View {
     @Environment(\.appAppearance) private var appearance
-    @ScaledMetric(relativeTo: .body) private var tileWidth: CGFloat = 92
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .body) private var largeTypeTileWidth: CGFloat = 92
+    @State private var availableWidth: CGFloat = 0
     let apps: [AppLauncher.App]
-    /// Tap on a tile: launch through the coordinator, which probes the
-    /// scheme again at tap time and speaks honestly when the app has gone
-    /// away.
+    /// Launch through the coordinator, including its installed-app check.
     let onLaunch: (AppLauncher.App) -> Void
+
+    private var tileWidth: CGFloat {
+        let fourAcrossWidth = max(DesignTokens.minTapTargetSize, (availableWidth - 24) / 4)
+        return dynamicTypeSize > .large ? max(largeTypeTileWidth, fourAcrossWidth) : fourAcrossWidth
+    }
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 12) {
+            HStack(alignment: .top, spacing: 8) {
                 ForEach(apps) { app in
                     tile(app)
                 }
-                // The plus tile pushes the Quick apps picker ITSELF
-                // (menu-audit task, 2026-09-17) — it used to land on the
-                // Settings hub's default Voice tab, one wrong tab away
-                // from the picker. Home's stack resolves
-                // `SettingsDestination` the same way the Directions leaf
-                // resolves `.places` locally.
                 NavigationLink(value: SettingsView.SettingsDestination.quickApps) {
                     addTile
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("home.quickAccess.add")
             }
             .padding(.vertical, 2)
         }
         .fixedSize(horizontal: false, vertical: true)
+        .onGeometryChange(for: CGFloat.self) { geometry in
+            geometry.size.width
+        } action: { width in
+            availableWidth = width
+        }
+        .accessibilityIdentifier("home.quickAccess")
     }
 
-    /// 56pt badge + name on a 92pt-wide tile, ≥44pt tall — one combined
-    /// accessibility element ("WhatsApp, button").
+    /// Four equal slots fit the viewport at ordinary type sizes. More
+    /// favourites and the picker stay accessible by horizontal scrolling.
     private func tile(_ app: AppLauncher.App) -> some View {
         Button {
             onLaunch(app)
         } label: {
             VStack(spacing: 4) {
-                AppGlyph(app: app, diameter: 56)
+                AppGlyph(app: app, diameter: 48)
                 Text(LocalizedStringKey(app.nameKey))
-                    // [DESIGN-REVIEW] 18pt caption floor + wrapping —
-                    // no minimumScaleFactor on localized tile labels.
                     .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
-                    .foregroundColor(appearance.colors.textPrimary)
+                    .foregroundStyle(appearance.colors.textPrimary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .frame(width: tileWidth)
-            .frame(minHeight: DesignTokens.minTapTargetSize)
+            .frame(width: tileWidth, alignment: .top)
+            .frame(minHeight: DesignTokens.minTapTargetSize, alignment: .top)
             .accessibilityElement(children: .combine)
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("home.quickAccess.\(app.id)")
     }
 
-    /// The trailing plus tile → the Quick apps picker directly
-    /// (`SettingsDestination.quickApps`), not the Settings hub (which
-    /// defaults to its Voice tab). Same 92pt width as the app tiles so
-    /// the row's rhythm stays even.
+    /// The trailing plus tile opens the Quick apps picker directly.
     private var addTile: some View {
-        VStack(spacing: 4) {
-            IconBadge(systemImage: "plus", tint: .apps, diameter: 56)
-        }
-        .frame(width: tileWidth)
-        .frame(minHeight: DesignTokens.minTapTargetSize)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(Text("home.quickAccess.add"))
+        IconBadge(systemImage: "plus", tint: .apps, diameter: 48)
+            .frame(width: tileWidth)
+            .frame(minHeight: DesignTokens.minTapTargetSize)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(Text("home.quickAccess.add"))
     }
 }
+
 
 extension QuickAccessStrip: Equatable {
     /// The favourites themselves — the only data the row renders (the
@@ -696,115 +697,88 @@ private struct SetupStrip: View {
 struct HomeDock: View {
     @Environment(\.appAppearance) private var appearance
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    let contactName: String?
     let onAppliance: () -> Void
     let onLiveTranslate: () -> Void
 
     private var topColumns: [GridItem] {
         dynamicTypeSize.isAccessibilitySize
-            ? [GridItem(.adaptive(minimum: 140), spacing: 8)]
-            : Array(repeating: GridItem(.flexible(minimum: 44), spacing: 8), count: 4)
+            ? [GridItem(.adaptive(minimum: 140), spacing: 8, alignment: .top)]
+            : Array(repeating: GridItem(.flexible(minimum: 44), spacing: 8, alignment: .top), count: 4)
     }
 
     private var bottomColumns: [GridItem] {
         dynamicTypeSize.isAccessibilitySize
-            ? [GridItem(.adaptive(minimum: 140), spacing: 8)]
-            : Array(repeating: GridItem(.flexible(minimum: 44), spacing: 8), count: 3)
+            ? [GridItem(.adaptive(minimum: 140), spacing: 8, alignment: .top)]
+            : Array(repeating: GridItem(.flexible(minimum: 44), spacing: 8, alignment: .top), count: 3)
     }
 
     var body: some View {
         VStack(spacing: 8) {
             LazyVGrid(columns: topColumns, alignment: .center, spacing: 8) {
                 Button(action: onAppliance) {
-                    tile(icon: "camera.viewfinder", tint: .appliance,
-                         titleKey: "plugin.applianceHelper.name", utility: true)
+                    tile(artwork: "settings", titleKey: "plugin.applianceHelper.name", onRail: false)
                 }
                 .buttonStyle(.plain)
+                .accessibilityIdentifier("home.action.appliance")
                 Button(action: onLiveTranslate) {
-                    tile(icon: LiveTranslateEntry.iconName, tint: .appliance,
-                         titleKey: LiveTranslateEntry.labelKey, utility: true)
+                    tile(artwork: "translate", titleKey: LiveTranslateEntry.labelKey, onRail: false)
                 }
                 .buttonStyle(.plain)
-                dockItem(.feed, icon: "rectangle.stack.fill", tint: .feeds,
-                         titleKey: "home.hub.feeds", utility: true)
-                dockItem(.directions, icon: "map.fill", tint: .directions,
-                         titleKey: "home.hub.directions", utility: true)
+                .accessibilityIdentifier("home.action.liveTranslate")
+                dockItem(.feed, artwork: "news", titleKey: "home.hub.feeds",
+                         onRail: false, identifier: "home.action.feed")
+                dockItem(.directions, artwork: "location", titleKey: "home.hub.directions",
+                         onRail: false, identifier: "home.action.maps")
             }
+            .accessibilityIdentifier("home.actionRow")
+
             LazyVGrid(columns: bottomColumns, alignment: .center, spacing: 8) {
-                callItem
-                dockItem(.meds, icon: "pills.fill", tint: .meds,
-                         titleKey: "home.hub.meds", utility: true)
-                dockItem(.reminders, icon: "clock.fill", tint: .reminders,
-                         titleKey: "home.hub.reminders", utility: true)
+                dockItem(.call, artwork: "phone", titleKey: "home.hub.call",
+                         onRail: true, identifier: "home.action.phone")
+                dockItem(.meds, artwork: "medicine", titleKey: "home.hub.meds",
+                         onRail: true, identifier: "home.action.medication")
+                dockItem(.reminders, artwork: "clock", titleKey: "home.hub.reminders",
+                         onRail: true, identifier: "home.action.reminders")
             }
+            .padding(8)
+            .appSurface(role: .dock, cornerRadius: 20)
+            .accessibilityIdentifier("home.dock")
         }
-        .padding(10)
-        .appSurface(role: .dock)
+        .accessibilityIdentifier("home.actions")
     }
 
-    private func dockItem(_ destination: LeafDestination, icon: String,
-                          tint: DesignTokens.BadgeTint, titleKey: String,
-                          utility: Bool = false) -> some View {
+    private func dockItem(_ destination: LeafDestination, artwork: String,
+                          titleKey: String, onRail: Bool, identifier: String) -> some View {
         NavigationLink(value: destination) {
-            tile(icon: icon, tint: tint, titleKey: titleKey, utility: utility)
+            tile(artwork: artwork, titleKey: titleKey, onRail: onRail)
         }
         .buttonStyle(.plain)
-    }
-
-    private var callItem: some View {
-        NavigationLink(value: LeafDestination.call) {
-            VStack(spacing: 6) {
-                if let contactName {
-                    FaceAvatar(name: contactName, diameter: 44)
-                } else {
-                    IconBadge(systemImage: "phone.fill", tint: .call, diameter: 44)
-                }
-                tileLabel("home.hub.call", utility: true)
-            }
-            .padding(.horizontal, 4)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity, minHeight: 88)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+        .accessibilityIdentifier(identifier)
     }
 
     @ViewBuilder
-    private func tile(icon: String, tint: DesignTokens.BadgeTint,
-                      titleKey: String, utility: Bool) -> some View {
-        if utility {
-            tileContent(icon: icon, tint: tint, titleKey: titleKey, utility: true)
+    private func tile(artwork: String, titleKey: String, onRail: Bool) -> some View {
+        if onRail {
+            tileContent(artwork: artwork, titleKey: titleKey, onRail: true)
         } else {
-            tileContent(icon: icon, tint: tint, titleKey: titleKey, utility: false)
-                .appSurface()
+            tileContent(artwork: artwork, titleKey: titleKey, onRail: false)
+                .appSurface(role: .control, cornerRadius: 12)
         }
     }
 
-    private func tileContent(icon: String, tint: DesignTokens.BadgeTint,
-                             titleKey: String, utility: Bool) -> some View {
-        VStack(spacing: 6) {
-            IconBadge(systemImage: icon, tint: tint, diameter: utility ? 40 : 44)
-            tileLabel(titleKey, utility: utility)
+    private func tileContent(artwork: String, titleKey: String, onRail: Bool) -> some View {
+        VStack(spacing: 4) {
+            ReferenceIconArtwork(name: artwork, diameter: onRail ? 44 : 48)
+            Text(LocalizedStringKey(titleKey))
+                .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .semibold))
+                .foregroundStyle(onRail ? appearance.colors.onAccent : appearance.colors.textPrimary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 4)
-        .padding(.vertical, 10)
-        .frame(maxWidth: .infinity, minHeight: 88)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, minHeight: 76, maxHeight: .infinity, alignment: .top)
         .contentShape(Rectangle())
-    }
-
-    private func tileLabel(_ titleKey: String, utility: Bool) -> some View {
-        Text(LocalizedStringKey(titleKey))
-            .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .semibold))
-            .foregroundStyle(utility ? appearance.colors.onAccent : appearance.colors.textPrimary)
-            .multilineTextAlignment(.center)
-            .fixedSize(horizontal: false, vertical: true)
-    }
-}
-
-extension HomeDock: Equatable {
-    /// Appearance and Dynamic Type invalidate through the environment;
-    /// coordinator updates still compare only the rendered contact name.
-    static func == (lhs: HomeDock, rhs: HomeDock) -> Bool {
-        lhs.contactName == rhs.contactName
+        .accessibilityElement(children: .combine)
     }
 }
