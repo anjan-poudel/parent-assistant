@@ -12635,6 +12635,23 @@
         }
       }
     },
+    "router.chatLowConfidence" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "I'm not confident about this — I can't answer that well."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "मलाई यसमा विश्वास छैन — म यो राम्ररी जवाफ दिन सक्दिनँ।"
+          }
+        }
+      }
+    },
     "router.calendarEventCalendarUnavailable" : {
       "extractionState" : "manual",
       "localizations" : {
