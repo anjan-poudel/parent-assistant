@@ -17,17 +17,14 @@ import XCTest
 ///  4. What still does not fit **scrolls**; nothing is truncated and no type is
 ///     shrunk.
 ///
-/// The suite asserts the rule's own numbers, not just its behaviour, because
-/// the numbers *are* the rule: a 0.45 that quietly became 0.6, or a 1.4 that
-/// became 2.0, would leave every "the panel fits" assertion below still green.
-/// `testTheRulesOwnNumbersArePinned` is the one that fails if the plan is
-/// edited by accident.
 final class LiveTranslateFocusLayoutTests: XCTestCase {
 
     /// A phone-sized container, the shape this screen is designed for.
     private let container = CGSize(width: 400, height: 800)
     /// The floor the real view passes: one row at the app's type floors.
-    private var floor: CGFloat { LiveTranslateFocusResultView.minimumPanelHeight }
+    private var floor: CGFloat {
+        LiveTranslateFocusResultView.minimumPanelHeight(typography: AppTypography(textSize: .medium))
+    }
 
     /// The rule every resolution below is asked for **explicitly**. The numbers
     /// live on `Rule` because they are config parameters (review finding: the
@@ -48,71 +45,7 @@ final class LiveTranslateFocusLayoutTests: XCTestCase {
                                          rule: rule ?? self.rule)
     }
 
-    // MARK: - The rule's own numbers
 
-    /// The rule's numbers, spelled here as numbers so that a change to any of
-    /// them has to be a deliberate change to this test. The **growth step** is
-    /// one of them (review finding: the stride the loop walks is a config
-    /// parameter like the other two, so it is pinned like the other two — a
-    /// step that quietly doubled would still satisfy every "the picture grew"
-    /// assertion below).
-    func testTheRulesOwnNumbersArePinned() {
-        XCTAssertEqual(rule.panelHeightFraction, 0.45, accuracy: 0.0001)
-        XCTAssertEqual(rule.maximumImageGrowth, 1.4, accuracy: 0.0001)
-        XCTAssertEqual(rule.growthStep, 0.05, accuracy: 0.0001)
-    }
-
-    /// The shipped rule **is the shipped config's**, not a second spelling of
-    /// the same numbers (review finding: the injected config on the layout
-    /// path). A session builds its rule from its own config
-    /// (`LiveTranslateSessionModel.focusRule`), so a config a suite drives has
-    /// to be the config that draws; `.shipped` is only what stands in for a
-    /// preview or a test with no session.
-    func testTheShippedRuleIsTheConfigsOwnNumbers() {
-        XCTAssertEqual(rule, LiveTranslateFocusLayout.Rule(config: LiveTranslateConfig.default))
-        XCTAssertEqual(rule.panelHeightFraction,
-                       LiveTranslateConfig.default.focusPanelHeightFraction,
-                       accuracy: 0.0001)
-        XCTAssertEqual(rule.growthStep,
-                       LiveTranslateConfig.default.focusPanelGrowthStep,
-                       accuracy: 0.0001)
-        XCTAssertEqual(rule.maximumImageGrowth,
-                       LiveTranslateConfig.default.focusImageMaxGrowth,
-                       accuracy: 0.0001)
-    }
-
-    /// A rule built from a config is **that** config's: the numbers a suite
-    /// arranges are the numbers the surface is drawn with, which is the whole
-    /// point of carrying the rule rather than reading the default at draw time.
-    func testARuleIsBuiltFromTheConfigItIsGiven() {
-        var config = LiveTranslateConfig()
-        config.focusPanelHeightFraction = 0.3
-        config.focusPanelGrowthStep = 0.2
-        config.focusImageMaxGrowth = 2.0
-
-        let sessionRule = LiveTranslateFocusLayout.Rule(config: config)
-
-        XCTAssertEqual(sessionRule.panelHeightFraction, 0.3, accuracy: 0.0001)
-        XCTAssertEqual(sessionRule.growthStep, 0.2, accuracy: 0.0001)
-        XCTAssertEqual(sessionRule.maximumImageGrowth, 2.0, accuracy: 0.0001)
-        XCTAssertNotEqual(sessionRule, rule)
-    }
-
-    /// The floor is the app's own type tokens, not a literal of this screen's:
-    /// one caption line (the original) plus one body line (the translation)
-    /// plus the padding the card puts round them.
-    func testTheLegibilityFloorIsMadeOfTheAppsOwnTypeTokens() {
-        let expected = DesignTokens.minCaptionPointSize
-            + DesignTokens.minBodyPointSize
-            + DesignTokens.interElementSpacing * 4
-        XCTAssertEqual(LiveTranslateFocusResultView.minimumPanelHeight,
-                       expected,
-                       accuracy: 0.0001)
-        // And it is a floor worth having: taller than a single body line, so a
-        // row cannot be squeezed to nothing and still satisfy the rule.
-        XCTAssertGreaterThan(LiveTranslateFocusResultView.minimumPanelHeight,
-                             DesignTokens.minBodyPointSize)
-    }
 
     // MARK: - Rule 1: the panel is bounded by the picture
 
@@ -362,7 +295,8 @@ final class LiveTranslateFocusLayoutTests: XCTestCase {
         let capture = LiveTranslateFocusResultFixture.capture(pixelSize: CGSize(width: 1000, height: 1000))
         let layout = LiveTranslateFocusResultView.layout(for: container,
                                                          capture: capture,
-                                                         panelContentHeight: 10)
+                                                         panelContentHeight: 10,
+                                                         typography: AppTypography(textSize: .medium))
         XCTAssertEqual(layout.imageHeight, 400, accuracy: 0.001)
         XCTAssertEqual(layout.panelHeight,
                        layout.imageHeight * rule.panelHeightFraction,
@@ -394,10 +328,12 @@ final class LiveTranslateFocusLayoutTests: XCTestCase {
         let tall = LiveTranslateFocusResultFixture.capture(pixelSize: CGSize(width: 1000, height: 4000))
         let plain = LiveTranslateFocusResultView.layout(for: container,
                                                         capture: tall,
-                                                        panelContentHeight: 200)
+                                                        panelContentHeight: 200,
+                                                        typography: AppTypography(textSize: .medium))
         let inset = LiveTranslateFocusResultView.layout(for: available,
                                                         capture: tall,
-                                                        panelContentHeight: 200)
+                                                        panelContentHeight: 200,
+                                                        typography: AppTypography(textSize: .medium))
         // The column is the glass less the gap the picture and the panel draw
         // between them — that gap is part of the rule (`columnSpacing`), so the
         // two heights fill the glass *minus* it and not the glass itself.

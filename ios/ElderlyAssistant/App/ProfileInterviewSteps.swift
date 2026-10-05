@@ -25,6 +25,7 @@ import SwiftUI
 
 struct AboutYouStep: View {
     @EnvironmentObject var coordinator: AppCoordinator
+    @Environment(\.appAppearance) private var appearance
     let onNext: (OnboardingState.Step) -> Void
 
     @State private var draft = AboutYouDraft()
@@ -104,7 +105,7 @@ struct AboutYouStep: View {
                     .multilineTextAlignment(.center)
             }
 
-            primaryButton(key: "onboarding.next") { saveAndAdvance() }
+            primaryButton(key: "onboarding.next", typography: appearance.typography) { saveAndAdvance() }
                 .disabled(!draft.isComplete)
                 .opacity(draft.isComplete ? 1 : 0.45)
         }
@@ -200,6 +201,7 @@ enum KinDesignation {
 
 struct EmergencyContactsStep: View {
     @EnvironmentObject var coordinator: AppCoordinator
+    @Environment(\.appAppearance) private var appearance
     let onNext: (OnboardingState.Step) -> Void
 
     @State private var draft = EmergencyContactsDraft()
@@ -251,7 +253,7 @@ struct EmergencyContactsStep: View {
                     .multilineTextAlignment(.center)
             }
 
-            primaryButton(key: "onboarding.next") { saveAndAdvance() }
+            primaryButton(key: "onboarding.next", typography: appearance.typography) { saveAndAdvance() }
         }
         .onAppear(perform: prefill)
     }
@@ -409,6 +411,7 @@ struct EmergencyContactsStep: View {
 
 struct VoiceFingerprintStep: View {
     let coordinator: AppCoordinator
+    @Environment(\.appAppearance) private var appearance
     let onNext: (OnboardingState.Step) -> Void
 
     @StateObject private var enrollment: VoiceEnrollmentSession
@@ -461,7 +464,7 @@ struct VoiceFingerprintStep: View {
             }
 
             // Skippable like every step: Next never depends on phase.
-            primaryButton(key: "onboarding.next") { onNext(.voiceFingerprint) }
+            primaryButton(key: "onboarding.next", typography: appearance.typography) { onNext(.voiceFingerprint) }
         }
         .onDisappear {
             // Same mid-recording teardown as `VoiceSettingsView` (rework

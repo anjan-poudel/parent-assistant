@@ -28,6 +28,7 @@ enum NewsSourceEditorSeam {
 /// House SettingsView pattern: the row lives in `SettingsView`'s
 /// `SettingsSection` list; this is the pushed destination.
 struct FeedsSettingsView: View {
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
 
     // Add-form drafts (kept on screen when a store write fails — the
@@ -52,8 +53,8 @@ struct FeedsSettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
             sectionHeader(key: "settings.feeds.sourcesSection")
             Text("settings.feeds.sourcesHint")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.captionPointSize))
+                .foregroundStyle(appearance.colors.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if coordinator.feedSources.isEmpty {
                 emptyLine(key: "settings.feeds.sourcesEmpty")
@@ -71,17 +72,17 @@ struct FeedsSettingsView: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 8) {
                     Text(source.name)
-                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                        .foregroundStyle(DesignTokens.textPrimary)
+                        .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                        .foregroundStyle(appearance.colors.textPrimary)
                     if source.isCuratedDefault {
                         Text("settings.feeds.defaultTag")
-                            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                            .foregroundStyle(DesignTokens.accent)
+                            .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
+                            .foregroundStyle(appearance.colors.accent)
                     }
                 }
                 Text(source.urlString)
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .font(.system(size: appearance.typography.captionPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
                     .lineLimit(2)
             }
             Spacer()
@@ -99,8 +100,7 @@ struct FeedsSettingsView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// ONE-field add form (senior-friendly): paste the feed address; the
@@ -110,17 +110,16 @@ struct FeedsSettingsView: View {
         VStack(spacing: 10) {
             TextField(LocalizedStringKey("settings.feeds.sourcePlaceholder"),
                       text: $newSourceURL)
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .keyboardType(.URL)
                 .padding(14)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
-                .background(DesignTokens.background)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
             if sourceAddFailed {
                 Text("settings.feeds.addSourceFailed")
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
+                    .font(.system(size: appearance.typography.captionPointSize))
                     .foregroundStyle(DesignTokens.stateError)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: .infinity, alignment: .center)
@@ -129,20 +128,18 @@ struct FeedsSettingsView: View {
                 addSource()
             } label: {
                 Text("settings.feeds.addSource")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.accent)
-                    .clipShape(Capsule())
+                    .appSurface(role: .accent, cornerRadius: 999)
             }
             .buttonStyle(.plain)
             .disabled(newSourceURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
         .padding(16)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     private func addSource() {
@@ -171,8 +168,8 @@ struct FeedsSettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
             sectionHeader(key: "settings.feeds.topicsSection")
             Text("settings.feeds.topicsHint")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.captionPointSize))
+                .foregroundStyle(appearance.colors.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if coordinator.feedTopics.isEmpty {
                 emptyLine(key: "settings.feeds.topicsEmpty")
@@ -188,15 +185,15 @@ struct FeedsSettingsView: View {
     private func topicRow(_ topic: String) -> some View {
         HStack(spacing: 12) {
             Text(topic)
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                .foregroundStyle(appearance.colors.textPrimary)
             Spacer()
             Button {
                 coordinator.removeFeedTopic(topic)
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 22))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
                     .frame(minWidth: DesignTokens.minTapTargetSize,
                            minHeight: DesignTokens.minTapTargetSize)
             }
@@ -205,37 +202,33 @@ struct FeedsSettingsView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     private var addTopicForm: some View {
         HStack(spacing: 10) {
             TextField(LocalizedStringKey("settings.feeds.topicPlaceholder"),
                       text: $newTopic)
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .padding(14)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
-                .background(DesignTokens.background)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
             Button {
                 addTopic()
             } label: {
                 Text("settings.feeds.addTopic")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 16)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.accent)
-                    .clipShape(Capsule())
+                    .appSurface(role: .accent, cornerRadius: 999)
             }
             .buttonStyle(.plain)
             .disabled(newTopic.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
         .padding(16)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     private func addTopic() {
@@ -258,20 +251,19 @@ struct FeedsSettingsView: View {
                     HStack(spacing: 14) {
                         Image(systemName: "newspaper.fill")
                             .font(.system(size: 26))
-                            .foregroundStyle(DesignTokens.accent)
+                            .foregroundStyle(appearance.colors.accent)
                             .frame(width: 40)
                         Text("settings.feeds.newsManage")
-                            .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                            .foregroundStyle(DesignTokens.textPrimary)
+                            .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
+                            .foregroundStyle(appearance.colors.textPrimary)
                         Spacer()
                         Image(systemName: "chevron.right")
                             .font(.system(size: 20, weight: .bold))
-                            .foregroundStyle(DesignTokens.textSecondary)
+                            .foregroundStyle(appearance.colors.textSecondary)
                     }
                     .padding(18)
                     .frame(maxWidth: .infinity)
-                    .background(DesignTokens.card)
-                    .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+                    .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
                 }
                 .buttonStyle(.plain)
             } else {
@@ -284,20 +276,19 @@ struct FeedsSettingsView: View {
 
     private func sectionHeader(key: String) -> some View {
         Text(LocalizedStringKey(key))
-            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-            .foregroundStyle(DesignTokens.textSecondary)
+            .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
+            .foregroundStyle(appearance.colors.textSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 8)
     }
 
     private func emptyLine(key: String) -> some View {
         Text(LocalizedStringKey(key))
-            .font(.system(size: DesignTokens.minBodyPointSize))
-            .foregroundStyle(DesignTokens.textSecondary)
+            .font(.system(size: appearance.typography.bodyPointSize))
+            .foregroundStyle(appearance.colors.textSecondary)
             .multilineTextAlignment(.leading)
             .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+            .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 }

@@ -31,6 +31,7 @@ import SwiftUI
 /// action verb in its VoiceOver label. Everything else on this leaf
 /// re-opens its recorded channel.
 struct HistoryView: View {
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject private var coordinator: AppCoordinator
 
     var body: some View {
@@ -93,11 +94,11 @@ struct HistoryView: View {
                 Text(ActivityRowText.name(for: entry,
                                           locale: coordinator.activeLocale,
                                           correlatedName: coordinator.missedCallDisplayNames[entry.id]))
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                    .foregroundStyle(appearance.colors.textPrimary)
                 Text(caption(for: entry))
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .font(.system(size: appearance.typography.captionPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
                     .lineLimit(2)
             }
             Spacer(minLength: 0)
@@ -115,8 +116,7 @@ struct HistoryView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// Accent ≥44pt phone circle — the unanswered row's "this opens the
@@ -128,8 +128,7 @@ struct HistoryView: View {
             .foregroundStyle(.white)
             .frame(minWidth: DesignTokens.minTapTargetSize,
                    minHeight: DesignTokens.minTapTargetSize)
-            .background(DesignTokens.accent)
-            .clipShape(Circle())
+            .appSurface(role: .accent, cornerRadius: 999)
             .accessibilityHidden(true)
     }
 
@@ -291,29 +290,28 @@ struct HistoryView: View {
     private var liveCallBanner: some View {
         HStack(spacing: 10) {
             Image(systemName: "phone.fill")
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                .foregroundStyle(DesignTokens.BadgeTint.call.tint)
+                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
+                .foregroundStyle(appearance.badgeTint(.call))
             Text("history.liveCall")
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                .foregroundStyle(DesignTokens.BadgeTint.call.tint)
+                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
+                .foregroundStyle(appearance.badgeTint(.call))
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 16)
         .frame(minHeight: DesignTokens.minTapTargetSize)
-        .background(DesignTokens.BadgeTint.call.background)
+        .background(appearance.badgeBackground(.call))
         .clipShape(Capsule())
         .accessibilityAddTraits(.updatesFrequently)
     }
 
     private var emptyStateCard: some View {
         Text(LocalizedStringKey("history.empty"))
-            .font(.system(size: DesignTokens.minBodyPointSize))
-            .foregroundStyle(DesignTokens.textSecondary)
+            .font(.system(size: appearance.typography.bodyPointSize))
+            .foregroundStyle(appearance.colors.textSecondary)
             .multilineTextAlignment(.center)
             .padding(32)
             .frame(maxWidth: .infinity)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+            .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 }
 

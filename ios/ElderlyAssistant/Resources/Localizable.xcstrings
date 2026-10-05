@@ -19369,13 +19369,251 @@
         }
       }
     },
+    "appearance.textSize" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Text Size"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "अक्षरको आकार"
+          }
+        }
+      }
+    },
+    "textSize.independentChoices" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Change text size without changing your colours or visual style. Changes apply throughout the app immediately."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "रङ वा दृश्य शैली नबदली अक्षरको आकार बदल्नुहोस्। परिवर्तन पूरै एपमा तुरुन्तै लागू हुन्छ।"
+          }
+        }
+      }
+    },
+    "textSize.system" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "System"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "सिस्टम"
+          }
+        }
+      }
+    },
+    "textSize.system.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Follow your iPhone text size, including larger accessibility sizes."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ठूला पहुँचयोग्य आकारहरूसहित आइफोनको अक्षर आकारअनुसार चल्छ।"
+          }
+        }
+      }
+    },
+    "textSize.small" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Small"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "सानो"
+          }
+        }
+      }
+    },
+    "textSize.small.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Smaller text in this app, with a readable minimum size."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "यो एपमा साना अक्षर, पढ्न मिल्ने न्यूनतम आकार कायम राखेर।"
+          }
+        }
+      }
+    },
+    "textSize.medium" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Medium"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "मध्यम"
+          }
+        }
+      }
+    },
+    "textSize.medium.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Medium text in this app, independent of iPhone settings."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "आइफोनको सेटिङबाट स्वतन्त्र, यो एपमा मध्यम अक्षर।"
+          }
+        }
+      }
+    },
+    "textSize.large" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Large"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ठूलो"
+          }
+        }
+      }
+    },
+    "textSize.large.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Large text in this app, independent of iPhone settings."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "आइफोनको सेटिङबाट स्वतन्त्र, यो एपमा ठूला अक्षर।"
+          }
+        }
+      }
+    },
+    "textSize.xl" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "XL"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "अझ ठूलो"
+          }
+        }
+      }
+    },
+    "textSize.xl.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Extra-large text for easier reading in this app."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "यो एपमा सजिलोसँग पढ्न अझ ठूला अक्षर।"
+          }
+        }
+      }
+    },
+    "textSize.xxl" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "XXL"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "अत्यन्त ठूलो"
+          }
+        }
+      }
+    },
+    "textSize.xxl.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The largest app text size. Scroll to see all content."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "एपको सबैभन्दा ठूलो अक्षर आकार। सबै सामग्री हेर्न स्क्रोल गर्नुहोस्।"
+          }
+        }
+      }
+    },
     "theme.cream" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Warm cream"
+            "value" : "Warm Cream"
           }
         },
         "ne" : {
@@ -22052,6 +22290,346 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "युट्युब"
+          }
+        }
+      }
+    },
+    "appearance.visualStyle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Visual Style"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "दृश्य शैली"
+          }
+        }
+      }
+    },
+    "appearance.colourSkin" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Colour Skin"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "रङको रूप"
+          }
+        }
+      }
+    },
+    "appearance.independentChoices" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Choose the surface style and colours separately. Changes apply immediately."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "सतहको शैली र रङ छुट्टाछुट्टै छान्नुहोस्। परिवर्तन तुरुन्तै लागू हुन्छ।"
+          }
+        }
+      }
+    },
+    "appearance.style.classic" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Classic"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "परम्परागत"
+          }
+        }
+      }
+    },
+    "appearance.style.soft" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Soft"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "कोमल"
+          }
+        }
+      }
+    },
+    "appearance.style.glass" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Liquid Glass"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "लिक्विड ग्लास"
+          }
+        }
+      }
+    },
+    "appearance.style.classic.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Solid surfaces with quiet, clear edges."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "स्पष्ट किनारा भएका ठोस सतहहरू।"
+          }
+        }
+      }
+    },
+    "appearance.style.soft.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gentle gradients, rounded cards and subtle depth."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "कोमल रङ मिश्रण, गोलाकार कार्ड र हल्का गहिराइ।"
+          }
+        }
+      }
+    },
+    "appearance.style.glass.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Native glass on iOS 26. Earlier versions use a frosted material. Accessibility settings keep surfaces solid when needed."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iOS 26 मा वास्तविक ग्लास। पुराना संस्करणमा धमिलो सामग्री प्रयोग हुन्छ। पहुँचयोग्यता सेटिङले आवश्यक हुँदा सतह ठोस राख्छ।"
+          }
+        }
+      }
+    },
+    "appearance.skin.cream.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Warm cream, cocoa text and amber-brown accents."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "न्यानो क्रिम, कोको रङको पाठ र खैरो सजावट।"
+          }
+        }
+      }
+    },
+    "appearance.skin.sage.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fresh sage surfaces with deep teal accents."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "हल्का हरियो सतह र गाढा नीलोहरियो सजावट।"
+          }
+        }
+      }
+    },
+    "appearance.skin.sky.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cool sky blue, white cards, navy text and a crimson Talk control."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "शीतल आकाशे नीलो, सेतो कार्ड, गाढा नीलो पाठ र रातो बोल्ने बटन।"
+          }
+        }
+      }
+    },
+    "appearance.skin.lavender.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Soft lavender with rich purple accents."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "कोमल ल्याभेन्डर र गाढा बैजनी सजावट।"
+          }
+        }
+      }
+    },
+    "appearance.skin.dusk.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pale slate surfaces with deep blue-grey accents."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "हल्का स्लेट सतह र गाढा नीलोखैरो सजावट।"
+          }
+        }
+      }
+    },
+    "appearance.skin.lightPink.description" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pale rose surfaces with deep berry accents."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "हल्का गुलाबी सतह र गाढा बेरी रङको सजावट।"
+          }
+        }
+      }
+    },
+    "appearance.preview" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live preview"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "प्रत्यक्ष झलक"
+          }
+        }
+      }
+    },
+    "appearance.preview.talk" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Talk control"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "बोल्ने बटन"
+          }
+        }
+      }
+    },
+    "appearance.preview.card" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reminder card"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "सम्झना कार्ड"
+          }
+        }
+      }
+    },
+    "appearance.selected" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Selected"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "छानिएको"
+          }
+        }
+      }
+    },
+    "appearance.notSelected" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not selected"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "नछानिएको"
           }
         }
       }

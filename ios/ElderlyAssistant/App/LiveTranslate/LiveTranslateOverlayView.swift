@@ -524,8 +524,8 @@ struct LiveTranslateOverlaySurface: Equatable {
     /// colour at a call site, and a device check can change how heavy the wash
     /// is without touching the token table.
     ///
-    /// The ink drawn *inside* it is `DesignTokens.textPrimary`, the app's
-    /// darkest type colour, for the reason stated at the in-place branch: dark
+    /// The ink drawn *inside* it is `DesignTokens.overlayText`, the invariant
+    /// dark operational colour, for the reason stated at the in-place branch: dark
     /// on green is what the owner asked to see, and it clears the wash by
     /// roughly 10:1 where the old pair (white on navy) could only be read by
     /// covering the sign up.
@@ -586,6 +586,8 @@ struct LiveTranslateOverlaySurface: Equatable {
     static func policy(config: LiveTranslateConfig,
                        alwaysShowOriginal: Bool,
                        extractionMode: Bool = false) -> LiveOverlayPlacement.Policy {
+        // Operational camera fitting floors stay independent of app chrome:
+        // measured evidence boxes and their text must retain identical geometry.
         let primary = max(config.overlayMinPointSize, DesignTokens.minBodyPointSize)
         let supporting = min(max(config.overlayMinPointSize, DesignTokens.minCaptionPointSize),
                              primary)
@@ -807,7 +809,7 @@ struct TranslateAllSurface: Equatable {
 /// indicator: which view is on screen changes nothing about what leaves the
 /// device).
 struct TranslateAllControl: View {
-
+    @Environment(\.appAppearance) private var appearance
     let surface: TranslateAllSurface
     /// The value the elder is asking for — an explicit set, not a flip, so the
     /// write says what the tap meant even if the surface it was drawn from is
@@ -820,10 +822,10 @@ struct TranslateAllControl: View {
         } label: {
             HStack(spacing: DesignTokens.interElementSpacing / 2) {
                 Image(systemName: TranslateAllSurface.symbolName)
-                    .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize,
+                    .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize,
                                                 weight: .semibold))
                 Text(surface.label)
-                    .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize,
+                    .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize,
                                                 weight: .semibold))
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -831,12 +833,12 @@ struct TranslateAllControl: View {
             // control's are: the on-state's label is the app background (the
             // token, not a bare `.white`), so nothing here introduces a second
             // place a colour is spelled.
-            .foregroundColor(surface.isTranslatingOn ? DesignTokens.background : DesignTokens.textPrimary)
+            .foregroundColor(surface.isTranslatingOn ? appearance.colors.onAccent : appearance.colors.textPrimary)
             .padding(.horizontal, DesignTokens.interElementSpacing * 2)
             .frame(minHeight: DesignTokens.minTapTargetSize)
             .frame(maxWidth: .infinity)
-            .background(surface.isTranslatingOn ? DesignTokens.accent : DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+            .appSurface(role: surface.isTranslatingOn ? .accent : .control,
+                        cornerRadius: DesignTokens.bubbleCornerRadius)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -854,7 +856,7 @@ struct TranslateAllControl: View {
 /// function of its surface, so nothing here can start a translation, await
 /// one, or hold a stale copy of one.
 struct LiveTranslateOverlayView: View {
-
+    @Environment(\.appAppearance) private var appearance
     let surface: LiveTranslateOverlaySurface
     /// Tap-to-hear (C12): speaks this region's translation. Only resolved
     /// bubbles offer it, because only they have something to say.
@@ -956,7 +958,7 @@ struct LiveTranslateOverlayView: View {
                         path.addLine(to: anchor)
                     }
                 }
-                .stroke(DesignTokens.textSecondary, lineWidth: Self.leaderLineWidth)
+                .stroke(appearance.colors.textSecondary, lineWidth: Self.leaderLineWidth)
 
                 ForEach(presentations) { presentation in
                     bubble(presentation)
@@ -1158,14 +1160,14 @@ struct LiveTranslateOverlayView: View {
             //
             // Laid out with the *same* policy values the pill was sized with.
             VStack(spacing: surface.policy.lineSpacing) {
-                line(presentation.lines.first, colour: DesignTokens.background)
+                line(presentation.lines.first, colour: .white)
                 if presentation.lines.count > 1 {
                     stateRow(presentation)
                 }
             }
             .padding(surface.policy.pillPadding)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(DesignTokens.textPrimary)
+            .background(DesignTokens.overlayText)
             .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
         }
     }
@@ -1195,7 +1197,7 @@ struct LiveTranslateOverlayView: View {
     private func panelRows(_ presentation: RegionPresentation) -> some View {
         VStack(spacing: surface.policy.lineSpacing) {
             ForEach(Array(presentation.lines.enumerated()), id: \.offset) { _, textLine in
-                line(textLine, colour: DesignTokens.textPrimary)
+                line(textLine, colour: DesignTokens.overlayText)
             }
         }
     }
@@ -1210,7 +1212,7 @@ struct LiveTranslateOverlayView: View {
                 Image(systemName: symbol)
                     .font(LiveOverlayTextMetrics.font(pointSize: supporting.pointSize,
                                                       weight: supporting.weight))
-                    .foregroundColor(DesignTokens.brandBlush)
+                    .foregroundColor(.white.opacity(0.9))
             }
             Text(supporting.text)
                 .font(LiveOverlayTextMetrics.font(pointSize: supporting.pointSize,
@@ -1218,7 +1220,7 @@ struct LiveTranslateOverlayView: View {
                 // The supporting line on a dark pill: the brand's light tone,
                 // which clears the fill by a wide margin where the grey
                 // secondary ink would not.
-                .foregroundColor(DesignTokens.brandBlush)
+                .foregroundColor(.white.opacity(0.9))
                 .multilineTextAlignment(.center)
         }
         .fixedSize(horizontal: false, vertical: true)
@@ -1242,13 +1244,13 @@ struct LiveTranslateOverlayView: View {
     /// in the elder's language, with the toggle still reachable.
     private var emptyState: some View {
         Text(surface.emptyHint)
-            .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize))
-            .foregroundColor(DesignTokens.textPrimary)
+            .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize))
+            .foregroundColor(appearance.colors.textPrimary)
             .multilineTextAlignment(.center)
             .fixedSize(horizontal: false, vertical: true)
             .padding(DesignTokens.interElementSpacing * 2)
             .frame(maxWidth: .infinity)
-            .background(DesignTokens.card)
+            .background(appearance.colors.card)
             .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
             .padding(DesignTokens.interElementSpacing * 2)
             // The one element not positioned by a rect: centred in the
@@ -1282,10 +1284,11 @@ struct LiveTranslateOverlayView: View {
 /// presentation as every region bubble, so the box sits on the thing the
 /// elder tapped under the same zoom, pan and stabilization; the chip's
 /// words come from the catalog in the active language (`pointask.chip.label`).
-/// No state, no task, no decision — the surface's `state` is the whole of
-/// what changes.
+/// Only the action row's measured height is held as layout state, so larger
+/// labels remain above the safe-area floor without changing camera geometry.
 struct PointAskOverlayBoxView: View {
-
+    @Environment(\.appAppearance) private var appearance
+    @State private var measuredActionRowHeight: CGFloat = DesignTokens.minTapTargetSize
     let surface: PointAskOverlaySurface
     let presentation: LiveCameraPresentation
     let onChipTap: () -> Void
@@ -1328,7 +1331,7 @@ struct PointAskOverlayBoxView: View {
                 // over it would hide it (the green overlay's own lesson:
                 // an opaque cover is the failure, not the style).
                 RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius)
-                    .stroke(DesignTokens.accent,
+                    .stroke(appearance.colors.accent,
                             style: StrokeStyle(lineWidth: Self.boxLineWidth))
                     .frame(width: boxRect.width, height: boxRect.height)
                     .offset(x: boxRect.minX, y: boxRect.minY)
@@ -1380,11 +1383,20 @@ struct PointAskOverlayBoxView: View {
         }
         .frame(width: actionRowWidth,
                alignment: boxRect.midX < containerSize.width / 2 ? .leading : .trailing)
+        .background {
+            GeometryReader { geometry in
+                Color.clear.preference(key: PointAskActionRowHeightKey.self,
+                                       value: geometry.size.height)
+            }
+        }
+        .onPreferenceChange(PointAskActionRowHeightKey.self) { height in
+            measuredActionRowHeight = max(Self.actionRowHeight, height)
+        }
         .offset(x: DesignTokens.interElementSpacing,
                 y: Self.actionRowOriginY(below: boxRect,
                                          containerHeight: containerSize.height,
                                          bottomInset: bottomInset,
-                                         rowHeight: Self.actionRowHeight,
+                                         rowHeight: measuredActionRowHeight,
                                          spacing: DesignTokens.interElementSpacing))
     }
 
@@ -1435,17 +1447,16 @@ struct PointAskOverlayBoxView: View {
             action()
         } label: {
             Text(label)
-                .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize,
+                .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize,
                                             weight: .semibold))
-                .foregroundColor(DesignTokens.textPrimary)
+                .foregroundColor(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, DesignTokens.interElementSpacing * 2)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
         }
         .buttonStyle(.plain)
-        .background(DesignTokens.card)
-        .clipShape(Capsule())
+        .appSurface(role: .control, cornerRadius: 999)
         .accessibilityIdentifier(identifier)
     }
 
@@ -1466,13 +1477,12 @@ struct PointAskOverlayBoxView: View {
     /// not awaiting an answer the chip could ask for.
     private func pendingChip(chipRect: CGRect) -> some View {
         Image(systemName: Self.pendingSymbolName)
-            .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize,
+            .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize,
                                         weight: .semibold))
-            .foregroundColor(DesignTokens.textPrimary)
+            .foregroundColor(appearance.colors.textPrimary)
             .padding(.horizontal, DesignTokens.interElementSpacing * 2)
             .frame(minHeight: DesignTokens.minTapTargetSize)
-            .background(DesignTokens.card)
-            .clipShape(Capsule())
+            .appSurface(role: .control, cornerRadius: 999)
             .frame(width: chipRect.width, height: chipRect.height)
             .offset(x: chipRect.minX, y: chipRect.minY)
             .accessibilityIdentifier("pointask.chip.pending")
@@ -1485,15 +1495,15 @@ struct PointAskOverlayBoxView: View {
         VStack(alignment: .leading, spacing: DesignTokens.interElementSpacing / 2) {
             ForEach(Array(surface.cardLines.enumerated()), id: \.offset) { _, line in
                 Text(line)
-                    .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize))
+                    .foregroundColor(appearance.colors.textPrimary)
                     .multilineTextAlignment(.leading)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(DesignTokens.interElementSpacing * 2)
         .frame(maxWidth: DesignTokens.minTapTargetSize * 6, alignment: .leading)
-        .background(DesignTokens.card)
+        .background(appearance.colors.card)
         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
         .offset(x: min(max(anchorRect.minX, DesignTokens.interElementSpacing),
                        anchorRect.minX),
@@ -1531,4 +1541,12 @@ struct PointAskOverlayBoxView: View {
     /// The box's stroke. A visual constant with no token of its own; it
     /// lives here so it is stated once (the leader line's precedent).
     static let boxLineWidth: CGFloat = 3
+}
+
+private struct PointAskActionRowHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = DesignTokens.minTapTargetSize
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
 }

@@ -23,12 +23,13 @@ import SwiftUI
 ///
 /// Phone-friendly rules: house `LeafScreen` chrome (back + title +
 /// emergency icon), ONE vertical ScrollView, one white card per section
-/// with a bold rounded header, body text at `DesignTokens.minBodyPointSize`
+/// with a bold rounded header and body text at the selected readable size
 /// with generous spacing — no horizontal scrolling.
 ///
 /// Honest fallback: a missing or malformed resource renders the dedicated
 /// empty-state card, never a half-rendered manual.
 struct UserManualView: View {
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
     @Environment(\.displayScale) private var displayScale
 
@@ -119,16 +120,15 @@ struct UserManualView: View {
         VStack(spacing: 14) {
             Image(systemName: "book.closed")
                 .font(.system(size: 48))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
             Text("manual.userManual.unavailable")
-                .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .font(.system(size: appearance.typography.bodyPointSize))
+                .foregroundStyle(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
         }
         .padding(24)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// One section card: bold rounded header, then the section's
@@ -145,25 +145,22 @@ struct UserManualView: View {
         return VStack(alignment: .leading, spacing: 12) {
             Text(section.title(locale: locale))
                 .font(DesignTokens.greetingFont(
-                    size: DesignTokens.minBodyPointSize + 2))
-                .foregroundStyle(DesignTokens.textPrimary)
+                    size: appearance.typography.bodyPointSize + 2))
+                .foregroundStyle(appearance.colors.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
             imagesBlock(section)
             VStack(alignment: .leading, spacing: 12) {
                 ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, paragraph in
                     Text(paragraph)
-                        .font(.system(size: DesignTokens.minBodyPointSize))
-                        .foregroundStyle(DesignTokens.textPrimary)
+                        .font(.system(size: appearance.typography.bodyPointSize))
+                        .foregroundStyle(appearance.colors.textPrimary)
                         .lineSpacing(4)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
         .padding(18)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+        .frame(maxWidth: .infinity, alignment: .leading).appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// The section's diagrams + the honest sketch caption. Images that
@@ -185,7 +182,7 @@ struct UserManualView: View {
                         .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
                         .overlay(
                             RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius)
-                                .stroke(DesignTokens.textSecondary.opacity(0.18),
+                                .stroke(appearance.colors.textSecondary.opacity(0.18),
                                         lineWidth: 1)
                         )
                         // Diagrams are decorative for VoiceOver — the
@@ -193,8 +190,8 @@ struct UserManualView: View {
                         .accessibilityHidden(true)
                 }
                 Text("manual.imageCaption")
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .font(.system(size: appearance.typography.captionPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }

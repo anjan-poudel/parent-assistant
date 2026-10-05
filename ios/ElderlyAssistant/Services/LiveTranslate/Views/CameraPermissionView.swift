@@ -125,6 +125,7 @@ struct CameraPermissionSurface: Equatable {
 /// The elder-facing card for those states. Large text, one clear action, and
 /// no dead ends.
 struct CameraPermissionView: View {
+    @Environment(\.appAppearance) private var appearance
 
     let surface: CameraPermissionSurface
     /// Re-calls the session's `start()` — the one permitted way past the
@@ -134,8 +135,8 @@ struct CameraPermissionView: View {
     var body: some View {
         VStack(spacing: 16) {
             Text(surface.message)
-                .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize))
-                .foregroundColor(DesignTokens.textPrimary)
+                .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize))
+                .foregroundColor(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("livetranslate.camera.message")
@@ -146,8 +147,7 @@ struct CameraPermissionView: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface()
     }
 
     private func actionButton(_ title: String) -> some View {
@@ -165,12 +165,11 @@ struct CameraPermissionView: View {
             }
         } label: {
             Text(title)
-                .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                .foregroundColor(.white)
+                .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize, weight: .semibold))
+                .foregroundStyle(appearance.colors.onAccent)
                 .padding(.horizontal, 20)
                 .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
-                .background(DesignTokens.accent)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                .appSurface(role: .accent, cornerRadius: DesignTokens.bubbleCornerRadius)
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("livetranslate.camera.action")

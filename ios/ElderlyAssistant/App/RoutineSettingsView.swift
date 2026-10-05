@@ -16,6 +16,7 @@ import SwiftUI
 /// roster and summaries live in state, rebuilt by the `.task` below when
 /// the underlying data actually changes; the body only reads them.
 struct RoutineSettingsView: View {
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
     /// Bumped after a toggle or photo edit so the cached lists re-read
     /// fresh data — the coordinator exposes routines as computed vars,
@@ -45,13 +46,12 @@ struct RoutineSettingsView: View {
             VStack(spacing: 12) {
                 if routineEntries.isEmpty {
                     Text("settings.routines.empty")
-                        .font(.system(size: DesignTokens.minBodyPointSize))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .font(.system(size: appearance.typography.bodyPointSize))
+                        .foregroundStyle(appearance.colors.textSecondary)
                         .multilineTextAlignment(.center)
                         .padding(32)
                         .frame(maxWidth: .infinity)
-                        .background(DesignTokens.card)
-                        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+                        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
                 } else {
                     ForEach(routineEntries) { entry in
                         routineManageRow(entry)
@@ -93,14 +93,14 @@ struct RoutineSettingsView: View {
         HStack(spacing: 12) {
             Image(systemName: entry.category.systemImage)
                 .font(.system(size: 24))
-                .foregroundStyle(DesignTokens.accent)
+                .foregroundStyle(appearance.colors.accent)
             VStack(alignment: .leading, spacing: 4) {
                 Text(entry.displayTitle(locale: coordinator.activeLocale))
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                    .foregroundStyle(appearance.colors.textPrimary)
                 Text(routineSummaries[entry.id] ?? "")
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .font(.system(size: appearance.typography.captionPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
             }
             Spacer()
             // Photos live behind this row: the family's configuration
@@ -110,7 +110,7 @@ struct RoutineSettingsView: View {
             } label: {
                 Image(systemName: entry.visualAids.isEmpty ? "photo.badge.plus" : "photo.fill")
                     .font(.system(size: 22))
-                    .foregroundStyle(DesignTokens.accent)
+                    .foregroundStyle(appearance.colors.accent)
                     .frame(minWidth: DesignTokens.minTapTargetSize,
                            minHeight: DesignTokens.minTapTargetSize)
             }
@@ -127,8 +127,7 @@ struct RoutineSettingsView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// "7:00 AM, 4:00 PM" for daily entries; weekly entries prefix the

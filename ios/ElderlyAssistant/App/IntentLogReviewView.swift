@@ -6,6 +6,7 @@ import SwiftUI
 /// for the next training round. Read-only — corrections themselves
 /// happen by voice, this screen is the audit trail.
 struct IntentLogReviewView: View {
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject private var coordinator: AppCoordinator
     @State private var records: [IntentLogStore.Record] = []
     @State private var exportURL: URL?
@@ -26,9 +27,9 @@ struct IntentLogReviewView: View {
                                     Image(systemName: "square.and.arrow.up")
                                     Text("intentLog.export")
                                 }
-                                .font(.system(size: DesignTokens.minCaptionPointSize,
+                                .font(.system(size: appearance.typography.captionPointSize,
                                               weight: .semibold))
-                                .foregroundStyle(DesignTokens.accent)
+                                .foregroundStyle(appearance.colors.accent)
                                 .frame(minHeight: DesignTokens.minTapTargetSize)
                             }
                         }
@@ -40,7 +41,7 @@ struct IntentLogReviewView: View {
                                 Image(systemName: "trash")
                                 Text("intentLog.clear")
                             }
-                            .font(.system(size: DesignTokens.minCaptionPointSize,
+                            .font(.system(size: appearance.typography.captionPointSize,
                                           weight: .semibold))
                             .foregroundStyle(DesignTokens.stateError)
                             .frame(minHeight: DesignTokens.minTapTargetSize)
@@ -51,10 +52,10 @@ struct IntentLogReviewView: View {
                     VStack(spacing: 12) {
                         Image(systemName: "checklist")
                             .font(.system(size: 44))
-                            .foregroundStyle(DesignTokens.textSecondary)
+                            .foregroundStyle(appearance.colors.textSecondary)
                         Text(L10n.str("intentLog.empty", locale: coordinator.activeLocale))
-                            .font(.system(size: DesignTokens.minBodyPointSize))
-                            .foregroundStyle(DesignTokens.textSecondary)
+                            .font(.system(size: appearance.typography.bodyPointSize))
+                            .foregroundStyle(appearance.colors.textSecondary)
                             .multilineTextAlignment(.center)
                     }
                     .frame(maxWidth: .infinity, minHeight: 320)
@@ -63,16 +64,15 @@ struct IntentLogReviewView: View {
                         ForEach(records) { record in
                             HStack(spacing: 10) {
                                 Image(systemName: icon(for: record))
-                                    .foregroundStyle(DesignTokens.accent)
+                                    .foregroundStyle(appearance.colors.accent)
                                 Text(summary(for: record))
-                                    .font(.system(size: DesignTokens.minBodyPointSize))
-                                    .foregroundStyle(DesignTokens.textPrimary)
+                                    .font(.system(size: appearance.typography.bodyPointSize))
+                                    .foregroundStyle(appearance.colors.textPrimary)
                                     .multilineTextAlignment(.leading)
                                 Spacer(minLength: 0)
                             }
                             .padding(16)
-                            .background(DesignTokens.card)
-                            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+                            .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
                         }
                     }
                 }

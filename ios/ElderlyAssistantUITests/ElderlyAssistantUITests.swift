@@ -229,6 +229,35 @@ final class ElderlyAssistantUITests: XCTestCase {
         // pending — the state this test just exercised).
         completeOnboardingIfNeeded(app)
     }
+    /// Precondition: the simulator has no Gemini key and uses Nepali.
+    /// The Home tile must still open offline manuals, not just speak a
+    /// refusal. Opening a guide also proves the nested library dismisses
+    /// back into the helper instead of losing the app-wide presentation.
+    func testApplianceHelpWithoutCloudOpensBundledManualAndDismisses() throws {
+        let app = launchToHome()
+        let appliance = app.buttons.matching(NSPredicate(
+            format: "label CONTAINS %@", "उपकरण सहायता")).firstMatch
+        let manuals = app.buttons.matching(NSPredicate(
+            format: "label CONTAINS %@", "म्यानुअलहरू")).firstMatch
+        tap(appliance, expecting: manuals, within: 15, in: app)
+        let takePhoto = app.buttons["फोटो खिच्नुहोस्"]
+        XCTAssertTrue(takePhoto.exists)
+        XCTAssertFalse(takePhoto.isEnabled,
+                       "Fresh cloud analysis must be unavailable without a key")
+        XCTAssertTrue(manuals.isEnabled, "Offline manuals must remain usable")
+
+        let iphone = app.buttons.matching(NSPredicate(
+            format: "label CONTAINS %@", "आइफोन सुरुवात")).firstMatch
+        tap(manuals, expecting: iphone, within: 10, in: app)
+        let firstStep = app.descendants(matching: .any).matching(NSPredicate(
+            format: "label CONTAINS %@",
+            "तपाईंको फोन सुतिरहेको छ। ब्युँझाउन दायाँपट्टिको बटन थिच्नुहोस्।")).firstMatch
+        tap(iphone, expecting: firstStep, within: 10, in: app)
+        XCTAssertFalse(manuals.exists, "Opening a bundled guide must leave the library")
+
+        tap(app.buttons["बन्द गर्नुहोस्"].firstMatch,
+            expecting: app.buttons["home.talk"], within: 10, in: app)
+    }
 
     func testTalkButtonStartsListening() throws {
         let app = launchToHome()
@@ -385,6 +414,138 @@ final class ElderlyAssistantUITests: XCTestCase {
             }
         }
     }
+
+    /// Exercises genuine selectors, navigation and process restart without preference fixtures.
+    func testAppearanceSelectionsAreIndependentAndSurviveRelaunch() throws {
+        let app = launchToHome()
+
+        func reveal(_ element: XCUIElement) {
+            let viewport = app.scrollViews["leaf.content"].firstMatch
+            for attempt in 0..<24 {
+                if isOnScreen(element, in: app), element.isHittable { return }
+                let upward = element.exists
+                    ? element.frame.midY > viewport.frame.midY
+                    : attempt < 12
+                let start = viewport.coordinate(withNormalizedOffset:
+                    CGVector(dx: 0.5, dy: upward ? 0.75 : 0.25))
+                let end = viewport.coordinate(withNormalizedOffset:
+                    CGVector(dx: 0.5, dy: upward ? 0.45 : 0.55))
+                start.press(forDuration: 0.05, thenDragTo: end)
+            }
+            XCTFail("Appearance control must be reachable: \(element), bounds \(element.frame), viewport \(viewport.frame)")
+        }
+
+        func openAppearance() {
+            let settings = app.buttons["home.settings"].firstMatch
+            let systemTab = app.buttons["settings.tab.system"].firstMatch
+            tap(settings, expecting: systemTab, within: 15, in: app)
+            if !isOnScreen(systemTab, in: app) {
+                app.buttons["settings.tab.voice"].firstMatch.swipeLeft()
+            }
+            for _ in 0..<5 where !isOnScreen(systemTab, in: app) {
+                systemTab.swipeLeft()
+            }
+            let appearanceRow = app.buttons["settings.appearance"].firstMatch
+            tap(systemTab, expecting: appearanceRow, within: 10, in: app)
+            tap(appearanceRow, expecting: app.buttons["textSize.system"], within: 10, in: app)
+        }
+
+        func choose(_ identifier: String) {
+            let row = app.buttons[identifier]
+            reveal(row)
+            row.tap()
+            XCTAssertTrue(row.isSelected, "The chosen appearance option must expose selected state")
+        }
+
+        func assertSelected(_ identifier: String) {
+            let row = app.buttons[identifier]
+            reveal(row)
+            XCTAssertTrue(row.isSelected, "Changing the other option must preserve this selection")
+        }
+
+        func capture(_ name: String, preview: Bool = true) {
+            if preview {
+                let panel = app.descendants(matching: .any)["appearance.preview"].firstMatch
+                let viewport = app.scrollViews["leaf.content"].firstMatch
+                for _ in 0..<10 {
+                    let bounds = panel.frame
+                    let visible = viewport.frame
+                    if bounds.minY >= visible.minY, bounds.maxY <= visible.maxY { break }
+                    viewport.swipeDown()
+                }
+            }
+            let attachment = XCTAttachment(screenshot: app.screenshot())
+            attachment.name = name
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+
+        func returnHome() {
+            let back = app.buttons["settings.back"].firstMatch
+            tap(back, expecting: app.buttons["settings.tab.system"].firstMatch, within: 10, in: app)
+            tap(back, expecting: app.buttons["home.settings"].firstMatch, within: 10, in: app)
+        }
+
+        openAppearance()
+        choose("appearance.style.classic")
+        choose("appearance.skin.cream")
+        assertSelected("appearance.style.classic")
+        capture("Classic + Warm Cream preview")
+        choose("appearance.style.glass")
+        assertSelected("appearance.skin.cream")
+        choose("appearance.skin.sage")
+        assertSelected("appearance.style.glass")
+        for identifier in ["textSize.system", "textSize.medium", "textSize.large", "textSize.xxl"] {
+            choose(identifier)
+        }
+        assertSelected("appearance.skin.sage")
+        assertSelected("appearance.style.glass")
+        choose("textSize.small")
+        let previewText = app.staticTexts["appearance.preview.talk"].firstMatch
+        reveal(previewText)
+        let smallTextHeight = previewText.frame.height
+        XCTAssertGreaterThan(smallTextHeight, 0)
+        capture("Glass + Sage + Small preview")
+        choose("textSize.xl")
+        reveal(previewText)
+        expectation(for: NSPredicate { _, _ in previewText.frame.height > smallTextHeight },
+                    evaluatedWith: previewText)
+        waitForExpectations(timeout: 5)
+        let xlTextHeight = previewText.frame.height
+        assertSelected("appearance.skin.sage")
+        assertSelected("appearance.style.glass")
+        capture("Glass + Sage preview")
+        returnHome()
+        capture("Glass + Sage returned Home", preview: false)
+
+        openAppearance()
+        assertSelected("appearance.style.glass")
+        assertSelected("appearance.skin.sage")
+        assertSelected("textSize.xl")
+        app.terminate()
+        app.launch()
+        completeOnboardingIfNeeded(app)
+        openAppearance()
+        assertSelected("appearance.style.glass")
+        assertSelected("appearance.skin.sage")
+        assertSelected("textSize.xl")
+        reveal(previewText)
+        XCTAssertEqual(previewText.frame.height, xlTextHeight, accuracy: 1,
+                       "The restored size must preserve visible text dimensions")
+        capture("Glass + Sage restored after relaunch")
+
+        choose("appearance.skin.sky")
+        assertSelected("appearance.style.glass")
+        choose("appearance.style.soft")
+        assertSelected("appearance.skin.sky")
+        assertSelected("textSize.xl")
+        choose("textSize.system")
+        capture("Soft + Sky preview")
+        returnHome()
+        capture("Soft + Sky returned Home", preview: false)
+    }
+
+
 
     /// Quick-access picker interaction: search field filters the catalog.
     func testQuickAccessPickerSearchWorks() throws {

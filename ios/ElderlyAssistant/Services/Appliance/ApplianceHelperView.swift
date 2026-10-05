@@ -10,8 +10,8 @@ import UIKit
 ///
 /// Guidance layout: instead of one crammed overlay on the full photo, each
 /// step is its own card — the instruction text up top, then a CROPPED,
-/// zoomed close-up of the relevant section with the button circled (a
-/// `warmGlowEnd` ring, white under-stroke, step badge) and the button's
+/// zoomed close-up of the relevant section with the button circled (an
+/// invariant amber ring, white under-stroke, step badge) and the button's
 /// label beneath it (augmented into the ACTIVE locale's language when the
 /// localizer knows the label). Close-ups are pinch-zoomed up to 4×
 /// (double-tap resets to 1×).
@@ -23,6 +23,7 @@ import UIKit
 /// follow the active locale (`@Environment(\.locale)`, set at the app root
 /// from `AppLanguage`) — Devanagari only under a Nepali-active locale.
 struct ApplianceHelperView: View {
+    @Environment(\.appAppearance) private var appearance
 
     @ObservedObject var session: ApplianceHelperSession
     /// The app's one shared translation store (T-013). The label seam reads
@@ -50,21 +51,21 @@ struct ApplianceHelperView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                DesignTokens.background.ignoresSafeArea()
+                appearance.colors.background.ignoresSafeArea()
                 content
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Text("plugin.applianceHelper.name")
-                        .font(DesignTokens.greetingFont(size: 20))
-                        .foregroundColor(DesignTokens.textPrimary)
+                        .font(DesignTokens.greetingFont(size: appearance.typography.scaled(20)))
+                        .foregroundColor(appearance.colors.textPrimary)
                 }
                 ToolbarItem(placement: .topBarLeading) {
                     Button { dismiss() } label: {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 24, weight: .bold))
-                            .foregroundStyle(DesignTokens.textPrimary)
+                            .foregroundStyle(appearance.colors.textPrimary)
                             .accessibilityHidden(true)
                     }
                     .buttonStyle(.plain)
@@ -74,6 +75,7 @@ struct ApplianceHelperView: View {
                 }
             }
         }
+        .tint(appearance.colors.accent)
         .onAppear {
             // Auto-open belongs to a live capture session only: an ARMED
             // session (bundled default manuals opened from the library or
@@ -84,13 +86,13 @@ struct ApplianceHelperView: View {
             // A voice turn that found this appliance's saved default manual
             // (2026-09-13, appliance-default-manual) opens THAT first —
             // camera-less, network-free, and the reason the elder asked.
-            // Only when no manual was pending, or the pending one can no
-            // longer be rendered (deleted in the meantime, photo file
-            // gone), does the camera affordance open as it always has.
+            // Only when no manual was pending, or it cannot be rendered,
+            // does a configured session open the camera. An unconfigured
+            // helper stays on its visible explanation and offline library.
             if session.pendingManualEntryID != nil, session.presentPendingManualIfNeeded() {
                 return
             }
-            showCamera = true
+            if session.canAnalyzePhotos { showCamera = true }
         }
         .sheet(isPresented: $showCamera) {
             CameraPicker(onImage: { image in
@@ -133,24 +135,26 @@ struct ApplianceHelperView: View {
             Spacer()
             Image(systemName: "camera.viewfinder")
                 .font(.system(size: 64))
-                .foregroundColor(DesignTokens.accent)
-            Text("plugin.applianceHelper.cameraPrompt")
-                .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundColor(DesignTokens.textPrimary)
+                .foregroundColor(appearance.colors.accent)
+            Text(LocalizedStringKey(session.canAnalyzePhotos
+                 ? "plugin.applianceHelper.cameraPrompt"
+                 : "plugin.applianceHelper.notConfigured"))
+                .font(.system(size: appearance.typography.bodyPointSize))
+                .foregroundColor(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 24)
             Button {
                 showCamera = true
             } label: {
                 Label("appliance.takePhoto", systemImage: "camera.fill")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                     .padding(.horizontal, 28)
                     .padding(.vertical, 14)
-                    .background(DesignTokens.accent)
-                    .foregroundColor(.white)
-                    .clipShape(Capsule())
+                    .foregroundStyle(appearance.colors.onAccent)
+                    .appSurface(role: .accent, cornerRadius: 100)
             }
             .frame(minHeight: DesignTokens.minTapTargetSize)
+            .disabled(!session.canAnalyzePhotos)
 
             // Saved-manuals entry (2026-09-06): the second way the cache
             // pays off — browse previously saved guides without touching
@@ -161,26 +165,24 @@ struct ApplianceHelperView: View {
                 HStack(spacing: 14) {
                     Image(systemName: "books.vertical.fill")
                         .font(.system(size: 24))
-                        .foregroundColor(DesignTokens.accent)
+                        .foregroundColor(appearance.colors.accent)
                         .frame(width: 40)
                     VStack(alignment: .leading, spacing: 3) {
                         Text("appliance.manual.title")
-                            .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                            .foregroundColor(DesignTokens.textPrimary)
+                            .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
+                            .foregroundColor(appearance.colors.textPrimary)
                         Text("appliance.manual.openHint")
-                            .font(.system(size: DesignTokens.minCaptionPointSize))
-                            .foregroundColor(DesignTokens.textSecondary)
+                            .font(.system(size: appearance.typography.captionPointSize))
+                            .foregroundColor(appearance.colors.textSecondary)
                     }
                     Spacer(minLength: 0)
                     Image(systemName: "chevron.right")
                         .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(DesignTokens.textSecondary)
+                        .foregroundColor(appearance.colors.textSecondary)
                 }
                 .padding(.horizontal, 18)
                 .padding(.vertical, 12)
-                .background(DesignTokens.setupReminder)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-                .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+                .appSurface(role: .control)
             }
             .buttonStyle(.plain)
             .frame(minHeight: DesignTokens.minTapTargetSize)
@@ -196,8 +198,8 @@ struct ApplianceHelperView: View {
             ProgressView()
                 .scaleEffect(1.6)
             Text("appliance.working")
-                .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundColor(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.bodyPointSize))
+                .foregroundColor(appearance.colors.textSecondary)
             Spacer()
         }
     }
@@ -209,20 +211,19 @@ struct ApplianceHelperView: View {
                 .font(.system(size: 44))
                 .foregroundColor(DesignTokens.stateListening)
             Text(message)
-                .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundColor(DesignTokens.textPrimary)
+                .font(.system(size: appearance.typography.bodyPointSize))
+                .foregroundColor(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 24)
             Button {
                 session.retake()
             } label: {
                 Label("appliance.retry", systemImage: "arrow.clockwise")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
                     .padding(.horizontal, 28)
                     .padding(.vertical, 14)
-                    .background(DesignTokens.accent)
-                    .foregroundColor(.white)
-                    .clipShape(Capsule())
+                    .foregroundStyle(appearance.colors.onAccent)
+                    .appSurface(role: .accent, cornerRadius: 100)
             }
             .frame(minHeight: DesignTokens.minTapTargetSize)
             Spacer()
@@ -254,8 +255,8 @@ struct ApplianceHelperView: View {
                         session.retake()
                     } label: {
                         Label("appliance.retake", systemImage: "camera.rotate.fill")
-                            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                            .foregroundColor(DesignTokens.accent)
+                            .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
+                            .foregroundColor(appearance.colors.accent)
                             .frame(minHeight: DesignTokens.minTapTargetSize)
                     }
                 }
@@ -270,27 +271,25 @@ struct ApplianceHelperView: View {
             Image(systemName: "questionmark.circle.fill")
                 .foregroundColor(DesignTokens.stateListening)
             Text("appliance.hedgeNotice")
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                .foregroundColor(DesignTokens.textPrimary)
+                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
+                .foregroundColor(appearance.colors.textPrimary)
             Spacer(minLength: 0)
         }
         .padding(12)
-        .background(DesignTokens.setupReminder)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+        .appSurface(cornerRadius: DesignTokens.bubbleCornerRadius)
     }
 
     private var closerPhotoHint: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "viewfinder")
-                .foregroundColor(DesignTokens.accent)
+                .foregroundColor(appearance.colors.accent)
             Text("appliance.closerPhotoHint")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundColor(DesignTokens.textPrimary)
+                .font(.system(size: appearance.typography.captionPointSize))
+                .foregroundColor(appearance.colors.textPrimary)
             Spacer(minLength: 0)
         }
         .padding(12)
-        .background(DesignTokens.userBubble)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+        .appSurface(cornerRadius: DesignTokens.bubbleCornerRadius)
     }
 
     /// Appliance name + spoken summary (the answer's plain-text anchor;
@@ -300,20 +299,18 @@ struct ApplianceHelperView: View {
             let name = presentation.guidance.identity.displayName
             if !name.isEmpty {
                 Text(name)
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                    .foregroundColor(appearance.colors.textPrimary)
             }
             if !presentation.guidance.spokenSummary.isEmpty {
                 Text(presentation.guidance.spokenSummary)
-                    .font(.system(size: DesignTokens.minBodyPointSize))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .font(.system(size: appearance.typography.bodyPointSize))
+                    .foregroundColor(appearance.colors.textPrimary)
             }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+        .appSurface()
     }
 
     // MARK: - Step cards
@@ -335,16 +332,17 @@ struct ApplianceHelperView: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .top, spacing: 12) {
                 ZStack {
-                    Circle().fill(DesignTokens.accent)
+                    Circle().fill(appearance.colors.accent)
                     Text(stepNumberText(card.number))
-                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                        .foregroundColor(.white)
+                        .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                        .foregroundStyle(appearance.colors.onAccent)
                         .accessibilityLabel(Text(stepAccessibilityLabel(card.number)))
                 }
-                .frame(width: 42, height: 42)
+                .frame(width: max(42, appearance.typography.bodyPointSize * 2),
+                       height: max(42, appearance.typography.bodyPointSize * 2))
                 Text(card.text)
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
+                    .foregroundColor(appearance.colors.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 9)
                 Spacer(minLength: 0)
@@ -355,9 +353,7 @@ struct ApplianceHelperView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+        .appSurface()
         .accessibilityElement(children: .combine)
     }
 
@@ -390,7 +386,7 @@ struct ApplianceHelperView: View {
                                   badgeText: stepNumberText(stepNumber))
                     .frame(height: Self.closeUpHeight)
                     .frame(maxWidth: .infinity)
-                    .background(DesignTokens.userBubble)
+                    .background(appearance.colors.userBubble)
                     .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
                     .accessibilityHidden(true)
             }
@@ -405,12 +401,12 @@ struct ApplianceHelperView: View {
     private func buttonLabel(_ display: ApplianceLabelLocalizer.Display) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(display.primary)
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                .foregroundColor(DesignTokens.textPrimary)
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
+                .foregroundColor(appearance.colors.textPrimary)
             if let secondary = display.secondary {
                 Text(secondary)
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundColor(DesignTokens.textSecondary)
+                    .font(.system(size: appearance.typography.captionPointSize))
+                    .foregroundColor(appearance.colors.textSecondary)
             }
         }
         .fixedSize(horizontal: false, vertical: true)
@@ -512,11 +508,13 @@ private struct ZoomableStepImage: View {
                 .frame(width: (radius + 3) * 2, height: (radius + 3) * 2)
                 .position(ringCenter)
             Circle()
-                .stroke(DesignTokens.warmGlowEnd, lineWidth: 4.5)
+                .stroke(DesignTokens.stateListening, lineWidth: 4.5)
                 .frame(width: radius * 2, height: radius * 2)
                 .position(ringCenter)
             ZStack {
-                Circle().fill(DesignTokens.warmGlowEnd)
+                Circle().fill(DesignTokens.stateListening)
+                // Evidence annotation: retain the camera's operational floor and
+                // fixed badge geometry, independently of the readable UI preference.
                 Text(badgeText)
                     .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
                     .foregroundColor(.white)

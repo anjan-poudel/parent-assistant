@@ -34,7 +34,7 @@ enum OverlayRenderProbe {
         var isEmpty: Bool { count == 0 }
     }
 
-    /// Renders the overlay at a fixed size over the app's background colour.
+    /// Renders over white paper: the controlled camera backdrop for overlay tests.
     /// `scale = 2` matches a Retina phone, so antialiasing behaves as it does
     /// on device.
     @MainActor
@@ -54,7 +54,7 @@ enum OverlayRenderProbe {
     static func render<V: View>(_ view: V, size: CGSize, scale: CGFloat = 2) -> UIImage? {
         let renderer = ImageRenderer(content: view
             .frame(width: size.width, height: size.height)
-            .background(DesignTokens.background))
+            .background(Color.white))
         renderer.scale = scale
         return renderer.uiImage
     }

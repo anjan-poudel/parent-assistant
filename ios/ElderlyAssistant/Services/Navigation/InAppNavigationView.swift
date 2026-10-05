@@ -17,6 +17,7 @@ import MapKit
 /// again, Stop cuts speech, and Back (or a swipe-dismiss) ends the
 /// session via `stop()`.
 struct InAppNavigationView: View {
+    @Environment(\.appAppearance) private var appearance
     @ObservedObject var session: InAppNavigationSession
     @Environment(\.dismiss) private var dismiss
     @Environment(\.locale) private var locale
@@ -46,7 +47,7 @@ struct InAppNavigationView: View {
 
             contentByPhase
         }
-        .background(DesignTokens.background.ignoresSafeArea())
+        .background(appearance.colors.background.ignoresSafeArea())
         .onAppear { session.start() }
         .onChange(of: session.phase) { phase in
             guard !autoSpokenReadyRoute, case .ready = phase else { return }
@@ -65,7 +66,7 @@ struct InAppNavigationView: View {
             } label: {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 24, weight: .bold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .foregroundStyle(appearance.colors.textPrimary)
                     .frame(minWidth: DesignTokens.minTapTargetSize,
                            minHeight: DesignTokens.minTapTargetSize)
             }
@@ -74,12 +75,12 @@ struct InAppNavigationView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("directions.inApp.title")
-                    .font(DesignTokens.greetingFont(size: 24))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .font(DesignTokens.greetingFont(size: appearance.typography.scaled(24)))
+                    .foregroundColor(appearance.colors.textPrimary)
                 Text(session.destinationName)
-                    .font(.system(size: 17, weight: .medium))
-                    .foregroundColor(DesignTokens.textSecondary)
-                    .lineLimit(1)
+                    .font(.system(size: appearance.typography.scaled(17), weight: .medium))
+                    .foregroundColor(appearance.colors.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
         }
@@ -110,10 +111,10 @@ struct InAppNavigationView: View {
             Spacer()
             ProgressView()
                 .controlSize(.large)
-                .tint(DesignTokens.accent)
+                .tint(appearance.colors.accent)
             Text(LocalizedStringKey(key))
-                .font(.system(size: 18, weight: .medium))
-                .foregroundColor(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.scaled(18), weight: .medium))
+                .foregroundColor(appearance.colors.textSecondary)
                 .multilineTextAlignment(.center)
             Spacer()
         }
@@ -126,25 +127,25 @@ struct InAppNavigationView: View {
             Spacer()
             Image(systemName: "map")
                 .font(.system(size: 34))
-                .foregroundColor(DesignTokens.textSecondary)
+                .foregroundColor(appearance.colors.textSecondary)
             Text("directions.inApp.failed")
-                .font(.system(size: 18, weight: .medium))
-                .foregroundColor(DesignTokens.textPrimary)
+                .font(.system(size: appearance.typography.scaled(18), weight: .medium))
+                .foregroundColor(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
             Text("directions.inApp.failedHint")
-                .font(.system(size: 15))
-                .foregroundColor(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.scaled(15)))
+                .foregroundColor(appearance.colors.textSecondary)
                 .multilineTextAlignment(.center)
             Button {
                 dismiss()
             } label: {
                 Text("directions.inApp.close")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundColor(.white)
+                    .font(.system(size: appearance.typography.scaled(18), weight: .bold))
+                    .foregroundStyle(appearance.colors.onAccent)
                     .padding(.horizontal, 24)
-                    .frame(height: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.accent)
-                    .clipShape(Capsule())
+                    .padding(.vertical, 10)
+                    .frame(minHeight: DesignTokens.minTapTargetSize)
+                    .appSurface(role: .accent, cornerRadius: 100)
             }
             .buttonStyle(.plain)
             .padding(.top, 4)
@@ -159,15 +160,15 @@ struct InAppNavigationView: View {
             // Step list header with a best-effort drive-time line.
             HStack(alignment: .firstTextBaseline) {
                 Text("directions.inApp.steps")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(DesignTokens.textSecondary)
+                    .font(.system(size: appearance.typography.scaled(15), weight: .semibold))
+                    .foregroundColor(appearance.colors.textSecondary)
                 Spacer()
                 if route.expectedTravelTime > 0 {
                     Text(L10n.fmt("directions.inApp.eta",
                                   locale: locale,
                                   minutes(route.expectedTravelTime)))
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(DesignTokens.accent)
+                        .font(.system(size: appearance.typography.scaled(15), weight: .semibold))
+                        .foregroundColor(appearance.colors.accent)
                 }
             }
             .padding(.horizontal)
@@ -177,15 +178,15 @@ struct InAppNavigationView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     // The OS-language honesty note sits above the steps.
                     Text("directions.inApp.stepsNote")
-                        .font(.system(size: 13))
-                        .foregroundColor(DesignTokens.textSecondary)
+                        .font(.system(size: appearance.typography.scaled(13)))
+                        .foregroundColor(appearance.colors.textSecondary)
                         .padding(.horizontal)
                     ForEach(Array(route.steps.enumerated()), id: \.offset) { index, step in
                         stepRow(index: index + 1, instruction: step.instruction)
                     }
                     Text("directions.inApp.arrival")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(DesignTokens.accent)
+                        .font(.system(size: appearance.typography.scaled(15), weight: .semibold))
+                        .foregroundColor(appearance.colors.accent)
                         .padding(.horizontal)
                         .padding(.top, 4)
                 }
@@ -202,12 +203,13 @@ struct InAppNavigationView: View {
                     } icon: {
                         Image(systemName: "speaker.wave.2.fill")
                     }
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(.white)
+                    .font(.system(size: appearance.typography.scaled(16), weight: .semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .foregroundStyle(appearance.colors.onAccent)
                     .frame(maxWidth: .infinity)
-                    .frame(height: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.accent)
-                    .clipShape(Capsule())
+                    .padding(.vertical, 10)
+                    .frame(minHeight: DesignTokens.minTapTargetSize)
+                    .appSurface(role: .accent, cornerRadius: 100)
                 }
                 .buttonStyle(.plain)
 
@@ -219,12 +221,13 @@ struct InAppNavigationView: View {
                     } icon: {
                         Image(systemName: "stop.fill")
                     }
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .font(.system(size: appearance.typography.scaled(16), weight: .semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .foregroundColor(appearance.colors.textPrimary)
                     .frame(maxWidth: .infinity)
-                    .frame(height: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.card)
-                    .clipShape(Capsule())
+                    .padding(.vertical, 10)
+                    .frame(minHeight: DesignTokens.minTapTargetSize)
+                    .appSurface(role: .control, cornerRadius: 100)
                 }
                 .buttonStyle(.plain)
             }
@@ -236,15 +239,16 @@ struct InAppNavigationView: View {
     private func stepRow(index: Int, instruction: String) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Text("\(index)")
-                .font(.system(size: 15, weight: .bold))
-                .foregroundColor(.white)
-                .frame(width: 26, height: 26)
-                .background(DesignTokens.accent)
+                .font(.system(size: appearance.typography.scaled(15), weight: .bold))
+                .foregroundStyle(appearance.colors.onAccent)
+                .frame(minWidth: max(26, appearance.typography.scaled(15) * 1.6),
+                       minHeight: max(26, appearance.typography.scaled(15) * 1.6))
+                .background(appearance.colors.accent)
                 .clipShape(Circle())
                 .accessibilityHidden(true)
             Text(instruction)
-                .font(.system(size: 17))
-                .foregroundColor(DesignTokens.textPrimary)
+                .font(.system(size: appearance.typography.scaled(17)))
+                .foregroundColor(appearance.colors.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal)
@@ -258,7 +262,7 @@ struct InAppNavigationView: View {
 // MARK: - Map
 
 /// The static-route MKMapView (directions task, 2026-09-07). Draws the
-/// route polyline in the app's accent, pins the destination, and fits the
+/// route polyline in invariant operational blue, pins the destination, and fits the
 /// visible region to the route once — re-centering ONLY when the geometry
 /// actually changed (never on incidental SwiftUI re-renders, which would
 /// fight the user's pan).
@@ -337,7 +341,9 @@ extension RouteMapView.Coordinator {
     func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
         if let polyline = overlay as? MKPolyline {
             let renderer = MKPolylineRenderer(polyline: polyline)
-            renderer.strokeColor = UIColor(DesignTokens.accent)
+            // Route ink belongs to the map, not app chrome; a skin change
+            // must not replace overlays or disturb the user's visible region.
+            renderer.strokeColor = UIColor(DesignTokens.stateIdle)
             renderer.lineWidth = 5
             renderer.lineCap = .round
             return renderer

@@ -76,7 +76,7 @@ import UIKit
 //     OCR pass still reads sensor pixels, cropped rather than magnified.
 
 struct LiveTranslateView: View {
-
+    @Environment(\.appAppearance) private var appearance
     @StateObject private var model: LiveTranslateSessionModel
     /// The zoom and focus surface (owner report, 2026-09-17). Observed rather
     /// than owned: the session owns it — it is the object that talks to the
@@ -374,11 +374,10 @@ struct LiveTranslateView: View {
             zoom.zoom(direction)
         } label: {
             Image(systemName: isCloser ? Self.zoomInSymbolName : Self.zoomOutSymbolName)
-                .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                .foregroundColor(DesignTokens.textPrimary)
+                .font(DesignTokens.warmFont(size: 21, weight: .semibold))
+                .foregroundColor(appearance.colors.textPrimary)
                 .frame(width: Self.zoomControlDiameter, height: Self.zoomControlDiameter)
-                .background(DesignTokens.card)
-                .clipShape(Circle())
+                .appSurface(role: .control, cornerRadius: 999)
         }
         .disabled(isCloser ? !zoom.model.canZoomCloser : !zoom.model.canZoomWider)
         .accessibilityIdentifier(isCloser ? Self.zoomInIdentifier : Self.zoomOutIdentifier)
@@ -392,13 +391,12 @@ struct LiveTranslateView: View {
     /// pinned, and arithmetic on session state is not copy.
     private var zoomReadout: some View {
         Text(zoom.model.label)
-            .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .semibold))
+            .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize, weight: .semibold))
             .monospacedDigit()
-            .foregroundColor(DesignTokens.textPrimary)
+            .foregroundColor(appearance.colors.textPrimary)
             .padding(.horizontal, DesignTokens.interElementSpacing)
             .frame(minWidth: Self.zoomControlDiameter, minHeight: Self.zoomControlDiameter)
-            .background(DesignTokens.card)
-            .clipShape(Capsule())
+            .appSurface(role: .control, cornerRadius: 999)
             .accessibilityIdentifier(Self.zoomFactorIdentifier)
     }
 
@@ -412,11 +410,10 @@ struct LiveTranslateView: View {
         } label: {
             Image(systemName: zoom.isFocusLocked ? Self.focusLockedSymbolName
                                                  : Self.focusUnlockedSymbolName)
-                .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                .foregroundColor(zoom.isFocusLocked ? DesignTokens.accent : DesignTokens.textPrimary)
+                .font(DesignTokens.warmFont(size: 21, weight: .semibold))
+                .foregroundColor(zoom.isFocusLocked ? appearance.colors.accent : appearance.colors.textPrimary)
                 .frame(width: Self.zoomControlDiameter, height: Self.zoomControlDiameter)
-                .background(DesignTokens.card)
-                .clipShape(Circle())
+                .appSurface(role: .control, cornerRadius: 999)
         }
         .accessibilityIdentifier(Self.focusLockIdentifier)
     }
@@ -489,15 +486,14 @@ struct LiveTranslateView: View {
                     // elder's text size (NFR-LCT-011). The overlay's text
                     // metrics are for text the placement measures, which this
                     // is not.
-                    .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                    .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize, weight: .semibold))
                     .fixedSize(horizontal: false, vertical: true)
             }
-            .foregroundColor(DesignTokens.textPrimary)
+            .foregroundColor(appearance.colors.textPrimary)
             .padding(.horizontal, DesignTokens.interElementSpacing)
             .frame(minWidth: DesignTokens.minTapTargetSize,
                    minHeight: DesignTokens.minTapTargetSize)
-            .background(DesignTokens.card)
-            .clipShape(Capsule())
+            .appSurface(role: .control, cornerRadius: 999)
         }
         .accessibilityIdentifier("livetranslate.close")
     }
@@ -735,19 +731,19 @@ struct WardenNoticeSurface: Equatable {
 /// camera happens to be pointing at; at the body floor, so it is legible at
 /// arm's length.
 struct LiveTranslateWardenNoticeBanner: View {
-
+    @Environment(\.appAppearance) private var appearance
     let surface: WardenNoticeSurface
 
     var body: some View {
         Text(surface.copy)
-            .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .semibold))
-            .foregroundColor(DesignTokens.textPrimary)
+            .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize, weight: .semibold))
+            .foregroundColor(appearance.colors.textPrimary)
             .multilineTextAlignment(.leading)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, DesignTokens.interElementSpacing * 2)
             .padding(.vertical, DesignTokens.interElementSpacing)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(DesignTokens.card)
+            .background(appearance.colors.card)
             .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
             .accessibilityIdentifier("livetranslate.warden.notice")
     }
@@ -765,7 +761,7 @@ struct LiveTranslateWardenNoticeBanner: View {
 /// order, top to bottom) — and a frame with nothing on it says so in words
 /// rather than showing an empty list.
 struct LiveTranslateResultsCardView: View {
-
+    @Environment(\.appAppearance) private var appearance
     let surface: LiveTranslateResultsCardSurface
     /// Tap-to-hear (C12), on the held frame's own placements: the row hands
     /// back the region it was built from.
@@ -813,8 +809,7 @@ struct LiveTranslateResultsCardView: View {
                 })
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
         .accessibilityIdentifier("livetranslate.results.card")
     }
 
@@ -822,8 +817,8 @@ struct LiveTranslateResultsCardView: View {
     /// line the overlay's empty state uses: one situation, one sentence.
     private var emptyState: some View {
         Text(surface.emptyHint)
-            .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize))
-            .foregroundColor(DesignTokens.textPrimary)
+            .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize))
+            .foregroundColor(appearance.colors.textPrimary)
             .multilineTextAlignment(.center)
             .fixedSize(horizontal: false, vertical: true)
             .padding(DesignTokens.interElementSpacing * 2)
@@ -868,8 +863,8 @@ struct LiveTranslateResultsCardView: View {
                 // lands where the answer is.
                 if let source = row.source, !source.isEmpty {
                     Text(source)
-                        .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize))
-                        .foregroundColor(DesignTokens.textSecondary)
+                        .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize))
+                        .foregroundColor(appearance.colors.textSecondary)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -877,12 +872,12 @@ struct LiveTranslateResultsCardView: View {
                        spacing: DesignTokens.interElementSpacing / 2) {
                     if let symbol = row.symbolName {
                         Image(systemName: symbol)
-                            .foregroundColor(DesignTokens.textSecondary)
+                            .foregroundColor(appearance.colors.textSecondary)
                     }
                     Text(row.translation)
-                        .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize,
+                        .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize,
                                                     weight: .semibold))
-                        .foregroundColor(DesignTokens.textPrimary)
+                        .foregroundColor(appearance.colors.textPrimary)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -890,15 +885,14 @@ struct LiveTranslateResultsCardView: View {
             Spacer(minLength: 0)
             if row.speaksTranslation {
                 Image(systemName: Self.speakSymbolName)
-                    .foregroundColor(DesignTokens.accent)
+                    .foregroundColor(appearance.colors.accent)
             }
         }
         .padding(DesignTokens.interElementSpacing)
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(minWidth: DesignTokens.minTapTargetSize,
                minHeight: DesignTokens.minTapTargetSize)
-        .background(DesignTokens.background)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.bubbleCornerRadius)
     }
 
     /// The hear-this glyph. An SF Symbol name is a system identifier, not
@@ -1180,7 +1174,7 @@ struct LiveTranslatePreviewHost: UIViewRepresentable {
 /// point-ask disclosure copy (design §5: what leaves — the small crop,
 /// nothing else — where it goes, nothing until agreement, stop any time).
 struct PointAskConsentPromptView: View {
-
+    @Environment(\.appAppearance) private var appearance
     let surface: PointAskConsentSurface
     let onGrant: () -> Void
     let onDecline: () -> Void
@@ -1188,23 +1182,23 @@ struct PointAskConsentPromptView: View {
     var body: some View {
         VStack(spacing: 16) {
             Text(surface.title)
-                .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                .foregroundColor(DesignTokens.textPrimary)
+                .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize, weight: .semibold))
+                .foregroundColor(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("pointask.consent.heading")
 
             Text(surface.message)
-                .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize))
-                .foregroundColor(DesignTokens.textPrimary)
+                .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize))
+                .foregroundColor(appearance.colors.textPrimary)
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("pointask.consent.message")
 
             if let failure = surface.failureMessage {
                 Text(failure)
-                    .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize))
+                    .foregroundColor(appearance.colors.textPrimary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("pointask.consent.failure")
@@ -1218,8 +1212,7 @@ struct PointAskConsentPromptView: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// The one button construction: both choices come through it, so
@@ -1233,13 +1226,12 @@ struct PointAskConsentPromptView: View {
             }
         } label: {
             Text(action.title)
-                .font(DesignTokens.warmFont(size: DesignTokens.minBodyPointSize, weight: .semibold))
+                .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize, weight: .semibold))
                 .foregroundColor(.white)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 20)
                 .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
-                .background(DesignTokens.accent)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                .appSurface(role: .accent, cornerRadius: DesignTokens.bubbleCornerRadius)
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier(action.accessibilityIdentifier)
@@ -1251,7 +1243,7 @@ struct PointAskConsentPromptView: View {
 /// language ("Looking online" — the mirror of the shipped "Translating
 /// online" indicator).
 struct PointAskCloudIndicatorView: View {
-
+    @Environment(\.appAppearance) private var appearance
     let locale: Locale
 
     /// An SF Symbol name is a system identifier, not user-visible copy, so
@@ -1262,18 +1254,17 @@ struct PointAskCloudIndicatorView: View {
     var body: some View {
         HStack(spacing: DesignTokens.interElementSpacing / 2) {
             Image(systemName: Self.symbolName)
-                .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
                                             weight: .semibold))
             Text(L10n.str("pointask.cloudIndicator.label", locale: locale))
-                .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
                                             weight: .semibold))
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .foregroundColor(DesignTokens.textPrimary)
+        .foregroundColor(appearance.colors.textPrimary)
         .padding(.horizontal, DesignTokens.interElementSpacing)
         .frame(minHeight: DesignTokens.minTapTargetSize)
-        .background(DesignTokens.card)
-        .clipShape(Capsule())
+        .appSurface(role: .control, cornerRadius: 999)
         .accessibilityIdentifier("pointask.cloudIndicator")
     }
 }

@@ -13,6 +13,7 @@ import SwiftUI
 /// row and the call/message flows already speak with, so the picker
 /// always agrees with the rest of the app in either script.
 struct CallingSettingsView: View {
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
 
     /// The four selectable channels, in `CallApp`'s declaration order.
@@ -29,8 +30,8 @@ struct CallingSettingsView: View {
                     }
                 }
                 Text("calling.defaultCaption")
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .font(.system(size: appearance.typography.captionPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
@@ -43,22 +44,21 @@ struct CallingSettingsView: View {
         } label: {
             HStack {
                 Text(LocalizedStringKey(Self.nameKey(for: app)))
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                    .foregroundStyle(appearance.colors.textPrimary)
                 Spacer()
                 if isSelected {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 26))
-                        .foregroundStyle(DesignTokens.accent)
+                        .foregroundStyle(appearance.colors.accent)
                 }
             }
             .padding(18)
             .frame(maxWidth: .infinity)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+            .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
             .overlay(
                 RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius)
-                    .stroke(isSelected ? DesignTokens.accent : Color.clear, lineWidth: 2)
+                    .stroke(isSelected ? appearance.colors.accent : Color.clear, lineWidth: 2)
             )
         }
         .buttonStyle(.plain)

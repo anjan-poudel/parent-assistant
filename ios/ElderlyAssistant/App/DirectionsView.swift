@@ -163,6 +163,7 @@ enum DirectionsScreenList {
 /// deep-links into Settings → Places and maps, where the targets are
 /// created.
 struct DirectionsView: View {
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
     @Environment(\.scenePhase) private var scenePhase
 
@@ -243,10 +244,10 @@ struct DirectionsView: View {
         HStack(spacing: 10) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
             TextField("directions.search.placeholder", text: $searchText)
-                .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .font(.system(size: appearance.typography.bodyPointSize))
+                .foregroundStyle(appearance.colors.textPrimary)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
             if micButtonVisible {
@@ -255,8 +256,7 @@ struct DirectionsView: View {
         }
         .padding(.horizontal, 16)
         .frame(minHeight: DesignTokens.minTapTargetSize)
-        .background(DesignTokens.card)
-        .clipShape(Capsule())
+        .appSurface(role: .card, cornerRadius: 999)
     }
 
     /// In-pill voice-search button (2026-09-07) — one shot captures a
@@ -271,10 +271,10 @@ struct DirectionsView: View {
                 // Caption token (DESIGN-REVIEW): 18pt floor, Dynamic Type
                 // aware — the 30pt circle below grows with it via
                 // `minHeight`/`minWidth` so the glyph can never clip.
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                .foregroundStyle(listening ? .white : DesignTokens.accent)
+                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
+                .foregroundStyle(listening ? DesignTokens.overlayText : appearance.colors.accent)
                 .frame(minWidth: 30, minHeight: 30)
-                .background(listening ? DesignTokens.accent : DesignTokens.background)
+                .background(listening ? DesignTokens.stateListening : appearance.colors.background)
                 .clipShape(Circle())
         }
         .frame(minWidth: DesignTokens.minTapTargetSize,
@@ -365,14 +365,14 @@ struct DirectionsView: View {
         switch micPhase {
         case .listening:
             Text(L10n.str("directions.search.micListening", locale: coordinator.activeLocale))
-                .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(DesignTokens.accent)
+                .font(.system(size: appearance.typography.captionPointSize))
+                .foregroundStyle(appearance.colors.accent)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 6)
         case .failed:
             Text(L10n.str("directions.search.micFailed", locale: coordinator.activeLocale))
-                .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.captionPointSize))
+                .foregroundStyle(appearance.colors.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 6)
         case .idle:
@@ -400,8 +400,8 @@ struct DirectionsView: View {
     private func groupSection(_ section: DirectionsScreenList.Section) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(LocalizedStringKey(section.group.headerKey))
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
+                .foregroundStyle(appearance.colors.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 4)
             ForEach(section.rows) { row in
@@ -419,19 +419,19 @@ struct DirectionsView: View {
                 .accessibilityHidden(true)   // row texts carry the meaning
             VStack(alignment: .leading, spacing: 3) {
                 Text(row.name)
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                    .foregroundStyle(appearance.colors.textPrimary)
                     .multilineTextAlignment(.leading)
                     .lineLimit(2)
                 if let relationship = row.relationship {
                     Text(relationship)
-                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                        .foregroundStyle(DesignTokens.accent)
+                        .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
+                        .foregroundStyle(appearance.colors.accent)
                         .lineLimit(2)
                 }
                 Text(row.address)
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .font(.system(size: appearance.typography.captionPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
                     .multilineTextAlignment(.leading)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
@@ -440,10 +440,7 @@ struct DirectionsView: View {
             goButton(for: row)
         }
         .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+        .frame(maxWidth: .infinity, alignment: .leading).appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// The row's leading circle: a place glyph in the directions badge
@@ -476,12 +473,10 @@ struct DirectionsView: View {
             }
         } label: {
             Text(LocalizedStringKey("directions.goLabel"))
-                .font(.system(size: 22, weight: .bold))
+                .font(.system(size: appearance.typography.scaled(22), weight: .bold))
                 .foregroundStyle(.white)
-                .frame(width: 56, height: 56)
-                .background(DesignTokens.accent)
-                .clipShape(Circle())
-                .shadow(color: DesignTokens.accent.opacity(0.35), radius: 4, y: 2)
+                .padding(12)
+                .frame(minWidth: 56, minHeight: 56).appSurface(role: .accent, cornerRadius: 999)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text(L10n.fmt("directions.goAccessibility",
@@ -495,32 +490,28 @@ struct DirectionsView: View {
         VStack(spacing: 14) {
             IconBadge(systemImage: "map.fill", tint: .directions, diameter: 72)
             Text(LocalizedStringKey("settings.places.empty"))
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                .foregroundStyle(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
             Text(LocalizedStringKey("directions.empty.body"))
-                .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.bodyPointSize))
+                .foregroundStyle(appearance.colors.textSecondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
             NavigationLink(value: SettingsView.SettingsDestination.places) {
                 Text(LocalizedStringKey("settings.places.add"))
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 24)
                     .frame(minHeight: 52)
                     .fixedSize(horizontal: false, vertical: true)
-                    .background(DesignTokens.accent)
-                    .clipShape(Capsule())
+                    .appSurface(role: .accent, cornerRadius: 999)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(Text(LocalizedStringKey("directions.empty.addAccessibility")))
         }
         .padding(24)
-        .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+        .frame(maxWidth: .infinity).appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// Search found nothing — say so plainly; keep typing or try another
@@ -528,13 +519,10 @@ struct DirectionsView: View {
     private var noResultsCard: some View {
         Text(L10n.fmt("directions.search.noResults",
                       locale: coordinator.activeLocale, trimmedQuery))
-            .font(.system(size: DesignTokens.minBodyPointSize))
-            .foregroundStyle(DesignTokens.textSecondary)
+            .font(.system(size: appearance.typography.bodyPointSize))
+            .foregroundStyle(appearance.colors.textSecondary)
             .multilineTextAlignment(.center)
             .padding(24)
-            .frame(maxWidth: .infinity)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-            .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+            .frame(maxWidth: .infinity).appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 }

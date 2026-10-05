@@ -2,58 +2,39 @@ import SwiftUI
 import UIKit
 
 extension Color {
-    /// The `Color` for an `AppTheme`'s background (skinnable home,
-    /// 2026-09-07) — the single view-layer bridge from the palette's
-    /// Foundation-only RGB tuple. Screen backgrounds read
-    /// `Color(theme: coordinator.appTheme)` so the whole app re-skins on
-    /// one change; swatches (Appearance settings) use it too.
+    /// A swatch/background bridge to the same complete skin palette used
+    /// by environment-driven surfaces.
     init(theme: AppTheme) {
-        self.init(red: theme.background.red,
-                  green: theme.background.green,
-                  blue: theme.background.blue)
+        self = AppColors.palette(for: theme).background
     }
 }
 
 
-/// Layered VoiceBridge canvas from the supplied Home reference: warm white
-/// at the focal center, broad dusty-rose ribbons at the edges, and enough
-/// calm space behind text. Static shapes avoid motion and raster scaling.
+/// A calm skin-colored canvas. Classic is quiet and opaque; Soft and Glass
+/// add static, low-contrast ribbons without imposing a separate brand palette.
 struct VoiceBridgeBackground: View {
+    @Environment(\.appAppearance) private var appearance
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
     let theme: AppTheme
 
+
     var body: some View {
+        let colors = AppAppearance(skin: theme, style: appearance.style).colors
         ZStack {
-            LinearGradient(
-                colors: [DesignTokens.brandCanvasTop,
-                         DesignTokens.brandCanvasBottom],
-                startPoint: .top,
-                endPoint: .bottom)
-            // Preserve a trace of the selected Appearance preset without
-            // allowing a saved blue/sage theme to erase the pink identity.
-            Color(theme: theme).opacity(0.10)
-            VoiceBridgeFlowWave(baseline: 0.34, crest: 0.20)
-                .fill(LinearGradient(
-                    colors: [DesignTokens.brandBlush.opacity(0.35),
-                             DesignTokens.brandDustyRose.opacity(0.72)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing))
-                .opacity(0.52)
-            VoiceBridgeFlowWave(baseline: 0.61, crest: 0.14)
-                .fill(LinearGradient(
-                    colors: [DesignTokens.brandDeepRose.opacity(0.55),
-                             DesignTokens.brandBlush.opacity(0.18)],
-                    startPoint: .trailing,
-                    endPoint: .leading))
-                .scaleEffect(x: -1, y: 1)
-                .opacity(0.34)
-            VoiceBridgeFlowWave(baseline: 0.83, crest: 0.11)
-                .fill(DesignTokens.brandGradient)
-                .opacity(0.13)
-            RadialGradient(
-                colors: [.white.opacity(0.80), .clear],
-                center: UnitPoint(x: 0.50, y: 0.47),
-                startRadius: 0,
-                endRadius: 330)
+            colors.background
+            if appearance.style != .classic && !reduceTransparency && contrast != .increased {
+                LinearGradient(colors: [colors.brandCanvasTop, colors.brandCanvasBottom],
+                               startPoint: .top, endPoint: .bottom)
+                VoiceBridgeFlowWave(baseline: 0.64, crest: 0.12)
+                    .fill(colors.brandDustyRose.opacity(appearance.style == .glass ? 0.18 : 0.10))
+                VoiceBridgeFlowWave(baseline: 0.86, crest: 0.08)
+                    .fill(colors.brandBlush.opacity(0.25))
+                    .scaleEffect(x: -1, y: 1)
+                RadialGradient(colors: [colors.card.opacity(0.75), .clear],
+                               center: UnitPoint(x: 0.5, y: 0.36),
+                               startRadius: 0, endRadius: 330)
+            }
         }
         .ignoresSafeArea()
         .accessibilityHidden(true)
@@ -90,35 +71,35 @@ private struct VoiceBridgeFlowWave: Shape {
 // MARK: - Icon badge (replaces bare gray SF Symbols — spec §2)
 
 struct IconBadge: View {
+    @Environment(\.appAppearance) private var appearance
     let systemImage: String
     let tint: DesignTokens.BadgeTint
     var diameter: CGFloat = DesignTokens.iconBadgeDiameter
 
     var body: some View {
-        Circle()
-            .fill(tint.background)
+        Color.clear
             .frame(width: diameter, height: diameter)
-            .overlay(
+            .appSurface(role: .control, cornerRadius: diameter * 0.28)
+            .overlay {
+                RoundedRectangle(cornerRadius: diameter * 0.28)
+                    .fill(appearance.badgeBackground(tint).opacity(0.55))
+                    .allowsHitTesting(false)
+            }
+            .overlay {
                 Image(systemName: systemImage)
                     .font(.system(size: diameter * 0.45, weight: .semibold))
-                    .foregroundStyle(tint.tint)
-            )
+                    .foregroundStyle(appearance.badgeTint(tint))
+            }
     }
 }
 
 // MARK: - Face avatar (initials — spec §3.1/§3.2, replaces generic phone icons)
 
-/// The OFFICIAL multicolor logo of a quick-access catalog app on a white
-/// circle (AppIcons.xcassets — Wikimedia Commons PNGs, 2026-09-07, see
-/// the catalog's README for sources), drawn as-is with its own colors, or
-/// the SF Symbol stand-in badge when the catalog carries no official logo
-/// (Apple built-ins use SF Symbols as their official glyphs; IMO's was
-/// removed from simple-icons over trademark concerns and Commons hosts
-/// none). Every tile is the same white circle with the logo at the same
-/// 0.6-of-diameter inset, whatever the logo's natural aspect, so the row
-/// reads uniform like iPhone drawer tiles. Hidden from VoiceOver — the
-/// surrounding tile/row reads the app name.
+/// Official multicolor app logos keep their original colors inside a
+/// white rounded-square tile. Stand-ins use the shared skinned badge.
+/// Hidden from VoiceOver because the surrounding tile reads the app name.
 struct AppGlyph: View {
+    @Environment(\.appAppearance) private var appearance
     let app: AppLauncher.App
     let diameter: CGFloat
 
@@ -131,7 +112,8 @@ struct AppGlyph: View {
                     .frame(width: diameter * 0.6, height: diameter * 0.6)
                     .frame(width: diameter, height: diameter)
                     .background(Color.white)
-                    .clipShape(Circle())
+                    .clipShape(RoundedRectangle(cornerRadius: diameter * 0.28))
+                    .shadow(color: appearance.colors.separator.opacity(0.3), radius: appearance.style == .classic ? 0 : 3, y: 2)
             } else {
                 IconBadge(systemImage: app.systemImage, tint: .apps, diameter: diameter)
             }
@@ -141,6 +123,7 @@ struct AppGlyph: View {
 }
 
 struct FaceAvatar: View {
+    @Environment(\.appAppearance) private var appearance
     let name: String
     var diameter: CGFloat = DesignTokens.iconBadgeDiameter
 
@@ -151,11 +134,12 @@ struct FaceAvatar: View {
 
     var body: some View {
         Circle()
-            .fill(DesignTokens.brandGradient)
-            .frame(width: diameter, height: diameter)
+            .fill(appearance.colors.brandGradient)
+            .frame(width: max(diameter, appearance.typography.scaled(diameter * 0.42) + 20),
+                   height: max(diameter, appearance.typography.scaled(diameter * 0.42) + 20))
             .overlay(
                 Text(initial)
-                    .font(.system(size: diameter * 0.42, weight: .bold))
+                    .font(.system(size: appearance.typography.scaled(diameter * 0.42), weight: .bold))
                     .foregroundStyle(.white)
             )
     }
@@ -212,6 +196,7 @@ enum PhoneAppOpener {
 /// is configured — places a real phone call via `tel:`. Honest about the
 /// unconfigured case instead of pretending the action succeeded.
 struct EmergencyIconButton: View {
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
     @State private var showNoContactAlert = false
 
@@ -222,13 +207,13 @@ struct EmergencyIconButton: View {
                 // floor and Dynamic Type aware, was a fixed 17pt. The
                 // circle below it uses minWidth/minHeight so the glyph
                 // scales without clipping at Accessibility XXXL.
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                .foregroundStyle(DesignTokens.BadgeTint.emergency.tint)
-                .frame(minWidth: 32, minHeight: 32)
-                .background(DesignTokens.BadgeTint.emergency.background)
+                .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
+                .foregroundStyle(appearance.badgeTint(.emergency))
+                .frame(minWidth: DesignTokens.minTapTargetSize, minHeight: DesignTokens.minTapTargetSize)
+                .background(appearance.badgeBackground(.emergency))
                 .clipShape(Circle())
                 .overlay(
-                    Circle().stroke(DesignTokens.BadgeTint.emergency.tint.opacity(0.4), lineWidth: 1.2)
+                    Circle().stroke(appearance.badgeTint(.emergency).opacity(0.4), lineWidth: 1.2)
                 )
         }
         .buttonStyle(.plain)
@@ -255,6 +240,7 @@ struct EmergencyIconButton: View {
 /// Talk button isn't a blank affordance for someone who's never used a
 /// voice assistant. Static, localized catalog — no ML involved.
 struct HintCarousel: View {
+    @Environment(\.appAppearance) private var appearance
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private static let phraseKeys = [
         "home.hint.medAck", "home.hint.reminder", "home.hint.call", "home.hint.query"
@@ -268,31 +254,30 @@ struct HintCarousel: View {
         // the old fixed amber glow).
         VStack(spacing: 6) {
             Text("home.hint.label")
-                .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .bold))
+                .foregroundStyle(appearance.colors.textSecondary)
             Text(LocalizedStringKey(Self.phraseKeys[index]))
                 // Static/rotating text under the speak button is caption-
                 // sized (home-redesign v3, 2026-09-08): this rotating
                 // phrase is an idle affordance, not reading matter.
-                .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .semibold))
+                .foregroundStyle(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
-                .background(DesignTokens.card)
-                .clipShape(Capsule())
+                .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
                 .id(index)
                 .transition(.opacity)
             HStack(spacing: 4) {
                 ForEach(Self.phraseKeys.indices, id: \.self) { i in
                     Circle()
-                        .fill(i == index ? DesignTokens.stateIdle : DesignTokens.textSecondary.opacity(0.3))
+                        .fill(i == index ? DesignTokens.stateIdle : appearance.colors.textSecondary.opacity(0.3))
                         .frame(width: 5, height: 5)
                 }
             }
         }
         .accessibilityElement(children: .combine)
-        .task {
+        .task(id: reduceMotion) {
             guard !reduceMotion else { return }
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: 4_000_000_000)
@@ -323,6 +308,8 @@ struct HintCarousel: View {
 /// lives on the hero's status line; this card holds only the label and
 /// the user's actual words.
 struct LiveCaptionPill: View {
+    @Environment(\.appAppearance) private var appearance
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let transcript: String?
 
     private var readyText: String? {
@@ -336,8 +323,8 @@ struct LiveCaptionPill: View {
             // transcript BELOW stays regular (it is the user's own
             // dynamic speech — visual-polish 2026-09-08).
             Text("home.liveCaption.label")
-                .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .bold))
+                .foregroundStyle(appearance.colors.textSecondary)
             if let text = readyText {
                 // Full text, immediately — NOT a per-character typewriter.
                 // A prior version revealed this a character at a time, but
@@ -354,17 +341,15 @@ struct LiveCaptionPill: View {
                     // 2026-09-08) — the spoken words are ephemeral
                     // under-hero text; the full exchange lives in the
                     // Updates leaf's Activity log.
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
+                    .foregroundStyle(appearance.colors.textPrimary)
                     .transition(.opacity)
             }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-        .shadow(color: .black.opacity(0.1), radius: 10, y: 4)
-        .animation(.easeInOut(duration: 0.15), value: readyText)
+        .appSurface()
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.15), value: readyText)
     }
 }
 
@@ -385,6 +370,7 @@ struct LiveCaptionPill: View {
 /// `AppCoordinator.OutcomeSummary.rows`, the same pure composition every
 /// outcome path funnels through.
 struct OutcomeCardView: View {
+    @Environment(\.appAppearance) private var appearance
     let outcome: AppCoordinator.OutcomeSummary
     let expanded: Bool
     let onTapChip: () -> Void
@@ -413,15 +399,15 @@ struct OutcomeCardView: View {
     private var expandedCard: some View {
         HStack(spacing: 12) {
             Circle()
-                .fill(DesignTokens.userBubble)
+                .fill(appearance.colors.userBubble)
                 .frame(width: 40, height: 40)
                 .overlay(
                     Image(systemName: outcome.icon)
                         // Caption token (DESIGN-REVIEW) — was a fixed
                         // 17pt; now on the 18pt floor and Dynamic Type
                         // aware, in step with the outcome rows beside it.
-                        .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                        .foregroundStyle(DesignTokens.accent)
+                        .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
+                        .foregroundStyle(appearance.colors.accent)
                 )
             VStack(alignment: .leading, spacing: 6) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -429,31 +415,32 @@ struct OutcomeCardView: View {
                         switch row {
                         case .user(let heard):
                             Text("home.outcome.youSaid")
-                                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                                .foregroundStyle(DesignTokens.textSecondary)
+                                .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
+                                .foregroundStyle(appearance.colors.textSecondary)
                             Text(heard)
                                 // Caption-sized outcome rows (home-redesign
                                 // v3, 2026-09-08): the assistant already
                                 // SPOKE this text — the visual channel is a
                                 // confirmation glance, not a read.
-                                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                                .foregroundStyle(DesignTokens.textPrimary)
+                                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
+                                .foregroundStyle(appearance.colors.textPrimary)
                         case .assistant(let response):
                             Text(response)
-                                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                                .foregroundStyle(DesignTokens.textPrimary)
+                                .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
+                                .foregroundStyle(appearance.colors.textPrimary)
                         }
                     }
                 }
                 HStack(spacing: 10) {
                     Text(outcome.timestamp.formatted(date: .omitted, time: .shortened))
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .font(.system(size: appearance.typography.captionPointSize))
+                        .foregroundStyle(appearance.colors.textSecondary)
                     if let undo = outcome.undo {
                         Button(action: undo) {
                             Text("home.outcome.undo")
-                                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                                .foregroundStyle(DesignTokens.BadgeTint.emergency.tint)
+                                .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
+                                .foregroundStyle(appearance.badgeTint(.emergency))
+                                .frame(minHeight: DesignTokens.minTapTargetSize)
                         }
                         .buttonStyle(.plain)
                     }
@@ -463,8 +450,9 @@ struct OutcomeCardView: View {
                     // setup strip returns for the rest of the session.
                     Button(action: onDismiss) {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                            .foregroundStyle(DesignTokens.textSecondary)
+                            .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
+                            .foregroundStyle(appearance.colors.textSecondary)
+                            .frame(minWidth: DesignTokens.minTapTargetSize, minHeight: DesignTokens.minTapTargetSize)
                             .accessibilityLabel(Text("home.outcome.dismiss"))
                     }
                     .buttonStyle(.plain)
@@ -474,49 +462,44 @@ struct OutcomeCardView: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-        .shadow(color: .black.opacity(0.1), radius: 10, y: 4)
+        .appSurface()
     }
 
     private var collapsedChip: some View {
         Button(action: onTapChip) {
             HStack(spacing: 14) {
                 Circle()
-                    .fill(DesignTokens.userBubble)
+                    .fill(appearance.colors.userBubble)
                     .frame(width: 52, height: 52)
                     .overlay(
                         Image(systemName: outcome.icon)
                             .font(.system(size: 24, weight: .semibold))
-                            .foregroundStyle(DesignTokens.accent)
+                            .foregroundStyle(appearance.colors.accent)
                     )
                 VStack(alignment: .leading, spacing: 4) {
                     Text("home.activity.title")
                         .font(DesignTokens.warmFont(
-                            size: DesignTokens.minBodyPointSize,
+                            size: appearance.typography.bodyPointSize,
                             weight: .bold))
-                        .foregroundStyle(DesignTokens.accent)
+                        .foregroundStyle(appearance.colors.accent)
                     Text(outcome.text)
-                        .font(.system(size: DesignTokens.minCaptionPointSize,
+                        .font(.system(size: appearance.typography.captionPointSize,
                                       weight: .semibold))
-                        .foregroundStyle(DesignTokens.textPrimary)
+                        .foregroundStyle(appearance.colors.textPrimary)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                 }
                 Spacer(minLength: 4)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(DesignTokens.accent)
+                    .foregroundStyle(appearance.colors.accent)
                     .frame(width: 44, height: 44)
-                    .background(DesignTokens.userBubble)
+                    .background(appearance.colors.userBubble)
                     .clipShape(Circle())
             }
             .padding(16)
             .frame(maxWidth: .infinity)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius,
-                                        style: .continuous))
-            .shadow(color: DesignTokens.brandWine.opacity(0.12), radius: 12, y: 5)
+            .appSurface()
         }
         .buttonStyle(.plain)
     }
@@ -589,6 +572,7 @@ enum HistoryRowOrderer {
 /// before the newest-first flip, so no pair ever reads response-above-
 /// transcript the way a bare `.reversed()` did.
 struct ConversationHistorySheet: View {
+    @Environment(\.appAppearance) private var appearance
     @ObservedObject var coordinator: AppCoordinator
     @Environment(\.dismiss) private var dismiss
 
@@ -626,7 +610,7 @@ struct ConversationHistorySheet: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 Capsule()
-                    .fill(DesignTokens.textSecondary.opacity(0.3))
+                    .fill(appearance.colors.textSecondary.opacity(0.3))
                     .frame(width: 36, height: 4)
                     .frame(maxWidth: .infinity)
                     .padding(.top, 8)
@@ -639,23 +623,22 @@ struct ConversationHistorySheet: View {
                     } label: {
                         Image(systemName: "chevron.left")
                             .font(.system(size: 24, weight: .bold))
-                            .foregroundStyle(DesignTokens.textPrimary)
+                            .foregroundStyle(appearance.colors.textPrimary)
                             .frame(minWidth: DesignTokens.minTapTargetSize,
                                    minHeight: DesignTokens.minTapTargetSize)
-                            .background(DesignTokens.card)
-                            .clipShape(Circle())
+                            .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(Text("common.close"))
                     Text("home.conversation.title")
-                        .font(DesignTokens.greetingFont(size: DesignTokens.titlePointSize))
-                        .foregroundStyle(DesignTokens.textPrimary)
+                        .font(DesignTokens.greetingFont(size: appearance.typography.titlePointSize))
+                        .foregroundStyle(appearance.colors.textPrimary)
                     Spacer(minLength: 0)
                 }
                 if visibleRows.isEmpty {
                     Text("home.conversation.empty")
-                        .font(.system(size: DesignTokens.minBodyPointSize))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .font(.system(size: appearance.typography.bodyPointSize))
+                        .foregroundStyle(appearance.colors.textSecondary)
                         .frame(maxWidth: .infinity, alignment: .center)
                         .padding(.top, 32)
                 } else {
@@ -690,14 +673,13 @@ struct ConversationHistorySheet: View {
     private var showMoreButton: some View {
         Button(action: loadOlderPage) {
             Text("history.showMore")
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                .foregroundStyle(DesignTokens.accent)
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                .foregroundStyle(appearance.colors.accent)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
-                .background(DesignTokens.card)
-                .clipShape(Capsule())
+                .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
                 .overlay(
-                    Capsule().stroke(DesignTokens.accent.opacity(0.35), lineWidth: 1.5)
+                    Capsule().stroke(appearance.colors.accent.opacity(0.35), lineWidth: 1.5)
                 )
         }
         .buttonStyle(.plain)
@@ -707,14 +689,14 @@ struct ConversationHistorySheet: View {
     private func row(_ exchange: AppCoordinator.Exchange) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(LocalizedStringKey(exchange.role == .user ? "home.conversation.user" : "home.conversation.assistant"))
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                .foregroundStyle(exchange.role == .user ? DesignTokens.textSecondary : DesignTokens.accent)
+                .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
+                .foregroundStyle(exchange.role == .user ? appearance.colors.textSecondary : appearance.colors.accent)
             Text(exchange.text)
-                .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .font(.system(size: appearance.typography.bodyPointSize))
+                .foregroundStyle(appearance.colors.textPrimary)
             Text(exchange.timestamp.formatted(date: .omitted, time: .shortened))
-                .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.captionPointSize))
+                .foregroundStyle(appearance.colors.textSecondary)
             // [TURN-TIMING] Per-stage timing caption under the assistant's
             // reply — shown only when the Voice personalization "Show
             // conversation timing" toggle is ON, and only under the row
@@ -724,14 +706,13 @@ struct ConversationHistorySheet: View {
                exchange.id == coordinator.lastTurnTimingExchangeID,
                let caption = coordinator.lastTurnTimingCaption {
                 Text(caption)
-                    .font(.system(size: DesignTokens.minCaptionPointSize, design: .monospaced))
-                    .foregroundStyle(DesignTokens.textSecondary.opacity(0.75))
+                    .font(.system(size: appearance.typography.captionPointSize, design: .monospaced))
+                    .foregroundStyle(appearance.colors.textSecondary.opacity(0.75))
                     .padding(.top, 2)
             }
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+        .appSurface(cornerRadius: DesignTokens.bubbleCornerRadius)
     }
 }

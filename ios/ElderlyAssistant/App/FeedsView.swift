@@ -15,6 +15,7 @@ import AVKit
 /// - audio/video → "Play", which presents the `FeedMediaPlayerSheet`.
 /// Nothing autoplays — playback only ever starts from the user's tap.
 struct FeedsView: View {
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
 
     /// The item whose play sheet is open (audio or video), nil = closed.
@@ -48,19 +49,18 @@ struct FeedsView: View {
         HStack(spacing: 12) {
             Text(L10n.fmt("feeds.count", locale: coordinator.activeLocale,
                           coordinator.feedItems.count))
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
+                .foregroundStyle(appearance.colors.textSecondary)
             Spacer()
             Button {
                 Task { await coordinator.refreshFeed() }
             } label: {
                 Label("feeds.refresh", systemImage: "arrow.clockwise")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.accent)
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                    .foregroundStyle(appearance.colors.accent)
                     .padding(.horizontal, 16)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.card)
-                    .clipShape(Capsule())
+                    .appSurface(role: .card, cornerRadius: 999)
             }
             .buttonStyle(.plain)
         }
@@ -88,41 +88,38 @@ struct FeedsView: View {
         HStack(spacing: 12) {
             ProgressView()
             Text("feeds.loading")
-                .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.bodyPointSize))
+                .foregroundStyle(appearance.colors.textSecondary)
         }
         .padding(20)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     private var failedCard: some View {
         VStack(spacing: 12) {
             Image(systemName: "wifi.exclamationmark")
                 .font(.system(size: 28))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .foregroundStyle(appearance.colors.textSecondary)
             Text("feeds.failed")
-                .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.bodyPointSize))
+                .foregroundStyle(appearance.colors.textSecondary)
                 .multilineTextAlignment(.center)
             Button {
                 Task { await coordinator.refreshFeed() }
             } label: {
                 Text("feeds.retry")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 20)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
-                    .background(DesignTokens.accent)
-                    .clipShape(Capsule())
+                    .appSurface(role: .accent, cornerRadius: 999)
             }
             .buttonStyle(.plain)
         }
         .padding(20)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     @ViewBuilder
@@ -148,29 +145,27 @@ struct FeedsView: View {
             Image(systemName: "exclamationmark.circle.fill")
                 // Caption-token status glyph (DESIGN-REVIEW) — 18pt floor,
                 // Dynamic Type aware; was a fixed 16pt.
-                .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.captionPointSize))
+                .foregroundStyle(appearance.colors.textSecondary)
                 .padding(.top, 2)
             Text(L10n.fmt("feeds.partialFailure", locale: coordinator.activeLocale,
                           coordinator.feedFailedSourceNames.joined(separator: ", ")))
-                .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.captionPointSize))
+                .foregroundStyle(appearance.colors.textSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(14)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     private var emptyCard: some View {
         Text("feeds.empty")
-            .font(.system(size: DesignTokens.minBodyPointSize))
-            .foregroundStyle(DesignTokens.textSecondary)
+            .font(.system(size: appearance.typography.bodyPointSize))
+            .foregroundStyle(appearance.colors.textSecondary)
             .multilineTextAlignment(.center)
             .padding(32)
             .frame(maxWidth: .infinity)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+            .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     // MARK: - Cards (one action per card)
@@ -215,13 +210,13 @@ struct FeedsView: View {
                 }
             }
             Text(display.title)
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                .foregroundStyle(appearance.colors.textPrimary)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if let summary = displaySummary(display) {
                 Text(summary)
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .font(.system(size: appearance.typography.captionPointSize))
+                    .foregroundStyle(appearance.colors.textPrimary)
                     .lineLimit(4)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -243,10 +238,7 @@ struct FeedsView: View {
             }
         }
         .padding(18)
-        .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+        .frame(maxWidth: .infinity).appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// Image card: the photo (async), then title + caption. No action —
@@ -269,7 +261,7 @@ struct FeedsView: View {
                         // the card still says what the item is.
                         Image(systemName: "photo")
                             .font(.system(size: 40))
-                            .foregroundStyle(DesignTokens.textSecondary)
+                            .foregroundStyle(appearance.colors.textSecondary)
                             .frame(maxWidth: .infinity)
                             .frame(height: 160)
                     @unknown default:
@@ -281,16 +273,13 @@ struct FeedsView: View {
                 .accessibilityHidden(true)
             }
             Text(item.title)
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                .foregroundStyle(appearance.colors.textPrimary)
                 .frame(maxWidth: .infinity, alignment: .leading)
             captionRow(item)
         }
         .padding(18)
-        .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+        .frame(maxWidth: .infinity).appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// Audio/video card: kind badge, title, source caption, and two
@@ -309,16 +298,16 @@ struct FeedsView: View {
                 Image(systemName: item.kind == .audio
                       ? "speaker.wave.2.fill" : "play.rectangle.fill")
                     .font(.system(size: 22))
-                    .foregroundStyle(DesignTokens.accent)
+                    .foregroundStyle(appearance.colors.accent)
                 Text(display.title)
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                    .foregroundStyle(appearance.colors.textPrimary)
                     .lineLimit(3)
             }
             if let summary = displaySummary(display) {
                 Text(summary)
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .font(.system(size: appearance.typography.captionPointSize))
+                    .foregroundStyle(appearance.colors.textPrimary)
                     .lineLimit(2)
             }
             captionRow(item)
@@ -332,13 +321,12 @@ struct FeedsView: View {
                     playingItem = item
                 } label: {
                     Label("feeds.play", systemImage: "play.fill")
-                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                        .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 18)
                         .frame(maxWidth: .infinity)
                         .frame(minHeight: DesignTokens.minTapTargetSize)
-                        .background(DesignTokens.accent)
-                        .clipShape(Capsule())
+                        .appSurface(role: .accent, cornerRadius: 999)
                 }
                 .buttonStyle(.plain)
                 .disabled(item.mediaURL == nil)
@@ -347,10 +335,7 @@ struct FeedsView: View {
             }
         }
         .padding(18)
-        .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+        .frame(maxWidth: .infinity).appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     // MARK: - Card helpers
@@ -359,17 +344,17 @@ struct FeedsView: View {
     private func captionRow(_ item: FeedItem) -> some View {
         HStack(spacing: 6) {
             Text(item.sourceName)
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
+                .foregroundStyle(appearance.colors.textSecondary)
             if let date = item.publishedAt {
                 Text("·")
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
                 Text(HistoryTimeFormat.displayString(for: date,
                                                      now: Date(),
                                                      calendar: .current,
                                                      locale: coordinator.activeLocale))
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .font(.system(size: appearance.typography.captionPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
             }
         }
     }
@@ -400,14 +385,14 @@ struct FeedsView: View {
     private var translatedMarker: some View {
         HStack(spacing: 4) {
             Image(systemName: "sparkles")
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
             Text("feeds.translatedByAI")
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
         }
-        .foregroundStyle(DesignTokens.accent)
+        .foregroundStyle(appearance.colors.accent)
         .padding(.horizontal, 10)
         .padding(.vertical, 4)
-        .background(DesignTokens.accent.opacity(0.12))
+        .background(appearance.colors.accent.opacity(0.12))
         .clipShape(Capsule())
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Text("feeds.translatedByAI"))
@@ -422,11 +407,11 @@ struct FeedsView: View {
         HStack(spacing: 6) {
             ProgressView()
                 .controlSize(.small)
-                .tint(DesignTokens.textSecondary)
+                .tint(appearance.colors.textSecondary)
             Text("feeds.translating")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
         }
-        .foregroundStyle(DesignTokens.textSecondary)
+        .foregroundStyle(appearance.colors.textSecondary)
         .accessibilityElement(children: .combine)
     }
 
@@ -439,11 +424,11 @@ struct FeedsView: View {
     private var translationUnavailableCaption: some View {
         HStack(spacing: 6) {
             Image(systemName: "exclamationmark.circle.fill")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
             Text("feeds.translationUnavailable")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
         }
-        .foregroundStyle(DesignTokens.textSecondary)
+        .foregroundStyle(appearance.colors.textSecondary)
         .accessibilityElement(children: .combine)
     }
 
@@ -466,7 +451,7 @@ struct FeedsView: View {
             Group {
                 if translating {
                     ProgressView()
-                        .tint(DesignTokens.accent)
+                        .tint(appearance.colors.accent)
                 } else {
                     Label(LocalizedStringKey(display.isShowingTranslation
                                              ? "feeds.showOriginal" : "feeds.translate"),
@@ -474,14 +459,13 @@ struct FeedsView: View {
                           ? "arrow.uturn.backward" : "character.bubble.fill")
                 }
             }
-            .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-            .foregroundStyle(DesignTokens.accent)
+            .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+            .foregroundStyle(appearance.colors.accent)
             .padding(.horizontal, 18)
             .frame(maxWidth: .infinity)
             .frame(minHeight: DesignTokens.minTapTargetSize)
-            .background(DesignTokens.background)
-            .clipShape(Capsule())
-            .overlay(Capsule().stroke(DesignTokens.accent.opacity(0.4), lineWidth: 1.5))
+            .appSurface(role: .control, cornerRadius: 999)
+            .overlay(Capsule().stroke(appearance.colors.accent.opacity(0.4), lineWidth: 1.5))
         }
         .buttonStyle(.plain)
         .disabled(translating)
@@ -516,13 +500,12 @@ struct FeedsView: View {
             readAloud(item)
         } label: {
             Label("feeds.readAloud", systemImage: "speaker.wave.2.fill")
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 .foregroundStyle(.white)
                 .padding(.horizontal, 18)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
-                .background(DesignTokens.accent)
-                .clipShape(Capsule())
+                .appSurface(role: .accent, cornerRadius: 999)
         }
         .buttonStyle(.plain)
     }
@@ -539,14 +522,13 @@ struct FeedsView: View {
             coordinator.readFeedItemArticleAloud(item)
         } label: {
             Label("feeds.readFullArticle", systemImage: "doc.text.fill")
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                .foregroundStyle(DesignTokens.accent)
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                .foregroundStyle(appearance.colors.accent)
                 .padding(.horizontal, 18)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
-                .background(DesignTokens.background)
-                .clipShape(Capsule())
-                .overlay(Capsule().stroke(DesignTokens.accent.opacity(0.4), lineWidth: 1.5))
+                .appSurface(role: .control, cornerRadius: 999)
+                .overlay(Capsule().stroke(appearance.colors.accent.opacity(0.4), lineWidth: 1.5))
         }
         .buttonStyle(.plain)
     }
@@ -558,15 +540,15 @@ struct FeedsView: View {
     private var unreadMarker: some View {
         HStack(spacing: 4) {
             Circle()
-                .fill(DesignTokens.accent)
+                .fill(appearance.colors.accent)
                 .frame(width: 8, height: 8)
             Text("feeds.unread")
-                .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
         }
-        .foregroundStyle(DesignTokens.accent)
+        .foregroundStyle(appearance.colors.accent)
         .padding(.horizontal, 10)
         .padding(.vertical, 4)
-        .background(DesignTokens.accent.opacity(0.12))
+        .background(appearance.colors.accent.opacity(0.12))
         .clipShape(Capsule())
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Text("feeds.unread"))
@@ -579,11 +561,11 @@ struct FeedsView: View {
     private var summaryOnlyCaption: some View {
         HStack(spacing: 6) {
             Image(systemName: "text.alignleft")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
             Text("feeds.summaryOnly")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
+                .font(.system(size: appearance.typography.captionPointSize))
         }
-        .foregroundStyle(DesignTokens.textSecondary)
+        .foregroundStyle(appearance.colors.textSecondary)
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
     }
@@ -618,6 +600,7 @@ struct FeedsView: View {
 /// itself never autoplays anything. The player pauses and releases on
 /// dismiss.
 struct FeedMediaPlayerSheet: View {
+    @Environment(\.appAppearance) private var appearance
     let item: FeedItem
     @EnvironmentObject var coordinator: AppCoordinator
     @Environment(\.dismiss) private var dismiss
@@ -632,20 +615,19 @@ struct FeedMediaPlayerSheet: View {
                 } label: {
                     Image(systemName: "chevron.left")
                         .font(.system(size: 24, weight: .bold))
-                        .foregroundStyle(DesignTokens.textPrimary)
+                        .foregroundStyle(appearance.colors.textPrimary)
                         .frame(minWidth: DesignTokens.minTapTargetSize,
                                minHeight: DesignTokens.minTapTargetSize)
-                        .background(DesignTokens.card)
-                        .clipShape(Circle())
+                        .appSurface(role: .card, cornerRadius: 999)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(Text("feeds.close"))
                 Text("feeds.playingTitle")
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
+                    .foregroundStyle(appearance.colors.textSecondary)
                 Text(item.title)
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
+                    .foregroundStyle(appearance.colors.textPrimary)
                     .lineLimit(2)
                 Spacer(minLength: 8)
             }

@@ -12,12 +12,10 @@ import UIKit
 // call (see `HomePresentationState.swift` for the models and the equality
 // rule).
 //
-// This is why the split matters for the review's acceptance: a feed
-// translation, a model-download tick, a settings change or an unrelated
-// timer invalidates HomeView, but `HomeDock`, `HomeTopBar`,
-// `QuickAccessStrip` and `TalkStage` all compare equal and their bodies
-// never run. Voice animation/state updates invalidate the talk stage (its
-// `==` includes the session state) and leave the dock and top bar alone.
+// Unrelated coordinator updates still compare equal. Skin/style and Dynamic
+// Type are environment dependencies, so their changes invalidate the relevant
+// subviews even across the equatable performance boundaries. Voice animation
+// and state updates remain isolated to the talk stage.
 //
 // iOS 16 floor: these are value-typed slices fed by HomeView, not
 // `@Observable` models — see `HomePresentationState.swift` for the
@@ -27,9 +25,11 @@ import UIKit
 
 /// Settings (leading), the date line doubling as the calendar's entry
 /// point (centered), the notifications bell and the emergency button
-/// (trailing). Equal-width 44pt containers keep the date line visually
-/// centered; the gear can never be confused with emergency.
+/// (trailing). At larger type the full date moves below the controls;
+/// every entrypoint retains a minimum 44pt target.
 struct HomeTopBar: View {
+    @Environment(\.appAppearance) private var appearance
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     /// Today's composed date line — nil until the first offline
     /// composition lands (one launch frame), which renders as an empty
     /// date area, exactly as before the split.
@@ -44,39 +44,42 @@ struct HomeTopBar: View {
     let onOpenUpdates: () -> Void
 
     var body: some View {
-        HStack(alignment: .center, spacing: 8) {
-            // Settings stays leading; Updates and Emergency remain grouped
-            // at the trailing edge while the date keeps the center target.
-            NavigationLink(value: LeafDestination.settings) {
-                IconBadge(systemImage: "gearshape.fill", tint: .settings, diameter: 32)
-                    .frame(width: 44, height: 44)
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                NavigationLink(value: LeafDestination.settings) {
+                    IconBadge(systemImage: "gearshape.fill", tint: .settings, diameter: 32)
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text("home.hub.settings"))
+                .accessibilityIdentifier("home.settings")
+                if dynamicTypeSize <= .large {
+                    calendarButton
+                        .frame(maxWidth: .infinity)
+                } else {
+                    Spacer(minLength: 8)
+                }
+                NotificationBellButton(count: notificationCount, action: onOpenUpdates)
+                EmergencyIconButton()
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text(LocalizedStringKey("home.hub.settings")))
-            .frame(width: 44, alignment: .leading)
-            // Balance the two trailing controls so the date remains at the
-            // physical screen center instead of drifting toward Settings.
-            Color.clear.frame(width: 44, height: 44)
-            Spacer(minLength: 4)
-            // The date area doubles as the calendar's entry point
-            // (2026-09-06): the calendar lives ON the home screen via this
-            // tap target, NOT as a dock item.
-            NavigationLink(value: LeafDestination.calendar) {
-                dateLineView
+            if dynamicTypeSize > .large {
+                calendarButton
+                    .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text("home.hub.calendar"))
-            .accessibilityValue(Text(calendarLine ?? ""))
-            Spacer(minLength: 4)
-            // The ONE notifications affordance (home-redesign v3,
-            // 2026-09-08): a bell with the active-panel badge — the badge
-            // count always matches what the Updates leaf lists (same
-            // registry instance). Emergency stays at the far edge.
-            NotificationBellButton(count: notificationCount, action: onOpenUpdates)
-            EmergencyIconButton()
-                .frame(width: 44, alignment: .trailing)
         }
         .padding(.top, 8)
+    }
+
+    private var calendarButton: some View {
+        NavigationLink(value: LeafDestination.calendar) {
+            dateLineView
+                .frame(minHeight: DesignTokens.minTapTargetSize)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(Text("home.hub.calendar"))
+        .accessibilityValue(Text(calendarLine ?? ""))
     }
 
     /// Compact date content; the whole center target opens Calendar.
@@ -85,18 +88,18 @@ struct HomeTopBar: View {
         VStack(alignment: .center, spacing: 3) {
             if let line = dateLine {
                 Text(line.primary)
-                    .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                    .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
                                                 weight: .bold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .foregroundStyle(appearance.colors.textPrimary)
                     .multilineTextAlignment(.center)
-                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
                 if !line.overlays.isEmpty {
                     Text(line.overlays.joined(separator: " • "))
-                        .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                        .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
                                                    weight: .medium))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .foregroundStyle(appearance.colors.textSecondary)
                         .multilineTextAlignment(.center)
-                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
@@ -123,6 +126,8 @@ extension HomeTopBar: Equatable {
 /// Settings → Quick apps; the row renders only while at least one
 /// favourite exists (the caller's `if`).
 struct QuickAccessStrip: View {
+    @Environment(\.appAppearance) private var appearance
+    @ScaledMetric(relativeTo: .body) private var tileWidth: CGFloat = 92
     let apps: [AppLauncher.App]
     /// Tap on a tile: launch through the coordinator, which probes the
     /// scheme again at tap time and speaks honestly when the app has gone
@@ -162,12 +167,12 @@ struct QuickAccessStrip: View {
                 Text(LocalizedStringKey(app.nameKey))
                     // [DESIGN-REVIEW] 18pt caption floor + wrapping —
                     // no minimumScaleFactor on localized tile labels.
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                    .foregroundColor(DesignTokens.textPrimary)
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .semibold))
+                    .foregroundColor(appearance.colors.textPrimary)
                     .multilineTextAlignment(.center)
-                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .frame(width: 92)
+            .frame(width: tileWidth)
             .frame(minHeight: DesignTokens.minTapTargetSize)
             .accessibilityElement(children: .combine)
         }
@@ -182,7 +187,7 @@ struct QuickAccessStrip: View {
         VStack(spacing: 4) {
             IconBadge(systemImage: "plus", tint: .apps, diameter: 56)
         }
-        .frame(width: 92)
+        .frame(width: tileWidth)
         .frame(minHeight: DesignTokens.minTapTargetSize)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Text("home.quickAccess.add"))
@@ -210,6 +215,7 @@ extension QuickAccessStrip: Equatable {
 /// that is what makes a voice state flip re-render the stage even though
 /// the stage does not observe the session.
 struct TalkStage: View {
+    @Environment(\.appAppearance) private var appearance
     /// The state the stage renders (branch, hint carousel, tap behavior).
     let state: VoiceSessionState
     /// Handed to the hero, which observes it for its own live updates
@@ -295,12 +301,12 @@ struct TalkStage: View {
             }
         } label: {
             Label("state.error.openSettings", systemImage: "gear")
-                .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-                .foregroundColor(DesignTokens.accent)
+                .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .semibold))
+                .foregroundColor(appearance.colors.accent)
                 .padding(.horizontal, 16)
-                .frame(height: DesignTokens.minTapTargetSize)
-                .background(DesignTokens.card)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                .frame(minHeight: DesignTokens.minTapTargetSize)
+                .padding(.vertical, 8)
+                .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
         }
         .buttonStyle(.plain)
     }
@@ -338,6 +344,14 @@ extension TalkStage: Equatable {
 /// not the irreversible class of destructive action the app's
 /// confirmation dialogs guard.
 struct HomeTimerChipView: View {
+    @Environment(\.appAppearance) private var appearance
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    private var chipLayout: AnyLayout {
+        dynamicTypeSize > .large
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10))
+            : AnyLayout(HStackLayout(spacing: 14))
+    }
     let service: AlarmTimersService
     @Environment(\.locale) private var locale
 
@@ -373,30 +387,30 @@ struct HomeTimerChipView: View {
 
     private var chip: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
-            HStack(spacing: 14) {
+            chipLayout {
                 Image(systemName: "timer")
                     .font(.system(size: 24, weight: .semibold))
-                    .foregroundStyle(DesignTokens.accent)
+                    .foregroundStyle(appearance.colors.accent)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(LocalizedStringKey("homeTimer.remaining"))
-                        .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                        .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
                                                    weight: .medium))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .foregroundStyle(appearance.colors.textSecondary)
                     Text(HomeTimerChipModel.countdownText(
                         remaining: viewModel.snapshot.endsAt?.timeIntervalSince(context.date) ?? 0,
                         isNepali: isNepali))
-                        .font(.system(size: DesignTokens.homeTimerDigitPointSize, weight: .bold))
-                        .foregroundStyle(DesignTokens.textPrimary)
+                        .font(.system(size: appearance.typography.homeTimerDigitPointSize, weight: .bold))
+                        .foregroundStyle(appearance.colors.textPrimary)
                         .monospacedDigit()
                 }
                 if let label = viewModel.snapshot.label {
                     Text(label)
-                        .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                        .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
                                                    weight: .regular))
-                        .foregroundStyle(DesignTokens.textSecondary)
-                        .lineLimit(1)
+                        .foregroundStyle(appearance.colors.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                Spacer(minLength: 8)
+                if dynamicTypeSize <= .large { Spacer(minLength: 8) }
                 if viewModel.snapshot.activeCount > 1 {
                     multipleBadge
                 }
@@ -415,8 +429,7 @@ struct HomeTimerChipView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+            .appSurface(cornerRadius: DesignTokens.bubbleCornerRadius)
         }
     }
 
@@ -426,12 +439,12 @@ struct HomeTimerChipView: View {
         let more = viewModel.snapshot.activeCount - 1
         let text = HomeTimerChipModel.devanagari("+\(more)")
         return Text(isNepali ? text : "+\(more)")
-            .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+            .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
                                         weight: .semibold))
-            .foregroundStyle(DesignTokens.accent)
+            .foregroundStyle(appearance.colors.accent)
             .padding(.horizontal, 8)
             .padding(.vertical, 3)
-            .background(DesignTokens.accent.opacity(0.12))
+            .background(appearance.colors.accent.opacity(0.12))
             .clipShape(Capsule())
             .accessibilityLabel(Text(L10n.fmt("homeTimer.multiple", locale: locale, more)))
     }
@@ -455,11 +468,11 @@ extension HomeTimerChipView: Equatable {
 
 /// Everything BELOW the hero inside Home's single scroll region: the
 /// transient setup nudge (only while onboarding steps remain) and the
-/// live-caption/outcome surface. This region between the hero and the
-/// pinned bottom cluster is the only part of Home that ever clips, so on
-/// an iPhone SE-sized viewport its content scrolls while the hero and
-/// dock never leave the screen.
+/// live-caption/outcome surface. The whole Home content column can scroll
+/// on shorter phones; at larger type the dock joins that same scroll flow.
 struct FeedbackRegion: View {
+    @Environment(\.appAppearance) private var appearance
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Which feedback branch shows (the capture states own the pill, the
     /// confirmation state owns nothing here — its chips are the stage).
     let state: VoiceSessionState
@@ -524,7 +537,7 @@ struct FeedbackRegion: View {
                     guard outcome.undo != nil else { return }
                     try? await Task.sleep(nanoseconds: 6_000_000_000)
                     guard !Task.isCancelled else { return }
-                    withAnimation(.easeInOut) { outcomeExpanded = false }
+                    withAnimation(reduceMotion ? nil : .easeInOut) { outcomeExpanded = false }
                 }
             }
         }
@@ -564,6 +577,7 @@ extension FeedbackRegion: Equatable {
 /// render and always pushes the same destination, the rule every extracted
 /// Home view follows (see HomePresentationState).
 struct HomeMissedCallTile: View {
+    @Environment(\.appAppearance) private var appearance
     let presentation: MissedCallPresentation
     let onOpen: () -> Void
 
@@ -575,23 +589,22 @@ struct HomeMissedCallTile: View {
                           diameter: 40)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(presentation.title)
-                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                        .foregroundStyle(DesignTokens.textPrimary)
+                        .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                        .foregroundStyle(appearance.colors.textPrimary)
                         .multilineTextAlignment(.leading)
                         .lineLimit(2)
                     Text(presentation.time)
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .font(.system(size: appearance.typography.captionPointSize))
+                        .foregroundStyle(appearance.colors.textSecondary)
                 }
                 Spacer(minLength: 8)
                 Image(systemName: "chevron.right")
-                    .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
+                    .foregroundStyle(appearance.colors.textSecondary)
             }
             .padding(16)
             .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+            .appSurface()
         }
         .buttonStyle(.plain)
         // One gesture reads the whole tile: "Missed call: बुबा · १० मिनेट
@@ -619,11 +632,12 @@ extension HomeMissedCallTile: Equatable {
 /// pending steps are OPTIONAL — the app is usable while they remain, which
 /// is exactly what the rendered "3 tasks remaining" treatment failed to
 /// say — so the strip now reads "%lld optional setup items" with the
-/// reassurance line "Talk now, or finish setup" beneath it. Warning
-/// styling (the alert glyph and the warm reminder tint) is reserved for
-/// the one case that IS a degradation: `needsAttention`, i.e. a startup
+/// reassurance line "Talk now, or finish setup" beneath it. The alert
+/// glyph is reserved for the one case that IS a degradation:
+/// `needsAttention`, i.e. a startup
 /// capability that actually failed.
 private struct SetupStrip: View {
+    @Environment(\.appAppearance) private var appearance
     let setup: SetupPresentation
     let action: () -> Void
 
@@ -641,25 +655,25 @@ private struct SetupStrip: View {
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(setup.needsAttention
                                      ? DesignTokens.stateError
-                                     : DesignTokens.accent)
+                                     : appearance.colors.accent)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(L10n.fmt("home.setupOptionalCount",
                                   locale: locale,
                                   setup.pendingCount))
-                        .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                        .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
                                                     weight: .semibold))
-                        .foregroundStyle(DesignTokens.textPrimary)
+                        .foregroundStyle(appearance.colors.textPrimary)
                     Text(L10n.str("home.setupTalkNow", locale: locale))
-                        .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                        .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
                                                     weight: .regular))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .foregroundStyle(appearance.colors.textSecondary)
                 }
                 .multilineTextAlignment(.leading)
                 .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 4)
                 Image(systemName: "chevron.right")
                     .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
@@ -667,10 +681,7 @@ private struct SetupStrip: View {
             // at Accessibility XXL — must be able to expand instead of
             // clipping.
             .frame(minHeight: 56)
-            .background(setup.needsAttention
-                        ? DesignTokens.setupReminder
-                        : DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+            .appSurface(cornerRadius: DesignTokens.bubbleCornerRadius)
         }
         .buttonStyle(.plain)
     }
@@ -678,133 +689,113 @@ private struct SetupStrip: View {
 
 // MARK: - Dock (redesign spec §3.1)
 
-/// Home's six manual-documented destinations in the established two-row
-/// dock: secondary tools above, daily actions closest to the thumb below.
-/// Three equal-width tiles per row keep every destination visible without
-/// horizontal scrolling.
+/// Four daily actions above a contrasting utility rail. Adaptive columns
+/// and wrapping labels keep all seven destinations reachable at larger type.
 struct HomeDock: View {
-    /// The top family contact's name — its face replaces the generic
-    /// phone icon on the call tile when one is configured (redesign spec
-    /// §3.1/§3.2).
+    @Environment(\.appAppearance) private var appearance
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let contactName: String?
-    /// The appliance vision helper presents app-wide (via
-    /// `pendingPluginPresentation`), same as the voice path.
     let onAppliance: () -> Void
-    /// [LIVE-TRANSLATE T-027] Live camera translation presents the same way:
-    /// the tile is the intent, and the session view arrives through
-    /// `pendingPluginPresentation` — the assistant is returned to when it
-    /// closes, with no navigation stack involved (FR-LCT-001).
     let onLiveTranslate: () -> Void
 
-    var body: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 6) {
-                applianceItem
-                // The camera family's second tile sits next to the first: both
-                // are "point the camera at something", and an elder looking
-                // for one will find the other (FR-LCT-001's one clear action).
-                translateItem
-                dockItem(.directions, icon: "map.fill", tint: .directions,
-                         titleKey: "home.hub.directions")
-                dockItem(.feed, icon: "rectangle.stack.fill", tint: .feeds,
-                         titleKey: "home.hub.feeds")
-            }
-            Rectangle()
-                .fill(DesignTokens.brandBlush)
-                .frame(height: 2)
-                .padding(.horizontal, 16)
-            HStack(spacing: 6) {
-                dockItem(.meds, icon: "pills.fill", tint: .meds,
-                         titleKey: "home.hub.meds")
-                callItem
-                dockItem(.reminders, icon: "clock.fill", tint: .reminders,
-                         titleKey: "home.hub.reminders")
-            }
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 12)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius,
-                                    style: .continuous))
-        .shadow(color: DesignTokens.brandWine.opacity(0.10), radius: 14, y: 6)
+    private var dailyColumns: [GridItem] {
+        [GridItem(.adaptive(minimum: dynamicTypeSize.isAccessibilitySize ? 140 : 72), spacing: 8)]
     }
 
+    private var utilityColumns: [GridItem] {
+        [GridItem(.adaptive(minimum: dynamicTypeSize.isAccessibilitySize ? 140 : 88), spacing: 8)]
+    }
+
+    var body: some View {
+        VStack(spacing: 12) {
+            LazyVGrid(columns: dailyColumns, alignment: .center, spacing: 8) {
+                callItem
+                dockItem(.meds, icon: "pills.fill", tint: .meds, titleKey: "home.hub.meds")
+                dockItem(.directions, icon: "map.fill", tint: .directions, titleKey: "home.hub.directions")
+                dockItem(.feed, icon: "rectangle.stack.fill", tint: .feeds, titleKey: "home.hub.feeds")
+            }
+            LazyVGrid(columns: utilityColumns, alignment: .center, spacing: 8) {
+                Button(action: onAppliance) {
+                    tile(icon: "camera.viewfinder", tint: .appliance,
+                         titleKey: "plugin.applianceHelper.name", utility: true)
+                }
+                .buttonStyle(.plain)
+                Button(action: onLiveTranslate) {
+                    tile(icon: LiveTranslateEntry.iconName, tint: .appliance,
+                         titleKey: LiveTranslateEntry.labelKey, utility: true)
+                }
+                .buttonStyle(.plain)
+                dockItem(.reminders, icon: "clock.fill", tint: .reminders,
+                         titleKey: "home.hub.reminders", utility: true)
+            }
+            .padding(10)
+            .appSurface(role: .dock)
+        }
+    }
 
     private func dockItem(_ destination: LeafDestination, icon: String,
-                          tint: DesignTokens.BadgeTint, titleKey: String) -> some View {
+                          tint: DesignTokens.BadgeTint, titleKey: String,
+                          utility: Bool = false) -> some View {
         NavigationLink(value: destination) {
-            tile(icon: icon, tint: tint, titleKey: titleKey)
+            tile(icon: icon, tint: tint, titleKey: titleKey, utility: utility)
         }
         .buttonStyle(.plain)
     }
 
-    /// Appliance is not a leaf push — it presents the vision helper
-    /// app-wide through the plugin presentation seam.
-    private var applianceItem: some View {
-        Button(action: onAppliance) {
-            tile(icon: "camera.viewfinder", tint: .appliance,
-                 titleKey: "plugin.applianceHelper.name")
-        }
-        .buttonStyle(.plain)
-    }
-
-    /// [LIVE-TRANSLATE T-027] The feature's Home entry (FR-LCT-001). The label
-    /// is the shipped catalog name for the feature — the same one its Settings
-    /// row uses — so the tile, the Settings row and the plugin's display name
-    /// are one string, in the active language (NFR-LCT-004).
-    private var translateItem: some View {
-        Button(action: onLiveTranslate) {
-            tile(icon: LiveTranslateEntry.iconName, tint: .appliance,
-                 titleKey: LiveTranslateEntry.labelKey)
-        }
-        .buttonStyle(.plain)
-    }
-
-    /// Uses the top family contact's face instead of a generic phone icon
-    /// when one is configured.
     private var callItem: some View {
         NavigationLink(value: LeafDestination.call) {
-            VStack(spacing: 4) {
+            VStack(spacing: 6) {
                 if let contactName {
                     FaceAvatar(name: contactName, diameter: 44)
                 } else {
                     IconBadge(systemImage: "phone.fill", tint: .call, diameter: 44)
                 }
-                tileLabel("home.hub.call")
+                tileLabel("home.hub.call", utility: false)
             }
-            .frame(maxWidth: .infinity, minHeight: 56)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: 88)
+            .appSurface()
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 
-    /// One dock tile: a 44pt badge over an 18pt label (the caption token —
-    /// navigation labels sit at or above the 18pt floor), on a 56pt
-    /// minimum target that grows when the text does.
+    @ViewBuilder
     private func tile(icon: String, tint: DesignTokens.BadgeTint,
-                      titleKey: String) -> some View {
-        VStack(spacing: 4) {
-            IconBadge(systemImage: icon, tint: tint, diameter: 44)
-            tileLabel(titleKey)
+                      titleKey: String, utility: Bool) -> some View {
+        if utility {
+            tileContent(icon: icon, tint: tint, titleKey: titleKey, utility: true)
+        } else {
+            tileContent(icon: icon, tint: tint, titleKey: titleKey, utility: false)
+                .appSurface()
         }
-        .frame(maxWidth: .infinity, minHeight: 56)
+    }
+
+    private func tileContent(icon: String, tint: DesignTokens.BadgeTint,
+                             titleKey: String, utility: Bool) -> some View {
+        VStack(spacing: 6) {
+            IconBadge(systemImage: icon, tint: tint, diameter: utility ? 40 : 44)
+            tileLabel(titleKey, utility: utility)
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, minHeight: 88)
         .contentShape(Rectangle())
     }
 
-    private func tileLabel(_ titleKey: String) -> some View {
+    private func tileLabel(_ titleKey: String, utility: Bool) -> some View {
         Text(LocalizedStringKey(titleKey))
-            .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .semibold))
-            .foregroundStyle(DesignTokens.textPrimary)
+            .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .semibold))
+            .foregroundStyle(utility ? appearance.colors.onAccent : appearance.colors.textPrimary)
             .multilineTextAlignment(.center)
-            .lineLimit(2)
             .fixedSize(horizontal: false, vertical: true)
     }
 }
 
 extension HomeDock: Equatable {
-    /// The contact name is the only datum the dock renders: the tiles are
-    /// static links, and the More sheet's choices reach the dock as
-    /// parameters of the closures it calls — never as captured state.
+    /// Appearance and Dynamic Type invalidate through the environment;
+    /// coordinator updates still compare only the rendered contact name.
     static func == (lhs: HomeDock, rhs: HomeDock) -> Bool {
         lhs.contactName == rhs.contactName
     }

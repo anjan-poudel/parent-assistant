@@ -21,7 +21,7 @@ import UIKit
 /// calendar from `body` would turn every unrelated notification into a
 /// burst of store round-trips.
 struct EventsView: View {
-
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
 
     /// The loaded list. Bumped-over via `version` after any edit, so the
@@ -40,7 +40,7 @@ struct EventsView: View {
             VStack(spacing: 12) {
                 addButton
                 if events.isEmpty {
-                    emptyState(key: "events.empty")
+                    emptyState(key: "events.empty", appearance: appearance)
                 } else {
                     ForEach(events) { event in
                         eventRow(event)
@@ -67,13 +67,12 @@ struct EventsView: View {
             addingEvent = true
         } label: {
             Label("events.add", systemImage: "plus.circle.fill")
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: DesignTokens.chipHeight)
                 .fixedSize(horizontal: false, vertical: true)
-                .background(DesignTokens.accent)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                .appSurface(role: .accent, cornerRadius: DesignTokens.bubbleCornerRadius)
         }
         .buttonStyle(.plain)
     }
@@ -85,19 +84,19 @@ struct EventsView: View {
             HStack(spacing: 12) {
                 Image(systemName: "calendar")
                     .font(.system(size: 24))
-                    .foregroundStyle(DesignTokens.accent)
+                    .foregroundStyle(appearance.colors.accent)
                 VStack(alignment: .leading, spacing: 4) {
                     Text(event.title)
-                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                        .foregroundStyle(DesignTokens.textPrimary)
+                        .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                        .foregroundStyle(appearance.colors.textPrimary)
                         .multilineTextAlignment(.leading)
                     Text(Self.whenText(for: event, locale: coordinator.activeLocale))
-                        .font(.system(size: DesignTokens.minCaptionPointSize))
-                        .foregroundStyle(DesignTokens.textSecondary)
+                        .font(.system(size: appearance.typography.captionPointSize))
+                        .foregroundStyle(appearance.colors.textSecondary)
                     if let address = event.address, !address.isEmpty {
                         Text(address)
-                            .font(.system(size: DesignTokens.minCaptionPointSize))
-                            .foregroundStyle(DesignTokens.textSecondary)
+                            .font(.system(size: appearance.typography.captionPointSize))
+                            .foregroundStyle(appearance.colors.textSecondary)
                             .lineLimit(2)
                             .multilineTextAlignment(.leading)
                     }
@@ -109,19 +108,16 @@ struct EventsView: View {
                     // rule this screen keeps (see the type's comment).
                     Image(systemName: "photo.fill")
                         .font(.system(size: 22))
-                        .foregroundStyle(DesignTokens.accent)
+                        .foregroundStyle(appearance.colors.accent)
                         .accessibilityHidden(true)
                 }
                 Image(systemName: "chevron.right")
                     .font(.system(size: 20, weight: .bold))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
                     .accessibilityHidden(true)
             }
             .padding(16)
-            .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-            .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+            .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize).appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
         }
         .buttonStyle(.plain)
         .accessibilityLabel(Text("events.edit"))
@@ -175,7 +171,7 @@ struct EventsView: View {
 /// appointment and place editors follow): nothing is claimed that did not
 /// happen.
 struct EventFormView: View {
-
+    @Environment(\.appAppearance) private var appearance
     /// nil = add a new event; non-nil = edit that one.
     let event: FreeFormEvent?
 
@@ -225,12 +221,11 @@ struct EventFormView: View {
 
     private var titleCard: some View {
         TextField(LocalizedStringKey("events.field.title"), text: $form.title)
-            .font(.system(size: DesignTokens.minBodyPointSize))
+            .font(.system(size: appearance.typography.bodyPointSize))
             .padding(14)
             .frame(minHeight: 56)
             .fixedSize(horizontal: false, vertical: true)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+            .appSurface(role: .card, cornerRadius: DesignTokens.bubbleCornerRadius)
     }
 
     private var whenCard: some View {
@@ -242,8 +237,7 @@ struct EventFormView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     private var durationCard: some View {
@@ -259,8 +253,7 @@ struct EventFormView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     private var recurrenceCard: some View {
@@ -275,8 +268,7 @@ struct EventFormView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     /// Photo controls — the family-form pattern (`PhotosPicker` +
@@ -297,12 +289,11 @@ struct EventFormView: View {
                 }
                 PhotosPicker(selection: $photoPickerItem, matching: .images) {
                     Text(displayedPhoto == nil ? "events.photo.add" : "events.photo.change")
-                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                        .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 18)
                         .frame(minHeight: DesignTokens.minTapTargetSize)
-                        .background(DesignTokens.accent)
-                        .clipShape(Capsule())
+                        .appSurface(role: .accent, cornerRadius: 999)
                 }
                 if displayedPhoto != nil, event != nil {
                     Button {
@@ -310,58 +301,53 @@ struct EventFormView: View {
                         removingStoredPhoto = true
                     } label: {
                         Text("events.photo.remove")
-                            .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                            .foregroundStyle(DesignTokens.textPrimary)
+                            .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                            .foregroundStyle(appearance.colors.textPrimary)
                             .padding(.horizontal, 18)
                             .frame(minHeight: DesignTokens.minTapTargetSize)
-                            .background(DesignTokens.background)
-                            .clipShape(Capsule())
+                            .appSurface(role: .control, cornerRadius: 999)
                     }
                     .buttonStyle(.plain)
                 }
             }
             Text("events.photo.note")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.captionPointSize))
+                .foregroundStyle(appearance.colors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     private var addressCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             fieldLabel("events.field.address")
             TextField(LocalizedStringKey("events.field.addressPlaceholder"), text: $form.address)
-                .font(.system(size: DesignTokens.minBodyPointSize))
+                .font(.system(size: appearance.typography.bodyPointSize))
                 .padding(14)
                 .frame(minHeight: 56)
                 .fixedSize(horizontal: false, vertical: true)
-                .background(DesignTokens.background)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
             Text("events.address.note")
-                .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.captionPointSize))
+                .foregroundStyle(appearance.colors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
     }
 
     private var notesCard: some View {
         TextField(LocalizedStringKey("events.field.notes"), text: $form.notes)
-            .font(.system(size: DesignTokens.minBodyPointSize))
+            .font(.system(size: appearance.typography.bodyPointSize))
             .padding(14)
             .frame(minHeight: 56)
             .fixedSize(horizontal: false, vertical: true)
-            .background(DesignTokens.card)
-            .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+            .appSurface(role: .card, cornerRadius: DesignTokens.bubbleCornerRadius)
     }
 
     /// [CALENDAR-POLICY] (2026-09-17) The never-silent caption: sharing
@@ -374,8 +360,8 @@ struct EventFormView: View {
         if coordinator.calendarShareService.status.isActive,
            coordinator.familyContacts.allSatisfy({ ($0.email ?? "").isEmpty }) {
             Text(LocalizedStringKey("events.share.noEmails"))
-                .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.captionPointSize))
+                .foregroundStyle(appearance.colors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 4)
         }
@@ -387,13 +373,13 @@ struct EventFormView: View {
                 save()
             } label: {
                 Text(event == nil ? "events.save" : "events.saveChanges")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .frame(minHeight: DesignTokens.chipHeight)
                     .fixedSize(horizontal: false, vertical: true)
-                    .background(form.isValid ? DesignTokens.accent
-                                             : DesignTokens.textSecondary.opacity(0.4))
+                    .background(form.isValid ? appearance.colors.accent
+                                             : appearance.colors.textSecondary.opacity(0.4))
                     .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
             }
             .buttonStyle(.plain)
@@ -403,8 +389,8 @@ struct EventFormView: View {
                 dismiss()
             } label: {
                 Text("common.cancel")
-                    .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
+                    .foregroundStyle(appearance.colors.textPrimary)
                     .frame(maxWidth: .infinity)
                     .frame(minHeight: DesignTokens.minTapTargetSize)
             }
@@ -416,8 +402,8 @@ struct EventFormView: View {
 
     private func fieldLabel(_ key: String) -> some View {
         Text(LocalizedStringKey(key))
-            .font(.system(size: DesignTokens.minCaptionPointSize, weight: .bold))
-            .foregroundStyle(DesignTokens.textSecondary)
+            .font(.system(size: appearance.typography.captionPointSize, weight: .bold))
+            .foregroundStyle(appearance.colors.textSecondary)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
@@ -425,8 +411,8 @@ struct EventFormView: View {
                            selection: Binding<Date>) -> some View {
         HStack(spacing: 12) {
             Text(LocalizedStringKey(key))
-                .font(.system(size: DesignTokens.minBodyPointSize))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .font(.system(size: appearance.typography.bodyPointSize))
+                .foregroundStyle(appearance.colors.textPrimary)
             Spacer()
             DatePicker("", selection: selection, displayedComponents: components)
                 .labelsHidden()
@@ -435,8 +421,7 @@ struct EventFormView: View {
         .padding(14)
         .frame(minHeight: 56)
         .fixedSize(horizontal: false, vertical: true)
-        .background(DesignTokens.background)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+        .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
     }
 
     /// One row of choice capsules (duration, recurrence). Generic over
@@ -456,14 +441,14 @@ struct EventFormView: View {
                         select(option)
                     } label: {
                         Text(label(option))
-                            .font(.system(size: DesignTokens.minBodyPointSize,
+                            .font(.system(size: appearance.typography.bodyPointSize,
                                           weight: .semibold))
-                            .foregroundStyle(isSelected ? .white : DesignTokens.textPrimary)
+                            .foregroundStyle(isSelected ? .white : appearance.colors.textPrimary)
                             .lineLimit(1)
                             .padding(.horizontal, 18)
                             .frame(minHeight: DesignTokens.minTapTargetSize)
-                            .background(isSelected ? DesignTokens.accent
-                                                   : DesignTokens.background)
+                            .background(isSelected ? appearance.colors.accent
+                                                   : appearance.colors.background)
                             .clipShape(Capsule())
                     }
                     .buttonStyle(.plain)
@@ -532,7 +517,7 @@ struct EventFormView: View {
 /// what the fire-time presentation shows when the event has a photo — one
 /// screen, so the elder never meets two versions of the same event.
 struct EventDetailView: View {
-
+    @Environment(\.appAppearance) private var appearance
     let eventId: String
     /// Called whenever the event changed under the screen (edited or
     /// deleted) so the list can re-read.
@@ -556,7 +541,7 @@ struct EventDetailView: View {
                 } else {
                     // Gone — deleted here, or by the family in their own
                     // Calendar app between the tap and this screen.
-                    emptyState(key: "events.detail.gone")
+                    emptyState(key: "events.detail.gone", appearance: appearance)
                 }
             }
         }
@@ -592,30 +577,29 @@ struct EventDetailView: View {
 
         VStack(alignment: .leading, spacing: 8) {
             Text(event.title)
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                .foregroundStyle(appearance.colors.textPrimary)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Text(EventsView.whenText(for: event, locale: coordinator.activeLocale))
-                .font(.system(size: DesignTokens.minCaptionPointSize))
-                .foregroundStyle(DesignTokens.textSecondary)
+                .font(.system(size: appearance.typography.captionPointSize))
+                .foregroundStyle(appearance.colors.textSecondary)
             if let address = event.address, !address.isEmpty {
                 Text(address)
-                    .font(.system(size: DesignTokens.minCaptionPointSize))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .font(.system(size: appearance.typography.captionPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if let notes = event.notes, !notes.isEmpty {
                 Text(notes)
-                    .font(.system(size: DesignTokens.minBodyPointSize))
-                    .foregroundStyle(DesignTokens.textPrimary)
+                    .font(.system(size: appearance.typography.bodyPointSize))
+                    .foregroundStyle(appearance.colors.textPrimary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
 
         if event.hasAddress {
             navigateButton(event)
@@ -632,13 +616,12 @@ struct EventDetailView: View {
             coordinator.navigateToEvent(event)
         } label: {
             Label("events.navigate", systemImage: "arrow.triangle.turn.up.right.circle.fill")
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: DesignTokens.chipHeight)
                 .fixedSize(horizontal: false, vertical: true)
-                .background(DesignTokens.accent)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                .appSurface(role: .accent, cornerRadius: DesignTokens.bubbleCornerRadius)
         }
         .buttonStyle(.plain)
     }
@@ -648,12 +631,11 @@ struct EventDetailView: View {
             editing = true
         } label: {
             Text("events.edit")
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
-                .foregroundStyle(DesignTokens.textPrimary)
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                .foregroundStyle(appearance.colors.textPrimary)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
-                .background(DesignTokens.card)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                .appSurface(role: .card, cornerRadius: DesignTokens.bubbleCornerRadius)
         }
         .buttonStyle(.plain)
     }
@@ -663,12 +645,11 @@ struct EventDetailView: View {
             confirmingDelete = true
         } label: {
             Text("events.delete")
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .bold))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
                 .foregroundStyle(DesignTokens.stateError)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
-                .background(DesignTokens.card)
-                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+                .appSurface(role: .card, cornerRadius: DesignTokens.bubbleCornerRadius)
         }
         .buttonStyle(.plain)
     }
@@ -678,8 +659,8 @@ struct EventDetailView: View {
             onClose()
         } label: {
             Text("common.close")
-                .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                .foregroundStyle(DesignTokens.accent)
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
+                .foregroundStyle(appearance.colors.accent)
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: DesignTokens.minTapTargetSize)
         }

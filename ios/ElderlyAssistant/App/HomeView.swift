@@ -53,6 +53,9 @@ enum LeafDestination: Identifiable {
 /// full-screen page (see `LeafScreen` in `LeafViews.swift`) — this
 /// separation is deliberate (redesign spec §3.2), not an oversight.
 struct HomeView: View {
+    @Environment(\.appAppearance) private var appearance
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @EnvironmentObject var coordinator: AppCoordinator
     @EnvironmentObject var session: VoiceSessionStateMachine
     /// [BOOT-LATENCY] Read so the container can animate the talk hero's
@@ -81,6 +84,17 @@ struct HomeView: View {
     /// any Hashable value, so dock leaves AND Settings sections push
     /// through the same stack.
     @State private var navPath = NavigationPath()
+
+    private var pinsDock: Bool {
+        dynamicTypeSize <= .large && verticalSizeClass != .compact
+    }
+
+    private var homeDock: some View {
+        HomeDock(contactName: homePresentation.primaryContactName,
+                 onAppliance: { coordinator.presentApplianceHelper(question: nil) },
+                 onLiveTranslate: { coordinator.presentLiveTranslate() })
+            .equatable()
+    }
 
     var body: some View {
         NavigationStack(path: $navPath) {
@@ -140,39 +154,25 @@ struct HomeView: View {
                                !homePresentation.setup.isVisible {
                                 historyChip
                             }
+                            if !pinsDock {
+                                homeDock
+                            }
                         }
                         .padding(.horizontal, 20)
                         .padding(.top, 12)
                         .padding(.bottom, 20)
                     }
+                    .accessibilityIdentifier("home.content")
                 }
             }
-            // Dock pinned to the bottom edge (home-redesign 2026-09-08):
-            // previously the dock was the last child of the fixed VStack,
-            // so any overflow above it (the old widget stack) pushed it
-            // off the viewport on small screens. As a `safeAreaInset` it
-            // always owns the bottom of the screen and the scroll region
-            // above it absorbs overflow instead.
+            // At larger type or short landscape heights, the complete dock
+            // joins the scroll region instead of consuming the viewport.
             .safeAreaInset(edge: .bottom, spacing: 16) {
-                // The compact destination rail stays pinned. Conversation
-                // history now lives in the scroll flow above it, so it can
-                // never cover a setup or outcome card on shorter screens.
-                VStack(spacing: 0) {
-                    HomeDock(contactName: homePresentation.primaryContactName,
-                             onAppliance: {
-                                 coordinator.presentApplianceHelper(question: nil)
-                             },
-                             // [LIVE-TRANSLATE T-027] The same present-app-wide
-                             // shape the appliance tile uses: the session view
-                             // arrives as a sheet and closing it returns to the
-                             // assistant with no prompts (FR-LCT-001).
-                             onLiveTranslate: {
-                                 coordinator.presentLiveTranslate()
-                             })
-                    .equatable()
+                if pinsDock {
+                    homeDock
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 8)
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 8)
             }
             // Home paints its own top bar (HomeTopBar), so the system
             // navigation bar is hidden entirely. `.toolbar(.hidden,
@@ -441,13 +441,13 @@ struct HomeView: View {
                 Image(systemName: "clock.arrow.circlepath")
                     .font(DesignTokens.warmFont(size: 11, weight: .bold))
                 Text("home.conversation.title")
-                    .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .semibold))
+                    .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .semibold))
             }
-            .foregroundColor(DesignTokens.textSecondary)
+            .foregroundColor(appearance.colors.textSecondary)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
-            .background(DesignTokens.card)
-            .clipShape(Capsule())
+            .frame(minHeight: DesignTokens.minTapTargetSize)
+            .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
         }
         .buttonStyle(.plain)
     }
@@ -499,6 +499,16 @@ struct HomeView: View {
 // MARK: - Talk button (spec §3.3, D5; redesign spec §2 — breathing glow)
 
 struct TalkButton: View {
+    @Environment(\.appAppearance) private var appearance
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorSchemeContrast) private var contrast
+    @ScaledMetric(relativeTo: .title) private var scaledHeroDiameter: CGFloat = 204
+
+    private var heroDiameter: CGFloat { min(scaledHeroDiameter, 280) }
+    private var usesGloss: Bool {
+        appearance.style != .classic && !reduceTransparency && contrast != .increased
+    }
     @ObservedObject var session: VoiceSessionStateMachine
     @Environment(\.locale) private var locale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -579,22 +589,22 @@ struct TalkButton: View {
 
     private var discTint: Color {
         if failure != nil { return DesignTokens.stateError }
-        return usesBrandFace ? DesignTokens.talkMid : visuals.tint
+        return usesBrandFace ? appearance.colors.talkMid : visuals.tint
     }
 
     private var discFill: AnyShapeStyle {
-        guard usesBrandFace else { return AnyShapeStyle(discTint) }
+        guard usesBrandFace && usesGloss else { return AnyShapeStyle(discTint) }
         return AnyShapeStyle(RadialGradient(
-            colors: [DesignTokens.talkHighlight,
-                     DesignTokens.talkMid,
-                     DesignTokens.talkDeep],
+            colors: [appearance.colors.talkHighlight,
+                     appearance.colors.talkMid,
+                     appearance.colors.talkDeep],
             center: UnitPoint(x: 0.27, y: 0.19),
             startRadius: 0,
-            endRadius: DesignTokens.talkButtonDiameter * 0.72))
+            endRadius: heroDiameter * 0.72))
     }
 
     private var heroGlowTint: Color {
-        usesBrandFace ? DesignTokens.brandPink : visuals.tint
+        usesBrandFace ? appearance.colors.brandPink : visuals.tint
     }
 
     /// The hold-to-reset affordance is live only in a reset-eligible state,
@@ -629,7 +639,7 @@ struct TalkButton: View {
                     if isBreathing && !isPressingForReset && readiness.isTalkEnabled {
                         breathingRings
                     }
-                    if usesBrandFace && !isPressingForReset {
+                    if usesBrandFace && usesGloss && !isPressingForReset {
                         brandGlassRings
                     }
                     if visuals.showsHalo && !isPressingForReset {
@@ -641,28 +651,16 @@ struct TalkButton: View {
                         // (call-UI fix, 2026-09-07).
                         Circle()
                             .stroke(heroGlowTint.opacity(0.30), lineWidth: 10)
-                            .frame(width: DesignTokens.talkButtonDiameter + 28,
-                                   height: DesignTokens.talkButtonDiameter + 28)
+                            .frame(width: heroDiameter + 28,
+                                   height: heroDiameter + 28)
                     }
-                    // Traffic-light hero (visual-polish 2026-09-08): a
-                    // SOLID state-color disc — flat fills read calmer and
-                    // clearer than the old radial amber "diya" glow, and
-                    // white glyphs hold ≥4.5:1 on every state color (unit
-                    // tested). The breathing rings + halo + shadow carry
-                    // the "alive" light in the state's own color family.
-                    // [P0-2] The disc's DIMENSIONS are readiness-independent
-                    // by construction (the frame below), so the hero keeps
-                    // its final size through loading and failure. The fill
-                    // is `discTint` — solid rest blue while loading or
-                    // failed, the state color otherwise. The floating boot
-                    // capsule is GONE (user feedback, 2026-09-11): the
-                    // hero's own spinner + label is the loading UI, and
-                    // capability diagnostics live in Settings.
+                    // Idle crimson is decorative, not an error. Runtime
+                    // states retain their invariant traffic-light fills.
                     Circle()
                         .fill(discFill)
-                        .frame(width: DesignTokens.talkButtonDiameter,
-                               height: DesignTokens.talkButtonDiameter)
-                        .shadow(color: discTint.opacity(0.34), radius: 16, y: 7)
+                        .frame(width: heroDiameter,
+                               height: heroDiameter)
+                        .shadow(color: discTint.opacity(usesGloss ? 0.34 : 0.10), radius: usesGloss ? 16 : 3, y: usesGloss ? 7 : 1)
                         .overlay(heroContent)
                     if isPressingForReset {
                         resetProgressRing
@@ -671,8 +669,8 @@ struct TalkButton: View {
                 // Decorative rings draw outside the hit target but do not
                 // claim 262pt of layout height. This keeps the compact
                 // activity card visible above the fixed two-row dock.
-                .frame(width: DesignTokens.talkButtonDiameter,
-                       height: DesignTokens.talkButtonDiameter)
+                .frame(width: heroDiameter,
+                       height: heroDiameter)
             }
             .buttonStyle(.plain)
             // Enabled only once the pipeline's start callback succeeded
@@ -687,6 +685,7 @@ struct TalkButton: View {
             // inside the disc. Greying the whole hero made the white text
             // unreadable (user feedback, 2026-09-11).
             .disabled(isDisabled)
+            .accessibilityIdentifier("home.talk")
             .accessibilityLabel(Text(TalkReadinessCopy.accessibilityLabel(
                 readiness,
                 stateLabel: session.state.buttonText(locale: locale),
@@ -719,12 +718,20 @@ struct TalkButton: View {
                 },
                 onPressingChanged: handleHoldPressing(_:)
             ))
+            if dynamicTypeSize.isAccessibilitySize {
+                Text(isLoading ? loadingStageLabel : session.state.buttonText(locale: locale))
+                    .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize, weight: .bold))
+                    .foregroundStyle(appearance.colors.textPrimary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityHidden(true)
+            }
 
             if !statusTextLine.isEmpty {
                 Text(statusTextLine)
-                    .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                    .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
                                                 weight: .medium))
-                    .foregroundStyle(DesignTokens.textSecondary)
+                    .foregroundStyle(appearance.colors.textSecondary)
                     .multilineTextAlignment(.center)
             }
             // [P0-2] The ONE recovery a failed boot-time start offers —
@@ -735,8 +742,11 @@ struct TalkButton: View {
                 recoveryAction(onRecover)
             }
         }
-        .onAppear {
-            guard !reduceMotion else { return }
+        .task(id: reduceMotion) {
+            guard !reduceMotion else {
+                breathe = false
+                return
+            }
             withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) {
                 breathe = true
             }
@@ -766,12 +776,13 @@ struct TalkButton: View {
                 // rather than shrinking (≥18pt caption token, no
                 // `minimumScaleFactor`), and bold keeps it clearly legible
                 // on the solid disc.
-                Text(loadingStageLabel)
-                    .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
-                                                weight: .bold))
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .padding(.horizontal, 12)
+                if !dynamicTypeSize.isAccessibilitySize {
+                    Text(loadingStageLabel)
+                        .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .bold))
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 22)
+                }
             } else {
                 Image(systemName: visuals.icon)
                     .font(.system(size: 32))
@@ -780,11 +791,13 @@ struct TalkButton: View {
                 // of shrinking: `minimumScaleFactor(0.7)` could render
                 // longer Nepali strings at ~14pt, under the 18pt floor
                 // this audience needs.
-                Text(session.state.buttonText(locale: locale))
-                    .font(DesignTokens.warmFont(size: 20, weight: .bold))
-                    .multilineTextAlignment(.center)
-                    .lineLimit(2)
-                    .padding(.horizontal, 12)
+                if !dynamicTypeSize.isAccessibilitySize {
+                    Text(session.state.buttonText(locale: locale))
+                        .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize, weight: .bold))
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 22)
+                }
             }
         }
         .foregroundStyle(.white)
@@ -805,14 +818,13 @@ struct TalkButton: View {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 18, weight: .semibold))
                 Text(TalkReadinessCopy.failureRecovery(locale: locale))
-                    .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize,
+                    .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize,
                                                 weight: .semibold))
             }
-            .foregroundStyle(DesignTokens.accent)
+            .foregroundStyle(appearance.colors.accent)
             .padding(.horizontal, 18)
             .frame(minHeight: 52)
-            .background(DesignTokens.card)
-            .clipShape(Capsule())
+            .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
         }
         .buttonStyle(.plain)
     }
@@ -877,8 +889,8 @@ struct TalkButton: View {
                     .stroke(Color.white, style: StrokeStyle(lineWidth: 6, lineCap: .round))
                     .rotationEffect(.degrees(-90))
             }
-            .frame(width: DesignTokens.talkButtonDiameter + 16,
-                   height: DesignTokens.talkButtonDiameter + 16)
+            .frame(width: heroDiameter + 16,
+                   height: heroDiameter + 16)
         }
     }
 
@@ -886,29 +898,26 @@ struct TalkButton: View {
     /// text and color still carry meaning when Reduce Motion is enabled.
     private var brandGlassRings: some View {
         ZStack {
+            Color.clear
+                .frame(width: heroDiameter + 26, height: heroDiameter + 26)
+                .appSurface(role: .control, cornerRadius: (heroDiameter + 26) / 2)
             Circle()
-                .fill(DesignTokens.brandBlush.opacity(0.16))
-                .frame(width: DesignTokens.talkButtonDiameter + 52,
-                       height: DesignTokens.talkButtonDiameter + 52)
-                .overlay(Circle().stroke(.white.opacity(0.78), lineWidth: 2))
-            Circle()
-                .stroke(DesignTokens.brandBlush.opacity(0.72), lineWidth: 2)
-                .frame(width: DesignTokens.talkButtonDiameter + 26,
-                       height: DesignTokens.talkButtonDiameter + 26)
+                .stroke(appearance.colors.brandBlush.opacity(0.72), lineWidth: 2)
+                .frame(width: heroDiameter + 52, height: heroDiameter + 52)
         }
-        .shadow(color: DesignTokens.brandBlush.opacity(0.55), radius: 18)
+        .shadow(color: appearance.colors.brandBlush.opacity(0.55), radius: 18)
     }
 
     private var breathingRings: some View {
         ZStack {
             Circle()
                 .stroke(heroGlowTint.opacity(breathe ? 0.05 : 0.35), lineWidth: 2)
-                .frame(width: breathe ? DesignTokens.talkButtonDiameter + 90 : DesignTokens.talkButtonDiameter + 20,
-                       height: breathe ? DesignTokens.talkButtonDiameter + 90 : DesignTokens.talkButtonDiameter + 20)
+                .frame(width: breathe ? heroDiameter + 90 : heroDiameter + 20,
+                       height: breathe ? heroDiameter + 90 : heroDiameter + 20)
             Circle()
                 .stroke(heroGlowTint.opacity(breathe ? 0.02 : 0.22), lineWidth: 2)
-                .frame(width: breathe ? DesignTokens.talkButtonDiameter + 130 : DesignTokens.talkButtonDiameter + 40,
-                       height: breathe ? DesignTokens.talkButtonDiameter + 130 : DesignTokens.talkButtonDiameter + 40)
+                .frame(width: breathe ? heroDiameter + 130 : heroDiameter + 40,
+                       height: breathe ? heroDiameter + 130 : heroDiameter + 40)
         }
     }
 }
@@ -1083,6 +1092,7 @@ struct ConfirmationChipSpeech {
 }
 
 struct ConfirmationChips: View {
+    @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
     let titleKey: String
 
@@ -1094,13 +1104,13 @@ struct ConfirmationChips: View {
                         .font(.system(size: 24))
                         .foregroundColor(DesignTokens.stateUnderstanding)
                     Text(LocalizedStringKey(titleKey))
-                        .font(DesignTokens.warmFont(size: DesignTokens.minCaptionPointSize, weight: .bold))
-                        .foregroundColor(DesignTokens.textSecondary)
+                        .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .bold))
+                        .foregroundColor(appearance.colors.textSecondary)
                 }
                 if let prompt = coordinator.lastAssistantReply, !prompt.isEmpty {
                     Text(prompt)
-                        .font(.system(size: DesignTokens.minBodyPointSize, weight: .semibold))
-                        .foregroundColor(DesignTokens.textPrimary)
+                        .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
+                        .foregroundColor(appearance.colors.textPrimary)
                         .multilineTextAlignment(.center)
                 }
             }
@@ -1111,9 +1121,7 @@ struct ConfirmationChips: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity)
-        .background(DesignTokens.card)
-        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.cardCornerRadius))
-        .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
+        .appSurface()
     }
 
     private func chip(key: String, isYes: Bool) -> some View {
@@ -1146,14 +1154,15 @@ struct ConfirmationChips: View {
             }
         } label: {
             Text(LocalizedStringKey(key))
-                .font(DesignTokens.warmFont(size: 24, weight: .bold))
-                .foregroundColor(isYes ? DesignTokens.accent : DesignTokens.textSecondary)
+                .font(DesignTokens.warmFont(size: appearance.typography.scaled(24), weight: .bold))
+                .foregroundColor(isYes ? appearance.colors.accent : appearance.colors.textSecondary)
                 .frame(maxWidth: .infinity)
-                .frame(height: DesignTokens.chipHeight)
-                .background(DesignTokens.card)
+                .frame(minHeight: DesignTokens.chipHeight)
+                .padding(.vertical, 8)
+                .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
                 .overlay(
                     RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius)
-                        .stroke(isYes ? DesignTokens.accent : DesignTokens.textSecondary,
+                        .stroke(isYes ? appearance.colors.accent : appearance.colors.textSecondary,
                                 lineWidth: 2)
                 )
         }
