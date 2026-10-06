@@ -1,4 +1,4 @@
-# Requirements lock — profile interview + address-as (v1)
+# Requirements lock — Spotify music integration (v1)
 #
 # Contract: requirements_lock (ai-sdd task define-requirements).
 # Snapshot of the feature requirements set produced from
@@ -8,342 +8,377 @@
 # stay in scope and to detect drift: if a requirement file's sha256 no longer
 # matches, the requirement set has changed since this lock.
 #
-# Status: re-baselined 2026-10-05 after the owner HIL sign-off on
-# define-requirements (risk tier T1) and the owner amendment of the same date
-# (adds FR-PI-016, app-start interview-status routing). Re-lock after any
-# further sign-off change; the hashes below are the drift-detection baseline.
+# Status: submitted for owner HIL approval (risk tier T1). Re-lock after any
+# sign-off change; the hashes below are the drift-detection baseline.
 #
 # Note on scope: the FR/ and NFR/ folders also still contain the previously
-# shipped live-camera-translation files (FR-LCT-NNN-*, NFR-LCT-NNN-*); they are
-# left in place and are NOT part of this lock. This lock covers the
-# profile-interview set only (FR-PI-* / NFR-PI-*).
+# shipped live-camera-translation files (FR-LCT-NNN-*, NFR-LCT-NNN-*) and the
+# profile-interview files (FR-PI-NNN-*, NFR-PI-NNN-*); they are left in place
+# and are NOT part of this lock. This lock covers the spotify-music-integration
+# set only (FR-SP-* / NFR-SP-*).
 
 version: "1"
 task: define-requirements
-feature: profile-interview
+feature: spotify-music-integration
 agent: ba
 contract: requirements_lock
-locked_at: "2026-10-05T10:06:53Z"
+locked_at: "2026-10-06T11:22:10Z"
 snapshot_of: "specs/define-requirements.md"
-snapshot_sha256: 27c31d4b1b872b1de77a782171bab89c1b7661ac360ec6e2fd724d8f67492386
+snapshot_sha256: 18e3c6060c99efd0286e290b3befde93e876a0974a0552dc4ffebc3cb3838179
 index: "specs/define-requirements/index.md"
 counts:
-  functional_requirements: 16
-  non_functional_requirements: 11
+  functional_requirements: 17
+  non_functional_requirements: 12
 
 requirements:
-  - id: FR-PI-001
-    title: "Interview step order in the first-run wizard"
+  - id: FR-SP-001
+    title: "Music requests start real playback (stub replacement)"
     kind: FR
-    area: "Onboarding Wizard"
+    area: "Music Playback / Router"
     priority: MUST
-    file: specs/define-requirements/FR/FR-PI-001-interview-step-order.md
-    sha256: 41d1065bc2909243ae53e1f46fb0f20492f852ae17808874b4a5f9a61c970325
-    acceptance_scenarios: 2
-  - id: FR-PI-002
-    title: "About-you mandatory fields gate Next"
-    kind: FR
-    area: "Onboarding Wizard / About-you"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-PI-002-about-you-mandatory-fields.md
-    sha256: ff1315b8b80155e2d79f9627592df319df8ea800e4b5a64e75d29220fa6b5649
-    acceptance_scenarios: 3
-  - id: FR-PI-003
-    title: "Encrypted profile store"
-    kind: FR
-    area: "Profile Storage"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-PI-003-encrypted-profile-store.md
-    sha256: cfbcaba792bc1d1217586810d3ff7dd73d644dc870faa2fd21f1663e26c797cf
-    acceptance_scenarios: 3
-  - id: FR-PI-004
-    title: "Optional steps remain skippable with pending status"
-    kind: FR
-    area: "Onboarding Wizard"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-PI-004-optional-step-skippable-pattern.md
-    sha256: 1f2a38b0b9b1abb7801a8128d551211dfe19a06b95a6a59d7b6a511792f8b1dd
-    acceptance_scenarios: 3
-  - id: FR-PI-005
-    title: "Family & friends step extension"
-    kind: FR
-    area: "Family & Friends"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-PI-005-family-and-friends-step.md
-    sha256: fadb01924a6ffdb56ae5b503c623b70ebeef2ed34750486ff113385c33e61968
-    acceptance_scenarios: 2
-  - id: FR-PI-006
-    title: "Emergency contacts step"
-    kind: FR
-    area: "Emergency Contacts"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-PI-006-emergency-contacts-step.md
-    sha256: 9be60680722a66818dae7d3169e33ccd14e9d64c7ad3f278fe28b8affb203598
-    acceptance_scenarios: 3
-  - id: FR-PI-007
-    title: "Voice fingerprint step (reuse of existing enrollment)"
-    kind: FR
-    area: "Voice Fingerprint"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-PI-007-voice-fingerprint-step.md
-    sha256: 83d70d8b695ba58a469e55f252b48a5c3630d40c9350d68599fc52330918af66
-    acceptance_scenarios: 2
-  - id: FR-PI-008
-    title: "Personalized wake acknowledgment"
-    kind: FR
-    area: "Wake Acknowledgment / Address-as"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-PI-008-wake-acknowledgment-address-as.md
-    sha256: 7fd0ea8a75731f96c9117b9c5a85d45299af4d598c26a6d0b423366a9685151d
-    acceptance_scenarios: 3
-  - id: FR-PI-009
-    title: "Address-as in brain reply-style rules (cloud and on-device)"
-    kind: FR
-    area: "Brain Personalization"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-PI-009-brain-reply-style-address-as.md
-    sha256: f1845c3de496a7734a748f6508b3d916e1692687120534b491d5811b09e4e879
+    file: specs/define-requirements/FR/FR-SP-001-music-requests-start-real-playback.md
+    sha256: e4fead0f9a5a697dce6aa58ab1292e33e8072d1869b3fbe100aa521a5791426e
     acceptance_scenarios: 4
-  - id: FR-PI-010
-    title: "Address-as spoken verbatim (never translated)"
+  - id: FR-SP-002
+    title: "Both-provider search for music requests"
     kind: FR
-    area: "Address-as Data Handling"
+    area: "Provider Selection"
     priority: MUST
-    file: specs/define-requirements/FR/FR-PI-010-address-as-spoken-verbatim.md
-    sha256: 9b71dba28a256141879f868901cac40c97c5cfe6a6ab0e9d322a5bae54a3cd76
-    acceptance_scenarios: 2
-  - id: FR-PI-011
-    title: "Un-personalized path behaves exactly as today"
-    kind: FR
-    area: "No-Regression"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-PI-011-unpersonalized-path-unchanged.md
-    sha256: da44fffc39a36ef751bb9c94297c2e313048bbbf8bcd812478e7aeb6a81d1536
-    acceptance_scenarios: 2
-  - id: FR-PI-012
-    title: "Settings profile editor"
-    kind: FR
-    area: "Settings"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-PI-012-settings-profile-editor.md
-    sha256: 84fb9f08ac9391cd6c812ee6e23368516fb17ade704ef33580ecdefb73a5c13c
+    file: specs/define-requirements/FR/FR-SP-002-both-provider-search.md
+    sha256: f50ca7ad95a1f04548cf5550ee2b1c4a10b1232a7f53f14250b8ccfb1cb75bac
     acceptance_scenarios: 3
-  - id: FR-PI-013
-    title: "Wizard reopen path for existing users"
+  - id: FR-SP-003
+    title: "Spotify preferred whenever linked and capable"
     kind: FR
-    area: "Onboarding Wizard"
+    area: "Provider Selection"
     priority: MUST
-    file: specs/define-requirements/FR/FR-PI-013-wizard-reopen-for-existing-users.md
-    sha256: 7268b073db1dbe99240c7dce29a455c6296e48b22e06c8cc5e940d6399ddc834
+    file: specs/define-requirements/FR/FR-SP-003-spotify-preferred-when-linked-and-capable.md
+    sha256: 073f7d9e6bd16ce9d13488415b343bf85381cc536082c7fe29ab6d05753a5ca5
     acceptance_scenarios: 3
-  - id: FR-PI-014
-    title: "Profile data available to existing safety paths"
+  - id: FR-SP-004
+    title: "YouTube fallback when Spotify cannot serve"
     kind: FR
-    area: "Safety Integration"
+    area: "Provider Selection / Degradation"
     priority: MUST
-    file: specs/define-requirements/FR/FR-PI-014-safety-path-data-availability.md
-    sha256: 4a8dad1ef5acc327f137550d7f5f039447680f13b684d3596f295b5bb860308d
-    acceptance_scenarios: 2
-  - id: FR-PI-015
-    title: "Profile read failures degrade to the un-personalized path"
-    kind: FR
-    area: "Error Handling"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-PI-015-profile-read-failure-fallback.md
-    sha256: 4fe69aad133075beaf46d5ef665768f21e54a6c4f0fecb61d45d4b48947a28e2
+    file: specs/define-requirements/FR/FR-SP-004-youtube-fallback-when-spotify-cannot-serve.md
+    sha256: fab8c8a2888312f4afc3de02a2a84a817bd0059d3c1bb557285dcefee182fb5c
     acceptance_scenarios: 3
-  - id: FR-PI-016
-    title: "App-start interview-status routing (resume where the user left off)"
+  - id: FR-SP-005
+    title: "Explicit YouTube requests unchanged"
     kind: FR
-    area: "Onboarding Wizard / App Start"
+    area: "No-Regression / Routing"
     priority: MUST
-    file: specs/define-requirements/FR/FR-PI-016-app-start-interview-routing.md
-    sha256: 8195b534374faddc932d8eacf3cb5f78282132e3142fdc145301446c8dd6e434
+    file: specs/define-requirements/FR/FR-SP-005-explicit-youtube-requests-unchanged.md
+    sha256: 702b251852ff0010084361e3eb3be262c84303ffc9a17d9968426fe35ad330ea
+    acceptance_scenarios: 3
+  - id: FR-SP-006
+    title: "SpotifyPlugin as an AssistantPlugin (YouTubePlugin twin)"
+    kind: FR
+    area: "Plugin Architecture"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-SP-006-spotifyplugin-assistantplugin-twin.md
+    sha256: 41bf4ef2c59c0ccf21fa4ffc6f3faf16cb3da5bdc5b43df2085e8bd3cc68570c
+    acceptance_scenarios: 3
+  - id: FR-SP-007
+    title: "SpotifyTool search and spotify: deep-link construction"
+    kind: FR
+    area: "Spotify Tool"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-SP-007-spotifytool-search-and-deeplink.md
+    sha256: 2b69ce0b2e07e529fe7f29be69c255f07e3e6261c87ec22138f11f44be47666d
     acceptance_scenarios: 4
-  - id: NFR-PI-001
-    title: "Profile encryption at rest"
+  - id: FR-SP-008
+    title: "Spotify account linking by the caregiver (OAuth)"
+    kind: FR
+    area: "Account Linking"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-SP-008-spotify-account-linking-by-caregiver.md
+    sha256: be8523043fcc195aa0a384dccc23a80bcd08a6e389b2be8000ea9950439c6ea4
+    acceptance_scenarios: 4
+  - id: FR-SP-009
+    title: "Encrypted Spotify credential and account store"
+    kind: FR
+    area: "Credential Storage"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-SP-009-encrypted-spotify-credential-store.md
+    sha256: 4a9357b04ea6340d1a5b600a7934bef0f7b6552e98cfaa9065bc78c9c4cb0e0e
+    acceptance_scenarios: 3
+  - id: FR-SP-010
+    title: "Unlink wipes credentials and revokes access"
+    kind: FR
+    area: "Account Linking / Security"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-SP-010-unlink-wipes-credentials-and-revokes.md
+    sha256: de2c2cc3770271c98bfb8cd993fe5b88d71219d84322d0d1bd2144faef530008
+    acceptance_scenarios: 4
+  - id: FR-SP-011
+    title: "Free-tier degradation to the spotify: deep-link fallback"
+    kind: FR
+    area: "Degradation"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-SP-011-free-tier-deeplink-degradation.md
+    sha256: d761834ee514d3c95b36522170046beba342dabcdfd6a692cb3a81f54d2b1c2e
+    acceptance_scenarios: 3
+  - id: FR-SP-012
+    title: "Honest localized outcomes — no silent failure on any path"
+    kind: FR
+    area: "Degradation / Honesty"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-SP-012-honest-outcomes-no-silent-failure.md
+    sha256: 1fa972c45182a86a67adcf3da474d4adbc23df1243bcf4af853e3b5a789b9849
+    acceptance_scenarios: 4
+  - id: FR-SP-013
+    title: "Deterministic music-domain rule in KeywordIntentRule"
+    kind: FR
+    area: "Intent Routing (no-model path)"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-SP-013-keyword-intent-rule-music-domain.md
+    sha256: 154679d296c68bd857567c6c1b41aba3544263f3f89bc61c6b5c592da355485e
+    acceptance_scenarios: 3
+  - id: FR-SP-014
+    title: "Music-request veto parity in VoiceContactSearchRoute"
+    kind: FR
+    area: "Intent Routing"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-SP-014-contact-search-veto-parity.md
+    sha256: 108a9362d9b6d6f0dc8045af25ec939cb1cde2494f2147fc13326c53cbf178d4
+    acceptance_scenarios: 3
+  - id: FR-SP-015
+    title: "Music-request intake in the voice route ladder"
+    kind: FR
+    area: "Intent Routing"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-SP-015-music-request-intake-in-route-ladder.md
+    sha256: 6bebc9078e040abbbb4cd56db592923b01e88f2b877694e7c8fbe4e47877bb5e
+    acceptance_scenarios: 3
+  - id: FR-SP-016
+    title: "Settings linking, status surface and privacy disclosure"
+    kind: FR
+    area: "Settings / Privacy"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-SP-016-settings-linking-and-privacy-disclosure.md
+    sha256: 252a220b3c9968fe5baee6104e2a085ed06653a9aa07054969af476beab63fd0
+    acceptance_scenarios: 4
+  - id: FR-SP-017
+    title: "Device-validation checklist recorded and passed (DV-* completion gate)"
+    kind: FR
+    area: "Validation / Completion Gate"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-SP-017-device-validation-checklist-recorded-and-passed.md
+    sha256: 2001bae571e7fb873ad691e921ee13c86e6409f3d98d887fee3b782e1f420e6f
+    acceptance_scenarios: 3
+  - id: NFR-SP-001
+    title: "Provider search responsiveness and timeout budget"
     kind: NFR
-    area: "Security"
+    area: "Performance"
     priority: MUST
-    file: specs/define-requirements/NFR/NFR-PI-001-profile-encryption-at-rest.md
-    sha256: 5ebe506b9e67c0a3255f45ba089e5f5d33b441f1c09a5a9093d4bec1e38d3f23
-    acceptance_scenarios: 2
-  - id: NFR-PI-002
-    title: "Log safety — no new PII in logs"
+    file: specs/define-requirements/NFR/NFR-SP-001-provider-search-responsiveness.md
+    sha256: 243b2b3847b6babd02a32fcf4e0710573d6034453eb266c8093af2e9811057d1
+    acceptance_scenarios: 3
+  - id: NFR-SP-002
+    title: "Log safety — no credentials, queries or provider bodies in logs"
     kind: NFR
     area: "Privacy / Security"
     priority: MUST
-    file: specs/define-requirements/NFR/NFR-PI-002-log-safety.md
-    sha256: 9df8ccfdaa924480ac7cfe80a8816d75cfc2c16de435113a8f81c7845cf927d6
+    file: specs/define-requirements/NFR/NFR-SP-002-log-safety.md
+    sha256: 4d5f2e08726ea6aae04620343719acd41b62745b00ac864df2ffb536b573277d
     acceptance_scenarios: 3
-  - id: NFR-PI-003
-    title: "No new network egress or cloud processing"
+  - id: NFR-SP-003
+    title: "No new network egress; music stays off any cloud LLM"
     kind: NFR
     area: "Privacy"
     priority: MUST
-    file: specs/define-requirements/NFR/NFR-PI-003-no-new-egress.md
-    sha256: 9805f989085241a4772073538abde6a58c5be411a496a252978e9b5e5f778b97
+    file: specs/define-requirements/NFR/NFR-SP-003-no-new-network-egress.md
+    sha256: e21b934a2783929bbb86a7d404ed7cbff5ccea6cec1c2926e9d0aa74de9deba1
     acceptance_scenarios: 3
-  - id: NFR-PI-004
-    title: "Untrusted profile-string hardening (injection)"
-    kind: NFR
-    area: "Security"
-    priority: MUST
-    file: specs/define-requirements/NFR/NFR-PI-004-profile-string-injection-hardening.md
-    sha256: 63a6609b96d73c83c1983e5af0c45e992849c60cdc0659da082e6f5a53a20a7c
-    acceptance_scenarios: 3
-  - id: NFR-PI-005
-    title: "Prompt token budget and seed mirror preserved"
+  - id: NFR-SP-004
+    title: "Prompt token budget preserved"
     kind: NFR
     area: "Reliability / Maintainability"
     priority: MUST
-    file: specs/define-requirements/NFR/NFR-PI-005-prompt-budget-and-seed-mirror.md
-    sha256: 3b465c80bd8f43b2d4eb903a405cdd853ac9940d310494116575ab05971b2d3c
-    acceptance_scenarios: 2
-  - id: NFR-PI-006
-    title: "Localisation of new UI strings"
+    file: specs/define-requirements/NFR/NFR-SP-004-prompt-budget-preserved.md
+    sha256: ae78df9e9aa90696bac846fb5f0c2d1ef482e25f2cb69784b2d8fee4a1435bcc
+    acceptance_scenarios: 3
+  - id: NFR-SP-005
+    title: "Localisation of all Spotify strings (ne/en)"
     kind: NFR
     area: "Localisation"
     priority: MUST
-    file: specs/define-requirements/NFR/NFR-PI-006-localisation.md
-    sha256: 94ff807fd8c033ce01b243fcf928c96ce1d417bdb25083f3770003495e8fdaab
-    acceptance_scenarios: 2
-  - id: NFR-PI-007
-    title: "Accessibility of the new interview UI"
-    kind: NFR
-    area: "Accessibility"
-    priority: MUST
-    file: specs/define-requirements/NFR/NFR-PI-007-accessibility.md
-    sha256: 3c5cab04d282c5b7d34283f28560f70ca9cb0c3e98e4fcf91ee9b8ba5e56787e
-    acceptance_scenarios: 2
-  - id: NFR-PI-008
-    title: "Wake-acknowledgment latency and failure fallback"
-    kind: NFR
-    area: "Performance / Reliability"
-    priority: MUST
-    file: specs/define-requirements/NFR/NFR-PI-008-wake-ack-latency-and-fallback.md
-    sha256: 5d9eeb935b8b46fa1d7a8d8478e63e94aeaa0b98c50aa1adeff67fd48d617f05
-    acceptance_scenarios: 2
-  - id: NFR-PI-009
-    title: "Voice-biometric mechanism unchanged"
-    kind: NFR
-    area: "Security / Compliance"
-    priority: MUST
-    file: specs/define-requirements/NFR/NFR-PI-009-voice-biometric-unchanged.md
-    sha256: 5a4c9c5d7feeae63d5935672412d9d92f08c99878e4e5fb12bc27433d27e6043
-    acceptance_scenarios: 2
-  - id: NFR-PI-010
-    title: "No regression to existing behaviours"
+    file: specs/define-requirements/NFR/NFR-SP-005-localisation.md
+    sha256: ec1e168beec0df0966901efe47d033048100fd1c3bde3b8669fdbd8214d8a76f
+    acceptance_scenarios: 3
+  - id: NFR-SP-006
+    title: "No regression to existing flows"
     kind: NFR
     area: "Reliability"
     priority: MUST
-    file: specs/define-requirements/NFR/NFR-PI-010-no-regression-existing-flows.md
-    sha256: 761d3b52b6d184667130b0502b9b79adbe0c88f6e1f1a0f8fc4958cac93621a9
+    file: specs/define-requirements/NFR/NFR-SP-006-no-regression.md
+    sha256: e7a94d616df8411abe9524a16f7fc34c997498df4047a58c8574b0b3307fd0dc
+    acceptance_scenarios: 4
+  - id: NFR-SP-007
+    title: "Credential and token encryption at rest"
+    kind: NFR
+    area: "Security"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-SP-007-credential-encryption-at-rest.md
+    sha256: 60354ac082aaff0f8a4680fbc01d3e399dc35a3dc96c9063fbf24cc9fc57c371
+    acceptance_scenarios: 4
+  - id: NFR-SP-008
+    title: "Deep-link URI construction hardening"
+    kind: NFR
+    area: "Security"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-SP-008-deeplink-uri-hardening.md
+    sha256: cfd39a8b3880af3ea4838bda23b1528b65962b98980b2bcf2c262ac90c029096
     acceptance_scenarios: 3
-  - id: NFR-PI-011
+  - id: NFR-SP-009
+    title: "OAuth redirect validation and token lifecycle"
+    kind: NFR
+    area: "Security"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-SP-009-oauth-redirect-and-token-lifecycle.md
+    sha256: 16dbcf40cbb97f53df11f2b581a2081994a2a810efe61b09d5fa18f3665fae1e
+    acceptance_scenarios: 4
+  - id: NFR-SP-010
+    title: "Accessibility of the new touch surfaces"
+    kind: NFR
+    area: "Accessibility"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-SP-010-accessibility-of-new-surfaces.md
+    sha256: 492f95d48facf2ad55f68aecb9d7fd65b41e0aaf4830e808db2fde272f584afa
+    acceptance_scenarios: 4
+  - id: NFR-SP-011
     title: "Compliance and release gates"
     kind: NFR
     area: "Compliance"
     priority: MUST
-    file: specs/define-requirements/NFR/NFR-PI-011-compliance-and-release-gates.md
-    sha256: 4e3f4efa483686a74c21d06bfd8c0fc8e59c76b50e09917afa972583ffda7229
-    acceptance_scenarios: 2
+    file: specs/define-requirements/NFR/NFR-SP-011-compliance-and-release-gates.md
+    sha256: b9ab0a559b6093f9d5eca9c5074e071aea2946da5a1be2781c245b52cea89390
+    acceptance_scenarios: 4
+  - id: NFR-SP-012
+    title: "Plugin isolation and model-stack invariance"
+    kind: NFR
+    area: "Maintainability / Architecture"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-SP-012-plugin-isolation-and-model-stack-invariance.md
+    sha256: 956137fa7da06caa7eec0e8895d8ed18f0cccd21717b97a26da95ace155b0c6d
+    acceptance_scenarios: 4
 
 assumptions:
   - id: A1
-    statement: "The existing integration surfaces named in the feature constitution and scaffold probe exist and are reused: OnboardingState / OnboardingWizardView, FamilyContactStore (with isEmergencyContact), SpeakerBiometricService / VoiceEnrollmentRecorder / VoiceSettingsView, VoicePipeline.handleWakeDetected, the shared IntentPrompt builder for the cloud (Gemini) and on-device (LLaMA) brains, and the EncryptedFileStorage storage pattern."
-    source: "feature constitution Integration Surfaces; specs/profile-interview/init-report.md (scaffold probe)"
+    statement: "The integration surfaces exist as named in the feature constitution's surface table: the YouTube pattern files (YouTubePlugin/YouTubeTool/YouTubeRoute and their test suites), the CommandRouter tool seams (the configStore/transport/linkOpener pattern around lines 639-648), AppCoordinator plugin registration and store wiring (around line 2058), SettingsView/SettingsTabs, and the Localizable.xcstrings + Info.plist surfaces. The scaffold probe (specs/spotify-music-integration/init-report.md) records the scaffold step only, not a code probe."
+    source: "feature constitution Integration Surfaces; specs/spotify-music-integration/init-report.md"
   - id: A2
-    statement: "The wake-detection path (VoicePipeline.handleWakeDetected) is the hook for the acknowledgment; wake-word recognition itself is unchanged and out of scope."
-    source: "feature constitution Address-as Behaviour Contract and Out of scope"
+    statement: "The stub line being replaced is the router.musicStub string ('Music isn't ready yet. Coming soon.' / 'संगीत सुविधा अहिले तयार छैन। चाँडै आउनेछ।'), spoken from the case .music: branch; the key may remain in the string catalog but must not be spoken on a music path once the feature ships."
+    source: "feature constitution Purpose & Scope; CommandRouter case .music:"
   - id: A3
-    statement: "InputSanitiser discipline (quarantine level) exists and is the required treatment for the user-entered profile strings before they enter any prompt."
-    source: "feature constitution Feature Constraint 4; project constitution Standards (Injection detection at quarantine level)"
+    statement: "The golden-corpus music block currently holds 15 utterances pinned to intent music (ios/ElderlyAssistantTests/ Services/Voice/GoldenCorpus.swift lines 142-157), while the feature constitution says 16 utterances; implementation reconciles the count against the source and records the result."
+    source: "feature constitution Feature Constraint 5; source inspection at requirements time"
   - id: A4
-    statement: "IntentPrompt templates run in a 1,024-token on-device context, are pinned by IntentPromptTests' character ceiling, and are byte-mirrored by tools/train-intent/seeds/prompt_template.txt."
-    source: "feature constitution Feature Constraints 1–2"
+    statement: "The spotify: deep-link fallback presumes the Spotify app is installed for that path (the device expectation); where it is absent, the honest-messaging rule applies instead of any fallback claim."
+    source: "feature constitution Feature Constraint 8"
   - id: A5
-    statement: "A helping family member may fill the interview in on the primary user's behalf at the device; no remote-companion flow is in scope for this feature."
-    source: "feature constitution Feature Purpose & Scope; init-report owner brief"
+    statement: "The caregiver/family member performs linking and credential setup at the device; the elderly primary user never handles OAuth or keys, and this feature adds no remote companion-app flow for Spotify linking."
+    source: "feature constitution Purpose & Scope (primary/secondary user); established family-handles-credentials pattern"
   - id: A6
-    statement: "Date of birth is captured for the profile record only; no behaviour in this feature reads it. Recorded so the field is not silently consumed."
-    source: "feature constitution Field Contract (DOB optional); elicitation"
+    statement: "Provider identifiers used in requirement examples are synthetic placeholders; no real track ID, client ID, secret, token or other credential is recorded anywhere in this requirement set."
+    source: "this requirements pass (SEC-002 discipline)"
   - id: A7
-    statement: "The project build/test gate is ios/build.sh; the release-build log-surface gate is ios/tools/check-release-log-safety.sh (wired into ios/build.sh)."
-    source: "project constitution Release gates; workflow.yaml final-sign-off comment"
+    statement: "Exact user-facing copy for the degradation paths is OD-S3; the Nepali/English example lines in this set are illustrative, and the requirement binds that the keys exist and are localized in both languages."
+    source: "feature constitution OD-S3; Feature Constraint 12"
+  - id: A8
+    statement: "The project unit-test baseline includes known pre-existing failures unrelated to this feature; NFR-SP-006 binds the feature's suites and the touched suites, with baseline failures recorded rather than silently included or excluded."
+    source: "project test baseline; feature constitution Feature Constraint 5"
+  - id: A9
+    statement: "The project build gate is ios/build.sh, and the release-build log-surface gate ios/tools/check-release-log-safety.sh is wired into it; both are binding for this feature."
+    source: "project constitution Release gates; feature constitution Feature Constraint 2"
 
 constraints:
   - id: C1
-    statement: "Architecture Constraint 1 (all AI inference on-device) applies; the feature adds no new cloud processing and no new network egress. Existing recorded exceptions (Open Decisions 12 and 13) are untouched."
-    source: "constitution Architecture Constraint 1; feature constitution Out of scope"
+    statement: "Architecture Constraint 1 (amended 2026-10-06) permits Spotify as a network integration for search and user-initiated playback hand-off; the on-device AI stance is unchanged and no other network egress is added or widened."
+    source: "project constitution Architecture Constraint 1 + amendment; feature constitution amendment record"
   - id: C2
-    statement: "The address-as term and name are untrusted user input composed into prompts: they must pass the InputSanitiser discipline and must not be able to alter reply-style rules, tool/intent routing, authentication or safety behaviour."
-    source: "feature constitution Feature Constraint 4; workflow.yaml security-design-review focus"
+    statement: "No Spotify code without the constitutional amendment: the 2026-10-06 amendment (Constraint 1 + Required-integrations list) is part of the feature change set."
+    source: "feature constitution Feature Constraint 10"
   - id: C3
-    statement: "Profile PII at rest (name, address-as, DOB, GP, hospital, next of kin) must be in encrypted local storage (Keychain, Data Protection Complete) and must not appear in logs (log sanitiser covers the new fields)."
-    source: "feature constitution Feature Constraint 5; project constitution Standards (Security, Privacy)"
+    statement: "Credential discipline: scopes requested at sign-in (addScopes), tokens verified, encrypted on-device storage (Keychain / EncryptedLocalStorage, Data Protection Complete), no credentials in the repository or any log; keys travel in a header, never a URL; the check-release-log-safety.sh gate is binding."
+    source: "feature constitution Feature Constraint 2 + amendment; project constitution Standards/release gates"
   - id: C4
-    statement: "All new UI strings are externalised to the L10n string catalogs; the address-as term is user data spoken verbatim and is never localized or routed through the catalogs."
-    source: "feature constitution Feature Constraint 3; project constitution Standards (Localisation)"
+    statement: "Prompt budget: IntentPromptTests pins the intent prompt's token budget; music/Spotify wording must fit it and must not raise the pin; the deterministic keyword rule is the zero-prompt-token model."
+    source: "feature constitution Feature Constraint 3"
   - id: C5
-    statement: "Prompt edits preserve the pinned token budget and keep IntentPromptTests passing; tools/train-intent/seeds/prompt_template.txt is updated byte-identically in the same change."
-    source: "feature constitution Feature Constraints 1–2"
+    statement: "Must-not-break paths: explicit YouTube requests ('युट्युबमा गीत चलाऊ') still route to YouTube exactly as today; Spotify-unavailable/unlinked falls back to YouTube; golden-corpus and route expectations change only where deliberately superseded, with the new expectation recorded alongside."
+    source: "feature constitution Feature Constraint 5"
   - id: C6
-    statement: "The voice-biometric enrollment/verification mechanism is reused as-is: no mechanism change, biometric data exclusively in Secure Enclave storage, no new permissions, existing threat model unchanged."
-    source: "feature constitution Feature Constraint 6 and Out of scope"
+    statement: "No new backend: the Spotify Web API is called directly from the app; development-mode rollout is limited to registered test users until a quota-extension request is approved, and unregistered users still see honest behaviour."
+    source: "feature constitution Feature Constraints 6-7"
+  - id: C7
+    statement: "Premium reality: playback control requires Spotify Premium; free-tier or unlinked remote control degrades to the spotify: deep-link fallback with clear messaging, never a silent failure."
+    source: "feature constitution Feature Constraint 1; root Agent Principle (no silent stubs)"
+  - id: C8
+    statement: "Device expectation: the Spotify app is installed for the spotify: deep-link fallback; behaviour without it follows the honest-messaging rule."
+    source: "feature constitution Feature Constraint 8"
+  - id: C9
+    statement: "Plugin isolation: the feature ships as an AssistantPlugin (SpotifyPlugin) with no entanglement beyond the mapped CommandRouter seams; no brain/router model-stack changes; no cloud LLM on the music path."
+    source: "feature constitution Feature Constraint 11 and Feature Constraint 4"
+  - id: C10
+    statement: "Localization discipline: all Spotify user-facing strings are localized (ne/en) via spotify.* keys, mirroring the YouTube plugin's L10n pattern."
+    source: "feature constitution Feature Constraint 12"
 
 open_decisions:
-  - id: OD-F1
-    statement: "Next-of-kin data shape: standalone field in the new profile store, or a designation on an existing FamilyContact via the existing isEmergencyContact flag. Both data paths already exist; the choice must be reflected in the field table and the emergency-contacts step design."
+  - id: OD-S1
+    statement: "Client-secret handling for the Spotify search flow: family-entered credential per the YouTubeConfigStore/SearchConfigStore Keychain precedent versus PKCE-only options where the flow permits; must satisfy constraint 2 and interact cleanly with the dev-mode test-user limit. The requirements bind the storage/log discipline for whichever path resolves."
+    resolves_at: "design-l1 (recorded in security-design-review as well)"
+    owner: "architect / security review"
+  - id: OD-S2
+    statement: "Spotify development-mode rollout and quota-extension plan: which accounts are registered during development and device validation, when the quota-extension request is filed, what unregistered users experience before approval, and the console-side Developer Dashboard registration (client ID + secret, redirect URI, scopes). The requirements bind honest behaviour for unregistered users regardless."
+    resolves_at: "owner + design-l1"
+    owner: "owner / architect"
+  - id: OD-S3
+    statement: "Premium-account degradation path: exact UX and precedence when Spotify cannot perform playback (free tier, unlinked, network/service failure, empty search) - which cases degrade to the spotify: deep-link fallback, which fall back to YouTube, the exact localized copy, and how both-provider search behaves in each case. The requirements bind that each path is non-silent and honest; composition and copy stay open."
     resolves_at: "design-l1 / design-l2"
-  - id: OD-F2
-    statement: "Wake-acknowledgment phrasing and locale handling: TTS of a hajur-<address-as> template vs pre-rendered AckFastLane variants, and how the surrounding acknowledgment copy is localized when the term is in a different script/language from the active app language. The term itself must always be spoken verbatim."
-    resolves_at: "design-l1 / design-l2"
-  - id: OD-F3
-    statement: "About-you skip affordance vs the wizard's 'no hard gate' contract: keep the header Skip on first run (soft gate, deferral via the Home reminder card) or disable Skip (hard gate). Either way the reminder-card reopen + Settings editor path applies to already-onboarded users."
-    resolves_at: "design-l1 / design-l2"
-  - id: OD-PI-4
-    statement: "Address-as input affordance (raised in elicitation): free-text entry vs a preset list of common terms, and what counts as 'filled' beyond non-blank after trimming. Requirements bind 'required, gates Next' only."
-    resolves_at: "design-l1 / design-l2"
-  - id: OD-PI-5
-    statement: "Settings editor authentication (raised in elicitation): requirements.md FR-042 requires in-app configuration behind voice-biometric or PIN authentication, while the biometric/PIN gate is recorded as unwired with accepted residual risk (project constitution Open Decision 11, B3). FR-PI-012 binds the editor's existence, reachability, persistence and effect — not the auth gate."
-    resolves_at: "owner review at the define-requirements HIL gate / design-l1"
-    owner: "Anjan Poudel"
+    owner: "architect"
 
 out_of_scope:
-  - "Wake-word recognition changes (the wake word and its detection are untouched; only the post-detection acknowledgment is added)"
-  - "Any new cloud processing / new network egress (only name/address-as may enter the existing prompt paths)"
-  - "Emergency-call logic changes (collected data becomes available to the existing safety paths; their logic, triggers and stubs are unchanged)"
-  - "Forcing address-as into every sentence (natural use only)"
-  - "New permissions, HealthKit use, or changes to the existing voice-biometric enrollment/verification mechanisms"
-  - "Scheduled auto-activation / daily-briefing and reminder copy (unchanged by this feature)"
-  - "Remote companion-app push of profile fields (interview completed at the device; a helping family member may fill it in on the user's behalf)"
-  - "Profile export/deletion flows (GDPR deferred, project constitution Open Decision 2; the store must not block future erasure/export)"
+  - "Cloud LLM on the music path (voice intent parsing and routing stay on-device; music queries go to the provider APIs directly)"
+  - "Brain/router model-stack changes (no model, catalog, weights or routing-model changes beyond the pinned intent wording)"
+  - "A new backend (the Spotify Web API is called directly from the app; nothing provisioned on our side)"
+  - "Explicit-YouTube routing changes ('युट्युबमा गीत चलाऊ' still reaches YouTube exactly as today)"
+  - "Library/playlist edits and account modifications (playback is read-only, user-initiated media control)"
+  - "Emergency / medication / health surface changes (none of any kind; no new safety path added or altered)"
+  - "Any network egress beyond the two provider APIs (Spotify Web API/OAuth and the existing YouTube endpoints)"
+  - "Wake-word work, Android, and other deferred project items"
 
 security_surfaces:
-  - surface: "User-entered profile strings (address-as, name) reaching the shared cloud/on-device prompt (instruction injection)"
-    requirements: ["NFR-PI-004", "FR-PI-009"]
-  - surface: "Profile PII at rest (name, address-as, DOB, GP, hospital, next of kin) in encrypted local storage"
-    requirements: ["NFR-PI-001", "FR-PI-003"]
-  - surface: "Log surface (no name/term/DOB/emergency-contact values in any build)"
-    requirements: ["NFR-PI-002", "FR-PI-015"]
-  - surface: "Egress leakage (zero new calls; only name/term may be composed into prompts; no other profile fields leave the device)"
-    requirements: ["NFR-PI-003", "FR-PI-009", "FR-PI-008"]
-  - surface: "Voice fingerprint enrollment data (Secure Enclave only; mechanism unchanged; existing threat model)"
-    requirements: ["NFR-PI-009", "FR-PI-007"]
-  - surface: "Un-personalized fallback integrity (no placeholder, no partial application, no regression)"
-    requirements: ["FR-PI-011", "FR-PI-015", "NFR-PI-010"]
+  - surface: "OAuth token lifecycle (scopes at sign-in, Keychain/EncryptedLocalStorage at rest, refresh handling, revocation on unlink; no tokens in logs)"
+    requirements: ["NFR-SP-009", "NFR-SP-007", "FR-SP-008", "FR-SP-010"]
+  - surface: "Client-secret handling for the client-credentials search flow (OD-S1 - open; bundled secrets are extractable)"
+    requirements: ["FR-SP-009", "NFR-SP-002"]
+  - surface: "Deep-link/URI injection: spotify: URIs are built from remote-controlled search results; track names/IDs validated before URI construction; a crafted result must not open arbitrary schemes"
+    requirements: ["NFR-SP-008", "FR-SP-007"]
+  - surface: "OAuth redirect validation: mismatched redirect URIs rejected (token interception via app-scheme hijacking)"
+    requirements: ["NFR-SP-009", "FR-SP-008"]
+  - surface: "Log sanitisation: music queries, provider responses and error bodies must not reach logs; check-release-log-safety.sh coverage"
+    requirements: ["NFR-SP-002", "NFR-SP-011"]
+  - surface: "Privacy disclosure: music-query/playback data flow to Spotify disclosed"
+    requirements: ["FR-SP-016", "NFR-SP-011"]
+  - surface: "Credential wipe/revocation on unlink"
+    requirements: ["FR-SP-010", "NFR-SP-007"]
+  - surface: "No new egress / no cloud LLM on the music path"
+    requirements: ["NFR-SP-003"]
 
 traceability:
-  - gate: design-l1
-    checks: "Resolve OD-F1, OD-F2, OD-F3, OD-PI-4, OD-PI-5; feature architecture for store, wizard, prompt-injection point, wake-ack path"
-  - gate: design-l2
-    checks: "Component design against this set; interface contracts for the profile store, the sanitised prompt composition and the wake-ack path"
-  - gate: review-l2
-    checks: "review.decision == GO against the component design and this set"
-  - gate: security-design-review
-    checks: "STRIDE for the security_surfaces above (profile-string injection, PII at rest, voice-fingerprint reuse, wake-ack path); SECURITY-GO required"
-  - gate: security-test
-    checks: "Evidence for NFR-PI-001 (encryption), NFR-PI-002 (log surface), NFR-PI-003 (no new egress), NFR-PI-004 (injection), NFR-PI-009 (biometric data at rest); SECURITY-GO required"
-  - gate: final-sign-off
-    checks: "T2 + HIL; ios/tools/check-release-log-safety.sh exits 0 (NFR-PI-002/NFR-PI-011); privacy disclosure update recorded"
+  - gate: "design-l1"
+    checks: "Resolve OD-S1 and OD-S3; address OD-S2 (owner/architect). Design the musicStub replacement at CommandRouter.swift:2640, the YouTubeRoute fall-through interplay, the SpotifyTool/plugin seams, the account-linking service and credential store; reconcile the pinned golden-corpus music entries."
+  - gate: "design-l2"
+    checks: "Component design against this set; interface contracts for SpotifyPlugin, SpotifyTool, the linking service, the credential store and the Settings surface."
+  - gate: "review-l2"
+    checks: "review.decision == GO against the component design and this set."
+  - gate: "security-design-review"
+    checks: "STRIDE for the security_surfaces above (OAuth lifecycle, client-secret handling, URI injection, redirect validation, log sanitisation, disclosure); SECURITY-GO required."
+  - gate: "plan-tasks / implement"
+    checks: "Plan units and implementation trace back to FR-SP-* / NFR-SP-* ids; paired review and 0.85 confidence on implementation output; rework bound 5."
+  - gate: "security-test"
+    checks: "Evidence: token storage (NFR-SP-007), release log-surface coverage (NFR-SP-002), hostile titles/IDs producing only validated spotify: URIs (NFR-SP-008), OAuth redirect validation (NFR-SP-009), credential wipe on unlink (FR-SP-010); SECURITY-GO required."
+  - gate: "final-sign-off"
+    checks: "T2 + HIL; ios/tools/check-release-log-safety.sh exits 0 (NFR-SP-002/NFR-SP-011); DV-* checklist recorded and passed on the reference device (FR-SP-017); privacy disclosure recorded (FR-SP-016)."

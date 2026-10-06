@@ -1,0 +1,108 @@
+{
+  "schema_version": "1",
+  "workflow": "spotify-music-integration",
+  "project": "/Users/anjan/workspace/projects/elderly-ai-assistant-spotify-music-integration",
+  "started_at": "2026-10-06T11:15:20.146Z",
+  "updated_at": "2026-10-06T11:28:22.449Z",
+  "tasks": {
+    "define-requirements": {
+      "status": "COMPLETED",
+      "started_at": null,
+      "completed_at": "2026-10-06T11:28:18.431Z",
+      "outputs": [
+        {
+          "path": "specs/define-requirements.md",
+          "contract": "requirements_doc"
+        },
+        {
+          "path": "specs/define-requirements.lock.yaml",
+          "contract": "requirements_lock"
+        }
+      ],
+      "iterations": 0,
+      "pending_at": "2026-10-06T11:12:10.529Z",
+      "last_activity_at": "2026-10-06T11:12:10.529Z"
+    },
+    "design-l1": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-06T11:12:10.529Z",
+      "last_activity_at": "2026-10-06T11:12:10.529Z"
+    },
+    "design-l2": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-06T11:12:10.529Z",
+      "last_activity_at": "2026-10-06T11:12:10.529Z"
+    },
+    "review-l2": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-06T11:12:10.529Z",
+      "last_activity_at": "2026-10-06T11:12:10.529Z"
+    },
+    "security-design-review": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-06T11:12:10.529Z",
+      "last_activity_at": "2026-10-06T11:12:10.529Z"
+    },
+    "plan-tasks": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-06T11:12:10.529Z",
+      "last_activity_at": "2026-10-06T11:12:10.529Z"
+    },
+    "implement": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-06T11:12:10.529Z",
+      "last_activity_at": "2026-10-06T11:12:10.529Z"
+    },
+    "review-implementation": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-06T11:12:10.529Z",
+      "last_activity_at": "2026-10-06T11:12:10.529Z"
+    },
+    "security-test": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-06T11:12:10.529Z",
+      "last_activity_at": "2026-10-06T11:12:10.529Z"
+    },
+    "final-sign-off": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-06T11:12:10.529Z",
+      "last_activity_at": "2026-10-06T11:12:10.529Z"
+    }
+  }
+}
