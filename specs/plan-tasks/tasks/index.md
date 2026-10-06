@@ -1,26 +1,31 @@
-# Implementation Tasks — Profile Interview (FR-PI v1)
+# Implementation Tasks
 
 | Group | Title | Tasks | Total Effort | Status |
 |-------|-------|-------|-------------|--------|
-| [TG-14](TG-14-profile-foundations/index.md) | Profile Foundations — store, guard, seams, strings | 4 | ~9.5–12 days | PENDING |
-| [TG-15](TG-15-personalization-paths/index.md) | Personalization Paths — prompt clause, seed mirror, wake ack | 3 | ~9.5–12 days | PENDING |
-| [TG-16](TG-16-interview-wizard-and-startup-routing/index.md) | Interview Wizard and Startup Routing | 6 | ~14.5–18 days | PENDING |
-| [TG-17](TG-17-settings-release-and-evidence/index.md) | Settings, Log Safety and Release Evidence | 3 | ~8–10 days | PENDING |
+| [TG-18](TG-18-spotify-tool-and-deep-link-hardening/index.md) | Spotify Tool and Deep-Link Hardening | 2 tasks | ~5.5 days | PENDING |
+| [TG-19](TG-19-account-linking-credential-store-and-session/index.md) | Account Linking, Credential Store and Session | 4 tasks | ~11 days | PENDING |
+| [TG-20](TG-20-music-intent-intake-and-contact-veto/index.md) | Music Intent Intake and Contact Veto | 2 tasks | ~3.5 days | PENDING |
+| [TG-21](TG-21-router-music-path-degradation-and-tool-log/index.md) | Router Music Path, Degradation and Tool Log | 3 tasks | ~8 days | PENDING |
+| [TG-22](TG-22-plugin-wiring-settings-and-localisation/index.md) | Plugin, Wiring, Settings and Localisation | 4 tasks | ~9.5 days | PENDING |
+| [TG-23](TG-23-release-gates-security-evidence-and-device-validation/index.md) | Release Gates, Security Evidence and Device Validation | 4 tasks | ~8 days | PENDING |
 
-**Totals:** 16 tasks (T-090 … T-105), all leaf tasks, ~41–52 developer-days sequential.
+**Totals:** 6 groups, 19 tasks, 0 subtasks, ~45.5 developer-days nominal.
 
-**ID numbering convention.** This plan continues after the accumulated global maxima: the highest
-pre-existing task id is T-089 and the highest pre-existing group is TG-13 (computed before writing
-via the prescribed scan over `specs/plan-tasks` plus the ai-sdd outputs). Profile Interview
-therefore uses **T-090 … T-105** and **TG-14 … TG-17**; no existing T-NNN or TG-NN file or folder
-was reused, overwritten or deleted. `specs/plan-tasks/plan.md` and this file are the two files the
-established pattern replaces with the current feature's content.
+## ID numbering convention
 
-Execution order is T-090 → T-105 in numeric order; every dependency points at a lower task ID, so a
-subagent executing top-to-bottom never assumes an unbuilt component. The recommended parallel
-packing is in the plan file (`## Summary` → recommended execution order).
+This tree accumulates across features: group folders and task files from earlier features
+remain on disk, and a new feature continues at the global maxima — **TG-18** and
+**T-106**. Previously delivered groups visible in this directory: TG-01..TG-10
+(T-001..T-030, live-camera-translation) and TG-14..TG-17 (T-090..T-105,
+profile-interview). This feature uses TG-18..TG-23 and T-106..T-124; the next feature
+continues at TG-24 / T-125.
 
-Requirement IDs (FR-PI-NNN / NFR-PI-NNN) resolve under `specs/define-requirements/`; component IDs
-(C01 … C13) and parameter names are used verbatim from `specs/design-l2.md`; amendment IDs
-(AM-1 … AM-4) and finding IDs (SD-1 … SD-7) come from `specs/security-design-review.md`;
-observation IDs (OB-1 … OB-5) come from `specs/review-l2.md`.
+Dependencies point at lower task IDs only, so ascending ID order is a valid topological
+order for the `implement` workflow's wave sort.
+
+## Requirement ID resolution
+
+Requirement links in task files climb four directory levels to
+`define-requirements/FR/...` and `define-requirements/NFR/...`, which resolve to
+`specs/define-requirements/` in this worktree. All 17 FR-SP and 12 NFR-SP documents are linked from at least one task;
+the per-requirement map is in [plan.md](../plan.md).
