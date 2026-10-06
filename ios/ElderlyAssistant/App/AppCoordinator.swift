@@ -1357,6 +1357,58 @@ final class AppCoordinator: ObservableObject {
     /// read it.
     private(set) lazy var newsSourceStore = NewsSourceStore(storage: storage)
 
+    /// [SPOTIFY] (2026-10-07) T-119 — the one encrypted Spotify record
+    /// (`spotify.session`, C-SP-02): the Keychain-backed encrypted
+    /// channel's single item, the same one-key pattern as the search and
+    /// YouTube credential stores above.
+    ///
+    /// [BOOT-REVIEW P0-1] FIRST USE, not `init()`: the store's constructor
+    /// reads its record from the encrypted channel — pre-first-frame work
+    /// nothing on the first frame needs. The Settings leaf (T-120) and the
+    /// plugin/router composition are its first uses.
+    ///
+    /// The type is `@MainActor` (design-l2 §concurrency: all Spotify-path
+    /// mutable state is main-confined), so the lazy getter builds on the
+    /// main actor — which every first-use path already is by construction
+    /// (the registry build in `start()`'s main composition, the Settings
+    /// surface). `assumeIsolated`, not a hop: a future off-main first use
+    /// traps rather than racing the published record — the assume-where-it-
+    /// holds stance the live-translate settings-view seam below states; that
+    /// seam can run off-main and pre-checks `Thread.isMainThread`, while
+    /// these first-use paths are main by construction, so the assumption
+    /// here is unconditional by intent.
+    private(set) lazy var spotifyCredentialStore = MainActor.assumeIsolated {
+        SpotifyCredentialStore(storage: storage)
+    }
+
+    /// [SPOTIFY] (2026-10-07) T-119 — the account session (C-SP-03): the
+    /// link/unlink state machine, the single token path and the
+    /// `spotify_link` / `spotify_unlink` events. ONE instance serves every
+    /// consumer — the plugin registered in `makePluginRegistry()`, the
+    /// router's music seams and (T-120) the Settings surface — so the
+    /// surfaces and the routing can never observe two different accounts.
+    ///
+    /// Lazily beside the store above for the same reason: constructing it
+    /// reads the record and touches nothing remote ([BOOT-REVIEW P0-1]).
+    ///
+    /// The presenter closure is resolved at PRESENT time, never captured
+    /// (the `calendarShareSession` precedent): the composition root runs
+    /// before any window exists, and a controller captured then would be a
+    /// detached one.
+    ///
+    /// [W2-review D1, 2026-10-07] `observabilityBus: observabilityBus` is
+    /// mandatory, never decoration: the session's initializer defaults the
+    /// bus to a dropping sink, so omitting the argument silently loses
+    /// `spotify_link`/`spotify_unlink` (ADR-SP-14). Pinned with an
+    /// event-delivery test in `AppCoordinatorSpotifyWiringTests`.
+    private(set) lazy var spotifyAccountSession: SpotifyAccountSession = MainActor.assumeIsolated {
+        let session = SpotifyAccountSession(store: spotifyCredentialStore,
+                                            flow: ASWebSpotifyAuthSession(),
+                                            observabilityBus: observabilityBus)
+        session.presenter = { [weak self] in self?.topPresentingViewController() }
+        return session
+    }
+
     /// Persisted "listen for ये कान्छी" UI preference — UserDefaults
     /// (not a secret), same shape as `sttModelPreference` /
     /// `voiceEngineStack`. Defaults ON: with the sherpa model bundled,
@@ -2056,6 +2108,16 @@ final class AppCoordinator: ObservableObject {
         // router's deterministic YouTube stage — same `YouTubeTool`
         // behavior (shared config store + transport + opener seams).
         registry.register(YouTubePlugin(configStore: youtubeConfigStore))
+        // [SPOTIFY] (2026-10-07) T-119 — the interpreter-side Spotify
+        // plugin (T-118), registered beside the YouTube twin it mirrors.
+        // The coordinator's ONE credential store and account session are
+        // handed over, so the plugin's `spotify.play` path and the
+        // router's deterministic music path read the same account state —
+        // and cannot diverge (L2-R2). Registration is compile-time and
+        // exactly once; the plugin constructs nothing here beyond holding
+        // its seams.
+        registry.register(SpotifyPlugin(accountSession: spotifyAccountSession,
+                                        credentialStore: spotifyCredentialStore))
         // [LIVE-TRANSLATE T-027] The live-camera-translation plugin. It is
         // registered with a *factory* and nothing else: no camera session,
         // no detector, no client and no session model is built here, so
@@ -3715,6 +3777,16 @@ final class AppCoordinator: ObservableObject {
             youtubeConfigStore: youtubeConfigStore,
             youtubeTransport: URLSession.shared,
             youtubeLinkOpener: SystemCallLinkOpener(),
+            // [SPOTIFY] (2026-10-07) T-119 — the music-path seams (T-116,
+            // §13): the coordinator's ONE account session (the same object
+            // the plugin is registered with — never a rebuild), URLSession
+            // for the search/play requests (each request carries its own
+            // timeout; see SpotifyTool) and the same call-link opener seam
+            // the call/message/YouTube flows use for the canOpenURL probe
+            // + open (spotify: hand-offs).
+            spotifyAccountSession: spotifyAccountSession,
+            spotifyTransport: URLSession.shared,
+            spotifyLinkOpener: SystemCallLinkOpener(),
             // [LAT-M2] Ack fast lane: cached-WAV playback on the pre-ack
             // path (miss → synthesis fallback + `ack_cache_miss`).
             preAckPlayer: ackFastLanePlayer,

@@ -22,7 +22,11 @@
   each have a producer task and a DoD line; no BLOCKERs exist.
 - **Release gate:** `ios/tools/` + `check-release-log-safety.sh` (wired into `ios/build.sh`)
   is binding; T-121 extends `FEATURE_ROOTS` with `Services/Spotify/`,
-  `Voice/SpotifyTool.swift` and `Plugins/SpotifyPlugin.swift`.
+  `Voice/SpotifyTool.swift` and `Plugins/SpotifyPlugin.swift`. [W5-closure annotation,
+  2026-10-07: shipped as two entries — `Services/Spotify` (no trailing slash; the match is
+  equality-or-prefix) and `Services/Plugins/SpotifyPlugin.swift`; `Voice/SpotifyTool.swift`
+  is a stale path (the tool lives in `Services/Spotify`). The corrected rule-scope model is
+  the C-2 disposition below (:141-143); design §20 carries the matching annotation.]
 - **Scope:** MVP only. No brain/router model-stack changes, no backend, no cloud LLM on
   the music path, no post-MVP items appear as tasks.
 
