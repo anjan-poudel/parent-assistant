@@ -99,6 +99,7 @@
     "implement": {
       "status": "RUNNING",
       "started_at": null,
+      "completed_at": null,
       "outputs": [],
       "iterations": 0,
       "pending_at": "2026-10-06T11:12:10.529Z",
