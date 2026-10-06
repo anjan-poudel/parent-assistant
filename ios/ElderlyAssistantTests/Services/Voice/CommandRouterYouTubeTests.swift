@@ -562,11 +562,26 @@ final class CommandRouterYouTubeTests: XCTestCase {
     // MARK: - Ordering proofs
 
     func testBarePlayWithoutYouTubeWordNeverReachesTheStage() {
+        // [SUPERSEDED FIXTURE — T-116, 2026-10-07] This test originally
+        // routed "play some music", which matches the relaxed table's
+        // music domain ([musicMarkers ∧ musicVerbFamily]) and, pre-T-116,
+        // fell through the stub arm to this same reprompt. T-116 activates
+        // that domain as the real music path (FR-SP-013/FR-SP-015): a
+        // music-marked utterance now terminates in a music turn — with
+        // only a YouTube opener armed that is the YouTube fallback — so
+        // the old fixture no longer exercises "the YouTube stage never
+        // claims a bare play". The ordering intent is preserved with a
+        // marker-free bare play (no music marker, no YouTube word): it
+        // must fall through the whole ladder to the reprompt, exactly as
+        // before. The music utterances' own ordering (the ladder's music
+        // stage, never the YouTube stage) is pinned in
+        // CommandRouterMusicTests. The T-114 golden captures above are
+        // untouched by this edit.
         let coordinator = MockVoiceCommandCoordinator()
         let opener = FakeLinkOpener(canOpen: true)
         let (router, _, _) = makeRouter(coordinator, youtubeLinkOpener: opener)
 
-        router.route(transcript: "play some music")
+        router.route(transcript: "play it")
 
         XCTAssertTrue(opener.opened.isEmpty,
                       "a play request without a YouTube word must fall through to the existing ladder")

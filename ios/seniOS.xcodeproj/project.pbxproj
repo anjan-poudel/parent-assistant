@@ -112,6 +112,7 @@
 		256C467E912F9D861ED1F2BD /* LiveTranslateCipherStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68D416ADD821076AF9A665C5 /* LiveTranslateCipherStorage.swift */; };
 		2699280145ED23377D4253F6 /* ApplianceStepCardPlannerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F27EA807992A7107AF0C50C /* ApplianceStepCardPlannerTests.swift */; };
 		26C321C37CF9D8E0299FBCB0 /* LiveTranslateAllowListTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FC3593BE4EC7AB527C24040 /* LiveTranslateAllowListTests.swift */; };
+		26FC1F1CC26E02663358BCA4 /* CommandRouterMusicTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 993AC12BACEFB982F199CEA5 /* CommandRouterMusicTests.swift */; };
 		271ED07E09037B21D5EEE30D /* GoogleAccountSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC3B341A004AA71AC8146CDC /* GoogleAccountSessionTests.swift */; };
 		277306DA4F6459C5C896C773 /* OverlayRenderProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEC123B9E266E9C6B1C45131 /* OverlayRenderProbe.swift */; };
 		27AB8E1CA3BBFC1C0F9E7009 /* LlamaCommandInterpreter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 227923B3238044CF61D063F1 /* LlamaCommandInterpreter.swift */; };
@@ -1303,6 +1304,7 @@
 		98930B8EC7CE463FFD1AEF78 /* NepaliTimeParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NepaliTimeParserTests.swift; sourceTree = "<group>"; };
 		98A9D74AC2A84318AF78C19B /* GeminiConfigStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiConfigStoreTests.swift; sourceTree = "<group>"; };
 		991D4BE5FC564AEE9A505DD8 /* SpotifyDeepLinkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotifyDeepLinkTests.swift; sourceTree = "<group>"; };
+		993AC12BACEFB982F199CEA5 /* CommandRouterMusicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandRouterMusicTests.swift; sourceTree = "<group>"; };
 		99F8BFB236F42C6680633A6F /* TurnTimingBreakdown.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurnTimingBreakdown.swift; sourceTree = "<group>"; };
 		9A77C0A64E96B988300C7B0A /* LiveTranslateCipherStorageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTranslateCipherStorageTests.swift; sourceTree = "<group>"; };
 		9A8C366C621558C51FEC8EEF /* FeatureSourceScan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeatureSourceScan.swift; sourceTree = "<group>"; };
@@ -2289,6 +2291,7 @@
 				CA8C8BCBEC8903B3640CC61F /* ChatResponseShapeTests.swift */,
 				7F63BE0F70F8D66B3FF4F28F /* CloudFallbackTests.swift */,
 				5651D47E7A43C3A9754E116B /* CommandRouterKeywordIntentTests.swift */,
+				993AC12BACEFB982F199CEA5 /* CommandRouterMusicTests.swift */,
 				D4CFAEA934431A46E8FC9D1E /* CommandRouterPreAckTests.swift */,
 				E31C9E19B2000DB3C710A619 /* CommandRouterReplySafetyTests.swift */,
 				A01C837A02E4DAAE4A2423E0 /* CommandRouterTests.swift */,
@@ -3633,6 +3636,7 @@
 				D0FF157329E558DE07C34E67 /* CloudTranslationTierTests.swift in Sources */,
 				76ECB01B8161713BC7F09195 /* ColdStartRoutingTests.swift in Sources */,
 				F41484F41F34B4EF29ADD414 /* CommandRouterKeywordIntentTests.swift in Sources */,
+				26FC1F1CC26E02663358BCA4 /* CommandRouterMusicTests.swift in Sources */,
 				D9789FDF083F285BB94383A0 /* CommandRouterPreAckTests.swift in Sources */,
 				73A325FEAA687E621949EE4A /* CommandRouterReplySafetyTests.swift in Sources */,
 				42EC2102DAB36A409DF7D0AC /* CommandRouterSafetyNetTests.swift in Sources */,
