@@ -697,6 +697,7 @@ private struct SetupStrip: View {
 struct HomeDock: View {
     @Environment(\.appAppearance) private var appearance
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    var edgeAttached: Bool = false
     let onAppliance: () -> Void
     let onLiveTranslate: () -> Void
 
@@ -730,6 +731,7 @@ struct HomeDock: View {
                 dockItem(.directions, artwork: "location", titleKey: "home.hub.directions",
                          onRail: false, identifier: "home.action.maps")
             }
+            .padding(.horizontal, edgeAttached ? 20 : 0)
             .accessibilityIdentifier("home.actionRow")
 
             LazyVGrid(columns: bottomColumns, alignment: .center, spacing: 8) {
@@ -741,7 +743,11 @@ struct HomeDock: View {
                          onRail: true, identifier: "home.action.reminders")
             }
             .padding(8)
-            .appSurface(role: .dock, cornerRadius: 20)
+            .background {
+                Color.clear
+                    .appSurface(role: .dock, cornerRadius: 20)
+                    .ignoresSafeArea(.container, edges: edgeAttached ? .bottom : [])
+            }
             .accessibilityIdentifier("home.dock")
         }
         .accessibilityIdentifier("home.actions")

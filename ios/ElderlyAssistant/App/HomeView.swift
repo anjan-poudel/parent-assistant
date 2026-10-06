@@ -96,7 +96,8 @@ struct HomeView: View {
     }
 
     private var homeDock: some View {
-        HomeDock(onAppliance: { coordinator.presentApplianceHelper(question: nil) },
+        HomeDock(edgeAttached: pinsDock,
+                 onAppliance: { coordinator.presentApplianceHelper(question: nil) },
                  onLiveTranslate: { coordinator.presentLiveTranslate() })
     }
 
@@ -168,16 +169,11 @@ struct HomeView: View {
                     }
                     .clipped()
                     .accessibilityIdentifier("home.content")
+                    if pinsDock {
+                        homeDock
+                            .padding(.top, 16)
+                    }
                 }
-            // At larger type or short landscape heights, the complete dock
-            // joins the scroll region instead of consuming the viewport.
-            .safeAreaInset(edge: .bottom, spacing: 16) {
-                if pinsDock {
-                    homeDock
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 8)
-                }
-            }
             }
             // Home paints its own top bar (HomeTopBar), so the system
             // navigation bar is hidden entirely. `.toolbar(.hidden,
