@@ -427,10 +427,13 @@ final class ASWebSpotifyAuthSessionTests: XCTestCase {
     }
 
     /// "... And the client-ID seam exists for the Dashboard paste" —
-    /// design-l2 §19 edit (3): the key ships blank so `bundledClientID`
-    /// resolves nil and the session stays dormant (the pinned T-110
-    /// behaviour) until the OD-S2 owner action pastes the Dashboard value
-    /// into this exact key.
+    /// design-l2 §19 edit (3): the key ships in `Info.plist` so
+    /// `bundledClientID` reads it and the session stays dormant until the
+    /// OD-S2 owner action pastes the Dashboard value into this exact key.
+    /// As of 2026-10-07 the owner's Dashboard client ID is pasted (OD-S2
+    /// step 4). This test keeps the seam honest: the key must exist and
+    /// carry no stray whitespace; the value itself is public by definition
+    /// (ADR-SP-01) and deliberately not pinned here.
     func testSourceInfoPlistCarriesTheSpotifyClientIDKey() throws {
         let plist = try sourceInfoPlist()
         let value = try XCTUnwrap(
