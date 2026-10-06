@@ -742,7 +742,7 @@ struct HomeDock: View {
                          onRail: true, identifier: "home.action.reminders")
             }
             .padding(.horizontal, 8)
-            .padding(.top, 6)
+            .padding(.top, 10)
             .background {
                 Color.clear
                     .appSurface(role: .dock, cornerRadius: 20)
@@ -765,7 +765,7 @@ struct HomeDock: View {
 
     private func tile(artwork: String, titleKey: String, onRail: Bool) -> some View {
         VStack(spacing: onRail ? 2 : 4) {
-            ReferenceIconArtwork(name: artwork, diameter: onRail ? 56 : 32)
+            ReferenceIconArtwork(name: artwork, diameter: onRail ? 48 : 32)
             Text(LocalizedStringKey(titleKey))
                 .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .semibold))
                 .foregroundStyle(onRail ? appearance.colors.onAccent : appearance.colors.textPrimary)
@@ -774,8 +774,8 @@ struct HomeDock: View {
         }
         .padding(.horizontal, 4)
         .padding(.vertical, onRail ? 0 : 2)
-        .frame(maxWidth: .infinity, minHeight: onRail ? 76 : DesignTokens.minTapTargetSize,
-               maxHeight: .infinity, alignment: .top)
+        .frame(maxWidth: .infinity, minHeight: DesignTokens.minTapTargetSize,
+               maxHeight: .infinity, alignment: onRail ? .center : .top)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
     }
