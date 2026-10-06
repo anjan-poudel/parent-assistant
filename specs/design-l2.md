@@ -1,1208 +1,845 @@
-# L2 Component Design — Profile Interview + Address-as (v1)
+# L2 Component Design — Spotify Music Integration (v1)
 
-**Feature:** `profile-interview` · **Branch:** `feat/profile-interview`
-**Task:** `design-l2` (agent `pe`) · **Contract:** `component_design_l2` → `specs/design-l2.md`
-**Date:** 2026-10-05 · **Status:** for `review-l2`; feeds `security-design-review`, `plan-tasks`, `implement`
+**Feature:** `spotify-music-integration` · **Branch:** `feat/spotify-music-integration` (worktree `elderly-ai-assistant-spotify-music-integration`; requirements baseline `bc1c495`, L1 architecture `bb51be7`)
+**Task:** `design-l2` (agent `sdd-principal-engineer`) · **Contract:** `design_l2` → `specs/design-l2.md`
+**Date:** 2026-10-06 · **Status:** for `review-l2`, `security-design-review`, `plan-tasks` and `implement`
+**Refines:** `specs/design-l1.md` (binding architecture) to implementation-grade component interfaces.
 
-**Inputs folded in.** `specs/design-l1.md` (BINDING — component inventory C01–C12, ADR-01…ADR-11,
-hand-off notes in its §16, and the §17 verification hooks); `specs/define-requirements.md` +
-`specs/define-requirements.lock.yaml` (16 FR-PI / 11 NFR-PI, all MUST — re-baselined with the
-2026-10-05 owner amendment that added FR-PI-016);
-`specs/profile-interview/constitution.md` (Field Contract, Address-as Behaviour Contract,
-Feature Constraints 1–8 — including the Constraint 8 app-start routing amendment — plus the
-resolved OD-F1/OD-F2/OD-F3 in the L1 ADRs, OD-PI-4 / OD-PI-5 owner-resolved);
-`specs/profile-interview/workflow.yaml`; and the shipped code, re-read for this task (the
-filenames quoted throughout appear in the L1 input list, §1).
+**Path convention (inherited from L1 §Path convention).** Paths are repo-relative. Where one path would exceed the release-log sanitiser's token limit (40 consecutive characters from the class `[A-Za-z0-9/+=]`), it is split across adjacent code spans; `` `ios/ElderlyAssistant/Services/` + `Voice/SpotifyTool.swift` `` denotes the single path obtained by joining the spans with `/`. The split is a sanitiser convention only — do not read the `+` as concatenation in code.
 
-**What this document is.** The component-level design for the components L1 defined: exact
-Swift interfaces with explicit error types, data shapes, error/observability behaviour,
-concurrency and isolation statements per shared resource, configurable parameters with named
-defaults, measured budget proof, technical risks, and test seams. It settles exactly the items
-L1 §16 assigned to `design-l2`. It adds **no** component, pattern, permission, egress, or API
-beyond L1 **except C13**, the app-start interview routing mandated by the 2026-10-05 owner
-amendment (FR-PI-016, Feature Constraint 8 — component C13 in the Components section);
-everything else is the L1 scope unchanged. Implementation code and migrations are out of scope for this
-task. Where this document corrects a stale number or an interface sketch in L1, the correction is
-recorded in **Section 13 (Findings and corrections vs L1)** with its evidence.
+**Identifier-break convention.** The same 40-character limit applies to any single identifier (including test names): where its text would form one run of 40 or more characters from the class above, it is broken across adjacent code spans at a word boundary, and the spans join with no separator — a `/` when the break falls on a path separator, nothing otherwise. Example: `` `testKeylessYouTubeIsNotOpenedWhen` + `SpotifyWins` `` denotes the single test name formed by joining those two spans directly. Every break of this kind in this document follows this convention.
 
-**Path convention.** Paths are source-root-relative. `App/…`, `Services/…`, `Resources/…` resolve
-under the app source root `` `ios/ElderlyAssistant` ``; `tools/…` resolves at the repository root;
-`ios/tools/…` at the iOS project root.
+**Sanitizer discipline.** This document contains no credential-shaped values, no `Authorization: Bearer` token samples (the header is always written as the `` `Authorization: Bearer` `` header — header name only), no `apiKey` assignments and no secret material of any kind. A request that carries a credential carries it in a request header, never in a URL, query parameter or deeplink.
+
+**Sources verified for this document.** Every interface below was written against the worktree source, not against L1 prose alone: `YouTubeTool` / `YouTubeConfigStore`, `YouTubePlugin` / `AssistantPlugin`, `LocalToolTransport`, `CallLinkOpening` / `SystemCallLinkOpener`, `EncryptedLocalStorage` / `StorageError`, `StoragePlacementPolicy`, `GoogleAccountSession` / `GoogleAuthFlow`, `LocalToolLogStore` / `ToolLogReviewView`, `SettingsView.YouTubeSettingsView` / `SettingsTabs` / `SettingsTabMappingTests`, `KeywordIntentRule` (rule table, `Alternative` / `Group` / `Variant` / `Rule`, keyword enumerations), `VoiceContactSearchRoute` (veto site), `YouTubeRoute` (extractor mechanics), `IntentPrompt` / `IntentPromptTests` (budget pins), `GoldenCorpus` (15 music entries) / `GoldenCorpusTests`, `CommandRouter` (seams 646–648, ladder 898/1146/1189, `fireYouTubePlay` 2386, `logToolRequest` 2544, `dispatchInterpreted` 2640, `handlePluginCommand` 2922), `AppCoordinator` (lazy stores 1328–1360, registry registration 2058, router construction 3704–3717), `Info.plist`, `Localizable.xcstrings` (1341 keys at this baseline), `ios/tools/` + `check-release-log-safety.py` (`FEATURE_ROOTS` role model) and `check-release-log-safety-fixtures.py` (per-rule fixtures), `check-prompt-mirror.sh`.
 
 ---
 
 ## Overview
 
-**Goal.** From a first-run interview (and a Settings editor afterwards), record who the user is
-and how the assistant should address them, then use the term ("address-as") in exactly two
-places: the spoken wake acknowledgment and the brain reply-style rules — cloud and on-device
-alike. Until a term is recorded, the app behaves exactly as today (FR-PI-011, NFR-PI-010).
+### 1. Purpose
 
-**Design shape (all from L1, restated as the L2 baseline).** One encrypted single-record store
-(C01) is the single source of truth; the wizard steps (C02/C11/C12) and the Settings editor (C04)
-write through one coordinator writer; the wake path (C05) speaks a localized template with the
-term as data, ack-first with a bounded hold; the prompt path (C06/C07) composes one guarded term
-through the shared builders; the seed mirror (C08) and the log-safety gate (C10) are updated in
-the same change; localisation (C09) covers every new string. The 2026-10-05 owner amendment
-adds app-start interview routing (C13, FR-PI-016): on cold start an incomplete interview opens
-the wizard at the first pending step, complete interviews start normally.
+Today a voice music request that reaches the music intent hits a first-class stub: the `case .music:` branch in `ios/ElderlyAssistant/Services/` + `Voice/CommandRouter.swift` (line 2640) emits `command_music_stub` and speaks `router.musicStub` ("Music isn't ready yet. Coming soon." / "संगीत सुविधा अहिले तयार छैन। चाँडै आउनेछ।"). Nothing plays. This feature replaces that branch with the real playback path resolved by L1 (OD-S1 = PKCE-only public client, ADR-SP-01; OD-S3 = capability-first precedence with the 12-row state × outcome matrix, ADR-SP-02).
 
-**What L2 settles (L1 §16 hand-off).**
+This document fixes what `plan-tasks` turns into coding tasks and what `implement` builds: the exact Swift surfaces (types, signatures, error enums), the data model and the one storage key, the two state machines (account-linking lifecycle, music playback attempt), the error mapping from every failure to exactly one matrix row, the complete `spotify.*` ne/en copy inventory, the intent/prompt-layer diffs with the test that pins each, the test seams per component, the log-surface contract and the release-gate roots, and a full traceability table over all 29 requirements.
 
-| L1 hand-off item | L2 settlement |
+### 2. Inputs
+
+- `specs/define-requirements.md` + `specs/define-requirements/FR/FR-SP-00*.md`, `.../NFR/NFR-SP-00*.md` — FR-SP-001…017, NFR-SP-001…012.
+- `specs/design-l1.md` — binding architecture; all ADR-SP-01…16 decisions, the §12 matrix, §15 auth flow, §16 data model, §20 parameters, §23 key inventory, §29 open items.
+- `specs/spotify-music-integration/constitution.md` — feature constraints 1–12, routing/degradation contract, DV gate.
+- `specs/spotify-music-integration/workflow.yaml` — task scope; `security-design-review` / `security-test` focus areas; release-gate requirement.
+- `constitution.md` (root) — Architecture Constraint 1 as amended 2026-10-06; standards; release gates; agent principles (explicit error types, configurable timeouts, no silent stubs).
+
+### 3. What this document resolves (the L1 §29 "For design-l2" list)
+
+| L1 open item | Answered in |
 |---|---|
-| Exact clause wording + measured budget proof | Clause wording adopted as final; base fixture measured at 2,506 Characters (the L1/test comment figure 2,936 is stale — §13, item 2); worst-case composition 2,586 ≤ 3,000 (Section 9.1) |
-| Final guard name and bound | `ProfilePromptTextGuard`, `guarded(_:)`, `maxPromptTermGraphemes` default 24 (= the entry bound), plus quote-slot neutralisation (§5.3) |
-| Ack service internal state machine | `WakeAcknowledgmentService`, two-state machine with a single `settle` exit; table in §7.1 |
-| C03 chip data structure | `AddressAsPresets.terms(for:)` over a `[String: [String]]` table (§5.2) |
-| `hasPayload` probe exact signature | `hasPayload(key: String) -> Bool?` on the new `ProfilePayloadStorage` seam (§5.1) |
-| Test seams for the §9 contracts | Section 12 |
-| Seed byte-identity hook | New build-blocking gate `ios/tools/check-prompt-mirror.sh` + `.py` wired into `ios/build.sh` beside the log-safety gate (§9.2); the gate found and the change fixes a one-byte trailing-newline drift (§13, item 3) |
-| App-start routing settlement (FR-PI-016, owner amendment) | `AppCoordinator.coldStartInterviewRoute()` — the earlier of the first pending step and About-you when the mandatory fields are missing — consumed once per cold start by the existing shell (§5.8, C13); the background→foreground re-check is decided **out** for v1, with revisit conditions recorded |
+| Exact Nepali/English copy for all `spotify.*` keys | §31 (complete inventory; the reviewable artifact) |
+| Exact keyword/verb enumerations + extractor fixtures | §14 (rule + extractor) and §29 (signatures), tests in §22 |
+| Plugin-composed prompt-budget check | §12 / §27 — no existing suite composes the real registry set against a ceiling (verified: `IntentPromptTests` composes `FakePlugin`s only); the guard added is a fragment-size assertion in `SpotifyPluginTests` plus the untouched digest/baseline pins |
+| Which feature roots the log gate must gain | §20 — `Services/Spotify/`, `Services/Voice/SpotifyTool.swift`, `Services/Plugins/SpotifyPlugin.swift`; no new rule or fixture is needed (rules already exist and are fixture-covered per `check-release-log-safety-fixtures.py`) |
+| `market` handling on search | §24 — omitted (`market` parameter exists for test shape, defaults `nil`); rationale below |
+| OD-S2 quota-request appendix text | §23 — draft for the owner, `[OWNER INPUT]` markers, nothing invented |
+| Settings-surface component spec (layout/state machine) | §17 (view spec + leaf state machine) |
+| DV protocol document content | §23 (C-SP-16 outline; the artifact itself is written at implement/DV time) |
 
-**Measured facts (evidence for the review).**
+### 4. Cross-cutting conventions
 
-| Measurement | Value | How measured |
+**Error typing (agent principle: every interface declares its error types).** No new API returns an untyped error. `SpotifyTool.FetchError`, `SpotifyTool.PlayError`, `SpotifyAuthError` and `StorageError` are the complete error vocabulary; every case has a matrix row (§13). No `Error` existential is surfaced across a component boundary in the new code; thrown values are always one of these concrete enums.
+
+**Timeouts are configuration.** Every network call carries an explicit timeout parameter with an injected default (§32). No timeout is a bare literal in the new code.
+
+**Async failure mode + retryability.** §32's table states, per operation, whether it is retryable and what bounds it. The only automatic retry anywhere in the feature is the single token refresh per request (ADR-SP-13); searches, play attempts, deep-link opens and link flows are single-shot.
+
+**Concurrency (explicit).** All Spotify-path mutable state (`SpotifyCredentialStore.record`, `SpotifyAccountSession.status`) is `@MainActor`-confined; the router's music path runs on the main thread like every other voice stage; network work runs off-main through the `LocalToolTransport` seam and results marshal back with `await MainActor.run` (the `fireYouTubePlay` pattern). Read/write rules per component are in §7–§23 ("Concurrency" paragraphs). No locks are introduced. A new turn does not cancel an in-flight music attempt (parity with the YouTube stage; accepted existing behaviour) — the outcome delivery of a superseded attempt is still exactly one spoken line, and both attempts record distinct observability events.
+
+**No silent stubs.** Every path through `fireMusicRequest` ends in exactly one `speak(...)` call; the matrix is total (§13). The stub branch is deleted, not bypassed.
+
+### 5. L2 decision log (refinements of L1; each is implemented, tested and reviewable)
+
+| ID | Decision | Rationale / pin |
 |---|---|---|
-| Rendered `build` fixture, no term, no plugins (`ne`, no meds, transcript "भोलिको मौसम कस्तो छ?") | 2,506 Swift `Character`s / 2,718 UTF-8 bytes | Compiled the exact source substring; `String.count` (graphemes) and `utf8.count` |
-| `addressAsClause` with a 24-grapheme term | 80 Characters (56 static + 24 term) | Character count of the settled clause |
-| Worst-case composed fixture (2,506 + 80) | 2,586 ≤ 3,000 (headroom 414) | Arithmetic on the two measurements |
-| Fixture with an 8-grapheme Devanagari term | 2,570 | Same |
-| `build` template with placeholder tokens | 2,698 bytes | Swift-dedent extraction of the literal, interpolations replaced by placeholder tokens |
-| Seed `tools/train-intent/seeds/prompt_template.txt` | 2,699 bytes | `wc -c`; differs from the template by exactly one trailing `\n` (§13, item 3) |
+| L2-D1 | **`market` is omitted from the search request** (`apiSearchURL(query:market:)` carries `market` only when non-nil; the router passes `nil`). | The linked user token already scopes results to the account's market; a hardcoded country would be wrong for a household abroad. The parameter stays on the interface so tests can pin both shapes. `SpotifyToolTests.` + `testApiSearchURLOmitsMarketWhenNil` + `AndIncludesItWhenGiven` |
+| L2-D2 | **Search is track-only** (`type=track`, `limit=1`). Playlists/albums/artists are not searched. | v1 scope is "music plays"; a track id has the validated 22-char shape this design hardens. `SpotifyToolTests.` + `testApiSearchURLIsTrackOnly` + `AndPercentEncoded` |
+| L2-D3 | **Playback never manages devices.** No `device_id` is sent; 404 `NO_ACTIVE_DEVICE` degrades to the deep link. | Device transfer/selection is out of scope; the deep link lets the user start playback where they are. ADR-SP-13 |
+| L2-D4 | **The YouTube leg of the concurrent search runs only when the YouTube path is keyed.** The keyless path is "askable" but is not pre-opened — its "search" *is* its outcome; pre-opening would start YouTube even when Spotify wins. | Reconciliation L2-R1 (below). `CommandRouterMusicTests.` + `testKeylessYouTubeIsNotOpenedWhen` + `SpotifyWins` |
+| L2-D5 | **A link-time verification or scope failure stores nothing**; status becomes `.linkFailed(error)` and routing treats the account as unlinked (matrix row 12). | L1 §15.5 wording ("session stored but marked not usable") is reconciled to avoid a stored record that makes `isLinked` disagree with routing. Reconciliation L2-R2. `SpotifyAccountSessionTests.` + `testMissingScopesStoresNothingAnd` + `ShowsLinkFailed` |
+| L2-D6 | **`SpotifyAuthError` gains four cases** — `noPresenter`, `presentationFailed(code:)`, `providerError(code:)`, `malformedResponse` — completing the "every failure has a case" rule; all content-free (numeric codes / fixed OAuth error vocabulary). | The L1 taxonomy could not map ASWebAuthenticationSession failures or an OAuth `error=` callback without leaking text or lying. `SpotifyAccountSessionTests` / `SpotifyAuthFlowTests` |
+| L2-D7 | **The link-flow timeout cancels the session and surfaces `userCancelled`.** No dedicated timeout case. | The user-interactive flow has no "failure" semantics to add beyond the existing cancel path; the bound exists to guard abandoned sessions. `SpotifyAccountSessionTests.` + `testLinkFlowTimeoutCancelsAnd` + `ReportsCancelled` |
+| L2-D8 | **The music rule excludes YouTube-marked utterances structurally**: `Rule` gains `excluded: [Group]` (default `[]`); the music rule sets `excluded: [youtubeKeywords]`. | Belt-and-braces to L1 §9.2/§9.3 (the YouTube stage runs first anyway). `KeywordIntentRuleTests.` + `testYouTubeMarkedUtteranceStill` + `MatchesTheYoutubeDomainDataDriven` |
+| L2-D9 | **English narration forms `played`, `listened`, `sang`, `sung` are excluded from `musicVerbFamily`**; progressive forms (`playing`, `listening`, `singing`) are kept. | Mirrors the `youtubeVerbFamily` narration comment ("searched stays out"); the golden "play a song" needs `play`. `KeywordIntentRuleTests.` + `testMusicRuleNeverFiresOn` + `NarrationDataDriven` |
+| L2-D10 | **When every query token is dropped, the extractor falls back to the first music-marker token, then to the raw transcript.** | L1 §10's "never leave an empty query" rule, made deterministic: "भजन बजाऊ" searches "भजन", not the verb phrase. `KeywordIntentRuleTests.` + `testMusicQueryFallsBackToThe` + `MarkerNounWhenEverythingDrops` |
+| L2-D11 | **Provider markers are query noise**: `spotify` (Latin token) and `स्पोटिफाइ` (Devanagari containment) are dropped like the YouTube markers. | "स्पोटिफाइमा गीत चलाऊ" must not search the provider name. `SpotifyToolTests`/`KeywordIntentRuleTests.testMusicQueryDropsProviderMarkers` |
+| L2-D12 | **Observability outcome vocabularies are closed sets** (§28). No free-form string is ever emitted from the Spotify path. | NFR-SP-002; the events carry no metadata dictionary keys at all (`metadata: [:]`), so no `LogSanitiser.allowedKeys` change is needed. |
+| L2-D13 | **`product` freshness needs no new field**: `SpotifySessionRecord` keeps ADR-SP-08's exact six fields; the verification age is derived from `expiry` (Spotify issues ~3,600 s tokens). | Keeps one-key atomic write and single-key wipe. §25, §32 |
+| L2-D14 | **`.unknown` product behaves as not-remote-capable** (deep link only), exactly like `.free`; `spotifyRemoteCapable` is `product == .premium` per L1 §11. | No fabricated capability; an actually-Premium account with an unknown product still gets Spotify via the deep link. `CommandRouterMusicTests.testUnknownProductUsesTheDeepLink` |
+| L2-D15 | **`SpotifyPlugin` handles explicit-Spotify requests; its prompt fragment explicitly routes general music requests to the `music` intent.** | Keeps the router's degradation ladder (including the YouTube fallback) on every bare-music utterance; the plugin path cannot chain to YouTube without entangling the plugin (ADR-SP-07 / NFR-SP-012). §27 |
 
-**Operator/user-visible summary.** Success: after the interview, the next wake answers with
-`हजुर <term>` and replies may address the user by the term; every new field is editable in
-Settings and takes effect on the next wake/reply with no relaunch. On app start, an incomplete
-interview opens the wizard at the first pending step (FR-PI-016) — the user is never trapped
-(every step skippable, the presentation dismissible) — and a complete interview starts normally.
-Failure: nothing about this feature ever blocks listening or replies — a store read failure, a
-guard rejection, a synthesis failure, or the hold bound all degrade to today's un-personalized
-behaviour, with a content-free event for the operator (§7.5).
+**Reconciliation L2-R1 (keyless YouTube leg).** L1 §11 reads "when both are askable, both searches are fired concurrently". The keyless YouTube path's "search" is the terminal open of the search deeplink (`YouTubeTool.openSearch`), so pre-running it would open YouTube even when Spotify wins the selection. L2 narrows the concurrent leg to the keyed (fetch) path: `youtubeAskable` is unchanged; when YouTube is askable only keylessly, only the Spotify fetch runs and the YouTube outcome is executed (unmodified `fireYouTubePlay`) only if Spotify cannot serve. The concurrency claim that matters to NFR-SP-001 (two network legs joined, bounded by `max(provider budget)`) applies whenever both *fetches* exist. Pinned by `CommandRouterMusicTests.` + `testKeylessYouTubeIsNotOpenedWhen` + `SpotifyWins` and `testBothKeyedProvidersAre` + `SearchedConcurrently`.
+
+**Reconciliation L2-R2 (verification failure storing).** L1 §15.5 says a scope failure leaves "session stored but marked not usable". A stored record makes `spotifyAskable` (`store.record != nil` per §16) true while routing must take unlinked treatment (matrix row 12) — two sources of truth. L2 stores nothing on `verificationFailed`/`missingScopes`; the status shows the failed/relink state, and routing is unlinked because the store is empty. The requirement's substance (verify before trusting; honest relink surface) is preserved; the storage mechanics change deliberately.
+
+### 6. Marked gaps (not guessed — carried for the named owner)
+
+1. **OD-S2 owner inputs** (L1 §5): Dashboard-owning account, household Premium account, free-tier test account, extra test-user emails, final app name / business details / privacy-policy URL, rollout-note copy approval, the final-sign-off line. Every one remains `[OWNER INPUT — …]` in §23; no account, email or Dashboard value is invented here.
+2. **Dashboard scheme acceptance** (L1 risk 1): whether the Spotify Dashboard accepts `sahayak-spotify` as a redirect scheme is unverifiable from the codebase. The validator is exact-match against a single constant (§26); if the Dashboard refuses the custom scheme, only the constant's value changes (`sahayak-spotify` → the re-shaped scheme), and the validator, its tests and the `Info.plist` entry move with it. Flagged for `security-design-review`.
+3. **The keyless YouTube path remaining as shipped** (L1 Reconciliation 2 / risk 3): this design's `youtubeAskable` predicate and L2-R1 depend on it. If that path ever changes, revisit §13 with it.
+4. **Spotify's quota-extension review window** (L1 §5(b)): unknown to the design; recorded at filing time by the owner.
 
 ---
 
 ## Components
 
-Each component below states: responsibility, files touched, key types, dependencies, concurrency,
-errors, and the requirements it carries. Component IDs C01–C12 are L1's; C13 is the single
-addition, under the 2026-10-05 owner amendment (FR-PI-016, Feature Constraint 8).
+### 7. Component map
 
-### C01 — `UserProfile`, `UserProfileStore`, `ProfileLoadResult`, `ProfileStoreError`
+C-SP-01…16 per L1 §25. File paths as declared by L1; state ownership and concurrency are stated per component. `NEW` = new file in the change set; `CHANGED` = existing file edited.
 
-- **Files.** New `Services/Storage/UserProfileStore.swift`; additive conformance extensions inside
-  `Services/Storage/EncryptedFileStorage.swift` and `Services/Storage/MigratingEncryptedStorage.swift`
-  (§5.1). No existing method changes.
-- **Responsibility.** One encrypted record (name, address-as, DOB, GP, hospital) behind
-  `UserProfileStoring`; absent-vs-unreadable discrimination; atomic durable writes; a
-  lock-protected in-memory cache; no PII in any log path.
-- **Key types.** `UserProfile`, `ProfileLoadResult`, `ProfileStoreError`, `UserProfileStoring`,
-  `ProfilePayloadStorage`, `UserProfileStore` (Section 4 and §5.1).
-- **Dependencies.** `ProfilePayloadStorage` (production: the shared `MigratingEncryptedStorage`
-  instance the coordinator hands every store; test: an in-memory fake), `ObservabilityBus?`.
-- **Concurrency.** Reads from any queue behind the store's `NSLock` + cache; writes
-  main-thread-only by contract (`UserProfileStore` asserts this in `save`); file I/O happens
-  inside the lock; atomic temp-file+rename means a crash mid-write leaves the previous record.
-  See Section 6.
-- **Errors.** `ProfileStoreError.readFailed / decodeFailed / writeFailed`; every failure is an
-  explicit case returned, never thrown; no retry loop anywhere.
-- **Requirements.** FR-PI-003, FR-PI-015, FR-PI-011; NFR-PI-001, NFR-PI-002, NFR-PI-010.
-  ADR-01.
+| ID | Component | Files | State ownership | Concurrency |
+|---|---|---|---|---|
+| C-SP-01 | `SpotifyTool` | NEW `ios/ElderlyAssistant/Services/` + `Voice/SpotifyTool.swift` | none (pure statics) | stateless; safe to call from any task |
+| C-SP-02 | `SpotifyCredentialStore` | NEW `ios/ElderlyAssistant/Services/` + `Spotify/SpotifyCredentialStore.swift` | the one record (`spotify.session`) | `@MainActor` |
+| C-SP-03 | `SpotifyAccountSession` | NEW `ios/ElderlyAssistant/Services/` + `Spotify/SpotifyAccountSession.swift` | status + flow in flight | `@MainActor`; network via transport seam, results marshalled back |
+| C-SP-04 | `SpotifyAuthFlow` (+ `SpotifyAuthSession` seam) | NEW `ios/ElderlyAssistant/Services/` + `Spotify/SpotifyAuthFlow.swift` | PKCE pair + state nonce for the duration of one link attempt | `@MainActor` presentation; pure helpers stateless |
+| C-SP-05 | `SpotifyPlugin` | NEW `ios/ElderlyAssistant/Services/` + `Plugins/SpotifyPlugin.swift` | references to session/store/seams only | plugin holds no mutable state |
+| C-SP-06 | Router music path | CHANGED `ios/ElderlyAssistant/Services/` + `Voice/CommandRouter.swift` | none beyond turn-local values | main-thread turn; transport off-main |
+| C-SP-07 | Music rule + extractor | CHANGED `ios/ElderlyAssistant/Services/` + `Voice/KeywordIntentRule.swift` | none (pure statics) | stateless |
+| C-SP-08 | Contact-search music veto | CHANGED `ios/ElderlyAssistant/Services/` + `Voice/VoiceContactSearchRoute.swift` | none | stateless |
+| C-SP-09 | Wiring | CHANGED `ios/ElderlyAssistant/App/` + `AppCoordinator.swift` | lazy composition | boot path |
+| C-SP-10 | Settings surface | CHANGED `ios/ElderlyAssistant/App/` + `SettingsView.swift`, `SettingsTabs.swift` | binds the coordinator's live session/store | `@MainActor` (view) |
+| C-SP-11 | Localisation catalog | CHANGED `ios/ElderlyAssistant/Resources/` + `Localizable.xcstrings` | none | n/a |
+| C-SP-12 | Info.plist | CHANGED `ios/ElderlyAssistant/Info.plist` | none | n/a |
+| C-SP-13 | Release log-safety gate | CHANGED `ios/tools/` + `check-release-log-safety.py` | none | n/a |
+| C-SP-14 | Tool-log + observability | CHANGED `ios/ElderlyAssistant/Services/` + `Voice/LocalToolLogStore.swift`, `App/ToolLogReviewView.swift` | the encrypted tool log | store `@MainActor` |
+| C-SP-15 | Tests | NEW/CHANGED under `ios/ElderlyAssistantTests/` | n/a | n/a |
+| C-SP-16 | DV protocol artifact | NEW `specs/SP-device-validation-protocol.md` (+ results) | n/a | n/a |
 
-### C02 — Wizard step extension (`OnboardingState.Step` + step views)
+### 8. C-SP-01 — `SpotifyTool`
 
-- **Files.** `App/OnboardingState.swift` (three cases, doc-comment addendum), 
-  `App/OnboardingWizardView.swift` (three step views + switch cases), new `App/OnboardingDrafts.swift`
-  (pure draft/merge values), new `App/Components/AddressAsField.swift` (C03).
-- **Responsibility.** Insert `aboutYou`, `emergencyContacts`, `voiceFingerprint` in the required
-  order (FR-PI-001); About-you gates Next on trimmed non-empty name + address-as (FR-PI-002) while
-  the header Skip stays (ADR-04); the family step additionally lists existing contacts
-  (FR-PI-005); every new step participates in the existing skip/pending/reopen machinery
-  (FR-PI-004, FR-PI-013).
-- **Key types.** `OnboardingState.Step` (extended), `AboutYouDraft`, `AddressAsField`,
-  `ProfileEntryBounds` (§5.2).
-- **Dependencies.** `AppCoordinator.saveProfile` / `currentProfileSnapshot` (C01 single writer),
-  `AddressAsField`, existing `primaryButton` and wizard chrome.
-- **Concurrency.** SwiftUI main actor only; all writes go through the coordinator's main-thread
-  writer.
-- **Errors.** Save `writeFailed` → inline localized message, step stays; `addFamilyContact` /
-  `updateFamilyContact` returning `false` → inline message, selection reloads from the store.
-- **Requirements.** FR-PI-001…FR-PI-005, FR-PI-013; NFR-PI-007, NFR-PI-010. ADR-03, ADR-04.
+**Responsibility.** Search (`GET https://api.spotify.com/v1/search`), remote playback control (`PUT https://api.spotify.com/v1/me/player/play`), validated `spotify:` deep-link construction, and deep-link opening through the shared `CallLinkOpening` seam. Caseless enum of pure statics, mirroring `YouTubeTool`: no state, no logging, no UI, no retries.
 
-### C03 — `AddressAsField` (chips + custom entry)
+**Data flows.**
+- Search: caller supplies the query + an access token + a `LocalToolTransport`; the tool builds the URL, sets the request timeout, performs the request, maps transport/HTTP errors to `FetchError`, parses `tracks.items[0]`, validates the id shape, returns `TrackResult`.
+- Play: caller supplies a validated `spotify:track:` URI + token + transport; the tool sends a PUT with the URI in the JSON body `{"uris":["<uri>"]}` and maps status to `PlayError`.
+- Deep link: caller supplies a query or a validated id; the tool returns a `spotify:` URL (or nil), then `open(_:opener:)` probes with `canOpenURL` and opens; result is `OpenOutcome`.
 
-- **File.** New `App/Components/AddressAsField.swift` (new directory `App/Components/`).
-- **Responsibility.** The one address-as input used by the wizard and Settings: preset chips for
-  the active language (OD-PI-4) plus a free-text field; grapheme-safe entry bound; the chip's
-  resolved term is written to the field as data (ADR-05).
-- **Key types.** `struct AddressAsField: View`, `enum AddressAsPresets`, `struct ProfileEntryBounds`.
-- **Dependencies.** `Locale` from the environment (`AppLanguage`-driven).
-- **Concurrency.** Main actor (SwiftUI).
-- **Errors.** None thrown; over-long input is clamped on `Character` boundaries.
-- **Requirements.** FR-PI-002, FR-PI-010; NFR-PI-006, NFR-PI-007. ADR-05.
+**Credentials.** The access token travels in the request header only (the `` `Authorization: Bearer` `` header, set from the parameter). No token is ever a URL component, query parameter or deeplink. No token is logged, echoed in an error, or included in an event.
 
-### C04 — `ProfileSettingsView` + `SettingsDestination.profile`
+**Hostile-input boundary.** `trackURI(id:)` never constructs a URI from unvalidated input; `searchURI(query:)` percent-encodes the query and caps it; the only scheme the tool can produce is `spotify` (plus the pre-existing YouTube shapes, which the tool never builds). The full grammar is §24.
 
-- **Files.** `App/SettingsTabs.swift` (destination case, family-tab row, view switch), new
-  `App/ProfileSettingsView.swift`, new `App/ProfileSettingsModel.swift`.
-- **Responsibility.** Plain (!) editor for name, address-as (C03), DOB, GP, hospital, plus a
-  read-only next-of-kin note linking to the family-contacts editor. Saves through the coordinator;
-  the change is effective on the next wake/reply via the cache swap (FR-PI-012). No new auth
-  (OD-PI-5 / ADR-08).
-- **Key types.** `SettingsDestination.profile`, `ProfileSettingsView`, `ProfileSettingsModel`.
-- **Dependencies.** Coordinator writer/snapshot, `AddressAsField`, `SettingsTabMappingTests`
-  (extended).
-- **Concurrency.** Main actor (`@MainActor` model).
-- **Errors.** `writeFailed` → inline localized message; the previously stored value remains in
-  effect.
-- **Requirements.** FR-PI-012, FR-PI-010; NFR-PI-006, NFR-PI-007. ADR-08.
+**Failure behavior.** Every `FetchError`/`PlayError` case maps to a matrix row in §13; the tool itself makes no decisions about speaking, fallback or retry.
 
-### C05 — `WakeAcknowledging` + `WakeAcknowledgmentService` + `VoicePipeline.beginCapture`
+**Test seam.** `SpotifyToolTests` (§22) with a fake `LocalToolTransport` and a fake `CallLinkOpening`; URL-shape assertions, parse fixtures, error injection, the hostile corpus. No real network.
 
-- **Files.** New `Services/Voice/WakeAcknowledgment.swift`; edits to
-  `Services/Voice/VoicePipeline.swift` (seam property, handler split, `stop()` cancel).
-- **Responsibility.** On wake detection with a recorded term, speak the localized template with
-  the term verbatim, then start capture — bounded by `wakeAckMaxHoldSeconds`; nil term or any
-  failure falls back to today's immediate silent start; nil seam is today's code path (FR-PI-008,
-  FR-PI-011, NFR-PI-008; ADR-06, ADR-09).
-- **Key types.** `WakeAcknowledging`, `WakeAcknowledgmentService`, `VoicePipeline.wakeAcknowledger`.
-- **Dependencies.** A `Speaker` (the coordinator's base `PiperVoiceSpeaker`, **not** the
-  `SpeechNoteForwarder`-wrapped instance — one bookkeeping owner, §6), the coordinator's
-  `noteSpeakingStarted/Ended` hooks, `L10n`, `ObservabilityBus?`.
-- **Concurrency.** Main-thread-only by contract with `dispatchPrecondition` checks; at most one
-  in-flight ack; completion exactly once per `begin` except when `cancel()` drops it (documented,
-  §7.1). See Section 6.
-- **Errors.** No thrown errors; failures are the synchronous fallback completion plus a
-  content-free event (`wake_ack_failed` / `wake_ack_timeout`).
-- **Requirements.** FR-PI-008, FR-PI-010, FR-PI-011, FR-PI-015; NFR-PI-001, NFR-PI-002,
-  NFR-PI-008, NFR-PI-010. ADR-06, ADR-09.
+### 9. C-SP-02 — `SpotifyCredentialStore`
 
-### C06 — `InterpreterContext.addressAs` + `IntentPrompt` clause
+**Responsibility.** Own the single encrypted record `SpotifySessionRecord` under the single key `spotify.session`, backed by the existing `EncryptedLocalStorage` seam (Keychain-backed, Data Protection Complete). `@MainActor ObservableObject`.
 
-- **Files.** `Services/Voice/LlamaCommandInterpreter.swift` (context type + init),
-  `Services/Voice/IntentPrompt.swift` (helper + three call sites), `Services/Voice/CommandRouter.swift`
-  (context construction ~line 1412), `App/AppCoordinator.swift` (collapse-provider context ~line 3601).
-- **Responsibility.** One guarded term flows from one accessor through the two existing
-  context-construction sites into the shared builders; the clause is appended to the reply-style
-  guidance in `build`, `buildChat`, and `buildUnderstanding`; no term → clause `""` → byte-identical
-  prompts (FR-PI-009, FR-PI-011; ADR-07, ADR-10).
-- **Key types.** `InterpreterContext` (extended), `IntentPrompt.addressAsClause(_:)`.
-- **Dependencies.** `ProfilePersonalizationReading` (C07), `IntentPromptTests`.
-- **Concurrency.** The clause rides the immutable `InterpreterContext` value; prompt composition is
-  pure and safe on any interpreter queue. See Section 6.
-- **Errors.** None; a rejected term is simply absent (nil) for that composition.
-- **Requirements.** FR-PI-009, FR-PI-010, FR-PI-011; NFR-PI-004, NFR-PI-005, NFR-PI-010.
-  ADR-07, ADR-10.
+**Data model.** Exactly ADR-SP-08 / L1 §16 (six fields, no additions): `accessToken`, `refreshToken`, `expiry`, `product`, `scope`, `linkedAt`. One Codable value under one key: atomic write, single-key wipe, one `StoragePlacementPolicy.keychainResidentKeys` addition (`"spotify.session"`). No other key, no plaintext fallback, no `UserDefaults`, no file path, never the repository.
 
-### C07 — `ProfilePromptTextGuard` + `ProfilePersonalization`
+**Read semantics.** The store loads the record in `init`; a missing or corrupt record reads as not configured (`record == nil`, `isLinked == false`) with no plaintext fallback. `save`/`clear` return `Result<Void, StorageError>`; a failed write leaves the previous record in place (or nil), and a failed clear is surfaced, never swallowed (the status flips only on a confirmed wipe).
 
-- **Files.** New `Services/Voice/ProfilePromptTextGuard.swift` (guard + `ProfileText` clamp
-  helper), new `Services/Voice/ProfilePersonalization.swift` (read seam + implementation).
-- **Responsibility.** The injection discipline for the one profile string that enters prompts:
-  quarantine → strip-then-detect → grapheme bound → quote-slot neutralisation → `nil` on residual
-  (un-personalized). `ProfilePersonalization` is the read seam the two context sites and the ack
-  service consume; it never writes.
-- **Key types.** `ProfilePromptTextGuard`, `ProfilePersonalizationReading`, `ProfilePersonalization`.
-- **Dependencies.** `InputSanitiser` (unchanged, single-sourced marker table), `UserProfileStoring`,
-  `ObservabilityBus?`.
-- **Concurrency.** Pure guard function; the read seam delegates to the store's locked cache; safe
-  from any queue. See Section 6.
-- **Errors.** No thrown errors; a dropped term emits `profile_prompt_text_quarantined` (content-free)
-  and the un-personalized path is used for that turn.
-- **Requirements.** FR-PI-011, NFR-PI-004, NFR-PI-002. ADR-09.
+**Single source of truth.** The store is the one read point for the router (askability), the account session and the Settings surface; `isLinked` is derived (`record != nil`), never stored separately, so there is no split-brain state (NFR-SP-010 scenario 4).
 
-### C08 — Seed mirror + Python renderer + mirror gate
+**Wipe evidence.** After `clear()` a sweep of the storage seam finds no Spotify value; the unlink test asserts the store reads not-configured and neither the tool log nor the console carries token material.
 
-- **Files.** `tools/train-intent/seeds/prompt_template.txt`,
-  `tools/train-intent/src/intent_prompt.py`, new `ios/tools/check-prompt-mirror.sh` + `.py`,
-  `ios/build.sh` (gate call).
-- **Responsibility.** The seed gains `{address_as_clause}` at the exact position the Swift
-  template interpolates the helper; the renderer gains the placeholder defaulting to `""`
-  (training bytes unchanged for the no-term corpus); a new build-blocking gate asserts byte
-  equality between the extracted Swift template and the seed, and fixes the one-byte trailing
-  newline drift it found (§13, item 3).
-- **Key types.** `PLACEHOLDERS`, `render_prompt(..., address_as_clause: String = "")`.
-- **Dependencies.** None at runtime; gate runs in `ios/build.sh` before every test scope.
-- **Concurrency.** n/a (build tooling).
-- **Errors.** Gate exits non-zero with a diff excerpt on any mismatch, missing placeholder, or
-  extraction failure (never a silent pass).
-- **Requirements.** NFR-PI-005. ADR-10.
+**Test seam.** `SpotifyCredentialStoreTests` with a fake `EncryptedLocalStorage` (`GeminiInMemoryStorage` precedent): round-trip of all six fields, clear, corrupt-store degradation, write/clear failure surfacing, and the key constant pinned so `StoragePlacementTests`' exact-set edit is forced.
 
-### C09 — L10n catalog additions
+### 10. C-SP-03 — `SpotifyAccountSession`
 
-- **File.** `Resources/Localizable.xcstrings` (en + ne).
-- **Responsibility.** Every new user-visible string keyed; the term and name are **data** and never
-  catalogued (FR-PI-010). New keys: the three step titles/bodies, about-you labels
-  (`onboarding.aboutYou.*`), emergency labels (`onboarding.emergency.*`), fingerprint step copy
-  (`onboarding.stepVoiceFingerprint.*`, `onboarding.voiceFingerprint.*`), the ack templates
-  (`wakeAck.personalized`: ne `हजुर %@`, en `Yes, %@`), and the Settings editor keys
-  (`settings.profile.title`, `profile.field.*`, `profile.kin.note`, `profile.save`,
-  `profile.saved`, `profile.error.saveFailed`). Button keys reuse `onboarding.next` /
-  `onboarding.skip` / `common.back`; the emergency inline add form reuses `onboarding.stepFamily.*`.
-- **Key types.** n/a (catalog).
-- **Dependencies.** `SettingsTabMappingTests`' L10n check (it fails if a new row's key is missing),
-  `L10n.str/fmt`.
-- **Concurrency.** n/a.
-- **Errors.** Unresolved template key → the ack speaks nothing (`wake_ack_failed`
-  `template_missing`); the UI degrades to the key string as today.
-- **Requirements.** NFR-PI-006, FR-PI-010; OD-A2 (owner eyeball on the en copy).
+**Responsibility.** The caregiver-facing account lifecycle: `link()`, `unlink()`, `markRevoked()`, `validAccessToken()`, `status`. `@MainActor ObservableObject`; holds the presenter closure; stores nothing outside C-SP-02; uses `SpotifyAuthFlow` (C-SP-04) for PKCE/URLs/parsing and its own transport for token exchange, `/v1/me` verification and refresh.
 
-### C10 — Observability + log-safety coverage
+**State machine A — linking lifecycle** (guards in parentheses; every transition is a test):
 
-- **Files.** `Services/Observability/LogSanitiser.swift` (redacted-keys additions),
-  `ios/tools/check-release-log-safety.py` (`FEATURE_ROOTS` additions).
-- **Responsibility.** Content-free events only (`outcome`, `error_code`, `duration_ms` — all
-  already allow-listed); profile field-name keys added to `redactedKeys` as the fail-closed
-  defence; the scan roots extended to the feature's own sources so a console write or an
-  unlisted metadata key in them fails the gate (NFR-PI-002).
-- **Key types.** `ObservabilityEvent` (unchanged), `LogSanitiser` (sets only).
-- **Dependencies.** `ios/build.sh` invokes `check-release-log-safety.sh` before every test scope
-  (existing wiring).
-- **Concurrency.** The bus is existing infrastructure; emitters below hold no shared state beyond
-  the store lock.
-- **Errors.** n/a.
-- **Requirements.** NFR-PI-002, NFR-PI-011.
+```
+ .notLinked ──link()──► .linking ──callback valid + exchange ok + verify ok ──► .linked(.premium | .free | .unknown)
+     ▲                     │   │
+     │                     │   ├─ user cancels / denies / flow times out ──► .linkFailed(.userCancelled)   [record: none]
+     │                     │   ├─ redirect/state mismatch ──► .linkFailed(.redirectMismatch|.stateMismatch) [record: none]
+     │                     │   ├─ provider error param ──► .linkFailed(.providerError(code:))              [record: none]
+     │                     │   ├─ token endpoint non-200 ──► .linkFailed(.exchangeFailed(statusCode:))     [record: none]
+     │                     │   ├─ /v1/me non-200 ──► .linkFailed(.verificationFailed(statusCode:))         [record: none]
+     │                     │   ├─ scope check fails ──► .linkFailed(.missingScopes(granted:))              [record: none]  (L2-D5)
+     │                     │   └─ store write fails ──► .linkFailed(.storageFailure)                       [record: unchanged]
+     │                     └─ no presenter / no client ID ──► .linkFailed(.noPresenter | .notConfigured)
+     │
+ .linked ──unlink()──► .notLinked            (record cleared; only on a confirmed wipe)
+ .linked ──validAccessToken() refresh + invalid_grant──► .notLinked   (wipe; emit spotify_unlink outcome revoked)
+ .linkFailed ──link()──► .linking            (re-attempt starts clean; no residual state)
+```
 
-### C11 — Emergency contacts step wiring
+`.notConfigured` (no client ID in `Info.plist`) is the dormant state: `link()` returns `.failed(.notConfigured)` immediately, the Settings row hides the Link action, and nothing crashes (the `GoogleAccountSession` missing-client-ID precedent). A `.linkFailed` status is transient UI state, cleared when the next attempt starts.
 
-- **Files.** `App/OnboardingWizardView.swift` (new `EmergencyContactsStep`),
-  `App/AppCoordinator.swift` (no API change — the existing `addFamilyContact` /
-  `updateFamilyContact` signatures already carry `isEmergencyContact`).
-- **Responsibility.** GP + hospital into C01 (optional, partial fill accepted); next of kin is the
-  existing `isEmergencyContact` designation on a family contact (ADR-02, resolving OD-F1); no
-  emergency-call logic change (FR-PI-014).
-- **Key types.** `EmergencyContactsDraft` (pure merge), `EmergencyContactsStep`.
-- **Dependencies.** `coordinator.familyContacts`, `addFamilyContact`, `updateFamilyContact`,
-  `saveProfile`, `currentProfileSnapshot`.
-- **Concurrency.** Main actor; contact writes go through the existing coordinator methods.
-- **Errors.** Contact write `false` → inline message + selection reload; profile `writeFailed` →
-  inline message, step stays.
-- **Requirements.** FR-PI-004, FR-PI-006, FR-PI-014; NFR-PI-001. ADR-02.
+**State machine B — music playback attempt** (in the router, C-SP-06; here for the transitions the session participates in):
 
-### C12 — Voice fingerprint step
+```
+ IDLE
+  └─ askable? (record present AND transport seam present)
+      ├─ no  ─► UNLINKED-TREATMENT branch of the matrix (rows 8/9/12)
+      └─ yes ─► TOKEN: validAccessToken()
+                  ├─ .revoked           → session wiped → UNLINKED-TREATMENT (row 10)
+                  ├─ .refreshFailed/.networkUnavailable/.storageFailure → SEARCH-FAILURE branch (row 11 → row 7 shape)
+                  └─ .success(token)    → SEARCH (concurrent legs per §13)
+                       ├─ usable        → SELECT: remote (Premium) | deep link | YouTube | honest line
+                       │     ├─ REMOTE: playTrack → ok → SPOKEN spotify.playing
+                       │     │            ├─ 401 → one forced refresh → retry once → second 401 → wipe → UNLINKED-TREATMENT
+                       │     │            └─ 403/404/network → DEEP-LINK branch
+                       │     └─ DEEP-LINK: canOpenURL → open → opened → SPOKEN spotify.openApp
+                       │                                   └─ not opened → SPOKEN spotify.appMissing (terminal)
+                       ├─ empty/failed  → YouTube fallback where it can serve, else the honest line
+                       └─ not capable   → YouTube fallback where it can serve, else spotify.appMissing
+```
 
-- **Files.** `App/OnboardingWizardView.swift` (new `VoiceFingerprintStep`).
-- **Responsibility.** Hosts the existing `VoiceEnrollmentSession` exactly as `VoiceSettingsView`
-  constructs it (same service/recorder/coordinator-as-suspender), as an optional skippable step;
-  a call site only — mechanism, storage, and permissions unchanged (FR-PI-007, NFR-PI-009).
-  `suspendForSampleCapture()` returns `true` when no live pipeline exists, so the pre-`start()`
-  wizard context is safe (verified in the coordinator conformance, §13 item 5).
-- **Key types.** `VoiceFingerprintStep` (holds the `@StateObject` session).
-- **Dependencies.** `VoiceEnrollmentSession`, `coordinator.makeEnrollmentSampleRecorder()`,
-  coordinator as `VoicePipelineSuspending`.
-- **Concurrency.** Existing `@MainActor` session + `VoicePipelineSuspending` cycle, unchanged.
-- **Errors.** The session's existing `Phase.failed` states render as honest copy; failure or skip
-  still advances; enrollment stays available in Settings.
-- **Requirements.** FR-PI-007; NFR-PI-009, NFR-PI-010.
+**`validAccessToken()` contract.** Returns the current token when `Date() < expiry - 60 s` (60 s skew, a named constant `expirySkewSeconds`); otherwise performs exactly one refresh (`spotify.maxRefreshAttemptsPerRequest` = 1), persists the refreshed record (updating `expiry`; `refreshToken` retained or rotated per the response), and opportunistically re-verifies `product` with the refreshed token via `GET /v1/me` (best-effort; failure keeps the previous value). `invalid_grant` from the token endpoint → wipe + `.failure(.revoked)`. Transport error → `.failure(.networkUnavailable)`. Non-200 other → `.failure(.refreshFailed(statusCode:))`. Store write failure → `.failure(.storageFailure)`. Never loops.
 
-### C13 — App-start interview routing (`coldStartInterviewRoute`; FR-PI-016)
+**Product staleness (L2-D13).** `product` is written at link time and on every successful refresh. The derived verification age is `expiry - 3,600 s` (Spotify's token lifetime); when a request finds that age older than `spotify.capabilityStalenessSeconds`, the opportunistic `/v1/me` re-check runs on the refresh path — one request, no schema change. A stale `premium` with a lapsed subscription is caught honestly by the play attempt (403 → deep link); a stale `free` costs at most one deep-link hand-off (L1 §11).
 
-- **Scope.** Added under the 2026-10-05 owner amendment (Feature Constraint 8); this is the only
-  addition to L1's C01–C12 inventory. It supersedes FR-PI-013's "No force-migration" scenario
-  **for the app-start path** (pending steps are now surfaced on start) while keeping FR-PI-013's
-  mechanism (`pendingSteps` / `firstPendingStep` / the wizard's `startingAt:` reopen), the
-  wizard's no-hard-gate contract and the FR-PI-004 / OD-F3 soft-skip. No new persisted state.
-- **Files.** `App/AppCoordinator.swift` (the route method), `App/ContentView.swift` (the
-  fresh-install path presents the wizard at the route), `App/HomeView.swift` (one-shot startup
-  presentation through the existing `showWizard` fullScreenCover), `App/OnboardingDrafts.swift`
-  (the shared trimmed-non-empty predicate). No new files.
-- **Responsibility.** Decide once per cold start where (if anywhere) to send the user into the
-  interview: the earlier of the first pending step and About-you when the mandatory fields are
-  not recorded; nil = no routing. Resume only — the outcome feeds the existing wizard
-  presentation; the check itself persists nothing.
-- **Key types.** `AppCoordinator.coldStartInterviewRoute()`,
-  `AboutYouDraft.mandatoryFieldsRecorded(in:)`.
-- **Dependencies.** `OnboardingState.stepStatuses` / `pendingSteps` / `firstPendingStep` (the
-  existing persisted map), `coordinator.currentProfileSnapshot()` (C01 cache; the check may
-  prime it).
-- **Concurrency.** Main-thread by contract; pure read, no mutation; one evaluation per process
-  (one-shot state in the shell). No async call, so no timeout parameter applies (Section 8).
-- **Errors.** The method never throws and has no error return: every failure mode has a defined
-  route (edge table below); its only outcomes are a `Step` or nil. Nothing in the check can
-  crash, stall or loop — the step-map read ignores unknown values (existing `status(of:)` rule)
-  and the decision is a single synchronous evaluation.
-- **Decision (L2, settling FR-PI-016's foreground question).** Cold start only; **no**
-  background→foreground re-check in v1. A foreground re-check would fire inside a living session
-  and can pop the interview over an active interaction (listening, playback, a safety flow) — an
-  interruption the requirement does not justify; cold start is its stated minimum.
-  Discoverability is preserved by the Home reminder card and the Settings editor. Revisit only
-  with an interruption-safety design (never over an active capture, call or alarm; never
-  mid-task).
-- **Requirements.** FR-PI-016 (plus FR-PI-001/002/004/013/015, NFR-PI-010).
+**Unlink discipline.** `unlink()` deletes the single record. Spotify exposes no third-party revocation endpoint, and the design says so honestly: no remote revoke is attempted or claimed (ADR-SP-14). Emit one `spotify_unlink` event (outcome `success` or `failed`; `revoked` when the wipe was triggered by `invalid_grant`). Re-link works through the same flow with no residual state.
 
-**Route rule (normative).** `first = onboardingState.firstPendingStep`.
-`mandatoryFieldsRecorded` = the snapshot is `.loaded` with a trimmed non-empty name AND
-address-as. If the mandatory fields are not recorded, the route is the earlier of `first` and
-`.aboutYou` in `Step.allCases` order (`.aboutYou` when `first` is nil or later than About-you);
-otherwise the route is `first`; nil when nothing is pending and the mandatory fields are
-recorded. The mandatory-missing route is a **hard route on start**; the About-you step's OD-F3
-soft-skip (ADR-04) and the dismissible presentation still apply, so the user is never trapped.
+**Observability.** `spotify_link` per attempt (outcomes `success` / `failed` / `cancelled` / `not_configured` / `no_presenter`; `errorCode` = the `SpotifyAuthError` case name); `spotify_unlink` per wipe. No metadata. Never a token, code, verifier or state value.
 
-**Edge behaviour (normative).**
+**Test seam.** `SpotifyAccountSessionTests` with a fake `EncryptedLocalStorage`, a fake transport, and a fake `SpotifyAuthSession` seam; covers every transition above including refresh bounds, the wipe on `invalid_grant`, re-link cleanliness, the flow timeout (L2-D7) and the `notConfigured` dormancy.
 
-| Situation | Status map | Profile snapshot | Route |
-|---|---|---|---|
-| Fresh install (never finished) | all pending | `.absent` | `.language` (the wizard's existing start — unchanged) |
-| Pre-finish relaunch (quit mid-wizard) | some completed | any | first pending step — resumes where the user left off; today such a relaunch restarted at `.language`, so this is the requirement's conscious resume change |
-| Interview complete | none pending | `.loaded`, name + address-as non-empty | none — the app starts normally |
-| Optional steps pending | first pending is optional | `.loaded`, mandatory recorded | first pending step — routed with the soft-skip preserved, never trapped |
-| Mandatory missing while About-you is marked completed (e.g. a corrupt payload discarded per §5.1) | aboutYou completed | `.absent` / empty / `.unreadable` | `.aboutYou` — the hard route repairs the record through the wizard's ordinary Next-and-save gate |
-| Status map corrupt (unknown raw values, wrong types) | reads as nothing recorded (existing rules) | any | as computed above — wizard from the first pending step; skippable; no crash, stall or loop |
-| Unit tests (hosted) | — | — | no routing — the one-shot honours the same boot guard ContentView uses for `start()` |
+### 11. C-SP-04 — `SpotifyAuthFlow`
 
-**Shell wiring (normative).**
+**Responsibility.** PKCE generation (S256), authorize-URL construction with all scopes at sign-in, callback parsing and exact-match validation, token-exchange and refresh request bodies, token-response parsing — plus the injectable presentation seam `SpotifyAuthSession` (production: `ASWebSpotifyAuthSession` over `ASWebAuthenticationSession`).
 
-- `ContentView` (the not-finished path): `OnboardingWizardView(startingAt: coordinator.coldStartInterviewRoute())`.
-  For an untouched fresh install this is `.language` — identical to today; for a pre-finish
-  relaunch it resumes at the first pending step (edge table).
-- `HomeView` (the finished path): a new `@State wizardStart: OnboardingState.Step?` is captured
-  by both entry points — the existing reminder card sets
-  `wizardStart = coordinator.onboardingState.firstPendingStep` (same value, captured at tap),
-  and the new one-shot sets `wizardStart = coordinator.coldStartInterviewRoute()` with
-  `showWizard = true`; the existing `.fullScreenCover` renders
-  `OnboardingWizardView(startingAt: wizardStart)` with its current environment injections.
-  One-shot: a `didCheckStartupRoute` `@State`, first `onAppear` only; `scenePhase` is not
-  observed for routing (the cold-start decision above). The one-shot honours the
-  `XCTestConfigurationFilePath` boot guard so hosted unit tests see today's behaviour; UI tests
-  run the real shell and see production routing.
+**Flow (caregiver-performed).** `link()` resolves the presenter at present time; builds a fresh PKCE pair and a fresh `state` nonce; starts the seam with `callbackURLScheme` = the app scheme and `spotify.linkFlowTimeoutSeconds` (300 s); on callback, validates (exact match) before anything else; exchanges; verifies; stores. Nothing is stored, and no token/code/verifier/state value reaches any log (NFR-SP-009).
+
+**Validation rules (exact match, zero exceptions).** Parse with `URLComponents`; require `scheme == "sahayak-spotify"` (case-sensitive), `host == "callback"`, empty path; require `state` present and equal to the stored nonce; require `code` present when no `error`; `error=access_denied` maps to `.userCancelled`, any other `error` value maps to `.providerError(code:)` (the fixed OAuth error vocabulary). Missing `state` or a mismatch → `.stateMismatch`; scheme/host/path mismatch → `.redirectMismatch`. On any rejection nothing is stored and no value is logged. The redirect constant is shared by `Info.plist` `CFBundleURLTypes`, the Dashboard registration and the validator; if the Dashboard refuses the scheme (gap 2), the constant moves and the validator/tests move with it.
+
+**Scopes at sign-in.** `user-read-private`, `user-read-playback-state`, `user-modify-playback-state` are requested on the authorization request itself (the calendar-share `addScopes` lesson; `GoogleAccountSession.grantsRequiredScopes` is the verification precedent). No client secret exists anywhere (ADR-SP-01); the token exchange carries `code_verifier` only.
+
+**Test seam.** `SpotifyAuthFlowTests`: RFC 7636-style verifier/challenge vector (verifier length 43–128, challenge = S256 of verifier), authorize-URL contents (all three scopes, `response_type=code`, `code_challenge_method=S256`, state), the callback accept/reject matrix, request-body shapes (form-encoded; no secret field), and token-response parse ok/malformed.
+
+### 12. C-SP-05 — `SpotifyPlugin`
+
+**Responsibility.** The `AssistantPlugin` twin of `YouTubePlugin`: `pluginID = "spotify"`, `displayNameKey = "plugin.spotify.name"`, one action `spotify.play` with a `query` entity, `handle` → `.spoken` / `.failed(spokenApology:)` with `spotify.*` lines, `presentationView` nil. It handles **explicit-Spotify** requests (the fragment below routes general music requests to the `music` intent, L2-D15): no link → honest `.failed(spotify.notLinked)`; linked → same `SpotifyTool` calls (search → remote/deeplink) → `spotify.playing` / `spotify.openApp` / honest failure lines. It never calls the network outside `SpotifyTool`/session seams and never chains to YouTube (the router's ladder owns degradation, ADR-SP-07).
+
+**Prompt fragment.** Kept at or under the YouTube fragment's size (the YouTube fragment is the size model; the compositor indents fragments identically). Exact text in §27. Plugin fragments compose only on the cloud path (`IntentPrompt.pluginSections(activePlugins)`); the on-device path composes none, so the 1,024-token context is unaffected.
+
+**Observability.** Component `plugin_spotify` (the `YouTubePlugin` precedent), events `spotify_plugin_no_query`, `spotify_plugin_play_opened`, `spotify_plugin_played`, `spotify_plugin_no_results`, `spotify_plugin_failed`, `spotify_plugin_not_linked`, `spotify_plugin_app_missing`; outcomes `opened_app` / `success` / `failure`; no metadata.
+
+**Test seam.** `SpotifyPluginTests` mirroring `YouTubePluginTests`: applicable to both locales; one action + a fragment that contains `spotify.play` and `query` and whose length is ≤ the YouTube fragment's length; no-query failure; unlinked failure line; linked handle speaks a `spotify.*` line and emits metadata-free events; app-absent failure; network-failure failure; `presentationView` nil.
+
+### 13. C-SP-06 — Router music path
+
+**Seams (dormant-nil pattern, added beside 646–648, injected at 689–691 and 709–711, wired by C-SP-09):** `spotifyAccountSession: SpotifyAccountSession?`, `spotifyTransport: LocalToolTransport?`, `spotifyLinkOpener: CallLinkOpening?`. All default nil so every pre-existing construction site and router test keeps compiling and behaving as before.
+
+**Intake.** Three entry points, all terminal for the turn, exactly one of them fires per utterance:
+1. ladder stage at ~1189: `case .music:` of the existing domain switch → `fireMusicRequest(query: KeywordIntentRule.musicQuery(from: preText) ?? preText)` (zero prompt tokens);
+2. `dispatchInterpreted` `case .music:` (2640–2643, stub deleted): `fireMusicRequest(query: interpretedQuery ?? KeywordIntentRule.musicQuery(from: transcript) ?? transcript)`; emits nothing under the old stub names;
+3. the plugin path (2922) is untouched; `SpotifyPlugin` serves explicit-Spotify requests per its fragment.
+
+**Askability and selection (pure helpers, test-pinned).**
+- `spotifyAskable` = `session?.isLinked == true && spotifyTransport != nil`.
+- `youtubeAskable` = `youtubeConfigStore?.apiKey != nil || youtubeLinkOpener != nil` (L1 §11; unchanged).
+- `spotifyRemoteCapable` = `product == .premium` (L2-D14).
+- `spotifyDeepLinkCapable` = `spotifyLinkOpener != nil && opener.canOpenURL(trackURI)` for the resolved track.
+- `youtubeServeable` for the selection = `youtubeAskable` (the YouTube leg's own outcome decides success; ADR-SP-06 keeps its behavior byte-identical to an explicit-YouTube request).
+
+**Matrix → code mapping (rows exactly as L1 §12; every row is one test).**
+
+| # | Condition at request time | Code path | Spoken line | Events | Tool-log |
+|---|---|---|---|---|---|
+| 1 | linked, Premium-capable, usable, remote play ok | search both legs (keyed YT) → `playTrack` 2xx | `spotify.playing` (fmt, title) | `spotify_search` usable; `spotify_play` ok | `.spotify` ok, query "", response "", status 204 |
+| 2 | linked, Premium-capable, usable, remote play fails (403/404/network) | → deep link `spotify:track:` opened | `spotify.openApp` | `spotify_play` premium_required/restricted/no_active_device/network_failed; `spotify_deeplink` opened | `.spotify` fail, response "", status 403/404/nil |
+| 3 | linked, free tier, usable | → deep link `spotify:track:` opened (no remote attempt) | `spotify.openApp` | `spotify_search` usable; `spotify_deeplink` opened | `.spotify` ok, response "", status nil |
+| 4 | linked, free tier, usable, app absent | not capable → YouTube if serveable, else honest line | YouTube lines, or `spotify.appMissing` | `spotify_deeplink` not_opened (when attempted) / `spotify_fallback` youtube or app_missing | `.spotify` fail |
+| 5 | deep-link open attempted and fails at attempt time | terminal, no chaining | `spotify.appMissing` | `spotify_deeplink` not_opened | `.spotify` fail, response = line |
+| 6 | linked, search empty | YouTube if serveable, else honest line | YouTube lines, or `spotify.notFound` | `spotify_search` empty; `spotify_fallback` youtube/not_found | `.spotify` fail, status 200 |
+| 7 | linked, search network/timeout/non-200/malformed/unusable | YouTube if serveable, else honest line | YouTube lines, or `spotify.unavailable` | `spotify_search` failed; `spotify_fallback` youtube/unavailable | `.spotify` fail, status or nil |
+| 8 | unlinked (never/wiped/revoked) | YouTube only (keyed or keyless); else `spotify:search:` opened; else honest line | YouTube lines, `spotify.openSearch`, else `spotify.notLinked` | `spotify_fallback` youtube / spoken(not_linked key) ; `spotify_deeplink` opened on the search hand-off | `.spotify` entry only if a Spotify attempt happened |
+| 9 | unlinked + YouTube seams dormant + no opener | honest line | `spotify.notLinked` | `spotify_fallback` not_linked | none |
+| 10 | `invalid_grant` on refresh | session wipes → unlinked treatment (row 8) | row 8 lines | `spotify_unlink` revoked; row 8 events | none |
+| 11 | refresh transport failure only | search-failure treatment (row 7 shape) | row 7 lines | `spotify_search` failed (when a search runs) / `spotify_fallback` | `.spotify` fail |
+| 12 | link-time verification/scope failure | stored nothing → unlinked treatment (row 8); Settings shows linkFailed | row 8 lines; `spotifySettings.*` | `spotify_link` failed | none |
+
+**Turn flow.** `fireMusicRequest(query:)`: resolve locale; `speakPreAck(locale:)` (parity with `fireYouTubePlay`); mark `attemptStartedAt`; run the askability checks; obtain the token (state machine B); search; select; execute; deliver exactly one spoken line; write at most one `.spotify` tool-log entry; emit the event pair. Async delivery mirrors `fireYouTubePlay`: main-thread entry, `Task` for network, `await MainActor.run` for speak/emit/log.
+
+**YouTube fallback.** `fireYouTubePlay(query:)` is called verbatim (ADR-SP-06), preceded by `spotify_fallback` emission (outcome `youtube`) and followed by the turn's `.spotify` fail entry (when a Spotify attempt happened). No YouTube internals change.
+
+**Double-handling guard.** The ordering makes it deterministic: YouTube-marked utterances are claimed at 1146 and never reach 1189; the music rule additionally excludes YouTube markers (L2-D8); every firing stage returns. Pinned by `CommandRouterMusicTests.` + `testYoutubeMarkedUtterance` + `NeverReachesTheMusicPath`.
+
+**Test seam.** `CommandRouterMusicTests` (§22) — one test per matrix row plus the cross-cutting pins (never-stub, one-line-per-turn, keyless-not-opened (L2-R1), no-metadata events, no query/title in the tool log, egress allowlist).
+
+### 14. C-SP-07 — `KeywordIntentRule` music rule + extractor
+
+**What is added (exact):** `Domain.music`; `Rule.excluded: [Group]` (default `[]`); `musicMarkers` (internal, shared with the veto); `musicVerbFamily`; one rule entry ordered between the YouTube rule and the first `appLaunch` rule; `mentionsMusic(_:)` (internal, for C-SP-08); `musicQuery(from:maxLength:)` + `maxMusicQueryLength = 100`.
+
+**`musicMarkers` (the shared family, exactly L1 §9.1):** भजन, गीत, गाना, संगीत, सङ्गीत (all as substring/phrase alternatives — postpositions fuse), Latin `music`, `song`, `bhajan` (whole-token). The plural "songs" is deliberately not a marker (out of the reviewed vocabulary; such an utterance still reaches the music path through the interpreter, stage 4 of §13).
+
+**`musicVerbFamily` (full enumeration; the virama/matra fusion rule applies — every form ships explicitly, per the YouTube/grapheme precedent):**
+- English whole tokens: `play`, `plays`, `playing`, `listen`, `listens`, `listening`, `sing`, `sings`, `singing` (L2-D9: `played`, `listened`, `sang`, `sung` excluded — narration guard).
+- Nepali play family (identical to the `youtubeVerbFamily` block): चलाऊ / चलाऊँ / चलाउ / चलाउनुहोस् / चलाउनुस् / चलाइदिनुहोस् / चलाइदिनुस् / चलाइदिनु / चलाइदेऊ / चलाइदेऊँ / चलाइदेउ; the same eleven-form बजाऊ block; the twelve-form लगाऊ block (including the लगाउँ twin).
+- Nepali listen family (identical to the `newsVerbFamily` सुनाऊ block): सुनाऊ / सुनाऊँ / सुनाउ / सुनाउनुहोस् / सुनाउनुस् / सुनाइदिनुहोस् / सुनाइदिनुस् / सुनाइदिनु / सुनाइदेऊ / सुनाइदेऊँ / सुनाइदेउ.
+- Nepali sing family (new): गाऊ / गाऊँ / गाउ / गाउनुहोस् / गाउनुस् / गाइदिनुहोस् / गाइदिनुस् / गाइदिनु / गाइदेऊ / गाइदेऊँ / गाइदेउ.
+
+**Rule shape.** `Rule(domain: .music, excluded: [youtubeKeywords], variants: [[musicMarkers, musicVerbFamily]])` — relaxed co-occurrence, exactly the youtube rule's shape. Deliberate conservative choice (L1 §9): noun-only phrases (उदाहरण "देवीको भजन") do not fire this stage; they reach the same music path via the interpreter's existing `music` intent. The खोज search family is deliberately NOT a music verb: "गीत खोज" falls to the interpreter, same treatment.
+
+**Ordering.** `news → youtube → music → appLaunch (camera, photos, settings, weather, whatsapp, youtube, facebook, magnifier, health, instagram, calendar) → festivalDate → (dynamic) medicationPhoto`. The music rule is evaluated before every appLaunch rule so "युट्युब खोल र गीत चलाऊ"-class utterances keep resolving as the strict ladder would.
+
+**Extractor `musicQuery(from:maxLength:)`** (mirrors `YouTubeRoute.extractQuery` mechanics exactly): split on whitespace/newlines; trim punctuation + danda per token; drop a token when `isMusicDropToken` — Latin whole-token drop set = the YouTube `latinDrops` set plus `music`, `song`, `bhajan`, `spotify`, `listen`, `listens`, `listening`, `sing`, `sings`, `singing`; Devanagari whole-token drop set = the YouTube `devanagariDrops` set plus भजन, गीत, गाना, संगीत, सङ्गीत, the सुनाऊ family and the गाऊ family; Devanagari containment drops = `युट्युब`, `स्पोटिफाइ` (any token containing them is dropped wholesale). If nothing survives, the first surviving *marker* token is used (L2-D10); if there is none, the raw transcript's tokens are used. Normalize with `NepaliTextNormalizer.normalize`, cap at `maxLength` (default 100), return nil only when the input canonicalizes empty. Worked fixtures (test-pinned): "भजन बजाऊ" → "भजन"; "पुरानो हिन्दी गीत बजाऊ" → "पुरानो हिन्दी"; "देवीको भजन" → "देवीको"; "युट्युबमा गीत चलाऊ" → "गीत" (only reachable in tests — the YouTube stage claims it in the ladder); "play a song" → "song"; "स्पोटिफाइमा गीत चलाऊ" → "गीत".
+
+**Test seam.** `KeywordIntentRuleTests` additions (§22): match data-driven over the golden verb-bearing utterances, matched-keys payload, YouTube precedence, narration guard (L2-D9 examples), bare-noun non-fire, ordering after youtube/before appLaunch, the extractor fixtures above, the cap, and `mentionsMusic` data-driven against the veto vocabulary.
+
+### 15. C-SP-08 — `VoiceContactSearchRoute` music veto
+
+**Change (one insertion).** Immediately after the existing YouTube veto in `decide(transcript:)` (line 83 region), before the search-marker check:
+
+```
+if isYouTubeUtterance(text) { return .notSearch }      // existing
+if KeywordIntentRule.mentionsMusic(text) { return .notSearch }   // [SPOTIFY] music veto — parity
+```
+
+`mentionsMusic` reuses the same `musicMarkers` alternatives (Latin whole-token, Devanagari substring) and canonicalizes internally, so the call is order-independent. Position parity with the YouTube veto; the direct-call veto above it is untouched.
+
+**Non-over-block proof.** A contact request without a music marker ("आरवलाई फोन गर", "call ram", "मेरो छोरालाई फोन लगाऊ") does not match any marker → veto does not fire → unchanged behavior. The YouTube veto and the direct-call veto hold independently.
+
+**Test seam.** `VoiceContactSearchRouteTests` additions: `testMusicShapedUtterances` + `AreNotContactSearches` (data-driven: "गीत चलाऊ", "भजन बजाऊ", "play a song", "संगीत सुनाऊ"), `testMusicVetoDoesNot` + `OverBlockContactRequests`, `testYoutubeVetoStillHolds` + `WithTheMusicVeto` ("युट्युबमा गीत खोज"), plus the existing contact-search suites unchanged.
+
+### 16. C-SP-09 — `AppCoordinator` wiring
+
+**Lazy stores (beside 1328–1360; first-use, not `init`, per BOOT-REVIEW P0-1):**
+
+```
+private(set) lazy var spotifyCredentialStore = SpotifyCredentialStore(storage: storage)
+private(set) lazy var spotifyAccountSession: SpotifyAccountSession = {
+    let session = SpotifyAccountSession(store: spotifyCredentialStore, flow: ASWebSpotifyAuthSession())
+    session.presenter = { [weak self] in self?.topPresentingViewController() }
+    return session
+}()
+```
+
+The presenter closure is resolved at present time, never captured (the `calendarShareSession` precedent at 9314–9322).
+
+**Registry (beside 2058):** `registry.register(SpotifyPlugin(accountSession: spotifyAccountSession, credentialStore: spotifyCredentialStore))`.
+
+**Router construction (beside 3704–3717):** `spotifyAccountSession: spotifyAccountSession, spotifyTransport: URLSession.shared, spotifyLinkOpener: SystemCallLinkOpener()`.
+
+**Removability (NFR-SP-012).** With all three router seams nil and the plugin unregistered, the feature is dormant: music requests reach the old stub-branch location and take the unlinked/no-seam honest path (§13 row 9 semantics); no crash; pre-existing tests compile unchanged. Pinned by the dormant-construction test in `CommandRouterMusicTests` and the registry-once test pattern.
+
+### 17. C-SP-10 — Settings surface
+
+**`SettingsDestination.spotify` (in `SettingsTabs.swift`).** `titleKey` = `spotifySettings.title`; `icon` = `music.note` (new row icon; the YouTube row uses `play.rectangle.fill`); no tab (`tab` derived, hidden-sheet membership); added to `hiddenSheetRows` in sheet order after `.youtube`: `[.geminiAI, .voiceEngine, .webSearch, .youtube, .spotify, .intentLog, .toolLog]`. `SettingsDestinationView` gains `case .spotify: SpotifySettingsView()`. Visible row count stays 21; the hidden sheet goes 6 → 7.
+
+**`SpotifySettingsView` (new struct in `SettingsView.swift`, mirroring `YouTubeSettingsView` at 768):** `LeafScreen(titleKey: "spotifySettings.title")` containing, in order: the status card (icon + `spotifySettings.status.*` line + Link/Unlink actions), the privacy disclosure text (`spotifySettings.privacy`), the rollout note (`spotifySettings.rolloutNote`, shown while the Dashboard app is in development mode — honest, never hidden, OD-S2(c)), and the shared confirmation dialog for unlink (`spotifySettings.removeConfirm`, destructive confirmed, cancel = `common.back`). No credential field of any kind (ADR-SP-01); if the recorded contingency ever activates, the field uses the YouTube `credentialField` secure-entry recipe.
+
+**Leaf state machine (derived from `SpotifyAccountSession.status`, never optimistic):**
+
+```
+notLinked      → status.notLinked;  primary action = Link (spotifySettings.link)
+linking        → buttons disabled;   no status change until an outcome exists
+linked(.premium) → status.linked;   primary action = Unlink (spotifySettings.unlink)
+linked(.free)  → status.freeTier;   primary action = Unlink
+linked(.unknown) → status.freeTier (L2-D14 wording: playback opens the app)
+linkFailed(e)  → status.linkFailed; primary action = Link (re-attempt)
+```
+
+**Accessibility (NFR-SP-010).** 44×44 pt minimum controls; body text through `appearance.typography` tokens (18 pt-equivalent); VoiceOver labels on every control; status conveyed as text (never colour alone); the disclosure and rollout note readable at caption size with high contrast.
+
+**Test seam.** `SettingsTabMappingTests` deliberate edits: `testHiddenSheetHoldsThe` + `RemovedTechnicalSections` gains `.spotify` in position; the partition/round-trip tests cover the new destination automatically; `testEveryRowTitleResolves` + `InBothLanguages` pins `spotifySettings.title` in the real catalog. The `testCloudProviderKeyScreens` + `AllLiveInTheHiddenSheet` peer set is unchanged (Spotify has no key screen).
+
+### 18. C-SP-11 — Localisation catalog
+
+`Localizable.xcstrings` gains the 20 keys of §31 with `ne` and `en` values both present and `extractionState` per the catalog's existing convention (`manual`, `state: translated` — the YouTube entries' shape). No hardcoded user-facing literal exists anywhere in the new paths; spoken lines go through `L10n.str` / `L10n.fmt` and settings text through the catalog. The full copy inventory is the reviewable artifact in §31 (owner sign-off requested there).
+
+### 19. C-SP-12 — `Info.plist`
+
+Three additive edits, no removals: (1) `LSApplicationQueriesSchemes` gains `spotify` (the `canOpenURL` pre-check must be honest — constraint 8); (2) `CFBundleURLTypes` gains one dict `{CFBundleTypeRole: Editor, CFBundleURLName: com.elderlyassistant.spotify, CFBundleURLSchemes: [sahayak-spotify]}` (the calendar-share entry is the shape precedent); (3) a new `SpotifyClientID` string whose value is copied from the Dashboard at implementation time — `[OWNER INPUT — public identifier; paste from the Dashboard into the plist, never into a document]`. No new usage description is added (no permission-protected API is touched).
+
+### 20. C-SP-13 — Release log-safety gate
+
+**Verified mechanics.** `check-release-log-safety.py` roles every `*.swift` under the source root as `engine` / `feature` / `other`. Rules 1–2 (transcript taint, raw-error rendering) apply to every file; rules 3–6 (any console write, content-worded console writes, unlisted metadata keys, content-derived event fields) apply only inside `FEATURE_ROOTS`. `check-release-log-safety-fixtures.py` requires one positive and one negative fixture per **rule** (not per root) and runs in every gate invocation.
+
+**Change (exactly):** `FEATURE_ROOTS` gains three entries — `Services/Spotify/` (the whole new group: store, session, auth flow), `Services/Voice/SpotifyTool.swift`, `Services/Plugins/SpotifyPlugin.swift`. No new rule and no new fixture is required (the four feature rules exist and are fixture-covered); the gate's own verdict proves the sweep because a console write or content-derived event field in any newly listed file fails it. Files changed in place (`CommandRouter.swift`, `KeywordIntentRule.swift`, `VoiceContactSearchRoute.swift`, `LocalToolLogStore.swift`, `ToolLogReviewView.swift`, `SettingsView.swift`, `SettingsTabs.swift` and the `AppCoordinator`) stay in the `other` role — they are large pre-existing files whose coverage under rules 1–2 is the project's established position, exactly as today. `LogSanitiser.allowedKeys` is not touched (the new events carry no metadata keys at all).
+
+### 21. C-SP-14 — Tool log + observability
+
+`LocalToolLogStore.Kind` gains `case spotify`; `ToolLogReviewView`'s kind→key mapping gains `case .spotify: key = "toolLog.kind.spotify"` (the view file is not otherwise changed). Entry contract (ADR-SP-15, stricter than YouTube):
+
+| Situation | query | response | outcome | statusCode |
+|---|---|---|---|---|
+| Spotify served (remote or deep link opened) | "" | "" | "ok" | 204 on remote; nil on deep link |
+| Spotify attempted, Spotify failed, fallback taken | "" | "" | "fail" | the Spotify failure status when known, else nil |
+| Spotify attempted, terminal honest line spoken | "" | the spoken static line | "fail" | status when known, else nil |
+| No Spotify attempt (unlinked rows, YouTube-only) | no entry — the YouTube leg writes its own existing entry | | | |
+
+The tool log is the encrypted `LocalToolLogStore` only; nothing here reaches the observability bus. Events and their closed vocabularies are §28; `metadata: [:]` always. No query text, no track title, no track id, no token, no provider body reaches any log, event, telemetry or console — DV-7 and the gate are the evidence.
+
+**Test seam.** `LocalToolLogStoreTests` gains a `spotify` kind round-trip; `CommandRouterMusicTests` pins the no-query/no-title/no-metadata assertions and the entry taxonomy above.
+
+### 22. C-SP-15 — Test seams (suite-by-suite)
+
+**New suites** (paths under `ios/ElderlyAssistantTests/` + `Services/...`; style mirrors the YouTube suites — XCTest, fake seams, `waitForDelivery()` async settling, `Locale(identifier: "ne-NP")` fixtures):
+
+| Suite | Load-bearing assertions |
+|---|---|
+| `SpotifyToolTests` | URL shapes (track-only, percent-encoding, market nil/given, cap, rejection of empty/overlong); header-only credential (fake transport inspects the `URLRequest`; URL carries no token); parse ok/empty/malformed/unusable-id; timeout injection → `timedOut`; transport error → `transportUnavailable`; non-200 → `invalidResponse(statusCode:)`; `trackURI` hostile corpus (scheme text, `//`, quotes, controls, traversal, over-long, percent traps, 21/23-char, non-base62) all nil; `searchURI` encode + cap; open outcomes via a fake opener (`canOpenURL` probed before `open`); play request shape (PUT, body, timeout) and 401/403/404/network mapping |
+| `SpotifyCredentialStoreTests` | six-field round-trip; clear wipes; corrupt/absent store reads not configured; write/clear failures surface `StorageError`; `storageKey == "spotify.session"` |
+| `SpotifyAuthFlowTests` | PKCE pair (length bounds, challenge = S256 of verifier); authorize URL (three scopes, S256, state); callback accept matrix (valid; wrong scheme/host/path; missing state; state mismatch; missing code; `error=access_denied` → userCancelled; other error → providerError); form-encoded exchange/refresh bodies containing no secret field; token parse ok/malformed |
+| `SpotifyAccountSessionTests` | every transition of state machine A; missingScopes/verification failure stores nothing (L2-D5); refresh within window makes no request; expired → exactly one refresh; `invalid_grant` wipes + status + event; refresh transport failure does not wipe; product re-verified on refresh, failure keeps the old value; unlink wipe + event; re-link clean; `notConfigured` dormant; flow timeout cancels (L2-D7) |
+| `SpotifyPluginTests` | both locales; one action `spotify.play` + fragment contains the action and `query`, length ≤ YouTube fragment length; no-query failure; unlinked failure line; linked speaks Spotify line; app-absent; network failure; events carry no metadata; `presentationView` nil |
+| `CommandRouterMusicTests` | one test per §13 matrix row (1–12); `testBareMusicRequestNeverSpeaksTheStub`; `testNoMusicBranchSpeaksThe` + `StubForInterpretedMusic` (scripted interpreter emits the music action with a query); `testYoutubeMarkedUtterance` + `NeverReachesTheMusicPath`; `testBothKeyedProvidersAre` + `SearchedConcurrently`; `testKeylessYouTubeIsNotOpenedWhen` + `SpotifyWins` (L2-R1); `testUnknownProductUsesTheDeepLink` (L2-D14); `testMusicTurnEndsInExactly` + `OneSpokenOutcomeLine` (data-driven over the rows); `testToolLogEntriesCarryNoQueryOrTitle`; `testObservabilityEventsCarryNoMetadata`; `testNoEgressBeyondTheProviderAllowlist` (every fake-transport request host ∈ `api.spotify.com`, `accounts.spotify.com`, the pre-existing YouTube hosts) |
+
+**Touched suites (must stay green; each change deliberate).**
+- `KeywordIntentRuleTests` — §14's additions (match, ordering, narration, bare-noun, extractor fixtures, `mentionsMusic`).
+- `VoiceContactSearchRouteTests` — §15's additions; all existing tests unchanged.
+- `SettingsTabMappingTests` — the §17 edits (hidden-sheet list content; the new destination rides the partition tests).
+- `StoragePlacementTests` — `testTheKeychainSetIsExactly` + `TheReviewedSecrets` gains `"spotify.session"` (set equality forces the conscious edit; no other change).
+- `LocalToolLogStoreTests` — the `spotify` kind round-trip.
+- `IntentPromptTests` / `GoldenCorpusTests` / `YouTubeRouteTests` / `YouTubePluginTests` / `CommandRouterYouTubeTests` — **unchanged**; their greenness is the NFR-SP-004/005/006 guard (prompt bytes, the 15-entry music block, explicit-YouTube behavior).
+
+**Golden-corpus supersession mechanics (constraint 5).** The corpus file is not edited: the 15 music utterances at `GoldenCorpus.swift` lines 143–157 all keep `intent: "music"` (the parser-level expectation is unchanged; `testCorpusHasAtLeast15EntriesPerIntent` keeps its floor). The deliberate supersession is at the **dispatch level**, recorded alongside the new expectation in `CommandRouterMusicTests` as a supersession block:
+
+| Pinned item | Old expectation (pre-feature) | New expectation (this feature) |
+|---|---|---|
+| `case .music:` dispatch (2640–2643) | emits `command_music_stub`; speaks `router.musicStub` | routes to `fireMusicRequest`; speaks exactly one real outcome line; the stub event name is unreachable on every music branch |
+| `router.musicStub` catalog key | reachable, spoken | retained in the catalog, **no reachable call site** (ADR-SP-11) |
+| Golden music block (15 utterances) | parse to `intent: "music"` | parse to `intent: "music"` (unchanged); verb-bearing entries additionally reach the deterministic music stage |
+| YouTube-marked request ("युट्युबमा गीत चलाऊ") | YouTube stage | YouTube stage (unchanged; test-verified) |
+
+**Baseline discipline (NFR-SP-006).** The project's known pre-existing unit-test baseline stands; the feature's own suites must pass, and every touched-suite edit is one of the deliberate ones enumerated above.
+
+### 23. C-SP-16 — DV protocol artifact (`specs/SP-device-validation-protocol.md`)
+
+Written at implement/DV time (pattern: the LCT protocol). It records, per item: exact steps, the build/device, the expected observation, pass/fail, and the evidence. Items = L1 §6 DV-1…DV-7: (1) unlinked + YouTube configured, 'भजन बजाऊ' → a real outcome, never the stub; (2) linked Premium test user, 'गीत चलाऊ' → both providers searched, Spotify selected, sound; (3) 'युट्युबमा गीत चलाऊ' → YouTube exactly as before; (4) free-tier / unlinked / airplane-mode / empty-search, each repeated → its explicit localized line (or the fallback), no silence, no false "playing"; (5) Nepali end-to-end on Anzaan for 1–4; (6) Spotify app removed → honest app-absent/fallback; (7) console/sysdiagnose capture during 1–6 → zero tokens, credentials, query text or provider bodies. Run with the OD-S2 registered accounts; an unmet item is a recorded failure that blocks the completion claim (FR-SP-017).
+
+**OD-S2 quota-request appendix (draft copy for the owner — `[OWNER INPUT]` to confirm/amend; nothing here is decided).** Use-case description for the extension form: a personal, voice-first assistant app for an elderly household (Nepali-first) that plays user-requested music; the integration searches the Spotify Web API with the linked household account's own token and, for Premium accounts, starts playback of the found track on the household's own devices; only the household's own accounts are served; no third-party users, no library or playlist writes, no data collection beyond what the API returns for the request. Dashboard app name `[OWNER INPUT — final name]`; redirect URI = the single registered constant; scopes = the three in §26; contact/business details `[OWNER INPUT]`; privacy-policy URL `[OWNER INPUT]`.
 
 ---
 
 ## Interfaces
 
-All signatures are the L2 contracts `plan-tasks` and `implement` must hold to. Error return types
-are explicit everywhere; nothing returns `any Error` or uses `unknown`-style placeholders.
-
-### 5.1 Store interfaces (C01)
+### 24. `SpotifyTool` — exact interface
 
 ```swift
-// Services/Storage/UserProfileStore.swift
-
-/// The single profile record. Unversioned; every future addition is an
-/// optional key read as nil when absent (the FamilyContact convention).
-/// `name` / `addressAs` are non-optional Strings: a payload MISSING those
-/// keys is unreadable — never defaulted. An empty string is legal and
-/// means "not recorded yet" (skip path, partial fill, Settings clear).
-struct UserProfile: Codable, Equatable {
-    var name: String
-    var addressAs: String
-    var dateOfBirth: DateComponents?   // year/month/day only; never spoken, never prompted
-    var emergencyDoctor: String?
-    var localHospital: String?
-}
-
-enum ProfileLoadResult {
-    case absent                        // fresh install / never written / discarded
-    case loaded(UserProfile)
-    case unreadable(ProfileStoreError) // present but not usable
-}
-
-enum ProfileStoreError: Error, Equatable {
-    case readFailed     // the store could not answer "is there a payload?"
-    case decodeFailed   // payload present, but not a valid UserProfile
-    case writeFailed    // the atomic write failed
-}
-
-/// The raw seam the store needs from the encrypted storage chain.
-/// Deliberately NOT `RawEncryptedStorage`: it adds the presence probe
-/// that distinguishes absent from unreadable, and inherits the typed
-/// write/delete surface from the existing protocol.
-protocol ProfilePayloadStorage: EncryptedLocalStorage {
-    /// The stored payload verbatim, or nil when the key is absent AND
-    /// when a file exists but does not yield a payload.
-    func readRawData(key: String) -> Data?
-    /// true  = a payload exists for `key` (even if unreadable),
-    /// false = no payload,
-    /// nil   = unknowable (store location unresolvable, or the file
-    ///         channel does not expose the probe). Never read as absent.
-    func hasPayload(key: String) -> Bool?
-}
-
-protocol UserProfileStoring: AnyObject {
-    /// Never throws; a failure is an explicit case. Callable from any
-    /// queue; the result is cached after the first disk read.
-    func load() -> ProfileLoadResult
-    /// Main-thread writer (UI-initiated through the coordinator). Atomic;
-    /// on failure the previously stored record stays in effect and the
-    /// cache is not touched.
-    func save(_ profile: UserProfile) -> Result<Void, ProfileStoreError>
-}
-
-final class UserProfileStore: UserProfileStoring {
-    static let storageKey = "user.profile"   // constant, not tunable
-    init(storage: ProfilePayloadStorage, observabilityBus: ObservabilityBus?)
-}
-```
-
-**File naming and placement (no change to the existing pattern).** The key is placed by the
-existing `StoragePlacementPolicy` on the encrypted-file channel (it is not in
-`keychainResidentKeys`): Application Support / `EncryptedStore/`, file named
-`<sha256("user.profile")>.json`, envelope `{key, payload}`, written `.atomic` +
-`.completeFileProtection`, excluded from backup. The migration seam
-(`MigratingEncryptedStorage`) is where the routing lives; `user.profile` is a new key, so no
-legacy copy can exist.
-
-**Probe conformance (additive; no call site changes).**
-
-```swift
-// Extension inside Services/Storage/EncryptedFileStorage.swift
-// (file-scoped access to the private URL builder).
-extension EncryptedFileStorage: ProfilePayloadStorage {
-    /// nil only when the store has no root (Application Support
-    /// unavailable) — the load path must not read that as "absent".
-    func hasPayload(key: String) -> Bool? {
-        guard let url = url(for: key) else { return nil }
-        return fileManager.fileExists(atPath: url.path)
+enum SpotifyTool {
+    struct TrackResult: Equatable {
+        let id: String        // validated: base62, exactly 22 characters
+        let title: String     // spoken-only; never in a URI, never logged
     }
-}
 
-// Extension inside Services/Storage/MigratingEncryptedStorage.swift
-// (file-scoped access to `files`, `keychain`, `migrateToFileIfPossible`).
-extension MigratingEncryptedStorage: ProfilePayloadStorage {
-    /// Mirrors `read()`'s precedence: snapshot → files → legacy Keychain
-    /// (+ the existing transactional migration), so a record that landed
-    /// on the Keychain fallback channel is still read honestly.
-    func readRawData(key: String) -> Data?
-    /// files probe; on `false`, a legacy Keychain copy still counts as
-    /// present; `nil` when the file channel cannot probe.
-    func hasPayload(key: String) -> Bool?
-}
-```
+    enum FetchError: Error, Equatable {
+        case invalidResponse(statusCode: Int)   // non-2xx (incl. 401 on search — row 7 treatment)
+        case noResults                          // 2xx but zero usable tracks
+        case malformedResponse                  // unparseable payload / empty title
+        case unusableResult                     // id present but failed validation
+        case timedOut                           // URLError.timedOut
+        case transportUnavailable               // other URL error / offline
+    }
 
-**Load state mapping (exhaustive).**
+    enum PlayError: Error, Equatable {
+        case invalidURI                         // defensive: uri.scheme != "spotify"
+        case unauthorized                       // 401 (already after the single refresh)
+        case premiumRequired                    // 403 with reason PREMIUM_REQUIRED
+        case restricted                         // other 403
+        case noActiveDevice                     // 404
+        case invalidResponse(statusCode: Int)   // other non-2xx
+        case timedOut
+        case transportUnavailable
+    }
 
-| Probe | Raw read | Decode | Result | Side effects |
-|---|---|---|---|---|
-| `nil` | — | — | `.unreadable(.readFailed)` | cached; `profile_store_unreadable` `read_failed` |
-| `false` | — | — | `.absent` | cached; `profile_store_absent` |
-| `true` | `nil` | — | `.unreadable(.decodeFailed)` | best-effort `delete`; cached as `.absent` when the delete succeeded, else cached `.unreadable`; `profile_store_unreadable` `decode_failed` |
-| `true` | data | throws | same as the row above | same |
-| `true` | data | ok | `.loaded` | cached; `profile_store_loaded` |
+    enum OpenOutcome: Equatable { case opened, notOpened }
 
-The **first** load of a corrupt payload returns `.unreadable(.decodeFailed)`; the payload is then
-discarded (L1 §3.2) and the cache holds what the store now contains. Events are emitted once per
-disk observation, never per cache hit, never in a loop.
+    static let defaultFetchTimeoutSeconds: TimeInterval = 8   // injectable at every call site
+    static let maxIdentifierLength = 22
+    static let maxSearchQueryLength = 100                     // mirrors music.maxQueryLength
 
-### 5.2 Wizard + editor model interfaces (C02, C03, C04, C11)
+    static func apiSearchURL(query: String, market: String?) -> URL?   // nil: empty or over-cap query
+    static func apiPlayURL() -> URL                                    // https://api.spotify.com/v1/me/player/play
 
-```swift
-// OnboardingState.swift — the only change to the enum:
-enum Step: String, CaseIterable, Identifiable {
-    case language, permissions
-    case aboutYou            // NEW
-    case familyContact
-    case emergencyContacts   // NEW
-    case voiceFingerprint    // NEW
-    case models
-}
-// The type's doc comment gains one clarifying line: every step is
-// skippable; the About-you step additionally gates its NEXT button on the
-// required fields (ADR-04) — this keeps the documented no-hard-gate
-// contract true and the two pinned tests in agreement.
-```
+    static func fetchTopTrack(query: String, accessToken: String,
+                              transport: LocalToolTransport,
+                              timeoutSeconds: TimeInterval = SpotifyTool.defaultFetchTimeoutSeconds)
+        async throws -> TrackResult                                    // throws FetchError
 
-```swift
-// App/OnboardingDrafts.swift — pure, unit-testable wizard helpers.
+    static func playTrack(uri: URL, accessToken: String,
+                          transport: LocalToolTransport,
+                          timeoutSeconds: TimeInterval = SpotifyTool.defaultFetchTimeoutSeconds)
+        async throws -> Void                                           // throws PlayError
 
-struct ProfileEntryBounds: Equatable {
-    var addressAsMaxGraphemes: Int = 24   // L1 §11 addressAsMaxGraphemes
-    var nameMaxGraphemes: Int = 60        // L1 §11 nameMaxGraphemes
-    static let `default` = ProfileEntryBounds()
-}
+    static func parseSearchJSON(_ data: Data) throws -> TrackResult    // throws FetchError
 
-struct AboutYouDraft: Equatable {
-    var name: String = ""
-    var addressAs: String = ""
-    var dateOfBirth: Date? = nil
-    var hasDateOfBirth: Bool = false
-    /// Trimmed non-empty name AND address-as (the Next gate, FR-PI-002).
-    var isComplete: Bool
-    /// The single permitted normalisation (trim) applied to name and
-    /// address-as; GP/hospital preserved from `base` (FR-PI-010).
-    func merged(into base: UserProfile) -> UserProfile
-}
-
-struct EmergencyContactsDraft: Equatable {
-    var emergencyDoctor: String = ""
-    var localHospital: String = ""
-    var nextOfKinID: UUID? = nil
-    /// Trims the two text fields; empty → nil; name/address-as/DOB
-    /// preserved from `base`.
-    func merged(into base: UserProfile) -> UserProfile
+    static func isSpotifyIdentifier(_ id: String) -> Bool              // ^[A-Za-z0-9]{22}$
+    static func trackURI(id: String) -> URL?                           // spotify:track:<id>, nil unless validated
+    static func searchURI(query: String) -> URL?                       // spotify:search:<percent-encoded>
+    static func open(_ url: URL, opener: CallLinkOpening) -> OpenOutcome
 }
 ```
 
-```swift
-// App/Components/AddressAsField.swift
-enum AddressAsPresets {
-    /// Chip options per language code. Data, not catalog strings: a chip's
-    /// term IS the stored term (ADR-05 / FR-PI-010), never a localised
-    /// display string. Suggested sets: ne — आमा, ममी, बुबा, दाइ, दिदी,
-    /// बजै, हजुरबुबा, हजुरआमा; en — Mum, Mom, Dad, Grandma, Grandpa.
-    /// Unknown language falls back to the en set.
-    static func terms(for languageCode: String) -> [String]
-}
+**URI validation boundary (NFR-SP-008) — accepted-input grammar.**
+- `trackURI(id:)`: accepted iff `id` matches `isSpotifyIdentifier` exactly — length 22, every scalar in `[A-Za-z0-9]`, nothing else. Rejected inputs include (test corpus): any `/`, `:`, `?`, `#`, `%`, `.`, `-`, `_`, whitespace or control character; scheme text; `//`; quotes; path traversal; non-base62 Unicode; lengths 0, 21, 23, 100. A rejected id returns nil and produces no partial URI.
+- `searchURI(query:)`: accepted iff the trimmed query is non-empty and its `Character` count ≤ `maxSearchQueryLength` (100). The query is percent-encoded with `CharacterSet.urlQueryAllowed` minus `+&=?/%#`, so no unencoded query delimiter survives; the result must parse with scheme `spotify`. Empty/over-cap → nil.
+- `apiSearchURL(query:market:)`: accepted iff same query bounds; built with `URLComponents`/`URLQueryItem` (`q`, `type=track`, `limit=1`, plus `market` only when non-nil); returns a `https` URL on `api.spotify.com` only.
+- **Scheme allowlist:** the tool constructs only `spotify:` URIs (deep links) and `https:` URLs on the two allowlisted hosts (API calls). The hostile corpus asserts every construction/opener call in the suite stays inside the allowlist.
 
-struct AddressAsField: View {
-    @Binding var text: String
-    let locale: Locale
-    var bounds: ProfileEntryBounds = .default
-    // Chips (Buttons, accessibilityLabel = the term as data) write the
-    // term into `text`; the TextField clamps writes to
-    // bounds.addressAsMaxGraphemes on Character boundaries via
-    // ProfileText.clamped(_:maxGraphemes:).
-}
-```
+**Request hardening.** The search and play requests set `timeoutInterval = timeoutSeconds` and carry the credential in the `` `Authorization: Bearer` `` header only. Play body: `{"uris":["<uri.absoluteString>"]}` where `uri` is a `spotify:track:` URL produced by `trackURI`. 403 handling inspects the JSON `error.reason` for `PREMIUM_REQUIRED` (content stays in memory, is never logged, echoed or stored); unparsable → `.restricted`. 401 on `playTrack` is returned to the caller for the single-refresh dance; 401 on `fetchTopTrack` is a row-7 search failure.
+
+### 25. `SpotifyCredentialStore` — exact interface
 
 ```swift
-// App/ProfileSettingsModel.swift
+struct SpotifySessionRecord: Codable, Equatable {
+    var accessToken: String
+    var refreshToken: String
+    var expiry: Date
+    var product: String?      // "premium" | "free" | nil
+    var scope: String?        // granted scope string (verification)
+    var linkedAt: Date
+}
+
 @MainActor
-final class ProfileSettingsModel: ObservableObject {
-    enum SaveState: Equatable { case idle, saved, failed }
-    @Published var name: String
-    @Published var addressAs: String
-    @Published var hasDateOfBirth: Bool
-    @Published var dateOfBirth: Date?
-    @Published var emergencyDoctor: String
-    @Published var localHospital: String
-    @Published private(set) var saveState: SaveState
+final class SpotifyCredentialStore: ObservableObject {
+    static let storageKey = "spotify.session"
+    @Published private(set) var record: SpotifySessionRecord?
+    var isLinked: Bool { record != nil }
 
-    init(coordinator: AppCoordinator, bounds: ProfileEntryBounds = .default)
-    /// Prefill from `coordinator.currentProfileSnapshot()`; empty strings
-    /// for absent/cleared fields.
-    func load()
-    /// Merges via AboutYouDraft/EmergencyContactsDraft semantics and
-    /// writes through `coordinator.saveProfile`. Empty name/address-as is
-    /// allowed here (clearing = back to the un-personalized path,
-    /// FR-PI-011); the wizard gate is the wizard's contract only.
-    func save()
+    init(storage: EncryptedLocalStorage)
+
+    @discardableResult func save(_ record: SpotifySessionRecord) -> Result<Void, StorageError>
+    @discardableResult func clear() -> Result<Void, StorageError>
 }
 ```
 
-**Wizard step views (all `private struct` in `App/OnboardingWizardView.swift`, on the existing
-chrome).**
+Placement: `StoragePlacementPolicy.keychainResidentKeys` gains `"spotify.session"` (the exact-set test is edited deliberately). Corrupt/absent storage → `record == nil`, no plaintext fallback.
 
-- `AboutYouStep(onNext:)` — name field (clamp 60), `AddressAsField`, optional DOB (`Toggle` +
-  `DatePicker`; components built with only year/month/day set, no calendar/timezone);
-  primary button `onboarding.next` disabled while `!draft.isComplete`; on tap: merge into
-  `coordinator.currentProfileSnapshot()` then
-  `coordinator.saveProfile(...)`; `writeFailed` → inline `profile.error.saveFailed` text and stay.
-- `FamilyContactStep` (existing) — additionally renders the store's contacts as a read-only
-  confirmation list (`settings.family.empty` when none); writes unchanged.
-- `EmergencyContactsStep(onNext:)` — kin list from `coordinator.familyContacts`: tapping a contact
-  writes `isEmergencyContact: true` through `updateFamilyContact` (passing its current values) and
-  clears the flag on any **other** flagged contact, so the wizard produces the singular
-  designation the requirement describes; plural flags remain legal in the store and resolve
-  through the existing `preferredEmergencyContact(_:)` rule unchanged (first flagged in list
-  order — verified in the shipped code). Empty list → the minimal inline form (reusing
-  `onboarding.stepFamily.*` field keys) calling
-  `addFamilyContact(name:phone:relationship:isEmergencyContact: true)`. GP/hospital TextFields
-  save with Next via `EmergencyContactsDraft`.
-- `VoiceFingerprintStep(onNext:)` — `@StateObject` session constructed exactly as
-  `VoiceSettingsView` constructs it; minimal UI driven by `session.phase` /
-  `session.collectedCount` (idle → "Record sample n of 3"; recording → stop; ready → done; failed →
-  the session's copy + `dismissFailure()`); Next always available.
-- `stepContent` gains the three cases; the exhaustive switch makes every future reorder visible.
-
-### 5.3 Prompt guard + personalization interfaces (C07)
+### 26. `SpotifyAccountSession` + `SpotifyAuthFlow` — exact interfaces
 
 ```swift
-// Services/Voice/ProfilePromptTextGuard.swift
-
-enum ProfileText {
-    /// Character-boundary prefix (grapheme clusters are never split).
-    static func clamped(_ value: String, maxGraphemes: Int) -> String
-}
-
-struct ProfilePromptTextGuard {
-    /// Composition bound (L1 §11 maxPromptTermGraphemes). Default = the
-    /// entry bound, so a stored term is never truncated at composition.
-    let maxPromptTermGraphemes: Int
-    init(maxPromptTermGraphemes: Int = 24)
-
-    /// nil in → nil out. nil out when:
-    ///  - the value is empty/whitespace after quarantine,
-    ///  - the quarantine action left a residual injection-marker shape
-    ///    (strip-then-detect via InputSanitiser's single-sourced table),
-    ///  - the bounded value is empty.
-    /// Slot neutralisation: `"` (U+0022) is replaced with `'` (U+0027)
-    /// so the term can never terminate the clause's quoted slot. This is
-    /// prompt-side only — the stored and spoken term is untouched
-    /// (FR-PI-010, ADR-09).
-    func guarded(_ value: String?) -> String?
+enum SpotifyAuthError: Error, Equatable {
+    case notConfigured                  // no client ID → feature dormant, never a crash
+    case noPresenter                    // no host controller at present time               (L2-D6)
+    case userCancelled                  // cancel, deny, or flow timeout                   (L2-D7)
+    case redirectMismatch               // scheme/host/path mismatch
+    case stateMismatch                  // missing or unequal state nonce
+    case providerError(code: String)    // OAuth error param, fixed vocabulary             (L2-D6)
+    case exchangeFailed(statusCode: Int)
+    case malformedResponse              // token endpoint 2xx but unparseable              (L2-D6)
+    case verificationFailed(statusCode: Int)
+    case missingScopes(granted: String)
+    case refreshFailed(statusCode: Int)
+    case revoked                        // provider said invalid_grant
+    case storageFailure(StorageError)
+    case networkUnavailable
+    case presentationFailed(code: Int)  // ASWebAuthenticationSession failure, numeric code (L2-D6)
 }
 ```
 
-```swift
-// Services/Voice/ProfilePersonalization.swift
-
-protocol ProfilePersonalizationReading: AnyObject {
-    /// Guarded term for prompt composition; nil = un-personalized.
-    var addressAsForPrompt: String? { get }
-    /// The stored term, verbatim, for the wake acknowledgment; nil when
-    /// absent/unreadable/empty. Never guard-processed (ADR-09 asymmetry).
-    var addressAsVerbatim: String? { get }
-}
-
-final class ProfilePersonalization: ProfilePersonalizationReading {
-    init(storage: UserProfileStoring,
-         promptGuard: ProfilePromptTextGuard,
-         observabilityBus: ObservabilityBus?)
-}
-```
-
-Behaviour: `addressAsVerbatim` returns the stored (already-trimmed) value when the load result is
-`.loaded`; `.absent` / `.unreadable` / empty → `nil` (no placeholder, ever). `addressAsForPrompt`
-applies `guarded(_:)` and, on a `nil` result for a non-nil input, emits
-`profile_prompt_text_quarantined` (outcome `quarantined`, no metadata). Guard evaluation runs per
-read; readings without a residual emit nothing.
-
-### 5.4 Ack service interfaces (C05)
+**`SpotifyAuthFlow` (statics) + the presentation seam.**
 
 ```swift
-// Services/Voice/WakeAcknowledgment.swift
+enum SpotifyAuthFlow {
+    static let authorizeEndpoint: URL      // https://accounts.spotify.com/authorize
+    static let tokenEndpoint: URL          // https://accounts.spotify.com/api/token
+    static let redirectURI = "sahayak-spotify://callback"   // one constant: plist + Dashboard + validator
+    static let callbackScheme = "sahayak-spotify"
+    static let callbackHost = "callback"
+    static let scopes = ["user-read-private", "user-read-playback-state", "user-modify-playback-state"]
 
-protocol WakeAcknowledging: AnyObject {
-    /// Starts the acknowledgment if a term is recorded; calls `completion`
-    /// exactly once, on the main queue, within `wakeAckMaxHoldSeconds`.
-    /// No term / unresolvable template → completion synchronously.
-    /// `cancel()` may drop a pending completion (pipeline stop or a
-    /// superseding capture — in both cases the completion is stale by
-    /// definition; see the state machine, §7.1).
-    func begin(completion: @escaping () -> Void)
-    /// Cancels any in-flight ack: playback stopped, bookkeeping balanced,
-    /// pending completion dropped, no event.
-    func cancel()
-}
+    static func makePKCE() -> (verifier: String, challenge: String)      // verifier 43–128 chars, S256
+    static func authorizeURL(clientID: String, state: String, challenge: String) -> URL?
+    static func parseCallback(_ url: URL, expectedState: String) -> Result<String, SpotifyAuthError>  // .success(code)
+    static func tokenExchangeRequest(code: String, verifier: String, clientID: String) -> URLRequest
+    static func refreshRequest(refreshToken: String, clientID: String) -> URLRequest
 
-final class WakeAcknowledgmentService: WakeAcknowledging {
-    init(speaker: Speaker,
-         termProvider: @escaping () -> String?,
-         localeProvider: @escaping () -> Locale,
-         onSpeakingStarted: @escaping () -> Void,
-         onSpeakingEnded: @escaping () -> Void,
-         wakeAckMaxHoldSeconds: TimeInterval = 2.5,
-         templateKey: String = "wakeAck.personalized",
-         observabilityBus: ObservabilityBus? = nil)
-}
-```
-
-**Phrase composition contract.** `phrase(term:templateKey:locale:) -> String?` resolves the
-template through `L10n.str`; if the resolved string equals the key (unresolved), or contains no
-`%@`, or the formatted result does not contain the term verbatim, the phrase is `nil` and the
-service emits `wake_ack_failed` (`error_code: "template_missing"`) and completes synchronously —
-a key or placeholder is never spoken.
-
-**Pipeline seam.**
-
-```swift
-// VoicePipeline.swift
-var wakeAcknowledger: WakeAcknowledging?   // nil default; wired by AppCoordinator
-
-private func handleWakeDetected() {
-    // unchanged: state/wakeWordGate guard; captureGeneration += 1; the
-    // per-capture buffer resets; emit("wake_word_detected"); turnTracer.beginTurn()
-    if let ack = wakeAcknowledger {
-        ack.begin { [weak self] in self?.beginCapture(generation: generation) }
-    } else {
-        beginCapture(generation: generation)   // today's exact path
+    struct TokenResponse: Equatable {
+        let accessToken: String
+        let refreshToken: String?          // present on authorization_code; may be absent on refresh
+        let expiresIn: TimeInterval
+        let scope: String
     }
+    static func parseTokenResponse(_ data: Data) -> TokenResponse?       // nil = malformed
 }
 
-private func beginCapture(generation: Int) {
-    guard captureGeneration == generation, state == .idle else { return }
-    // today's capture-start body VERBATIM, in order: the noise-filter
-    // capture bookend, the legacy/push recognizer branch (VAD reset +
-    // callbacks), state = .capturingCommand, the wedge-guard
-    // asyncAfter, speechRecognizer.startListening(timeout:)
+protocol SpotifyAuthSession: AnyObject {
+    @MainActor func authorize(url: URL, callbackURLScheme: String) async throws -> URL
 }
-
-func stop() {
-    startGeneration += 1
-    captureGeneration += 1
-    wakeAcknowledger?.cancel()   // NEW — before engine teardown
-    // ...unchanged
-}
+@MainActor final class ASWebSpotifyAuthSession: SpotifyAuthSession { /* ASWebAuthenticationSession */ }
 ```
 
-**Extraction rationale for the ack-first order.** Moving the noise-filter bookend into
-`beginCapture` keeps the ack's own audio out of the ambient noise profile the capture computes for
-the user's utterance. `simulateWakeWordDetection()` routes through the same handler, so the Talk
-button gets the same acknowledgment (ADR-06, recorded). The pipeline state stays `.idle` during
-the ack; the wake gate closes through the coordinator's `noteSpeakingStarted` hook, which the
-shipped wiring delivers on a main-queue async hop (AM-3 — this text previously claimed a
-synchronous close at `begin`), so a detection racing the ack start is normally rejected by the
-existing `allowsWakeDetection` guard, and in the narrow window before the hop lands the ack
-service's supersede teardown owns the old ack: the worst observable outcome is a restarted
-greeting, never a doubled capture start (the racing pair is pinned by
-`WakeAcknowledgmentSeamTests` + `WakeAcknowledgmentServiceTests`).
-
-### 5.5 Prompt builder interfaces (C06, C08)
+**`SpotifyAccountSession`.**
 
 ```swift
-// LlamaCommandInterpreter.swift — final L2 form (see §13, item 1).
-struct InterpreterContext {
-    let pendingMedications: [String]
-    let userLanguageHint: String
-    let addressAs: String?          // guarded term; nil = un-personalized
+@MainActor
+final class SpotifyAccountSession: ObservableObject {
+    enum Product: Equatable { case premium, free, unknown }
+    enum Status: Equatable {
+        case notLinked
+        case linking
+        case linked(Product)
+        case linkFailed(SpotifyAuthError)
+    }
+    enum LinkOutcome: Equatable {
+        case linked(Product)
+        case failed(SpotifyAuthError)
+        case cancelled                        // userCancelled / timeout, surfaced distinctly for the UI copy
+    }
 
-    init(pendingMedications: [String],
-         userLanguageHint: String,
-         addressAs: String? = nil)
-}
+    static var bundledClientID: String? { get }   // Info.plist key "SpotifyClientID"; nil → notConfigured
 
-// IntentPrompt.swift — settled wording (L1 candidate adopted as final).
-private static func addressAsClause(_ term: String?) -> String {
-    guard let term, !term.isEmpty else { return "" }
-    return " Address them as \"\(term)\" where it fits, never every sentence."
-}
-```
+    var presenter: (() -> UIViewController?)?
+    @Published private(set) var status: Status
+    var isLinked: Bool                    // status is .linked(...) only
+    var product: Product
 
-**Interpolation positions (exact anchors).**
+    init(store: SpotifyCredentialStore,
+         flow: SpotifyAuthSession,
+         transport: LocalToolTransport = URLSession.shared,
+         clientID: String? = SpotifyAccountSession.bundledClientID,
+         refreshAttemptLimit: Int = 1,                    // spotify.maxRefreshAttemptsPerRequest
+         capabilityStalenessSeconds: TimeInterval = 3600, // spotify.capabilityStalenessSeconds
+         linkFlowTimeoutSeconds: TimeInterval = 300,      // spotify.linkFlowTimeoutSeconds
+         expirySkewSeconds: TimeInterval = 60)
 
-- `build` — appended directly after the text `one short idea per sentence.` on the
-  `"response" is SPOKEN ALOUD` line.
-- `buildChat` — appended directly after `one short idea per sentence.` in its Nepali line (before
-  ` Never invent a fact…`).
-- `buildUnderstanding` — appended directly after `…keep one short idea per sentence.` in the
-  `Reply style` bullet.
-
-**Construction sites (the only two; verified by grep).** `CommandRouter.swift` (~1412) and
-`AppCoordinator.swift` (~3601, the Gemini collapse provider) both pass
-`addressAs: profilePersonalization?.addressAsForPrompt`. Downstream call sites of
-`IntentPrompt.build` / `buildChat` / `buildUnderstanding` (Gemini interpreter, Llama interpreter,
-local interpreter, Gemini client) need no edits — the clause arrives through the context value.
-
-### 5.6 Coordinator seams (C01 writer + read snapshots)
-
-```swift
-// AppCoordinator — additions only; main-thread writer, any-queue reads.
-
-/// The only writer for the profile record (wizard + Settings call it).
-/// The five values are written as the complete new record; callers merge
-/// by reading `currentProfileSnapshot()` first.
-@discardableResult
-func saveProfile(name: String,
-                 addressAs: String,
-                 dateOfBirth: DateComponents?,
-                 emergencyDoctor: String?,
-                 localHospital: String?) -> Result<Void, ProfileStoreError>
-
-/// The store's cached load result; no disk I/O after the first read.
-/// Any queue.
-func currentProfileSnapshot() -> ProfileLoadResult
-
-/// The read seam the interpreters and the ack service consume. Created in
-/// `init()`; nil means "not wired" (tests) and is consumed as nil-safe.
-private(set) var profilePersonalization: ProfilePersonalizationReading?
-```
-
-**Construction order (why `init()`).** The wizard runs **before** `coordinator.start()`, so the
-store, guard, and personalization seam are built in `AppCoordinator.init()` next to the existing
-storage composition; only the ack service (needs the speaker) is built in `start()`, where the
-seam is also handed to the pipeline (`voicePipeline.wakeAcknowledger = …`) and the base speaker
-instance is passed (never a forwarding wrapper — §6).
-
-### 5.7 Settings destination interfaces (C04)
-
-```swift
-// SettingsTabs.swift
-enum SettingsDestination { /* ... */ case profile }        // new case
-// titleKey: "settings.profile.title" · icon: "person.text.rectangle"
-// tab: .family  — rows become [.family, .profile, .caregiverNotifications, .calling]
-
-struct SettingsDestinationView: View { /* … case .profile: ProfileSettingsView() */ }
-```
-
-The kin note links to the existing family editor via the Settings navigation stack (the same
-mechanism the hub uses to push leaves); the row's L10n key and the family-tab test expectations
-are updated in the same change (`SettingsTabMappingTests`: family rows list + the visible-row
-count 20 → 21).
-
-### 5.8 App-start routing interfaces (C13)
-
-```swift
-// AppCoordinator.swift
-/// Cold-start interview routing (FR-PI-016). Evaluated by the shell once
-/// per process. Synchronous, main-thread; reads the persisted step map
-/// and the profile store's cached load result only — no async work, so
-/// no timeout parameter applies.
-/// Returns the step to present the wizard at, or nil when the interview
-/// is complete. No error return: every failure mode has a defined route
-/// (C13's edge table) — the method never throws.
-func coldStartInterviewRoute() -> OnboardingState.Step?
-```
-
-```swift
-// OnboardingDrafts.swift — the trimmed-non-empty predicate, single-sourced
-// with the About-you Next gate (FR-PI-002).
-extension AboutYouDraft {
-    static func mandatoryFieldsRecorded(in profile: UserProfile) -> Bool
+    func link() async -> LinkOutcome
+    func unlink() -> Result<Void, StorageError>
+    func markRevoked() -> Result<Void, StorageError>
+    func validAccessToken() async -> Result<String, SpotifyAuthError>
 }
 ```
 
-### 5.9 Interface-to-requirement matrix
+`isLinked` is true exactly when `status` is `.linked(…)`; the store's `record != nil` and the status are written together by the session, so routing and UI cannot disagree (L2-D5/L2-R2). `markRevoked()` is the wipe used by both the refresh path (`invalid_grant`) and the router's second-401 path; it emits `spotify_unlink` outcome `revoked`.
 
-| Interface element | Requirements |
+**Observability (both components).** `spotify_link` per attempt — outcomes `success` / `failed` / `cancelled` / `not_configured` / `no_presenter`; `errorCode` = the `SpotifyAuthError` case name only (never an associated value except the numeric status inside `refreshFailed`-class events, which are not emitted here). `spotify_unlink` — `success` / `failed` / `revoked`; `errorCode` `"storageFailure"` on failure. `metadata: [:]` always.
+
+### 27. `SpotifyPlugin` — exact interface
+
+```swift
+final class SpotifyPlugin: AssistantPlugin {
+    let pluginID = "spotify"
+    let displayNameKey = "plugin.spotify.name"
+
+    init(accountSession: SpotifyAccountSession,
+         credentialStore: SpotifyCredentialStore,
+         transport: LocalToolTransport = URLSession.shared,
+         linkOpener: CallLinkOpening = SystemCallLinkOpener())
+
+    func isApplicable(locale: Locale) -> Bool { true }        // English and Nepali households alike
+
+    var intentContribution: PluginIntentContribution          // actionNames: ["spotify.play"]; fragment below
+
+    func handle(_ command: PluginCommand, context: PluginExecutionContext) async -> PluginResult
+    func presentationView(for result: PluginResult) -> AnyView? { nil }
+}
+```
+
+**Prompt fragment (exact text; routes bare music to the `music` intent, L2-D15):**
+
+```
+PLUGIN CAPABILITY (Spotify): if the user asks to play or search
+something on Spotify specifically ("play bhajan on spotify",
+"स्पोटिफाइमा गीत चलाऊ"), set action to "plugin", pluginAction to
+"spotify.play", and pluginEntities to {"query": "<what they want>"}.
+General music or bhajan requests without the word Spotify are NOT this
+capability — use the "music" intent for those.
+```
+
+**`handle` behavior.** Trim `entities["query"]`; empty → event `spotify_plugin_no_query`, `.failed(spokenApology: L10n.str("spotify.unavailable"))`. Not linked → event `spotify_plugin_not_linked`, `.failed(L10n.str("spotify.notLinked"))`. Linked: `validAccessToken()` (failure → `.failed` with `spotify.unavailable`, or `spotify.notLinked` for `.revoked`); `fetchTopTrack`; on `noResults` → `spotify.notFound`; on another fetch failure → `spotify.unavailable`; on success: Premium-capable → `playTrack` (ok → `.spoken(L10n.fmt("spotify.playing", title))`; 403/404/network → deep link); free/unknown → deep link `trackURI`; deep-link open not-opened → `spotify.appMissing`. Events per §12; no metadata; no YouTube chaining.
+
+### 28. Router music path — exact interface, events, tool-log contract
+
+**Seams (added to the `init` signature and stored beside 646–648):**
+
+```swift
+private let spotifyAccountSession: SpotifyAccountSession?
+private let spotifyTransport: LocalToolTransport?
+private let spotifyLinkOpener: CallLinkOpening?
+```
+
+**Methods (new, private; the pure selection helper is internal for tests).**
+
+```swift
+private func fireMusicRequest(query: String)
+private func deliverMusicLine(locale: Locale, key: String, statusCode: Int?,
+                              outcome: String, startedAt: Date)      // static lines
+private func emitSpotify(eventType: String, outcome: String,
+                         durationMs: Int?, errorCode: String?)
+
+enum MusicOutcome: Equatable {
+    case spotifyRemote(SpotifyTool.TrackResult)
+    case spotifyDeepLink(SpotifyTool.TrackResult)
+    case spotifySearchHandoff
+    case youtube
+    case honestLine(String)        // L10n key: notFound | unavailable | notLinked | appMissing
+}
+static func selectMusicOutcome(spotifyLinked: Bool,
+                               spotifyTransportPresent: Bool,
+                               search: Result<SpotifyTool.TrackResult, SpotifyTool.FetchError>?,
+                               product: SpotifyAccountSession.Product,
+                               deepLinkCapable: Bool,
+                               youtubeServeable: Bool,
+                               spotifySearchOpenerPresent: Bool) -> MusicOutcome
+```
+
+`selectMusicOutcome` is pure, total and data-driven-tested; it encodes §13's rows as conditions, in order: linked+usable+remote-capable → remote; linked+usable+deep-link-capable → deep link; linked+usable+not capable → YouTube if serveable else appMissing; linked+search failure → YouTube if serveable else notFound/unavailable by error class; unlinked → YouTube if serveable, else search hand-off if an opener exists, else notLinked; linked+transport missing → the row-7 branch.
+
+**Observability vocabulary (component `spotify`; `metadata: [:]` on every event; `durationMs` only where stated).**
+
+| eventType | When | Closed outcome set |
+|---|---|---|
+| `spotify_search` | once per Spotify search attempt | `usable`, `empty`, `failed` |
+| `spotify_play` | once per remote-play attempt | `ok`, `premium_required`, `restricted`, `no_active_device`, `unauthorized`, `network_failed` |
+| `spotify_deeplink` | once per deep-link attempt (track or search hand-off) | `opened`, `not_opened` |
+| `spotify_fallback` | once per fallback/terminal branch | `youtube`, `not_linked`, `not_found`, `unavailable`, `app_missing` |
+| `spotify_link` | once per link attempt (session) | `success`, `failed`, `cancelled`, `not_configured`, `no_presenter` |
+| `spotify_unlink` | once per wipe (session/router) | `success`, `failed`, `revoked` |
+
+**Tool-log contract.** At most one `.spotify` entry per music turn, written iff a Spotify search or play/deep-link attempt happened; `query` is always `""`; `response` is `""` unless a terminal honest line was spoken (then the exact line); `outcome` `"ok"` only when Spotify served; `statusCode` from the last HTTP response when one exists; `durationMs` from the attempt start. Never a title, id, token or provider body.
+
+**Turn guarantee.** Exactly one `speak(...)` per turn from the music path (plus the pre-ack, which is the existing convention and not an outcome line); every branch of `selectMusicOutcome` and every failure of the execute step reaches a `speak` call before the turn returns.
+
+### 29. Intent layer — exact interface additions
+
+```swift
+// KeywordIntentRule.swift
+enum Domain: String { case news, youtube, music, appLaunch, festivalDate, medicationPhoto }  // + music
+
+private struct Rule {
+    let domain: Domain
+    let variants: [Variant]
+    let appID: String?
+    let excluded: [Group]        // NEW — a variant never fires when any excluded group matches
+}
+
+// internal (used by VoiceContactSearchRoute):
+static let musicMarkers: Group                       // भजन, गीत, गाना, संगीत, सङ्गीत, music, song, bhajan
+static func mentionsMusic(_ raw: String) -> Bool     // canonicalizes internally; same alternatives
+static let maxMusicQueryLength = 100
+static func musicQuery(from raw: String,
+                       maxLength: Int = KeywordIntentRule.maxMusicQueryLength) -> String?
+```
+
+`Rule`'s memberwise init gains `excluded: [Group] = []` so every existing rule table entry is untouched. The music rule entry sits between the youtube rule and the camera rule (§14). `VoiceContactSearchRoute` calls `KeywordIntentRule.mentionsMusic(text)` (§15). No change to `YouTubeRoute.swift`, `IntentPrompt.swift`'s core template, `ChatIntentClassifier`, or any encoder/interpreter action list: the music wording already exists in the prompt and the interpreter's music action already exists (pinned by `IntentPromptTests.testMentionsAllCanonicalIntentValues`, the digest pins and `testPromptStaysWithin` + `OnDeviceCharacterBudget`); the only intent-layer addition is `spotify.play` in `SpotifyPlugin.intentContribution`.
+
+### 30. Wiring, settings, plist, gate — exact edit list
+
+| File | Edit |
 |---|---|
-| `UserProfileStoring.load/save`, `ProfileLoadResult`, `ProfileStoreError` | FR-PI-003, FR-PI-015; NFR-PI-001 |
-| `ProfilePayloadStorage.readRawData/hasPayload` | FR-PI-015 (absent vs unreadable); NFR-PI-010 |
-| `saveProfile`, `currentProfileSnapshot` | FR-PI-002/003/006/012, FR-PI-015 |
-| `OnboardingState.Step` + drafts + steps | FR-PI-001/002/004/005/013; NFR-PI-007 |
-| `AddressAsField`, `AddressAsPresets` | FR-PI-002, FR-PI-010; OD-PI-4 |
-| `ProfileSettingsModel` | FR-PI-012; OD-PI-5 |
-| `ProfilePromptTextGuard.guarded` | NFR-PI-004; Feature Constraint 4 |
-| `ProfilePersonalizationReading` | FR-PI-009/010/011, FR-PI-015 |
-| `WakeAcknowledging.begin/cancel` | FR-PI-008/010/011; NFR-PI-008 |
-| `VoicePipeline.beginCapture`, `stop` cancel | FR-PI-008/011; NFR-PI-010 |
-| `InterpreterContext.addressAs`, `addressAsClause` | FR-PI-009/010/011; NFR-PI-005 |
-| Seed + renderer + mirror gate | NFR-PI-005; Feature Constraint 2 |
-| L10n additions | NFR-PI-006; Feature Constraint 3 |
-| LogSanitiser + FEATURE_ROOTS | NFR-PI-002; Feature Constraint 5 |
-| `coldStartInterviewRoute`, `mandatoryFieldsRecorded(in:)` | FR-PI-016, FR-PI-002/013; NFR-PI-010 |
+| `ios/ElderlyAssistant/App/` + `AppCoordinator.swift` | two lazy stores (§16); one `registry.register(SpotifyPlugin(...))`; three `CommandRouter` init arguments |
+| `ios/ElderlyAssistant/Services/` + `Voice/CommandRouter.swift` | three seams + init params; `fireMusicRequest`/`deliverMusicLine`/`emitSpotify`/`selectMusicOutcome`; ladder `case .music:`; dispatch stub replacement; `Kind.spotify` log calls |
+| `ios/ElderlyAssistant/Services/` + `Voice/KeywordIntentRule.swift` | §14/§29 additions |
+| `ios/ElderlyAssistant/Services/` + `Voice/VoiceContactSearchRoute.swift` | the one music-veto insertion (§15) |
+| `ios/ElderlyAssistant/Services/` + `Voice/LocalToolLogStore.swift` | `case spotify` |
+| `ios/ElderlyAssistant/App/` + `ToolLogReviewView.swift` | one mapping case |
+| `ios/ElderlyAssistant/App/` + `SettingsTabs.swift` | `case spotify` destination + title/icon/tab/hidden-sheet/view mapping |
+| `ios/ElderlyAssistant/App/` + `SettingsView.swift` | `SpotifySettingsView` struct |
+| `ios/ElderlyAssistant/Resources/` + `Localizable.xcstrings` | the 20 keys (§31) |
+| `ios/ElderlyAssistant/Info.plist` | the three additions (§19) |
+| `ios/tools/` + `check-release-log-safety.py` | three `FEATURE_ROOTS` entries (§20) |
+| `ios/seniOS.xcodeproj/project.pbxproj` | new Swift files in the app target and the test target (same change) |
+| `specs/SP-device-validation-protocol.md` | NEW artifact (§23) |
 
----
+### 31. Localisation inventory — the complete `spotify.*` copy (REVIEWABLE ARTIFACT)
 
-## 6. Concurrency and isolation
+20 keys, `ne` and `en` both mandatory; a missing translation is a failure, not a fallback to English. No `ne` value contains English prose (the provider name is the Devanagari loanword स्पोटिफाइ; the existing `YouTube` loanword precedent applies to युट्युब in the `removeConfirm` line). Only `spotify.playing` embeds a runtime value (the remote-sourced track title; spoken-only, never carded, never logged, never part of any URI). **This table is the artifact for owner sign-off** (FR-SP-016, NFR-SP-005; the rollout note's copy is an OD-S2 owner approval item).
 
-Per shared resource: who reads, who writes, and the isolation mechanism.
-
-| Resource | Readers | Writers | Isolation | Guarantees |
-|---|---|---|---|---|
-| Encrypted profile file (`user.profile`) | Any queue, through `UserProfileStore.load` / `ProfilePersonalization` | `UserProfileStore.save`, main-thread-only by contract (asserted) | One `NSLock` inside the store guards the cache and the disk access; the underlying `EncryptedFileStorage` writes are atomic (temp + rename) | A reader never sees a partial record; a failed write leaves both the file and the cache on the previous record; the first read primes the cache, later reads are cache hits |
-| Prompt assembly (`InterpreterContext` + `IntentPrompt`) | Any interpreter queue | None (values are immutable per turn) | Value semantics; `addressAsClause` is a pure static; the guarded term is computed at the read seam before the context is built | No shared mutable state; the same context value can be read from cloud/on-device paths without coordination |
-| Wake-ack path (`WakeAcknowledgmentService`) | `VoicePipeline.handleWakeDetected` (main-confined), `stop()` (main-confined) | same | Main-thread-only by contract, enforced with `dispatchPrecondition(.onQueue(.main))`; single in-flight ack; one `settle` exit | `completion` runs at most once per `begin` (except a `cancel()` that drops it); speaking bookkeeping is balanced exactly once; `begin` closes the wake gate through the coordinator's speaking hook, which the shipped wiring delivers on a main-queue async hop (AM-3) — the supersede path covers the racing window |
-| `VoicePipeline` capture epoch | — | `handleWakeDetected` / `stop` (main) | Existing `captureGeneration` counter + the added `state == .idle` check in `beginCapture` | A stale ack completion (superseded capture, stop race) is inert; `stop()` cancels the ack and bumps the epoch, double-protecting the invariant |
-| Family contacts (`family.contacts`) | Existing published list (main) | Existing coordinator methods, main | Unchanged existing store behaviour | The emergency step's flag writes are ordinary existing edits; the safety path's rule is untouched |
-| Wizard / Settings state | Main actor (SwiftUI) | Main actor | Existing pattern | `ProfileSettingsModel` and the step views are `@MainActor` |
-| Voice enrollment session | Main actor | Main actor | Existing `@MainActor` + `VoicePipelineSuspending` cycle | Unchanged; the pre-`start()` wizard context is handled by the existing no-live-pipeline path |
-| Cold-start interview routing (`coldStartInterviewRoute`) | Shell views, main thread, once per process | None — pure read (no mutation) | One-shot `@State` in the shell; the profile read uses the store's existing lock/cache; `scenePhase` deliberately not observed | The decision is stable for the process lifetime; no background re-evaluation; returning to Home never re-presents the wizard |
-
-**Why the ack service takes the base speaker.** The coordinator's reply lane wraps the shared
-speaker in `SpeechNoteForwarder` (it calls `noteSpeakingStarted/Ended` per utterance). The ack
-service receives the **base** `PiperVoiceSpeaker` instance plus the coordinator's note closures,
-so each ack balances the speaking count exactly once — wrapping a second forwarder would
-double-count.
-
----
-
-## 7. Error handling and observability
-
-### 7.1 Ack state machine (C05)
-
-States: `idle`, `active`. Fields: `completion`, `maxHoldWorkItem`, `speakTask`,
-`speakingOutstanding`, `startedAt`.
-
-| Event | Condition | Actions (in order) | Completion |
+| Key | English | Nepali | Used by |
 |---|---|---|---|
-| `begin` | state active (unreachable through the pipeline — defensive) | teardown of the old ack as `superseded` (playback cancel, balance speaking, drop old completion, no event) | dropped (old); new one proceeds |
-| `begin` | term nil/empty | none | called synchronously |
-| `begin` | phrase nil (template/unresolved/term not present) | `wake_ack_failed` `template_missing` | called synchronously |
-| `begin` | phrase ok | `speakingOutstanding = true`; `onSpeakingStarted()`; state `active`; `speakTask = Task { await speaker.speak }; schedule maxHold timer | pending |
-| speak returns (played or cancelled) | state active | `settle(.spoken)` | called |
-| timer fires | state active | `speaker.cancel()`; `wake_ack_timeout` `hold_exceeded`, `duration_ms` = hold | called |
-| `cancel()` | state active | `speaker.cancel()`; no event | dropped |
-| any settle | — | cancel timer; balance `onSpeakingEnded()` once; clear task/completion; state `idle`; then call the completion | — |
+| `spotify.playing` | "Playing %@ on Spotify." | "स्पोटिफाइमा %@ चलाउँदैछु।" | matrix row 1 (remote play ok); plugin success |
+| `spotify.openApp` | "Opening Spotify — play it there." | "स्पोटिफाइ खोल्दैछु — त्यहाँ बजाउनुहोस्।" | rows 2/3 (deep-link hand-off opened) |
+| `spotify.openSearch` | "Opening Spotify search." | "स्पोटिफाइमा खोज खोल्दैछु।" | row 8 (unlinked, search hand-off opened) |
+| `spotify.notFound` | "I couldn't find that music on Spotify." | "स्पोटिफाइमा त्यो संगीत भेटिएन।" | row 6 (empty search, no YouTube) |
+| `spotify.unavailable` | "Spotify isn't available right now. Please try again." | "अहिले स्पोटिफाइ उपलब्ध छैन। फेरि प्रयास गर्नुहोस्।" | row 7 (search/refresh failure, no YouTube) |
+| `spotify.notLinked` | "Spotify isn't set up yet. A family member can add it in Settings." | "स्पोटिफाइ अझै जोडिएको छैन। परिवारका सदस्यले सेटिङमा जोड्न सक्नुहुन्छ।" | rows 8/9/12 (unlinked, nothing else can serve) |
+| `spotify.appMissing` | "The Spotify app isn't on this phone, so I can't play the music." | "यो फोनमा स्पोटिफाइ एप छैन, त्यसैले संगीत बजाउन सकिनँ।" | rows 4/5 (app absent; terminal after an attempted open) |
+| `spotify.rolloutLimited` | "Spotify hasn't approved this account yet. Please try again later." | "स्पोटिफाइले यो खातालाई अझै स्वीकृति दिएको छैन। पछि फेरि प्रयास गर्नुहोस्।" | OD-S2 unregistered-account guidance |
+| `plugin.spotify.name` | "Spotify" | "स्पोटिफाइ" | plugin display name |
+| `spotifySettings.title` | "Spotify" | "स्पोटिफाइ" | settings row + leaf title |
+| `spotifySettings.status.linked` | "Connected (Premium)" | "जोडिएको (प्रिमियम)" | status row, Premium |
+| `spotifySettings.status.freeTier` | "Connected (free — playback opens the Spotify app)" | "जोडिएको (निःशुल्क — गीत स्पोटिफाइ एपमा खुल्छ)" | status row, free/unknown |
+| `spotifySettings.status.notLinked` | "Not connected" | "जोडिएको छैन" | status row |
+| `spotifySettings.status.linkFailed` | "Couldn't connect. Please try again." | "जोड्न सकिएन। फेरि प्रयास गर्नुहोस्।" | status row after a failed link |
+| `spotifySettings.link` | "Connect Spotify" | "स्पोटिफाइ जोड्नुहोस्" | Link action (caregiver framing) |
+| `spotifySettings.unlink` | "Remove Spotify" | "स्पोटिफाइ हटाउनुहोस्" | Unlink action + dialog confirm button |
+| `spotifySettings.removeConfirm` | "Remove the Spotify connection? Music will use YouTube only." | "स्पोटिफाइ जडान हटाउने हो? संगीत युट्युबबाट मात्र बज्नेछ।" | unlink confirmation dialog |
+| `spotifySettings.privacy` | "What you ask for is sent to Spotify to find the music; nothing else is sent." | "संगीत खोज्न तपाईंले भन्नुभएको कुरा स्पोटिफाइमा पठाइन्छ; अरू केही पठाइँदैन।" | privacy disclosure (FR-SP-016) |
+| `spotifySettings.rolloutNote` | "Spotify's service is still being tested; for now only approved accounts can connect." | "स्पोटिफाइ सेवा अझै परीक्षणमा छ; अहिले स्वीकृत खाताले मात्र जोड्न सकिन्छ।" | rollout note while in development mode (OD-S2(c)) |
+| `toolLog.kind.spotify` | "Spotify" | "स्पोटिफाइ" | tool-log review row label |
 
-Notes. `Speaker.speak` is non-throwing, so "failed" is exactly the phrase-resolution failure
-above; a synthesis that dies silently inside the speaker presents as the timeout path (the
-existing fallback chain inside the speaker is unchanged). The "exactly once, within
-`wakeAckMaxHoldSeconds`" contract holds for every path except `cancel()`, which is only called
-when the pending completion is by definition stale (`stop()`, supersede).
+### 32. Configuration parameters
 
-### 7.2 Error taxonomy
-
-| # | Error | Trigger | Retry | User sees | Operator sees |
-|---|---|---|---|---|---|
-| E1 | `ProfileStoreError.readFailed` | store cannot answer presence | no | nothing (un-personalized) | `profile_store_unreadable` `read_failed` |
-| E2 | `ProfileStoreError.decodeFailed` | present but undecodable | no | nothing (un-personalized) | `profile_store_unreadable` `decode_failed`; payload discarded |
-| E3 | `ProfileStoreError.writeFailed` | atomic write failed | user re-taps | inline `profile.error.saveFailed`; nothing claimed; previous value intact | none (no event in v1 — the L1 catalogue is followed exactly; the failure is user-visible) |
-| E4 | guard rejection | residual marker / empty after quarantine | no | nothing (un-personalized turn) | `profile_prompt_text_quarantined` |
-| E5 | ack phrase unavailable | unresolved template / term not present after formatting | no | silent start (today's behaviour) | `wake_ack_failed` `template_missing` |
-| E6 | ack hold exceeded | playback not finished within the bound | no | capture starts; greeting cut off at worst | `wake_ack_timeout` `hold_exceeded` |
-| E7 | contact write `false` | store add/update failed | user retries | inline message; list reloads | existing contact-path behaviour |
-| E8 | interview status unreadable/corrupt | step map or profile snapshot unusable at cold start | no | wizard opens at the first pending step; every step skippable; never trapped | none (no new event in v1 — the routing outcome is user-visible and the requirement carries no log surface; C13 records the decision) |
-
-### 7.3 Event catalogue (no new metadata keys; all values content-free)
-
-| Event (`component` / `eventType`) | outcome | errorCode | durationMs | metadata | Emission point |
-|---|---|---|---|---|---|
-| `profile` / `profile_store_loaded` | `success` | — | — | `[:]` | first disk load that decodes |
-| `profile` / `profile_store_absent` | `success` | — | — | `[:]` | first load, nothing stored |
-| `profile` / `profile_store_unreadable` | `failure` | `read_failed` \| `decode_failed` | — | `[:]` | first load of an unusable payload |
-| `profile` / `profile_store_saved` | `success` | — | — | `[:]` | successful save |
-| `profile_guard` / `profile_prompt_text_quarantined` | `quarantined` | — | — | `[:]` | guard dropped a term |
-| `wake_ack` / `wake_ack_spoken` | `success` | — | hold ms | `[:]` | playback finished within the bound |
-| `wake_ack` / `wake_ack_timeout` | `failure` | `hold_exceeded` | hold ms | `[:]` | bound reached; playback cancelled |
-| `wake_ack` / `wake_ack_failed` | `failure` | `template_missing` | — | `[:]` | phrase unavailable; silent start |
-
-`outcome` values follow the shipped free-form vocabulary (`success` / `failure`, plus the
-explicit `quarantined` marker); `error_code`, `duration_ms`, and `outcome` are all already in
-`LogSanitiser.allowedKeys`, so the scan-gate rules pass on the new roots without widening the
-allow-list. L1's `term_present` boolean on `wake_ack_spoken` is dropped as redundant (the event
-only fires when a term was spoken) — recorded in §13, item 4.
-
-### 7.4 Log safety (C10)
-
-- `LogSanitiser.redactedKeys` gains `profile_name`, `address_as`, `date_of_birth`,
-  `emergency_doctor`, `local_hospital`. Redaction runs before the allow-list filter, so the
-  fail-closed direction holds: if a future diagnostic ever emits one of these keys, the value is
-  replaced by `[redacted]` first and the key is then dropped by the allow-list (it is
-  deliberately **not** added to `allowedKeys` — no shipped event carries it).
-- `ios/tools/check-release-log-safety.py` `FEATURE_ROOTS` gains the feature's own sources:
-  `Services/Storage/UserProfileStore.swift`, `Services/Voice/WakeAcknowledgment.swift`,
-  `Services/Voice/ProfilePromptTextGuard.swift`, `Services/Voice/ProfilePersonalization.swift`,
-  `App/Components/AddressAsField.swift`, `App/ProfileSettingsView.swift`,
-  `App/ProfileSettingsModel.swift`, `App/OnboardingDrafts.swift`. Rules 3–6 then apply to them:
-  no Release-compiled console write, no content in any configuration, metadata keys must be in
-  the shipped allow-list (they are), no text interpolated into an event field (none is).
-
-### 7.5 What the user / operator sees
-
-| Flow | Success | Failure |
-|---|---|---|
-| About-you Next | advances; values persisted; next wake greets by term | inline `profile.error.saveFailed`, step stays, nothing claimed |
-| Emergency step Next / kin pick | values persisted; flag reflected in Settings too | inline message; selection reloads from the store |
-| Voice fingerprint | session's existing ready state | existing failure states; Next still advances |
-| Settings save | confirmation text; effective next wake/reply | inline message; previous value remains in effect |
-| Wake with term | `हजुर <term>` (ne) / `Yes, <term>` (en, OD-A2), then listening | silent start (E5) or a cut-off greeting then listening (E6); never a retry loop |
-| Store unreadable | n/a | nothing visible; exactly today's assistant behaviour |
-| Cold start, interview incomplete | wizard opens at the first pending step (FR-PI-016) | corrupt/unreadable state → wizard from the first pending step; still skippable; no crash or stall |
-
----
-
-## 8. Configuration
-
-Named, injectable, with defaults; no call-site magic numbers.
-
-| Parameter | Type | Default | Declared at | Wired at |
+| Parameter | Interface (exact name) | Default | Owner | Retryability / failure mode |
 |---|---|---|---|---|
-| `wakeAckMaxHoldSeconds` | `TimeInterval` | 2.5 | `WakeAcknowledgmentService.init` | `AppCoordinator.start()` |
-| `templateKey` | `String` | `"wakeAck.personalized"` | `WakeAcknowledgmentService.init` | `AppCoordinator.start()` |
-| `maxPromptTermGraphemes` | `Int` | 24 (= entry bound) | `ProfilePromptTextGuard.init` | `AppCoordinator.init()` |
-| `addressAsMaxGraphemes` | `Int` | 24 | `ProfileEntryBounds` | wizard + Settings editor |
-| `nameMaxGraphemes` | `Int` | 60 | `ProfileEntryBounds` | wizard + Settings editor |
-| `storageKey` | `String` | `"user.profile"` | `UserProfileStore` (constant, not tunable per L1 §11) | — |
+| `spotify.fetchTimeoutSeconds` | `timeoutSeconds` on `fetchTopTrack` / `playTrack`, default `SpotifyTool.defaultFetchTimeoutSeconds` | 8.0 | call sites (router/plugin) | single-shot; timeout → `timedOut` → matrix row 7 (search) / deep-link (play) |
+| `music.outcomeBudgetSeconds` | test assertion in `CommandRouterMusicTests` | 10.0 | test | assertion: when at least one provider answers, the outcome line lands within budget |
+| `music.negativeBudgetSeconds` | test assertion | 16.0 | test | assertion: no path waits longer than two sequential provider budgets before speaking |
+| `spotify.maxRefreshAttemptsPerRequest` | `refreshAttemptLimit` on the session init | 1 | AppCoordinator call site | counted; never loops (ADR-SP-13) |
+| `spotify.capabilityStalenessSeconds` | `capabilityStalenessSeconds` on the session init | 3,600 | AppCoordinator call site | best-effort re-check on the refresh path; failure keeps the stored product (§10) |
+| `music.maxQueryLength` | `maxLength` on `musicQuery`, default `KeywordIntentRule.maxMusicQueryLength`; `maxSearchQueryLength` on the tool | 100 | extractor/tool | over-cap input → nil URI / capped extraction |
+| PKCE verifier / challenge | `makePKCE()` | 43–128 chars / S256 | `SpotifyAuthFlow` | spec-fixed, not tunable |
+| `spotify.linkFlowTimeoutSeconds` | `linkFlowTimeoutSeconds` on the session init | 300 | AppCoordinator call site | timeout cancels the seam → `userCancelled` (L2-D7) |
 
-Async/external call timeouts: the only added async call is `Speaker.speak` from the ack service —
-bounded by `wakeAckMaxHoldSeconds` (default 2.5 s). The store adds no async call and no timeout:
-its I/O is synchronous local-disk work behind its lock (the existing atomic-write pattern), and
-it performs no network of any kind. The enrollment session's async methods keep the existing
-mechanism's behaviour with no new timeout.
+### 33. Log-surface discipline (interface level, NFR-SP-002 / ADR-SP-15)
 
-FR-PI-016 routing adds no parameter and no async call: `coldStartInterviewRoute()` is a single
-synchronous cached read (the ack bound and the entry bounds above are unaffected). The
-background→foreground re-check is deliberately not implemented in v1 — recorded in C13.
-
----
-
-## 9. Performance and security implementation patterns
-
-### 9.1 Prompt budget proof (NFR-PI-005)
-
-- **Ceiling unchanged:** `IntentPromptTests` pins `prompt.count <= 3_000` for the fixture. The
-  ceiling is not raised.
-- **Measured base:** the fixture renders to **2,506** Swift `Character`s (2,718 UTF-8 bytes)
-  today. The in-file test comment's "2,936" is stale — it predates the `[GEMINI-SOLIDIFY]`
-  trim (2026-09-18); the comment is corrected to the measured value in the same change so a
-  future trim starts from truth (§13, item 2).
-- **Worst-case composition:** 2,506 + 56 (clause static) + 24 (term at the entry bound) =
-  **2,586 ≤ 3,000**, headroom **414**. An 8-grapheme Devanagari term measures 64 → 2,570. The
-  composition bound equals the entry bound, so no stored term is ever truncated.
-- **Token view:** the ceiling was calibrated against the real tokenizers (696 qwen3 / 677 gemma
-  tokens at the base); the worst-case addition is ≤ 80 characters (roughly ≤ 20 tokens), leaving
-  ≈280 tokens for the utterance and JSON inside the 1,024-token on-device context.
-- **Runtime cost:** the guard is O(term length ≤ 200) on an already-sanitised string; the
-  personalization read is a lock + cached-value read (no disk after the first read).
-
-### 9.2 Seed mirror gate (NFR-PI-005, Feature Constraint 2)
-
-- `ios/tools/check-prompt-mirror.sh` (wrapper, mirroring the log-safety gate's shape) calls
-  `ios/tools/check-prompt-mirror.py`; `ios/build.sh` runs it beside
-  `tools/check-release-log-safety.sh` before every test scope and fails the build on a non-zero
-  exit.
-- The checker: extracts the `build` literal from `Services/Voice/IntentPrompt.swift` with Swift
-  multiline-literal semantics (dedent by the closing delimiter's indentation; drop exactly one
-  trailing newline), replaces the four interpolation sources — `\(context.userLanguageHint)`,
-  `\(meds)`, `\(transcript)`, `\(addressAsClause(context.addressAs))` — with
-  `{language_hint}`, `{medications}`, `{transcript}`, `{address_as_clause}`, then asserts byte
-  equality with `tools/train-intent` `/seeds/prompt_template.txt`.
-- Failure modes are loud: extraction failure, missing/duplicated interpolation, missing
-  placeholder, or any byte mismatch exits non-zero with a diff excerpt. There is no pass-by-default.
-- The checker's first run established the current drift: the seed ends `request.\n\n`, the
-  template `request.\n` — 2,699 vs 2,698 bytes. The C08 change removes the seed's extra newline
-  and adds the 18-byte placeholder (net 2,716 bytes), making `render_prompt(..., address_as_clause: "")`
-  byte-identical to the pre-feature rendered prompt (§13, item 3).
-
-### 9.3 Injection discipline (NFR-PI-004, Feature Constraint 4)
-
-Applied at the read seam, before any context construction, in this order:
-quarantine via `InputSanitiser.sanitise(value, level: .quarantine)` (control-strip, whitespace
-collapse, marker removal, clamp 200) → `containsInjectionMarker` (strip-then-detect, single-sourced
-table) → `Character`-boundary clamp to `maxPromptTermGraphemes` → quote-slot neutralisation
-(`"` → `'`) → nil on any residual. The term then appears only inside the quoted slot of the
-clause and is explicitly framed as data ("Address them as …"). The ack speaks the stored term
-verbatim and never guard-processes it (TTS, not a prompt — ADR-09 asymmetry). Model output
-remains untrusted exactly as today; nothing in a reply can cause a profile write or an action.
-
-### 9.4 Storage and privacy patterns (NFR-PI-001, NFR-PI-003)
-
-- All five fields live on the encrypted-file channel (Data Protection Complete, not backed up,
-  atomic writes); no plaintext copy exists at any point, including the atomic temp file.
-- DOB is stored as year/month/day components, never spoken, never composed into any prompt or
-  payload; GP/hospital likewise never leave the device. The only profile value that can reach an
-  engine is the guarded term, under the existing consent-gated cloud path (ADR-11).
-- The ack's synthesis uses the existing `PiperVoiceSpeaker` path whose temp WAV is deleted after
-  playback; no personalized audio is cached (ADR-06).
-- No new permissions, no HealthKit, no new egress. `Info.plist` untouched.
-- Cold-start routing (C13) reads the store's cached load result — priming it once on the main
-  thread (one small synchronous local read, the same first read personalization would perform)
-  — and performs no polling, no background work, no network.
+- **No new console writes.** The new files contain zero `print` statements in any configuration (the gate's feature-role rule enforces this for the three new roots).
+- **No content in events.** Every Spotify event is `component: "spotify"` (or `plugin_spotify`) with `metadata: [:]` and the closed vocabularies of §28; `errorCode` is only a case name or a numeric status. No `LogSanitiser.allowedKeys` change is needed or made.
+- **No content in the tool log.** Query always `""`; response `""` unless a terminal static line was spoken; never a title, id, token or provider body (§28).
+- **No credential anywhere except the header.** The token travels in the `` `Authorization: Bearer` `` header on the two API hosts only; the authorize/token exchange bodies carry the PKCE verifier (a per-attempt secret, discarded after use) and never a client secret, which does not exist.
+- **The gate.** `ios/tools/check-release-log-safety.sh` runs in every `ios/build.sh` scope; it must exit 0 before any unit or Release gate runs. The three feature-root additions (§20) are the feature's deliberate change to it.
 
 ---
 
-## 10. Technical risks and mitigations
+## Traceability — every requirement mapped
 
-| # | Risk | Likelihood | Impact | Mitigation |
-|---|---|---|---|---|
-| R1 | Ack synthesis latency misses NFR-PI-008's ≤ 1 s activation on a slow device (OD-A1, evidence owed) | medium | low | Ack-first design; warmed Piper engine (existing WarmStart); the fallback ladder stays L1's: warm the engine, then a memory-only pre-synthesis keyed by term+voice (never a disk artifact), then shorten copy. The implement/security-test tasks measure detection→first audio on a device |
-| R2 | Piper synthesises while the mic is live; a race lets the tail of the greeting reach the recognizer | low | low | Ack-first with a bounded hold; speaker cancelled before capture starts on timeout/cancel; the gate closes through the coordinator's speaking hook on a main-queue async hop (AM-3), so the racing window is real and handled by the supersede path; worst case is a short clipped greeting in the transcript, bounded by the existing capture timeout |
-| R3 | Prompt budget regression from a future edit | medium | medium | Pinned 3,000-char ceiling test unchanged + comment corrected to 2,506; seed gate blocks template/seed drift; the measured table in §9.1 is the baseline for future changes |
-| R4 | The seed-mirror checker mis-emulates Swift's literal semantics | low | medium | The checker implements the two rules verified by compilation in this task (dedent + exactly one dropped trailing newline) and fails loudly on extraction anomalies instead of passing |
-| R5 | `wake_ack_spoken` timeout at 2.5 s cuts a slow synthesis before any audio, so a personalized user hears nothing on a slow boot | low | low | Same fallback as today (silent start); the timeout path emits `wake_ack_timeout` so the frequency is observable; OD-A1 measurement drives any default change (the parameter is injectable) |
-| R6 | Multiple flagged contacts confuse "next of kin" | low | low | The wizard step produces a single flag (clears others); plural flags from the Settings editor remain legal and resolve through the existing first-flagged rule, unchanged |
-| R7 | Corrupt-store discard loop on a locked device | low | low | The first load deletes best-effort and caches the outcome; no path re-reads in a loop; a save overwrites cleanly |
-| R8 | Settings "link to family editor" assumed a navigation stack | low | low | If the Settings stack cannot push a leaf from a leaf in implementation, the note degrades to text with the same information; tracked as an implementation detail, not a contract |
-| R9 | Guard false-positives reject a legitimate term (e.g. a term containing a marker-like phrase) | low | low | The rejection is per-turn and un-personalized — no crash, no user error; `profile_prompt_text_quarantined` makes it visible; the ACK still speaks the term verbatim (the user still hears their greeting) |
-| R10 | Devanagari grapheme handling in clamps/truncation | low | medium | All clamps use `Character` prefixes (`ProfileText.clamped`); tests pin a Devanagari fixture (conjuncts are single Characters) |
-| R11 | The one-byte seed drift repeats (edits to one file only) | medium (historically) | medium | The new build-blocking gate; the Swift file's doc comment and `intent_prompt.py`'s loud placeholder failure remain |
-| R12 | L10n key for the ack template missing in a language | low | low | Phrase builder refuses unresolved templates (silent start + `wake_ack_failed`); `SettingsTabMappingTests`' L10n sweep plus the catalog additions cover the rest |
-| R13 | Startup routing repeats on every cold start until the interview is completed — a user who deliberately declines to give a term is routed each launch | medium (required by the amendment) | low | The OD-F3 soft-skip and the dismissible presentation guarantee they are never trapped, and completing the steps (or the Settings editor) ends the routing; the behaviour itself is the owner's amendment (Feature Constraint 8), not an implementation choice |
+All 29 requirements are touched by this design; none is untouched, and no requirement is silently dropped.
 
----
+| Requirement | Component(s) | Interface (exact symbol) | Test seam |
+|---|---|---|---|
+| FR-SP-001 stub → real playback | C-SP-06 | `fireMusicRequest` replacing the `command_music_stub` branch | `CommandRouterMusicTests.testBareMusicRequestNeverSpeaksTheStub`, `testNoMusicBranchSpeaksThe` + `StubForInterpretedMusic`; DV-1 |
+| FR-SP-002 both-provider search | C-SP-06, C-SP-01 | `selectMusicOutcome(...)`, concurrent keyed fetches (L2-R1) | `testBothKeyedProvidersAre` + `SearchedConcurrently`, `testOneProviderUnavailable` + `DoesNotBlockTheOther`, `testNeitherProviderAskable` + `SpeaksNotLinked` |
+| FR-SP-003 Spotify preferred | C-SP-06, C-SP-03 | `spotifyRemoteCapable`, `spotifyDeepLinkCapable` inside `selectMusicOutcome` | `testSpotifyWinsWhenLinkedAndCapable`, `testFreeTierGoesStraightToTheDeepLink`; DV-2 |
+| FR-SP-004 YouTube fallback | C-SP-06 | rows 4/6/7/8 → `fireYouTubePlay(query:)` verbatim (ADR-SP-06) | matrix-row tests 4/6/7/8; YouTube suites unchanged; DV-4 |
+| FR-SP-005 explicit YouTube unchanged | C-SP-07 (exclusion), C-SP-06 (ordering) | `Rule.excluded = [youtubeKeywords]`; ladder 1146 first | `KeywordIntentRuleTests.` + `testYouTubeMarkedUtteranceStill` + `MatchesTheYoutubeDomainDataDriven`; `YouTubeRouteTests`/`CommandRouterYouTubeTests` unchanged; DV-3 |
+| FR-SP-006 SpotifyPlugin | C-SP-05, C-SP-09 | `SpotifyPlugin: AssistantPlugin`, `registry.register` | `SpotifyPluginTests`; registry-once pattern |
+| FR-SP-007 tool + deep links | C-SP-01 | `SpotifyTool.fetchTopTrack` / `playTrack` / `trackURI` / `searchURI` / `open` | `SpotifyToolTests` incl. the hostile corpus; DV-1 |
+| FR-SP-008 account linking | C-SP-03, C-SP-04 | `SpotifyAccountSession.link()`, `SpotifyAuthFlow.authorizeURL/parseCallback` | `SpotifyAccountSessionTests`, `SpotifyAuthFlowTests` |
+| FR-SP-009 encrypted store | C-SP-02 | `SpotifyCredentialStore.save/clear`, `storageKey` | `SpotifyCredentialStoreTests`; `StoragePlacementTests` |
+| FR-SP-010 unlink wipe / revoked | C-SP-03, C-SP-02 | `unlink()`, `markRevoked()`, `validAccessToken()` `.revoked` | `SpotifyAccountSessionTests` (wipe, revoked, re-link) |
+| FR-SP-011 free-tier deep link | C-SP-06, C-SP-01 | rows 2/3/5 → `spotifyDeepLink` / `spotifySearchHandoff`; `OpenOutcome` | `testPremiumRemotePlayFailure` + `FallsToTheDeepLink`, `testDeepLinkOpenFailureSpeaks` + `AppMissingTerminal`; DV-4 |
+| FR-SP-012 honest outcomes | C-SP-06, C-SP-11 | total matrix; `deliverMusicLine` | `testMusicTurnEndsInExactly` + `OneSpokenOutcomeLine` (all rows); DV-4 |
+| FR-SP-013 keyword music rule | C-SP-07 | `Domain.music`, `musicMarkers`, `musicVerbFamily`, the rule entry | `KeywordIntentRuleTests` additions (§14) |
+| FR-SP-014 contact veto | C-SP-08 | `mentionsMusic(_:)` insertion after the YouTube veto | `VoiceContactSearchRouteTests` additions (§15) |
+| FR-SP-015 route intake | C-SP-06, C-SP-07 | ladder `case .music:`; `musicQuery(from:)` | `CommandRouterMusicTests` intake/no-double-handling tests |
+| FR-SP-016 Settings + disclosure | C-SP-10, C-SP-11 | `SettingsDestination.spotify`, `SpotifySettingsView`, §31 copy | `SettingsTabMappingTests` edits; catalog completeness; DV-5 |
+| FR-SP-017 DV checklist | C-SP-16 | `specs/SP-device-validation-protocol.md` | Checklist recorded and passed on Anzaan |
+| NFR-SP-001 responsiveness/timeouts | C-SP-01, C-SP-06 | `timeoutSeconds` parameters; §32 budgets | timeout-injection tests; budget assertions; DV-1/4 |
+| NFR-SP-002 log safety | C-SP-06, C-SP-13, C-SP-14 | §28 event vocabulary; §28 tool-log contract; `FEATURE_ROOTS` additions | `testToolLogEntriesCarryNoQueryOrTitle`, `testObservabilityEventsCarryNoMetadata`; gate exit 0; DV-7 |
+| NFR-SP-003 no new egress | C-SP-01, C-SP-06 | `apiSearchURL`/`apiPlayURL` hosts; seams | `testNoEgressBeyondTheProviderAllowlist` |
+| NFR-SP-004 prompt budget | C-SP-05, C-SP-07 | fragment size guard; zero core-template delta | `IntentPromptTests` unchanged; `SpotifyPluginTests` fragment-size assertion |
+| NFR-SP-005 localisation | C-SP-11 | §31 (20 keys, ne+en) | catalog completeness in both languages; spoken-line tests; DV-5 |
+| NFR-SP-006 no regression | all | ordering, exclusions, dormant seams, untouched `YouTubeRoute` | YouTube suites unchanged; golden 15 hold; baseline recorded |
+| NFR-SP-007 encryption at rest | C-SP-02 | `SpotifySessionRecord` under `spotify.session` | store tests; placement; wipe sweep |
+| NFR-SP-008 URI hardening | C-SP-01 | `isSpotifyIdentifier`, `trackURI`, `searchURI` grammar (§24) | hostile-corpus suite |
+| NFR-SP-009 redirect + token lifecycle | C-SP-03, C-SP-04 | `parseCallback`, `validAccessToken`, `SpotifyAuthError` | callback matrix; refresh bounds; wipe; log-free assertions |
+| NFR-SP-010 accessibility | C-SP-10 | `SpotifySettingsView` per §17 | accessibility assertions in settings tests |
+| NFR-SP-011 compliance/release gates | C-SP-12, C-SP-13, C-SP-16 | plist entries; gate roots; DV protocol | gate exit 0; TLS hosts (allowlist); DV + release checklist |
+| NFR-SP-012 plugin isolation | C-SP-05, C-SP-06, C-SP-09 | dormant seams; plugin boundaries | registry/dormant-construction tests; diff-surface check |
 
-## 11. Traceability (delta vs L1 §13)
+## Technical risks and mitigations
 
-L1's traceability table stands (it predates the 2026-10-05 amendment). The L2 additions that
-complete it — coverage now **16/16 FR-PI and 11/11 NFR-PI**:
+| # | Risk | Mitigation (implemented where) | Residual |
+|---|---|---|---|
+| 1 | Dashboard refuses the custom redirect scheme | One constant in `SpotifyAuthFlow`; validator/tests/plist move together; nothing else depends on the string (§11, gap 2) | Recorded at registration; flagged for security review |
+| 2 | Stale `product` misroutes one attempt | Play attempt is the honest catch (403 → deep link); re-verify on every refresh; stale `free` costs one hand-off (L1 §11) | Accepted, bounded |
+| 3 | Keyless-YouTube pre-open hazard (would start YouTube when Spotify wins) | L2-R1: no pre-open; pinned by `testKeylessYouTubeIsNotOpenedWhen` + `SpotifyWins` | None if the keyless path is unchanged (gap 3) |
+| 4 | A hostile/odd provider payload crafting a URI or a spoken claim | id shape validation, percent-encoding, titles never in URIs, scheme allowlist, hostile corpus; `spotify.playing` spoken only on a confirmed 2xx or a confirmed open | Static-analysis limits stated in the gate docs |
+| 5 | Off-main state mutation / interleaved turns | Main-actor confinement (C-SP-02/03), seams for network, one spoken line per attempt; superseded attempts do not cancel (documented parity) | Existing stage behaviour, accepted |
+| 6 | Prompt-budget growth | Core template untouched (digest pins); fragment is cloud-path only; fragment-size guard added | None |
+| 7 | Log regressions in the new files (raw print, body, metadata key) | Gate feature-roots additions; closed event vocabularies; tool-log contract; DV-7 | Gate's documented static limits |
+| 8 | Xcode target drift (new files not added) | `project.pbxproj` edit is part of the change set; test:impact mapping mirrors the source tree | Build-time detection |
+| 9 | L10n drift (missing `ne`) | Catalog completeness test both languages; no literals in new paths | None |
+| 10 | Refresh/revocation loops | `refreshAttemptLimit` = 1; `invalid_grant` wipes and never retries; play retry once on 401 only | None |
 
-| Requirement | L2 design points |
-|---|---|
-| FR-PI-001 / FR-PI-013 | Step enum extension (§5.2); pending-by-construction from legacy status maps; `OnboardingStateTests` additions |
-| FR-PI-002 / FR-PI-004 | `AboutYouDraft.isComplete`; Skip path unchanged; both pinned by tests |
-| FR-PI-003 / FR-PI-015 | `UserProfileStoring`, load state mapping table (§5.1), cache/discard semantics, E1/E2 |
-| FR-PI-005 / FR-PI-006 / FR-PI-014 | `EmergencyContactsStep` writes through the existing contact APIs; flag semantics documented (§5.2); `preferredEmergencyContact` untouched |
-| FR-PI-007 | `VoiceFingerprintStep` canonical construction; pre-`start()` suspension safety verified (§13, item 5) |
-| FR-PI-008 / FR-PI-010 / NFR-PI-008 | Ack state machine (§7.1), phrase composition contract (§5.4), pipeline seam (§5.4) |
-| FR-PI-009 / FR-PI-011 | Clause + interpolation anchors (§5.5); no-term byte-identity via the clause `""` and the pinned digest test (Section 12) |
-| FR-PI-012 | `ProfileSettingsModel`, destination row, cache-swap effectiveness (§5.2, §5.7) |
-| NFR-PI-001 | §9.4; store on the encrypted-file channel |
-| NFR-PI-002 | Event catalogue (§7.3), redacted keys + scan roots (§7.4) |
-| NFR-PI-003 | §9.4; only the guarded term ever composes into a prompt |
-| NFR-PI-004 | §9.3 guard pipeline incl. quote-slot neutralisation |
-| NFR-PI-005 | §9.1 budget proof; §9.2 mirror gate |
-| NFR-PI-006 | C09 key list |
-| NFR-PI-007 | Existing wizard/Settings chrome + `DesignTokens`; chips as ≥44 pt buttons |
-| NFR-PI-009 | C12: call site only; no mechanism/permission change |
-| NFR-PI-010 | §5.4 extraction keeps today's capture-start body verbatim; nil-seam path; `InterpreterContext` init keeps every call site compiling |
-| NFR-PI-011 | §7.4 gate wiring; disclosure item unchanged (owner/compliance, 2026-10-13 window) |
-| FR-PI-016 (owner amendment 2026-10-05) | C13 route rule + shell wiring (§5.8); the "pending-by-construction" behaviour of legacy status maps is what the cold-start route surfaces. **Supersedes FR-PI-013's "No force-migration" scenario for the app-start path** (recorded in FR-PI-016) — L1's "the wizard is never auto-presented" sentence is superseded; FR-PI-013's `pendingSteps` / `firstPendingStep` / `startingAt:` mechanics are unchanged and are the resume mechanism used here |
+## Not in this design
 
----
+Explicit boundary (constraints 4, 6, 11 and the L1 out-of-scope list). None of the following is built, changed or prepared for:
 
-## 12. Test seams
-
-| Seam | Test (existing file unless noted) | Pins |
-|---|---|---|
-| `UserProfileStore` over an in-memory `ProfilePayloadStorage` fake (no file system) | `UserProfileStoreTests.swift` (new) | round-trip; absent vs unreadable vs readFailed; corrupt payload removed then read as absent; a failed write leaves the existing record in effect; empty-string partial records; merge helpers (`AboutYouDraft`, `EmergencyContactsDraft`); trim rules |
-| `EncryptedFileStorage` probe on a temp directory root | `EncryptedFileStorageProbeTests.swift` (new, small) | `hasPayload` true for a corrupt envelope, false for absent, nil for an unresolvable root |
-| Guard with adversarial fixtures | `ProfilePromptTextGuardTests.swift` (new) | marker payloads → nil; quotes → `'`; 24-grapheme clamp (Latin + Devanagari conjuncts); empty/whitespace → nil; nil in → nil out |
-| `ProfilePersonalization` over the store fake | `ProfilePersonalizationTests.swift` (new) | verbatim accessor; guarded accessor; quarantine event once per read; absent/unreadable → nil |
-| Budget + byte identity | `IntentPromptTests.swift` (extend) | ceiling 3,000 with a 24-grapheme term (2,586); no-term digest pin of the composed `build`; clause position in all three builders; clause `""` for nil/empty |
-| Ack state machine with a fake `Speaker` (controllable completion) and `wakeAckMaxHoldSeconds: 0.01` | `WakeAcknowledgmentServiceTests.swift` (new) | sync completion for nil term; spoken path; timeout cancel + event; cancel drops completion; supersede; template-missing path; speaking hooks balanced exactly once |
-| Pipeline seam with a stub `WakeAcknowledging` | `WakeAcknowledgmentSeamTests.swift` (new, alongside the existing `VoicePipelineNoiseFilterSeamTests` / `VoiceTurnTimingSeamTests` harnesses using `debugEnterIdleForTesting` + `simulateWakeWordDetection`) | capture starts only after completion; nil seam = synchronous start (today's path); `stop()` cancels the ack; stale completion inert |
-| Step order / pending semantics | `OnboardingStateTests.swift` (extend) | 7-case order; legacy status maps leave the three new IDs pending; `firstPendingStep` |
-| Settings table + L10n | `SettingsTabMappingTests.swift` (extend) | family rows `[.family, .profile, …]`; visible count 21; `settings.profile.title` resolves in en + ne |
-| Editor model | `ProfileSettingsModelTests.swift` (new) | prefill; save success/failure mapping; clearing allowed |
-| Seed mirror | `ios/tools/check-prompt-mirror.sh` via `ios/build.sh` | byte equality template↔seed; loud failure otherwise |
-| Log surface | `ios/tools/check-release-log-safety.sh` via `ios/build.sh` | new roots clean; metadata keys allow-listed |
-| Cold-start routing composition | `ColdStartRoutingTests.swift` (new) | fresh → `.language`; complete → nil; optional pending → first pending; mandatory missing with About-you completed → `.aboutYou`; corrupt/unknown step values read as pending; unreadable profile counts as mandatory missing; the predicate trims like the About-you Next gate |
-| Startup presentation | UI test (extend the onboarding UI-test group) | cold start with a pending interview → the wizard appears at the first pending step with the skip affordance; existing Home-assuming UI tests account for the one-time presentation (no new launch argument is introduced — tests manage persisted state as they already do for onboarding) |
-
----
-
-## 13. Findings and corrections vs L1
-
-All corrections preserve L1's binding intent; each is recorded here for `review-l2`.
-
-1. **`InterpreterContext` defaulted field does not compile as written.** L1 §6.2 sketches
-   `let addressAs: String? = nil` with "every existing call site compiles unchanged". Verified by
-   compiler experiment: with `let` and a default, the synthesized memberwise initializer omits the
-   parameter entirely, so no call site can ever pass a term (the personalization would be dead
-   code); with `var` and a default it compiles but makes the field mutable. L2 settles the
-   explicit initializer in §5.5 — immutability kept, the parameter defaulted, every existing call
-   site source-compatible. Semantics are unchanged; only the mechanism differs.
-2. **The budget baseline number is stale.** L1 §6.3 (and the test's comment) cite the fixture at
-   2,936 characters; the shipped fixture measures **2,506** (the prompt was trimmed by
-   `[GEMINI-SOLIDIFY]`, 2026-09-18). The ceiling stays 3,000; the comment is corrected to 2,506 in
-   the same change so the next trim starts from truth. The clause still fits with room to spare
-   (2,586 worst case).
-3. **The seed mirror was off by one byte.** Byte comparison shows the seed ends `request.\n\n`
-   while the Swift template (with placeholders) ends `request.\n` — 2,699 vs 2,698 bytes. The C08
-   change removes the extra trailing newline and adds the 18-byte `{address_as_clause}`
-   placeholder; the new gate makes the contract enforceable from then on.
-4. **`wake_ack_spoken.term_present` dropped.** L1 §7.3 lists a `term_present` boolean; it cannot
-   ever be false (the event only fires on the personalized path), and it is not in the shipped
-   allow-list. Dropping it keeps the event content-free without widening `allowedKeys`.
-5. **Pre-`start()` enrollment safety verified.** `suspendForSampleCapture()` in the shipped
-   coordinator returns `true` when `voicePipeline == nil` (the wizard's state), so hosting the
-   session in the wizard needs no mechanism change (C12).
-6. **Owner amendment, not a correction: FR-PI-016 supersedes one L1 sentence.** L1 §4.1 says the
-   wizard "is never auto-presented (no force-migration)"; the 2026-10-05 owner amendment
-   (Feature Constraint 8, FR-PI-016) supersedes that for the app-start path — pending steps are
-   now surfaced on start. The mechanism sentence around it (`pendingSteps` / `firstPendingStep` /
-   `startingAt:`) stands as written and is exactly the mechanism C13 uses.
-
-Not a correction, for completeness: L1's guard sketch names the method `guard(_:)`; `guard` is a
-keyword, so L2 settles the name `guarded(_:)` — this is within the L1 §16 hand-off ("final guard
-name"), not a deviation.
-
----
-
-## 14. Hand-off notes
-
-- **`review-l2`** should check: the §13 corrections, the error taxonomy completeness (every
-  interface declares its failure return), the concurrency table against the four shared resources
-  the dispatch names, the budget arithmetic, and C13's route rule + edge table against FR-PI-016
-  (including the cold-start-only decision).
-- **`security-design-review` (STRIDE)** focus, per L1 §16, sharpened at L2: the guard pipeline
-  incl. the quote-slot neutralisation (§9.3); the read seam's fail-closed nil behaviour
-  (§5.1); the ack path as TTS-only with verbatim data (ADR-09); the log surface (§7.4); storage
-  at rest (§9.4); no new egress (§9.4).
-- **`plan-tasks`**: land the seed + template + mirror gate as one indivisible unit; the store
-  (C01) before its consumers; the pipeline extraction before the ack service wiring; the wizard
-  step views after the store and drafts; land C13 with the step-enum extension (its route
-  references the new step IDs, and it needs no dependency on C01 — a nil/absent snapshot is a
-  handled route).
-- **`security-test`** hooks: adversarial terms through the guard; no-PII log runs over a
-  personalized session; container inspection for plaintext; ack failure injection incl. the
-  timeout path; seed-gate negative test (flip one byte → build fails).
-- **UI tests:** startup routing presents the wizard once per launch for upgraded states (the new
-  step IDs are pending by construction), so existing Home-assuming UI tests must account for the
-  one-time presentation; the routing check itself is suppressed under hosted unit tests by the
-  existing boot guard.
-
-## 15. Open items
-
-- **OD-A1 (from L1, unchanged):** device-measured wake-ack synthesis latency vs the ≤ 1 s
-  activation budget; evidence owed by `implement`/`security-test`. The fallback ladder and the
-  injectable `wakeAckMaxHoldSeconds` are already in place.
-- **OD-A2 (from L1, unchanged):** the English ack copy `Yes, %@` is an owner eyeball item at this
-  gate; the term is never translated or reformatted.
-- **Implementation note (not a design decision):** Nepali copy for the new catalog keys and the
-  chip presets is drafted as part of the implementation's localisation pass; the chip terms are
-  data constants, the surrounding copy is catalogued (C09).
-- **Recorded, not open:** App Store privacy-disclosure update for the new fields (NFR-PI-011 #2,
-  owner/compliance, 2026-10-13 window); the project-wide biometric/PIN gate remains a recorded
-  follow-up outside this feature (OD-PI-5); FR-PI-016's background→foreground question is settled
-  in C13 (cold start only in v1, with the revisit conditions stated there).
+- **No brain/router model-stack changes.** No model swap, no prompt-model change, no classifier change; the interpreter's existing `music` action and the core prompt's existing music wording are used as-is.
+- **No new backend.** The Spotify Web API is called directly from the app; nothing is provisioned on our side.
+- **No cloud LLM on the music path.** The query goes to the two provider APIs only; the cloud voice stack's recorded exceptions (Open Decisions 12/13) are not invoked by this feature.
+- **No playback beyond track search + play:** no playlists, albums, artists, library edits, playlist mutations or account modifications; playback is read-only, user-initiated control (or an OS hand-off).
+- **No remote token revocation**: Spotify exposes no third-party revocation endpoint; unlink is a local wipe and the design never claims otherwise (ADR-SP-14).
+- **No device management**: no `device_id`, no transfer-playback.
+- **No credential/secret field**: no client secret exists anywhere; the recorded OD-S1 contingency (family-entered credential) is not built.
+- **No changes to `YouTubeRoute.swift` internals**, no changes to the emergency/medication/health surfaces, no wake-word, no Android, no new `Info.plist` usage descriptions, no new observability metadata keys, no `LogSanitiser` allow-list change.
+- **No edits to the pinned test surfaces**: `IntentPrompt.swift`'s core template, `GoldenCorpus.swift`, `tools/train-intent/seeds/prompt_template.txt` (the mirror gate stays green trivially), and the YouTube suites.
