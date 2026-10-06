@@ -1,0 +1,27 @@
+{
+  "id": "bb4b6eb1-6657-4044-b6ea-a0d3c5d831ee",
+  "task_id": "design-l1",
+  "workflow_id": "spotify-music-integration",
+  "status": "RESOLVED",
+  "reason": "T1 design gate — L1 architecture for spotify-music-integration. Effective overlay: hil enabled (design-architecture template default). No owner-decision content at this gate: the two decisions bound to design-l1 (OD-S1 client-secret handling; OD-S3 Premium degradation precedence) are architect/security-review decisions, and OD-S2 is a draft only — owner approval of the rollout/quota plan is scheduled at the final T2 sign-off per the owner's 2026-10-06 disposition. Resolved by the dispatching session under the owner's standing ai-sdd workstream autonomy grant. Downstream verification is structural: review-l2 (GO gate) reviews the design chain and security-design-review (SECURITY-GO) STRIDEs the OD-S1/OD-S3 resolutions.",
+  "context": {
+    "task_description": "Architect-authored L1 design: system architecture, components, interfaces and decisions for the music playback feature (stub-to-real flip, both-provider search with Spotify preferred, honest degradation, account linking, plugin isolation).",
+    "risk_tier": "T1",
+    "agent": "architect",
+    "artifacts": [
+      "specs/design-l1.md"
+    ],
+    "verification": "architecture_l1 contract sections present (## Overview line 15, ## Architecture line 197, ## Components line 496); SEC-002 clean (0 runs of 40+ class chars); 16 components C-SP-01..16; all 17 FR-SP and 12 NFR-SP traced (section 28 table); OD-S2 exact label present with 13 owner-input slots.",
+    "decisions_resolved": [
+      "OD-S1: PKCE-only public client — no app-held client secret; Authorization Code + PKCE (S256) via ASWebAuthenticationSession; search runs on the linked user token; family-entered-secret contingency recorded but not built. Security-design-review verifies.",
+      "OD-S3: capability-first precedence ladder — Spotify wins when linked and capable (remote control on Premium; spotify: deep-link hand-off otherwise); YouTube fallback where it can serve; spotify:search hand-off for unlinked where YouTube cannot; honest localized line otherwise; 12-row state x outcome matrix (section 12)."
+    ],
+    "deferred_to_owner": "OD-S2 — draft for owner approval (final T2 sign-off): registered test-user accounts, quota-extension criteria and timeline, unregistered-user honest behaviour, Developer Dashboard registration checklist; 13 [OWNER INPUT] slots marked, no values invented.",
+    "branch": "feat/spotify-music-integration",
+    "branch_tip": "bc1c495",
+    "note": "Item created by the dispatching session because the task was dispatched directly (not via the ai-sdd run command). Resolved under the standing autonomy grant; the gate exists to keep the declared overlay honest and the decision auditable."
+  },
+  "created_at": "2026-10-06T11:42:31.000Z",
+  "notes": "Approved under the owner's standing ai-sdd workstream autonomy grant (2026-10-06): T1 design gate, no owner-decision content. L1 verified: contract sections present, SEC-002 clean, 16 components, all 29 requirements traced; OD-S1 (PKCE-only, no app-held secret) and OD-S3 (capability-first ladder + 12-row matrix) resolved for security-design-review verification; OD-S2 draft with 13 owner-input slots deferred to the final T2 owner approval per the owner's disposition.",
+  "resolved_at": "2026-10-06T11:42:39.501Z"
+}
