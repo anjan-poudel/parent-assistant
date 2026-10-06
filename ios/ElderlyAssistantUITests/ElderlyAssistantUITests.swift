@@ -192,9 +192,17 @@ final class ElderlyAssistantUITests: XCTestCase {
     /// Four configured favourites must fit without a horizontal swipe; the
     /// requested action rows stay separately ordered and reachable.
     func testHomeKeepsConfiguredAppsAndActionRowsVisible() throws {
+        checkHomeLayout(skin: "sky")
+    }
+
+    func testHomeSpeechLayoutInDarkSkin() throws {
+        checkHomeLayout(skin: "midnight")
+    }
+
+    private func checkHomeLayout(skin: String) {
         let app = XCUIApplication()
         app.launchArguments = ["-quickAccessApps", "(facebook, messenger, youtube, camera)",
-                               "-appTextSize", "medium", "-appTheme", "sky",
+                               "-appTextSize", "medium", "-appTheme", skin,
                                "-appVisualStyle", "soft"]
         app.launch()
         completeOnboardingIfNeeded(app)
@@ -230,6 +238,12 @@ final class ElderlyAssistantUITests: XCTestCase {
         orderedRow(favourites)
         orderedRow(upper)
         orderedRow(lower)
+        for button in lower {
+            XCTAssertGreaterThanOrEqual(button.height, 44,
+                                        "Dock actions must keep accessible touch targets")
+            XCTAssertLessThanOrEqual(button.height, 90,
+                                     "Dock actions must not accumulate empty vertical padding")
+        }
         for card in upper.dropFirst() {
             XCTAssertEqual(card.height, upper[0].height, accuracy: 1,
                            "Wrapping a label must not leave mismatched action-card heights")
@@ -239,9 +253,33 @@ final class ElderlyAssistantUITests: XCTestCase {
         XCTAssertLessThanOrEqual(app.scrollViews["home.content"].frame.maxY, upper[0].minY,
                                  "Scrollable content must end above the action strip")
         XCTAssertLessThanOrEqual(upper.map(\.maxY).max()!, lower.map(\.minY).min()!)
+        let header = app.descendants(matching: .any)["home.header"].firstMatch
+        XCTAssertTrue(header.waitForExistence(timeout: 10))
+        XCTAssertGreaterThanOrEqual(favourites[0].minY - header.frame.maxY, 20,
+                                    "Header controls and app shortcuts need distinct groups")
+        let talk = app.buttons["home.talk"]
+        let prompt = app.staticTexts["home.hint.prompt"]
+        let example = app.staticTexts["home.hint.example"]
+        XCTAssertTrue(talk.waitForExistence(timeout: 10))
+        XCTAssertTrue(prompt.waitForExistence(timeout: 10))
+        XCTAssertTrue(example.waitForExistence(timeout: 10))
+        XCTAssertEqual(talk.frame.midX, app.frame.midX, accuracy: 1,
+                       "The speech control must stay horizontally centered")
+        XCTAssertGreaterThanOrEqual(prompt.frame.minY - talk.frame.maxY, 24,
+                                    "The prompt must clear the full microphone halo")
+        XCTAssertGreaterThanOrEqual(example.frame.minY - prompt.frame.maxY, 8,
+                                    "Prompt and example text must not overlap")
+        let originalExample = example.label
+        XCTAssertTrue(NSPredicate(format: "label != %@", originalExample)
+            .evaluate(with: example) || XCTWaiter.wait(for: [expectation(for:
+                NSPredicate(format: "label != %@", originalExample), evaluatedWith: example)],
+                timeout: 6) == .completed,
+                      "The example must remain readable when the carousel advances")
+        XCTAssertEqual(app.staticTexts.matching(identifier: "home.hint.example").count, 1,
+                       "Carousel changes must not overlay old and new text")
 
         let screenshot = XCTAttachment(screenshot: app.screenshot())
-        screenshot.name = "Complete Home with supplied icons and separate action rows"
+        screenshot.name = "Home spacing and proportions — \(skin)"
         screenshot.lifetime = .keepAlways
         add(screenshot)
 

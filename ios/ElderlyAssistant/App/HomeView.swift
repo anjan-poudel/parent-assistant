@@ -90,6 +90,7 @@ struct HomeView: View {
     /// any Hashable value, so dock leaves AND Settings sections push
     /// through the same stack.
     @State private var navPath = NavigationPath()
+    @State private var conversationViewportHeight: CGFloat = 0
 
     private var pinsDock: Bool {
         dynamicTypeSize <= .large && verticalSizeClass != .compact
@@ -132,6 +133,7 @@ struct HomeView: View {
                                 coordinator.cancelTimer(id: id)
                             }
                             .equatable()
+                            Spacer(minLength: 0)
 
                             talkStage
                                 .equatable()
@@ -159,15 +161,22 @@ struct HomeView: View {
                                !homePresentation.setup.isVisible {
                                 historyChip
                             }
+                            Spacer(minLength: 0)
                             if !pinsDock {
                                 homeDock
                             }
                         }
                         .padding(.horizontal, 20)
-                        .padding(.top, 12)
+                        .padding(.top, 24)
                         .padding(.bottom, 20)
+                        .frame(maxWidth: .infinity, minHeight: conversationViewportHeight)
                     }
                     .clipped()
+                    .onGeometryChange(for: CGFloat.self) { geometry in
+                        geometry.size.height
+                    } action: { height in
+                        conversationViewportHeight = height
+                    }
                     .accessibilityIdentifier("home.content")
                     if pinsDock {
                         homeDock
@@ -623,10 +632,8 @@ struct TalkButton: View {
     }
 
     var body: some View {
-        // 4pt — the status line HUGS the hero circle so button + caption
-        // read as one unit (visual-polish 2026-09-08; the stage VStack
-        // keeps its own ≤4pt below this line to the hint carousel).
-        VStack(spacing: 4) {
+        // The decorative halo gets real layout clearance before any status text.
+        VStack(spacing: 12) {
             Button(action: {
                 // The reset backstop (see `suppressTapAfterReset`): after
                 // a completed hold the release must not ALSO run the tap
@@ -677,9 +684,8 @@ struct TalkButton: View {
                         resetProgressRing
                     }
                 }
-                // Decorative rings draw outside the hit target but do not
-                // claim 262pt of layout height. This keeps the compact
-                // activity card visible above the fixed two-row dock.
+                // The disc remains the same size; external padding reserves
+                // space for the decorative halo and symmetric waveforms.
                 .frame(width: heroDiameter,
                        height: heroDiameter)
             }
@@ -739,6 +745,8 @@ struct TalkButton: View {
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
             }
+            .padding(.horizontal, 39)
+            .padding(.vertical, 32)
             if dynamicTypeSize.isAccessibilitySize {
                 Text(isLoading ? loadingStageLabel : session.state.buttonText(locale: locale))
                     .font(DesignTokens.warmFont(size: appearance.typography.bodyPointSize, weight: .bold))
@@ -754,6 +762,8 @@ struct TalkButton: View {
                                                 weight: .medium))
                     .foregroundStyle(appearance.colors.textSecondary)
                     .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("home.talk.status")
             }
             // [P0-2] The ONE recovery a failed boot-time start offers —
             // and only then. It replaces the old "tap the dead hero to
@@ -780,7 +790,7 @@ struct TalkButton: View {
     /// caption. Both branches sit inside the same fixed-size circle, so
     /// the hero's final dimensions never move with readiness.
     private var heroContent: some View {
-        VStack(spacing: 6) {
+        VStack(spacing: 10) {
             if isLoading {
                 // [LOADING-CONTRAST] (2026-09-11) The loading disc is the
                 // SOLID rest blue (`discTint` above — the accepted darker-
@@ -933,12 +943,12 @@ struct TalkButton: View {
         ZStack {
             Circle()
                 .stroke(heroGlowTint.opacity(breathe ? 0.05 : 0.35), lineWidth: 2)
-                .frame(width: breathe ? heroDiameter + 90 : heroDiameter + 20,
-                       height: breathe ? heroDiameter + 90 : heroDiameter + 20)
+                .frame(width: breathe ? heroDiameter + 32 : heroDiameter + 20,
+                       height: breathe ? heroDiameter + 32 : heroDiameter + 20)
             Circle()
                 .stroke(heroGlowTint.opacity(breathe ? 0.02 : 0.22), lineWidth: 2)
-                .frame(width: breathe ? heroDiameter + 130 : heroDiameter + 40,
-                       height: breathe ? heroDiameter + 130 : heroDiameter + 40)
+                .frame(width: breathe ? heroDiameter + 56 : heroDiameter + 40,
+                       height: breathe ? heroDiameter + 56 : heroDiameter + 40)
         }
     }
 
