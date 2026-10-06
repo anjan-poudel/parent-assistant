@@ -26,6 +26,7 @@
 		069A7F7014D12FEE7CCC5DF8 /* IntentTestHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCCCDEF7C01C244CC0942BA3 /* IntentTestHelpers.swift */; };
 		07AD5C13AD2DE2D93DEB4DDC /* ProfilePersonalization.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23736F8217BD5C29FAD41235 /* ProfilePersonalization.swift */; };
 		07EB59E4C20F6A4460D1EBD7 /* ProfileSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDF4882AC6616158DF25F691 /* ProfileSettingsView.swift */; };
+		08309D9B923EC86AC31F7A1D /* SpotifyPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = E07454CB6E1310F2F6ACDCF6 /* SpotifyPlugin.swift */; };
 		08DA0C0C1B90B588F3F7B62C /* RoutinePluginTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7161E9FF6CEEE7A0EE0C5FA3 /* RoutinePluginTests.swift */; };
 		090F94B2C3D159992225B40C /* HomeWidgetTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A147808D9ACC09608A51E486 /* HomeWidgetTestSupport.swift */; };
 		09388B1EF4818844F0F500BA /* AckFastLaneTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD40D54F68171373A5BA3A76 /* AckFastLaneTests.swift */; };
@@ -336,6 +337,7 @@
 		6A67604ED7E66C048BD76561 /* StartupBoot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C10F00EBA0FFE62595217FB /* StartupBoot.swift */; };
 		6A703B2F0CA61CEB95B5FC6B /* SherpaTTSEngineSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F56D48FD8A88A77B1D58B2B /* SherpaTTSEngineSmokeTests.swift */; };
 		6AB2C7E92DF4DF5CB61641C8 /* CloudActivityIndicatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAFEADEFBB7B938441831544 /* CloudActivityIndicatorTests.swift */; };
+		6B256FD9F86B3470D2971747 /* PinnedSurfaceGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C298389CE26F07F01EA97293 /* PinnedSurfaceGuardTests.swift */; };
 		6B3D9B0F017F7D37A9D1FA1B /* LiveOverlayPlacementGeometryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA0DDE4F6987CD014EA2C533 /* LiveOverlayPlacementGeometryTests.swift */; };
 		6B3E056A8C81F4A2E3EA2D37 /* TranslateTestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C2F40DBD7498D26EB910A47 /* TranslateTestView.swift */; };
 		6B3E697833CF5EC06C68F22A /* SpotifyTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 151691B090D14E2E51617547 /* SpotifyTool.swift */; };
@@ -653,6 +655,7 @@
 		D61D72E3BABE6F886F294AAC /* PointAskAnalysisPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = C54F8C0C14C266EB54ADA18A /* PointAskAnalysisPipeline.swift */; };
 		D6499632537E384D96F11681 /* NewsFeedParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3E44D73EC35D96C9BB7F372 /* NewsFeedParser.swift */; };
 		D652C180781D68507298611B /* ModelStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 19DC3DAE6268BC226AAB0509 /* ModelStore.swift */; };
+		D69988E0034C33CB247A9236 /* SpotifyPluginTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B17623B15B3E5CB21121480A /* SpotifyPluginTests.swift */; };
 		D73C35FDF9D6E68345BD6A0E /* LiveTranslateSpeech.swift in Sources */ = {isa = PBXBuildFile; fileRef = F76796766605ED152AAF8E57 /* LiveTranslateSpeech.swift */; };
 		D760D7B42F53BABEFBA47BD8 /* CalendarShareMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4DC975B84C402D6FEC87F2D /* CalendarShareMapper.swift */; };
 		D82D6015BA64CD44BDB5AB7C /* SpeakerBiometricServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DB994909EEA3C869ABDBE57 /* SpeakerBiometricServiceTests.swift */; };
@@ -1380,6 +1383,7 @@
 		AF94EF103968B07445324A94 /* CallLinks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallLinks.swift; sourceTree = "<group>"; };
 		B0AC946B96FF0A409765B8CE /* LiveCameraZoomModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveCameraZoomModelTests.swift; sourceTree = "<group>"; };
 		B1335E0760DD3A920FB22D80 /* FeedsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedsView.swift; sourceTree = "<group>"; };
+		B17623B15B3E5CB21121480A /* SpotifyPluginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotifyPluginTests.swift; sourceTree = "<group>"; };
 		B1FDEF634A12A4E179A53F21 /* ResponseVoiceSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResponseVoiceSelectionTests.swift; sourceTree = "<group>"; };
 		B23ED5C6DE4D8B5D3F32756C /* FreeFormEventServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FreeFormEventServiceTests.swift; sourceTree = "<group>"; };
 		B27CD5B5F3AC722BFEF870F8 /* MedicationVisualAidViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicationVisualAidViews.swift; sourceTree = "<group>"; };
@@ -1423,6 +1427,7 @@
 		C1C241D106EFDAF7D5F92FA9 /* InputSanitiserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InputSanitiserTests.swift; sourceTree = "<group>"; };
 		C21DC38CB5F39A8E1CD343D1 /* CameraPermissionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraPermissionView.swift; sourceTree = "<group>"; };
 		C22E1ECE45B39604B17F0271 /* LiveTranslateExtractModeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTranslateExtractModeTests.swift; sourceTree = "<group>"; };
+		C298389CE26F07F01EA97293 /* PinnedSurfaceGuardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PinnedSurfaceGuardTests.swift; sourceTree = "<group>"; };
 		C373F9FE08E0DDE37E44F24A /* KeywordIntentRuleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeywordIntentRuleTests.swift; sourceTree = "<group>"; };
 		C3A016233A0C060D8C8F6559 /* TimerAlarmScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimerAlarmScreen.swift; sourceTree = "<group>"; };
 		C44EB5747E660A2A7E93B92B /* LocalGoogleEventMappingStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalGoogleEventMappingStoreTests.swift; sourceTree = "<group>"; };
@@ -1513,6 +1518,7 @@
 		DF87DFB06C6F8F59BDA028E4 /* LiveTranslatePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTranslatePlugin.swift; sourceTree = "<group>"; };
 		DFCA1FBCF5F571D61069AFEE /* ProfilePersonalizationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfilePersonalizationTests.swift; sourceTree = "<group>"; };
 		E0226645878EE5342A83BFFE /* ApplianceLabelLocalizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplianceLabelLocalizer.swift; sourceTree = "<group>"; };
+		E07454CB6E1310F2F6ACDCF6 /* SpotifyPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotifyPlugin.swift; sourceTree = "<group>"; };
 		E105F6325EBF508804B1A06B /* IntentToolWebSearchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentToolWebSearchTests.swift; sourceTree = "<group>"; };
 		E108C082D6831FDD80FA44AA /* CalculatorToolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalculatorToolTests.swift; sourceTree = "<group>"; };
 		E14E2B9CFF235CC12E3273CB /* MedicationLabelScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicationLabelScanner.swift; sourceTree = "<group>"; };
@@ -1650,6 +1656,7 @@
 				72315EBD991FBD531F4B0F54 /* NotificationReaderTests.swift */,
 				CE350F7008686CCAEAF75F29 /* PluginRegistryTests.swift */,
 				0E2F545614DEDFA182DBB163 /* SpeechSourceRegistryTests.swift */,
+				B17623B15B3E5CB21121480A /* SpotifyPluginTests.swift */,
 				634F4CB3294C0340AC9C67B9 /* YouTubePluginTests.swift */,
 			);
 			path = Plugins;
@@ -2119,6 +2126,7 @@
 				0D5E46F84DD8C7E7CE2161C5 /* PluginRegistry.swift */,
 				3CB785F3E9F2AB2CF381AFDE /* RoutinePlugin.swift */,
 				469503800F9E5EA3670000F6 /* SpeechSource.swift */,
+				E07454CB6E1310F2F6ACDCF6 /* SpotifyPlugin.swift */,
 				B5B27A5F278473E1FB9ACC2D /* YouTubePlugin.swift */,
 			);
 			path = Plugins;
@@ -2316,6 +2324,7 @@
 				98930B8EC7CE463FFD1AEF78 /* NepaliTimeParserTests.swift */,
 				8E1097A261906C1929809B6E /* NewsStageRoutingTests.swift */,
 				A89955EB577CFCB8D4C59F04 /* OnDeviceSTTSelectionTests.swift */,
+				C298389CE26F07F01EA97293 /* PinnedSurfaceGuardTests.swift */,
 				F6D0122346CB9657139E6909 /* PiperVoiceSpeakerTests.swift */,
 				DFCA1FBCF5F571D61069AFEE /* ProfilePersonalizationTests.swift */,
 				579692A4040D53ACACD671E9 /* ProfilePromptTextGuardTests.swift */,
@@ -3514,6 +3523,7 @@
 				7BEE2BFCCD71BDD73DCCF7E5 /* SpotifyAuthError.swift in Sources */,
 				85562D73C65AB1FF27E8AC3C /* SpotifyAuthFlow.swift in Sources */,
 				146457C97160DF096A5BFA49 /* SpotifyCredentialStore.swift in Sources */,
+				08309D9B923EC86AC31F7A1D /* SpotifyPlugin.swift in Sources */,
 				6B3E697833CF5EC06C68F22A /* SpotifyTool.swift in Sources */,
 				16E45ABA871CCAC97F5B88D6 /* SpotifyTransport.swift in Sources */,
 				6A67604ED7E66C048BD76561 /* StartupBoot.swift in Sources */,
@@ -3832,6 +3842,7 @@
 				277306DA4F6459C5C896C773 /* OverlayRenderProbe.swift in Sources */,
 				A6724A269F092129060C7752 /* PhotoCameraPresenterTests.swift in Sources */,
 				B73BCFB2FEA8C0FD579A9F66 /* PhotosLibraryPhotoSaverTests.swift in Sources */,
+				6B256FD9F86B3470D2971747 /* PinnedSurfaceGuardTests.swift in Sources */,
 				AFA35E445E49A49F01D8F2B8 /* PiperVoiceSpeakerTests.swift in Sources */,
 				0C23C559D5302E0414D8AD39 /* PluginRegistryTests.swift in Sources */,
 				9F9561A86DE48161886A2E74 /* PointAskAnalysisPipelineTests.swift in Sources */,
@@ -3893,6 +3904,7 @@
 				20549122D6200D2660E0FCC8 /* SpotifyDeepLinkTests.swift in Sources */,
 				365246D390B116202DCD28D3 /* SpotifyHostileCorpus.swift in Sources */,
 				2442FE1B6A72DE94FB6D043C /* SpotifyLocalizationTests.swift in Sources */,
+				D69988E0034C33CB247A9236 /* SpotifyPluginTests.swift in Sources */,
 				D2A9D69D153B60BAA5C99E72 /* SpotifyToolTests.swift in Sources */,
 				2EBF0379623E8AF30368062B /* StartupBootSpinnerFloorTests.swift in Sources */,
 				7D6817E0AA85EA6A39B48A58 /* StartupBootTests.swift in Sources */,
