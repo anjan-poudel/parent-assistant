@@ -22,7 +22,7 @@ Feature: SpotifyTool search and remote play
     Given a stub transport and a token source that returns a valid access token
     When SpotifyTool searches for a song query
     Then exactly one search request is issued with type=track and limit=1
-    And the returned track exposes its 22-character base62 id, name and artist
+    And the returned track exposes its 22-character base62 id and title (§24's TrackResult — no artist; W1 review F-3 amends this planning wording)
 
   Scenario: Search failure is typed, single-shot and content-free in logs
     Given the stub transport returns a non-200 response for a search

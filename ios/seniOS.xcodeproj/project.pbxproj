@@ -63,10 +63,12 @@
 		131CEF7228370D168FC31C9F /* ApplianceHelperView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAC3AD46468610B5F17EA5F3 /* ApplianceHelperView.swift */; };
 		1353F733659C1369A9B41C75 /* PointAskYOLOEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2DEEECBC24E9A54DC6BB5A8E /* PointAskYOLOEngine.swift */; };
 		13AC1C44FEF5DF867792BC6A /* MedicalAppointmentParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 489494A7B9DC30CA378A3B17 /* MedicalAppointmentParser.swift */; };
+		146457C97160DF096A5BFA49 /* SpotifyCredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD7A96EB4ED8B7AABCB9B085 /* SpotifyCredentialStore.swift */; };
 		14C17283B19361A8D000E4B6 /* NepaliTextNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C56ECED33B6FFBA9DAEA9C9E /* NepaliTextNormalizer.swift */; };
 		14E74986D0D6FA4D6A911B71 /* ApplianceCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A012D8FD1155E0F5774CE332 /* ApplianceCache.swift */; };
 		15E7C212B549DC6370F18E88 /* AlarmTimerCommandParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70A6673A1C7AE11C0E288035 /* AlarmTimerCommandParser.swift */; };
 		16635A2365083326F5AA866B /* NumberWordNormalizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8E1556B760B056BE5530FA7 /* NumberWordNormalizer.swift */; };
+		16E45ABA871CCAC97F5B88D6 /* SpotifyTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9317F7B716F91135DE743D01 /* SpotifyTransport.swift */; };
 		175FBED180C17BFE65E59593 /* VoiceContactSearchRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80462B405AD704A16369558F /* VoiceContactSearchRoute.swift */; };
 		1812AD99862723B5C2128B26 /* LiveTextDetectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5EE75C0B25470981950BCD44 /* LiveTextDetectorTests.swift */; };
 		1823942F7054BC6AE52767A7 /* AddressAsField.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F3D54044C733C0D83A4790B /* AddressAsField.swift */; };
@@ -79,7 +81,6 @@
 		19856F6EA352CF38EDA80140 /* ProfilePersonalizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFCA1FBCF5F571D61069AFEE /* ProfilePersonalizationTests.swift */; };
 		1A78AA3AD77DA25AFA4D13DD /* MessengerHandleStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C1E3FDDC092D291009FA2CF /* MessengerHandleStoreTests.swift */; };
 		1B19A8427986D4D8146FB481 /* MigratingEncryptedStorageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BE37B436A630B55C44B0CDA /* MigratingEncryptedStorageTests.swift */; };
-		1B5E8B6A1B9309B685D4F3F1 /* HomeProfileLinkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AEDE98BB68199F944A733E2B /* HomeProfileLinkTests.swift */; };
 		1C1588C7CEA590D5F9407235 /* NavigationGeocoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4110ED5F9481C973A164A54B /* NavigationGeocoder.swift */; };
 		1C4A83F7293BFBB6A65173A6 /* SpeakerBiometricService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE14BB231318BB94B12FF212 /* SpeakerBiometricService.swift */; };
 		1CA21B40BF45AE4B7FA53891 /* TithiCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5752A2A6EEC2DE266A00DAC2 /* TithiCalculator.swift */; };
@@ -99,6 +100,7 @@
 		230CEC8F8DD9E013062224E6 /* InterpreterSelectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A1A8F4202C570AB8F399728 /* InterpreterSelectorTests.swift */; };
 		23CB2025BF1FCD04600B9D9F /* YouTubeTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = C074CAB06970C46E5B8D1BEE /* YouTubeTool.swift */; };
 		24063BA0F9864FEA4F692324 /* LeafViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1161B9D8F9059F5D5881DF1C /* LeafViews.swift */; };
+		2442FE1B6A72DE94FB6D043C /* SpotifyLocalizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2647266FC8A962270B131C11 /* SpotifyLocalizationTests.swift */; };
 		246223CB44AA3F1D3FEB409D /* LiveCameraZoomModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0AC946B96FF0A409765B8CE /* LiveCameraZoomModelTests.swift */; };
 		24B4AA4B81484DAC236FD7FB /* LiveCameraSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EFB3EB7B234BE0D88A4D750 /* LiveCameraSessionTests.swift */; };
 		24FC7CD6D9377AB0FC52B3FE /* LiveOverlayPlacement.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15E17666ABFBC03903FA54C /* LiveOverlayPlacement.swift */; };
@@ -233,6 +235,7 @@
 		4D35DCD2E6B0CED4FA39B9A3 /* GoldenCorpus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F4B490AD8898085B8F0895A /* GoldenCorpus.swift */; };
 		4D4904A90B38563561E233D8 /* SpeakQueueTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FDB7F0CC1472A2939C30BD2 /* SpeakQueueTests.swift */; };
 		4DADA7AE33EDA520636C625F /* FeedTopicFilterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFF49D5E554A84E0DE236313 /* FeedTopicFilterTests.swift */; };
+		4DD3828A322B0B7F3312C83C /* SpotifyAuthFlowTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3121CCE6146F9E0359A0C268 /* SpotifyAuthFlowTests.swift */; };
 		4EB75F032FEEB3FB24DE2303 /* PointAskSessionModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D48F37CBBC9BA2DA0FD2FF7B /* PointAskSessionModel.swift */; };
 		4EBB36CE295423A763657745 /* LiveTranslateEmptyOverlayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 786ECD4AFD5B569227ECCC75 /* LiveTranslateEmptyOverlayTests.swift */; };
 		4F688325E81142800E51AA57 /* ApplianceHelperSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F253783E3E352EF68EA466F /* ApplianceHelperSession.swift */; };
@@ -270,6 +273,7 @@
 		57352E6B7BC403C2DB4BEDA6 /* CalculatorToolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E108C082D6831FDD80FA44AA /* CalculatorToolTests.swift */; };
 		57387874E58EC854768F3E6A /* UserManualCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CE58E85BC291C8BFD9D3E46 /* UserManualCatalog.swift */; };
 		57A304D3B2F04C73D15C1906 /* PointAskYOLODecoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50225C817AD43B203A32CA4D /* PointAskYOLODecoderTests.swift */; };
+		581771E71420CB50C996D8BA /* HomeProfileLinkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 133BC94926927C45132262BF /* HomeProfileLinkTests.swift */; };
 		585D5F36CCBFEDE734AF7112 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 878B433E4C66ADC0A34F7A69 /* ContentView.swift */; };
 		58661028E700083263585070 /* CalendarSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52F50C83B482A19F5DC8B6CE /* CalendarSyncService.swift */; };
 		58819F311E6D4EBC6A387777 /* EncryptedFileStorage.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD408D01D8A120C902E41AC9 /* EncryptedFileStorage.swift */; };
@@ -328,10 +332,12 @@
 		6AB2C7E92DF4DF5CB61641C8 /* CloudActivityIndicatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAFEADEFBB7B938441831544 /* CloudActivityIndicatorTests.swift */; };
 		6B3D9B0F017F7D37A9D1FA1B /* LiveOverlayPlacementGeometryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA0DDE4F6987CD014EA2C533 /* LiveOverlayPlacementGeometryTests.swift */; };
 		6B3E056A8C81F4A2E3EA2D37 /* TranslateTestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C2F40DBD7498D26EB910A47 /* TranslateTestView.swift */; };
+		6B3E697833CF5EC06C68F22A /* SpotifyTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 151691B090D14E2E51617547 /* SpotifyTool.swift */; };
 		6B58C4A20C6C7637B66B4A10 /* AppLauncherPluginTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C2928C7DCA281112CD80D23 /* AppLauncherPluginTests.swift */; };
 		6C805EE560A4E7F417CA9401 /* FreeFormEventFireHandlerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A44FDCF17F840C6199DBB978 /* FreeFormEventFireHandlerTests.swift */; };
 		6CB952A2C32CD046DD8FDAFB /* CalendarShareMapperTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 16CD0A9C3136FF1981DFF10B /* CalendarShareMapperTests.swift */; };
 		6CC7AEE676733914BE2B7A25 /* PointAskConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D1EE4ADDBC1404CAF014354 /* PointAskConfig.swift */; };
+		6D1D8D797BF3B64B87119E89 /* SpotifyCredentialStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CC7F24D1688959756587827 /* SpotifyCredentialStoreTests.swift */; };
 		6D7F86BF179DB59112E73473 /* LiveOverlayPlacementTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD045949BD2562B861577461 /* LiveOverlayPlacementTests.swift */; };
 		6EB57A388D23A8C134D8278D /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACAF3F4EE4B4C11562224323 /* SettingsView.swift */; };
 		6EBC86F77CF0346E38A75FA5 /* HomeWidgetRegistryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EBAFF70235903F1AF1351BFD /* HomeWidgetRegistryTests.swift */; };
@@ -364,6 +370,7 @@
 		7B52637FCD3F3FC0B0A9F891 /* InAppNavigationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87FEC57F5011493C07F29752 /* InAppNavigationView.swift */; };
 		7BC7E7C76546C31FF3E1D68F /* LiveCameraCaptureStub.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6213F9675D88C5FB097FF3E8 /* LiveCameraCaptureStub.swift */; };
 		7BD42D88F038F799AEDCEE36 /* kws in Resources */ = {isa = PBXBuildFile; fileRef = 83D7A38BF8A5C9EBE3A7EF52 /* kws */; };
+		7BEE2BFCCD71BDD73DCCF7E5 /* SpotifyAuthError.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE82EC0FD7AB22D9F22835C7 /* SpotifyAuthError.swift */; };
 		7C420642E0B121247B8853EB /* LocalBrainChainTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5A00D2F8F62F1792BC2784F /* LocalBrainChainTests.swift */; };
 		7CB0BE302C115DA2782BB9F6 /* MFCCSpeakerEmbedderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C95F63C56E99BB74B9C7A446 /* MFCCSpeakerEmbedderTests.swift */; };
 		7CC9C3F1FD3C8FB8D99F6594 /* NewsDigestComposerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18FC98C7FD6732A8B9045DB4 /* NewsDigestComposerTests.swift */; };
@@ -394,6 +401,7 @@
 		850EFBBBA4BFEDD70C73B849 /* WakeWordUserRecordingProbeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71087481932AB5E88C9FF39D /* WakeWordUserRecordingProbeTests.swift */; };
 		8521BD1B2F154AC66C203389 /* ApplianceCategoryKeyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5ED67C46BB055E5D738393EB /* ApplianceCategoryKeyTests.swift */; };
 		852A95F82E0646D5167A8635 /* InterpreterSelector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 923ED5C7C1B9B517363272BA /* InterpreterSelector.swift */; };
+		85562D73C65AB1FF27E8AC3C /* SpotifyAuthFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78263B5E5E4D2DD36185983F /* SpotifyAuthFlow.swift */; };
 		8567D2CD1407641E8EEC1E14 /* VADHangoverTrimTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62E0366B5FF6055695A53C3D /* VADHangoverTrimTests.swift */; };
 		8569DF670C003C38729E1F62 /* ApplianceGuidance.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0B1DE15DC91ED50AED5D835 /* ApplianceGuidance.swift */; };
 		856BA233B80B5FE063329BFF /* MedicationLabelScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = E14E2B9CFF235CC12E3273CB /* MedicationLabelScanner.swift */; };
@@ -618,6 +626,7 @@
 		D04AF7E3BC73170DA9484CE6 /* VoiceBiometricStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9AD22F253FD8BA87501C3442 /* VoiceBiometricStoreTests.swift */; };
 		D0672B97B70896B144C9418D /* CaregiverEventFireHandlerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A04AEBA51FBA94AA3639B703 /* CaregiverEventFireHandlerTests.swift */; };
 		D0793871C836D0C5BA592E8B /* ModelCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 553B22C3EBAF6EEA126300DA /* ModelCatalog.swift */; };
+		D0BA2155CB170D6FC1AACA3C /* ToolLogKindMappingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A59B88E7B8E4645E0F2C3575 /* ToolLogKindMappingTests.swift */; };
 		D0D12A1B2A353D816177EC22 /* IntentRouterChatRoutingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 135762E13D3CCF813A3B0F3B /* IntentRouterChatRoutingTests.swift */; };
 		D0EBEA1921AF00B1269B0B85 /* CameraPermissionSurfaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA3FBAB721EE99B9AF9E29E4 /* CameraPermissionSurfaceTests.swift */; };
 		D0EE39ACE349FF9690B9C5C8 /* HomeDateLineComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40FA3780DF1A872699A610BC /* HomeDateLineComposer.swift */; };
@@ -626,6 +635,7 @@
 		D276DF9E37893F5A48C07847 /* FestivalCalendarServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20090654EB2D4E0183CF8609 /* FestivalCalendarServiceTests.swift */; };
 		D2842D112BF5BFAEDFBFD0BA /* FreeFormEventService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D480A7D4CF119EE20E34F293 /* FreeFormEventService.swift */; };
 		D28F554887AB3C9520A96933 /* ModelLifecycleManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C8A24C6175E5A8325FEDA2D /* ModelLifecycleManagerTests.swift */; };
+		D2A9D69D153B60BAA5C99E72 /* SpotifyToolTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22B0FEB34929B3FA13B1B50E /* SpotifyToolTests.swift */; };
 		D37D0723AD112B8BDC4D8B4B /* MedicationPurposeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A6BAE650B7E175E00675E42 /* MedicationPurposeTests.swift */; };
 		D4175E7CBA4AF5F86F7464B3 /* TranscriptSanityGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E873864734A0F0500AE4D63 /* TranscriptSanityGuard.swift */; };
 		D591B79C10F7D608353FA1F7 /* WhisperSpeechRecognizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E3EEA3E69C5ECA0B8EE1DBA /* WhisperSpeechRecognizerTests.swift */; };
@@ -871,11 +881,13 @@
 		125D87077C3A6EABA3196E84 /* NewsSourcesSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewsSourcesSettingsView.swift; sourceTree = "<group>"; };
 		12631243807DE846B6E44364 /* AudioSessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioSessionManager.swift; sourceTree = "<group>"; };
 		126B9531CD4BFF2A82CE5E13 /* ContactCallButtonsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactCallButtonsTests.swift; sourceTree = "<group>"; };
+		133BC94926927C45132262BF /* HomeProfileLinkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeProfileLinkTests.swift; sourceTree = "<group>"; };
 		135762E13D3CCF813A3B0F3B /* IntentRouterChatRoutingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentRouterChatRoutingTests.swift; sourceTree = "<group>"; };
 		137B38C1AF355DA90BE25FCC /* IntentPromptTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentPromptTests.swift; sourceTree = "<group>"; };
 		138E5BBA1B24CCEAECB05587 /* ConfirmationTier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfirmationTier.swift; sourceTree = "<group>"; };
 		1411939748140920CBE9E815 /* SpectralGateCore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpectralGateCore.swift; sourceTree = "<group>"; };
 		148E5FBD9E66E5EE4AB49ACD /* AlarmKitAlarmBackendTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlarmKitAlarmBackendTests.swift; sourceTree = "<group>"; };
+		151691B090D14E2E51617547 /* SpotifyTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotifyTool.swift; sourceTree = "<group>"; };
 		151B13AEC9B0FEF80AC8DD9F /* DialectLexicon.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = DialectLexicon.json; sourceTree = "<group>"; };
 		15F0074FD67707356D249845 /* MissedCallDialBackTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissedCallDialBackTests.swift; sourceTree = "<group>"; };
 		16CD0A9C3136FF1981DFF10B /* CalendarShareMapperTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarShareMapperTests.swift; sourceTree = "<group>"; };
@@ -918,12 +930,14 @@
 		220F763E9AB052077C73451B /* MedicationSchedulerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicationSchedulerTests.swift; sourceTree = "<group>"; };
 		22577ED90A48390A73B44C47 /* MedicationVisualAidPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicationVisualAidPresentationTests.swift; sourceTree = "<group>"; };
 		227923B3238044CF61D063F1 /* LlamaCommandInterpreter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LlamaCommandInterpreter.swift; sourceTree = "<group>"; };
+		22B0FEB34929B3FA13B1B50E /* SpotifyToolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotifyToolTests.swift; sourceTree = "<group>"; };
 		23564CD4C6A81A44380352B5 /* MFCCSpeakerEmbedder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MFCCSpeakerEmbedder.swift; sourceTree = "<group>"; };
 		23736F8217BD5C29FAD41235 /* ProfilePersonalization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfilePersonalization.swift; sourceTree = "<group>"; };
 		25D960115E1EE4B691893FAB /* TranslateTestModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslateTestModel.swift; sourceTree = "<group>"; };
 		25EB3058A3FF1A3ED599A472 /* ModelDownloadDebugSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloadDebugSettings.swift; sourceTree = "<group>"; };
 		2627CAEAB86588DE8701C8A4 /* CalendarShareSettingsSeamTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarShareSettingsSeamTests.swift; sourceTree = "<group>"; };
 		2635340C10BBF8F75E445C53 /* XlmrUnigramTokenizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = XlmrUnigramTokenizerTests.swift; sourceTree = "<group>"; };
+		2647266FC8A962270B131C11 /* SpotifyLocalizationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotifyLocalizationTests.swift; sourceTree = "<group>"; };
 		269C71573D21DF9EAFB68405 /* TithiCalculatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TithiCalculatorTests.swift; sourceTree = "<group>"; };
 		26BCEDA5523CAA502571199D /* WakeWordConfigTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WakeWordConfigTests.swift; sourceTree = "<group>"; };
 		277B510740CCCB3BC47555CF /* SpeakerBiometricTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerBiometricTestSupport.swift; sourceTree = "<group>"; };
@@ -953,6 +967,7 @@
 		30905463AB2C016DE019796A /* DefaultManualsBrowseView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DefaultManualsBrowseView.swift; sourceTree = "<group>"; };
 		30A574DCE83948B01E78BAEA /* ReplySanityGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplySanityGate.swift; sourceTree = "<group>"; };
 		30FB125BFE6F1924719372DA /* HistoryTimeFormatTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryTimeFormatTests.swift; sourceTree = "<group>"; };
+		3121CCE6146F9E0359A0C268 /* SpotifyAuthFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotifyAuthFlowTests.swift; sourceTree = "<group>"; };
 		313369B48446E5D7804B0F6B /* ModelLifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelLifecycle.swift; sourceTree = "<group>"; };
 		31B2F1E52012C40396E02666 /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
 		31F837B488F6EB4CE377C677 /* GeminiClient+Vision.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "GeminiClient+Vision.swift"; sourceTree = "<group>"; };
@@ -1172,6 +1187,7 @@
 		77F2970D06739B3D7DE4A75D /* RoutineScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutineScheduler.swift; sourceTree = "<group>"; };
 		78019B43DD23A703F2AA2515 /* PhotosLibraryPhotoSaverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosLibraryPhotoSaverTests.swift; sourceTree = "<group>"; };
 		7819E4D2F60A8F4142CCF548 /* ElderlyAssistantUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElderlyAssistantUITests.swift; sourceTree = "<group>"; };
+		78263B5E5E4D2DD36185983F /* SpotifyAuthFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotifyAuthFlow.swift; sourceTree = "<group>"; };
 		786ECD4AFD5B569227ECCC75 /* LiveTranslateEmptyOverlayTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTranslateEmptyOverlayTests.swift; sourceTree = "<group>"; };
 		788D1FDD5EE237D36E52AD69 /* RepetitionGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RepetitionGuard.swift; sourceTree = "<group>"; };
 		78E9B689940EC0673C817D95 /* MedicationEditorDraftTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MedicationEditorDraftTests.swift; sourceTree = "<group>"; };
@@ -1254,6 +1270,7 @@
 		923ED5C7C1B9B517363272BA /* InterpreterSelector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterpreterSelector.swift; sourceTree = "<group>"; };
 		926C7F0772C6477A087B8CD2 /* LiveTranslateFocusLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTranslateFocusLayoutTests.swift; sourceTree = "<group>"; };
 		92F8B8264F7A569F2943ABF9 /* HomeTimerChipModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeTimerChipModelTests.swift; sourceTree = "<group>"; };
+		9317F7B716F91135DE743D01 /* SpotifyTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotifyTransport.swift; sourceTree = "<group>"; };
 		9343373A38D6137D52284887 /* FeedTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedTransport.swift; sourceTree = "<group>"; };
 		937BEF1B661393F13869F81A /* UserProfileStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserProfileStoreTests.swift; sourceTree = "<group>"; };
 		940ADBAE2E5A811B03503971 /* VoiceContactSearchRouteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceContactSearchRouteTests.swift; sourceTree = "<group>"; };
@@ -1285,6 +1302,7 @@
 		9C5E5CF8BE78DC4717747523 /* WhisperSpeechRecognizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WhisperSpeechRecognizer.swift; sourceTree = "<group>"; };
 		9C74DE20F41523F7A263CCF9 /* LiveCallDetector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveCallDetector.swift; sourceTree = "<group>"; };
 		9CB7FCEEC41A92E8C3C60A7D /* CaregiverNotifySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaregiverNotifySettingsView.swift; sourceTree = "<group>"; };
+		9CC7F24D1688959756587827 /* SpotifyCredentialStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotifyCredentialStoreTests.swift; sourceTree = "<group>"; };
 		9CEA044B7717B56C151001D2 /* LiveTranslateConsentGateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTranslateConsentGateTests.swift; sourceTree = "<group>"; };
 		9D43BAFFAD3E3FA0E5F5793F /* LiveTranslateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTranslateView.swift; sourceTree = "<group>"; };
 		9DDF8EB1C6FE258BAABEBD59 /* ApplianceGuidancePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplianceGuidancePolicy.swift; sourceTree = "<group>"; };
@@ -1309,6 +1327,7 @@
 		A44FDCF17F840C6199DBB978 /* FreeFormEventFireHandlerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FreeFormEventFireHandlerTests.swift; sourceTree = "<group>"; };
 		A4C4584CBA9E3EFDABEC5F3F /* LiveTranslatePluginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTranslatePluginTests.swift; sourceTree = "<group>"; };
 		A530A5F8BA1DF276C701B1C4 /* LiveTranslateSentenceSplitter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTranslateSentenceSplitter.swift; sourceTree = "<group>"; };
+		A59B88E7B8E4645E0F2C3575 /* ToolLogKindMappingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolLogKindMappingTests.swift; sourceTree = "<group>"; };
 		A5CD09CC570C2098510C8EEC /* NepaliTimeParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NepaliTimeParser.swift; sourceTree = "<group>"; };
 		A5D1072FB1430CB8355B3FA8 /* MessageComposeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageComposeView.swift; sourceTree = "<group>"; };
 		A600B6B05329AADBC3BD185D /* ElderlyAssistantUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = ElderlyAssistantUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -1341,7 +1360,6 @@
 		AE5A7A7BF2077907CF177EDF /* LiveTranslationPipelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTranslationPipelineTests.swift; sourceTree = "<group>"; };
 		AE7F696D1331EC1C2BB6E27D /* AppTextSize.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTextSize.swift; sourceTree = "<group>"; };
 		AEC123B9E266E9C6B1C45131 /* OverlayRenderProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlayRenderProbe.swift; sourceTree = "<group>"; };
-		AEDE98BB68199F944A733E2B /* HomeProfileLinkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeProfileLinkTests.swift; sourceTree = "<group>"; };
 		AEFDC2B5E271E674D761E185 /* LiveTranslateGreenOverlayTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTranslateGreenOverlayTests.swift; sourceTree = "<group>"; };
 		AF94EF103968B07445324A94 /* CallLinks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallLinks.swift; sourceTree = "<group>"; };
 		B0AC946B96FF0A409765B8CE /* LiveCameraZoomModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveCameraZoomModelTests.swift; sourceTree = "<group>"; };
@@ -1511,6 +1529,7 @@
 		ED32B7996617D6A05D9423F8 /* CallOverrideParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallOverrideParser.swift; sourceTree = "<group>"; };
 		EDAA7689FF96B4B4A6CE3494 /* CalendarShareSeams.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarShareSeams.swift; sourceTree = "<group>"; };
 		EE4E40F60537B38F6304D243 /* GeminiConfigStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiConfigStore.swift; sourceTree = "<group>"; };
+		EE82EC0FD7AB22D9F22835C7 /* SpotifyAuthError.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotifyAuthError.swift; sourceTree = "<group>"; };
 		EEBB2D1A7F7357E6FAC679C2 /* PointAskAnalysisPipelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PointAskAnalysisPipelineTests.swift; sourceTree = "<group>"; };
 		EF3878B39CB94F2A699E176C /* SettingsTabs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsTabs.swift; sourceTree = "<group>"; };
 		EF3D6AAD86A9608F1FBC7830 /* ReplySpeakLane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplySpeakLane.swift; sourceTree = "<group>"; };
@@ -1551,6 +1570,7 @@
 		FB312A03484A66893874EAC9 /* CloudCascadeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudCascadeTests.swift; sourceTree = "<group>"; };
 		FBD625CA4CD3406ED96AE74F /* SearchTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SearchTool.swift; sourceTree = "<group>"; };
 		FBFB5064750DE4B1073059D3 /* VoiceSessionBindingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceSessionBindingTests.swift; sourceTree = "<group>"; };
+		FD7A96EB4ED8B7AABCB9B085 /* SpotifyCredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotifyCredentialStore.swift; sourceTree = "<group>"; };
 		FDADF751C3E88E7BCE67D6AD /* LLM.swift */ = {isa = PBXFileReference; lastKnownFileType = folder; name = LLM.swift; path = vendor/LLM.swift; sourceTree = SOURCE_ROOT; };
 		FDF4882AC6616158DF25F691 /* ProfileSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileSettingsView.swift; sourceTree = "<group>"; };
 		FE811FACF80BAA62A9F6C1D9 /* WarmStart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WarmStart.swift; sourceTree = "<group>"; };
@@ -1709,6 +1729,7 @@
 				4E7BDBB72570D561ADB64E14 /* PointAsk */,
 				B3ECA4A7B5469558FFBE86AA /* Readiness */,
 				31871F8811A963C2F69C6682 /* Reminders */,
+				4222D93B193DE785C6ED70B5 /* Spotify */,
 				11787E1E93605DB453F56F21 /* Storage */,
 				7A09DF1228214557A75718BB /* Theme */,
 				73F8EFBC13A9CF77D4AED92A /* Voice */,
@@ -1838,6 +1859,7 @@
 		391135E423E056F0051EA93C /* ElderlyAssistantTests */ = {
 			isa = PBXGroup;
 			children = (
+				22B0FEB34929B3FA13B1B50E /* SpotifyToolTests.swift */,
 				6656FBC4CA0EA9BA0EC908E9 /* App */,
 				1D50488FDD7291A3A526FA6E /* Services */,
 			);
@@ -1926,6 +1948,16 @@
 				DB8C99DCB2156C33403F2AAB /* UnifiedContactSearchTests.swift */,
 			);
 			path = Contacts;
+			sourceTree = "<group>";
+		};
+		4222D93B193DE785C6ED70B5 /* Spotify */ = {
+			isa = PBXGroup;
+			children = (
+				3121CCE6146F9E0359A0C268 /* SpotifyAuthFlowTests.swift */,
+				9CC7F24D1688959756587827 /* SpotifyCredentialStoreTests.swift */,
+				2647266FC8A962270B131C11 /* SpotifyLocalizationTests.swift */,
+			);
+			path = Spotify;
 			sourceTree = "<group>";
 		};
 		4317DAE10FB5C0332CF612DB /* Widgets */ = {
@@ -2150,7 +2182,7 @@
 				435643E21CD475A8DBF118B7 /* ColdStartRoutingTests.swift */,
 				00ABD1B5F8C75588285FC5EC /* DesignTokensTests.swift */,
 				E33F5F28A61EB5B535E69FF6 /* DirectionsScreenListTests.swift */,
-				AEDE98BB68199F944A733E2B /* HomeProfileLinkTests.swift */,
+				133BC94926927C45132262BF /* HomeProfileLinkTests.swift */,
 				FF46FF3BB62902DB1FC16086 /* KinDesignationTests.swift */,
 				91B220F3E406C71B4549529A /* L10nCatalogCoverageTests.swift */,
 				22577ED90A48390A73B44C47 /* MedicationVisualAidPresentationTests.swift */,
@@ -2167,6 +2199,7 @@
 				4565222B482D35D3233C2498 /* StartupDataBatchTests.swift */,
 				DF715886271093CBABF8E880 /* StartupDegradationTests.swift */,
 				884A6DDFF2AD69915DB478F1 /* StartupSignpostsTests.swift */,
+				A59B88E7B8E4645E0F2C3575 /* ToolLogKindMappingTests.swift */,
 				77D68E8B6164782253FEEC63 /* TranslateTestModelTests.swift */,
 				FBFB5064750DE4B1073059D3 /* VoiceSessionBindingTests.swift */,
 				79E50F03A4A3FAF1A1A0B822 /* VoiceSessionStateMachineTests.swift */,
@@ -2338,6 +2371,7 @@
 				3CCAC65B24BB8DDC0DD68E6D /* PointAsk */,
 				7AD1DF45B11EC0951366C008 /* Readiness */,
 				137F5134C741CB1AB953FFC8 /* Reminders */,
+				AE0C60F57E6D4627AC927633 /* Spotify */,
 				5D971121A7B1328821CC3D35 /* Storage */,
 				B26870B316F0C29E3B02D2FB /* Theme */,
 				D8FA26BA089C7E6C61D0DA02 /* Voice */,
@@ -2640,6 +2674,18 @@
 				066757B2CBB523275AD8CE07 /* VoiceCalendarEventWriterTests.swift */,
 			);
 			path = CalendarSync;
+			sourceTree = "<group>";
+		};
+		AE0C60F57E6D4627AC927633 /* Spotify */ = {
+			isa = PBXGroup;
+			children = (
+				EE82EC0FD7AB22D9F22835C7 /* SpotifyAuthError.swift */,
+				78263B5E5E4D2DD36185983F /* SpotifyAuthFlow.swift */,
+				FD7A96EB4ED8B7AABCB9B085 /* SpotifyCredentialStore.swift */,
+				151691B090D14E2E51617547 /* SpotifyTool.swift */,
+				9317F7B716F91135DE743D01 /* SpotifyTransport.swift */,
+			);
+			path = Spotify;
 			sourceTree = "<group>";
 		};
 		B26870B316F0C29E3B02D2FB /* Theme */ = {
@@ -3439,6 +3485,11 @@
 				2E22AFD7995CAD2B82E00524 /* SpeechRecognizer.swift in Sources */,
 				ACDE59D994E9EC7497DE6454 /* SpeechSource.swift in Sources */,
 				B0FAA9361B4E1A999B112E34 /* SpokenTime.swift in Sources */,
+				7BEE2BFCCD71BDD73DCCF7E5 /* SpotifyAuthError.swift in Sources */,
+				85562D73C65AB1FF27E8AC3C /* SpotifyAuthFlow.swift in Sources */,
+				146457C97160DF096A5BFA49 /* SpotifyCredentialStore.swift in Sources */,
+				6B3E697833CF5EC06C68F22A /* SpotifyTool.swift in Sources */,
+				16E45ABA871CCAC97F5B88D6 /* SpotifyTransport.swift in Sources */,
 				6A67604ED7E66C048BD76561 /* StartupBoot.swift in Sources */,
 				F109D17C3F64BB10822330AD /* StartupDegradation.swift in Sources */,
 				999EA26B3E5147D90AC8F7A2 /* StartupSignposts.swift in Sources */,
@@ -3625,6 +3676,7 @@
 				9446C54FDE05927D7D4ADAA3 /* HiINCapabilityProbeTests.swift in Sources */,
 				4B1186A99DD1B243EAD5F19D /* HistoryTimeFormatTests.swift in Sources */,
 				916DEEB02831B7415BFB307F /* HomeDateLineComposerTests.swift in Sources */,
+				581771E71420CB50C996D8BA /* HomeProfileLinkTests.swift in Sources */,
 				189B019772EFC433CD42BC60 /* HomeTimerChipModelTests.swift in Sources */,
 				6EBC86F77CF0346E38A75FA5 /* HomeWidgetRegistryTests.swift in Sources */,
 				090F94B2C3D159992225B40C /* HomeWidgetTestSupport.swift in Sources */,
@@ -3772,7 +3824,6 @@
 				19856F6EA352CF38EDA80140 /* ProfilePersonalizationTests.swift in Sources */,
 				4B3BF96161C53B4E8B0E02E4 /* ProfilePromptTextGuardTests.swift in Sources */,
 				637B3ABEB85AC77FB4478AFF /* ProfileSettingsModelTests.swift in Sources */,
-				1B5E8B6A1B9309B685D4F3F1 /* HomeProfileLinkTests.swift in Sources */,
 				6151A345F053B88FD001281E /* QueryEndToEndRegressionTests.swift in Sources */,
 				5621AC3DB8A9AB51DC66CB37 /* RepetitionGuardTests.swift in Sources */,
 				8F8D38392071EB681655CDE1 /* ReplySanityGateTests.swift in Sources */,
@@ -3807,6 +3858,10 @@
 				C7DBB2B5CA4ACD6CBD3CE28C /* SpectralGateDenoiserTests.swift in Sources */,
 				EDB40322DA71A0CF7DB0EC27 /* SpeechSourceRegistryTests.swift in Sources */,
 				FF1437F51840CE033E800196 /* SpokenTimeTests.swift in Sources */,
+				4DD3828A322B0B7F3312C83C /* SpotifyAuthFlowTests.swift in Sources */,
+				6D1D8D797BF3B64B87119E89 /* SpotifyCredentialStoreTests.swift in Sources */,
+				2442FE1B6A72DE94FB6D043C /* SpotifyLocalizationTests.swift in Sources */,
+				D2A9D69D153B60BAA5C99E72 /* SpotifyToolTests.swift in Sources */,
 				2EBF0379623E8AF30368062B /* StartupBootSpinnerFloorTests.swift in Sources */,
 				7D6817E0AA85EA6A39B48A58 /* StartupBootTests.swift in Sources */,
 				AF589ADE0665DD8433BCC200 /* StartupDataBatchTests.swift in Sources */,
@@ -3824,6 +3879,7 @@
 				826BFEEED44EFF8ACBB41E46 /* TimeSlotProvenanceTests.swift in Sources */,
 				4706C690591D882919A03ACE /* TimerAlarmEngineTests.swift in Sources */,
 				36E22F0466C005027B0921E5 /* TithiCalculatorTests.swift in Sources */,
+				D0BA2155CB170D6FC1AACA3C /* ToolLogKindMappingTests.swift in Sources */,
 				4359AC45AD296B70CF2114BF /* TopicPreAnswerTests.swift in Sources */,
 				58A4B3B234A2D554FF19CA71 /* TranscriptSanityGuardTests.swift in Sources */,
 				870524938E1B8161B6E13C50 /* TranslateTestModelTests.swift in Sources */,

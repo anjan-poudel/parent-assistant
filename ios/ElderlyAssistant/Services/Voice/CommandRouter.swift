@@ -1202,6 +1202,12 @@ final class CommandRouter {
                 emitIntentKeywordMatch(relaxed)
                 fireYouTubePlay(query: query)
                 return .unrecognised(transcript: raw)
+            case .music:
+                // [SPOTIFY] Placeholder arm (driver-directed, T-114): T-112
+                // added Domain.music to the keyword table and this switch
+                // must stay exhaustive for the shared worktree to compile;
+                // the real routing (fireMusicRequest) lands with T-116.
+                break
             case .appLaunch:
                 // [APP-LAUNCHER] (2026-09-16) The launcher's voice fast
                 // path ("क्यामेरा खोल", "open WhatsApp", "फोटो खिच्न") —
@@ -2359,6 +2365,30 @@ final class CommandRouter {
 
     // MARK: - [YOUTUBE] Voice YouTube search/play (youtube-plugin, 2026-09-08)
 
+    /// [T-114][M-1] Log projection for the reusable YouTube helpers
+    /// (`fireYouTubePlay` / `deliverYouTubeFailure`).
+    ///
+    /// Explicit-YouTube turns keep the shipped behavior — `.explicit` is
+    /// the default, so every pre-existing call site is untouched and the
+    /// query is logged verbatim (the FR-SP-005 baseline). Music turns
+    /// that fall back to YouTube (the §13 fallback rows) pass
+    /// `.queryFree`: there the music query is the sensitive value and
+    /// must never reach the tool log (NFR-SP-002 / security finding
+    /// M-1). The projection changes the LOGGED query only — routing,
+    /// speech and network behavior are identical for both cases.
+    enum YouTubeLogProjection {
+        case explicit
+        case queryFree
+
+        /// The `query` value the tool log records for a helper call.
+        func loggedQuery(_ query: String) -> String {
+            switch self {
+            case .explicit: return query
+            case .queryFree: return ""
+            }
+        }
+    }
+
     /// The YouTube stage's execution (see the stage comment in `route`).
     /// Called only after `YouTubeRoute.decide` matched with an extracted
     /// query. Two honest paths:
@@ -2371,7 +2401,9 @@ final class CommandRouter {
     ///     confirmation. The title goes through the SPOKEN path ONLY: no
     ///     visible card, never into the observability bus or the debug
     ///     log (the log entry for the success path carries the query +
-    ///     outcome, an EMPTY response by design — see `logToolRequest`).
+    ///     outcome, an EMPTY response by design — see `logToolRequest`;
+    ///     music-turn callers pass `.queryFree`, which blanks the logged
+    ///     query — [T-114][M-1]).
     ///   · No key: open the SEARCH deeplink directly
     ///     (`youtube://www.youtube.com/results` → https fallback) and
     ///     speak `youtube.openingSearch` — the user accepted
@@ -2383,7 +2415,8 @@ final class CommandRouter {
     ///   honest localized fallback — `youtube.notFound` for an empty
     ///   result set, `youtube.unavailable` otherwise — never a
     ///   fabricated title, never a dead end.
-    private func fireYouTubePlay(query: String) {
+    private func fireYouTubePlay(query: String,
+                                 logProjection: YouTubeLogProjection = .explicit) {
         let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
         // [VOICE-ACK] The lookup/deeplink open takes a beat — ack before
         // the attempt, the outcome line follows through the lane.
@@ -2396,6 +2429,7 @@ final class CommandRouter {
         guard let apiKey = youtubeConfigStore?.apiKey else {
             guard let opener = youtubeLinkOpener else {
                 deliverYouTubeFailure(locale: locale, query: query,
+                                      logProjection: logProjection,
                                       fallbackKey: "youtube.unavailable",
                                       statusCode: nil, startedAt: attemptStartedAt)
                 return
@@ -2410,7 +2444,8 @@ final class CommandRouter {
             // convention); response stays EMPTY on the ok path so the
             // encrypted store never gains text the design keeps to
             // speech.
-            logToolRequest(kind: .youtube, query: query, response: "", outcome: "ok",
+            logToolRequest(kind: .youtube, query: logProjection.loggedQuery(query),
+                           response: "", outcome: "ok",
                            statusCode: nil,
                            durationMs: Self.elapsedMilliseconds(since: attemptStartedAt))
             return
@@ -2423,6 +2458,7 @@ final class CommandRouter {
             guard let transport = self.youtubeTransport else {
                 await MainActor.run {
                     self.deliverYouTubeFailure(locale: locale, query: query,
+                                               logProjection: logProjection,
                                                fallbackKey: "youtube.unavailable",
                                                statusCode: nil, startedAt: attemptStartedAt)
                 }
@@ -2435,6 +2471,7 @@ final class CommandRouter {
                 await MainActor.run {
                     guard let opener = self.youtubeLinkOpener else {
                         self.deliverYouTubeFailure(locale: locale, query: query,
+                                                   logProjection: logProjection,
                                                    fallbackKey: "youtube.unavailable",
                                                    statusCode: nil, startedAt: attemptStartedAt)
                         return
@@ -2449,25 +2486,29 @@ final class CommandRouter {
                     // entry below records the attempt with an EMPTY
                     // response for exactly that reason.
                     self.speak(text: text, locale: locale)
-                    self.logToolRequest(kind: .youtube, query: query, response: "",
+                    self.logToolRequest(kind: .youtube, query: logProjection.loggedQuery(query),
+                                        response: "",
                                         outcome: "ok", statusCode: 200,
                                         durationMs: Self.elapsedMilliseconds(since: attemptStartedAt))
                 }
             } catch YouTubeTool.FetchError.noResults {
                 await MainActor.run {
                     self.deliverYouTubeFailure(locale: locale, query: query,
+                                               logProjection: logProjection,
                                                fallbackKey: "youtube.notFound",
                                                statusCode: 200, startedAt: attemptStartedAt)
                 }
             } catch YouTubeTool.FetchError.invalidResponse(let statusCode) {
                 await MainActor.run {
                     self.deliverYouTubeFailure(locale: locale, query: query,
+                                               logProjection: logProjection,
                                                fallbackKey: "youtube.unavailable",
                                                statusCode: statusCode, startedAt: attemptStartedAt)
                 }
             } catch {
                 await MainActor.run {
                     self.deliverYouTubeFailure(locale: locale, query: query,
+                                               logProjection: logProjection,
                                                fallbackKey: "youtube.unavailable",
                                                statusCode: nil, startedAt: attemptStartedAt)
                 }
@@ -2478,14 +2519,18 @@ final class CommandRouter {
     /// Failure delivery for the YouTube stage — the honest localized
     /// fallback line (`youtube.notFound` / `youtube.unavailable`), a
     /// `youtube` component `fail` event, and one "fail" debug-log entry
-    /// carrying the line the user actually heard (never a title).
+    /// carrying the line the user actually heard (never a title; the
+    /// logged query follows `logProjection` — blanked on music turns,
+    /// [T-114][M-1]).
     private func deliverYouTubeFailure(locale: Locale, query: String,
+                                       logProjection: YouTubeLogProjection = .explicit,
                                        fallbackKey: String,
                                        statusCode: Int?, startedAt: Date) {
         emitYouTube(eventType: "youtube", outcome: "fail")
         speakWithVisibleOutcome(key: fallbackKey)
         let line = L10n.str(fallbackKey, locale: locale)
-        logToolRequest(kind: .youtube, query: query, response: line, outcome: "fail",
+        logToolRequest(kind: .youtube, query: logProjection.loggedQuery(query),
+                       response: line, outcome: "fail",
                        statusCode: statusCode,
                        durationMs: Self.elapsedMilliseconds(since: startedAt))
     }
