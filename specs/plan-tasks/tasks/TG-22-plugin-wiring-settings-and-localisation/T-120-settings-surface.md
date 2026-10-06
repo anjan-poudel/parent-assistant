@@ -45,6 +45,7 @@ Feature: Settings Spotify section
 ## Implementation notes
 - Files: `ios/ElderlyAssistant/` + `Settings/` (`SpotifySettingsView.swift`, section registration) mirroring `YouTubeSettingsView.swift` at the shipped insertion point; copy comes only from T-117 keys.
 - F-7 note: the remove-confirm copy claims "Music will use YouTube only." while matrix row 8 can still open the `spotify:search:` hand-off when YouTube cannot serve; if kept, record the deviation here and in T-117 rather than silently shipping.
+- [W2-review D3] Treat relink as routine maintenance copy, not error copy: the provider expires refresh tokens after 6 months (verified against primary docs 2026-10-07, T-110 V-1), so `invalid_grant` → unlink → relink is an expected event for every linked household; the link-failed state and retry affordance should read as normal maintenance, not a fault.
 - States to render exactly as the component spec lists: not linked, link failed, linked, free tier, plus the rollout note.
 - Disclosure row is the visible half of security evidence obligation 7; T-123 packages the copy-vs-data-flow check.
 - Accessibility: localised labels, traits and tap targets per NFR-SP-010; no icon-only affordances.

@@ -410,7 +410,16 @@ final class KeywordIntentRuleTests: XCTestCase {
         for utterance in ["गीतालाई फोन गर", "call geeta", "गीता पढ",
                           "अलार्म बजाऊ", "टाइमर लगाऊ", "घण्टी बजाऊ",
                           "बिहानको अलार्म बजाउनुहोस्",
-                          "अलार्म चलाऊ", "फोन लगाऊ"] {
+                          "अलार्म चलाऊ", "फोन लगाऊ",
+                          // Fused-marker class (W1 review F-1): here the
+                          // marker stem SURVIVES the grapheme clusters
+                          // ("गीत" ⊂ "गीतमाया", "भजन" ⊂ "भजनलाई"), so
+                          // the marker group matches — but the utterance
+                          // carries no music verb, so the music rule
+                          // still stays nil. The veto-side over-block
+                          // for this same class is pinned in T-113's
+                          // VoiceContactSearchRouteTests (F-6 trade-off).
+                          "भजनलाई फोन गर", "गीतमाया"] {
             XCTAssertNil(KeywordIntentRule.match(transcript: utterance),
                          "\(utterance) is not a music request — the required marker set must stay intact")
         }

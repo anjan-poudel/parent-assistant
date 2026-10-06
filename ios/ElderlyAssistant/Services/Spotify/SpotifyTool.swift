@@ -12,6 +12,11 @@ import Foundation
 //  - Play: one PUT against `https://api.spotify.com/v1/me/player/play`
 //    carrying the verified `spotify:track:` URI in the JSON body, mapped to
 //    a typed outcome.
+//  - Deep links (the T-107 half, below): `trackURI(id:)` builds
+//    `spotify:track:<id>` from a validated base62 22-character identifier
+//    only; `searchURI(query:)` builds `spotify:search:<percent-encoded>`
+//    under the §24 grammar; `open(_:opener:)` probes with `canOpenURL` and
+//    opens, pinned to that probe alone (V-4).
 //
 // Every failure maps to a `FetchError` / `PlayError` case tied to the
 // router's matrix rows (§13): `noResults` is row 6; every other search
@@ -298,5 +303,101 @@ enum SpotifyTool {
     private static func collapsed(_ raw: String) -> String {
         raw.split(whereSeparator: { $0.isWhitespace || $0.isNewline })
             .joined(separator: " ")
+    }
+
+    // MARK: - Deep links (T-107, design §24 "URI validation boundary")
+
+    /// What a deep-link attempt reached (design §24). Exactly two cases:
+    /// the router's matrix reads `.opened` as the observed hand-off and
+    /// `.notOpened` as the honest app-absent terminal (FR-SP-011); there is
+    /// no third value, and no case reports success when the platform probe
+    /// said otherwise (V-4, FR-SP-012).
+    enum OpenOutcome: Equatable {
+        /// The platform probe reported an installed app that accepts the
+        /// URL, and the open call was issued.
+        case opened
+        /// The platform probe reported no installed app for the URL; no
+        /// open call is issued and the caller speaks the honest app-absent
+        /// line instead of a silent no-op (FR-SP-011/FR-SP-012).
+        case notOpened
+    }
+
+    /// The one deep-link scheme this tool can construct (design §24,
+    /// "Scheme allowlist"): every URI the two builders return parses with
+    /// exactly this scheme, and nothing else can escape them.
+    private static let deepLinkScheme = "spotify"
+
+    /// `spotify:track:<id>` / `spotify:search:<percent-encoded>` — the two
+    /// deep-link shapes, private so no caller can re-compose a third.
+    private static let trackURIPrefix = "spotify:track:"
+    private static let searchURIPrefix = "spotify:search:"
+
+    /// `spotify:track:<id>` for an identifier that matches the base62
+    /// 22-character grammar exactly — nil for anything else (NFR-SP-008;
+    /// design §24). The id is the tool's own validated value (`TrackResult`
+    /// or a corpus-clean literal): a rejected id produces no URI at all,
+    /// never a partial or repaired one, and a title is never composed into
+    /// a URI by any path this tool offers.
+    static func trackURI(id: String) -> URL? {
+        guard isSpotifyIdentifier(id) else { return nil }
+        return validatedDeepLink(trackURIPrefix + id)
+    }
+
+    /// `spotify:search:<percent-encoded query>` — the search hand-off link
+    /// (matrix row 8). Accepted iff the trimmed query is non-empty and its
+    /// `Character` count is within `maxSearchQueryLength`; the query is
+    /// percent-encoded with `CharacterSet.urlQueryAllowed` minus
+    /// `+&=?/%#` (design §24), so no unencoded query delimiter survives
+    /// into the URI. Empty or over-cap resolves to nil — nothing is
+    /// constructed and nothing can be opened.
+    static func searchURI(query: String) -> URL? {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.count <= maxSearchQueryLength else {
+            return nil
+        }
+        guard let encoded = trimmed.addingPercentEncoding(withAllowedCharacters: searchURIAllowedCharacters),
+              !encoded.isEmpty else {
+            // Defensive: unreachable for any valid Swift string (UTF-8
+            // encoding is total), kept so no path can build from a partial
+            // encoding.
+            return nil
+        }
+        return validatedDeepLink(searchURIPrefix + encoded)
+    }
+
+    /// `CharacterSet.urlQueryAllowed` minus the query delimiters that must
+    /// never survive unencoded (`+&=?/%#`, design §24) — `+` because form
+    /// decoders read it as a space, the rest because each can end the query
+    /// component or start a new one.
+    private static let searchURIAllowedCharacters: CharacterSet = {
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "+&=?/%#")
+        return allowed
+    }()
+
+    /// The construction boundary itself: a deep link is only ever returned
+    /// when the assembled string parses AND its scheme is exactly the
+    /// allowlisted one (NFR-SP-008, "Scheme allowlist"). Anything else is
+    /// nil rather than a URL another layer might open.
+    private static func validatedDeepLink(_ raw: String) -> URL? {
+        guard let url = URL(string: raw), url.scheme == deepLinkScheme else {
+            return nil
+        }
+        return url
+    }
+
+    /// Probes and opens a deep link this tool built, pinned to the platform
+    /// probe alone (V-4): `canOpenURL` is consulted exactly once and is the
+    /// only input to the outcome. The probe reporting the app present means
+    /// the open call is issued and `.opened` is returned; the probe
+    /// reporting the app absent means nothing is opened and `.notOpened` is
+    /// returned — no fallback inside this call, no inference from any other
+    /// signal, no retry, and no path where a failed probe yields `.opened`.
+    static func open(_ url: URL, opener: CallLinkOpening) -> OpenOutcome {
+        if opener.canOpenURL(url) {
+            opener.open(url)
+            return .opened
+        }
+        return .notOpened
     }
 }

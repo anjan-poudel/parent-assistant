@@ -466,6 +466,154 @@ final class SpotifyToolTests: XCTestCase {
         XCTAssertEqual(transport.capturedRequests.count, 1)
     }
 
+    // MARK: - Deep links (T-107; Gherkin: validated id opens / app absent)
+
+    /// Gherkin: "A validated track id opens the Spotify app" — the link is
+    /// the exact `spotify:track:` shape for the validated id, carries no
+    /// title and no query text (the title is spoken-only), and every scalar
+    /// in it is base62 or the scheme's colon.
+    func testTrackURIUsesTheExactSpotifyTrackShapeAndCarriesNoTitleOrQueryText() throws {
+        let uri = try XCTUnwrap(SpotifyTool.trackURI(id: trackID))
+        XCTAssertEqual(uri.absoluteString, "spotify:track:" + trackID)
+        XCTAssertEqual(uri.scheme, "spotify")
+        XCTAssertFalse(uri.absoluteString.contains(trackTitle),
+                       "a title is never composed into a URI (NFR-SP-008)")
+        XCTAssertFalse(uri.absoluteString.contains("search"),
+                       "a track link is not a search link")
+        let allowed = CharacterSet(charactersIn:
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789:")
+        XCTAssertTrue(uri.absoluteString.unicodeScalars.allSatisfy { allowed.contains($0) },
+                      "a validated id cannot introduce any scalar outside base62")
+    }
+
+    /// Representative grammar rejections; the exhaustive hostile corpus —
+    /// one named rejection assertion per fixture — lives in
+    /// `SpotifyDeepLinkTests` / `SpotifyHostileCorpus`.
+    func testTrackURIRejectsRepresentativeNonGrammarIdentifiers() {
+        let rejected = [
+            "",
+            "01AbCdEfGhIjKlMnOpQrS",
+            "01AbCdEfGhIjKlMnOpQrStX",
+            "spotify:track:01AbCdEfGhIjKlMnOpQrSt",
+            "01AbCdEfGhIjKlMnOpQrS/",
+        ]
+        for id in rejected {
+            XCTAssertNil(SpotifyTool.trackURI(id: id), "must not build a URI from '\(id)'")
+        }
+    }
+
+    /// Gherkin: "A validated track id opens the Spotify app" — the probe
+    /// (canOpenURL true in this scenario) runs first and determines the
+    /// outcome; the open call carries exactly the validated URL.
+    func testValidatedTrackIDOpensThroughTheProbeWithTheProbeResultAsTheOutcome() throws {
+        let uri = try XCTUnwrap(SpotifyTool.trackURI(id: trackID))
+        let opener = RecordingSpotifyLinkOpener(grantsOpen: true)
+        XCTAssertEqual(SpotifyTool.open(uri, opener: opener), SpotifyTool.OpenOutcome.opened)
+        XCTAssertEqual(opener.events, [.canOpenURL(uri), .open(uri)],
+                       "the probe runs first, exactly once, then the accepted URL opens")
+    }
+
+    /// Gherkin: "Spotify app absent degrades honestly" — a probe that
+    /// reports no installed app is the typed not-opened outcome the caller
+    /// turns into the honest app-absent line; no open call is issued, so
+    /// there is no silent no-op to mistake for success.
+    func testProbeReportingTheAppAbsentIsNotOpenedWithNoOpenCall() throws {
+        let uri = try XCTUnwrap(SpotifyTool.searchURI(query: "भजन"))
+        let opener = RecordingSpotifyLinkOpener(grantsOpen: false)
+        XCTAssertEqual(SpotifyTool.open(uri, opener: opener), SpotifyTool.OpenOutcome.notOpened)
+        XCTAssertEqual(opener.events, [.canOpenURL(uri)],
+                       "a failed probe never reaches the open call")
+        XCTAssertTrue(opener.openedURLs.isEmpty)
+    }
+
+    /// The DoD pin, over both probe answers: `.opened` appears if and only
+    /// if the probe granted, the probe is consulted exactly once, and the
+    /// outcome has no other input (V-4) — no path treats probe failure as
+    /// success.
+    func testOpenOutcomeHasNoPathThatTreatsProbeFailureAsSuccess() throws {
+        let uri = try XCTUnwrap(SpotifyTool.trackURI(id: trackID))
+        for grants in [true, false] {
+            let opener = RecordingSpotifyLinkOpener(grantsOpen: grants)
+            let outcome = SpotifyTool.open(uri, opener: opener)
+            XCTAssertEqual(outcome, grants ? .opened : .notOpened)
+            XCTAssertEqual(opener.probedURLs, [uri],
+                           "the probe is the single, once-only input to the pin (V-4)")
+            XCTAssertEqual(opener.openedURLs, grants ? [uri] : [],
+                           "the open call happens iff the probe granted")
+        }
+    }
+
+    /// The search hand-off link follows the same grammar and encoding rules
+    /// (design §24, matrix row 8).
+    func testSearchURIUsesTheSpotifySearchShapeAndPercentEncodesTheQuery() throws {
+        let uri = try XCTUnwrap(SpotifyTool.searchURI(query: "भजन & फूल"))
+        XCTAssertEqual(uri.scheme, "spotify")
+        XCTAssertTrue(uri.absoluteString.hasPrefix("spotify:search:"),
+                      "the hand-off keeps the spotify:search: shape")
+        let encoded = String(uri.absoluteString.dropFirst("spotify:search:".count))
+        XCTAssertFalse(encoded.contains("&"), "no unencoded query delimiter survives")
+        XCTAssertFalse(encoded.contains("="))
+        XCTAssertTrue(encoded.contains("%26"), "the reserved delimiter is percent-encoded")
+        XCTAssertTrue(encoded.contains("%20"), "the space is percent-encoded")
+        XCTAssertEqual(encoded.removingPercentEncoding, "भजन & फूल",
+                       "the query round-trips; only the encoding changed")
+    }
+
+    func testSearchURIEncodesEveryDelimiterInTheGrammarSet() throws {
+        let cases: [(query: String, body: String)] = [
+            ("a+b", "a%2Bb"),   // '+' first: form decoders read a raw '+' as space
+            ("a&b", "a%26b"),
+            ("a=b", "a%3Db"),
+            ("a?b", "a%3Fb"),
+            ("a/b", "a%2Fb"),
+            ("a%b", "a%25b"),
+            ("a#b", "a%23b"),
+        ]
+        for (query, expectedBody) in cases {
+            let uri = try XCTUnwrap(SpotifyTool.searchURI(query: query))
+            XCTAssertEqual(String(uri.absoluteString.dropFirst("spotify:search:".count)),
+                           expectedBody, "\(query)")
+        }
+    }
+
+    func testSearchURIRejectsEmptyTrimmedAndOverCapQueries() throws {
+        XCTAssertNil(SpotifyTool.searchURI(query: ""))
+        XCTAssertNil(SpotifyTool.searchURI(query: " \n\t "))
+        let atCap = String(repeating: "ग", count: SpotifyTool.maxSearchQueryLength)
+        XCTAssertNotNil(SpotifyTool.searchURI(query: atCap),
+                        "the cap counts Characters, not bytes or scalars")
+        XCTAssertNil(SpotifyTool.searchURI(query: atCap + "ग"))
+        let trimmed = try XCTUnwrap(SpotifyTool.searchURI(query: "  भजन  "))
+        XCTAssertEqual(String(trimmed.absoluteString.dropFirst("spotify:search:".count))
+                        .removingPercentEncoding,
+                       "भजन",
+                       "the hand-off trims the same way the API search does")
+    }
+
+    /// NFR-SP-008's scheme allowlist, over accepted inputs including hostile
+    /// query text: every construction stays `spotify:` and only `spotify:`
+    /// URLs are ever offered to the opener seam.
+    func testEveryDeepLinkConstructionStaysInsideTheSpotifyScheme() throws {
+        var constructed: [URL] = []
+        for id in [trackID, "ABCDEFGHIJKLMNOPQRSTUV"] {
+            constructed.append(try XCTUnwrap(SpotifyTool.trackURI(id: id)))
+        }
+        for query in ["भजन", "https://evil.example/x", "javascript:alert(1)", "..%2F..%2Fetc"] {
+            constructed.append(try XCTUnwrap(SpotifyTool.searchURI(query: query)))
+        }
+
+        let opener = RecordingSpotifyLinkOpener(grantsOpen: true)
+        for uri in constructed {
+            XCTAssertEqual(uri.scheme, "spotify",
+                           "\(uri) escapes the construction allowlist (NFR-SP-008)")
+            _ = SpotifyTool.open(uri, opener: opener)
+        }
+        XCTAssertEqual(opener.probedURLs.count, constructed.count)
+        XCTAssertEqual(Set(opener.probedURLs.map(\.scheme)), ["spotify"],
+                       "only allowlisted schemes ever reach the opener seam")
+        XCTAssertEqual(Set(opener.openedURLs.map(\.scheme)), ["spotify"])
+    }
+
     // MARK: - Helpers
 
     /// Runs a search and returns the typed `FetchError` it threw — failing

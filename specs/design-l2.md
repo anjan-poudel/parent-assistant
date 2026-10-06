@@ -73,7 +73,7 @@ This document fixes what `plan-tasks` turns into coding tasks and what `implemen
 | L2-D11 | **Provider markers are query noise**: `spotify` (Latin token) and `स्पोटिफाइ` (Devanagari containment) are dropped like the YouTube markers. | "स्पोटिफाइमा गीत चलाऊ" must not search the provider name. `SpotifyToolTests`/`KeywordIntentRuleTests.testMusicQueryDropsProviderMarkers` |
 | L2-D12 | **Observability outcome vocabularies are closed sets** (§28). No free-form string is ever emitted from the Spotify path. | NFR-SP-002; the events carry no metadata dictionary keys at all (`metadata: [:]`), so no `LogSanitiser.allowedKeys` change is needed. |
 | L2-D13 | **`product` freshness needs no new field**: `SpotifySessionRecord` keeps ADR-SP-08's exact six fields; the verification age is derived from `expiry` (Spotify issues ~3,600 s tokens). | Keeps one-key atomic write and single-key wipe. §25, §32 |
-| L2-D14 | **`.unknown` product behaves as not-remote-capable** (deep link only), exactly like `.free`; `spotifyRemoteCapable` is `product == .premium` per L1 §11. | No fabricated capability; an actually-Premium account with an unknown product still gets Spotify via the deep link. `CommandRouterMusicTests.testUnknownProductUsesTheDeepLink` |
+| L2-D14 | **`.unknown` product behaves as not-remote-capable** (deep link only), exactly like `.free`; `spotifyRemoteCapable` is `product == .premium` per L1 §11. | No fabricated capability; an actually-Premium account with an unknown product still gets Spotify via the deep link. `CommandRouterMusicTests.testUnknownProductUsesTheDeepLink`. **W2 amendment (2026-10-07):** the provider's OpenAPI schema marks `/v1/me`'s `product` field deprecated (verified 2026-10-07) — if it is ever removed, this row's `.unknown` degradation is the shipped safe fallback; T-123's bundle carries the record. |
 | L2-D15 | **`SpotifyPlugin` handles explicit-Spotify requests; its prompt fragment explicitly routes general music requests to the `music` intent.** | Keeps the router's degradation ladder (including the YouTube fallback) on every bare-music utterance; the plugin path cannot chain to YouTube without entangling the plugin (ADR-SP-07 / NFR-SP-012). §27 |
 
 **Reconciliation L2-R1 (keyless YouTube leg).** L1 §11 reads "when both are askable, both searches are fired concurrently". The keyless YouTube path's "search" is the terminal open of the search deeplink (`YouTubeTool.openSearch`), so pre-running it would open YouTube even when Spotify wins the selection. L2 narrows the concurrent leg to the keyed (fetch) path: `youtubeAskable` is unchanged; when YouTube is askable only keylessly, only the Spotify fetch runs and the YouTube outcome is executed (unmodified `fireYouTubePlay`) only if Spotify cannot serve. The concurrency claim that matters to NFR-SP-001 (two network legs joined, bounded by `max(provider budget)`) applies whenever both *fetches* exist. Pinned by `CommandRouterMusicTests.` + `testKeylessYouTubeIsNotOpenedWhen` + `SpotifyWins` and `testBothKeyedProvidersAre` + `SearchedConcurrently`.
@@ -305,13 +305,16 @@ if KeywordIntentRule.mentionsMusic(text) { return .notSearch }   // [SPOTIFY] mu
 ```
 private(set) lazy var spotifyCredentialStore = SpotifyCredentialStore(storage: storage)
 private(set) lazy var spotifyAccountSession: SpotifyAccountSession = {
-    let session = SpotifyAccountSession(store: spotifyCredentialStore, flow: ASWebSpotifyAuthSession())
+    let session = SpotifyAccountSession(store: spotifyCredentialStore, flow: ASWebSpotifyAuthSession(),
+                                        observabilityBus: observabilityBus)
     session.presenter = { [weak self] in self?.topPresentingViewController() }
     return session
 }()
 ```
 
 The presenter closure is resolved at present time, never captured (the `calendarShareSession` precedent at 9314–9322).
+
+**[W2-review D1 amendment, 2026-10-07] The `observabilityBus:` argument is mandatory.** `SpotifyAccountSession`'s §26 init carries the bus as a trailing *defaulted* parameter whose default is a dropping sink (the GoogleAccountSession precedent), so a construction that omits it silently loses every `spotify_link` / `spotify_unlink` event (§10/§28, ADR-SP-14). The `calendarShareSession` construction passes `observabilityBus: observabilityBus` (AppCoordinator.swift:9318-9320); T-119 pins the same here with an event-delivery test.
 
 **Registry (beside 2058):** `registry.register(SpotifyPlugin(accountSession: spotifyAccountSession, credentialStore: spotifyCredentialStore))`.
 

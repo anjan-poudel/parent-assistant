@@ -35,12 +35,19 @@ Feature: AppCoordinator Spotify wiring
     When the coordinator builds the router and registry
     Then construction succeeds with the seams present and the state dormant
     And no network call is made during construction
+
+  Scenario: Session events reach the app's observability bus (W2-review D1)
+    Given the coordinator's Spotify services are constructed
+    When the account session emits a link or unlink event
+    Then the event arrives on the app's observability bus
+    And not on the session's dropping default
 ```
 
 ## Implementation notes
 - File: `ios/ElderlyAssistant/` + `App/AppCoordinator.swift`; mirror the shipped lazy-store region and plugin registration site; router construction matches the existing 3704–3717 pattern with the three new parameters.
 - No duplicate instances: the Settings surface (T-120) and the router must observe the same account session; pass the instance, never rebuild it.
 - Wiring tests assert construction with an unlinked store and no transport activity, plus registration counts (mirroring existing coordinator/registration tests).
+- [W2-review D1, mandatory] Pass the app's `observabilityBus` when constructing `SpotifyAccountSession` (§16's amended construction shows it). The §26 init defaults the bus to a dropping sink, so omitting the argument silently loses `spotify_link`/`spotify_unlink`; pin event delivery with the fourth Gherkin scenario (the construction must pass the same bus the registry uses; precedent `calendarShareSession` at AppCoordinator.swift:9318-9320).
 - No log changes; wiring must not log tokens or session state (NFR-SP-002).
 
 ## Definition of done

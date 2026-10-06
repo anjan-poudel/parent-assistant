@@ -82,6 +82,21 @@ enum VoiceContactSearchRoute {
         // ran.
         if isYouTubeUtterance(text) { return .notSearch }
 
+        // [SPOTIFY] (2026-10-06) Music-marked utterances belong to the
+        // music stage, which runs LATER in the ladder — position parity
+        // with the YouTube veto above, exactly as design L2 §15 (the
+        // reviewed contract) places it: after that veto, before the
+        // search-marker check. A marker from the shared
+        // `KeywordIntentRule.musicMarkers` family ("गीत", "भजन",
+        // "गाना", "संगीत", "music", "song", …) means the utterance is
+        // a music request, never a contact lookup, even where a search
+        // marker co-occurs ("गीत खोज" belongs to the interpreter's
+        // music intent, not to a Phone screen prefilled "गीत"). The
+        // veto calls the rule's own predicate, so the two stages can
+        // never disagree about what a music utterance is; the
+        // direct-call veto above is untouched and still runs first.
+        if KeywordIntentRule.mentionsMusic(text) { return .notSearch }
+
         guard isSearchMarkerHit(text) else { return .notSearch }
         return .openPhone(extractQuery(from: text))
     }
