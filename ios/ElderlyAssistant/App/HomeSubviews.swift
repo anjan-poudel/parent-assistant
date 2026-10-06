@@ -78,6 +78,8 @@ struct HomeTopBar: View {
             }
         }
         .padding(.top, 8)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("home.header")
     }
 
     private var calendarButton: some View {
@@ -254,12 +256,8 @@ struct TalkStage: View {
                 // capability diagnostics live in Settings.
                 ConfirmationChips(titleKey: visuals.captionKey)
             } else {
-                // The stage reads as ONE unit: hero, its status line and
-                // the hint carousel each sit ≤4pt apart (visual-polish
-                // 2026-09-08). The boot capsule is an overlay on the disc
-                // inside `TalkButton`, NOT a flow element here, so nothing
-                // below shifts when it collapses.
-                VStack(spacing: 4) {
+                // Separate the button, its status and the suggested phrase.
+                VStack(spacing: 24) {
                     TalkButton(session: session,
                                // [P0-2] Manual Talk readiness — the shared
                                // `VoicePipelineReadiness` contract, driven
@@ -302,6 +300,7 @@ struct TalkStage: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 
     private var openSettingsButton: some View {
@@ -742,7 +741,8 @@ struct HomeDock: View {
                 dockItem(.reminders, artwork: "clock", titleKey: "home.hub.reminders",
                          onRail: true, identifier: "home.action.reminders")
             }
-            .padding(8)
+            .padding(.horizontal, 8)
+            .padding(.top, 6)
             .background {
                 Color.clear
                     .appSurface(role: .dock, cornerRadius: 20)
@@ -764,7 +764,7 @@ struct HomeDock: View {
 
 
     private func tile(artwork: String, titleKey: String, onRail: Bool) -> some View {
-        VStack(spacing: 4) {
+        VStack(spacing: onRail ? 2 : 4) {
             ReferenceIconArtwork(name: artwork, diameter: onRail ? 56 : 32)
             Text(LocalizedStringKey(titleKey))
                 .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .semibold))
@@ -773,7 +773,7 @@ struct HomeDock: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 4)
-        .padding(.vertical, onRail ? 4 : 2)
+        .padding(.vertical, onRail ? 0 : 2)
         .frame(maxWidth: .infinity, minHeight: onRail ? 76 : DesignTokens.minTapTargetSize,
                maxHeight: .infinity, alignment: .top)
         .contentShape(Rectangle())

@@ -255,10 +255,13 @@ struct HintCarousel: View {
         // blue (visual-polish 2026-09-08: the carousel only shows under
         // the idle hero, so its accent follows the hero's blue instead of
         // the old fixed amber glow).
-        VStack(spacing: 6) {
+        VStack(spacing: 12) {
             Text("home.hint.label")
                 .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .bold))
                 .foregroundStyle(appearance.colors.textSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("home.hint.prompt")
             Text(LocalizedStringKey(Self.phraseKeys[index]))
                 // Static/rotating text under the speak button is caption-
                 // sized (home-redesign v3, 2026-09-08): this rotating
@@ -266,11 +269,12 @@ struct HintCarousel: View {
                 .font(DesignTokens.warmFont(size: appearance.typography.captionPointSize, weight: .semibold))
                 .foregroundStyle(appearance.colors.textPrimary)
                 .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.horizontal, 16)
                 .padding(.vertical, 8)
                 .appSurface(role: .control, cornerRadius: DesignTokens.bubbleCornerRadius)
-                .id(index)
-                .transition(.opacity)
+                .transaction { transaction in transaction.animation = nil }
+                .accessibilityIdentifier("home.hint.example")
             HStack(spacing: 4) {
                 ForEach(Self.phraseKeys.indices, id: \.self) { i in
                     Circle()
@@ -279,7 +283,8 @@ struct HintCarousel: View {
                 }
             }
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("home.hint.carousel")
         .task(id: reduceMotion) {
             guard !reduceMotion else { return }
             while !Task.isCancelled {
