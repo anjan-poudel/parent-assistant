@@ -202,6 +202,7 @@
 		40666B0EBA9C0F809ECFE0F1 /* EventKitCalendarGateway.swift in Sources */ = {isa = PBXBuildFile; fileRef = 041EC5EF8D87CC51513133B5 /* EventKitCalendarGateway.swift */; };
 		4088881B7B619C3F7913E494 /* VoiceCalendarEventWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA785533228088207C534690 /* VoiceCalendarEventWriter.swift */; };
 		40C08482D601998A55A0ABD3 /* IntentEncoderCoreMLModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C94EB05B3754311F725EBA4 /* IntentEncoderCoreMLModel.swift */; };
+		40D875CFFFFFB01113E83B74 /* SpotifySettingsSurfaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A42C240FFDF3F4B99FA9519 /* SpotifySettingsSurfaceTests.swift */; };
 		40E6E2A1395C79F90AD9DCB9 /* LiveTranslateConsentGateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CEA044B7717B56C151001D2 /* LiveTranslateConsentGateTests.swift */; };
 		4114680AE8ABDBA9F007FAC0 /* ReplySanityGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30A574DCE83948B01E78BAEA /* ReplySanityGate.swift */; };
 		42DC467E8829FE92EC7BE941 /* LiveTranslateSentenceSplitter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A530A5F8BA1DF276C701B1C4 /* LiveTranslateSentenceSplitter.swift */; };
@@ -1213,6 +1214,7 @@
 		79CD8E352C1F92787067EE7A /* LiveTranslateSpeechTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTranslateSpeechTests.swift; sourceTree = "<group>"; };
 		79E50F03A4A3FAF1A1A0B822 /* VoiceSessionStateMachineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceSessionStateMachineTests.swift; sourceTree = "<group>"; };
 		7A1A8F4202C570AB8F399728 /* InterpreterSelectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterpreterSelectorTests.swift; sourceTree = "<group>"; };
+		7A42C240FFDF3F4B99FA9519 /* SpotifySettingsSurfaceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotifySettingsSurfaceTests.swift; sourceTree = "<group>"; };
 		7AA8E8A56F3A9D64BB5F0836 /* ElderlyAssistantApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElderlyAssistantApp.swift; sourceTree = "<group>"; };
 		7ACD8E6DBCB9C7E029D61EFC /* LiveTranslateCommandCaptureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTranslateCommandCaptureTests.swift; sourceTree = "<group>"; };
 		7AD9281901B134268D25B3C7 /* LiveTranslateSessionModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTranslateSessionModel.swift; sourceTree = "<group>"; };
@@ -2226,6 +2228,7 @@
 				73F1FEC4E74DF80941BA8C45 /* ProfileSettingsModelTests.swift */,
 				5B2D76FA74A7534CB0F207ED /* SchemeProbeTests.swift */,
 				57ECC13455DB43643BFD27EE /* SettingsTabMappingTests.swift */,
+				7A42C240FFDF3F4B99FA9519 /* SpotifySettingsSurfaceTests.swift */,
 				A649B58B183CCC04C675E3AF /* StartupBootSpinnerFloorTests.swift */,
 				018B36FE9E0EA261EFC434CB /* StartupBootTests.swift */,
 				4565222B482D35D3233C2498 /* StartupDataBatchTests.swift */,
@@ -3909,6 +3912,7 @@
 				365246D390B116202DCD28D3 /* SpotifyHostileCorpus.swift in Sources */,
 				2442FE1B6A72DE94FB6D043C /* SpotifyLocalizationTests.swift in Sources */,
 				D69988E0034C33CB247A9236 /* SpotifyPluginTests.swift in Sources */,
+				40D875CFFFFFB01113E83B74 /* SpotifySettingsSurfaceTests.swift in Sources */,
 				D2A9D69D153B60BAA5C99E72 /* SpotifyToolTests.swift in Sources */,
 				2EBF0379623E8AF30368062B /* StartupBootSpinnerFloorTests.swift in Sources */,
 				7D6817E0AA85EA6A39B48A58 /* StartupBootTests.swift in Sources */,

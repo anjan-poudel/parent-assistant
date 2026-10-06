@@ -92,10 +92,12 @@ final class SettingsTabMappingTests: XCTestCase {
 
     func testHiddenSheetHoldsTheRemovedTechnicalSections() {
         // AI + dev tools, in sheet order. Content configuration (appearance,
-        // language, …) stays visible — decision 2.
+        // language, …) stays visible — decision 2. [SPOTIFY T-120] Spotify
+        // joins after YouTube (design-l2 §17: the caregiver's account link
+        // is plumbing of the provider-screen class); the sheet goes 6 → 7.
         XCTAssertEqual(Destination.hiddenSheetRows,
                        [.geminiAI, .voiceEngine, .webSearch, .youtube,
-                        .intentLog, .toolLog])
+                        .spotify, .intentLog, .toolLog])
     }
 
     func testCloudProviderKeyScreensAllLiveInTheHiddenSheet() {
@@ -337,24 +339,28 @@ final class SettingsTabMappingTests: XCTestCase {
         }
     }
 
-    func testTheManualNamesYouTubeWhereItNowLives() throws {
+    func testTheManualNamesEveryHiddenSheetRowWhereItLives() throws {
         // The hidden sheet's rows are absent from the tabs on purpose, so
         // the manual's Settings tour is the family's only written pointer
         // to them — and YouTube, which the menu-deepening pass moved into
         // the sheet, has to be named there in both languages (a row that
         // moves without its manual sentence leaves the household hunting
-        // for a screen the tour still puts under Tools).
+        // for a screen the tour still puts under Tools). [SPOTIFY T-120]
+        // generalises the pin from YouTube alone to every hidden row when
+        // Spotify joins the sheet, so the next move cannot drift either.
         let sections = try bundledManual()
         let tour = try XCTUnwrap(sections.first { $0.id == "settings" },
                                  "the manual must keep its Settings tour")
         let en = tour.paragraphs(locale: english).joined(separator: "\n")
         let ne = tour.paragraphs(locale: nepali).joined(separator: "\n")
-        let youtubeEn = L10n.str(Destination.youtube.titleKey, locale: english)
-        let youtubeNe = L10n.str(Destination.youtube.titleKey, locale: nepali)
-        XCTAssertTrue(en.contains(youtubeEn),
-                      "the technical-settings paragraph must name \"\(youtubeEn)\"")
-        XCTAssertTrue(ne.contains(youtubeNe),
-                      "प्राविधिक सेटिङको अनुच्छेदले \"\(youtubeNe)\" को नाम लिनुपर्छ")
+        for row in Destination.hiddenSheetRows {
+            let enTitle = L10n.str(row.titleKey, locale: english)
+            let neTitle = L10n.str(row.titleKey, locale: nepali)
+            XCTAssertTrue(en.contains(enTitle),
+                          "the technical-settings paragraph must name \"\(enTitle)\"")
+            XCTAssertTrue(ne.contains(neTitle),
+                          "प्राविधिक सेटिङको अनुच्छेदले \"\(neTitle)\" को नाम लिनुपर्छ")
+        }
     }
 
     func testTheManualDoesNotPromiseAStaleHoldDuration() throws {
