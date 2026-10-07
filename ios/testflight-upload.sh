@@ -12,6 +12,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT="$SCRIPT_DIR/seniOS.xcodeproj"
 APP_INFO_PLIST="$SCRIPT_DIR/ElderlyAssistant/Info.plist"
+WIDGET_INFO_PLIST="$SCRIPT_DIR/TimerAlarmWidget/Info.plist"
 SCHEME="ElderlyAssistant"
 APP_NAME="seniOS"
 DEFAULT_TEAM_ID="BKXWPS4X87"
@@ -238,6 +239,13 @@ if [[ "$BUMP_BUILD" == 1 ]]; then
   fi
   /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $NEW_BUILD" "$APP_INFO_PLIST"
   printf 'Build number: %s -> %s (Info.plist).\n' "$OLD_BUILD" "$NEW_BUILD"
+  # The widget's Info.plist hardcodes its own CFBundleVersion; App Store
+  # validation (90473) requires it to match the containing app, so keep
+  # the two in lockstep on every bump.
+  if [[ -f "$WIDGET_INFO_PLIST" ]]; then
+    /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $NEW_BUILD" "$WIDGET_INFO_PLIST"
+    printf 'Widget build number set to %s (TimerAlarmWidget/Info.plist).\n' "$NEW_BUILD"
+  fi
 fi
 
 if [[ "$ADD_ENCRYPTION_KEY" == 1 ]]; then
@@ -279,6 +287,25 @@ if ! xcodebuild archive \
   fail_after_build "Archive"
 fi
 printf 'Archive created: %s\n' "$ARCHIVE_PATH"
+
+# onnxruntime ships an Info.plist MinimumOSVersion (15.1) lower than its
+# binary's LC_BUILD_VERSION minos (16.0, SDK 26.5 build). App Store
+# validation rejects that inconsistency (90208: "does not support the
+# minimum OS Version specified in the Info.plist"). Patch the embedded
+# framework plist to match the binary and re-sign ad-hoc; the export step
+# re-signs everything with the distribution identity anyway.
+ONNX_PLIST="$ARCHIVE_PATH/Products/Applications/ElderlyAssistant.app/Frameworks/onnxruntime.framework/Info.plist"
+if [[ -f "$ONNX_PLIST" ]]; then
+  DECLARED="$(plutil -extract MinimumOSVersion raw "$ONNX_PLIST" 2>/dev/null || true)"
+  if [[ "$DECLARED" != "16.0" ]]; then
+    printf 'Patching onnxruntime MinimumOSVersion %s -> 16.0…\n' "$DECLARED"
+    plutil -replace MinimumOSVersion -string "16.0" "$ONNX_PLIST"
+    codesign --force --sign - --preserve-metadata=identifier,entitlements,flags \
+      "${ONNX_PLIST%/Info.plist}" 2>&1 | tee -a "$LOG_FILE" || fail_after_build "onnxruntime re-sign"
+  fi
+else
+  printf 'Warning: onnxruntime.framework not found in archive products; skipping patch.\n' >&2
+fi
 
 # ExportOptions: "app-store-connect" with destination "upload" signs,
 # exports, and uploads in one step. Uses the Apple ID signed into Xcode —
