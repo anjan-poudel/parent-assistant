@@ -8992,17 +8992,23 @@ self.noteTalkContractChanged()
     /// footprint and closure, so calling it again on a re-install is
     /// harmless.
     ///
-    /// The encoder is LIGHT (≈ 140 MB) and already has a complete
-    /// unload/re-arm contract of its own, so it is registered for the
-    /// ledger's sake but excluded from eviction — its residency is the
-    /// [T-037-a] observer's business, and routing it through the idle sweep
-    /// would trip the pressure flag on a timer.
+    /// [VOICE-OOM] The encoder is LIGHT (≈ 140 MB) and evictable: a
+    /// critical-pressure sweep may take its CoreML specialization — the
+    /// trade `handleCriticalMemoryPressure` documents ("the light models
+    /// the `.warning` path spares"; the kernel is out of memory and 140 MB
+    /// of specialization is worth less than surviving). The flag only
+    /// widens the eviction surface to that moment: the idle sweep has its
+    /// own heavy-only filter and never touches a light slot, and the
+    /// `.warning` squeeze takes heavy models first. The re-arm is the
+    /// encoder's own contract — the release closure below IS its level-2
+    /// `handleMemoryPressure()`, and `rearmIntentEncoderIfEnabled()` at the
+    /// next turn's capture start reloads it ([T-037-a]).
     private func registerEncoderSlotIfNeeded() {
         ModelLifecycleManager.shared.register(
             slot: .intentEncoder,
             modelID: ModelCatalog.intentEncoderSpike,
             owner: intentEncoderInterpreter,
-            evictable: false
+            evictable: true
         ) { [weak intentEncoderInterpreter] in
             intentEncoderInterpreter?.handleMemoryPressure()
         }
