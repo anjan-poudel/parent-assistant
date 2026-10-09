@@ -525,4 +525,93 @@ final class WarmStartTests: XCTestCase {
             .contains("memory"),
                       "the caption must disclose the memory/battery trade-off")
     }
+
+    // MARK: - [VOICE-OOM] warm headroom gate (change C, 2026-10-10)
+
+    /// On a device near its ceiling the whole point is to warm NOTHING
+    /// heavy: a 1 GB ANE page-in / a multi-GB brain load at boot is the
+    /// spike that gets the app killed before the user says anything. TTS
+    /// (tens of MB) is deliberately exempt — it is the reply voice, not a
+    /// multi-GB page-in, and still warms.
+    func testLowHeadroomSkipsSTTAndBrainWarms() {
+        var config = defaultConfig()
+        config.availableProcessMemoryBytes = 1_500_000_000
+        config.sttWarmFootprintBytes = 1_000_000_000
+        config.brainWarmFootprintBytes = 3_400_000_000
+
+        let plan = WarmStartPlanner.plan(for: config)
+
+        XCTAssertTrue(plan.contains(WarmStartStep(engine: .whisperKit,
+                                                  action: .skip(reason: "low_headroom"))),
+                      "the STT warm must not page ~1 GB of ANE weights in at boot on a starved device")
+        XCTAssertTrue(plan.contains(WarmStartStep(engine: .llamaInterpreter,
+                                                  action: .skip(reason: "low_headroom"))),
+                      "the brain warm must not page the multi-GB model in at boot on a starved device")
+        XCTAssertTrue(plan.contains(WarmStartStep(engine: .ttsVoice(ModelCatalog.piperNepali),
+                                                  action: .warm,
+                                                  phase: .boot)),
+                      "TTS is headroom-exempt — the reply voice is tens of MB, not a multi-GB page-in")
+    }
+
+    func testGenerousHeadroomKeepsTheDefaultPlan() {
+        var config = defaultConfig()
+        config.availableProcessMemoryBytes = 20_000_000_000
+        config.sttWarmFootprintBytes = 1_000_000_000
+        config.brainWarmFootprintBytes = 3_400_000_000
+
+        XCTAssertEqual(WarmStartPlanner.plan(for: config),
+                       WarmStartPlanner.plan(for: defaultConfig()),
+                       "a device with room keeps the pre-brief warm plan exactly")
+    }
+
+    func testPartialHeadroomWarmsSTTWhileTheBrainStepsAside() {
+        var config = defaultConfig()
+        config.sttWarmFootprintBytes = 1_000_000_000
+        config.brainWarmFootprintBytes = 3_400_000_000
+        // Clears STT + the 1 GB floor (2.0 GB), not the brain + floor
+        // (4.4 GB) — the two gates are independent.
+        config.availableProcessMemoryBytes = 2_500_000_000
+
+        let plan = WarmStartPlanner.plan(for: config)
+
+        XCTAssertTrue(plan.contains(WarmStartStep(engine: .whisperKit,
+                                                  action: .warm)))
+        XCTAssertTrue(plan.contains(WarmStartStep(engine: .llamaInterpreter,
+                                                  action: .skip(reason: "low_headroom"))),
+                      "each warm is gated on its OWN footprint — a skipped brain must not cost the STT warm")
+    }
+
+    func testWarmProceedsExactlyAtTheHeadroomFloor() {
+        var config = defaultConfig()
+        config.sttWarmFootprintBytes = 1_000_000_000
+        config.brainWarmFootprintBytes = 1_000_000_000
+        // available == footprint + floor for both steps.
+        config.availableProcessMemoryBytes = 2_000_000_000
+
+        let plan = WarmStartPlanner.plan(for: config)
+
+        XCTAssertTrue(plan.contains(WarmStartStep(engine: .whisperKit,
+                                                  action: .warm)),
+                      "the gate skips STRICTLY below footprint + floor; at the floor the warm runs")
+        XCTAssertTrue(plan.contains(WarmStartStep(engine: .llamaInterpreter,
+                                                  action: .warm)))
+    }
+
+    func testMemoryInputsAbsentLeaveThePlanUngated() {
+        var availableOnly = defaultConfig()
+        // A starved probe with no footprints resolved: the gate cannot
+        // run — hand-built configs keep the pre-brief decision table by
+        // construction (the coordinator always resolves both inputs
+        // together).
+        availableOnly.availableProcessMemoryBytes = 1
+        XCTAssertEqual(WarmStartPlanner.plan(for: availableOnly),
+                       WarmStartPlanner.plan(for: defaultConfig()))
+
+        var footprintsOnly = defaultConfig()
+        footprintsOnly.sttWarmFootprintBytes = 99_000_000_000
+        footprintsOnly.brainWarmFootprintBytes = 99_000_000_000
+        XCTAssertEqual(WarmStartPlanner.plan(for: footprintsOnly),
+                       WarmStartPlanner.plan(for: defaultConfig()),
+                       "footprints without a probe are ungated the same way")
+    }
 }

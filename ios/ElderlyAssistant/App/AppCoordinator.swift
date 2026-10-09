@@ -4229,7 +4229,22 @@ final class AppCoordinator: ObservableObject {
                 ?? ModelCatalog.piperNepali,
             llamaAvailable: llamaCommandInterpreter.isAvailable,
             wakeWordEnabled: wakeWordEnabled,
-            isSimulator: Self.isSimulator
+            isSimulator: Self.isSimulator,
+            // [VOICE-OOM] C (2026-10-10) — the warm headroom gate's
+            // inputs, resolved HERE on main from the same probes the
+            // post-turn policy uses. A warm that would leave < 1 GB free
+            // is skipped by the planner (reason `low_headroom`): on a
+            // device already near its ceiling, boot-time page-in of the
+            // ~1 GB ANE weights or the multi-GB brain is the spike that
+            // gets the app killed before the user says anything. The
+            // skipped warm costs only the head start — STT re-arms via
+            // the first-use prewarm and the brain loads on first
+            // inference (exactly the no-warm behavior).
+            availableProcessMemoryBytes: MemoryProbe.availableProcessMemoryBytes,
+            sttWarmFootprintBytes: whisperFootprintBytes,
+            brainWarmFootprintBytes: ModelLifecycleInventory.footprint(
+                for: .brain,
+                modelID: llamaCommandInterpreter.baseModelID).liveBytes
         )
         let plan = WarmStartPlanner.plan(for: config)
         let bootPlan = plan.filter { $0.phase == .boot }
