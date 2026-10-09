@@ -103,7 +103,7 @@ final class IntentEncoderArtifactTests: XCTestCase {
     /// to the app's Documents directory. `devicectl` can copy the zip into
     /// the app data container's `Documents/`
     /// (`--domain-type appDataContainer --domain-identifier
-    /// com.elderlyassistant.app --destination Documents/`) but never
+    /// ai.voicebridge.senior.assistant --destination Documents/`) but never
     /// exposes the container UUID, so a tester cannot construct the
     /// absolute path the override used to require — the bare filename is
     /// the whole handshake now. Absolute values must keep their meaning.

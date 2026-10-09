@@ -11,7 +11,7 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJECT_DIR"
 DERIVED="build/DerivedDataCli"
-BUNDLE_ID="com.elderlyassistant.app"
+BUNDLE_ID="ai.voicebridge.senior.assistant"
 
 echo "=== Elderly Assistant — build + install to iPhone ==="
 
