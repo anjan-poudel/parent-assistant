@@ -65,10 +65,12 @@ final class WhisperKitSpeechRecognizerTests: XCTestCase {
                                    rootDirectoryOverride: tmpRoot,
                                    checksumPolicy: .skip)
         // Simulate an installed directory artifact by creating it at the
-        // location directoryURL(for:) derives.
+        // location directoryURL(for:) derives. [VOICE-OOM] The no-argument
+        // constructor resolves the init default — now the language default
+        // `whisperKitMediumV6`, not the superseded v3.
         let dir = tmpRoot
             .appendingPathComponent("whisperKit", isDirectory: true)
-            .appendingPathComponent(ModelCatalog.whisperKitNepaliMedium.rawValue,
+            .appendingPathComponent(ModelCatalog.whisperKitMediumV6.rawValue,
                                     isDirectory: true)
         try FileManager.default.createDirectory(at: dir,
                                                 withIntermediateDirectories: true)
@@ -101,8 +103,8 @@ final class WhisperKitSpeechRecognizerTests: XCTestCase {
         let recognizer = WhisperKitSpeechRecognizer(observabilityBus: bus,
                                                     modelStore: nil)
         XCTAssertEqual(recognizer.effectiveModelID,
-                       ModelCatalog.whisperKitNepaliMedium,
-                       "init default is the shipped v3 ANE artifact")
+                       ModelCatalog.whisperKitMediumV6,
+                       "[VOICE-OOM] init default is the language default v6 ANE artifact (was the 2× v3, a jetsam-trap on never-picked devices)")
 
         recognizer.setPreferredModel(ModelCatalog.whisperKitMediumV6)
 
@@ -119,7 +121,7 @@ final class WhisperKitSpeechRecognizerTests: XCTestCase {
         recognizer.setPreferredModel(ModelCatalog.whisperMediumV6)
 
         XCTAssertEqual(recognizer.effectiveModelID,
-                       ModelCatalog.whisperKitNepaliMedium,
+                       ModelCatalog.whisperKitMediumV6,
                        "a ggml pick must not repoint the ANE artifact")
     }
 
@@ -144,7 +146,7 @@ final class WhisperKitSpeechRecognizerTests: XCTestCase {
         recognizer.setPreferredModel(ModelID(rawValue: "not-a-catalog-model"))
 
         XCTAssertEqual(recognizer.effectiveModelID,
-                       ModelCatalog.whisperKitNepaliMedium)
+                       ModelCatalog.whisperKitMediumV6)
     }
 
     /// The adopted id is not a label-only field: `isAvailable` and
@@ -158,7 +160,7 @@ final class WhisperKitSpeechRecognizerTests: XCTestCase {
                                                     modelStore: store)
         #if canImport(WhisperKit)
         XCTAssertFalse(recognizer.isAvailable,
-                       "nothing installed — the default v3 artifact is absent")
+                       "nothing installed — the default artifact is absent")
 
         // The user picks the v6 ANE artifact and its install completes.
         recognizer.setPreferredModel(ModelCatalog.whisperKitMediumV6)

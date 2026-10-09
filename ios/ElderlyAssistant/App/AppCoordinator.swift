@@ -1250,12 +1250,17 @@ final class AppCoordinator: ObservableObject {
     /// factory runs). Safe by construction: nothing in `init()` (or in any
     /// other stored property's initializer) touches this lazy, so the
     /// first evaluation is the boot's voice phase — provably after the
-    /// restore. `nil` (never picked) keeps the engine's own default.
+    /// restore. `nil` (never picked) falls back to the engine's own
+    /// default ([VOICE-OOM] `whisperKitMediumV6`, the language default —
+    /// mirrored EXPLICITLY here; this expression shadows the init default
+    /// at the only production construction site, so leaving the old
+    /// `whisperKitNepaliMedium` here would re-introduce the v3 trap on
+    /// never-picked devices).
     private lazy var whisperKitSpeechRecognizer: WhisperKitSpeechRecognizer = {
         let recognizer = WhisperKitSpeechRecognizer(
             observabilityBus: observabilityBus,
             modelStore: modelStore,
-            preferredModelID: sttModelPreference ?? ModelCatalog.whisperKitNepaliMedium
+            preferredModelID: sttModelPreference ?? ModelCatalog.whisperKitMediumV6
         )
         // [TURN-TIMING] Both whisper recognizers mark `asr_loaded` with
         // their measured load ms when a load happens inside a live turn.
