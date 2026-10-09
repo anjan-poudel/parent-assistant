@@ -1081,6 +1081,26 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
             emit("model_path_missing", outcome: "failure")
             return .failure(.modelPathMissing)
         }
+        // [VOICE-OOM] B' (2026-10-10) — the terminal refusal, before
+        // anything is registered or reserved. Under fresh kernel pressure
+        // (or a catastrophically low ceiling), a load whose live bytes
+        // cannot clear the app's CURRENT free memory plus the page-in
+        // margin is refused outright: `available` is the real probe, not
+        // the ledger's class budget — the field device's class said room
+        // while the kernel had ~30 MB left, and that is the load this
+        // hardening exists to stop. `PressureBrainPickResolver` owns the
+        // arithmetic so this gate and the per-turn pick can never
+        // disagree. The caller sees the same `.insufficientHeadroom` a
+        // denied reservation returns, so the router's existing
+        // deterministic-reply fallback applies unchanged.
+        if PressureBrainPickResolver.pressureRefusesLoad(
+            reading: lifecycle.memoryPressureReading(),
+            availableProcessMemoryBytes: MemoryProbe.availableProcessMemoryBytes,
+            liveBytes: ModelLifecycleInventory.footprint(
+                for: .brain, modelID: preferredBaseId).liveBytes) {
+            emit("model_load_denied:pressure_low_headroom", outcome: "failure")
+            return .failure(.insufficientHeadroom)
+        }
         // [MODEL-LIFECYCLE] The gate, at the single construction site.
         // Reached from the warm seam AND the first inference (whichever
         // runs first), both on `inferenceQueue` — so an eviction this

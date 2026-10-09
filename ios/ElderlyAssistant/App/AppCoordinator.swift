@@ -5907,6 +5907,12 @@ self.noteTalkContractChanged()
     /// the jetsam logs show.
     func recordTranscript(_ text: String) {
         applyPostTranscriptWhisperPolicy()
+        // [VOICE-OOM] B' (2026-10-10) — the pressure-tiered brain pick for
+        // THIS turn, applied BEFORE the router reaches the brain's load
+        // (the router calls `recordTranscript` first and only later
+        // `interpreter.interpret`), so a warned device runs the smaller
+        // installed brain instead of walking into the load.
+        applyPressureBrainPickForTurn()
         DispatchQueue.main.async { [weak self] in
             self?.livePartialTranscript = nil
             self?.lastTranscript = text
@@ -6089,6 +6095,113 @@ self.noteTalkContractChanged()
         observabilityBus.emit(ObservabilityEvent(
             component: "whisper_weights",
             eventType: eventType,
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: nil,
+            metadata: metadata
+        ))
+    }
+
+    // MARK: - Pressure-tiered brain pick ([VOICE-OOM] B', 2026-10-10)
+
+    /// The per-turn pressure-tiered brain pick, applied at the top of
+    /// every turn. `recordTranscript` runs before the router reaches the
+    /// brain (`CommandRouter.route` records the transcript first and only
+    /// later calls `interpreter.interpret`), so the swap below is always
+    /// in force before the load — the warned device runs the smaller
+    /// installed brain instead of walking into the 4B's page-in.
+    ///
+    /// The decision itself lives in `PressureBrainPickResolver` (pure);
+    /// this function resolves its inputs and applies the outcome through
+    /// the interpreter's existing `switchBaseModel` seam. The stored
+    /// preference is NEVER touched: Settings keeps showing the household's
+    /// pick, and a recovered device swaps straight back to it.
+    ///
+    /// Gated on `llamaCommandInterpreter.isAvailable` only — wherever the
+    /// local brain can load, the pick must be able to protect that load.
+    /// That is BOTH stacks: the .gemini stack is local-first hybrid (the
+    /// local brain answers what it can, Gemini takes the rest), so its
+    /// first tier is the same load.
+    private func applyPressureBrainPickForTurn() {
+        guard llamaCommandInterpreter.isAvailable else {
+            // No local brain can load this turn — nothing to pick, and no
+            // degradation is in force.
+            publishDegradedVoiceMode(.normal)
+            return
+        }
+        let remembered = resolvedBrainModelID
+        let pick = PressureBrainPickResolver.resolve(
+            reading: ModelLifecycleManager.shared.memoryPressureReading(),
+            availableProcessMemoryBytes: MemoryProbe.availableProcessMemoryBytes,
+            language: appLanguage.rawValue,
+            rememberedPick: remembered,
+            installedModelIDs: installedBrainModelIDs)
+        switch pick {
+        case .keep:
+            if llamaCommandInterpreter.baseModelID != remembered {
+                // Recovery — pressure eased (or the remembered pick fits
+                // again) after an earlier turn stepped down. Swapping
+                // back is also what hides the pill on the next publish.
+                llamaCommandInterpreter.switchBaseModel(to: remembered)
+            }
+        case .stepDown(let id):
+            if llamaCommandInterpreter.baseModelID != id {
+                llamaCommandInterpreter.switchBaseModel(to: id)
+            }
+            emitPressureBrainPickEvent(pick: pick, remembered: remembered)
+        case .lightweight:
+            // No installed brain fits. Drop any resident handle so the
+            // load-site refusal (`loadLLMHandle`) is real — the router
+            // then answers from its deterministic path this turn.
+            llamaCommandInterpreter.unloadModel()
+            emitPressureBrainPickEvent(pick: pick, remembered: remembered)
+        }
+        publishDegradedVoiceMode(DegradedVoiceMode.resolved(from: pick))
+    }
+
+    /// The brains the resolver may choose from: the curated on-disk set —
+    /// the same pool the Settings picker offers, so a hidden/legacy
+    /// artifact can never be picked by pressure, and a candidate that is
+    /// not installed is invisible (never downloaded under pressure).
+    private var installedBrainModelIDs: Set<ModelID> {
+        Set(ModelCatalog.curatedEntries(kind: .llamaBase)
+            .map(\.id)
+            .filter { modelStore.isCached($0) })
+    }
+
+    /// Publishes the degraded-mode state Home renders as its status pill.
+    /// `recordTranscript` is main-confined on the production path (the
+    /// STT completion hops to main before routing); the guard is cheap
+    /// insurance for any other caller.
+    private func publishDegradedVoiceMode(_ mode: DegradedVoiceMode) {
+        if Thread.isMainThread {
+            degradedVoiceMode = mode
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.degradedVoiceMode = mode
+            }
+        }
+    }
+
+    /// One event per non-normal pick: component `pressure_brain_pick`,
+    /// catalog ids only — never audio or transcripts. No event for
+    /// `.keep` (the healthy path must stay silent).
+    private func emitPressureBrainPickEvent(pick: PressureBrainPick,
+                                            remembered: ModelID) {
+        var metadata: [String: String] = ["from": remembered.rawValue]
+        let outcome: String
+        switch pick {
+        case .keep:
+            return
+        case .stepDown(let id):
+            outcome = "step_down"
+            metadata["to"] = id.rawValue
+        case .lightweight:
+            outcome = "lightweight"
+        }
+        observabilityBus.emit(ObservabilityEvent(
+            component: "pressure_brain_pick",
+            eventType: "turn",
             durationMs: nil,
             outcome: outcome,
             errorCode: nil,
