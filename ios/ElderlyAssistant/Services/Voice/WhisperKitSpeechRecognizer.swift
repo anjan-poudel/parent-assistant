@@ -149,7 +149,14 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
 
     init(observabilityBus: ObservabilityBus,
          modelStore: ModelStore? = nil,
-         preferredModelID: ModelID = ModelCatalog.whisperKitNepaliMedium,
+         // [VOICE-OOM] The default is the LANGUAGE default
+         // (`whisperKitMediumV6`, ~1.0 GB live), NOT the superseded fp16
+         // v3 (`whisperKitNepaliMedium`, ~2.0 GB live — the same 2×
+         // mis-sizing the post-turn policy was corrected away from). A
+         // construction site that does not name an artifact — a
+         // never-picked device — must not load the bigger one by
+         // default; that pairing is the trap this repoint closes.
+         preferredModelID: ModelID = ModelCatalog.whisperKitMediumV6,
          lifecycle: ModelLifecycleManager = .shared) {
         self.modelStore = modelStore
         self.observabilityBus = observabilityBus
@@ -204,7 +211,7 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
     ///    (unlike `WhisperSpeechRecognizer.currentModelID()`, which walks
     ///    the cached-model preference list). It loads exactly one catalog
     ///    directory artifact and its documented default is
-    ///    `ModelCatalog.whisperKitNepaliMedium` (the init default). An
+    ///    `ModelCatalog.whisperKitMediumV6` (the init default). An
     ///    unset would leave `loadDescriptor()` with nothing to resolve —
     ///    `isAvailable` false — on a pick the user reads as "the app
     ///    decides", so keeping the current artifact IS the automatic

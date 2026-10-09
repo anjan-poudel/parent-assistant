@@ -422,6 +422,30 @@ final class ModelLifecycleManagerTests: XCTestCase {
         XCTAssertTrue(manager.isResident(.intentEncoder))
     }
 
+    func testCriticalPressureEvictsTheLightEncoder() {
+        // [VOICE-OOM] Change D: the coordinator now registers the intent
+        // encoder `evictable: true`, so a critical sweep may take its
+        // CoreML specialization — the trade `handleCriticalMemoryPressure`
+        // already documents ("the light models the `.warning` path
+        // spares"). This pins the manager-side contract the coordinator
+        // flag flip relies on; the idle sweep still leaves the light slot
+        // alone (above), and the `.warning` squeeze takes heavy models
+        // first.
+        let encoderOwner = FakeOwner()
+        manager.register(slot: .intentEncoder, modelID: nil,
+                         owner: encoderOwner) { [weak encoderOwner] in
+            encoderOwner?.unload()
+        }
+        manager.didLoad(.intentEncoder, owner: encoderOwner)
+
+        let evicted = manager.handleMemoryPressure(level: .critical)
+
+        XCTAssertEqual(evicted, [.intentEncoder])
+        XCTAssertEqual(encoderOwner.unloadCount, 1,
+                       "the release closure is the encoder's own memory-pressure contract")
+        XCTAssertFalse(manager.isResident(.intentEncoder))
+    }
+
     func testIdleEvictionRespectsAPin() {
         let sttOwner = FakeOwner()
         XCTAssertTrue(load(.speechToText, modelID: sttQ8, owner: sttOwner).isAllowed)

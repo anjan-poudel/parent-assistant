@@ -24,14 +24,33 @@ import Foundation
 //
 //  2. When the TTL hold lapses, the weights are released AND a
 //     background re-warm MUST follow (never skipped by policy) — the
-//     re-warm's own probe is the only gate — so the next turn is warm
-//     again. The re-warmed weights re-arm the same TTL hold.
+//     re-warm's own probe is the only gate (generalized in 4 below) —
+//     so the next turn is warm again. The re-warmed weights re-arm the
+//     same TTL hold.
 //
 //  3. The warm-start preference gates the BOOT warm ONLY
 //     (`WarmStartPlanner.plan(for:)`). Post-turn residency is the
 //     invariance contract's back-to-back half and must NOT depend on the
 //     toggle — `ResidencyConfig` below has no warm input by
 //     construction, pinned by tests.
+//
+//  4. [VOICE-OOM] (2026-10-10) A resident brain changes the calculus. The
+//     fleet runs explicit large picks (a 4B admitted `soloOverBudget`,
+//     ~3.4 GB live); holding ~1.0 GB of ANE weights beside it is what
+//     forced the per-turn page-in ping-pong the jetsam logs show (the OS
+//     evicted the brain, the re-warm evicted the weights, every turn).
+//     Two rules, both in `decide`:
+//      - an OVER-BUDGET brain makes the weights yield every turn
+//        (`.brainOverBudget`): released after the turn, NEVER re-warmed
+//        in the background while it stays resident — the brain's ~3.4 GB
+//        reload is the expensive half; the weights reload at ~1.0 GB,
+//      - the hold/re-warm gate counts REAL residents: `available` must
+//        clear the weights + the resident brain's ledger bytes + the
+//        512 MB margin (`.ramHeadroom` when it does not). The old
+//        unreachable `footprint + llama headroom` gate is NOT back:
+//        that one added a constant no resident claimed against a
+//        2×-too-large footprint; this one counts what the ledger says
+//        (0 when no brain is resident).
 //
 // The policy runs only for the on-device stack's WhisperKit choice —
 // whisper.cpp loads a FRESH context per attempt by design (a held
@@ -57,13 +76,55 @@ enum WhisperPostTurnPolicy {
     /// nothing when memory is tight.
     static let ttlSeconds: TimeInterval = 180.0
 
+    /// [VOICE-OOM] (2026-10-10) The margin the generalized hold/re-warm
+    /// gate requires on top of the weights and any resident brain — the
+    /// room a turn's own spikes (ack WAV, KV growth, tokenizer scratch)
+    /// need without the OS answering with the killer jetsam. 512 MB per
+    /// the hardening brief.
+    static let headroomMarginBytes: UInt64 = 512_000_000
+
     enum Decision: Equatable {
         /// Keep the weights resident (TTL-hold).
         case hold
-        /// Release now and stay released — the ceiling is so tight the
-        /// weights themselves do not fit (a reload would endanger the
-        /// app, jetsam risk); the next turn pays the load.
-        case releaseOnly
+        /// Release now and stay released — the next turn pays the load.
+        /// Carries the honest reason (the coordinator emits it).
+        case releaseOnly(ReleaseReason)
+    }
+
+    /// [VOICE-OOM] Why the weights must yield — one token each, emitted on
+    /// the `post_transcript`/`rewarm` events so a field capture can tell
+    /// the cases apart.
+    enum ReleaseReason: String, Equatable {
+        /// A resident brain admitted past its class budget
+        /// (`soloOverBudget` — the explicit 4B pick on a standard phone).
+        /// Holding the weights beside it is what forces the per-turn
+        /// page-in ping-pong (brain in / weights out, then back again):
+        /// the brain stays resident and the weights reload per turn at
+        /// ~1.0 GB instead of the brain at ~3.4 GB.
+        case brainOverBudget = "brain_over_budget"
+        /// The probe leaves less than weights + brain + margin
+        /// (`available < footprint + activeBrain.liveBytes +
+        /// headroomMarginBytes`) — holding would spike the turn into
+        /// jetsam.
+        case ramHeadroom = "ram_headroom"
+        /// The weights themselves do not fit (`available < footprint`) —
+        /// a reload would endanger the app.
+        case ramCritical = "ram_critical"
+    }
+
+    /// [VOICE-OOM] The active brain's residency at probe time, resolved by
+    /// the coordinator from the MODEL-LIFECYCLE ledger. `.none` means no
+    /// brain is resident — nothing to co-reside with, the pre-brief
+    /// calculus.
+    struct ActiveBrain: Equatable {
+        /// The brain's live bytes from the ledger (0 when not resident).
+        var liveBytes: UInt64
+        /// The `soloOverBudget` criterion: live bytes past the CLASS
+        /// budget — the same number the admission used
+        /// (`snapshot().classBudgetBytes`).
+        var isOverClassBudget: Bool
+
+        static let none = ActiveBrain(liveBytes: 0, isOverClassBudget: false)
     }
 
     /// [LAT-EVIDENCE] The pure decision table: the weights stay held
@@ -72,9 +133,36 @@ enum WhisperPostTurnPolicy {
     /// hold gate is gone — unreachable on device (see the header) — and
     /// so is the middle `releaseAndReWarm` tier: a marginal ceiling no
     /// longer forces a release + finalize-time re-warm.
+    ///
+    /// [VOICE-OOM] (2026-10-10) Three tiers now, checked in this order:
+    ///  1. an over-budget resident brain (`.brainOverBudget`) — the
+    ///     device's actual situation; checked FIRST because arithmetic
+    ///     against a page-thrash regime would only relabel it,
+    ///  2. the critical floor (`.ramCritical`) — the weights alone do not
+    ///     fit, a reload would endanger the app,
+    ///  3. the generalized headroom gate counting the REAL resident
+    ///     brain: held only when `available` clears weights + brain live
+    ///     bytes + margin (`.ramHeadroom` otherwise).
+    ///
+    /// Tier 3 is NOT the old unreachable gate returning: the old one
+    /// added a constant 1.2 GB that no resident claimed and read a
+    /// 2×-too-large footprint (1.6 GB vs the shipping v6's 1.0 GB). This
+    /// one counts the brain's ledger bytes — 0 when none is resident,
+    /// so a brainless device keeps the [LAT-EVIDENCE] behavior of only
+    /// needing the weights + margin.
     static func decide(availableBytes: UInt64,
-                       whisperFootprintBytes: UInt64) -> Decision {
-        availableBytes >= whisperFootprintBytes ? .hold : .releaseOnly
+                       whisperFootprintBytes: UInt64,
+                       activeBrain: ActiveBrain) -> Decision {
+        guard !activeBrain.isOverClassBudget else {
+            return .releaseOnly(.brainOverBudget)
+        }
+        guard availableBytes >= whisperFootprintBytes else {
+            return .releaseOnly(.ramCritical)
+        }
+        let required = whisperFootprintBytes
+            + activeBrain.liveBytes
+            + headroomMarginBytes
+        return availableBytes >= required ? .hold : .releaseOnly(.ramHeadroom)
     }
 
     /// [LAT-EVIDENCE] Pure inputs to the post-transcript decision (the
@@ -100,9 +188,9 @@ enum WhisperPostTurnPolicy {
     enum TranscriptAction: Equatable {
         /// Keep the weights resident and arm the TTL hold.
         case hold
-        /// Critical RAM — release and stay released (the next turn pays
-        /// the load).
-        case releaseOnly
+        /// Release and stay released — the next turn pays the load. The
+        /// reason rides the `Decision` (the coordinator emits it).
+        case releaseOnly(ReleaseReason)
         /// The policy does not apply (wrong stack, not the active STT,
         /// not loaded) — today's unconditional release applies.
         case notApplicable
@@ -110,19 +198,22 @@ enum WhisperPostTurnPolicy {
 
     /// The pure post-transcript decision: applies only for the
     /// on-device stack's live WhisperKit recognizer with weights
-    /// resident; then hold unless the probe is critical.
+    /// resident; then the `decide` table (over-budget brain, critical
+    /// floor, generalized headroom).
     static func transcriptAction(
         config: ResidencyConfig,
         availableBytes: UInt64,
-        whisperFootprintBytes: UInt64) -> TranscriptAction {
+        whisperFootprintBytes: UInt64,
+        activeBrain: ActiveBrain) -> TranscriptAction {
         guard config.stack == .onDevice,
               config.whisperKitIsActiveSTT,
               config.whisperKitAvailable else { return .notApplicable }
         guard config.isModelLoaded else { return .notApplicable }
         switch decide(availableBytes: availableBytes,
-                      whisperFootprintBytes: whisperFootprintBytes) {
+                      whisperFootprintBytes: whisperFootprintBytes,
+                      activeBrain: activeBrain) {
         case .hold: return .hold
-        case .releaseOnly: return .releaseOnly
+        case .releaseOnly(let reason): return .releaseOnly(reason)
         }
     }
 }

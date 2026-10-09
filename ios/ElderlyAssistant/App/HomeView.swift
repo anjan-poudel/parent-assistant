@@ -116,6 +116,15 @@ struct HomeView: View {
                     .padding(.horizontal, 20)
                     .padding(.top, 8)
 
+                    // [VOICE-OOM] F (2026-10-10) — the degraded-mode
+                    // status pill: visible while the turn in force runs a
+                    // stepped-down brain or the deterministic reply path,
+                    // gone (renders nothing) the moment the next turn
+                    // resolves back to the remembered pick. Outside the
+                    // scroll and above the talk hero, so it never covers
+                    // the mic/voice UI.
+                    DegradedModeStatusPill(mode: coordinator.degradedVoiceMode)
+
                     // One vertical scroll owns every movable Home section.
                     // The previous nested feedback scroller had almost no
                     // height above the fixed two-row dock, so activity cards

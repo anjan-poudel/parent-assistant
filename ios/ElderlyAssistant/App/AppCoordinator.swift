@@ -673,6 +673,12 @@ final class AppCoordinator: ObservableObject {
 
     @Published var lastOutcome: OutcomeSummary?
 
+    /// [VOICE-OOM] F (2026-10-10) — the degraded-mode status for the turn
+    /// in force, published per turn by `applyPressureBrainPickForTurn`.
+    /// Home renders it as a small, low-contrast status pill (or nothing
+    /// for `.normal`, which is both the default and the recovered state).
+    @Published private(set) var degradedVoiceMode: DegradedVoiceMode = .normal
+
     /// [DESIGN-REVIEW] Explicit outcome dismissal — clears the published
     /// outcome so Home's feedback region hands the strip back to the
     /// optional-setup affordance for the rest of the session (the
@@ -1250,12 +1256,17 @@ final class AppCoordinator: ObservableObject {
     /// factory runs). Safe by construction: nothing in `init()` (or in any
     /// other stored property's initializer) touches this lazy, so the
     /// first evaluation is the boot's voice phase — provably after the
-    /// restore. `nil` (never picked) keeps the engine's own default.
+    /// restore. `nil` (never picked) falls back to the engine's own
+    /// default ([VOICE-OOM] `whisperKitMediumV6`, the language default —
+    /// mirrored EXPLICITLY here; this expression shadows the init default
+    /// at the only production construction site, so leaving the old
+    /// `whisperKitNepaliMedium` here would re-introduce the v3 trap on
+    /// never-picked devices).
     private lazy var whisperKitSpeechRecognizer: WhisperKitSpeechRecognizer = {
         let recognizer = WhisperKitSpeechRecognizer(
             observabilityBus: observabilityBus,
             modelStore: modelStore,
-            preferredModelID: sttModelPreference ?? ModelCatalog.whisperKitNepaliMedium
+            preferredModelID: sttModelPreference ?? ModelCatalog.whisperKitMediumV6
         )
         // [TURN-TIMING] Both whisper recognizers mark `asr_loaded` with
         // their measured load ms when a load happens inside a live turn.
@@ -4224,7 +4235,22 @@ final class AppCoordinator: ObservableObject {
                 ?? ModelCatalog.piperNepali,
             llamaAvailable: llamaCommandInterpreter.isAvailable,
             wakeWordEnabled: wakeWordEnabled,
-            isSimulator: Self.isSimulator
+            isSimulator: Self.isSimulator,
+            // [VOICE-OOM] C (2026-10-10) — the warm headroom gate's
+            // inputs, resolved HERE on main from the same probes the
+            // post-turn policy uses. A warm that would leave < 1 GB free
+            // is skipped by the planner (reason `low_headroom`): on a
+            // device already near its ceiling, boot-time page-in of the
+            // ~1 GB ANE weights or the multi-GB brain is the spike that
+            // gets the app killed before the user says anything. The
+            // skipped warm costs only the head start — STT re-arms via
+            // the first-use prewarm and the brain loads on first
+            // inference (exactly the no-warm behavior).
+            availableProcessMemoryBytes: MemoryProbe.availableProcessMemoryBytes,
+            sttWarmFootprintBytes: whisperFootprintBytes,
+            brainWarmFootprintBytes: ModelLifecycleInventory.footprint(
+                for: .brain,
+                modelID: llamaCommandInterpreter.baseModelID).liveBytes
         )
         let plan = WarmStartPlanner.plan(for: config)
         let bootPlan = plan.filter { $0.phase == .boot }
@@ -5879,8 +5905,20 @@ self.noteTalkContractChanged()
     /// behavior) when the policy does not apply. The warm-start
     /// preference is NOT consulted — it gates the BOOT warm only;
     /// post-turn residency is the invariance contract.
+    ///
+    /// [VOICE-OOM] The hold/release gate counts the REAL residents: a
+    /// resident brain's ledger bytes + a 512 MB margin, and an
+    /// over-budget brain (`soloOverBudget`) releases the weights
+    /// outright — holding beside it is the per-turn page-in ping-pong
+    /// the jetsam logs show.
     func recordTranscript(_ text: String) {
         applyPostTranscriptWhisperPolicy()
+        // [VOICE-OOM] B' (2026-10-10) — the pressure-tiered brain pick for
+        // THIS turn, applied BEFORE the router reaches the brain's load
+        // (the router calls `recordTranscript` first and only later
+        // `interpreter.interpret`), so a warned device runs the smaller
+        // installed brain instead of walking into the load.
+        applyPressureBrainPickForTurn()
         DispatchQueue.main.async { [weak self] in
             self?.livePartialTranscript = nil
             self?.lastTranscript = text
@@ -5920,6 +5958,23 @@ self.noteTalkContractChanged()
             modelID: whisperKitSpeechRecognizer.preferredModelID).liveBytes
     }
 
+    /// [VOICE-OOM] The active brain's residency for the post-turn policy —
+    /// LEDGER facts only, so the hold/re-warm arithmetic counts the real
+    /// resident instead of a constant. A brain admitted past its class
+    /// budget (an explicit 4B pick, `soloOverBudget`) makes the weights
+    /// yield every turn: holding them beside it is what forced the
+    /// per-turn page-in ping-pong the jetsam logs show.
+    private var activeBrainResidency: WhisperPostTurnPolicy.ActiveBrain {
+        let manager = ModelLifecycleManager.shared
+        guard manager.isResident(.brain),
+              let live = manager.footprint(of: .brain)?.liveBytes,
+              live > 0 else { return .none }
+        let classBudget = manager.snapshot().classBudgetBytes
+        return WhisperPostTurnPolicy.ActiveBrain(
+            liveBytes: live,
+            isOverClassBudget: classBudget > 0 && live > classBudget)
+    }
+
     /// True while WhisperKit is the STT the on-device selection table
     /// would actually run — the only recognizer whose weights can be
     /// held/re-warmed (whisper.cpp loads a fresh context per attempt).
@@ -5950,7 +6005,8 @@ self.noteTalkContractChanged()
                 whisperKitAvailable: whisperKitSpeechRecognizer.isAvailable,
                 isModelLoaded: whisperKitSpeechRecognizer.isModelLoaded),
             availableBytes: MemoryProbe.availableProcessMemoryBytes,
-            whisperFootprintBytes: whisperFootprintBytes)
+            whisperFootprintBytes: whisperFootprintBytes,
+            activeBrain: activeBrainResidency)
         switch action {
         case .hold:
             // The probe allows the weights to stay resident across the
@@ -5961,14 +6017,18 @@ self.noteTalkContractChanged()
             emitWhisperWeightsEvent(
                 eventType: "post_transcript", outcome: "held",
                 metadata: ["ttl_s": "\(Int(WhisperPostTurnPolicy.ttlSeconds))"])
-        case .releaseOnly:
-            // Critically tight: release and stay released — a reload
-            // would endanger the app. The next turn pays the load.
+        case .releaseOnly(let reason):
+            // [VOICE-OOM] Release and stay released. Three honest cases
+            // ride `reason`: an over-budget brain (holding beside it is
+            // the page-in ping-pong — the TTL re-warm must NOT fire
+            // while it stays resident), too little headroom for
+            // weights + brain + margin, or the weights alone not
+            // fitting. The next turn pays only the ~1.0 GB weights load.
             whisperResidencyCycle.cancel()
             whisperKitSpeechRecognizer.releaseModel()
             emitWhisperWeightsEvent(
                 eventType: "post_transcript", outcome: "released",
-                metadata: ["reason": "ram_critical"])
+                metadata: ["reason": reason.rawValue])
         case .notApplicable:
             // Not the on-device WhisperKit stack, or nothing loaded (a
             // fallback STT served the turn) — today's release applies.
@@ -5986,20 +6046,31 @@ self.noteTalkContractChanged()
     }
 
     /// [LAT-EVIDENCE] The background re-warm (runs when the TTL hold
-    /// lapses, main-confined): re-probes at execution time — only a
-    /// critical ceiling skips it (the safety valve), and the warm-start
-    /// preference NEVER gates it. On success the re-warmed weights
-    /// re-arm the same TTL hold, so the residency cycle repeats and the
-    /// next turn is warm.
+    /// lapses, main-confined): re-probes at execution time — a critical
+    /// ceiling skips it (the safety valve), and the warm-start preference
+    /// NEVER gates it. On success the re-warmed weights re-arm the same
+    /// TTL hold, so the residency cycle repeats and the next turn is warm.
+    ///
+    /// [VOICE-OOM] The re-probe is the SAME generalized gate the hold
+    /// used (`WhisperPostTurnPolicy.decide`): an over-budget brain or a
+    /// ceiling that cannot take weights + brain + margin skips the
+    /// re-warm — re-warming the weights would evict the brain the next
+    /// turn has to page back in at ~3.4 GB, the exact ping-pong this
+    /// hardening exists to stop.
     private func runBackgroundWhisperReWarm() {
         guard voiceEngineStack == .onDevice,
               whisperKitIsActiveSTT,
               whisperKitSpeechRecognizer.isAvailable else { return }
-        guard MemoryProbe.availableProcessMemoryBytes
-                >= whisperFootprintBytes else {
+        switch WhisperPostTurnPolicy.decide(
+            availableBytes: MemoryProbe.availableProcessMemoryBytes,
+            whisperFootprintBytes: whisperFootprintBytes,
+            activeBrain: activeBrainResidency) {
+        case .hold:
+            break
+        case .releaseOnly(let reason):
             emitWhisperWeightsEvent(
                 eventType: "rewarm", outcome: "skipped",
-                metadata: ["reason": "ram_critical"])
+                metadata: ["reason": reason.rawValue])
             return
         }
         emitWhisperWeightsEvent(eventType: "rewarm", outcome: "started")
@@ -6030,6 +6101,113 @@ self.noteTalkContractChanged()
         observabilityBus.emit(ObservabilityEvent(
             component: "whisper_weights",
             eventType: eventType,
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: nil,
+            metadata: metadata
+        ))
+    }
+
+    // MARK: - Pressure-tiered brain pick ([VOICE-OOM] B', 2026-10-10)
+
+    /// The per-turn pressure-tiered brain pick, applied at the top of
+    /// every turn. `recordTranscript` runs before the router reaches the
+    /// brain (`CommandRouter.route` records the transcript first and only
+    /// later calls `interpreter.interpret`), so the swap below is always
+    /// in force before the load — the warned device runs the smaller
+    /// installed brain instead of walking into the 4B's page-in.
+    ///
+    /// The decision itself lives in `PressureBrainPickResolver` (pure);
+    /// this function resolves its inputs and applies the outcome through
+    /// the interpreter's existing `switchBaseModel` seam. The stored
+    /// preference is NEVER touched: Settings keeps showing the household's
+    /// pick, and a recovered device swaps straight back to it.
+    ///
+    /// Gated on `llamaCommandInterpreter.isAvailable` only — wherever the
+    /// local brain can load, the pick must be able to protect that load.
+    /// That is BOTH stacks: the .gemini stack is local-first hybrid (the
+    /// local brain answers what it can, Gemini takes the rest), so its
+    /// first tier is the same load.
+    private func applyPressureBrainPickForTurn() {
+        guard llamaCommandInterpreter.isAvailable else {
+            // No local brain can load this turn — nothing to pick, and no
+            // degradation is in force.
+            publishDegradedVoiceMode(.normal)
+            return
+        }
+        let remembered = resolvedBrainModelID
+        let pick = PressureBrainPickResolver.resolve(
+            reading: ModelLifecycleManager.shared.memoryPressureReading(),
+            availableProcessMemoryBytes: MemoryProbe.availableProcessMemoryBytes,
+            language: appLanguage.rawValue,
+            rememberedPick: remembered,
+            installedModelIDs: installedBrainModelIDs)
+        switch pick {
+        case .keep:
+            if llamaCommandInterpreter.baseModelID != remembered {
+                // Recovery — pressure eased (or the remembered pick fits
+                // again) after an earlier turn stepped down. Swapping
+                // back is also what hides the pill on the next publish.
+                llamaCommandInterpreter.switchBaseModel(to: remembered)
+            }
+        case .stepDown(let id):
+            if llamaCommandInterpreter.baseModelID != id {
+                llamaCommandInterpreter.switchBaseModel(to: id)
+            }
+            emitPressureBrainPickEvent(pick: pick, remembered: remembered)
+        case .lightweight:
+            // No installed brain fits. Drop any resident handle so the
+            // load-site refusal (`loadLLMHandle`) is real — the router
+            // then answers from its deterministic path this turn.
+            llamaCommandInterpreter.unloadModel()
+            emitPressureBrainPickEvent(pick: pick, remembered: remembered)
+        }
+        publishDegradedVoiceMode(DegradedVoiceMode.resolved(from: pick))
+    }
+
+    /// The brains the resolver may choose from: the curated on-disk set —
+    /// the same pool the Settings picker offers, so a hidden/legacy
+    /// artifact can never be picked by pressure, and a candidate that is
+    /// not installed is invisible (never downloaded under pressure).
+    private var installedBrainModelIDs: Set<ModelID> {
+        Set(ModelCatalog.curatedEntries(kind: .llamaBase)
+            .map(\.id)
+            .filter { modelStore.isCached($0) })
+    }
+
+    /// Publishes the degraded-mode state Home renders as its status pill.
+    /// `recordTranscript` is main-confined on the production path (the
+    /// STT completion hops to main before routing); the guard is cheap
+    /// insurance for any other caller.
+    private func publishDegradedVoiceMode(_ mode: DegradedVoiceMode) {
+        if Thread.isMainThread {
+            degradedVoiceMode = mode
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.degradedVoiceMode = mode
+            }
+        }
+    }
+
+    /// One event per non-normal pick: component `pressure_brain_pick`,
+    /// catalog ids only — never audio or transcripts. No event for
+    /// `.keep` (the healthy path must stay silent).
+    private func emitPressureBrainPickEvent(pick: PressureBrainPick,
+                                            remembered: ModelID) {
+        var metadata: [String: String] = ["from": remembered.rawValue]
+        let outcome: String
+        switch pick {
+        case .keep:
+            return
+        case .stepDown(let id):
+            outcome = "step_down"
+            metadata["to"] = id.rawValue
+        case .lightweight:
+            outcome = "lightweight"
+        }
+        observabilityBus.emit(ObservabilityEvent(
+            component: "pressure_brain_pick",
+            eventType: "turn",
             durationMs: nil,
             outcome: outcome,
             errorCode: nil,
@@ -8987,17 +9165,23 @@ self.noteTalkContractChanged()
     /// footprint and closure, so calling it again on a re-install is
     /// harmless.
     ///
-    /// The encoder is LIGHT (≈ 140 MB) and already has a complete
-    /// unload/re-arm contract of its own, so it is registered for the
-    /// ledger's sake but excluded from eviction — its residency is the
-    /// [T-037-a] observer's business, and routing it through the idle sweep
-    /// would trip the pressure flag on a timer.
+    /// [VOICE-OOM] The encoder is LIGHT (≈ 140 MB) and evictable: a
+    /// critical-pressure sweep may take its CoreML specialization — the
+    /// trade `handleCriticalMemoryPressure` documents ("the light models
+    /// the `.warning` path spares"; the kernel is out of memory and 140 MB
+    /// of specialization is worth less than surviving). The flag only
+    /// widens the eviction surface to that moment: the idle sweep has its
+    /// own heavy-only filter and never touches a light slot, and the
+    /// `.warning` squeeze takes heavy models first. The re-arm is the
+    /// encoder's own contract — the release closure below IS its level-2
+    /// `handleMemoryPressure()`, and `rearmIntentEncoderIfEnabled()` at the
+    /// next turn's capture start reloads it ([T-037-a]).
     private func registerEncoderSlotIfNeeded() {
         ModelLifecycleManager.shared.register(
             slot: .intentEncoder,
             modelID: ModelCatalog.intentEncoderSpike,
             owner: intentEncoderInterpreter,
-            evictable: false
+            evictable: true
         ) { [weak intentEncoderInterpreter] in
             intentEncoderInterpreter?.handleMemoryPressure()
         }
