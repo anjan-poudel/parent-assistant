@@ -184,6 +184,11 @@ final class WhisperKitSpeechRecognizerTests: XCTestCase {
     func testPreferenceChangeEmitsOneContentFreeEvent() throws {
         let recognizer = WhisperKitSpeechRecognizer(observabilityBus: bus,
                                                     modelStore: nil)
+        // [VOICE-OOM] The shipped default is v6 itself since the E
+        // repoint (seed 56073e8) — move the recognizer off it first so
+        // the adoption below is a REAL change (a same-value pick is a
+        // deliberate no-op and must emit nothing).
+        recognizer.setPreferredModel(ModelCatalog.whisperKitMediumV5)
         bus.emittedEvents.removeAll()
 
         recognizer.setPreferredModel(ModelCatalog.whisperKitMediumV6)
