@@ -5884,6 +5884,12 @@ self.noteTalkContractChanged()
     /// behavior) when the policy does not apply. The warm-start
     /// preference is NOT consulted — it gates the BOOT warm only;
     /// post-turn residency is the invariance contract.
+    ///
+    /// [VOICE-OOM] The hold/release gate counts the REAL residents: a
+    /// resident brain's ledger bytes + a 512 MB margin, and an
+    /// over-budget brain (`soloOverBudget`) releases the weights
+    /// outright — holding beside it is the per-turn page-in ping-pong
+    /// the jetsam logs show.
     func recordTranscript(_ text: String) {
         applyPostTranscriptWhisperPolicy()
         DispatchQueue.main.async { [weak self] in
@@ -5925,6 +5931,23 @@ self.noteTalkContractChanged()
             modelID: whisperKitSpeechRecognizer.preferredModelID).liveBytes
     }
 
+    /// [VOICE-OOM] The active brain's residency for the post-turn policy —
+    /// LEDGER facts only, so the hold/re-warm arithmetic counts the real
+    /// resident instead of a constant. A brain admitted past its class
+    /// budget (an explicit 4B pick, `soloOverBudget`) makes the weights
+    /// yield every turn: holding them beside it is what forced the
+    /// per-turn page-in ping-pong the jetsam logs show.
+    private var activeBrainResidency: WhisperPostTurnPolicy.ActiveBrain {
+        let manager = ModelLifecycleManager.shared
+        guard manager.isResident(.brain),
+              let live = manager.footprint(of: .brain)?.liveBytes,
+              live > 0 else { return .none }
+        let classBudget = manager.snapshot().classBudgetBytes
+        return WhisperPostTurnPolicy.ActiveBrain(
+            liveBytes: live,
+            isOverClassBudget: classBudget > 0 && live > classBudget)
+    }
+
     /// True while WhisperKit is the STT the on-device selection table
     /// would actually run — the only recognizer whose weights can be
     /// held/re-warmed (whisper.cpp loads a fresh context per attempt).
@@ -5955,7 +5978,8 @@ self.noteTalkContractChanged()
                 whisperKitAvailable: whisperKitSpeechRecognizer.isAvailable,
                 isModelLoaded: whisperKitSpeechRecognizer.isModelLoaded),
             availableBytes: MemoryProbe.availableProcessMemoryBytes,
-            whisperFootprintBytes: whisperFootprintBytes)
+            whisperFootprintBytes: whisperFootprintBytes,
+            activeBrain: activeBrainResidency)
         switch action {
         case .hold:
             // The probe allows the weights to stay resident across the
@@ -5966,14 +5990,18 @@ self.noteTalkContractChanged()
             emitWhisperWeightsEvent(
                 eventType: "post_transcript", outcome: "held",
                 metadata: ["ttl_s": "\(Int(WhisperPostTurnPolicy.ttlSeconds))"])
-        case .releaseOnly:
-            // Critically tight: release and stay released — a reload
-            // would endanger the app. The next turn pays the load.
+        case .releaseOnly(let reason):
+            // [VOICE-OOM] Release and stay released. Three honest cases
+            // ride `reason`: an over-budget brain (holding beside it is
+            // the page-in ping-pong — the TTL re-warm must NOT fire
+            // while it stays resident), too little headroom for
+            // weights + brain + margin, or the weights alone not
+            // fitting. The next turn pays only the ~1.0 GB weights load.
             whisperResidencyCycle.cancel()
             whisperKitSpeechRecognizer.releaseModel()
             emitWhisperWeightsEvent(
                 eventType: "post_transcript", outcome: "released",
-                metadata: ["reason": "ram_critical"])
+                metadata: ["reason": reason.rawValue])
         case .notApplicable:
             // Not the on-device WhisperKit stack, or nothing loaded (a
             // fallback STT served the turn) — today's release applies.
@@ -5991,20 +6019,31 @@ self.noteTalkContractChanged()
     }
 
     /// [LAT-EVIDENCE] The background re-warm (runs when the TTL hold
-    /// lapses, main-confined): re-probes at execution time — only a
-    /// critical ceiling skips it (the safety valve), and the warm-start
-    /// preference NEVER gates it. On success the re-warmed weights
-    /// re-arm the same TTL hold, so the residency cycle repeats and the
-    /// next turn is warm.
+    /// lapses, main-confined): re-probes at execution time — a critical
+    /// ceiling skips it (the safety valve), and the warm-start preference
+    /// NEVER gates it. On success the re-warmed weights re-arm the same
+    /// TTL hold, so the residency cycle repeats and the next turn is warm.
+    ///
+    /// [VOICE-OOM] The re-probe is the SAME generalized gate the hold
+    /// used (`WhisperPostTurnPolicy.decide`): an over-budget brain or a
+    /// ceiling that cannot take weights + brain + margin skips the
+    /// re-warm — re-warming the weights would evict the brain the next
+    /// turn has to page back in at ~3.4 GB, the exact ping-pong this
+    /// hardening exists to stop.
     private func runBackgroundWhisperReWarm() {
         guard voiceEngineStack == .onDevice,
               whisperKitIsActiveSTT,
               whisperKitSpeechRecognizer.isAvailable else { return }
-        guard MemoryProbe.availableProcessMemoryBytes
-                >= whisperFootprintBytes else {
+        switch WhisperPostTurnPolicy.decide(
+            availableBytes: MemoryProbe.availableProcessMemoryBytes,
+            whisperFootprintBytes: whisperFootprintBytes,
+            activeBrain: activeBrainResidency) {
+        case .hold:
+            break
+        case .releaseOnly(let reason):
             emitWhisperWeightsEvent(
                 eventType: "rewarm", outcome: "skipped",
-                metadata: ["reason": "ram_critical"])
+                metadata: ["reason": reason.rawValue])
             return
         }
         emitWhisperWeightsEvent(eventType: "rewarm", outcome: "started")
