@@ -6878,6 +6878,40 @@
         }
       }
     },
+    "home.degradedMode.lightweight" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Simple answer — low memory"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "सरल जवाफ — कम मेमोरी"
+          }
+        }
+      }
+    },
+    "home.degradedMode.smallerBrain" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Simple mode — low memory"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "सरल मोड — कम मेमोरी"
+          }
+        }
+      }
+    },
     "home.greeting.morning" : {
       "extractionState" : "manual",
       "localizations" : {

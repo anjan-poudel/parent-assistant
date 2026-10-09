@@ -361,6 +361,45 @@ struct LiveCaptionPill: View {
     }
 }
 
+// MARK: - Degraded-mode status pill ([VOICE-OOM] F, 2026-10-10)
+
+/// The small, low-contrast status pill Home shows while the turn in force
+/// is running a stepped-down brain or the deterministic reply path (see
+/// `DegradedVoiceMode`). Deliberately subtle: caption-sized secondary-ink
+/// text on the standard card surface — informative, never error-looking
+/// (no warning glyph, no accent colour), silent (no sound, haptics, or
+/// interruption) and non-interactive, so it can never block the mic/voice
+/// UI. It renders NOTHING for `.normal`, and the mode is the single input:
+/// the view shows the current state only — no history, no timers.
+struct DegradedModeStatusPill: View {
+    @Environment(\.appAppearance) private var appearance
+    @Environment(\.locale) private var locale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let mode: DegradedVoiceMode
+
+    var body: some View {
+        Group {
+            if let text = mode.pillText(locale: locale) {
+                Text(text)
+                    .font(DesignTokens.warmFont(
+                        size: appearance.typography.captionPointSize,
+                        weight: .regular))
+                    .foregroundStyle(appearance.colors.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.vertical, 6)
+                    .frame(maxWidth: .infinity)
+                    .appSurface()
+                    .accessibilityIdentifier("home.degradedMode.pill")
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+                    .transition(.opacity)
+            }
+        }
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: mode)
+    }
+}
+
 // MARK: - Outcome card (Home, after routing — spec §3.1, §6)
 
 /// Dual-channel confirmation: the assistant already spoke the reply

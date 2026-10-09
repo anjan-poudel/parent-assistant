@@ -673,6 +673,12 @@ final class AppCoordinator: ObservableObject {
 
     @Published var lastOutcome: OutcomeSummary?
 
+    /// [VOICE-OOM] F (2026-10-10) — the degraded-mode status for the turn
+    /// in force, published per turn by `applyPressureBrainPickForTurn`.
+    /// Home renders it as a small, low-contrast status pill (or nothing
+    /// for `.normal`, which is both the default and the recovered state).
+    @Published private(set) var degradedVoiceMode: DegradedVoiceMode = .normal
+
     /// [DESIGN-REVIEW] Explicit outcome dismissal — clears the published
     /// outcome so Home's feedback region hands the strip back to the
     /// optional-setup affordance for the rest of the session (the
