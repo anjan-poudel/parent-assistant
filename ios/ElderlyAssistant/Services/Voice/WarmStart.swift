@@ -134,6 +134,17 @@ struct WarmStartConfig: Equatable {
     /// there and the load can outlive the boot watchdog without ever
     /// helping a real conversation.
     var isSimulator: Bool
+    /// [VOICE-OOM] (2026-10-10) The app's available process memory at
+    /// plan time (`MemoryProbe.availableProcessMemoryBytes`, resolved by
+    /// the coordinator on main). nil = ungated — hand-built configs
+    /// (tests) keep the pre-brief decision table by construction.
+    var availableProcessMemoryBytes: UInt64? = nil
+    /// [VOICE-OOM] The STT artifact's live footprint — the same
+    /// ledger/inventory number the post-turn policy uses. nil = ungated.
+    var sttWarmFootprintBytes: UInt64? = nil
+    /// [VOICE-OOM] The brain artifact's live footprint for the resolved
+    /// base model id. nil = ungated.
+    var brainWarmFootprintBytes: UInt64? = nil
 }
 
 /// The pure decision table behind the boot's warm phase. Gating tests
@@ -149,6 +160,29 @@ enum WarmStartPlanner {
     /// on the simulator; a slow primary warm must not gate `.ready`
     /// past this budget).
     static let bootWarmBudgetSeconds: TimeInterval = 4.0
+
+    /// [VOICE-OOM] (2026-10-10) The free headroom a warm must leave
+    /// behind: a warm that would leave less than this is SKIPPED — the
+    /// boot-time version of the jetsam spike this hardening exists to
+    /// stop (a 1 GB ANE load / a 3.4 GB brain page-in landing while the
+    /// app already counts every byte is how the device died). The skip
+    /// costs only the head start, never the turn: the first-use prewarm
+    /// covers STT (`WhisperFirstUsePrewarmPolicy`, armed at listening
+    /// start) and the brain loads on the first inference anyway — both
+    /// re-armed on demand, nothing to reset.
+    static let warmHeadroomFloorBytes: UInt64 = 1_000_000_000
+
+    /// [VOICE-OOM] The generalized warm gate — the coordinator resolves
+    /// the two memory inputs; a config without them (hand-built test
+    /// plans) is ungated by construction. Returns the honest skip reason
+    /// when the warm must not run.
+    private static func lowHeadroomReason(config: WarmStartConfig,
+                                          footprintBytes: UInt64?) -> String? {
+        guard let available = config.availableProcessMemoryBytes,
+              let footprintBytes else { return nil }
+        return available < footprintBytes + warmHeadroomFloorBytes
+            ? "low_headroom" : nil
+    }
 
     static func plan(for config: WarmStartConfig) -> [WarmStartStep] {
         guard config.enabled else { return [] }
@@ -171,6 +205,12 @@ enum WarmStartPlanner {
                                      action: .skip(reason: "simulator"))
             }
             if config.whisperKitAvailable {
+                if let reason = lowHeadroomReason(
+                    config: config,
+                    footprintBytes: config.sttWarmFootprintBytes) {
+                    return WarmStartStep(engine: .whisperKit,
+                                         action: .skip(reason: reason))
+                }
                 return WarmStartStep(engine: .whisperKit, action: .warm)
             }
             if config.whisperCppAvailable {
@@ -196,6 +236,18 @@ enum WarmStartPlanner {
                                  action: .skip(reason: "simulator"))
         }
         if config.llamaAvailable {
+            // [VOICE-OOM] The brain warm is headroom-gated like the STT
+            // one: on a device already near its ceiling, page-in of a
+            // multi-GB brain at boot is the spike that gets the app
+            // killed before the user says anything. Skipped warms re-arm
+            // on demand (first inference pays the load, exactly the
+            // no-warm behavior).
+            if let reason = lowHeadroomReason(
+                config: config,
+                footprintBytes: config.brainWarmFootprintBytes) {
+                return WarmStartStep(engine: .llamaInterpreter,
+                                     action: .skip(reason: reason))
+            }
             return WarmStartStep(engine: .llamaInterpreter,
                                  action: .warm,
                                  phase: .boot)
