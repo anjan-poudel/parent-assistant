@@ -56,10 +56,15 @@ final class SpotifyLocalizationTests: XCTestCase {
     }
 
     /// The branch-point baseline (review-l2, verification method: 1,341 keys,
-    /// no `spotify*` keys yet). The catalog total must stay exactly this plus
-    /// the 20 added keys — the feature's edit list adds keys and modifies
-    /// none.
-    private let baselineKeyCount = 1341
+    /// no `spotify*` keys yet), refreshed at T-141 (W6) per the W1 review's
+    /// F-4: three unrelated master entries landed between the branch point
+    /// and this feature's base (catalog 1,364 at `0cbe4e6`, already 3 past
+    /// the stale 1,361 expectation), and the multi-turn-conversation
+    /// feature added its 17 `dialogue.*` keys (T-129; catalog 1,381 at
+    /// feature HEAD). 1,341 + 3 + 17 = 1,361: the catalog total must stay
+    /// exactly this plus the 20 added keys — the feature's edit list adds
+    /// keys and modifies none.
+    private let baselineKeyCount = 1361
 
     private let english = Locale(identifier: "en")
     private let nepali = Locale(identifier: "ne-NP")

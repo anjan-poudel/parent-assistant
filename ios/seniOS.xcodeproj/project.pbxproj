@@ -730,6 +730,7 @@
 		E6CD7A649BC80B23C416B27F /* SpeakQueue.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21EE07B96FEE151F1990EB2B /* SpeakQueue.swift */; };
 		E700F45EAE38E220DAC6B893 /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 31B2F1E52012C40396E02666 /* LaunchScreen.storyboard */; };
 		E708D6B8397B5BAA99E522D9 /* whisper-medium-ne-q5_1.bin in Resources */ = {isa = PBXBuildFile; fileRef = 9AA00B88AADB64F15A1BC85C /* whisper-medium-ne-q5_1.bin */; };
+		E74266D14019153DFC7DBC71 /* DialogueAcceptanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 819F386644095F0779C7B506 /* DialogueAcceptanceTests.swift */; };
 		E76AA29896D8E29082527374 /* FeatureReadiness.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF672A05050E5A35DEC8D134 /* FeatureReadiness.swift */; };
 		E7B87B15F917C56B33CA3AC8 /* LocalToolLogStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01BAA3C718729257B3998825 /* LocalToolLogStoreTests.swift */; };
 		E832AE79A79025BBE71BB145 /* CloudProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7D174597EE97C5544816850 /* CloudProvider.swift */; };
@@ -1274,6 +1275,7 @@
 		811F4C4DA8994E9C3C95B5D4 /* FeedReadStateStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedReadStateStoreTests.swift; sourceTree = "<group>"; };
 		81254CF022A8E5C2F4030E25 /* NepaliOutputGateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NepaliOutputGateTests.swift; sourceTree = "<group>"; };
 		81548C7BFEB7AAA0ADD63048 /* IntentEncoderFeature.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntentEncoderFeature.swift; sourceTree = "<group>"; };
+		819F386644095F0779C7B506 /* DialogueAcceptanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DialogueAcceptanceTests.swift; sourceTree = "<group>"; };
 		81F60EA5BB435D5EAEDE8E4B /* ContactPhotoStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContactPhotoStore.swift; sourceTree = "<group>"; };
 		822B86279A9F75D9F94B44FB /* SpeakerEmbedderSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeakerEmbedderSelectionTests.swift; sourceTree = "<group>"; };
 		8302DB1270ED342869E228C0 /* NepaliCalendarPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NepaliCalendarPlugin.swift; sourceTree = "<group>"; };
@@ -2362,6 +2364,7 @@
 				0E9E90B47A12C2406E4569D5 /* CommandRouterYouTubeTests.swift */,
 				F3946EB8DB3D4F888B969D0E /* DialectBiasComposerTests.swift */,
 				04FA79D428D0A71D286F4701 /* DialectIdentifierTests.swift */,
+				819F386644095F0779C7B506 /* DialogueAcceptanceTests.swift */,
 				7987C3B69DE9411316A61CC7 /* DialogueAnswerPathTests.swift */,
 				040D3739CE04161773DF4E16 /* DialogueCacheBypassTests.swift */,
 				986BB3C08E01A3371892E6FA /* DialogueCandidateBuilderTests.swift */,
@@ -3743,6 +3746,7 @@
 				A81826A4DCA61C3A49DCA07E /* DevanagariNumeralsTests.swift in Sources */,
 				683820EF607F195C9ED70D5E /* DialectBiasComposerTests.swift in Sources */,
 				0A4138EA927BA2E05F6C874B /* DialectIdentifierTests.swift in Sources */,
+				E74266D14019153DFC7DBC71 /* DialogueAcceptanceTests.swift in Sources */,
 				F6205895E3F55D517C047C96 /* DialogueAnswerPathTests.swift in Sources */,
 				B27A714BD73D2B847AC33D94 /* DialogueCacheBypassTests.swift in Sources */,
 				F15960E2E644442DE7D45BB5 /* DialogueCandidateBuilderTests.swift in Sources */,
