@@ -875,9 +875,70 @@ final class CommandRouter {
                     }
                     return .unrecognised(transcript: raw)
                 }
-                _ = coordinator?.takePendingRephraseCommand()
+                // [MTC-T134] rephrase-discard upgrade (design-l2 §12.4
+                // edit 5; C-5 review-l2): the taken hypothesis was
+                // previously DROPPED here — it is now bound and re-offered
+                // as the candidate frame's LAST candidate alongside the
+                // original utterance's near-matches (R2: never alone).
+                // `speakDialogueDidYouMean` speaks the composed
+                // `dialogue.understood.no` honest lead plus the
+                // `dialogue.didYouMean` question in ONE utterance (the
+                // composer's candidateChoice body already carries the
+                // lead — speaking it separately would repeat the line);
+                // with zero candidates, or a window that cannot open, the
+                // shipped discard line stands byte-identically (never
+                // fabricate, FR-MTC-004; NFR-MTC-012).
+                let taken = coordinator?.takePendingRephraseCommand()
                 emit(eventType: "rephrase_discarded", outcome: "info")
-                speak(key: "router.rephrase.discard")
+                let rephraseSource = taken?.sourceTranscript ?? raw
+                let rephraseCandidates = DialogueCandidateBuilder.build(
+                    for: rephraseSource,
+                    excludingDomain: nil,
+                    rephraseHypothesis: taken?.command)
+                // [W4 review F-1, 2026-10-10] The arm + probe pair is
+                // DEFERRED by exactly one main tick. Ordering proof:
+                // `takePendingRephraseCommand()` has just QUEUED its
+                // `.awaitingConfirmation → .idle` hop (block A) on the
+                // main queue and this branch runs before that hop lands.
+                // Arming synchronously would bridge the still-
+                // `.awaitingConfirmation` session to `.awaitingSlotAnswer`
+                // (the opener's legal `.idle` bridge), and block A would
+                // then land on the freshly armed window: it closes it
+                // (`.awaitingSlotAnswer → .idle`, cancelling the slot
+                // timer) and the queued session-exit observer, seeing a
+                // live frame with the window gone, resolves it as
+                // `.superseded` — the just-spoken probe is answer-dead
+                // (T-134 Gherkin 4 / design-l2 §12.4 edit 5). Deferring
+                // makes the order: block A (`.awaitingConfirmation →
+                // .idle`; the observer hop finds no frame yet — a no-op)
+                // → block B below (`openSlotAnswerWindow` from `.idle`
+                // directly; the observer sees `.awaitingSlotAnswer` — a
+                // no-op; the frame arms; the probe is spoken exactly
+                // once). The synchronous legs stay synchronous: zero
+                // candidates or no coordinator keep the shipped line with
+                // no defer (NFR-MTC-012), and a deallocated router speaks
+                // nothing and opens nothing. The start call happens ONLY
+                // inside block B, immediately followed by the speak on
+                // success, so no window is ever opened without its probe;
+                // the arm-failure / deallocated-coordinator legs speak the
+                // shipped line byte-identically (NFR-MTC-012).
+                if coordinator != nil, !rephraseCandidates.isEmpty {
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self else { return }
+                        guard let coordinator = self.coordinator,
+                              coordinator.startDialogueFrame(
+                                  DialogueFrame.candidateChoice(
+                                      candidates: rephraseCandidates,
+                                      sourceTranscript: rephraseSource)) else {
+                            self.speak(key: "router.rephrase.discard")
+                            return
+                        }
+                        self.speakDialogueDidYouMean(rephraseCandidates,
+                                                     locale: coordinator.activeLocale)
+                    }
+                } else {
+                    speak(key: "router.rephrase.discard")
+                }
                 return .unrecognised(transcript: raw)
             }
             // Call-confirmation correction protocol (spec §7.2): a
@@ -1411,7 +1472,17 @@ final class CommandRouter {
                 // utterance so the turn always has a query. Terminal for
                 // the turn, exactly like the YouTube arm above.
                 emitIntentKeywordMatch(relaxed)
-                fireMusicRequest(query: KeywordIntentRule.musicQuery(from: preText) ?? preText)
+                // [MTC-T134] ladder-degenerate (design-l2 §12.4 edit 3;
+                // §23's ladder intake): a degenerate extraction
+                // (marker/transcript fallback) opens the slot-fill probe
+                // instead of a blind search of the fallback token; a
+                // content extraction fires the shipped blind request with
+                // the identical query — `musicQuery(from:)` is the thin
+                // wrapper over `musicQueryOutcome(from:)`, so a specific
+                // request stays byte-identical (NFR-MTC-012).
+                fireMusicRequestOrProbe(query: KeywordIntentRule.musicQueryOutcome(from: preText),
+                                        raw: raw,
+                                        intake: .ladder)
                 return .unrecognised(transcript: raw)
             case .appLaunch:
                 // [APP-LAUNCHER] (2026-09-16) The launcher's voice fast
@@ -2211,7 +2282,16 @@ final class CommandRouter {
                             locale: coordinator?.activeLocale
                                 ?? Locale(identifier: "ne-NP")))
                 } else {
-                    speak(key: "router.reprompt")
+                    // [MTC-T134] keyword-remainder upgrade (design-l2
+                    // §12.4 edit 6): with ≥1 near-match candidate the
+                    // honest `dialogue.retry`-prefixed candidateChoice
+                    // probe is spoken and its frame armed; with zero
+                    // candidates — or a window that cannot open — the
+                    // shipped `router.reprompt` line stands
+                    // byte-identically (NFR-MTC-012). The
+                    // cloud-failure-class branch above and both no-brain
+                    // branches below are untouched.
+                    speakDialogueDidYouMeanOrReprompt(raw)
                 }
             }
         case .downloadingBrain:
@@ -3932,9 +4012,25 @@ final class CommandRouter {
             let modelQuery = command.message?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             let interpretedQuery = (modelQuery?.isEmpty == false) ? modelQuery : nil
-            fireMusicRequest(query: interpretedQuery
-                ?? KeywordIntentRule.musicQuery(from: raw)
-                ?? raw)
+            if let interpretedQuery {
+                // The model set its own query — exactly today's request.
+                fireMusicRequest(query: interpretedQuery)
+            } else {
+                // [MTC-T134] interpreted-degenerate (design-l2 §12.4 edit
+                // 4; §23's interpreted intake): the model set no
+                // `message`, so the deterministic extractor reads the
+                // transcript — a degenerate reading opens the slot-fill
+                // probe instead of searching the fallback token, a
+                // content reading fires the identical blind request
+                // (byte-identity, NFR-MTC-012). The arrived command rides
+                // the frame as `activeCommand` (L2-D13) so an answer
+                // merges back into its own dispatch.
+                fireMusicRequestOrProbe(
+                    query: KeywordIntentRule.musicQueryOutcome(from: raw),
+                    raw: raw,
+                    intake: .interpreted,
+                    activeCommand: command)
+            }
         case .sendMessage:
             handleSendMessage(command)
         case .guide:

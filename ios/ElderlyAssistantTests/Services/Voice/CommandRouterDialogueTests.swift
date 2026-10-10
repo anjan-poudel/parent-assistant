@@ -455,9 +455,17 @@ final class CommandRouterDialogueTests: XCTestCase {
         XCTAssertTrue(stale.isExpired(at: Date()))
         world.coordinator.forcedFrame = stale
 
-        let result = world.router.route(transcript: "भजन बजाऊ")
+        // [MTC-T134] (2026-10-10) The fixture is a CONTENT query: after
+        // T-134's wiring a marker-only utterance on a fresh path opens
+        // the slot-fill probe (FR-MTC-002, pinned by
+        // `CommandRouterDegenerateTriggerTests`), which is a different
+        // behaviour from this test's "unaltered ladder" contract. The
+        // expired-frame pin itself — resolve nothing, consume nothing —
+        // is unchanged.
+        let utterance = "दशैं दुर्गा भजन बजाऊ"
+        let result = world.router.route(transcript: utterance)
 
-        XCTAssertEqual(result, .unrecognised(transcript: "भजन बजाऊ"))
+        XCTAssertEqual(result, .unrecognised(transcript: utterance))
         XCTAssertTrue(world.coordinator.resolutions.isEmpty,
                       "an expired frame resolves nothing — it is simply not live")
         XCTAssertTrue(world.bus.emittedEvents.allSatisfy { !$0.eventType.hasPrefix("dialogue_") },
@@ -465,7 +473,7 @@ final class CommandRouterDialogueTests: XCTestCase {
 
         // The utterance ran the unaltered ladder exactly once.
         waitForDelivery()
-        XCTAssertEqual(world.opener.opened, [YouTubeTool.appSearchURL(query: "भजन")])
+        XCTAssertEqual(world.opener.opened, [YouTubeTool.appSearchURL(query: "दशैं दुर्गा")])
         XCTAssertEqual(world.interpreter.interpretCount, 0,
                        "the deterministic music stage claimed it unaltered")
     }

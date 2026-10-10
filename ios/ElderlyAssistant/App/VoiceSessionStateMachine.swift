@@ -257,6 +257,17 @@ final class VoiceSessionStateMachine: ObservableObject {
         return true
     }
 
+    /// The answer-window length in seconds (review-l2 C-1): the ONE value
+    /// `config.confirmationTimeoutSeconds` (`:120`) owns, exposed as an
+    /// instance accessor so `AppCoordinator` can construct its
+    /// `DialogueManager` from this single source. `config` is a private
+    /// instance field, so no type-level access exists and no caller may
+    /// re-declare the 45; passing it at construction is C-1's other
+    /// sanctioned shape and this accessor is what feeds it.
+    var answerWindowSeconds: TimeInterval {
+        TimeInterval(config.confirmationTimeoutSeconds)
+    }
+
     private func armConfirmationTimer() {
         cancelConfirmationTimer()
         let seconds = config.confirmationTimeoutSeconds
