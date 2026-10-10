@@ -269,4 +269,63 @@ final class VoiceContactSearchRouteTests: XCTestCase {
         XCTAssertEqual(VoiceContactSearchRoute.decide(transcript: "युट्युबमा रामायण खोजिदिनुहोस्"),
                        .notSearch)
     }
+
+    // MARK: - L2-D2 barge-in predicate access widenings (T-128)
+
+    /// Gherkin "The answer path can consume the predicate surfaces":
+    /// evaluate a sensitive-phrase fixture and a direct-call fixture
+    /// through the WIDENED symbols, from outside the declaring types,
+    /// exactly the way the answer path will (design-l2 §6 B1-B3,
+    /// §"Barge-in (pinned)") — and get the booleans the shipped call
+    /// sites compute. Referencing the symbols here at all is the
+    /// widening proof: they are `private` (file-scoped) at baseline, and
+    /// a `@testable` import reaches `internal` only. The assertions pin
+    /// that visibility changed and nothing else did.
+    func testWidenedBargeInPredicatesMatchTheShippedCallSites() {
+        // B1 — the medication-acknowledgement check
+        // (`CommandRouter.swift:1913`, already `internal`; denials are
+        // excluded inside the check).
+        XCTAssertTrue(CommandRouter.isExplicitMedicationAcknowledgement("औषधि खाएँ"))
+        XCTAssertFalse(CommandRouter.isExplicitMedicationAcknowledgement("नखाए"),
+                       "a denial is never an acknowledgement — guard order lives in the check")
+
+        // B2 — the sensitive-call phrase list with the router's
+        // `containsPhrase` semantics (`CommandRouter.swift:1826` —
+        // `text.contains(phrase)`), over canonical lowercased text: the
+        // exact expression the shipped call sites run at `:1360` (the
+        // topic pre-answer self-exclusion) and `:1973-1980` (the
+        // `router.sensitiveBlocked` block; that end-to-end outcome is
+        // pinned by `CommandRouterTests.testSensitiveCallCommandIsBlockedUntilAuthExists`).
+        // The fixture is the router's own doc example.
+        let sensitiveCall = "मौसम बताउने मान्छेलाई फोन गर"
+        XCTAssertTrue(CommandRouter.sensitiveCallPhrases.contains { sensitiveCall.contains($0) },
+                      "the sensitive-call fixture must keep hitting the SAME list that blocks")
+        let plainTopic = "आज मौसम कस्तो छ"
+        XCTAssertFalse(CommandRouter.sensitiveCallPhrases.contains { plainTopic.contains($0) },
+                       "a plain topic question must stay clear of the block")
+
+        // B3 — the direct-call tester, consumed exactly as design-l2 §6
+        // B3 does: canonical lowercased text (the lowercase-input
+        // contract is pinned by the next test).
+        let directCall = "फोन नम्बर लगाऊ"
+        XCTAssertTrue(VoiceContactSearchRoute.isDirectCallUtterance(directCall))
+        XCTAssertEqual(VoiceContactSearchRoute.decide(transcript: directCall), .notSearch,
+                       "shipped call site: the veto at VoiceContactSearchRoute.swift:74 flips the search-marker hit")
+        XCTAssertEqual(VoiceContactSearchRoute.extractQuery(from: directCall), "लगाऊ",
+                       "baseline artifact: without the veto this extraction WAS the Phone-screen prefill")
+    }
+
+    /// Gherkin "`isDirectCallUtterance` keeps its documented
+    /// lowercase-input contract": the widening added no case folding.
+    /// Canonicalising is the caller's job — `decide(transcript:)`
+    /// lowercases first (`VoiceContactSearchRoute.swift:68`) — and the
+    /// answer path lowercases before its B3 evaluation (design-l2's
+    /// pinned barge-in step).
+    func testDirectCallTesterKeepsItsLowercaseInputContract() {
+        XCTAssertTrue(VoiceContactSearchRoute.isDirectCallUtterance("call maiya"))
+        XCTAssertFalse(VoiceContactSearchRoute.isDirectCallUtterance("CALL MAIYA'S NUMBER"),
+                       "the tester folds no case itself — mixed-case input is not canonicalised inside")
+        XCTAssertEqual(VoiceContactSearchRoute.decide(transcript: "CALL MAIYA'S NUMBER"), .notSearch,
+                       "the shipped call site canonicalises first, so the same utterance is still vetoed")
+    }
 }

@@ -1,0 +1,47 @@
+{
+  "id": "18b9d747-9176-48ea-ba08-f2623eb21d9d",
+  "task_id": "define-requirements",
+  "workflow_id": "multi-turn-conversation",
+  "status": "RESOLVED",
+  "reason": "T1 human sign-off — feature story for multi-turn-conversation. The requirement set is complete and locked: 20 functional requirements (FR-MTC-001..020) — the one-deep dialogue frame (DialogueManager + DialogueFrame) with both probe kinds (.slotFill for a missing slot, e.g. the bhajan deity; .candidateChoice/didYouMean: an honest 'didn't understand' line plus voice-pickable candidates by name/index-word/repetition/free-form with the 'no — let me say it again' escape), template probes ne/en (never model-generated), pre-ladder answer interception with cancel words / emergency precedence / strong-new-command barge-in, deterministic answer merge, the curated on-device music option catalog, max 2 probes then execute with defaults, the 45 s deadline, and the degraded-brain deterministic path. Phase 1 (FR-MTC-001..017, all MUST) is the deterministic MVP, shippable alone — the owner's bhajan example ('play bhajans' -> which kind? -> 'dasain durga bhajans' -> correct playback) is its acceptance anchor (FR-MTC-003). Phase 2 (FR-MTC-018, v17 follow-up NLU fine-tune, pending OD-M3) and Phase 3 (FR-MTC-019 reminder/calendar rollover + FR-MTC-020 DV-* device-validation gate, pending OD-M4) are traceable but later phases. 12 non-functional requirements (NFR-MTC-001..012: probe budget, 45 s deadline, 1024-token ceiling with ~300-token clause headroom, zero new egress/network, log-safety gate (check-release-log-safety.sh), degraded-brain safety unchanged, ne/en localisation, 6 GB sustained multi-turn without jetsam). 97 Gherkin acceptance scenarios. The owner is asked to approve the feature story before design work begins: confirm the Phase 1 scope and that OD-M1..M4 remain OPEN into design with the study's recommendations as the defaults — OD-M1 probe policy (2 probes max, default offered on the first probe), OD-M2 option source (curated on-device catalog for the MVP), OD-M3 sequencing (Phase 1 first, v17 data authoring in parallel), OD-M4 Phase-3 scope (whether reminder/calendar answer capture rides this release) — with the owner re-confirming the dispositions at the final T2 sign-off. Supersession note: the greenfield brief's open-ended-conversation FR-008 is explicitly NOT delivered by this feature (bounded one-deep frames only) and is recorded as out of scope.",
+  "context": {
+    "task_description": "Business-analyst requirements pass for the multi-turn-conversation feature: one file per requirement (FR/NFR), indexes at each level, consolidated requirements doc, and a lock file computed last as the drift baseline.",
+    "risk_tier": "T1",
+    "agent": "ba",
+    "artifacts": [
+      "specs/define-requirements.md",
+      "specs/define-requirements.lock.yaml",
+      "specs/define-requirements/index.md",
+      "specs/define-requirements/FR/index.md",
+      "specs/define-requirements/NFR/index.md"
+    ],
+    "artifact_counts": {
+      "functional_requirements": 20,
+      "non_functional_requirements": 12,
+      "acceptance_scenarios": 97
+    },
+    "lock_verified": "All 32 per-file sha256 hashes re-verified against disk; snapshot_sha256 matches specs/define-requirements.md (e4f13621...); lock parses (locked_at 2026-10-10T01:37:40Z).",
+    "branch": "feat/multi-turn-conversation",
+    "branch_tip": "0cbe4e6",
+    "artifacts_uncommitted": true,
+    "open_decisions": [
+      "OD-M1 probe policy — 2 probes max, default offered on the first probe (study recommendation); owner confirms at T2",
+      "OD-M2 option source — curated on-device catalog for the MVP (study recommendation); owner confirms at T2",
+      "OD-M3 sequencing — Phase 1 first, v17 data authoring in parallel (study recommendation); owner confirms at T2",
+      "OD-M4 Phase-3 scope — whether reminder/calendar answer capture rides this release (owner)"
+    ],
+    "assumptions_recorded": [
+      "Verified anchors vs study-derived line refs recorded per requirement",
+      "Illustrative probe copy is OD/l10n-bound",
+      "Catalog contents refined at design (curated bhajan deity set is the MVP seed)",
+      "v16 current / v17 planned training labels",
+      "Pre-existing test baseline noted (master has known reds)",
+      "45 s deadline = the existing confirmation timer value (reused)",
+      "New surfaces (DialogueManager, catalog) confirmed absent from current source"
+    ],
+    "note": "Item created by the dispatching session because the task was dispatched directly (not via the ai-sdd run command), which is the path that normally creates it. Left PENDING for the human. Artifacts are uncommitted in the feature worktree; commit follows the owner decision."
+  },
+  "created_at": "2026-10-10T01:39:48.696Z",
+  "notes": "Owner-approved as-is (T1 feature-story sign-off). Decision relayed via the main conversation 2026-10-10: (1) feature story approved as written — Phase 1 deterministic MVP scope (FR-MTC-001..017), Phases 2/3 recorded as later phases, out-of-scope list accepted, no amendments; (2) OD-M1..M4 remain OPEN into design with the study's recommendations as defaults (OD-M1 2 probes max, default offered on first probe; OD-M2 curated on-device catalog; OD-M3 Phase 1 first with v17 data authoring in parallel; OD-M4 Phase-3 scope), owner re-confirms all dispositions at the final T2 sign-off.",
+  "resolved_at": "2026-10-10T01:54:19.825Z"
+}

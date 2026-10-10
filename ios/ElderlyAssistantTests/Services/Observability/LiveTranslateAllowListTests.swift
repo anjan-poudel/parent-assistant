@@ -108,7 +108,17 @@ final class LiveTranslateAllowListTests: XCTestCase {
             // COCO class names with confidences ("bottle:0.87,person:0.45")
             // and normalized boxes ("0.1,0.2,0.5,0.6;…") — closed vocabulary
             // and coordinates, never pixels, never scene text.
-            "labels", "boxes"
+            "labels", "boxes",
+            // [MULTI-TURN] (2026-10-10, T-137) The dialogue-frame vocabulary's
+            // six keys — the degenerate query's closed three-token intake
+            // reading, the probe-kind enum's raw value, the bounded attempt
+            // count (1…2) and option count (0…4), the capture form and the
+            // merge source. Each is an enum raw value or a bounded count, so
+            // no string has a route into any of them (the same declaration
+            // T-137 recorded in `LogSanitiserTests`; this suite's delta pin
+            // widened with it).
+            "intake", "probe_kind", "attempt", "option_count",
+            "capture_form", "merge_source"
         ], "the extension is exactly the union of the three declared key sets")
         XCTAssertNil(sanitisedMetadata(["somethingNoOneDeclared": "x"])["somethingNoOneDeclared"],
                      "unknown keys are still dropped outright")

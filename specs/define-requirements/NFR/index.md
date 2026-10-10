@@ -1,40 +1,40 @@
-# Non-Functional Requirements — Spotify Music Integration (v1)
+# Non-Functional Requirements — Multi-Turn Conversation (v1)
 
-12 non-functional requirements. IDs are namespaced `NFR-SP-NNN` to avoid colliding with the
+12 non-functional requirements. IDs are namespaced `NFR-MTC-NNN` to avoid colliding with the
 project-level `NFR-NNN` set in the root stakeholder brief (`requirements.md`) — the same
-convention the live-camera-translation feature uses with `NFR-LCT-NNN` and profile-interview with
-`NFR-PI-NNN`. This page covers the `spotify-music-integration` set (`NFR-SP-*`) only; the earlier
-feature files remain in this folder and are not part of this feature's requirements or lock.
+convention live-camera-translation used (`NFR-LCT-NNN`), profile-interview used (`NFR-PI-NNN`)
+and spotify-music-integration used (`NFR-SP-NNN`). This page covers the
+`multi-turn-conversation` set (`NFR-MTC-*`) only; the earlier feature files remain in this
+folder and are not part of this feature's requirements or lock.
 
 | ID | Title | Category | Priority |
 |----|-------|----------|----------|
-| [NFR-SP-001](NFR-SP-001-provider-search-responsiveness.md) | Provider search responsiveness and timeout budget | Performance | MUST |
-| [NFR-SP-002](NFR-SP-002-log-safety.md) | Log safety — no credentials, queries or provider bodies in logs | Privacy / Security | MUST |
-| [NFR-SP-003](NFR-SP-003-no-new-network-egress.md) | No new network egress; music stays off any cloud LLM | Privacy | MUST |
-| [NFR-SP-004](NFR-SP-004-prompt-budget-preserved.md) | Prompt token budget preserved | Reliability / Maintainability | MUST |
-| [NFR-SP-005](NFR-SP-005-localisation.md) | Localisation of all Spotify strings (ne/en) | Localisation | MUST |
-| [NFR-SP-006](NFR-SP-006-no-regression.md) | No regression to existing flows | Reliability | MUST |
-| [NFR-SP-007](NFR-SP-007-credential-encryption-at-rest.md) | Credential and token encryption at rest | Security | MUST |
-| [NFR-SP-008](NFR-SP-008-deeplink-uri-hardening.md) | Deep-link URI construction hardening | Security | MUST |
-| [NFR-SP-009](NFR-SP-009-oauth-redirect-and-token-lifecycle.md) | OAuth redirect validation and token lifecycle | Security | MUST |
-| [NFR-SP-010](NFR-SP-010-accessibility-of-new-surfaces.md) | Accessibility of the new touch surfaces | Accessibility | MUST |
-| [NFR-SP-011](NFR-SP-011-compliance-and-release-gates.md) | Compliance and release gates | Compliance | MUST |
-| [NFR-SP-012](NFR-SP-012-plugin-isolation-and-model-stack-invariance.md) | Plugin isolation and model-stack invariance | Maintainability / Architecture | MUST |
+| [NFR-MTC-001](NFR-MTC-001-probe-turn-latency.md) | Probe and answer turns stay within the existing turn envelope | Performance | MUST |
+| [NFR-MTC-002](NFR-MTC-002-prompt-budget-and-token-ceiling.md) | 1024-token ceiling and the pinned prompt budget are preserved | Reliability / Maintainability | MUST |
+| [NFR-MTC-003](NFR-MTC-003-no-new-network-egress.md) | No new network egress — probes and answers stay on-device | Privacy | MUST |
+| [NFR-MTC-004](NFR-MTC-004-log-safety.md) | Log safety — probe and answer text never reach logs | Privacy / Security | MUST |
+| [NFR-MTC-005](NFR-MTC-005-degraded-brain-deterministic-path.md) | The frame survives a degraded or absent brain — deterministic path | Reliability | MUST |
+| [NFR-MTC-006](NFR-MTC-006-localisation.md) | Localisation of every dialogue string (ne/en) | Localisation | MUST |
+| [NFR-MTC-007](NFR-MTC-007-sustained-multi-turn-stability.md) | Sustained multi-turn stability on 6 GB devices — no jetsam | Reliability / Performance | MUST |
+| [NFR-MTC-008](NFR-MTC-008-answer-sanitisation-and-injection-safety.md) | Answer-path sanitisation and injection safety | Security | MUST |
+| [NFR-MTC-009](NFR-MTC-009-voice-only-accessibility.md) | Voice-only accessibility of probes and answer capture | Accessibility | MUST |
+| [NFR-MTC-010](NFR-MTC-010-frame-trap-resistance.md) | Frame-trap resistance — zero stuck states | Reliability / Safety | MUST |
+| [NFR-MTC-011](NFR-MTC-011-kv-prefix-stability.md) | KV-prefix stability — the frame clause never mutates the template prefix | Performance / Reliability | MUST |
+| [NFR-MTC-012](NFR-MTC-012-compliance-and-release-gates.md) | Compliance, no-regression and release gates | Compliance | MUST |
 
 ## Coverage of the security-relevant surfaces (workflow focus areas)
 
 | Surface (workflow `security-design-review` / `security-test` focus) | Covered by |
 |---|---|
-| OAuth token lifecycle: scopes at sign-in, encrypted at rest, refresh, revocation on unlink, no tokens in logs | [NFR-SP-009](NFR-SP-009-oauth-redirect-and-token-lifecycle.md), [FR-SP-008](../FR/FR-SP-008-spotify-account-linking-by-caregiver.md), [FR-SP-010](../FR/FR-SP-010-unlink-wipes-credentials-and-revokes.md), [NFR-SP-007](NFR-SP-007-credential-encryption-at-rest.md) |
-| Client-secret handling for the client-credentials search flow (OD-S1 — open): bundled secrets extractable; family-entered credential per the SearchConfigStore precedent is the candidate pattern | [FR-SP-009](../FR/FR-SP-009-encrypted-spotify-credential-store.md), [NFR-SP-002](NFR-SP-002-log-safety.md) (property binding either OD-S1 resolution) |
-| Deep-link/URI injection: remote-controlled track names/IDs validated before URI construction; a crafted result must not open arbitrary schemes | [NFR-SP-008](NFR-SP-008-deeplink-uri-hardening.md), [FR-SP-007](../FR/FR-SP-007-spotifytool-search-and-deeplink.md) |
-| OAuth redirect validation: mismatched redirect URIs rejected (token interception via app-scheme hijacking) | [NFR-SP-009](NFR-SP-009-oauth-redirect-and-token-lifecycle.md), [FR-SP-008](../FR/FR-SP-008-spotify-account-linking-by-caregiver.md) |
-| Log sanitisation: music queries, provider responses and error bodies must not reach logs (check-release-log-safety.sh coverage) | [NFR-SP-002](NFR-SP-002-log-safety.md), [NFR-SP-011](NFR-SP-011-compliance-and-release-gates.md) |
-| Privacy disclosure: music-query/playback data flow to Spotify disclosed | [FR-SP-016](../FR/FR-SP-016-settings-linking-and-privacy-disclosure.md), [NFR-SP-011](NFR-SP-011-compliance-and-release-gates.md) |
-| Credential wipe/revocation on unlink | [FR-SP-010](../FR/FR-SP-010-unlink-wipes-credentials-and-revokes.md), [NFR-SP-007](NFR-SP-007-credential-encryption-at-rest.md) |
-| No new egress / no cloud LLM on the music path | [NFR-SP-003](NFR-SP-003-no-new-network-egress.md) |
+| Emergency precedence mid-dialogue: emergency keywords win mid-frame; a hostile or corrupted answer cannot bypass the override | [FR-MTC-011](../FR/FR-MTC-011-emergency-precedence-mid-frame.md), [NFR-MTC-010](NFR-MTC-010-frame-trap-resistance.md) |
+| Free-text answer injection: answers enter routing mid-frame; interception must open no new injection surface | [NFR-MTC-008](NFR-MTC-008-answer-sanitisation-and-injection-safety.md), [FR-MTC-009](../FR/FR-MTC-009-pre-ladder-answer-interception.md), [FR-MTC-017](../FR/FR-MTC-017-transcript-cache-bypass.md) |
+| Frame-trap resistance: cancel, barge-in and the 45 s timeout must always recover | [FR-MTC-010](../FR/FR-MTC-010-cancel-drops-the-frame.md), [FR-MTC-012](../FR/FR-MTC-012-barge-in-strong-new-command.md), [FR-MTC-013](../FR/FR-MTC-013-timeout-silent-rearm.md), [NFR-MTC-010](NFR-MTC-010-frame-trap-resistance.md) |
+| Log sanitisation: probe texts and captured answers must not reach logs (B2/T-050 precedent) | [NFR-MTC-004](NFR-MTC-004-log-safety.md), [NFR-MTC-012](NFR-MTC-012-compliance-and-release-gates.md) |
+| No new egress: probes and answers stay on-device | [NFR-MTC-003](NFR-MTC-003-no-new-network-egress.md) |
+| Degraded-brain path: the deterministic merge must not weaken the emergency/safety gates | [NFR-MTC-005](NFR-MTC-005-degraded-brain-deterministic-path.md), [FR-MTC-011](../FR/FR-MTC-011-emergency-precedence-mid-frame.md) |
 
 ## Related
-- [FR index](../FR/index.md) — 17 functional requirements
+
+- [FR index](../FR/index.md) — 20 functional requirements
 - [Requirements index](../index.md)
 - [Consolidated copy](../../define-requirements.md)

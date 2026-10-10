@@ -387,4 +387,250 @@ final class LogSanitiserTests: XCTestCase {
                            + "behaviour is the pin (design-l2 §7.4)")
         }
     }
+
+    // MARK: - Dialogue metadata keys (multi-turn-conversation T-137; M-4/E5)
+
+    /// The shipped allow-list as it stood before the dialogue extension.
+    /// Pinned key for key so the diff below is provably exactly SIX NEW keys
+    /// (E5): an existing key cannot be removed, renamed or re-meant, and
+    /// `reason` is visible in this set — the dialogue feature REUSES it, it
+    /// does not add it (M-4).
+    private let shippedKeysBeforeTheDialogueExtension: Set<String> = [
+        "entry_id_hash", "contact_id_hash", "refire_count", "entry_count", "alert_type",
+        "outcome", "state", "duration_ms", "error_code",
+        "calendar", "contacts", "decode_detail", "chunks", "frame", "rect", "cloud",
+        "labels", "boxes", "stages", "part", "parts", "bytes", "http_status",
+        "correction_mode", "correction_state", "correction_lexicon_revision",
+        "correction_tokens_considered", "correction_applied_count",
+        "correction_threshold_bucket", "correction_reasons", "correction_veto",
+        "correction_entry_ids", "correction_classes", "correction_class_origins",
+        "correction_best_bucket", "correction_margin_bucket",
+        "regionCount", "regionSetHash", "stringCount", "batchIndex", "batchCount",
+        "resolvedCount", "unresolvedCount", "durationMs", "keyCount", "count",
+        "origin", "mode", "reason", "tier", "failureStage",
+        "generationLength", "generationShape", "rejections", "disclosureVersion",
+        "cap", "errorCode", "provider", "threshold", "confidence",
+        "slot", "liveBytes", "budgetBytes", "evicted", "purpose", "isLargeLoad",
+        "heldSeconds", "transientLiveBytes",
+        "phys_footprint", "ceiling_bytes", "working_set_bytes",
+        "projected_peak_bytes", "freed_bytes", "load_ms", "priority",
+        "recognized_text", "source_text", "translated_text"
+    ]
+
+    /// The exactly six keys this change adds, with each key's documented
+    /// closed vocabulary — the raw-value sets of the emitting types
+    /// (design-l2 §26 over the §9/§12.5 enums) and the bounded counts of
+    /// `DialogueConfig` (`maxProbes` = 2, `maxSlotOptions` = 4). `reason` is
+    /// deliberately NOT here: it is a reused generic key whose dialogue
+    /// tokens are closed at the construction site (M-4), not at the bus.
+    private let dialogueClosedVocabularies: [String: Set<String>] = [
+        "intake": ["ladder", "interpreted", "candidate"],
+        "probe_kind": ["slotFill", "candidateChoice"],
+        "attempt": ["1", "2"],
+        "option_count": ["0", "1", "2", "3", "4"],
+        "capture_form": ["indexWord", "optionName", "repetition", "freeText"],
+        "merge_source": ["catalog", "freeText", "candidate", "defaultQuery"]
+    ]
+
+    /// Asserts the marker appears in **no field** of the sanitised event — a
+    /// redaction that moved the string into `errorCode`, `eventType` or the
+    /// component tag would satisfy a metadata-only assertion and still leak
+    /// (the [SANITISED-DEBUG-LANE] sweep, reused).
+    private func assertNoTrace(of marker: String, in clean: ObservabilityEvent,
+                               file: StaticString = #filePath, line: UInt = #line) {
+        var fields = [clean.eventType, clean.outcome,
+                      clean.errorCode ?? "", clean.component]
+        fields.append(contentsOf: clean.metadata.map { "\($0.key)=\($0.value)" })
+        for field in fields {
+            XCTAssertFalse(field.contains(marker),
+                           "content '\(marker)' survived sanitisation in '\(field)'",
+                           file: file, line: line)
+        }
+    }
+
+    // MARK: Scenario: The six new keys are admitted with closed value sets
+
+    func testTheSixNewDialogueKeysAreAdmittedAndInVocabularyPairsSurvive() {
+        let clean = sanitiser.sanitise(event(metadata: [
+            "intake": "ladder",
+            "probe_kind": "slotFill",
+            "attempt": "1",
+            "option_count": "4",
+            "capture_form": "optionName",
+            "merge_source": "catalog",
+            // The reused key and a pre-existing key ride along untouched.
+            "reason": "degenerateAnswer",
+            "outcome": "invalid"
+        ]))
+        XCTAssertEqual(clean.metadata["intake"], "ladder")
+        XCTAssertEqual(clean.metadata["probe_kind"], "slotFill")
+        XCTAssertEqual(clean.metadata["attempt"], "1")
+        XCTAssertEqual(clean.metadata["option_count"], "4")
+        XCTAssertEqual(clean.metadata["capture_form"], "optionName")
+        XCTAssertEqual(clean.metadata["merge_source"], "catalog")
+        XCTAssertEqual(clean.metadata["reason"], "degenerateAnswer")
+        XCTAssertEqual(clean.metadata["outcome"], "invalid")
+        XCTAssertEqual(Set(clean.metadata.keys), Set([
+            "intake", "probe_kind", "attempt", "option_count",
+            "capture_form", "merge_source", "reason", "outcome"
+        ]), "every pair survives the filter — none is dropped or invented")
+    }
+
+    func testEveryDocumentedDialogueTokenSurvivesTheFilter() {
+        for (key, vocabulary) in dialogueClosedVocabularies {
+            for token in vocabulary {
+                let clean = sanitiser.sanitise(event(metadata: [key: token]))
+                XCTAssertEqual(clean.metadata[key], token,
+                               "documented token '\(token)' for \(key) must survive untouched")
+            }
+        }
+    }
+
+    /// The vocabularies are **part of the log contract**: each one is exact
+    /// (widening one takes a deliberate, reviewable edit here — a silent
+    /// widening fails) and governs exactly the keys the allow-list admits.
+    func testTheDialogueVocabulariesAreClosedAndExactlyAsDocumented() {
+        XCTAssertEqual(LogSanitiser.closedVocabularyMetadataKeys,
+                       dialogueClosedVocabularies,
+                       "the closed vocabularies are pinned, not documented-only")
+        XCTAssertEqual(LogSanitiser.closedVocabularyMetadataKeys.count, 6,
+                       "exactly the six new dialogue keys are value-governed")
+        for key in dialogueClosedVocabularies.keys {
+            XCTAssertTrue(LogSanitiser.allowedKeys.contains(key),
+                          "\(key) is governed by a vocabulary and must be allow-listed")
+        }
+        XCTAssertNil(LogSanitiser.closedVocabularyMetadataKeys["reason"],
+                     "reason is reused and generic — its dialogue tokens are "
+                     + "closed at the construction site, not at the bus (M-4)")
+    }
+
+    // MARK: Scenario: An unlisted key is still dropped
+
+    func testAnUnlistedDialogueKeyIsDroppedAndTheAllowedPairsAreUnaffected() {
+        // The verbatim answer text the feature must never log (the owner's
+        // merge example, a benign fixture from the requirements corpus).
+        let answerMarker = "दुर्गा भजन बजाऊ"
+        // Plausible emitter mistakes: content-named keys and camelCase
+        // near-twins of the new keys — near-twins are NOT the keys.
+        let unlistedKeys = ["answer_text", "dialogue_transcript", "probe_text",
+                            "answerText", "probeKind", "mergeSource",
+                            "captureForm", "optionCount", "intake_source"]
+        var metadata: [String: String] = [
+            "intake": "ladder",
+            "probe_kind": "candidateChoice",
+            "attempt": "2",
+            "option_count": "3",
+            "capture_form": "freeText",
+            "merge_source": "freeText"
+        ]
+        for key in unlistedKeys { metadata[key] = answerMarker }
+
+        let clean = sanitiser.sanitise(event(metadata: metadata))
+
+        for key in unlistedKeys {
+            XCTAssertNil(clean.metadata[key],
+                         "\(key) is not in the allow-list and must be dropped whole")
+        }
+        // The allowed pairs of the same event are unaffected.
+        XCTAssertEqual(clean.metadata["intake"], "ladder")
+        XCTAssertEqual(clean.metadata["probe_kind"], "candidateChoice")
+        XCTAssertEqual(clean.metadata["attempt"], "2")
+        XCTAssertEqual(clean.metadata["option_count"], "3")
+        XCTAssertEqual(clean.metadata["capture_form"], "freeText")
+        XCTAssertEqual(clean.metadata["merge_source"], "freeText")
+        // …and the verbatim answer appears in no field of the output.
+        assertNoTrace(of: answerMarker, in: clean)
+    }
+
+    // MARK: Scenario: Out-of-vocabulary token values fail closed
+
+    func testAnOutOfVocabularyDialogueTokenFailsClosed() {
+        // Each value is outside its key's documented set by a different
+        // failure shape: a suffix, a case drift, a count past the config
+        // bound and a joined pair. None may be logged — the pair survives
+        // only as the redaction token.
+        let outOfVocabulary: [String: String] = [
+            "intake": "ladder_stage",
+            "probe_kind": "SlotFill",
+            "attempt": "3",
+            "option_count": "5",
+            "capture_form": "free_text",
+            "merge_source": "freeText,catalog"
+        ]
+        for (key, value) in outOfVocabulary {
+            let clean = sanitiser.sanitise(event(metadata: [key: value]))
+            XCTAssertEqual(clean.metadata[key], LogSanitiser.redactionToken,
+                           "\(key)='\(value)' is outside its closed vocabulary "
+                           + "and must be rejected, not logged")
+        }
+        // Boundary: the in-vocabulary neighbours of the same inputs pass —
+        // the bound refuses what is past it, not what is inside it.
+        let atTheBounds = sanitiser.sanitise(event(metadata: [
+            "attempt": "2",
+            "option_count": "4",
+            "capture_form": "freeText"
+        ]))
+        XCTAssertEqual(atTheBounds.metadata["attempt"], "2")
+        XCTAssertEqual(atTheBounds.metadata["option_count"], "4")
+        XCTAssertEqual(atTheBounds.metadata["capture_form"], "freeText")
+    }
+
+    /// The sharpest out-of-vocabulary case, across all six keys: verbatim
+    /// answer text. The value is replaced wholesale — the PII scrub would
+    /// have left the sentence intact, because a sentence holds no phone
+    /// number — and it appears in no field of the sanitised event.
+    func testVerbatimAnswerTextUnderADialogueKeyIsReplacedNotScrubbed() {
+        let answer = "दुर्गा भजन बजाऊ"
+        for key in dialogueClosedVocabularies.keys {
+            let clean = sanitiser.sanitise(event(metadata: [key: answer]))
+            XCTAssertEqual(clean.metadata[key], LogSanitiser.redactionToken,
+                           "\(key) may never carry answer text")
+            assertNoTrace(of: answer, in: clean)
+        }
+    }
+
+    // MARK: Scenario: The reused reason key is already admitted
+
+    func testTheReusedReasonKeySurvivesDialogueTokensWithoutAnAllowListChange() {
+        XCTAssertTrue(LogSanitiser.allowedKeys.contains("reason"))
+        XCTAssertTrue(shippedKeysBeforeTheDialogueExtension.contains("reason"),
+                      "reason is in the pre-change snapshot — reused, not added (M-4)")
+        // The dialogue invalid-answer tokens under the reused key
+        // (`InvalidAnswerReason` raw values, design-l2 §9) all survive with
+        // no allow-list change for it.
+        for token in ["overLength", "emptyAfterStrip", "degenerateAnswer",
+                      "noCandidateClaimed"] {
+            XCTAssertEqual(sanitiser.sanitise(event(metadata: ["reason": token]))
+                            .metadata["reason"], token)
+        }
+        // …and the key keeps its shipped meaning for the non-dialogue
+        // emitters: a real ledger token still rides it untouched, which a
+        // bus-level narrowing to the dialogue vocabulary would have broken.
+        XCTAssertEqual(sanitiser.sanitise(event(metadata: ["reason": "over_class_budget"]))
+                        .metadata["reason"], "over_class_budget")
+    }
+
+    // MARK: The allow-list diff (E5 producer line)
+
+    func testTheAllowListDiffIsExactlyTheSixNewKeysAndReasonIsUntouched() {
+        // Nothing pre-existing was removed, renamed or re-meant.
+        for key in shippedKeysBeforeTheDialogueExtension {
+            XCTAssertTrue(LogSanitiser.allowedKeys.contains(key),
+                          "\(key) was in the shipped allow-list and must not be removed")
+        }
+        let added = LogSanitiser.allowedKeys
+            .subtracting(shippedKeysBeforeTheDialogueExtension)
+        XCTAssertEqual(added, Set(dialogueClosedVocabularies.keys),
+                       "the extension is exactly the six documented dialogue keys "
+                       + "— a silent widening fails here")
+        XCTAssertEqual(added.count, 6)
+        XCTAssertEqual(LogSanitiser.allowedKeys.count,
+                       shippedKeysBeforeTheDialogueExtension.count + 6)
+        XCTAssertFalse(added.contains("reason"),
+                       "reason is reused (already in the shipped set), never re-added")
+        for key in added {
+            XCTAssertNotNil(LogSanitiser.closedVocabularyMetadataKeys[key],
+                            "every added dialogue key is governed by a closed vocabulary")
+        }
+    }
 }

@@ -1,14 +1,14 @@
-# L1 Architecture — Spotify Music Integration (v1)
+# L1 Architecture — Multi-Turn Conversation (v1)
 
-**Feature:** `spotify-music-integration` · **Branch:** `feat/spotify-music-integration` (worktree `elderly-ai-assistant-spotify-music-integration`, requirements baseline `bc1c495`)
+**Feature:** `multi-turn-conversation` · **Branch:** `feat/multi-turn-conversation` (worktree `elderly-ai-assistant-multi-turn-conversation`, requirements baseline `437d4dc`)
 **Task:** `design-l1` (agent `sdd-architect`) · **Contract:** `architecture_l1` → `specs/design-l1.md`
-**Date:** 2026-10-06 · **Status:** for review; feeds `design-l2`, `review-l2` and `security-design-review`
-**Resolves:** OD-S1 (client-secret handling → §4 ADR-SP-01), OD-S3 (degradation precedence → §12)
-**Drafts:** OD-S2 (dev-mode rollout / quota extension → §5, owner decision, final T2 sign-off)
+**Date:** 2026-10-10 · **Status:** for review; feeds `design-l2`, `review-l2` and `security-design-review`
+**Resolves (design-owned):** the interception seam and its strict ordering (§10), the frame model (§9), degenerate-query detection (§12), the did-you-mean assembly (§13), the answer window + silent timeout (§14), the catalog format (§15), degradation survival (§16), the Phase 2 clause budget/mirror (§17), cache bypass (§11, §19), log-gate coverage (§22).
+**Drafts (owner-facing, final T2):** OD-M1 probe policy, OD-M2 option source, OD-M3 sequencing, OD-M4 Phase-3 scope → §5. All four stay **OPEN** per the feature constitution; the feasibility study's recommendations are the design defaults; the owner re-confirms at final sign-off.
 
-**Inputs folded in.** The feature constitution (`specs/spotify-music-integration/` `constitution.md`, including the 2026-10-06 amendment record, the Routing & Degradation Contract, Feature Constraints 1–12, and the DV completion gate); `specs/define-requirements.md` (FR-SP-001…FR-SP-017, NFR-SP-001…NFR-SP-012, 95 Gherkin scenarios); the root `constitution.md` (Architecture Constraint 1 as amended; Standards; release gates; Agent Principles); `specs/spotify-music-integration/` `workflow.yaml` (design-l1 scope comment and the `security-design-review` focus areas); and the source seams re-verified against the worktree for this document (§7).
+**Inputs folded in.** The feature constitution (`specs/multi-turn-conversation/` `constitution.md` — probe kinds, the answer-turn contract, the frame shape, Safety-Relevant Constraints 1–4, Feature Constraints 1–10, the DV gate, OD-M1..M4); the root `constitution.md` (Architecture Constraints 1–6, Standards, release gates, Agent Principles); `specs/define-requirements.md` (FR-MTC-001…FR-MTC-020, NFR-MTC-001…NFR-MTC-012, 97 Gherkin scenarios — locked, `specs/define-requirements.lock.yaml`); `docs/multi-turn-conversation-feasibility.md` (§2 today's behaviour, §4 existing mechanisms, §5 hard constraints, §6 recommended design, §7 phasing, §9 ODs); and `.ai-sdd/workflows/multi-turn-conversation.yaml` (the `design-l1` obligation list and the `security-design-review` focus areas). Every line reference below was re-verified against this worktree at `437d4dc` for this document (§7).
 
-**Path convention.** Paths are repo-relative. Where one path would exceed the release-log sanitiser's token limit (SEC-002: 40 consecutive characters from the class `[A-Za-z0-9/+=]`), it is split across adjacent code spans; `ios/ElderlyAssistant/Services/` + `Voice/SpotifyTool.swift` denotes the single path obtained by joining the spans with `/`. The split is a sanitizer convention only — do not read the `+` as concatenation in code.
+**Path convention.** Paths are repo-relative. Where a single path would exceed the release-log sanitiser's token limit (SEC-002: 40 consecutive characters from the class `[A-Za-z0-9/+=]`), it is split across adjacent code spans; `ios/ElderlyAssistant/Services/` + `Voice/CommandRouter.swift` denotes the single path obtained by joining the spans with `/`. The split is a sanitizer convention only — do not read the `+` as concatenation in code.
 
 ---
 
@@ -16,608 +16,665 @@
 
 ### 1. Purpose and the broken-to-working flip
 
-Today a voice music request that reaches the music intent hits a first-class stub: the `case .music:` branch in `ios/ElderlyAssistant/Services/` + `Voice/CommandRouter.swift` (line 2640) emits `command_music_stub` and speaks `router.musicStub` — "Music isn't ready yet. Coming soon." / "संगीत सुविधा अहिले तयार छैन। चाँडै आउनेछ।". Nothing plays. This feature replaces that branch with a real playback path: for a bare music request ('भजन बजाऊ', 'गीत चलाऊ', 'play a song') both providers are searched and **Spotify wins whenever it is linked and capable** (Feature Constraint 9); YouTube serves explicit YouTube requests exactly as today and the Spotify-cannot-serve fallback. Every path ends in an explicit, localized, spoken outcome — never the stub, never silence, never a fabricated "playing" claim.
+Today the voice pipeline is strictly single-turn: `route(transcript:)` (`ios/ElderlyAssistant/Services/` + `Voice/CommandRouter.swift:740`) turns one transcript into one `RoutingResult`; no state survives the turn. Two user-visible failures follow, both verified at this baseline:
 
-The primary user is the elderly Nepali-first voice user; the family member/caregiver performs account linking and sees the Settings disclosure. The elderly user never touches OAuth, a client ID or a secret.
+- **The music path guesses.** For a bare "भजन बजाऊ" the extractor's never-empty fallback (`KeywordIntentRule.swift:764-775`) returns the bare marker `"भजन"`, the ladder arm fires `fireMusicRequest(query:)` with it (`CommandRouter.swift:1233` → `:2667` → `runMusicTurn` `:2684`), and the outcome is the literal top search hit (`selectMusicOutcome` `:2614`). The user asked for *a bhajan*; Pip plays *whatever ranks first*.
+- **The not-understood path dead-ends.** `routeKeywordRemainder` speaks the honest-but-stateless `router.reprompt` (`:2021`), and the rephrase-discard branch speaks `router.rephrase.discard` (`:806-809`). Both tell the user Pip failed; neither helps them succeed.
 
-The architectural shape is deliberately small and brownfield-faithful: a new deterministic music stage beside the existing YouTube stage in the voice route ladder, a `SpotifyTool` that is a structural twin of `YouTubeTool`, a `SpotifyPlugin` that is a structural twin of `YouTubePlugin`, an account-linking service that follows the `GoogleAccountSession` (calendar-share) precedent, one encrypted session record, no backend, no model-stack change, and no network egress beyond the two provider APIs.
+The flip is a bounded, one-deep **dialogue frame**: a short template probe ("कस्तो भजन? शिव, दुर्गा, विष्णु, देवी … वा आफैँ भन्नुहोस्"), the user's spoken answer captured by name / index word / repetition / free text, a **deterministic merge** of the answer into the pending command, and execution through the existing music path — the owner's example ("play bhajans" → probe → "dasain durga bhajans" → correct playback) working end-to-end in Phase 1 with no training run. The same frame answers the second owner requirement: when Pip does not understand, it says so **and** offers voice-pickable candidate interpretations (didYouMean) instead of the dead-end line.
+
+The architectural shape is deliberately small and brownfield-faithful: one new in-memory frame type, one new pre-ladder interception block that generalizes the existing confirmation hook, one new session state beside `awaitingConfirmation` reusing its 45 s timer, one bundled option catalog, zero model-stack change in Phase 1, zero new network egress, and no new UI (probes are spoken through the existing reply lane and appear in the chat history like any reply — `speak(text:)` already calls `coordinator?.noteAssistantSpoke(text)` at `CommandRouter.swift:3864`).
 
 ### 2. Scope
 
-**In scope (v1):**
+**In scope (Phase 1 — deterministic MVP, shippable alone):**
 
-- Stub replacement: `case .music:` in `CommandRouter.swift` routes into the real music path; the stub wording is unreachable on any music branch (FR-SP-001).
-- Both-provider search with Spotify preference for bare music requests; explicit YouTube requests untouched; YouTube fallback where YouTube can serve (FR-SP-002/003/004/005).
-- `SpotifyPlugin` (`AssistantPlugin` twin), `SpotifyTool` (Spotify Web API search + validated `spotify:` deep links), a Spotify account-linking service and one encrypted credential/account store (FR-SP-006/007/008/009/010).
-- Honest degradation for free tier, unlinked account, network failure, empty search, revoked grant and app-absent — with the `spotify:` deep-link fallback (FR-SP-011/012); precedence resolved in §12 (OD-S3).
-- Deterministic routing work: the music domain in `KeywordIntentRule`, the music veto in `VoiceContactSearchRoute`, and music intake in the route ladder (FR-SP-013/014/015).
-- Settings linking/status surface with the privacy disclosure (FR-SP-016), full ne/en localization, observability and encrypted tool-log integration, release-gate coverage, and the DV-* completion gate (FR-SP-017).
+- `DialogueManager` + `DialogueFrame` (`probeKind` `.slotFill` / `.candidateChoice`, `slot`, `activeCommand`, `candidates`, `attempts`, `deadline`) — one-deep, in-memory, coordinator-owned (FR-MTC-001; §9).
+- Pre-ladder answer interception placed at the confirmation hook's position, with emergency absolute above it (FR-MTC-009/011; §10).
+- Answer capture — option name, index word, repetition, free-form — and the deterministic merge (sanitise → strip scaffolding → catalog canonicalise → merge → dispatch `fireMusicRequest` → `runMusicTurn`) (FR-MTC-005/006; §11).
+- Degenerate music-query detection on both intake routes — the ladder arm and the interpreted `.music` action (FR-MTC-002; §12).
+- The didYouMean probe upgrading the two `routeKeywordRemainder`-family dead ends (FR-MTC-004; §13).
+- The `awaitingSlotAnswer` session state with the reused 45 s timer, silent expiry and re-arm (FR-MTC-013/014; §14).
+- The curated on-device option catalog (FR-MTC-015; §15), template probes ne/en (FR-MTC-003/016; §9, §22), the probe budget (FR-MTC-007; §11), the escape (FR-MTC-008; §10), cancel (FR-MTC-010; §10), barge-in (FR-MTC-012; §10), cache bypass (FR-MTC-017; §11, §19).
+- Focused tests mirroring the confirmation-protocol suites, and the DV-* device gate (FR-MTC-020; §29, §6).
 
-**Out of scope (must not change):** cloud LLM on the music path; brain/router model-stack changes; any new backend; explicit-YouTube routing changes; playlist/library/account mutations (playback is read-only, user-initiated media control); emergency/medication/health surfaces; any network egress beyond the two provider APIs; wake-word, Android and other deferred project items. (Requirement set "Out of scope" table, mirrored.)
+**In scope (later phases, designed but not shipped now):** Phase 2 — follow-up NLU fine-tune v17 with the frame clause inside the pinned prompt (FR-MTC-018; §17); Phase 3 — the same frame path over the stateless reminder/calendar missing-slot re-prompts plus RepetitionGuard interplay (FR-MTC-019; §18).
+
+**Out of scope (must not change):** open-ended conversation/chat; raw transcript history in prompts; model-generated probe text; cloud/BYO-LLM anything; persistent dialogue state across sessions; reminder/calendar turn behaviour in Phase 1; any new network egress; the on-device stance and existing encrypted stores; any new compliance regime. Emergency and medication behaviour is byte-for-byte today's in every phase.
 
 ### 3. Inherited binding constraints → design response
 
-| # | Feature constraint (verbatim gist) | Design response | Where |
+| # | Constraint (verbatim gist) | Design response | Where |
 |---|---|---|---|
-| 1 | Premium reality is an NFR — honest degradation, free-tier/unlinked degrades to `spotify:` deep link, never silent | Capability model + deep-link fallback + `spotify.appMissing`; full precedence ladder | §11, §12, §13 |
-| 2 | Credential discipline — scopes at sign-in, verification, encrypted storage, header never URL, never logged (B2/T-050) | PKCE-only (no secret at all, ADR-SP-01); one encrypted session record; gate coverage | §4, §15, §16, §22 |
-| 3 | Prompt budget — `IntentPromptTests` pins the budget; YouTube zero-prompt-token discipline is the model | Core prompt stays byte-identical; deterministic music rule is the zero-token path; plugin fragment mirrors YouTube's | §17, ADR-SP-09 |
-| 4 | On-device stance — provider APIs only, never cloud LLM, no new egress | Egress allowlist (two hosts); no cloud call on the music path | §21, §22 |
-| 5 | Must-not-break — explicit YouTube unchanged; Spotify-unavailable/unlinked → YouTube; golden churn only where recorded | YouTube stage untouched and ordered first; fallback reuses `fireYouTubePlay`; deliberate supersession recorded | §9, §12, §17 |
-| 6 | No new backend | Direct app → Spotify Web API calls | §15, §21 |
-| 7 | Rollout constraint — dev-mode test users until quota extension; unregistered still honest | OD-S2 draft (§5) + `spotify.rolloutLimited` honest path | §5, §23 |
-| 8 | Device expectation — Spotify app installed for the deep-link fallback; without it honest messaging | `canOpenURL` pre-check + `spotify.appMissing` attempt-time line | §12, §14 |
-| 9 | Preference semantics — both searched, Spotify wins when linked and capable; YouTube only for explicit or Spotify-cannot-serve | Capability predicate + selection rule | §11 |
-| 10 | Constitution moves with the spec | Amendment already recorded in both constitutions (2026-10-06) — change set includes it | §7 |
-| 11 | Plugin isolation — `AssistantPlugin`, no entanglement beyond mapped seams, no model-stack change | Component boundaries; dormant seams; removability smoke test | §19, §25, §27 |
-| 12 | Localization discipline — all strings ne/en via `spotify.*` keys | Key inventory + no hardcoded literals | §23 |
+| S1 | Emergency precedence is absolute; hostile answer cannot sidestep it | Emergency check stays exactly at `CommandRouter.swift:779-783`, **above** the new frame block; the frame clear is a post-dispatch, side-effect-only statement (never a condition); all answer text is data, never control flow | §10, §24 |
+| S2 | Frames must never trap the user | Cancel → drop + honest line; escape → drop + re-capture ack; strong barge-in → drop + execute new command; ambiguous → answer; 45 s silent timeout; one-deep; no persistence; interception-time deadline check (no half-open window) | §10, §14 |
+| S3 | Privacy & log-safety stance unchanged | No new egress; answer text through the existing `InputSanitiser` seam before any use; no probe/answer text in logs or events; B2/T-050 precedent; the release-build log gate extended to the new files | §21, §22 |
+| S4 | Security-review focus is the answer-capture path | STRIDE pre-map (§24); answer text can only fill a slot or pick from a pre-built enumerated candidate set — it never selects an execution path | §11, §13, §23, §24 |
+| 1 | 1024-token ceiling; dialogue state in the app, never transcript history in prompts | Frame is app-side state only; Phase 1 adds **zero** prompt tokens; Phase 2 clause ≤300 Characters inside the ~300-token headroom | §9, §17 |
+| 2 | Template probes only, localized ne/en; the model never writes probe text | `DialogueManager` composes probes from `dialogue.*` xcstrings keys + static separators; the model is not consulted on any Phase 1 probe or answer turn | §9, §22 |
+| 3 | Probe budget: ≤2 probes then execute with defaults; ≤3–4 options (slotFill), ≤2–3 (candidateChoice); free text always accepted | `DialogueConfig.maxProbes = 2`, `maxSlotOptions = 4`, `maxCandidates = 3`; default option on probe 1; exhaustion table (§11) | §9, §11, §20 |
+| 4 | Deterministic merge works with the brain absent or degraded; PR #156 hardening intact | Phase 1 answer turn never consults the brain (structurally: the frame block returns before the interpreter); no new residents; pressure-tiered picks and the per-turn STT release are untouched | §16 |
+| 5 | The Phase 2 clause ships only with v17; byte-identical seed mirror; `.raw` framing unaltered | The clause is the 5th interpolation; seed + mirror gate + digest pins updated in the **same** change; no clause without training data | §17 |
+| 6 | KV-prefix stability | The clause is inserted after the `User said:` line, before the closing imperative; the stable template prefix stays byte-identical | §17 |
+| 7 | Cache bypass during `awaitingSlotAnswer`; only confirmed merged commands are recordable | The answer turn returns before the interpreter/cache; `pendingTranscript` stays `nil` on the frame execution path so no answer text can teach the cache | §11, §19 |
+| 8 | Delivery gates: focused tests + typecheck per unit; full suite once at the end; DV on Anzaan | Test plan §29; DV-1..DV-5 §6; Phase 0 note §25 |
+| 9 | Phase 0 prerequisite: PR #156 device smoke outstanding | Phase 0 gate recorded in §6/§25 — run before Phase 1 device validation | §6, §25 |
+| 10 | iOS only | No platform scope; all work in the existing app target and test bundle | §25 |
 
 ### 4. Decision log
 
-Full ADR entries for the load-bearing decisions; each records the alternatives and why they lost. OD-S1's full resolution is ADR-SP-01 below. OD-S3's full resolution is the ladder + matrix in §12 (ADR-SP-02 records the decision line). OD-S2 is intentionally **not** decided here — see §5.
+Full ADR entries for the load-bearing decisions; each records the alternatives and why they lost.
 
 | ADR | Decision (one line) |
 |---|---|
-| ADR-SP-01 | **OD-S1 resolved: PKCE-only public client.** No app-held client secret anywhere. Client ID (public) bundled in `Info.plist`; Authorization Code + PKCE (S256) in `ASWebAuthenticationSession`; search and playback run on the linked user's access token. |
-| ADR-SP-02 | **OD-S3 resolved:** precedence ladder + state × outcome matrix (§12). Spotify outcome whenever linked and capable (remote control or deep-link hand-off); YouTube fallback wherever YouTube can serve; explicit honest line otherwise. |
-| ADR-SP-03 | Music intake is a new deterministic stage in the existing ladder, implemented through the `KeywordIntentRule` domain switch; no new route stage type, no changes to `YouTubeRoute` internals. |
-| ADR-SP-04 | Music query extraction mirrors `YouTubeRoute.extractQuery` (marker-drop with full grapheme enumerations); query cap 100 chars (mirrors `maxQueryLength`), configurable. |
-| ADR-SP-05 | Both providers are searched **concurrently** when both are askable; Spotify is selected when it resolved a usable result and is capable of at least one outcome; per-provider budget 8 s (NFR-SP-001). |
-| ADR-SP-06 | The YouTube fallback reuses `fireYouTubePlay(query:)` verbatim, so the fallback outcome is byte-identical to the explicit-YouTube outcome (FR-SP-004's "pinned YouTube behaviour"). |
-| ADR-SP-07 | `SpotifyPlugin` handles the model-classified (`pluginAction`/interpreted) path; the router owns the deterministic path and the whole degradation ladder. The plugin never calls the network itself — it uses `SpotifyTool` + the session seams. |
-| ADR-SP-08 | Token storage is **one** encrypted record `spotify.session` (Codable struct under one `EncryptedLocalStorage` key), not one key per value: atomic write, single-key wipe, one `keychainResidentKeys` addition. |
-| ADR-SP-09 | The core intent prompt stays **byte-identical** (SHA-256 digest pins + the exact 2,506-char assertion in `IntentPromptTests` force this); the music intent wording already exists in `IntentPrompt`; `SpotifyPlugin` contributes a prompt fragment the size of YouTube's, budget-checked where plugin composition is pinned. |
-| ADR-SP-10 | Golden corpus: the music block stays at its **true 15 entries** (lines 143–157; the constitution's "16" is reconciled in §7); the deliberate dispatch-level supersession (stub → real path) is recorded in a new `CommandRouterMusicTests`, which pins that no music branch speaks `router.musicStub`. |
-| ADR-SP-11 | `case .music:` in `dispatchInterpreted` routes to the same music path; the `router.musicStub` key is retained in the catalog but has no reachable call site. |
-| ADR-SP-12 | Deep-link hardening: track IDs must match the Spotify base62 identifier shape before URI construction; query components percent-encoded; titles never composed into URIs; only the `spotify:` scheme is ever produced (plus the pre-existing YouTube shapes in the fallback). |
-| ADR-SP-13 | Remote control is gated by the stored `product` (premium) plus a bounded play attempt; HTTP 403/404 degrade to the deep link, a 401 triggers exactly one refresh per request. |
-| ADR-SP-14 | Unlink wipes locally (single-key delete). Spotify exposes no third-party token-revocation endpoint; the design says so honestly instead of pretending a remote revoke happened. A provider-side `invalid_grant` is treated as unlinked. |
-| ADR-SP-15 | **Stricter than the YouTube convention:** no Spotify tool-log entry carries the query text or a provider body at any time (query "" / response "" on success; the query-free spoken line on failure). NFR-SP-002 and the workflow security focus ("music queries … must not reach logs") win over copying `YouTubeTool`'s raw-query habit. |
-| ADR-SP-16 | Concurrency: all Spotify-path mutable state is main-actor-confined; searches run off-main through the transport seam and marshal results back; one in-flight music attempt is superseded (not cancelled) by the next turn, matching the existing YouTube stage behaviour. |
+| ADR-MTC-01 | One-deep `DialogueFrame` (value type) owned by the coordinator via `DialogueManager`, in memory only, never in prompts; both probe kinds share the same interception, capture and merge path. |
+| ADR-MTC-02 | The answer interception is a new block at the confirmation hook's structural position — immediately **after** the hook's closing brace (`CommandRouter.swift:886`) and **before** the safety net (`:897`) — with emergency unchanged above it; the emergency branch gains a post-dispatch frame clear. |
+| ADR-MTC-03 | Confirmation window and frame window are mutually exclusive by construction (arming a frame asserts no pend; pending a confirmation clears any frame); the confirmation flow stays byte-for-byte today's. |
+| ADR-MTC-04 | The answer turn is fully deterministic in Phase 1: classify (deadline → escape → cancel/amendment → barge-in → answer → invalid), then merge. No model call on the answer turn. |
+| ADR-MTC-05 | Barge-in is defined as "a deterministic ladder stage would claim this utterance, and it is not the frame's own domain" — evaluated with the stages' existing **pure** decision functions, never by invoking side-effecting executors. |
+| ADR-MTC-06 | Degenerate detection reads the extractor's **provenance** (`.content` / `.markerFallback` / `.transcriptFallback`), never re-derives it; both intake routes share one trigger helper. |
+| ADR-MTC-07 | Candidate assembly is deterministic and restricted to the safe fast-path domains (news, YouTube, music, appLaunch); candidates execute through the same seams the ladder uses; `candidateChoice` exhaustion closes honestly (nothing to execute), while `slotFill` exhaustion executes the pending command with its default query. |
+| ADR-MTC-08 | `awaitingSlotAnswer` is a sibling state with its own opener (`openSlotAnswerWindow()`), its own timer (same 45 s config value) and its own **silent** expiry callback; expiry differs deliberately from the confirmation timeout's spoken line. |
+| ADR-MTC-09 | The option catalog is a bundled JSON resource (ids + queries + alias tokens) with **all spoken labels in `Localizable.xcstrings`** — one localisation source of truth; matching is whole-token, never Devanagari substring. |
+| ADR-MTC-10 | Phase 1 adds no brain dependency anywhere on the dialogue path; the PR #156 ladder (per-turn STT release, pressure-tiered picks) is untouched; brain-assisted frame merge is Phase 2 only. |
+| ADR-MTC-11 | Cache bypass is structural: the answer turn returns before the interpreter, and frame execution never sets `pendingTranscript` — answer text cannot be interned by `IntentCommandCache`. |
+| ADR-MTC-12 | Phase 2 clause: inserted between the `User said:` line and the closing imperative as the 5th interpolation; ≤300 Characters; byte-identical seed mirror; `check-prompt-mirror` anchors + digest pins + the 2_506 baseline updated in the same change; the 3_000-Character ceiling is **not** raised. |
+| ADR-MTC-13 | Probes speak through the existing `speak(text:)` lane (`noteAssistantSpoke` parity, chat history, no new UI); every string is a `dialogue.*` key; the timeout speaks nothing. |
+| ADR-MTC-14 | Observability uses closed-vocabulary events (`dialogue_probe_spoken`, `dialogue_answer`, `dialogue_frame_resolved`, `dialogue_degenerate_query`) with count/enum metadata only; the new files join the release-log gate's `FEATURE_ROOTS` with a fixtures entry. |
+| ADR-MTC-15 | Phase 3 (reminder/calendar rollover) reuses the frame path unchanged, with a dedicated slot vocabulary; it ships separately (OD-M4) and Phase 1 registers no such trigger. |
+| ADR-MTC-16 | All frame state is main-queue-confined (the `VoiceSessionStateMachine` contract); probes speak through the actor `ReplySpeakLane`; the timeout `Task` is cancelled on every resolution and re-checks window state before firing (the F6 guard pattern, `VoiceSessionStateMachine.swift:191-198`). |
 
-#### ADR-SP-01 — OD-S1: PKCE-only public client, no app-held client secret
+#### ADR-MTC-01 — One-deep dialogue frame, coordinator-owned, in memory only
 
-**Decision.** The Spotify integration is a **public client** using Authorization Code + PKCE (S256), performed by the caregiver in `ASWebAuthenticationSession`. The only credential in the change set is the **client ID**, which is public by definition and bundled in `Info.plist` as `SpotifyClientID` (mirroring the `GIDClientID` pattern). There is **no client secret anywhere**: not in the repository, not in `Info.plist`, not in a Settings field, not in the encrypted store, not in any log. Search executes with the linked user's access token (`/v1/search` is valid with a user token); the client-credentials flow — the only flow that would need the secret — is not used.
+**Decision.** A single `DialogueFrame` value held by a `DialogueManager` (a small class) that the coordinator owns, mirroring the existing pending-command ownership pattern (`AppCoordinator.swift:7395-7401` pending rephrase; read by the router through `VoiceCommandCoordinating` hooks such as `isAwaitingConfirmation`, `AppCoordinator.swift:10535-10539`). The frame carries exactly the constitution's fields:
 
-**Why this over the family-entered credential (the `YouTubeConfigStore`/`SearchConfigStore` Keychain precedent):**
-
-- **Bundled secrets are extractable.** Any secret shipped in the binary or pushed to the device by a family member is recoverable by anyone with the device or the artifact; PKCE removes the secret from the device entirely, which is the strongest possible answer to security-review focus "bundled secrets are extractable".
-- **PKCE defeats app-scheme callback hijack.** A malicious app that registers or intercepts the callback scheme still cannot exchange the stolen code without the `code_verifier` (S256), so the redirect is not a transferable credential by itself.
-- **One flow serves both surfaces.** The same authorization yields search and (Premium) playback-control scopes; the family never manages a credential, and the OD-S2 test-user registration applies to the linked user regardless of which flow is chosen — the interaction OD-S1 was required to keep clean.
-- **PKCE is Spotify's documented mobile flow** for apps without a backend (constraint 6: no backend). The client-secrets flow would additionally age badly: a secret in a shipped app cannot be rotated without a release.
-
-**Storage/use/rotation discipline (constraint 2, unchanged by the choice):**
-
-- The client ID is a constant; no rotation mechanism is needed or wanted. Tokens are the sensitive material and live only in the encrypted store (§16).
-- Any credential presented to Spotify travels in an `Authorization` request header — never a URL, query parameter or deeplink (B2/T-050 precedent).
-- No token, code, verifier or authorization header value reaches any log, telemetry event or diagnostic surface (§22); the release-log gate covers the new paths.
-
-**Verifiability (for `security-design-review` / `security-test`):**
-
-- A scan of the built artifact finds no secret-shaped value and no `client_secret` usage; the authorize URL carries `code_challenge_method=S256`; the token exchange carries `code_verifier`.
-- The redirect is validated by exact match; a mismatched/hijacked callback stores nothing (NFR-SP-009).
-- The `Settings` surface has **no** credential/secret field (the FR-SP-009 "family-entered credential path" branch is not exercised; the store holds tokens only).
-
-**Recorded contingency (not implemented).** If device validation finds a hard reason user-token search cannot be used (e.g. an unexpected API restriction), the fallback is the family-entered client ID + secret held in the encrypted store, exactly per the `SearchConfigStore` precedent (`credentialField` secure entry, header not URL, never logged). That would be a design-l2 change with a `security-design-review` re-run; it is not built today, and nothing in this design blocks it later (the store and the Settings surface have a natural place for the field).
-
-### 5. OD-S2 — draft for owner approval (final T2 sign-off)
-
-**Status: DRAFT — architect proposal for an owner decision.** Nothing in this section is decided. Every value the architect cannot know is marked `[OWNER INPUT — …]`; no account, email, business detail or Dashboard field is invented. The final decision is recorded at `final-sign-off` (T2 + HIL) at the latest; the Dashboard registration steps must be completed **before** any device validation that links a real account (DV-1/DV-2 need a working link).
-
-**Context.** A Spotify app in Development mode works only for accounts explicitly added to the app's allowlist ("User Management") in the Developer Dashboard; all other accounts get an error from Spotify during authorization. A quota-extension request moves the app to an extended mode with a service cap; until it is approved, only registered users are served. No requirement in this feature depends on external users; the requirements bound honest behaviour for unregistered users (FR-SP-012, FR-SP-016) regardless.
-
-**(a) Which accounts are registered during development and device validation.**
-
-| Purpose | Account class | Value |
+| Field | Type | Meaning |
 |---|---|---|
-| Developer account owning the Dashboard app | The owner's Spotify account | `[OWNER INPUT — the Spotify account email that will own the Dashboard app]` |
-| DV-1 / DV-2 (flip + Spotify-preferred selection; the remote-control happy path needs Premium) | The Anzaan reference-device household account, Premium | `[OWNER INPUT — household Spotify account email; confirm Premium, else DV-2 must use the free-tier deep-link path and DV-1 accepts the deep-link outcome]` |
-| DV-4 free-tier honest line + (recommended) a non-Premium negative case | A free-tier test account (may be a second account, or the household account temporarily downgraded if that is acceptable) | `[OWNER INPUT — free-tier test account, if any]` |
-| Any additional caregiver/development device enrolled for linking tests | Additional test-user email(s) | `[OWNER INPUT — additional emails, if used]` |
+| `probeKind` | `.slotFill` / `.candidateChoice` | which probe was asked |
+| `slot` | `DialogueSlot` (`.musicQuery` in Phase 1) | what the probe asked for |
+| `activeCommand` | `InterpretedCommand?` | the pending resolved command (nil for a pure didYouMean frame) |
+| `domain` | `KeywordIntentRule.Domain?` | the frame's own domain (barge-in exclusion set) |
+| `candidates` | `[DialogueCandidate]` | the pre-built enumerated options (candidateChoice) |
+| `defaultQuery` | `String?` | slotFill: the pending degenerate query — the "just play anything" resolution |
+| `attempts` | `Int` | probes spoken so far (capped by `DialogueConfig.maxProbes`) |
+| `deadline` | `Date` | 45 s from probe speech (`VoiceSessionStateMachine.Config.confirmationTimeoutSeconds`) |
 
-Design-side requirements that do not depend on the owner: the linking flow must treat an unregistered account's authorize failure (or denial) as an explicit `linkFailed` status with the rollout note — never a half-link, never silence (FR-SP-008, FR-SP-016).
+**Why a structured frame and not a fifth `pending*` field:** the existing one-deep `pending*` state (`pendingRephrase`, `pendingCallAction`, `pendingCalendarEvent`, `pendingNavigationWalk`, `pendingAppLaunch`) is a family of ad-hoc optionals each with its own handling. This feature adds a dialogue *shape* (two probe kinds, candidates, attempts, a deadline) that the next feature (Phase 3) extends by adding a slot case, not another optional. The frame is deliberately **in-memory and main-queue-confined**: no persistence (cold start ⇒ no frame; FR-MTC-001 scenario 3), no transcript history, nothing serialisable to disk.
 
-**(b) Quota-extension request: criteria and timeline.**
+**One-deep invariant, enforced structurally:** every probe trigger sits on the ladder *below* the interception block (§10). If a frame is live, the interception consumes or falls through the utterance before any trigger can run; a barge-in clears the frame before the ladder executes. Trigger code additionally guards `activeDialogueFrame == nil` (defensive). A resolution may *chain* into a new frame (e.g. picking a music candidate whose query is itself degenerate triggers the slotFill probe) — sequentially, never nested: the old frame is fully cleared before the new probe is spoken.
 
-File the request when **all** of the following hold (architect-proposed criteria; owner may amend):
+#### ADR-MTC-02 — The interception seam: position, ordering, and the emergency clear
 
-1. DV-1…DV-5 pass in Development mode on the Anzaan reference device (FR-SP-017) — evidence that the integration is real, not a probe.
-2. Dashboard metadata is final and matches the shipped build: app name `[OWNER INPUT — final name]`, the exact redirect URI (§15; the single constant registered here is the same constant validated in code), the final scope list (`user-read-private`, `user-read-playback-state`, `user-modify-playback-state`; unchanged by the PKCE resolution), and the app description.
-3. The Settings privacy disclosure (§23) and the release checklist's App Store privacy entries (NFR-SP-011) are in place, so any privacy-policy URL the form asks for exists and is accurate.
-4. No further OAuth/scope changes are planned (a scope change after approval re-opens the review).
+**Decision.** Insert the dialogue block between the confirmation hook (closing brace at `CommandRouter.swift:886`) and the safety-net comment (`:888-899`). Resulting `route()` order — everything above the new block and everything below it keeps today's code:
 
-Timeline: **before the first distribution outside the registered test set** (i.e. before any TestFlight/App Store build reaches unregistered users) — the same class of prerequisite as the calendar-share Google OAuth console work. Owner files it; the project tracks Spotify's review outcome as a release gate input. `[OWNER INPUT — Spotify's current review window is not known to the architect; record the actual SLA observed at filing.]`
+1. `TranscriptSanityGuard` (`:747-758`) — unchanged, still first.
+2. Emergency keywords (`:779-783`) — unchanged position, unchanged dispatch; **plus one new side-effect-only statement after `handleEmergency()`**: `coordinator?.clearDialogueFrame(reason: .emergency)`.
+3. Confirmation hook (`:789-886`) — byte-identical, untouched.
+4. **Dialogue-frame interception (NEW)** — §10's classifier.
+5. Safety net (`:897-899`) — unchanged; this is why med-ack and sensitive-call vocabulary still win when an answer is ambiguous, and why barge-in falls *through* to it.
+6. Contact search (`:916-920`), directions, alarms, YouTube (`:1164-1167`), keyword-intent stage (`:1169-1244`), topic/interpreter (`:1488…`), `routeKeywordRemainder` (`:1968-2030`) — unchanged except the two designated probe-trigger edits (§12, §13).
 
-**(c) What unregistered users experience before approval.**
+**Why *after* the confirmation hook rather than between emergency and the hook:** the two windows are mutually exclusive (ADR-MTC-03), so the relative order between them is behaviourally immaterial; placing the block after the hook keeps the hook's 100-line body byte-identical (zero regression risk to the confirmation flow, NFR-MTC-012) and reads top-down ("confirmation answers first, then dialogue answers, then the ladder").
 
-- **Linking attempt by an unregistered account:** Spotify shows its own error during authorization; our flow maps any non-success to the explicit `spotifySettings.linkFailed` status plus the rollout note (`spotifySettings.rolloutNote`) — the caregiver sees that the account isn't yet allowed, not a silent failure and not a fake "connected".
-- **Music request while unlinked** (which is what every unregistered user is): the normal unlinked degradation applies — YouTube serves where it can, the `spotify:` search hand-off is offered where it can open, otherwise the honest `spotify.notLinked` line. The user still gets music (YouTube path); nothing is promised about Spotify.
-- **Settings surface:** while the app is in Development mode, the Spotify settings surface must not hide the reality (FR-SP-016): the rollout note text is shown whenever the Dashboard app is still in development mode. `[OWNER INPUT — approve the note's final copy; design-l2 / implement finalize the ne/en strings.]`
-- **Never:** a silent failure, a fabricated success, or a claim that Spotify played when it did not (FR-SP-012).
+**Why the emergency clear is safe (S1, FR-MTC-011):** the clear runs *after* `handleEmergency()` has already been dispatched, is non-throwing and side-effect-only, and contributes no condition, delay or gate to the emergency path. A frame left armed across an emergency would strand the window (the next utterance would be parsed as a stale answer); a clear placed *before* dispatch would put frame machinery *in front of* the emergency path — forbidden. A test pins that emergency dispatch is unaffected, and that an emergency utterance with a live frame leaves no frame (§29).
 
-**(d) Spotify Developer Dashboard registration checklist (console-side).**
+**Emergency detection stays only where it is.** `emergencyPhrases` (`:1855`) is checked at `:779-783` and again inside `routeKeywordRemainder` (`:1936`); both checks are unchanged. The frame classifier never inspects emergency phrases itself — the check has already run above it on every utterance.
 
-| # | Step | Value / owner |
+#### ADR-MTC-04 — The answer turn is deterministic; classification precedence is fixed
+
+**Decision.** `DialogueAnswerPath.classify` runs this ordered ladder on the prepared utterance (the raw transcript having passed sanitise + seam, §11):
+
+1. **Deadline** — `frame.deadline <= now` ⇒ drop the frame silently and **fall through** (the utterance is a fresh command; the utterance-arrives-just-before-expiry case is an answer because the frame block reads a live frame). This is the half-open-window guarantee (FR-MTC-013 scenario 3) and the last-resort anti-trap backstop.
+2. **Escape** — the localized "no — let me say it again" phrase ⇒ drop frame + speak `dialogue.escape` + re-arm listening; nothing executes (FR-MTC-008). Checked before cancel because the escape phrase embeds a negation.
+3. **Cancel / amendment** — a leading negation from the existing `isNoResponse` vocabulary (`CommandRouter.swift:3809`): with **no content after it** ⇒ drop frame + speak `dialogue.cancelled` + nothing executes (FR-MTC-010); **with content** ("होइन, दुर्गा भजन") ⇒ the content is an answer (the no-with-amendment precedent, `:816-820`), so the bare-cancel branch must not swallow it. Bare cancel resolves even at the attempt cap (scenario 2); the default execution does not fire on a cancel.
+4. **Barge-in** (ADR-MTC-05) — drop the frame and **fall through**: the utterance executes through the normal ladder exactly as today, subject to the normal tiers (FR-MTC-012).
+5. **Answer** — capture forms §11; a valid answer merges and executes.
+6. **Invalid** — content resolved to nothing (empty after the scaffold strip, or a degenerate-answer value, §11) ⇒ `attempts += 1`; while `attempts < maxProbes` re-probe (`dialogue.retry` prefix + the same question body); on the cap, exhaustion resolution (§11 table). Ambiguity is never a drop: an utterance that is not a strong different-command match is an answer attempt (FR-MTC-012 scenario 2).
+
+**Gibberish-guard interaction (recorded behaviour):** an utterance rejected by `TranscriptSanityGuard` (`:747-758`) never reaches the frame block; the guard speaks `router.reprompt` and the frame **stays armed with no attempt consumed** (noise is not an answer attempt). The 45 s deadline bounds the window regardless, and the next utterance is still an answer. No new guard code.
+
+#### ADR-MTC-05 — Barge-in is defined with pure stage decisions, never by re-running executors
+
+**Decision.** `DialogueAnswerPath.isBargeIn(prepared, frame:)` is true iff any of the following holds, evaluated with **side-effect-free** predicates only (each is the same decision function its ladder stage uses — single source, no vocabulary duplication):
+
+- `CommandRouter.isExplicitMedicationAcknowledgement(utterance)` (`:1913`) — the F3 discipline: a dose acknowledgement mid-probe is a barge-in, never an answer (the app-launch window learned this; `CommandRouter.swift:847-862`).
+- `sensitiveCallPhrases` match (`:1869`, via `containsPhrase` `:1826`) — sensitive-call blocking keeps its behaviour (it will block below, unchanged).
+- `VoiceContactSearchRoute.decide(transcript:) != .notSearch` (`ios/ElderlyAssistant/Services/` + `Voice/VoiceContactSearchRoute.swift:67`) — e.g. "मैयाको फोन नम्बर खोज".
+- `YouTubeRoute.decide(transcript:)` returns `.play` (`CommandRouter.swift:1164`).
+- `KeywordIntentRule.match(transcript:)` (`KeywordIntentRule.swift:164`) resolves a domain **≠ the frame's own domain** (news / YouTube / appLaunch all barge in; **music never does** — FR-MTC-005 scenario 3: "दुर्गा भजन बजाऊ" mid-frame is an answer, not a new command).
+
+The classifier must **not** call `routeSafetyNet` (`:1931`) or any executor (they act); it mirrors their vocabulary with pure statics. On barge-in the frame block returns nothing (falls through) and the stage below executes exactly once. **Ambiguity defaults to answer** — the predicate is deliberately conservative.
+
+#### ADR-MTC-06 — Degenerate detection reads extraction provenance
+
+**Decision.** `KeywordIntentRule` gains `musicQueryOutcome(from:maxLength:) -> MusicQueryExtraction { query: String?, provenance: .content | .markerFallback | .transcriptFallback }` — the existing three-step fallback (`:764-775`) restructured to report *which* step produced the query; `musicQuery(from:maxLength:)` becomes a thin wrapper returning `.query`, so its return values (and every existing test) are byte-identical. **Degenerate ⇔ provenance ≠ `.content`** (the bare-marker fallback, or a query that canonicalised away and would fall back to the raw transcript). Specific queries keep today's behaviour exactly (FR-MTC-002 scenario 2, NFR-MTC-012). On the interpreted route the model's own `message` entity, when non-empty (`CommandRouter.swift:3350-3352`), counts as `.content` and passes through (§12).
+
+#### ADR-MTC-07 — Candidate assembly, eligibility, and exhaustion resolution
+
+**Decision.** `DialogueCandidateBuilder.build(for:excludingDomain:rephraseHypothesis:)` produces ≤ `DialogueConfig.maxCandidates` (3) candidates from deterministic sources, in priority order:
+
+1. **The rephrase-band hypothesis** — the mid-band (confidence < 0.7, tier `.free`) interpretation the pipeline already computed (`CommandRouter.swift:1493-1519`). Placement: as today it becomes a yes/no question (`:1513`, unchanged); when the user answers **no** (`:806-809`), the taken hypothesis joins the candidate list **only when relaxed near-matches contribute at least one other candidate** (ordered last) — a re-offer alongside alternatives, never alone (re-asking a just-denied single option would ignore the "no": a trap). If it is the only possible candidate, today's `router.rephrase.discard` line stands alone. *Alternative considered and rejected:* converting the yes/no itself into a candidate probe — it would change the confirmation flow the constitution freezes (NFR-MTC-012, FR-MTC-014 scenario 3).
+2. **Relaxed near-matches** — a new pure `KeywordIntentRule.nearMatches(transcript:)` reporting the rule's own domains that *partially* co-occur (at least one required keyword group present, not all), each rendered from a fixed `dialogue.candidate.*` template; an eligible domain must be executable with the utterance's own extracted query (no query invented).
+3. **The active frame's candidates** — the re-probe case (the same list, re-offered).
+
+Eligibility is restricted to the safe fast-path domains {news, YouTube, music, appLaunch}: **a candidate can never carry `.call` / `.sendMessage` / `.setReminder` / `.createCalendarEvent` or any `neverGated` action**, so picking a candidate can never bypass a confirmation tier (§23). Execution of a pick goes through the **same seam the ladder uses for that domain** (`fireNewsReader`, `fireYouTubePlay`, `fireMusicRequest`, the launcher's `requestAppLaunch`-equivalent) — "executed exactly as if it had been understood as that command" (FR-MTC-004 scenario 2) with byte-identical outcome paths.
+
+**Never fabricate (FR-MTC-004 scenario 3):** an empty candidate list ⇒ no frame opened; the honest line (`router.reprompt` / `router.rephrase.discard`) stands alone, today's behaviour.
+
+**Exhaustion resolution (FR-MTC-007 reconciliation).** Each frame carries its terminal default:
+
+| Frame | On attempt-cap exhaustion with no valid answer |
+|---|---|
+| `.slotFill` with `activeCommand` | Execute the pending command with its default behaviour — the default query (the pending degenerate query); the user hears the normal execution outcome. |
+| `.candidateChoice` (no pending command) | Close the frame and speak the honest `dialogue.exhausted` line, then re-arm. There is no pending command to execute; executing a candidate unasked would be exactly the trap the requirements forbid (FR-MTC-004 "never fabricate", FR-MTC-010 "never executes unasked"). This is the design's reading of FR-MTC-007's "executes with its default behaviour … rather than asking again or dead-ending" where no default exists; flagged for review-l2 (§31 R3). |
+
+#### ADR-MTC-08 — The window and its silent timeout
+
+**Decision.** `VoiceSessionState` gains `case awaitingSlotAnswer` beside `awaitingConfirmation` (`VoiceSessionStateMachine.swift:9-17`), with transition-table edits mirroring the confirmation edges exactly: entry from `.idle` and the busy states (the same set that accepts `.awaitingConfirmation`, `:29-38`), exits to `[.idle, .error, .stopped]`. A sibling opener `openSlotAnswerWindow()` mirrors the F14 "the window must EXIST, not merely be attempted" discipline of `openConfirmationWindow()` (`:153-181`): bridge through `.idle`, only ever travelling legal edges. Entering the state arms `slotAnswerTimer` with the **same config value** (`config.confirmationTimeoutSeconds`, `:93-96`: 45 s — single source, no new literal); any transition out cancels it (`:119-123` mirrored).
+
+**The expiry is silent and different.** `armConfirmationTimer`'s callback (`:183-203`) speaks nothing itself — the coordinator's `onConfirmationTimeout` handler does (`AppCoordinator.swift:2996-3038`, speaking `router.confirmationTimeout` at `:3035-3036`). For the frame window the design adds a **separate callback** `onSlotAnswerTimeout`, fired by the mirrored timer after its own F6 still-open guard (`guard self.state == .awaitingSlotAnswer`): the coordinator's handler clears the frame, emits `dialogue_frame_resolved {timeout}`, and **speaks nothing** (FR-MTC-013: silent drop and re-arm; deliberately unlike the confirmation notice). The confirmation callback and its spoken notice are untouched; `recordConfirmationTimeout()` is not called on the frame path (it is yes/no accept-band telemetry).
+
+#### ADR-MTC-12 — Phase 2 clause inside the pinned prompt
+
+**Decision.** The frame clause is the **5th interpolation** of `IntentPrompt.build` (`ios/ElderlyAssistant/Services/` + `Voice/IntentPrompt.swift:69-128`), inserted after the `User said: "\(transcript)"` line and before the closing `Now output ONLY the JSON object for that request.` imperative — the latest possible point, so the stable template prefix (what the vendored LLM's KV-prefix reuse depends on) stays byte-identical (NFR-MTC-011). Draft clause (feasibility study §6.4), gated behind `frameClause: String? = nil` so Phase 1 call sites are unchanged:
+
+> `Answer to the earlier question about music. Missing detail: kind of bhajan.`
+
+Budget: clause **≤300 Characters** (the existing slack: measured baseline 2,506, worst-case composition 2,586, ceiling 3,000 — `IntentPromptTests.swift:482-495`, `:126`), leaving ≥180 qwen3-token headroom under the 1,024-token cap (`LlamaCommandInterpreter.swift:1159-1163`, `:1199`). The same change updates: the seed mirror `tools/train-intent/seeds/prompt_template.txt` (byte-identical; the identity rule at `IntentPrompt.swift:44-55`), the `check-prompt-mirror` anchor validation (it validates each interpolation placeholder's anchors — the 5th gains anchors in the same change), and the `PinnedSurfaceGuardTests` digests + baseline Character count (`ios/ElderlyAssistantTests/Services/` + `Voice/PinnedSurfaceGuardTests.swift:57-67`, `:61`, `:63`). The 3,000-Character ceiling and the 1,024-token cap are **not** raised. The `.raw` framing (chat-format table `LlamaCommandInterpreter.swift:820-896`, framing at `:973-1000`) is untouched. A clause without the v17 training iteration does not ship (Feature Constraint 5).
+
+### 5. Open decisions OD-M1..OD-M4 — drafted for T2
+
+All four remain **OPEN** (the constitution is explicit); the design *implements* the study's recommendations as configurable defaults so the owner's resolution is a config/scope change, not a redesign. Owner confirms at final T2 sign-off.
+
+**OD-M1 — probe policy (DRAFTED FOR T2).** Default: **2 probes max**, the default answer offered **on the first probe**, default wording `dialogue.option.anyPlay` = "जे पनि बजाऊ" / "just play anything". Implemented as `DialogueConfig.maxProbes = 2`; if the owner resolves to 1, the only change is the config value (all tests parameterised). *Why 2:* one unrecognised answer (a cough, a mis-transcription) would otherwise burn the single probe and execute with defaults; the second probe is the recovery. Cost: at most one extra question, bounded by the deadline.
+
+**OD-M2 — option source (DRAFTED FOR T2).** Default: **curated on-device catalog** (§15) — zero latency, on-device stance, works with no network and no Spotify link; the live-Spotify-playlist alternative would add a network round trip *per probe* and a `SpotifyTool` extension, and its results would be model/API-generated option text (tension with "template probes only"). The catalog is a JSON resource precisely so a later OD-M2 resolution can swap or extend the source behind `DialogueOptionCatalog` without touching the frame path.
+
+**OD-M3 — sequencing (DRAFTED FOR T2).** Default: **Phase 1 deterministic-only ships first** (it alone covers the owner's bhajan example with no training run); v17 data authoring proceeds in parallel; the Phase 2 clause attaches to the v17 change (§17). *Why:* Phase 1 is a complete, shippable unit; the clause is worthless without v17 (prompt-identity drift is the named hazard).
+
+**OD-M4 — Phase-3 scope (DRAFTED FOR T2).** Default: **Phase 3 ships separately** — the reminder/calendar rollover (FR-MTC-019) is designed (§18) but not built with the music probe, so the Phase 1 release carries exactly one new trigger domain (music), keeping the safety review and DV scope tight. The frame and the state machine are built slot-agnostic so Phase 3 is additive.
+
+### 6. Success criteria and the DV plan
+
+| Success criterion (constitution) | Mechanism | Verified by |
 |---|---|---|
-| 1 | Create the app in the Spotify Developer Dashboard | `[OWNER INPUT — app name; use a recognizable product name]` |
-| 2 | Add redirect URI | `sahayak-spotify://callback` — **exact string**, one constant shared by Dashboard, `Info.plist` and code. If the Dashboard refuses a custom scheme, re-shape per the scheme note in §15 and record the final value here. |
-| 3 | Request scopes | `user-read-private`, `user-read-playback-state`, `user-modify-playback-state` (requested at sign-in; §15) |
-| 4 | Client ID | Copy into `Info.plist` as `SpotifyClientID` `[OWNER INPUT — the ID value itself is a public identifier; copy it from the Dashboard into the plist at implementation time, not into any document]` |
-| 5 | Client secret | **NOT USED** — PKCE public client (ADR-SP-01). Do not paste it anywhere; if the Dashboard displays one, ignore it. |
-| 6 | User Management (test users while in Development mode) | Add the accounts from (a) `[OWNER INPUT — the list]` |
-| 7 | Quota-extension request form | File per (b); business/contact details `[OWNER INPUT — owner's business info and privacy-policy URL]`; use-case description drafted in design-l2 as an appendix `[design-l2]` |
+| Owner's bhajan example works end-to-end, Phase 1, no training run | §12 trigger → §9 probe → §11 merge → existing music path | FR-MTC-002/003/006 tests; DV-1 |
+| Every probe template-generated, localized ne/en; ≤2 probes then defaults | §9 probe composer; `dialogue.*` keys; `DialogueConfig.maxProbes` | FR-MTC-003/007/016 tests; §22 key inventory |
+| Answers captured by name / index / repetition / free-form | §11 capture ladder | FR-MTC-005 tests (one per form) |
+| Unrecognised utterance → honest line + didYouMean probe + escape | §13; §10 step 2 | FR-MTC-004/008 tests |
+| Cancel drops with an honest line; emergency wins; barge-in executes; 45 s silently re-arms — zero stuck states | §10, §14 | FR-MTC-010/011/012/013 tests; DV-2/3 |
+| Brain-degraded turns fall back to the deterministic merge or one more probe; reminder/calendar unchanged | §16 (structural) | FR-MTC-006 scenario 4; unchanged-suite runs |
+| No jetsam across sustained multi-turn use | §16 (no new residents, no new GPU work) | DV-5; §16 |
 
-**Owner sign-off line (to be completed at final-sign-off):** `[OWNER INPUT — approve/amend sections (a)–(d); record the decision and date.]`
-
-### 6. Success criteria and the DV completion gate
-
-Success (feature constitution, restated as designed-for outcomes): music requests that hit the stub today start real playback; Spotify wins when linked and capable; every degradation path speaks an honest localized line; explicit YouTube requests behave exactly as before; a Nepali request for music produces sound on the Anzaan device.
-
-**DV-1…DV-5 plan (FR-SP-017).** A DV-style checklist is recorded with the feature (pattern: `specs/LCT-device-validation-protocol.md` → the feature records `specs/SP-device-validation-protocol.md` with results alongside, naming device and build). Minimum coverage, with the design's expected observations:
-
-| Item | Steps (summary) | Expected |
-|---|---|---|
-| DV-1 | Unlinked + YouTube configured; say 'भजन बजाऊ' on a Release build | A real outcome (YouTube path or deep-link hand-off); **never** the stub line; sound can start via the provider app |
-| DV-2 | Linked Premium (registered test user); say 'गीत चलाऊ' | Both providers searched; Spotify selected; remote playback line names Spotify; music plays |
-| DV-3 | Linked Spotify + YouTube key both present; say 'युट्युबमा गीत चलाऊ' | YouTube path exactly as before; music/Spotify path does not also handle it |
-| DV-4 | Free-tier linked / unlinked / airplane-mode network failure / empty-search utterance; each repeated | Each path speaks its explicit localized line (or the YouTube fallback); no silence; no false "playing" claim |
-| DV-5 | Nepali session end-to-end on Anzaan for DV-1…DV-4 scenarios | All spoken lines are Nepali; no English fallback |
-| DV-6 (added by this design) | Spotify app removed from the device; free-tier or unlinked request | Honest app-absent/fallback behaviour per §12; no crash, no false claim |
-| DV-7 (added by this design) | Console/sysdiagnose capture during DV-1…DV-6 | Zero tokens, credentials, query text or provider bodies (NFR-SP-002, project pre-release device check) |
-
-An unmet item is recorded as failing and blocks the completion claim (FR-SP-017); deviation requires explicit owner resolution.
+**DV-1..DV-5 (Anzaan device gate, FR-MTC-020):** DV-1 probe → answer → correct playback (the bhajan example, one shot, owner-path). DV-2 timeout: 45 s expiry drops silently, next utterance is a fresh command. DV-3 barge-in: "मेरो छोरालाई फोन गर" mid-probe places the call (its normal confirmation runs) with no residual frame. DV-4 mid-dialogue degraded-brain turn: force the pressure pick (or unload), answer the probe; the deterministic merge carries the dialogue. DV-5 sustained multi-turn without jetsam (post-conversation JetsamEvent log pull, the PR #156 protocol). **Phase 0 prerequisite (constitution #9):** the outstanding PR #156 device smoke (conversation → no jetsam → JetsamEvent pull) runs first; its protocol is the DV-5 harness.
 
 ### 7. Source verification and reconciliations
 
-All seams used by this design were re-read from the worktree at this task's baseline and the line numbers below are the verified ones (differences from the feature constitution's prose are reconciled here):
+Every seam below was re-verified in this worktree at `437d4dc` for this document (the study's references were treated as claims, not facts):
 
-| Seam | Verified fact |
-|---|---|
-| Music stub | `case .music:` at `CommandRouter.swift:2640`; `command_music_stub` event and `router.musicStub` at 2642–2643. Neighbouring stubs (`router.healthNotAvailable`, `router.featureNotYet`) are separate branches and are untouched. |
-| YouTube seams | `youtubeConfigStore` / `youtubeTransport` / `youtubeLinkOpener` declared optional in `CommandRouter.swift:646–648`; injected at 689–691; assigned 709–711 (dormant-nil pattern). |
-| Route ladder order | sanity guard → emergency (761) → confirmation (771) → safety net → `VoiceContactSearchRoute.decide` (898) → directions → alarms/timers (963–1031) → briefing (1035) → full-article → news → `YouTubeRoute.decide` (1146) → `KeywordIntentRule.match` (1189) → topic pre-answer (1329) → sensitive-call → interpreter → `dispatchInterpreted`. |
-| YouTube execution | `fireYouTubePlay(query:)` at 2386: keyless path opens the search deeplink (synchronous, no network) and speaks `youtube.openingSearch`; keyed path fetches via `YouTubeTool.fetchTopResult` and speaks `youtube.playing` (title spoken-only, never logged); failures via `deliverYouTubeFailure` speak `youtube.notFound` / `youtube.unavailable`. |
-| Tool log | `logToolRequest(kind:query:response:outcome:statusCode:durationMs:)` at 2544; nil store = no-op; the log store is the encrypted `LocalToolLogStore` only, never observability. `Kind` currently `weather/search/youtube` — `.spotify` is added (§16). |
-| Plugin path | `handlePluginCommand` at 2922; registry registration `registry.register(YouTubePlugin(configStore:))` at `AppCoordinator.swift:2058`; store wiring at 3715–3717 (`URLSession.shared`, `SystemCallLinkOpener()`); lazy store precedent at 1341. |
-| Link-opener seam | `CallLinkOpening` (`Services/Intents/CallLinks.swift:37`) already has **both** `canOpenURL(_:) -> Bool` and `open(_:)`; `SystemCallLinkOpener` hops to main. The capability pre-check needs **no seam change**. |
-| Transport seam | `LocalToolTransport` (`Services/Voice/LocalToolTransport.swift:13`) = `fetchData(for:) async throws -> (Data, URLResponse)`; `YouTubeTool.fetchTimeoutSeconds = 8` (line 59). |
-| Intent prompt | Music wording already present (`IntentPrompt` schema list includes `"music"`; the music mapping line; the music intent bullet) — no core-template change is needed. |
-| Settings | `YouTubeSettingsView` struct actually begins at `SettingsView.swift:768` (the constitution cites 759–840 as the neighborhood); `SettingsTabs` maps `.youtube` at 123/159/419 with `hiddenSheetRows` including `.youtube`. |
+- `route()` opens at `CommandRouter.swift:740`; gibberish guard `:747-758`; **emergency block `:779-783`** (`handleEmergency()` dispatch at `:781`, `:3556`); **confirmation hook `:785-886`** (guard `:789`; rephrase follow-up `:794-809`; call-override predicate `:816-820`; `speaksItsOwnYesNo` `:830-846`; F3 med-ack exclusion `:847-862`; yes/no/ambiguous `:863-885`); safety net `:897-899`; contact search `:916-920`; YouTube stage `:1164-1167`; keyword-intent stage `:1169-1244` (**music arm `:1223-1234`**, `fireMusicRequest` call at `:1233`); rephrase band `:1493-1519` (condition `:1509-1512`, arm `:1513`); `routeKeywordRemainder` `:1968-2030` (sensitive block `:1973-1980`; web-search hook `:2004`; `router.reprompt` `:2021`; brain-downloading/needs-setup `:2024-2027`); music execution `selectMusicOutcome` `:2614`, `fireMusicRequest` `:2667-2678`, `runMusicTurn` `:2684`; `pendingTranscript` `:3307`; `dispatchInterpreted` `:3315`; **interpreted `.music` `:3336-3355`** (query composition `:3350-3355`); `handleEmergency` `:3556`; `isYesResponse` `:3801` / `isNoResponse` `:3809`; `speak(text:)` `:3848` with `noteAssistantSpoke` at `:3864`; `VoiceCommandCoordinating` protocol `:47-140`; emergency vocabulary `:1855`; `sensitiveCallPhrases` `:1869`; `isExplicitMedicationAcknowledgement` `:1913`; `routeSafetyNet` `:1931`; second emergency check `:1936`.
+- `KeywordIntentRule.swift`: `maxMusicQueryLength` `:722`; `mentionsMusic` `:730-734`; `musicQuery(from:)` `:752-779` with the three-step fallback `:764-775` and the marker branch at `:770`; drop sets `:781-850`.
+- `VoiceSessionStateMachine.swift` (`ios/ElderlyAssistant/App/`): enum `:9-17` (`awaitingConfirmation` `:15`); `canTransition` `:21-57`; `supportsTalkReset` `:71-78`; `Config.confirmationTimeoutSeconds` `:93-96`; `transition` `:111-127`; `transitionViaIdle` `:143-151`; `openConfirmationWindow` `:153-181`; `armConfirmationTimer` `:183-203` (F6 guard `:191-198`); `cancelConfirmationTimer` `:205-208`.
+- `AppCoordinator.swift`: `onConfirmationTimeout` handler `:2996-3038` (spoken line `:3035-3036`); voice watchdog `:4865`; `noteAssistantSpoke` `:5210`; `openConfirmationWindow()` `:7019-7027`; `pendingRephrase` `:7395-7396`; `startRephraseConfirmation` `:7397-7401`; `handleCallConfirmationOverride` `:7473`; `isAwaitingConfirmation` `:10535-10539`.
+- `LocalBrainChain.swift` (`ios/ElderlyAssistant/Services/` + `Intents/`): `turnInput` `:275-285` — `InputSanitiser.sanitise(_, level: .quarantine)` then `inputSeam.prepare(clean)` at `:281-282` (the answer merge's seam, §11).
+- `IntentPrompt.swift`: size-budget doc `:29-42` (696 qwen3 / 677 gemma of 1,024; ~300 left), identity doc `:44-55`, `build` `:69-128`, `addressAsClause` `:142-145`. `LlamaCommandInterpreter.swift`: `.raw` kind `:820-830` region `:820-896`, framing `:973-1000`/`:1176-1184`, `maxTokenCount: 1024` `:1199` with the 2048-crash comment `:1159-1163`.
+- Prompt pins: `IntentPromptTests.swift:105-131` (3,000-Character tripwire), `:257`, `:482-495` (2,506 baseline, 2,586 worst case). `PinnedSurfaceGuardTests.swift:16-47`, `:57-67` (music digest `fb14012e…`, prompt digests `18003ddd…`/`bd47910d…`, 2_506/3_000).
+- Log gate: `ios/tools/check-release-log-safety.py` — `ENGINE_FILES` `:132`, `FEATURE_ROOTS` `:141`, `DEFAULT_ALLOW_LIST` `:181`, `RULES` `:187`; wired into `ios/build.sh` ahead of every test scope.
+- Degradation stack: `PressureBrainPick.swift` (`ios/ElderlyAssistant/Services/` + `Voice/`) `.keep`/`.stepDown`/`.lightweight` `:57-62`, `safetyMarginBytes` 768 MB `:78`, `pressureWindowSeconds` `:89`; `WhisperPostTurnPolicy.swift` `.brainOverBudget` per-turn release (PR #156, `437631e`).
 
-**Reconciliation 1 — golden music count: 15, not 16.** `GoldenCorpus.swift` lines 143–157 contain exactly 15 `.init(…, intent: "music")` entries (verified by source scan; the constitution's "16 utterances" is stale). `GoldenCorpusTests.testCorpusHasAtLeast15EntriesPerIntent` requires ≥15 per intent, so the block must not shrink. Implementation keeps the 15 and records the counted result (NFR-SP-006's own instruction).
+**Reconciliations (requirement text vs. verified code):**
 
-**Reconciliation 2 — FR-SP-002 scenario 3 ("neither provider can be asked") vs the keyless YouTube path.** The shipped keyless YouTube behaviour intentionally opens the search deeplink and speaks `youtube.openingSearch` — the code's own comment calls it "the whole feature, not a degraded mode". YouTube is therefore "askable" without an API key whenever the link-opener seam is present. "Neither provider can be asked" occurs only when the YouTube seams are dormant (no transport and no opener) **and** Spotify is unlinked/incapable; the explicit localized line is then spoken. Implementers must not "fix" the keyless path into a failure — the scenario's requirement ("no silent outcome; an explicit localized line") is satisfied by the pinned behaviour.
-
-**Reconciliation 3 — prompt digest pins are byte-level.** `IntentPromptTests` pins SHA-256 digests of the rendered no-term prompt (two fixtures) and asserts the exact 2,506-character baseline. Any core-template edit — even a byte-neutral-intent music wording tweak — breaks those pins. This design therefore treats the core prompt as immutable for this feature (ADR-SP-09) and notes that `SpotifyPlugin`'s composed fragment is checked wherever plugin-composed budgets are asserted (`[design-l2]`: confirm no existing suite composes the real registry set against the pinned ceiling; if one does, the Spotify fragment must fit inside it).
-
-**Reconciliation 4 — the June amendment ordering constraint (constraint 10).** The root-constitution amendment (Constraint 1 + Required integrations, 2026-10-06) is already recorded in the same change as the feature spec (both constitutions carry it). The implement change set must not remove or reword it; if the amendment text needs adjustment it moves with the feature spec.
+- FR-MTC-004's "rephrase band … `CommandRouter.swift:794-809`" cites the follow-up *handler*; the band's *trigger* is `:1493-1519`. Both are correct for what they name; this design uses the trigger for candidate sourcing and the handler for the discard path.
+- FR-MTC-002's "marker fallback at `KeywordIntentRule.swift:765-775`" — verified as the `kept.isEmpty` branch `:765-775` inside `musicQuery(from:)` `:752-779`; the marker line is `:770`.
+- FR-MTC-014's "states at 15–16" is the enum region `:9-17` (only `awaitingConfirmation` is at `:15`; the enum's true span is 9–17); "the 45 s timer at 91–127" spans `Config` `:93-96` and the transition arms `:119-127`, with the timer construction at `:183-203`. The design edits all three regions.
+- The workflow comment's "generalize the confirmation hook ~785-886" — verified: the block's doc comment opens at `:785`, the guard at `:789`, the closing brace at `:886`.
+- Accessibility precedent for the probe: this repo's ambiguity-walk (`isAwaitingNavigationDisambiguation`, `AppCoordinator.swift:8537` region) already speaks candidate questions one-by-one; the frame path keeps that pattern's spirit but is deliberately a **single** bounded question with ≤3 candidates (no walk), because the frame is one-deep and time-bounded.
 
 ---
 
 ## Architecture
 
-### 8. System context and end-to-end flow
+### 8. Context and end-to-end flow
 
 ```
- (voice turn)                         on-device only
- [STT] → transcript → CommandRouter.route(transcript:)
-                          │  existing stages… (emergency/contacts/alarms/…)
-                          │
-                          ├─ YouTubeRoute.decide (explicit marker) ─→ fireYouTubePlay ─→ YouTube (unchanged today)
-                          │
-                          └─ KeywordIntentRule.match ─ .youtube ─→ fireYouTubePlay (unchanged)
-                                                     └ .music  ─→ fireMusicRequest(query:)   ◄── NEW deterministic stage
-                                                                        │
-                    ┌───────────────────────────────────────────────────┤   both providers askable?
-                    │                                                   │
-             Spotify leg (linked)                                YouTube leg (mirrors fireYouTubePlay)
-                    │                                                   │
-        SpotifyTool.search ── api.spotify.com ──┐                      YouTubeTool.fetchTopResult ── googleapis
-                    │                            │                      │            (or keyless deeplink open)
-        select: Spotify wins if usable+capable   │                      │
-                    │                            │                      │
-     remote play ─→ api.spotify.com/v1/me/player/play          youtube://watch or search deeplink
-        │ fail                                    │                      │
-     deep link spotify:track:<id> ─→ Spotify app  │                      │
-        │ fail                                    │                      │
-     YouTube fallback ────────────────────────────┘                      │
-                    │                                                   │
-                    └────────────── one explicit localized spoken outcome ┘
- (interpreter / pluginAction "spotify.play" path) ─→ SpotifyPlugin.handle ─→ same router-owned ladder
+ user speech ──► WhisperKit STT (unchanged)
+                     │  transcript
+                     ▼
+        CommandRouter.route(transcript:)                       [CommandRouter.swift:740]
+        ┌─ 1 TranscriptSanityGuard .......................... :747-758  unchanged
+        ├─ 2 EMERGENCY keywords ............................ :779-783  unchanged + frame clear (§10)
+        ├─ 3 confirmation hook (yes/no, rephrase, …) ....... :789-886  unchanged; mutually exclusive (§14)
+        ├─ 4 DIALOGUE FRAME INTERCEPTION (NEW) ............. §10
+        │      live frame? ─ expired ─► drop, fall through (fresh command)
+        │             ├─ escape ─► drop + ack + re-arm
+        │             ├─ cancel / cancel+amendment ─► drop + line  |  answer=amendment
+        │             ├─ barge-in (pure-stage match) ─► drop, fall through
+        │             ├─ answer ─► merge + execute (§11) ─► return
+        │             └─ invalid ─► attempts++; re-probe or default (§11)
+        ├─ 5 safety net (med-ack, sensitive) ............... :897-899  unchanged
+        ├─ 6 contact search / directions / alarms .......... :916-…    unchanged
+        ├─ 7 YouTube stage ................................. :1164-1167 unchanged
+        ├─ 8 keyword-intent stage ........................... :1169-1244
+        │      music arm :1223-1234 ─ degenerate? ─► ARM slotFill FRAME + probe (§12)
+        │                            else ─► fireMusicRequest (today)
+        ├─ 9 topic pre-answer + interpreter ................ :1488-…    unchanged
+        │      interpreted .music :3336-3355 ─ degenerate? ─► ARM frame (§12)
+        │      abstention :1521 ─► routeKeywordRemainder
+        └─ 10 routeKeywordRemainder ........................ :1968-2030
+               .available + no web-search/failure line ─► honest line + didYouMean probe (§13)
+               no candidates ─► today's honest line alone
 ```
 
-**Egress (complete list):** `accounts.spotify.com` (OAuth token endpoint), `api.spotify.com` (search, `/v1/me`, player endpoints), plus the pre-existing YouTube endpoints on the YouTube leg. Nothing else — no LLM provider, no new host (NFR-SP-003).
+Probe speech goes through the router's existing `speak(text:)` lane (`CommandRouter.swift:3848-3884` → `ReplySpeakLane` actor → `noteAssistantSpoke` `:3864`), so a probe is a normal reply on every existing surface (speech, chat history, outcome machinery) with zero new UI.
 
-**Turn-level flow (linked, Premium, happy path):** pre-ack spoken → both searches fire concurrently → Spotify resolves a usable result → remote play attempt → success → `spotify.playing` with the real track title (spoken only). Every leg is bounded by the configurable per-call budget (§20) and every branch ends in a spoken line (§12 matrix).
+### 9. The frame model
 
-### 9. Voice route intake ladder (FR-SP-005, FR-SP-013, FR-SP-014, FR-SP-015)
-
-**Design: one new deterministic stage inside the existing `KeywordIntentRule` domain switch, plus a veto in the contact-search stage. No new stage ordering, no `YouTubeRoute` internals change.**
-
-1. **Contact search (existing stage at 898)** — `VoiceContactSearchRoute.decide` gains a **music veto** immediately after the existing YouTube veto: when the transcript contains a music-family token (the shared family constant, below), the contact-search decision is vetoed. Vetoes are token-presence-based, mirroring the existing YouTube veto (`"youtube"` token / `"युट्युब"` substring); the music veto uses the shared music-family tokens (`भजन`, `गीत`, `गाना`, `संगीत`, `सङ्गीत`, Latin `music`, `song`, `bhajan`). This cannot over-block a genuine contact request: a request without a music marker is untouched (FR-SP-014 scenario 2).
-2. **Explicit YouTube (unchanged, 1146)** — `YouTubeRoute.decide` fires exactly as today and returns; the music stage is never reached for a YouTube-marked utterance. The music rule additionally refuses any utterance carrying a YouTube marker (belt and braces; FR-SP-013 scenario 2).
-3. **New music domain (1189 switch)** — `KeywordIntentRule.Domain` gains `case music`; the rules array is ordered `news → youtube → music → appLaunch → festivalDate`. The router's existing domain switch gains `case .music:` → `fireMusicRequest(query: KeywordIntentRule.musicQuery(from: preText) ?? preText)`. This is the zero-prompt-token path (constraint 3): bare music never consults the model.
-4. **Model-classified music (`dispatchInterpreted`, 2640)** — `case .music:` is replaced: `fireMusicRequest(query: interpretedQuery ?? KeywordIntentRule.musicQuery(from: transcript))`, where `interpretedQuery` is the command's query entity when the model supplied one. The `command_music_stub` emission and the `router.musicStub` call are deleted (key retained in the catalog, ADR-SP-11).
-5. **No double-handling** — every firing stage returns; an utterance is handled by exactly one of the YouTube path and the music path; the ordering makes it deterministic (YouTube marker → stage 2; bare music → stage 3; model-classified music that slipped past both → stage 4).
-
-**Extraction** (mirrors `YouTubeRoute.extractQuery`): drop leading/trailing music-family markers and the play/listen verb family using full grapheme-cluster enumerations (Devanagari matra/virama fusion means the families are enumerated explicitly, exactly as `youtubeVerbFamily` does today; a substring match on a base form is not sufficient — see the Swift Devanagari grapheme lesson recorded in project memory). Containment drops include the YouTube tokens. Result capped at 100 characters (mirrors `YouTubeRoute.maxQueryLength`), configurable (§20). Empty extraction falls back to the whole marker-stripped transcript, and finally to `preText`, so the search always has a query.
-
-**Music rule shape** (mirrors the youtube rule exactly): `musicKeywords` × `musicVerbFamily` (relaxed co-occurrence), with the existing narration guard discipline (narration-style mentions must not fire; the youtube rule's narration comment is the model). Verb families are the shared play/listen/sing enumerations (reuse or deliberately duplicate the youtube verb-family constants within the file — one source of truth for both rules where practical). **Deliberate conservative choice:** noun-only musical phrases (e.g. 'देवीको भजन') do **not** fire the deterministic stage; they reach the same music path through the interpreter's already-present `"music"` intent (stage 4). This keeps the rule's precision high and avoids over-capture; it is recorded because FR-SP-013's scenario set only pins verb-bearing requests. `[design-l2]: exact keyword/verb enumerations, with the same test style as `KeywordIntentRuleTests`.]
-
-### 10. Music query extraction details
-
-- Extractor: `KeywordIntentRule.musicQuery(from:)` — pure, static, deterministic, unit-tested with the golden families and the YouTube-marker exclusion.
-- Marker-drop lists: leading/trailing music nouns and verb forms; Devanagari enumeration includes the fused forms (`चलाऊ`, `चलाउनुस्`, `बजाऊ`, `बजाउनुस्`, `लगाऊ`, `लगाउनुस्`, `सुनाऊ`, `सुनाउनुस्`, `गाउनुस्`, plus the लगाउँ twin family the youtube route carries) — the full lists are finalized in design-l2 against the same fixtures the youtube route tests use.
-- The extractor never strips a token that would leave an empty query if the utterance's remaining text is non-empty; worst case the full `preText` is used.
-- Extraction happens on-device only; the query goes to provider APIs (`api.spotify.com` search `q=` parameter, percent-encoded; YouTube leg's existing behaviour) — never to a cloud LLM (NFR-SP-003).
-
-### 11. Both-provider search, capability predicates, selection (FR-SP-002, FR-SP-003, constraint 9)
-
-**Askability** (based on the shipped dormant-seam pattern — a missing seam simply means that provider is not asked):
-
-| Predicate | Definition |
-|---|---|
-| `spotifyAskable` | A session record exists in the credential store (linked) **and** the Spotify transport seam is present. A refresh that ends in `invalid_grant` or a verification failure flips the account to unlinked *before* this check (FR-SP-010). |
-| `youtubeAskable` | `youtubeConfigStore?.apiKey != nil` (keyed API search) **or** `youtubeLinkOpener != nil` (the keyless search-deeplink path — see Reconciliation 2). |
-
-**Request-time behaviour:** when both are askable, both searches are fired **concurrently** (two child tasks; results joined before selection). When only one is askable, only that one is searched (an unavailable provider must not block the other — FR-SP-002 scenario 2). When neither is askable, the honest line is spoken immediately (FR-SP-002 scenario 3 semantics; §12 row 10).
-
-**Outcome capability** (evaluated from the search result and the account state):
-
-| Predicate | Definition |
-|---|---|
-| `spotifyUsable` | The Spotify search returned a validated result (shape-checked ID; §14) — not empty, not malformed. |
-| `spotifyRemoteCapable` | Stored `product == "premium"` **and** a valid access token exists at attempt time. |
-| `spotifyDeepLinkCapable` | The link-opener seam is present and `canOpenURL("spotify:…")` is true for the target URI. |
-| `spotifyCapable` | `spotifyUsable && (spotifyRemoteCapable || spotifyDeepLinkCapable)` — exactly FR-SP-003's definition ("at least one Spotify outcome is available — remote playback control or the `spotify:` deep-link fallback"). |
-
-**Selection:** if `spotifyCapable` → the Spotify outcome is selected (constraint 9; the both-provider search still ran when both were askable, and the recorded selection shows which provider won — FR-SP-002 scenario 1). Otherwise, if the YouTube leg can serve (served a result, or the keyless path can open), the YouTube outcome is selected. Otherwise the explicit honest line for the dominant failure (§12). The selection decision is recorded as a content-free observability event (`spotify_search` outcome + `spotify_fallback` outcome; no query text — ADR-SP-15).
-
-**Premium capability source.** `product` is read from `GET /v1/me` at link time and refreshed on every successful token refresh; it is cached in the session record with a configurable staleness bound (§20). A stale `premium` with a lapsed subscription is caught honestly by the play attempt itself (403 → deep-link path, §13); a stale `free` costs at most one deep-link hand-off instead of remote control, which is honest and safe. The status surface (FR-SP-016) shows the same stored value the router acts on (NFR-SP-010 scenario 4).
-
-### 12. OD-S3 — Degradation precedence and the state × outcome matrix
-
-**Resolution (ADR-SP-02).** Precedence is *capability-first, then provider order*, with a single rule per state so the matrix is total (every state maps to exactly one outcome branch):
-
-1. If Spotify is linked and capable → **Spotify serves** (remote control when Premium-capable, else the validated deep-link hand-off). This is constraint 1's deep-link degradation together with constraint 9's preference: free-tier linked accounts still win the selection and still get Spotify — via the honest hand-off, never a control pretense.
-2. If Spotify is linked but cannot serve the *search* (empty/failure) or cannot produce *any* outcome (free-tier with the app absent), → **YouTube serves where it can** (constraint 5/FR-SP-004), with the identical behaviour an explicit YouTube request would get (ADR-SP-06).
-3. If Spotify is not linked (or was revoked → unlinked treatment) → **YouTube serves where it can first** ("unlinked music requests fall back to YouTube"); where YouTube cannot serve at all, the `spotify:` **search hand-off** is offered as the constraint-1 degradation (opening the search for the user); where even that cannot open, the honest `spotify.notLinked` line.
-4. If a deep-link hand-off was chosen and the open fails at attempt time → the honest `spotify.appMissing` line (FR-SP-011 scenario 2 / FR-SP-012's app-absent row — this is the one terminal point where no further chaining happens; the pre-check already gave YouTube its chance in the states where YouTube could serve).
-5. Never: silence, a fabricated "playing", a raw error, or a retry loop against a dead grant.
-
-**State × outcome matrix** (row = request-time state; "Both searched?" states what ran; outcome column is what the user hears/gets):
-
-| # | Account / service state | Both searched? | Outcome branch | Spoken line (key) |
-|---|---|---|---|---|
-| 1 | Linked, Premium-capable, search usable, remote play **succeeds** | Yes (both askable) | Spotify remote control `PUT /v1/me/player/play` | `spotify.playing` (names Spotify + real title) |
-| 2 | Linked, Premium-capable, search usable, remote play fails (403 premium lapsed / 404 no active device / network) | Yes | `spotify:track:<id>` deep link → opened | `spotify.openApp` ("Opening Spotify — play it there.") |
-| 3 | Linked, free tier, search usable | Yes | `spotify:track:<id>` deep link → opened (remote control is not attempted) | `spotify.openApp` |
-| 4 | Linked, free tier, search usable, **app absent** | Yes (search ran) | Not capable → YouTube fallback where it can serve; else `spotify.appMissing` | YouTube lines, or `spotify.appMissing` |
-| 5 | Linked, search usable, deep-link open attempted and **fails** (2/3/4 attempt-time) | Yes | Terminal honest line (no chaining) | `spotify.appMissing` |
-| 6 | Linked, search **empty** | Yes | YouTube fallback where it can serve; else `spotify.notFound` | YouTube lines, or `spotify.notFound` |
-| 7 | Linked, search **network failure / timeout / non-200 / malformed** | Yes | YouTube fallback where it can serve; else `spotify.unavailable` | YouTube lines, or `spotify.unavailable` |
-| 8 | **Unlinked** (never linked, wiped, or revoked→unlinked) | Spotify not askable; YouTube asked | YouTube serves where it can (keyed or keyless path, existing lines); else `spotify:search:<encoded>` hand-off → opened; else honest line | YouTube lines, `spotify.openSearch`, else `spotify.notLinked` |
-| 9 | Unlinked + YouTube seams dormant + no opener | Neither | Explicit honest line | `spotify.notLinked` |
-| 10 | Linked, refresh fails: `invalid_grant` (revoked) | — | Grant dropped (wipe), **unlinked treatment** (row 8); bounded refresh (1 attempt) — no retry loop | Row 8 lines |
-| 11 | Linked, refresh fails: transport/network only | — | Treat as search failure (row 7): YouTube fallback where it can; else `spotify.unavailable` | Row 7 lines |
-| 12 | Token verification failed at link time (`/v1/me` non-200 / missing scopes) | — | Account treated as not usable → unlinked treatment (row 8); Settings shows a failed/relink state | Row 8 lines; `spotifySettings.*` status |
-
-**Both-provider behaviour per state, explicitly:** rows 1–7 search both (Spotify wins per `spotifyCapable`); row 8 searches YouTube only; rows 10–12 do not search at all until the link is re-established — and each row still produces exactly one spoken line. The YouTube leg of rows 4/6/7/8 is `fireYouTubePlay(query:)` reused verbatim, so the fallback outcome equals the explicit-YouTube outcome for the same query (FR-SP-004's pinned-behaviour clause).
-
-**Copy approach (constraint 12, NFR-SP-005).** All lines exist as `spotify.*` keys with ne/en values; none embeds the query; only `spotify.playing` embeds the remote-sourced track title and it is spoken-only (never carded, never logged — mirroring the YouTube title discipline). The requirement set's Nepali examples are illustrative; the exact Nepali copy finalizes in design-l2/implement against the same review that approves the disclosure text. Keys: `spotify.playing`, `spotify.openApp`, `spotify.openSearch`, `spotify.notFound`, `spotify.unavailable`, `spotify.notLinked`, `spotify.appMissing`, `spotify.rolloutLimited` (OD-S2 unregistered guidance), plus the `spotifySettings.*` family (§23).
-
-### 13. Playback hand-off and remote control (FR-SP-011, constraint 1)
-
-- **Remote control (Premium-capable only):** `PUT https://api.spotify.com/v1/me/player/play` with JSON body `{"uris":["spotify:track:<id>"]}` and the access token in the `Authorization: Bearer …` header; bounded by the configurable tool timeout (§20). Success (204/2xx) → `spotify.playing`. `403` (premium required / restricted) and `404` (no active device) → deep-link path. `401` → exactly one refresh, then retry once; a second 401 → wipe as revoked (row 10). Network error → deep-link path.
-- **Deep-link hand-off:** `SpotifyTool.trackURI(id:)` → `spotify:track:<id>` (id validated first, §14); if no validated track id exists, `SpotifyTool.searchURI(query:)` → `spotify:search:<percent-encoded query>`. Opened through the existing `CallLinkOpening` seam (`canOpenURL` then `open`); Spotify has no web fallback, so the seam's `OpenOutcome` is binary (opened / not opened).
-- **App-absent honesty:** when the attempt-time open fails, the user hears `spotify.appMissing`; no playback success is ever claimed. The `Info.plist` `LSApplicationQueriesSchemes` entry makes the `canOpenURL` pre-check honest (constraint 8).
-- **No silent hop:** every transition watches an explicit condition (status code, error enum) — there is no "try and hope"; the observability event pair (`spotify_play`, then `spotify_deeplink` or `spotify_fallback`) records the path taken.
-
-### 14. SpotifyTool and deep-link hardening (FR-SP-007, NFR-SP-008)
-
-`SpotifyTool` is a caseless enum of pure statics mirroring `YouTubeTool`, in `Services/Voice/` + `SpotifyTool.swift`, using the same seams (`LocalToolTransport`, `CallLinkOpening`) and the same test style (URL-shape and parsing tests, no real network).
+Types (new file `ios/ElderlyAssistant/Services/` + `Voice/DialogueManager.swift`):
 
 ```swift
-enum SpotifyTool {
-    struct TrackResult: Equatable { let id: String; let title: String }
-    enum FetchError: Error, Equatable {
-        case invalidResponse(statusCode: Int)   // non-2xx
-        case noResults                          // 2xx but zero usable tracks
-        case malformedResponse                  // unparseable payload
-        case unusableResult                     // result present, ID failed validation
-        case timedOut                           // URLError.timedOut (mapped distinctly)
-        case transportUnavailable               // no transport seam / offline
+enum ProbeKind: Equatable { case slotFill, candidateChoice }
+
+enum DialogueSlot: Equatable { case musicQuery }        // Phase 3 adds .reminderTime, .calendarTitle
+
+struct DialogueCandidate: Equatable {
+    let id: String                 // stable; index words map to position
+    let labelKey: String           // xcstrings key for the spoken name
+    let domain: KeywordIntentRule.Domain
+    let query: String?             // extracted from the user's own utterance; nil when the domain needs none
+}
+
+struct DialogueFrame {
+    let id: UUID
+    let probeKind: ProbeKind
+    let slot: DialogueSlot
+    let domain: KeywordIntentRule.Domain?     // barge-in exclusion
+    let activeCommand: InterpretedCommand?    // nil for a pure candidateChoice frame
+    let candidates: [DialogueCandidate]       // ≤ maxCandidates
+    let defaultQuery: String?                 // slotFill: the pending degenerate query
+    var attempts: Int
+    let deadline: Date                        // probe-spoken + confirmationTimeoutSeconds
+    var isExpired: Bool { Date() >= deadline }
+}
+
+enum DialogueFrameResolution: Equatable {
+    case answered(capture: CaptureForm, merge: MergeSource)
+    case defaultExecuted
+    case candidateSelected(Int)
+    case exhausted, cancelled, escaped, bargedIn, timedOut, superseded
+}
+
+final class DialogueManager {                 // main-queue-confined, coordinator-owned
+    private(set) var frame: DialogueFrame?
+    var liveFrame: DialogueFrame?             // nil when absent; drops an expired frame on read
+    func arm(_ frame: DialogueFrame) throws   // DialogueError.windowBusy | .noResolution
+    @discardableResult func noteAttempt() -> Int
+    func resolve(_ r: DialogueFrameResolution) -> DialogueFrame?   // clears + returns the frame
+}
+```
+
+**Probe composition (template-only).** `DialogueManager` renders probe text from `dialogue.*` keys: slotFill = question key + ordered option labels (from `DialogueOptionCatalog`, ≤ `maxSlotOptions`) + the default label + the free-text invitation, joined with static separators; candidateChoice = the honest `dialogue.understood.no` line + `dialogue.didYouMean` with ≤ `maxCandidates` labels. Retry (second probe) prefixes `dialogue.retry`. The model is never consulted. FR-MTC-003's acceptance anchor probe text ('कस्तो भजन? शिव, दुर्गा, विष्णु, देवी … वा आफैँ भन्नुहोस्') and the default ('जे पनि बजाऊ') are the draft catalog/string values (§15, §22).
+
+**Lifecycle.** arm (probe spoken, window opened, timer armed) → attempts (invalid answers only) → resolve (single funnel: clear frame, cancel timer, emit, close window via the state machine's legal edges) → optional sequential re-arm (§ADR-MTC-01). Terminal outcomes: answered, defaultExecuted, candidateSelected, exhausted, cancelled, escaped, bargedIn, timedOut, superseded (a confirmation pend while a frame exists — defensive; §14). Every terminal outcome clears all frame state; nothing survives the turn-resolution funnel.
+
+### 10. The interception seam and its strict ordering
+
+The block (ADR-MTC-02 position) runs at the top of `route()`, after the emergency check and the confirmation hook. Pseudocode with the classified outcomes:
+
+```swift
+if let frame = coordinator?.activeDialogueFrame {          // live (expiry-checked on read)
+    // The raw transcript went through TranscriptSanityGuard above (:747-758).
+    let prepared = preparedForDialogue(raw)                // §11: sanitise + shared input seam
+    switch DialogueAnswerPath.classify(prepared, frame: frame, catalog: catalog) {
+    case .expired:                    // deadline passed on read: liveFrame already dropped it
+        break                                             // fall through — fresh command
+    case .escape:
+        coordinator.resolveDialogueFrame(.escaped); speak(key: "dialogue.escape"); return .unrecognised(transcript: raw)
+    case .cancel:
+        coordinator.resolveDialogueFrame(.cancelled); speak(key: "dialogue.cancelled"); return .unrecognised(transcript: raw)
+    case .amendment(let content):     // "होइन, दुर्गा भजन" — a negative carrying content is an answer
+        return executeDialogueAnswer(content, frame: frame, raw: raw)          // §11
+    case .bargeIn:
+        coordinator.resolveDialogueFrame(.bargedIn)       // fall through — the ladder executes it (ADR-MTC-05)
+    case .answer(let a):
+        return executeDialogueAnswer(a.value, frame: frame, raw: raw)          // §11
+    case .invalid:
+        let n = coordinator.noteDialogueAttempt()
+        if n < DialogueConfig.maxProbes { speakProbeAgain(frame) }             // re-probe
+        else { return resolveDialogueExhaustion(frame, raw: raw) }             // §11 table
+        return .unrecognised(transcript: raw)
     }
-    static let defaultFetchTimeoutSeconds: TimeInterval = 8   // configurable; mirrors YouTubeTool
-
-    static func apiSearchURL(query: String, market: String?) -> URL?        // GET api.spotify.com/v1/search
-    static func parseSearchJSON(_ data: Data) throws -> TrackResult         // shape + ID validation
-    static func fetchTopTrack(query: String, accessToken: String,
-                              transport: LocalToolTransport,
-                              timeoutSeconds: TimeInterval) async throws -> TrackResult
-    static func playTrack(uri: URL, accessToken: String,
-                          transport: LocalToolTransport,
-                          timeoutSeconds: TimeInterval) async throws      // PUT /v1/me/player/play
-    static func trackURI(id: String) -> URL?          // spotify:track:<id>; nil unless id matches the shape
-    static func searchURI(query: String) -> URL?      // spotify:search:<percent-encoded>
-    static func open(_ url: URL, opener: CallLinkOpening) -> OpenOutcome   // .opened / .notOpened
-    enum OpenOutcome { case opened, notOpened }
-    static func isSpotifyIdentifier(_ id: String) -> Bool   // base62, 22 chars — the validated shape
 }
 ```
 
-**Hardening rules (NFR-SP-008, non-negotiable):**
+**Ordering guarantees this block carries (each one binding):**
 
-1. **Identifier validation before any URI construction.** A track ID is accepted only if it matches the Spotify identifier shape (base62 `[A-Za-z0-9]`, 22 characters — the shape every real Spotify ID has; the requirement's synthetic placeholder `01AbCdEfGhIjKlMnOpQrStU` is this shape). A hostile or malformed identifier (scheme text, `//`, quotes, control characters, traversal, over-long, percent-encoded traps) → the result is `unusableResult` → never a URI, never a partial URI.
-2. **Titles never enter URIs.** The title is used only in the spoken confirmation (`spotify.playing`); it is never a URI component and never written to any log (ADR-SP-15).
-3. **Query components are percent-encoded** via `URLComponents`/`URLQueryItem`; the search URI is built from the encoded query only.
-4. **Scheme allowlist.** The tool constructs only `spotify:` URIs. (The YouTube fallback uses the pre-existing YouTube URI shapes unchanged.) A hostile corpus test asserts zero constructions/openings outside the allowlist.
-5. **Every failure has a case** in `FetchError` and maps to an explicit matrix row (§12) — no fabrication, no guess, no silent forward.
-6. **Timeout is a parameter** (`timeoutSeconds`), default 8 s, mirroring `YouTubeTool`; the negative budget is the caller's composition (search + play attempt ≤ 16 s worst case, §20).
+1. **Emergency first, absolute** (S1): the check at `:779-783` runs above the block on every utterance; the block never re-evaluates, weakens or delays it; a hostile answer containing an emergency keyword is dispatched as an emergency before the block exists in its path (FR-MTC-011 scenario 3).
+2. **Confirmation hook intact**: mutually exclusive windows (ADR-MTC-03). Enforcement is coordinator-side and structural: `startDialogueFrame` returns false (and the caller then executes today's non-probe behaviour — a defensive-only path, unreachable on the current ladder) when `isAwaitingConfirmation`; every confirmation-pending seam clears any live frame with `.superseded`. The hook's 100 lines stay byte-identical.
+3. **Interception armed exactly while the window is live** (FR-MTC-009): reading `activeDialogueFrame` after expiry returns nil and drops the frame (no half-open window); every resolution disarms. A stale frame cannot swallow a later command.
+4. **Barge-in falls through, never duplicates**: the classifier uses pure predicates only (ADR-MTC-05); after `resolveDialogueFrame(.bargedIn)` the utterance executes exactly once, in the stages below, with all their confirmation tiers.
+5. **Med-ack F3 discipline** (the app-launch lesson at `:847-862`): a dose acknowledgement mid-probe is a barge-in, reaches the safety net (`:897`), and is acknowledged exactly as today.
+6. **Ambiguity is an answer**: only a *strong* different-command match drops the frame (FR-MTC-012 scenario 2).
 
-### 15. Account linking (OAuth) and token lifecycle (FR-SP-008/010, NFR-SP-009)
+### 11. Answer capture and the deterministic merge
 
-**Flow (caregiver-performed, `GoogleAccountSession` precedent):** a new `SpotifyAccountSession` + `SpotifyAuthFlow` under a new `Services/Spotify/` group, `@MainActor`, with a `presenter` closure resolved at present time (the calendar-share pattern: `session.presenter = { [weak self] in self?.topPresentingViewController() }`).
+**Preparation (step 1 of FR-MTC-006).** The answer text passes the exact seam every turn uses: `InputSanitiser.sanitise(_:level: .quarantine)` (the AM-3/CL-6 boundary) followed by the shared input seam (STT-error corrector + dialect canonicalizer, `LocalBrainChain.swift:281-282`). This feature extracts that pair into one shared helper (`IntentTranscriptPreparation.prepare(_:seam:)`) called by both `LocalBrainChain.turnInput` and the dialogue path — one implementation, two callers, byte-identical behaviour. The router reaches it through a new coordinator protocol member `prepareDialogueAnswerText(_:) -> String` (the router does not own the seam). `InputSanitiser`'s 200-Character cap applies unchanged; an over-length answer is an invalid answer (re-probe/default), not a truncated merge.
 
-1. **Authorize** — `SpotifyAuthFlow.authorizeURL(clientID:redirectURI:scopes:state:challenge:)` builds the request with **all required scopes at sign-in** (`addScopes` lesson: consent-screen-only scopes caused the calendar-share 401; here the scopes are on the authorization request itself): `user-read-private`, `user-read-playback-state`, `user-modify-playback-state`, `response_type=code`, `code_challenge_method=S256`, a fresh `state` nonce, and the redirect URI constant.
-2. **Present** — `ASWebAuthenticationSession` via a thin seam (`SpotifyAuthFlow` protocol + production implementation) with `callbackURLScheme` = the app scheme; the seam is injectable so tests drive callback URLs without UI or network.
-3. **Validate the callback (exact match, zero exceptions)** — parse the callback with `URLComponents`; require scheme `sahayak-spotify`, host `callback`, empty path, `state ==` the stored nonce, presence of `code`, absence of `error`; **exact match against the registered redirect constant**. Any mismatch (`redirectMismatch`, `stateMismatch`) → rejected, **nothing stored**, no token/code in any log (NFR-SP-009; security focus "redirect validation").
-   - Scheme note: `sahayak-spotify://callback` is the design's plan of record (single constant shared by `Info.plist` `CFBundleURLTypes`, the Dashboard registration and the validator). If the Dashboard refuses the custom scheme at registration (OD-S2 step 2), the constant is re-shaped (e.g. the SDK-style `spotify-<clientid>://callback` form) and **which scheme is registered is the only thing that changes** — the validator's exact-match discipline is untouched. `[design-l2 / security-review: confirm the accepted scheme shape against the live Dashboard at registration time; no other mitigation depends on the specific string.]`
-4. **Exchange** — `POST https://accounts.spotify.com/api/token` (form-encoded): `grant_type=authorization_code`, `code`, `redirect_uri` (the same constant), `client_id`, `code_verifier`. No secret (ADR-SP-01). Non-200 → `exchangeFailed(statusCode:)` → `linkFailed` status; nothing stored.
-5. **Verify before trusting** — `GET https://api.spotify.com/v1/me` with the fresh token: 200 required; `product` extracted (`premium` → remote-capable); the granted scope string from the token response is checked to contain the required scopes (`missingScopes` → session stored but marked not usable, honest outcome at request time — the calendar-share "verify, don't assume" precedent). Then the single `spotify.session` record is written (§16).
-6. **Refresh, bounded** — access tokens expire (~1 h); refresh via `grant_type=refresh_token` with the `client_id` + `refresh_token`, at most **one automatic attempt per request** (§20). `invalid_grant` → the grant is dead: **wipe the record** and treat as unlinked (row 10); transport failure → row 11. A refresh failure never loops and never hangs (FR-SP-010, NFR-SP-001).
-7. **Unlink** — caregiver action: delete the single record (**local wipe is the guarantee** — ADR-SP-14; Spotify exposes no third-party revocation endpoint, so no remote revoke is attempted or claimed), emit a content-free `spotify_unlink` event, status → not linked. A later provider-side `invalid_grant` on a stale grant is also treated as unlinked (row 10). Re-link works through the same flow with no residual state (FR-SP-010 scenario 4).
-8. **Status model** — `.notLinked` / `.linked(product: premium|free|unknown)`; the Settings surface (FR-SP-016) and the router read the same observable store, so the displayed status is never optimistic (NFR-SP-010 scenario 4).
+**Capture ladder (FR-MTC-005), on the stripped value:**
 
-**Failure taxonomy (`SpotifyAuthError`, every case explicit):** `notConfigured` (no client ID → feature dormant, never a crash — the `GoogleAccountSession` missing-client-ID degradation precedent), `userCancelled`, `redirectMismatch`, `stateMismatch`, `exchangeFailed(statusCode:)`, `verificationFailed(statusCode:)`, `missingScopes(granted:)`, `refreshFailed(statusCode:)`, `revoked`, `storageFailure(StorageError)`, `networkUnavailable`. Retryability per case is tabulated in §18.
+| Form | Rule | Example |
+|---|---|---|
+| Index word | first token ∈ the localized index table (`पहिलो`/`first`→1, `दोस्रो`/`second`→2, `तेस्रो`/`third`→3), index ≤ option count | "पहिलो" → option 1 |
+| Option name | the value (or its marker-dropped variant, below) whole-token-matches a catalog alias or a candidate label alias | "दुर्गा" → the दुर्गा option |
+| Repetition | same as option name — a repetition *is* a name match ("दुर्गा भजन बजाऊ" → strip → "दुर्गा भजन" → marker-dropped "दुर्गा" matches) | FR-MTC-005 scenario 3 |
+| Free-form | any non-empty stripped value not matching an option — **always accepted** | "दशैं दुर्गा भजन" |
 
-### 16. Credential store and data model (FR-SP-009, NFR-SP-007)
+**Scaffold strip (step 2).** Remove the *scaffolding*: the music verb family and particles (reusing the extractor's own drop vocabulary through a new narrow accessor on `KeywordIntentRule` — one vocabulary source, no duplication), probe-echo words (the `dialogue.probe.*` question words), and a leading index word in index form. **Markers are not stripped from the free-text fallback** (FR-MTC-006 keeps "दशैं दुर्गा भजन" intact), but a marker-dropped *variant* of the value is also compared for **option matching** — that is how "दुर्गा भजन" still canonicalises as the दुर्गा option. If nothing survives the strip, the answer is invalid (§ADR-MTC-04 step 6); a marker-only answer ("गीत चलाऊ") is exactly that case, not a valid answer.
 
-**One encrypted record, one key** (ADR-SP-08): `SpotifyCredentialStore: ObservableObject` in `Services/Spotify/` + `SpotifyCredentialStore.swift`, backed by the existing `EncryptedLocalStorage` seam (Keychain-backed, `kSecAttrAccessible` + `WhenUnlockedThisDeviceOnly` = Data Protection Complete; `StorageError { encryptedWriteFailed, encryptedReadFailed }`).
+**Catalog canonicalisation (step 3).** Whole-value alias match (not per-token substitution): "दुर्गा" → canonical query `"durga bhajan"` (FR-MTC-006 scenario 2); "दशैं दुर्गा भजन" matches nothing whole ⇒ the sanitised free text is kept as the value (scenario 3). **Never reject, never invent.**
 
-```swift
-struct SpotifySessionRecord: Codable, Equatable {
-    var accessToken: String
-    var refreshToken: String
-    var expiry: Date
-    var product: String?      // "premium" | "free" | nil (unknown)
-    var scope: String?        // granted scope string (verification)
-    var linkedAt: Date
+**Merge and dispatch (steps 4–5).** The answer fills the missing slot on `activeCommand` (music: the query travels the free-text `message` entity, the same field the interpreted `.music` route reads at `:3350-3352`; all other command properties unchanged). Dispatch for a merged music command: `fireMusicRequest(query:)` (`:2667`) → `runMusicTurn` (`:2684`) → the existing outcome matrix (`selectMusicOutcome` `:2614`), so pre-ack, Spotify/YouTube precedence and every honest outcome line are exactly the directly-spoken path's (NFR-MTC-012). A merged slotFill answer whose value is again degenerate does not re-probe recursively: the default behaviour of a *merged* command executes directly.
+
+**Cache bypass (FR-MTC-017, ADR-MTC-11).** The answer turn returns from the frame block before the interpreter, so `IntentCommandCache.command(for:)` is structurally unreachable on it (the cache check lives inside `interpret()`). On execution the frame path never sets `pendingTranscript` (`:3307`) — it executes `fireMusicRequest` directly or dispatches a candidate through its deterministic seam — so no answer text can reach `recordConfirmedExecution` learning (`AppCoordinator.swift:7626-7635` call site). **Recorded caveat for review:** today no confirmed-execution path records *music* commands at all (the only `recordConfirmedExecution` call site is the call path); the design keeps it that way and pins it with a test (§29) — a merged music command is not internable.
+
+### 12. Degenerate music-query detection
+
+Both intake routes share one trigger helper on the router:
+
+- **Ladder arm** (`CommandRouter.swift:1223-1234`): replace the direct call with `let outcome = KeywordIntentRule.musicQueryOutcome(from: preText)`; if `outcome.isDegenerate` → arm the slotFill frame (catalog group `bhajan.deity`, default query = `outcome.query ?? preText`) and speak the probe instead of searching; else `fireMusicRequest(query: outcome.query ?? preText)` — today's behaviour, byte-identical.
+- **Interpreted route** (`.music`, `:3336-3355`): compute the selected query exactly as today (`interpretedQuery ?? musicQuery ?? raw`, `:3350-3355`), then classify: a non-empty model query is `.content` (specific); otherwise the extractor's provenance decides; the `?? raw` transcript fallback is degenerate by definition (FR-MTC-002 scenario 3: no search is fired with the raw transcript as the query).
+
+`isDegenerate ⇔ provenance != .content`. Detection is model-free, zero prompt tokens, and applies only inside the music domain — specific queries keep today's exact behaviour (NFR-MTC-012). The trigger emits `dialogue_degenerate_query {intake: ladder|interpreted}` before arming.
+
+### 13. The did-you-mean candidate assembly
+
+Trigger points (both replace a dead-end *line*, never a live branch):
+
+1. `routeKeywordRemainder`, `.available` branch, the bare `speak(key: "router.reprompt")` at `CommandRouter.swift:2021` → when `DialogueCandidateBuilder` yields ≥1 candidate: speak `dialogue.understood.no` + `dialogue.didYouMean` with the candidates, arm the `.candidateChoice` frame, open the window. When the web-search hook answered (`:2004`) or a cloud-failure-class line was spoken (`:2013-2019`), the turn is owned — no probe. The `.downloadingBrain` / `.needsSetup` branches (`:2024-2027`) keep their truthful lines exactly (FR-MTC-004: no-brain states preserved) — a probe is also not offered there, because the honest state message is the more useful line and NFR-MTC-012 protects that behaviour.
+2. The rephrase-discard branch (`:806-809`): the taken hypothesis is captured before discarding (it is already returned by `takePendingRephraseCommand()` at `:806`); candidates = near-matches of the **original** utterance (`taken.sourceTranscript`), with the denied hypothesis appended last **only when** ≥1 near-match exists (ADR-MTC-07). With candidates: honest line + probe instead of `router.rephrase.discard`. Without: today's line stands.
+
+Candidate labels are rendered from `dialogue.candidate.*` templates (never model text) and may embed the user's own extracted query (their own words, not generated content). Picking a candidate closes the frame, then executes through that domain's existing deterministic seam (ADR-MTC-07) — "as if it had been understood". A candidate whose execution would itself need a missing slot (a degenerate music near-match) chains sequentially into a fresh slotFill frame (ADR-MTC-01), never nests.
+
+### 14. The answer window: `awaitingSlotAnswer` and the 45 s reuse
+
+Edits to `VoiceSessionStateMachine.swift` (mirroring, not refactoring, the confirmation machinery):
+
+- `VoiceSessionState` gains `.awaitingSlotAnswer` (`:9-17`); `canTransition` gains the mirrored edges — entry from `.idle` and the busy states (same set as `:29-38`), exits to `[.idle, .error, .stopped]` (`:39-40` mirrored); `supportsTalkReset` returns false in the new state exactly as in `.awaitingConfirmation` (`:75-76`: the dialog owns the turn).
+- `@discardableResult func openSlotAnswerWindow() -> Bool` mirrors `openConfirmationWindow()` `:153-181` (bridge via `.idle`; legal edges only). The coordinator exposes the same main-thread hop pattern as `AppCoordinator.openConfirmationWindow()` (`:7019-7027`).
+- `transition(to:)` (`:111-127`) gains the mirrored arms: leaving the state cancels `slotAnswerTimer`; entering it arms. `armSlotAnswerTimer()` mirrors `armConfirmationTimer()` `:183-203`, including the F6 still-open guard — `guard self.state == .awaitingSlotAnswer` — before firing `onSlotAnswerTimeout`.
+- The timer value is `config.confirmationTimeoutSeconds` (`:93-96`, 45 s) — one config field serves both windows; no new literal. The expiry callback is the silent one (ADR-MTC-08); the confirmation callback (`onConfirmationTimeout`, `:102`) and its spoken notice (`AppCoordinator.swift:3035-3036`) are untouched.
+
+**Boundary correctness (FR-MTC-013).** Two independent guards make a half-open window impossible: (a) the timer cancels on every resolution and re-checks state before firing; (b) the interception reads `liveFrame`, which auto-drops an expired frame *while the same turn continues as a fresh command*. An utterance just before expiry is an answer; the same utterance after expiry is a fresh command.
+
+**Backstops.** The 60 s voice watchdog (`AppCoordinator.swift:4865`) and the Talk-button recovery (`supportsTalkReset` semantics) are unchanged; the frame path adds no new stuck path. A watchdog fire or a Talk tap that moves the session out of `.awaitingSlotAnswer` legally also resolves the frame with `.superseded` (coordinator-side funnel). Frame timeout does **not** call `recordConfirmationTimeout()` (yes/no telemetry) — it emits `dialogue_frame_resolved {timeout}` instead.
+
+### 15. The curated on-device option catalog
+
+New resource `DialogueOptionCatalog.json` (app bundle) + `DialogueOptionCatalog.swift` loader:
+
+```json
+{
+  "version": 1,
+  "groups": {
+    "bhajan.deity": {
+      "questionKey": "dialogue.probe.bhajanKind",
+      "options": [
+        { "id": "shiva", "labelKey": "dialogue.option.bhajan.shiva",
+          "query": "shiva bhajan", "aliases": ["शिव", "shiv", "shiva"] },
+        { "id": "durga", "labelKey": "dialogue.option.bhajan.durga",
+          "query": "durga bhajan", "aliases": ["दुर्गा", "durga"] },
+        { "id": "bishnu", "labelKey": "dialogue.option.bhajan.bishnu",
+          "query": "bishnu bhajan", "aliases": ["विष्णु", "bishnu"] },
+        { "id": "devi", "labelKey": "dialogue.option.bhajan.devi",
+          "query": "devi bhajan", "aliases": ["देवी", "devi"] }
+      ]
+    }
+  }
 }
-// key: "spotify.session" — the ONE new storage key (StoragePlacementPolicy addition)
 ```
 
-- **Placement:** the key is added to `StoragePlacementPolicy.keychainResidentKeys` (the exact-set test drives the addition both directions — `StoragePlacementTests` must be consciously updated; the encrypted-file path is never used for this key).
-- **Empty/clear semantics:** `clear()` deletes the key (wipe); an unavailable/corrupt store reads as not-configured → honest degraded outcome, **no plaintext fallback ever** (NFR-SP-007 scenario 3).
-- **No weak fallbacks:** never `UserDefaults`, never a plist/file, never the repository (FR-SP-009).
-- **Observing:** the store is the single read point for the router and the Settings surface; `isLinked` is derived (`record != nil`), not stored separately, so there is no split-brain state.
-- **What is NOT stored:** the client ID lives in `Info.plist` (public, not sensitive); no client secret exists at all (ADR-SP-01); no query history, no playback history, no titles.
-- **Wipe evidence:** after `clear()`, a sweep finds no Spotify value; the unlink test asserts the store reads not-configured and the tool log/console carry no token material (FR-SP-010).
+- **Spoken labels live in `Localizable.xcstrings`** (via `labelKey`), not in the JSON — one localisation source of truth (ADR-MTC-09; the ne/en rule).
+- `query` is the canonical search string the merge substitutes on an option match (FR-MTC-006 scenario 2: दुर्गा → `"durga bhajan"`).
+- `aliases` is match vocabulary only (never spoken) — consistent with the keyword tables' precedent; matching is **whole-token** after normalisation, with the marker-dropped variant allowed, and **never Devanagari substring containment** (the repo's grapheme-cluster discipline: partial-word Devanagari substring matching is a known hazard; "गीता" must not match "गीत").
+- The default option ("जे पनि बजाऊ" / "just play anything") is not a catalog entry: it is the frame's `defaultQuery` resolution (the pending degenerate query) rendered from `dialogue.option.anyPlay`; offered on every probe (FR-MTC-003/007).
+- **Loading errors are first-class**: `DialogueOptionCatalog.load` throws `DialogueError.catalogUnavailable` (missing/malformed resource). The slotFill trigger then degrades honestly: the probe still asks, free-text-only (options omitted), and the default still resolves — never a crash, never a silent no-question. A gate test asserts the resource ships in the bundle and parses.
+- The catalog is the OD-M2 seam: a future live-search source implements the same lookup shape behind `DialogueOptionCatalog`, leaving the frame path untouched.
 
-### 17. Intent/prompt layer and golden corpus (constraint 3, NFR-SP-004, NFR-SP-006)
+### 16. Surviving the degradation ladder (PR #156)
 
-- **Core prompt: zero delta.** The music intent wording already exists in `IntentPrompt` (schema list, mapping line, music bullet), and `IntentPromptTests` pins rendered-prompt digests and the exact 2,506-character baseline — any edit breaks the pins. No core-template change is made (ADR-SP-09). The deterministic rule (§9) is the primary music classification path (zero prompt tokens), exactly the youtube route's discipline.
-- **Plugin fragment:** `SpotifyPlugin.intentContribution` mirrors `YouTubePlugin`'s shape (`actionNames: ["spotify.play"]` + a short prompt fragment). Plugin fragments compose only when plugins are active; the fragment is kept at or under the YouTube fragment's size. `[design-l2]: verify the plugin-composed budget wherever asserted; add a guard if none exists.]`
-- **Seed mirror:** no prompt-template change → no seed-mirror change (`ios/tools/check-prompt-mirror.sh` stays green trivially); if design-l2 decides any wording change, the byte-mirrored seed updates in the same change (NFR-SP-004).
-- **Golden corpus:** the 15 pinned music entries (lines 143–157) stay resolving to intent `music` (parser-level test unchanged; count reconciliation in §7). The feature's deliberate supersession is at the **dispatch** level, not the corpus: the stub is gone, so the new `CommandRouterMusicTests` records the new expectation — the same bar requests now produce a real outcome and **no music branch speaks `router.musicStub`** (FR-SP-001 scenario 4). No entry is removed or relabelled (the ≥15-per-intent test is the floor).
-- **Other stub intents:** health-query and video stubs keep their lines; the interpreter's other intents are untouched (NFR-SP-006).
+Phase 1's guarantee is structural, not defensive: **the dialogue path never consults the brain**. The interception block returns before `interpreter` is reached (the interpreter call is in the async completion of the topic stage, `CommandRouter.swift:1488`); the probe text is template-composed; the merge is deterministic (`DialogueAnswerPath`); candidate assembly is `KeywordIntentRule`-pure. Consequences:
 
-### 18. Interfaces and error taxonomy
+- **No new memory residents, no new GPU/ANE work** — the frame is a few hundred bytes of value state on the coordinator. The PR #156 hardening is untouched: the `.brainOverBudget` per-turn STT release (`WhisperPostTurnPolicy`) sees the same turn shape; the pressure-tiered picks (`PressureBrainPick` `.keep`/`.stepDown`/`.lightweight`, `:57-62`; 768 MB margin `:78`; 30 s window `:89`; INSTALLED ONLY / NEVER UP) are unaffected because no frame turn loads a model.
+- **Brain absent / downloading / needs-setup**: unchanged lines (`:2024-2027`); a live frame's *answer turn* still works because it needs no brain. The one interplay that remains a model path is the didYouMean **trigger** point when the brain is `.available` (the abstention line): with the brain degraded, the abstention branch is not reached and the truthful no-brain lines stay — correctness over cleverness (recorded, §31 R7).
+- **Degraded-mode pill**: no change; the pill reflects brain readiness, which this feature never alters.
+- **Phase 2 optional brain merge**: the frame clause (§17) lets the model classify the answer; its absence degrades to exactly the Phase 1 path ("brain unavailable → one more probe, then execute with defaults" — the frame stays deterministic-first at all times). The degraded path must not weaken the safety gates: the clause is additive prompt text under the unaltered emergency/safety stages; no ordering changes.
+- **Jetsam stance (NFR-MTC-007)**: sustained multi-turn adds bounded dialogue state and unchanged capture/STT work; DV-5 verifies with the PR #156 protocol.
 
-Every interface declares explicit error types (Agent Principles), and every async operation declares its failure mode and retryability:
+### 17. Phase 2 — the frame clause inside the pinned prompt (ships only with v17)
 
-| Operation | Failure modes (explicit) | Retryable? | User-visible outcome |
-|---|---|---|---|
-| `SpotifyTool.fetchTopTrack` | `invalidResponse(statusCode:)`, `noResults`, `malformedResponse`, `unusableResult`, `timedOut`, `transportUnavailable` | No automatic retry (bounded by design; the single refresh is a token concern, not a search retry) | §12 rows 6/7 |
-| `SpotifyTool.playTrack` | `unauthorized` (→ one refresh), `premiumRequired`, `restricted`, `noActiveDevice`, `invalidResponse`, `timedOut` | One refresh on 401 only | §12 rows 1/2 |
-| `SpotifyTool.open` | `.notOpened` | No | `spotify.appMissing` / row 4/5 |
-| `SpotifyAccountSession.link()` | `SpotifyAuthError` cases (`notConfigured`, `userCancelled`, `redirectMismatch`, `stateMismatch`, `exchangeFailed`, `verificationFailed`, `missingScopes`, `storageFailure`, `networkUnavailable`) | User-initiated re-attempt yes; automatic no | Settings status + `spotifySettings.*` message |
-| `SpotifyAccountSession.validAccessToken()` | `refreshFailed`, `revoked`, `networkUnavailable`, `storageFailure` | 1 automatic refresh per request | Rows 10/11 |
-| `SpotifyAccountSession.unlink()` | `StorageError` (`encryptedWriteFailed/ReadFailed` — surfaced, never swallowed) | User re-attempt yes | Status flips only on a confirmed wipe |
-| `fireMusicRequest` (router) | Terminal by construction: every branch ends in a `speak` (the matrix is total) | n/a (a new turn starts fresh) | Exactly one spoken line per request |
+Per ADR-MTC-12: 5th interpolation, inserted after the `User said:` line; defaulted parameter `frameClause: String? = nil` keeps Phase 1 byte-identical; `.raw` framing untouched. **The same change** must: (1) update `tools/train-intent/seeds/prompt_template.txt` byte-identically (the `IntentPrompt.swift:44-55` identity rule); (2) extend `check-prompt-mirror`'s anchor validation for `{frame_clause}` (its four-interpolation anchors become five, with the gate's self-test mutation updated); (3) update the `PinnedSurfaceGuardTests` digest literals (`:61`, `:63`) and the `IntentPromptTests` 2,506 baseline + worst-case recomputation (`:482-495`) — the 3,000-Character ceiling (`:126`) and the 1,024-token cap (`LlamaCommandInterpreter.swift:1199`) stay unchanged; (4) the v17 iteration trains on follow-up turns (golden corpus + synthetic follow-ups: probe → answer pairs with the frame clause in-prompt), per FR-MTC-018. Budget discipline: clause ≤300 Characters (≥494 Characters of slack under the ceiling today; worst-case 2,586 → ≤2,886); the prompt-identity drift hazard is managed by making clause + mirror + pins + digest one atomic change (the seed and template can never diverge).
 
-All async work runs through the `LocalToolTransport` seam so failure injection is deterministic in tests. No operation blocks the main thread on network (URLSession async + main-actor marshalling). No API returns an untyped error or silently succeeds (root Agent Principle).
+### 18. Phase 3 — reminder/calendar rollover (deferred, designed additively)
+
+The same frame path carries the existing stateless missing-slot re-prompts for reminders/calendar: `DialogueSlot` gains `.reminderTime`, `.calendarTitle`, `.calendarTime`; their trigger points are the current handlers' ask-lines (`handleSetReminder` `CommandRouter.swift:3462`, `handleCreateCalendarEvent` `:3510`) converted to frame arms; the answer merge canonicalises a time expression through the existing `NepaliTimeParser` path instead of the music catalog; the `.confirm` tier behaviour is unchanged (the merged command still confirms). RepetitionGuard interplay (FR-MTC-019): the frame resolves before the confirmation pend, so the guard sees the merged command only on confirmed execution — the existing recording seam (`AppCoordinator.swift:7626-7635` region). No Phase 3 trigger registers in Phase 1 (ADR-MTC-15; OD-M4).
 
 ### 19. Concurrency and isolation
 
-- **Actor confinement:** `SpotifyAccountSession` and `SpotifyCredentialStore` are `@MainActor` (`ObservableObject` state read by UI and the router). The router's music path runs on the main thread like the rest of the voice stack; network work hops off via the transport seam and results marshal back with `await MainActor.run` (the `fireYouTubePlay` pattern).
-- **Parallel searches:** the Spotify and YouTube legs are child tasks joined before selection; each carries its own configurable timeout; the join is bounded by `max(provider budget)`, satisfying the 10 s outcome budget and the ≤16 s sequential-worst-case assertion (search + play attempt).
-- **Turn overlap:** a new turn does not cancel an in-flight music attempt (parity with the YouTube stage; accepted existing behaviour). The outcome delivery is idempotent per attempt; observability records both attempts distinctly. `[design-l2: if a shared in-flight tracker is introduced later, it must stay inside the existing seams.]`
-- **No shared mutable state across components:** the store is the single source of truth; the tool is stateless statics; the plugin holds only the store reference (the `YouTubePlugin` shape).
-- **ASWebAuthenticationSession** presentation is main-actor and presenter-resolved at call time (no retained view-controller references).
-- **Deadlock/livelock guards:** no locks are introduced; the only cross-thread reads are the store's main-actor-confined values; refresh retries are counted (≤1/request) and open attempts are single-shot.
+- **Frame state is main-queue-confined** — the same contract as `VoiceSessionStateMachine` (all mutations on the main queue; callers hop as today, `AppCoordinator.openConfirmationWindow()` `:7019-7027` pattern). Router reads/writes travel the coordinator hooks; no lock, no actor needed.
+- **Turns never overlap** — `VoicePipeline` serialises utterances (the `pendingTranscript` doc comment `:3302-3306` is explicit: single in-flight interpretation). The interception therefore never races a second turn; a barge-in utterance is the *same* turn continuing into the ladder.
+- **Speech is serialised by the existing actor** — `ReplySpeakLane` (FIFO) orders the probe and any outcome line exactly as it orders today's replies.
+- **Timer lifecycle** — `slotAnswerTimer` is a `Task` cancelled on every resolution and state exit; the F6 guard re-checks the window before firing (a queued callback after cancellation cannot speak — it is silent by design anyway; it may only clear an already-clear frame).
+- **Candidate execution is synchronous with the turn** — no new async surface; the seams preserve their own async behaviour below (music search etc. unchanged).
+- **Isolation tests**: the plan (§29) includes concurrent-ish sequences (answer-then-timeout ordering, timeout-then-answer, resolution-then-second-resolution) proving idempotent clearing.
 
-### 20. Configurable parameters (timeouts are configuration — Agent Principles)
+### 20. Configuration parameters
 
-| Parameter | Default | Owner / where | Notes |
+| Knob | Default | Home | Notes |
 |---|---|---|---|
-| `spotify.fetchTimeoutSeconds` | 8.0 | `SpotifyTool` (injectable; mirrors `YouTubeTool.fetchTimeoutSeconds`) | Per provider call: search, `/v1/me`, play attempt each bounded |
-| `music.outcomeBudgetSeconds` (assertion, not code) | 10.0 | Test assertion (NFR-SP-001) | When ≥1 provider answers in budget |
-| `music.negativeBudgetSeconds` (assertion) | 16.0 | Test assertion (NFR-SP-001) | Two sequential provider budgets worst case; no path waits longer before speaking |
-| `spotify.maxRefreshAttemptsPerRequest` | 1 | Session | Bounded, counted (FR-SP-010) |
-| `spotify.capabilityStalenessSeconds` | 3,600 | Session/status | Refresh `product` on TTL or on next successful refresh |
-| `music.maxQueryLength` | 100 | Extractor (mirrors `YouTubeRoute.maxQueryLength`) | Bounds URIs and search params |
-| PKCE verifier/challenge lengths | 43–128 / S256 | `SpotifyAuthFlow` | Spec-fixed values, not tunables |
-| `spotify.linkFlowTimeoutSeconds` | 300 (user-interactive) | Session | The authorization is user-paced; the bound guards abandoned sessions |
+| `DialogueConfig.maxProbes` | 2 | `DialogueManager.swift` | OD-M1; counts probes spoken |
+| `DialogueConfig.maxCandidates` | 3 | same | FR-MTC-004 ≤2–3 |
+| `DialogueConfig.maxSlotOptions` | 4 | same | FR-MTC-003 ≤3–4 |
+| Window timeout | `confirmationTimeoutSeconds` = 45 s | `VoiceSessionStateMachine.Config` `:93-96` | single source for both windows; never a new literal |
+| Capture timeout / watchdog | 22 s / 60 s | `VoicePipeline.swift:130`; `AppCoordinator.swift:4865` | unchanged envelopes the frame path must not exceed |
+| Catalog resource | `DialogueOptionCatalog.json` v1 | bundle | §15 |
+| `maxMusicQueryLength` | 100 | `KeywordIntentRule.swift:722` | unchanged |
 
-No timeout is a bare literal in the new code; each is a parameter with an injected default, mirroring the project's tool pattern.
+Invariant: no numeric literal is introduced in the frame path; tests inject small values (short timeouts, cap 1) to exercise boundaries without wall-clock waits.
 
-### 21. Security architecture (STRIDE pre-map for `security-design-review`)
+### 21. Error taxonomy and failure modes
 
-| STRIDE | Threat (this feature) | Mitigation (designed) | Requirement |
+```swift
+enum DialogueError: Error, Equatable {
+    case windowBusy          // arm while a window is open (defensive; unreachable on the current ladder)
+    case noResolution        // arm with neither a candidate list nor a default to resolve
+    case catalogUnavailable  // resource missing/malformed
+    case emptyMerge          // merge produced no value (answer was invalid — callers treat as re-probe)
+}
+```
+
+| Failure | Behaviour | Retryable |
+|---|---|---|
+| Catalog load fails | probe asks free-text-only + default; `dialogue_*` event with `error_code` | next launch (resource fixed) |
+| Answer resolves to nothing | invalid answer → attempt++ → re-probe / exhaustion | yes, bounded by `maxProbes` |
+| Brain absent on answer turn | nothing to fail — Phase 1 path is brain-free | n/a |
+| Speech lane busy | probe/outcome queues FIFO (existing lane) | n/a |
+| Window expiry races a resolution | first resolution wins; the second is a no-op on a cleared frame (idempotent `resolve`) | n/a |
+| Merged command execution fails | the music path's own honest failure lines (unchanged) | per existing path |
+
+### 22. Privacy, log safety, observability, localisation
+
+**No new egress (NFR-MTC-003).** Probes, candidates, the catalog and the merge are on-device; the only network traffic on the executed path is the existing music search (Spotify-feature-owned). The feature adds zero calls.
+
+**No content in logs (NFR-MTC-004, S3, B2/T-050).** Events are closed-vocabulary and count/enum-shaped only: `dialogue_degenerate_query {intake}`, `dialogue_probe_spoken {probe_kind, attempt, option_count}`, `dialogue_answer {capture_form, merge_source}`, `dialogue_frame_resolved {outcome}`. New metadata keys (`probe_kind`, `capture_form`, `merge_source`, `intake`, `attempt`, `option_count`) join `LogSanitiser.allowedKeys` with fixed vocabularies, following the existing justified-key comment convention. The new source files (`DialogueManager.swift`, `DialogueAnswerPath.swift`, `DialogueCandidateBuilder.swift`, `DialogueOptionCatalog.swift`) join the release-log gate's `FEATURE_ROOTS` (`ios/tools/check-release-log-safety.py:141`) with a fixtures entry, so any future console write or content-derived field in them fails `ios/tools/check-release-log-safety.sh` (wired into `ios/build.sh`). The transcript-recording policy is unchanged (`recordTranscript`, `CommandRouter.swift:741`); probe text rides the existing assistant-reply surface via `noteAssistantSpoke` (`:3864`) — the chat-history parity the requirements want, and the same on-device surface replies already use.
+
+**Localisation (NFR-MTC-006).** New `dialogue.*` keys in `Localizable.xcstrings` (sourceLanguage en), all ne+en, with draft copy:
+
+| Key | ne (draft) | en (draft) |
+|---|---|---|
+| `dialogue.probe.bhajanKind` | कस्तो भजन? %@ … वा आफैँ भन्नुहोस् | What kind of bhajan? %@ … or say it yourself |
+| `dialogue.option.bhajan.shiva/durga/bishnu/devi` | शिव / दुर्गा / विष्णु / देवी | shiva / durga / bishnu / devi |
+| `dialogue.option.anyPlay` | जे पनि बजाऊ | just play anything |
+| `dialogue.retry` | फेरि सोध्छु — | Let me ask again — |
+| `dialogue.understood.no` | मैले बुझिन। | I didn't understand. |
+| `dialogue.didYouMean` | के तपाईंको मतलब %@ हो? | Did you mean %@? |
+| `dialogue.candidate.<domain>` | (per-domain templates, e.g. युट्युबमा %@? ) | (e.g. YouTube: %@?) |
+| `dialogue.cancelled` | ठीक छ। | OK. |
+| `dialogue.escape` | ठीक छ, फेरि भन्नुहोस्। | OK, tell me again. |
+| `dialogue.exhausted` | मैले बुझिन। अर्को पटक फेरि भन्नुहोस्। | I didn't understand. Try again another time. |
+| `dialogue.timeout` | — | — (intentionally absent: expiry is silent) |
+
+Matching vocabularies (index words, escape variants) are input tables in Swift, mirroring `isYesResponse`/`isNoResponse` (`:3801-3809`) — not spoken strings, not xcstrings. Voice-only accessibility (NFR-MTC-009): every option is spoken by name and answerable as a single word; no visual affordance required; the chat-history copy is a transcript, not an interaction requirement.
+
+### 23. Auth and sensitive-action posture
+
+No auth changes of any kind: no new credential, no new store, no new permission. The frame cannot authenticate, cannot bypass a tier, and cannot reach a sensitive action except through its existing gate:
+
+- A merged command is the **same resolved command** that would have executed anyway; its tier is unchanged (music = `.free`).
+- Candidate lists are restricted to safe fast-path domains (§ADR-MTC-07) — no `.call`/`.sendMessage`/`.setReminder`/`.createCalendarEvent` candidate can be constructed in Phase 1, by construction, not by filtering.
+- A barge-in command executes through the normal ladder with its normal confirmation tiers (FR-MTC-012 scenario 1: the call still asks).
+- The answer text is data with exactly two possible effects: fill one slot value or select one enumerated candidate. It never selects an execution path, never names a contact, never names a time (§24 E-row).
+
+### 24. STRIDE pre-map for security-design-review
+
+| Threat | Surface | Mitigation (design) | Verified by |
 |---|---|---|---|
-| Spoofing | Malicious app intercepts the OAuth callback scheme | PKCE S256 (`code_verifier` never leaves the device flow); exact redirect match; state nonce; nothing stored on mismatch | NFR-SP-009, ADR-SP-01 |
-| Spoofing | Fake "connected" state | Verification (`/v1/me` + scope check) before first trusted use; status derived from the store only | FR-SP-008, FR-SP-016 |
-| Tampering | Hostile provider result crafts a URI/scheme | Identifier shape validation, percent-encoding, titles never in URIs, scheme allowlist, hostile corpus test | NFR-SP-008 |
-| Tampering | Token tampering at rest | Encrypted store only (Keychain, Data Protection Complete); no plaintext fallback | NFR-SP-007 |
-| Repudiation | Linking/unlink actions unverifiable | Content-free `spotify_link` / `spotify_unlink` events (who/what/outcome, no values) | NFR-SP-002 |
-| Information disclosure | Secrets/keys in logs or URLs | No app secret exists; header-only credentials; no query/token/body in any log; release gate covers new paths | NFR-SP-002, §22 |
-| Information disclosure | Egress beyond the two providers | Allowlist + seam-level egress assertions | NFR-SP-003 |
-| Denial of service | Unbounded waits/retries; revoked-grant loop | Configurable budgets; ≤1 refresh/request; no retry loops | NFR-SP-001, FR-SP-010 |
-| DoS | Token endpoint rate limits | Bounded attempts; honest unavailable outcome | NFR-SP-001 |
-| Elevation of privilege | Over-broad scopes (library/playlist writes) | Minimal scope set (3 read/control scopes); playback read-only, user-initiated | Feature scope; FR-SP-016 |
-| EoP | Client secret extraction | No secret shipped (ADR-SP-01) | Constraint 2 |
+| **S**poofing | answer claims authority ("यो फोन गर" as an answer) | answers cannot trigger sensitive actions (candidates safe-only; barge-in uses normal tiers); no auth surface touched | §23; barge-in tests |
+| **T**ampering | crafted/corrupted answer text | sanitised at the boundary (`InputSanitiser` `.quarantine`, 200-char cap) before any use; merge is pure over the stripped value; no prompt in Phase 1 | §11; hostile corpus |
+| **R**epudiation | dialogue resolutions | closed-vocabulary events per resolution; transcript recording unchanged (`:741`) | §22; event tests |
+| **I**nformation disclosure | probe/answer text in logs, new egress | no content in events; allow-list keys; FEATURE_ROOTS coverage; zero new network calls; chat surface is the existing on-device reply path | §22; log gate; egress grep gate (§29) |
+| **D**enial of service | trap loops, probe fatigue | one-deep; ≤2 probes; 45 s silent timeout; cancel/escape/barge-in recoveries; idempotent resolve; watchdog untouched | §10, §14; trap tests; DV-2/3 |
+| **E**levation of privilege | answer drives execution | answer ∉ control flow: slot value or enumerated pick only; candidates free-domain-only; emergency above everything | §10, §23; injection corpus |
 
-Also for review: deep-link handling treats Spotify as a hand-off (the app opens another app; no data is fetched from the opened page), and the OAuth `presenter` retains nothing. The full threat model with residual risks is the `security-design-review` artifact.
+The workflow's security focus areas land as: emergency precedence mid-dialogue (§10 guarantee 1, tested in DV-3-adjacent suites); free-text answer injection (§11/§24 T+E); frame-trap resistance (§10, §14); log sanitisation of probe/answer text (§22); no new egress (§22); degraded-brain path must not weaken safety gates (§16 — nothing on the dialogue path gates safety).
 
-### 22. Privacy, log safety and compliance
+### 25. Infrastructure and build topology
 
-- **No new egress beyond the allowlist** (§8): `accounts.spotify.com`, `api.spotify.com` + existing YouTube endpoints; music text never reaches a cloud LLM (NFR-SP-003); deep links are OS hand-offs, not fetches.
-- **Log discipline (stricter than YouTube — ADR-SP-15):** no Spotify credential, token, code, verifier, authorization header, query text, title, or raw provider body reaches any console print, observability event, telemetry, or the encrypted tool log. The tool-log entries use `kind: .spotify` with query `""` and response `""` on success; failure entries carry the query-free spoken line the user heard (mirroring the YouTube failure-entry shape, minus the query). Observability events carry only non-content classifications (component `spotify`, outcome vocabulary).
-- **Release gate:** `ios/tools/check-release-log-safety.sh` (build-blocking, wired into `ios/build.sh` ahead of every test scope) is extended: add the Spotify feature root(s) (e.g. `Services/Spotify/`) to `FEATURE_ROOTS`, and add a rule + fixture pair (positive/negative) so a re-introduced raw print or provider-body print in the new paths fails the gate. The new files under `Services/Voice/` and `Services/Plugins/` must be confirmed inside existing coverage or added explicitly. `[design-l2: verify which roots the gate already sweeps; make the addition deliberately, per the LiveTranslate precedent.]`
-- **Pre-release device check (project gate):** DV-7 (§6) runs the console/sysdiagnose capture over the music paths.
-- **Privacy disclosure (FR-SP-016, amendment):** Settings states plainly (ne/en) that linking sends music queries and playback activity to Spotify and nothing else (§23); the App Store privacy entries for this integration are recorded in the release checklist (NFR-SP-011); `Info.plist` carries the `spotify` query scheme (no new *UsageDescription is needed — no new permission-protected API is touched).
-- **Data at rest:** one encrypted session record; wiped on unlink; no query/playback history stored anywhere (NFR-SP-007).
-- **Consent posture unchanged:** recorded cloud exceptions (Open Decisions 12/13) are not invoked by this feature's music path.
+**No Docker, no backend, no services.** This is an iOS-only, on-device feature (Feature Constraint 10): one app target, one test bundle, one bundled JSON resource. Build/test topology is the existing one: `ios/build.sh` (which runs the release-log gate ahead of test scopes), the focused-suite discipline per unit (project rule: focused tests + typecheck per unit; full suite once at the end), and the DV harness on Anzaan. The Phase 0 prerequisite (PR #156 smoke) and the DV sessions use the existing devicectl/deploy script (`ios/tools/deploy` path, `5bf8685` recipe) and the JetsamEvent pull protocol.
 
-### 23. Settings surface and localisation (FR-SP-016, NFR-SP-005/010/011)
+### 26. Phase coverage
 
-**`SpotifySettingsView`** (new, in `SettingsView.swift`, mirroring `YouTubeSettingsView` at line 768) + a `SettingsDestination.spotify` entry in `SettingsTabs.swift` (title key, icon, `hiddenSheetRows` inclusion like `.youtube`, view mapping). Contents:
-
-- **Status row** — not linked / linked (Premium) / linked (free tier — "playback opens the Spotify app") / link failed, derived from the store (never optimistic).
-- **Actions** — Link (starts `SpotifyAccountSession.link()`, caregiver framing), Unlink with the `removeConfirm` confirmation pattern (wipes; §16). **No credential/secret field** (ADR-SP-01); if the recorded contingency is ever activated, the field uses the existing `credentialField` secure-entry style.
-- **Privacy disclosure** — `spotifySettings.privacy`, plain language, ne/en: what is sent (the spoken query, to Spotify), what comes back (search results), what is not sent (nothing else; no health/family data); mirrors `youtubeSettings.privacy`'s shape. Illustrative: "गीत खोज्न तपाईंले भन्नुभएको कुरा स्पोटिफाइमा पठाइन्छ; अरू केही पठाइँदैन।" / "What you say is sent to Spotify to find the music; nothing else is sent."
-- **Rollout note** — `spotifySettings.rolloutNote` while Development mode limits service (OD-S2); never hides the reality.
-- **Accessibility (NFR-SP-010):** 44×44 pt controls, 18 pt-equivalent body text via appearance tokens, VoiceOver labels for all controls, status announced as text not colour.
-- **Key inventory (ne/en, both required):** `plugin.spotify.name`; `spotify.playing`, `spotify.openApp`, `spotify.openSearch`, `spotify.notFound`, `spotify.unavailable`, `spotify.notLinked`, `spotify.appMissing`, `spotify.rolloutLimited`; `spotifySettings.title`, `.status.linked`, `.status.notLinked`, `.status.freeTier`, `.status.linkFailed`, `.link`, `.unlink`, `.removeConfirm`, `.privacy`, `.rolloutNote`; `toolLog.kind.spotify`. No hardcoded user-facing literals anywhere in the new paths (NFR-SP-005).
-
-### 24. Infrastructure and build topology
-
-- **No services, no Docker, no backend** (constraint 6). The only "infrastructure" surfaces are: the Spotify Developer Dashboard (console-side, §5), the two provider hosts, and the app's own build gates.
-- **Build/gates:** `ios/build.sh` remains the canonical runner (`test:unit`, `test:impact`, etc.); the log-safety gate stays wired ahead of every scope; the prompt-mirror gate stays green (no template change).
-- **Project file:** new Swift files are added to the Xcode target (`project.pbxproj`) in the same change; tests mirror the source tree (`test:impact` mapping convention).
-- **Storage placement:** one new keychain-resident key `spotify.session` (§16); `StoragePlacementTests` updated deliberately.
-- **Info.plist:** `LSApplicationQueriesSchemes` += `spotify`; `CFBundleURLTypes` += the Spotify callback scheme; `SpotifyClientID` string. No new permission usage descriptions.
-- **Localization catalog:** `Localizable.xcstrings` gains the §23 keys (ne + en both present; a missing translation is a failure).
-- **Android:** out of scope (project constraint; feature constitution scope).
+| Phase | Content | Sections | Ships |
+|---|---|---|---|
+| 0 | PR #156 device smoke (outstanding) | §6, §25 | prerequisite, before Phase 1 DV |
+| 1 | Frame + both probes + catalog + deterministic merge + window + gates + tests | §9–§16, §19–§24, §27–§29 | first, alone (OD-M3) |
+| 2 | v17 fine-tune + frame clause + brain-assisted merge | §17 | only together with v17 |
+| 3 | Reminder/calendar rollover + RepetitionGuard | §18 | separately (OD-M4) |
 
 ---
 
 ## Components
 
-### 25. Component inventory
+### 27. Component inventory
 
-| ID | Component | Type | File(s) | Primary requirements |
+| ID | Component | File (repo-relative) | New/Changed | Phase |
 |---|---|---|---|---|
-| C-SP-01 | `SpotifyTool` — search, playback call, deep-link construction, hardening | NEW | `Services/Voice/` + `SpotifyTool.swift` | FR-SP-007, NFR-SP-008, NFR-SP-001 |
-| C-SP-02 | `SpotifyCredentialStore` — the one encrypted session record | NEW | `Services/Spotify/` + `SpotifyCredentialStore.swift` | FR-SP-009, NFR-SP-007 |
-| C-SP-03 | `SpotifyAccountSession` — link/unlink/refresh/status | NEW | `Services/Spotify/` + `SpotifyAccountSession.swift` | FR-SP-008, FR-SP-010, NFR-SP-009 |
-| C-SP-04 | `SpotifyAuthFlow` — PKCE + `ASWebAuthenticationSession` seam + redirect validation | NEW | `Services/Spotify/` + `SpotifyAuthFlow.swift` | NFR-SP-009, ADR-SP-01 |
-| C-SP-05 | `SpotifyPlugin` — `AssistantPlugin` twin | NEW | `Services/Plugins/` + `SpotifyPlugin.swift` | FR-SP-006, NFR-SP-012 |
-| C-SP-06 | Router music path — intake hook, search orchestration, selection, degradation ladder, telemetry, tool log | CHANGED | `Services/Voice/` + `CommandRouter.swift` | FR-SP-001…005, FR-SP-011/012, NFR-SP-001/002/006 |
-| C-SP-07 | Music intent rule + query extractor | CHANGED | `Services/Voice/` + `KeywordIntentRule.swift` | FR-SP-013, FR-SP-015 |
-| C-SP-08 | Contact-search music veto | CHANGED | `Services/Voice/` + `VoiceContactSearchRoute.swift` | FR-SP-014 |
-| C-SP-09 | Wiring/registration (stores, session, plugin, router seams) | CHANGED | `App/` + `AppCoordinator.swift` | FR-SP-006, NFR-SP-012 |
-| C-SP-10 | Settings surface | CHANGED | `App/` + `SettingsView.swift`, `SettingsTabs.swift` | FR-SP-016, NFR-SP-010 |
-| C-SP-11 | Localisation catalog | CHANGED | `Resources/` + `Localizable.xcstrings` | NFR-SP-005 |
-| C-SP-12 | Info.plist declarations | CHANGED | `Info.plist` | NFR-SP-011, constraint 8 |
-| C-SP-13 | Release log-safety coverage | CHANGED | `tools/` + `check-release-log-safety.sh` (+ `.py`) | NFR-SP-002 |
-| C-SP-14 | Tool-log + observability integration | CHANGED | `Services/Voice/` + `LocalToolLogStore.swift`, tool-log review view | NFR-SP-002, FR-SP-012 |
-| C-SP-15 | Test suites (new + touched) | CHANGED/NEW | `ElderlyAssistantTests/` + `Services/Voice/` etc. | All |
-| C-SP-16 | DV checklist artifact (protocol + results) | NEW | `specs/SP-device-validation-protocol.md` (+ results) | FR-SP-017 |
+| C-MTC-01 | `DialogueManager`, `DialogueFrame`, `ProbeKind`, `DialogueSlot`, `DialogueFrameResolution`, probe composer | `ios/ElderlyAssistant/Services/` + `Voice/DialogueManager.swift` | NEW | 1 |
+| C-MTC-02 | `DialogueAnswerPath` (classify/merge), `CaptureForm`, `MergeSource`, vocab tables | `ios/ElderlyAssistant/Services/` + `Voice/DialogueAnswerPath.swift` | NEW | 1 |
+| C-MTC-03 | `DialogueCandidateBuilder`, `DialogueCandidate` | `ios/ElderlyAssistant/Services/` + `Voice/DialogueCandidateBuilder.swift` | NEW | 1 |
+| C-MTC-04 | `DialogueOptionCatalog` + resource | `ios/ElderlyAssistant/Services/` + `Voice/DialogueOptionCatalog.swift`; `ios/ElderlyAssistant/Resources/` + `DialogueOptionCatalog.json` | NEW | 1 |
+| C-MTC-05 | Interception block + two trigger edits + execution seams | `ios/ElderlyAssistant/Services/` + `Voice/CommandRouter.swift` | CHANGED | 1 |
+| C-MTC-06 | `musicQueryOutcome` provenance, `nearMatches`, narrow drop-vocabulary accessor | `ios/ElderlyAssistant/Services/` + `Voice/KeywordIntentRule.swift` | CHANGED | 1 |
+| C-MTC-07 | `awaitingSlotAnswer`, `openSlotAnswerWindow`, `onSlotAnswerTimeout`, timer mirror | `ios/ElderlyAssistant/App/` + `VoiceSessionStateMachine.swift` | CHANGED | 1 |
+| C-MTC-08 | Ownership + protocol conformance + timeout handler + confirmation coexistence funnels | `ios/ElderlyAssistant/App/` + `AppCoordinator.swift` | CHANGED | 1 |
+| C-MTC-09 | `dialogue.*` keys | `ios/ElderlyAssistant/Resources/` + `Localizable.xcstrings` | CHANGED | 1 |
+| C-MTC-10 | Log-gate coverage + fixtures | `ios/tools/check-release-log-safety.py` | CHANGED | 1 |
+| C-MTC-11 | Test suites + hostile corpus (§29) | `ios/ElderlyAssistantTests/…` | NEW/CHANGED | 1 |
+| C-MTC-12 | Frame clause + seed mirror + pin updates + v17 | `ios/ElderlyAssistant/Services/` + `Voice/IntentPrompt.swift`; `tools/train-intent/seeds/prompt_template.txt`; tests | CHANGED | 2 |
+| C-MTC-13 | Reminder/calendar rollover + RepetitionGuard interplay | `CommandRouter.swift`, slot vocabulary | CHANGED | 3 |
 
-### 26. Component detail
+### 28. Component detail
 
-**C-SP-01 `SpotifyTool`** — stateless statics (§14). Responsibilities: build/perform the `/v1/search` request with `Authorization: Bearer` (header only), parse + validate the top track, build validated `spotify:` URIs, perform the play call, map every failure to `FetchError`. Uses `LocalToolTransport` + `CallLinkOpening`; no state, no logging, no UI. Tests: URL shapes, parse fixtures, hostile corpus, timeout injection.
+**C-MTC-01 `DialogueManager`** — owns the single frame; probe text composition. Interface in §9. Errors: `DialogueError.windowBusy`, `.noResolution`. Async: none (pure state; the deadline is read, never awaited). Concurrency: main-queue-confined. Responsibility fence: it never speaks, never executes, never touches the catalog beyond rendering passed-in options.
 
-**C-SP-02 `SpotifyCredentialStore`** — `@MainActor ObservableObject`; one Codable record under `spotify.session`; `save`/`clear`/read; `Result`-typed errors; no other key, no plaintext path. Tests: round-trip, clear, corrupt-store degradation, placement.
+**C-MTC-02 `DialogueAnswerPath`** — the pure brain of the answer turn:
 
-**C-SP-03 `SpotifyAccountSession`** — `@MainActor`; owns the flow: `link() -> LinkOutcome`, `unlink()`, `validAccessToken()`, `status`; holds the `presenter` closure; stores nothing outside C-SP-02. Degrades to `isConfigured == false` when the client ID is absent (no crash). Tests: flow outcomes per `SpotifyAuthError`, refresh bounds, revoked → wipe, status transitions.
+```swift
+enum AnswerClassification { case expired, escape, cancel, amendment(String), bargeIn, answer(DialogueAnswer), invalid }
+static func classify(_ prepared: String, frame: DialogueFrame, catalog: DialogueOptionCatalog) -> AnswerClassification
+static func isBargeIn(_ prepared: String, frame: DialogueFrame) -> Bool          // ADR-MTC-05 predicates
+static func merge(_ value: String, into frame: DialogueFrame, catalog: DialogueOptionCatalog) throws -> String  // §11
+```
 
-**C-SP-04 `SpotifyAuthFlow`** — pure-ish helpers + a presentable seam: PKCE pair generation (`SecRandomCopyBytes`/`CryptoKit`-based, S256), authorize-URL construction (all scopes at sign-in), callback parsing + exact-match/state validation, session-start seam. Tests: RFC 7636-style verifier/challenge vector, callback accept/reject matrix (mismatch, wrong host, missing state, error param), no token on rejection.
+Errors: `throws DialogueError.emptyMerge`. Pure and synchronous — every rule in §11 is unit-testable without a coordinator.
 
-**C-SP-05 `SpotifyPlugin`** — twin of `YouTubePlugin`: `pluginID = "spotify"`, `displayNameKey = "plugin.spotify.name"`, `intentContribution` (`spotify.play` + short fragment), `handle` → `.spoken`/`.failed(spokenApology:)` with `spotify.*` lines, observability events with empty metadata, `presentationView` nil; inert without a link (the router owns degradation). Tests mirror `YouTubePluginTests`.
+**C-MTC-03 `DialogueCandidateBuilder`** — `static func build(for utterance: String, excluding domain: KeywordIntentRule.Domain?, rephrase: InterpretedCommand?) -> [DialogueCandidate]` (ADR-MTC-07). Pure; returns `[]` when nothing is eligible ("never fabricate"). No side effects, no execution knowledge beyond the candidate's domain tag.
 
-**C-SP-06 Router music path** — new private methods in `CommandRouter.swift` (mirroring the `fireYouTubePlay` family): `fireMusicRequest(query:)` (pre-ack, both-leg search, selection, ladder per §12), `deliverMusicOutcome(...)` (speak + emit + tool-log), the email-free capability reads from stores. Additions: `Kind.spotify` tool-log calls (query `""`); observability events `spotify_search`, `spotify_play`, `spotify_deeplink`, `spotify_fallback`, `spotify_link`, `spotify_unlink` (component `spotify`, no metadata); YouTube fallback via the existing `fireYouTubePlay`. The stub branch is deleted; the `case .music:` in `dispatchInterpreted` routes here. Tests: `CommandRouterMusicTests` (new) pin the matrix rows and the never-stub rule.
+**C-MTC-04 `DialogueOptionCatalog`** — `load(bundle:) throws`, `group(_:) -> DialogueOptionGroup?`, `canonicalQuery(forAnswer:in:) -> String?` (§15). Errors: `DialogueError.catalogUnavailable`. Read-only after load; static data, thread-safe by immutability.
 
-**C-SP-07 Music rule** — `KeywordIntentRule` changes: `Domain.music`, ordered rules, `musicKeywords` (shared constant) × `musicVerbFamily`, narration guard, YouTube-marker exclusion, `musicQuery(from:)` extractor. Tests: `KeywordIntentRuleTests` additions (music match, YouTube precedence, narration, extraction with Devanagari enumerations).
+**C-MTC-05 router edits** — (a) the interception block (§10); (b) the `fireMusicRequestOrProbe` trigger helper used by the ladder arm (`:1233`) and the interpreted `.music` route (`:3353-3355`); (c) the two didYouMean trigger edits (`:806-809`, `:2021`); (d) the emergency-frame clear (`:779-783`); (e) new `VoiceCommandCoordinating` members: `var activeDialogueFrame: DialogueFrame?`, `func startDialogueFrame(_:) -> Bool`, `@discardableResult func noteDialogueAttempt() -> Int`, `func resolveDialogueFrame(_:)`, `func prepareDialogueAnswerText(_:) -> String`, and `var dialogueOptionCatalog: DialogueOptionCatalog` (or a throwing accessor). Everything else in the file is untouched.
 
-**C-SP-08 Contact veto** — `VoiceContactSearchRoute.decide`: music veto directly after the YouTube veto, using the shared music-family constant; no over-block. Tests: `VoiceContactSearchRouteTests` additions (veto fires, contact request unaffected, YouTube veto intact).
+**C-MTC-06 `KeywordIntentRule` edits** — `MusicQueryExtraction` + `musicQueryOutcome` (wrapper keeps `musicQuery` byte-identical); `nearMatches(transcript:)`; a narrow `isMusicScaffoldToken(_:)` accessor for the answer strip. Existing drop sets stay private and single-sourced.
 
-**C-SP-09 Wiring** — `AppCoordinator`: lazy stores (`spotifyCredentialStore`, `spotifyAccountSession` with the presenter closure), `registry.register(SpotifyPlugin(...))` beside line 2058, `CommandRouter` init params for the Spotify seams (dormant optionals) alongside 3715–3717. Tests: registry once-only, dormant construction compiles/behaves (removability smoke, NFR-SP-012).
+**C-MTC-07 state machine edits** — §14, mirrored edges only; the confirmation machinery is not refactored.
 
-**C-SP-10 Settings** — `SpotifySettingsView` + `SettingsDestination.spotify` mapping in `SettingsTabs.swift`. Tests: `SettingsTabMappingTests` (destination maps, counts updated deliberately), accessibility assertions per NFR-SP-010.
+**C-MTC-08 coordinator edits** — `DialogueManager` ownership; `VoiceCommandCoordinating` conformance (main-thread hops mirroring `:7019-7027`); `onSlotAnswerTimeout` wiring (silent clear + event); confirmation-pend funnels call `clearDialogueFrame(.superseded)`; `prepareDialogueAnswerText` delegates to the shared seam helper; the timeout handler does **not** call `recordConfirmationTimeout()`.
 
-**C-SP-11 L10n** — the §23 key inventory in `Localizable.xcstrings`, ne+en each; no literals. Tests: catalog completeness (both languages), plus the router/plugin tests speak through L10n.
+**C-MTC-09..C-MTC-13** — §22 (strings), §22 (gate), §29 (tests), §17, §18.
 
-**C-SP-12 Info.plist** — three additions (§24); verified by a plist test where the project has one, else by the DV device run.
+### 29. Testing strategy
 
-**C-SP-13 Log gate** — `FEATURE_ROOTS` + rule/fixture additions; the gate runs in every `ios/build.sh` scope; fixtures prove a raw print in the new paths fails.
+Focused suites per unit (project rule), mirroring the confirmation-protocol pattern; full suite once at the end; DV on Anzaan completes the gate.
 
-**C-SP-14 Tool log/observability** — `LocalToolLogStore.Kind.spotify` + the review-view mapping. Tests: kind round-trip, review-row rendering, and the no-content rule (no query/title in entries).
-
-**C-SP-15 Tests** — see §27.
-
-**C-SP-16 DV artifact** — protocol + results recorded with the feature (§6); the checklist is the completion gate (FR-SP-017).
-
-### 27. Testing strategy and suite plan
-
-**New suites (mirroring the YouTube suite pattern):**
-
-| Suite | Covers |
+| Suite (test-bundle path) | Covers |
 |---|---|
-| `SpotifyToolTests` | Search URL construction (percent-encoding, header-only auth), parse fixtures (ok/empty/malformed), error mapping incl. `timedOut` injection, `trackURI` validation, search URI encoding, open outcomes with a fake opener, the **hostile corpus** (scheme text, `//`, quotes, control chars, traversal, over-long, percent-encoded traps → zero non-allowlisted constructions/opens) |
-| `SpotifyCredentialStoreTests` | Save/read/clear round-trip via fake `EncryptedLocalStorage`; corrupt store → not configured; wipe leaves nothing; placement key |
-| `SpotifyAccountSessionTests` | Authorize URL (scopes at sign-in, S256, state), callback accept/reject matrix, exchange failure, verification (`/v1/me` 200/product, missing scopes), refresh bounded + `invalid_grant` wipe, unlink wipe + event, re-link clean |
-| `SpotifyAuthFlowTests` | PKCE pair (challenge = S256 of verifier), callback parsing, exact-match/state rules |
-| `SpotifyPluginTests` | Registry shape (`spotify.play`, entity, display name key), handle outcomes, failure apology, dormant-without-link |
-| `CommandRouterMusicTests` | The §12 matrix row by row (fake transports/opener/stores): Spotify wins when capable; free tier → deep link; deep-link fail → `spotify.appMissing`; empty/failure → YouTube leg; unlinked → YouTube leg; unlinked+no-YT → search hand-off/notLinked; revoked → wipe + unlinked treatment; **no music branch speaks `router.musicStub`**; YouTube-marked utterance never reaches the music path; no double-handling |
+| `Services/Voice/DialogueFrameTests.swift` (NEW) | FR-MTC-001: one-deep arming, retrigger suppression, resolution clears all fields, no-persistence shape; FR-MTC-007 attempts accounting |
+| `Services/Voice/DialogueAnswerPathTests.swift` (NEW) | FR-MTC-005 forms (one test each incl. single-word), FR-MTC-006 merge (owner example; दुर्गा → `durga bhajan`; free-form kept; brain-absent path), FR-MTC-008/010 escape/cancel/amendment, ADR-MTC-04 precedence, ADR-MTC-05 barge-in predicates (incl. "मेरो छोरालाई फोन गर", "औषधि खाएँ", repetition-of-candidate negative case), invalid-answer/degenerate-answer guard |
+| `Services/Voice` + `DialogueOptionCatalogTests.swift` (NEW) | resource parses, canonical mapping, whole-token/no-substring discipline ("गीता"/"गीत"), load-failure degradation |
+| `Services/Voice` + `CommandRouterDialogueTests.swift` (NEW) | interception placement (answer never reaches the ladder/interpreter — spy interpreter proves zero calls), emergency-mid-frame drops the frame with dispatch unchanged, barge-in falls through and executes once, stale-frame/expiry boundary (last-moment answer vs post-expiry fresh command), confirmation coexistence (hook byte-behaviour), gibberish mid-frame consumes no attempt; file-private doubles per the `CommandRouterMusicTests` pattern |
+| `Services/Voice/CommandRouterMusicTests.swift` (CHANGED) | degenerate trigger on both routes replaces the blind search; specific queries byte-identical (existing supersession block kept green); merged dispatch goes through `fireMusicRequest`/`runMusicTurn` |
+| `App/VoiceSessionStateMachineTests.swift` (CHANGED) | new state edges legal ±, window-exists opener, timer arm/cancel/expiry, F6 still-open guard, silent callback never speaks, confirmation suite unchanged |
+| `Services/Intents` + `DialogueCacheBypassTests.swift` (NEW) | `pendingTranscript` stays nil on frame execution; `IntentCommandCache` never consulted/recorded on the answer turn |
+| `Services/Voice` + `DialogueHostileCorpusTests.swift` (NEW) | the security corpus (§24): answers embedding injections/emergency phrases/candidate-list poisons; assert emergency wins, frames clear, no sensitive action without its tier, no fabrication |
+| `Services/Voice/KeywordIntentRuleTests.swift` (CHANGED) | provenance cases (content/marker/transcript), `nearMatches` sets, wrapper byte-parity |
+| `Services/Voice/IntentPromptTests.swift` + `PinnedSurfaceGuardTests.swift` | Phase 2 only: baseline/digests/anchors updated in the clause change; Phase 1 green unchanged |
+| `ios/tools/check-prompt-mirror.sh` self-test; `check-release-log-safety.sh` fixtures | Phase 2 anchor extension; Phase 1 FEATURE_ROOTS + fixture entry |
 
-**Touched suites (must stay green):** `YouTubeRouteTests`, `YouTubePluginTests`, `CommandRouterYouTubeTests` (unchanged — the guard for FR-SP-005); `KeywordIntentRuleTests` (music additions, youtube unchanged); `VoiceContactSearchRouteTests` (veto additions, over-block guard); `GoldenCorpusTests` (unchanged; still 15/≥15); `IntentPromptTests` (byte-identical pins hold); `SettingsTabMappingTests` (new destination, deliberate count updates); `StoragePlacementTests` (the one new key). Plus the log-gate fixture suite.
+**Pins that must stay green in Phase 1** (no-regression evidence): golden music digest `fb14012e…`, prompt digests `18003ddd…`/`bd47910d…`, the 2_506 baseline, the 3_000 ceiling, `GoldenCorpusTests`, the Spotify suites, the confirmation-protocol suites.
 
-**Baseline discipline (NFR-SP-006):** the project's known pre-existing unit-test failures are recorded as the baseline (a known master-branch condition); the feature's own suites must pass, and any touched suite's change must be a recorded deliberate one.
+**DV protocol (FR-MTC-020)** — DV-1..DV-5 per §6, each recorded (date, device, build, transcript script, observed outcome, jetsam log for DV-5) with the feature spec, per the repo's DV convention.
 
-**Device validation:** DV-1…DV-7 per §6, run in Development mode with the OD-S2 registered accounts; results recorded as C-SP-16.
+### 30. Traceability
 
-### 28. Traceability — every requirement mapped
+| Requirement | Design section(s) |
+|---|---|
+| FR-MTC-001 frame lifecycle | §9, §19, §27 C-MTC-01 |
+| FR-MTC-002 degenerate detection | §12, ADR-MTC-06 |
+| FR-MTC-003 slotFill probe | §9 (composition), §15, §22 |
+| FR-MTC-004 candidateChoice | §13, ADR-MTC-07 |
+| FR-MTC-005 capture forms | §11 |
+| FR-MTC-006 merge/execution | §11, ADR-MTC-11 |
+| FR-MTC-007 probe budget | §9, §11 (exhaustion table), §20 |
+| FR-MTC-008 escape | §10, ADR-MTC-04 |
+| FR-MTC-009 interception | §10, ADR-MTC-02 |
+| FR-MTC-010 cancel | §10, ADR-MTC-04 (amendment precedent) |
+| FR-MTC-011 emergency | §10 (guarantee 1), §24 |
+| FR-MTC-012 barge-in | §10, ADR-MTC-05 |
+| FR-MTC-013 timeout | §14, ADR-MTC-08 |
+| FR-MTC-014 awaitingSlotAnswer | §14, ADR-MTC-08 |
+| FR-MTC-015 catalog | §15, ADR-MTC-09 |
+| FR-MTC-016 template probes | §9, §22, ADR-MTC-13 |
+| FR-MTC-017 cache bypass | §11, §19, ADR-MTC-11 |
+| FR-MTC-018 Phase 2 v17 | §17, ADR-MTC-12 |
+| FR-MTC-019 Phase 3 | §18, ADR-MTC-15 |
+| FR-MTC-020 DV gate | §6, §29 |
+| NFR-MTC-001 turn envelope | §14, §20 (22 s/45 s/60 s unchanged) |
+| NFR-MTC-002 prompt budget | §17, ADR-MTC-12 |
+| NFR-MTC-003 no egress | §22 |
+| NFR-MTC-004 log safety | §22, §27 C-MTC-10 |
+| NFR-MTC-005 degraded brain | §16, ADR-MTC-10 |
+| NFR-MTC-006 localisation | §22 |
+| NFR-MTC-007 jetsam | §16, §6 DV-5 |
+| NFR-MTC-008 sanitisation/injection | §11, §24 |
+| NFR-MTC-009 voice-only accessibility | §11, §22 |
+| NFR-MTC-010 trap resistance | §10, §14, §24 |
+| NFR-MTC-011 KV prefix | §17, ADR-MTC-12 |
+| NFR-MTC-012 no regression | §7 pins, §29 |
 
-| Requirement | Design components / sections | Verification path |
-|---|---|---|
-| FR-SP-001 stub → real playback | C-SP-06 (§9), C-SP-05 | `CommandRouterMusicTests` (never-stub), DV-1 |
-| FR-SP-002 both-provider search | C-SP-06 (§11), C-SP-01 | `CommandRouterMusicTests` (both-legs, one-leg, neither), `SpotifyToolTests` |
-| FR-SP-003 Spotify preferred | C-SP-06 (§11), C-SP-02 | `CommandRouterMusicTests` (selection rows), DV-2 |
-| FR-SP-004 YouTube fallback | C-SP-06 (§12 rows 4/6/7/8), C-SP-01 | `CommandRouterMusicTests`; YouTube suites hold |
-| FR-SP-005 explicit YouTube unchanged | C-SP-07 exclusion (§9), C-SP-06 | `YouTubeRouteTests` / `YouTubePluginTests` / `CommandRouterYouTubeTests` unchanged; DV-3 |
-| FR-SP-006 SpotifyPlugin | C-SP-05, C-SP-09 | `SpotifyPluginTests`, registry-once test |
-| FR-SP-007 tool + deep links | C-SP-01 (§14) | `SpotifyToolTests` (incl. hostile corpus), DV-1 |
-| FR-SP-008 account linking | C-SP-03, C-SP-04 (§15) | `SpotifyAccountSessionTests`, `SpotifyAuthFlowTests` |
-| FR-SP-009 encrypted store | C-SP-02 (§16) | `SpotifyCredentialStoreTests`, `StoragePlacementTests` |
-| FR-SP-010 unlink wipe/revoke | C-SP-03, C-SP-02 (§15.7, §16) | `SpotifyAccountSessionTests` (wipe, revoked, re-link) |
-| FR-SP-011 free-tier deep link | C-SP-06 (§12 rows 2/3/5), C-SP-01 | `CommandRouterMusicTests`, DV-4 |
-| FR-SP-012 honest outcomes | C-SP-06 (§12 total matrix), C-SP-11 | `CommandRouterMusicTests` (every row speaks), DV-4 |
-| FR-SP-013 keyword music rule | C-SP-07 (§9/§10) | `KeywordIntentRuleTests` additions |
-| FR-SP-014 contact veto | C-SP-08 (§9.1) | `VoiceContactSearchRouteTests` additions |
-| FR-SP-015 route intake | C-SP-06, C-SP-07 (§9) | `CommandRouterMusicTests` (intake/no-double-handling) |
-| FR-SP-016 Settings + disclosure | C-SP-10, C-SP-11 (§23) | `SettingsTabMappingTests`, disclosure inspection, DV-5 |
-| FR-SP-017 DV checklist | C-SP-16 (§6) | Checklist recorded + passed on Anzaan |
-| NFR-SP-001 responsiveness/timeouts | C-SP-01, C-SP-06 (§19/§20) | Timeout-injection tests; budget assertions; DV-1/4 |
-| NFR-SP-002 log safety | C-SP-06, C-SP-13, C-SP-14 (§22) | Log-gate fixtures + gate exit 0; no-content assertions; DV-7 |
-| NFR-SP-003 no new egress | C-SP-01, C-SP-06 (§8/§21) | Seam-level egress assertions (allowlist only) |
-| NFR-SP-004 prompt budget | C-SP-05, C-SP-07 (§17) | `IntentPromptTests` unchanged; plugin-budget check `[design-l2]` |
-| NFR-SP-005 localisation | C-SP-11 (§23) | Catalog completeness (ne+en), spoken-line tests, DV-5 |
-| NFR-SP-006 no regression | All (§7/§27) | YouTube suites unchanged; golden 15 hold; stubs intact; dormant seams; baseline recorded |
-| NFR-SP-007 encryption at rest | C-SP-02 (§16) | Store tests + placement + wipe sweep |
-| NFR-SP-008 URI hardening | C-SP-01 (§14) | Hostile-corpus suite |
-| NFR-SP-009 redirect + token lifecycle | C-SP-03, C-SP-04 (§15) | Callback matrix, refresh bounds, wipe, log-free assertions |
-| NFR-SP-010 accessibility | C-SP-10 (§23) | Accessibility assertions in settings tests |
-| NFR-SP-011 compliance/release gates | C-SP-12, C-SP-13, C-SP-16 (§22/§24) | Gate exit 0, TLS hosts (allowlist), DV + release checklist |
-| NFR-SP-012 plugin isolation | C-SP-05, C-SP-06, C-SP-09 (§19/§24) | Diff-surface check, registry test, dormant-seam/removability tests |
+### 31. Open items and risks
 
-**Not architecturally touched:** none — every one of the 29 requirements maps to at least one component above. (Project-level surfaces outside this feature — emergency/meds/health — are explicitly unchanged; see §2 out-of-scope.)
+For **review-l2**: (R1) the barge-in predicate's stage list (ADR-MTC-05) — design-l2 must pin the exact call sites and add a test per stage the negative examples rely on ("मेरो छोरालाई फोन गर" must resolve through the contact-search/direct-call vocabulary; verify against `VoiceContactSearchRoute.isDirectCallUtterance` `:137`). (R2) The discard-path candidate composition (hypothesis appended last only with ≥1 near-match) — flagged as the least-forced reading of FR-MTC-004's source list; alternative (never re-offer) recorded. (R3) `candidateChoice` exhaustion closes honestly rather than executing (ADR-MTC-07 table) — reconcile with FR-MTC-007's literal wording at review. (R4) The strip/marker rules embedded in §11 — pin with tests, since the FR's examples imply both "markers kept in free text" and "markers droppable for option matching". (R5) Whether the re-probe should reset `attempts` after an escape (design: escape drops the frame entirely, so no reset is needed).
 
-### 29. Open items
+For **security-design-review**: (R6) the emergency-branch frame clear (ADR-MTC-02) — verify non-gating by test (dispatch with the clear forced to a no-op). (R7) The gibberish-guard interaction (§10): rejected noise leaves the frame armed without consuming an attempt — verify no trap (the deadline bounds it) and no log content. (R8) The hostile corpus (§29) must include: answers containing emergency keywords or injection markers, candidate-poisoning utterances, and claims of authority. (R9) Log-gate coverage: the four new files + the modified router paths.
 
-**Owner input (OD-S2, §5 — all marked in place):** Dashboard-owning account email; household Premium account (DV-1/2); free-tier test account (DV-4); any extra test-user emails; final app name / business details / privacy-policy URL; the rollout-note copy approval; the final-sign-off decision line. **No account, email or Dashboard value is invented anywhere in this document.**
+For **design-l2**: (R10) `InterpretedCommand` reuse for `activeCommand` (the free-text `message` entity carries the music query — pin the exact field mapping in the interface). (R11) The shared seam helper's shape (`IntentTranscriptPreparation`) must not disturb `LocalBrainChain.turnInput`'s byte behaviour. (R12) Phase 2's `frameClause` plumbing through `InterpreterContext` vs a `build` parameter — either is acceptable; the mirror gate must see the same text.
 
-**For `design-l2`:** exact Nepali/English copy for all `spotify.*` keys (illustrative strings here); exact keyword/verb enumerations + extractor fixtures; the plugin-composed prompt-budget check; which feature roots the log gate must gain; `market` handling on search; the OD-S2 quota-request appendix text; the settings-surface component spec (layout/state machine) mirroring `YouTubeSettingsView`; the DV protocol document content.
-
-**For `security-design-review` (SECURITY-GO):** the STRIDE table above as the starting model; PKCE-only posture (no secret) verification; redirect exact-match scheme acceptance at the Dashboard (§15 note); hostile-URI corpus adequacy; the stricter-than-YouTube log rule (ADR-SP-15) as an accepted design decision; refresh/revocation bounds; egress allowlist enforcement.
-
-**For `security-test` (SECURITY-GO):** token storage (Keychain only), release log-surface coverage of the new paths, hostile track titles/IDs producing only validated `spotify:` URIs, redirect validation, credential wipe on unlink — per the workflow's focus list; DV-7 results as device evidence.
-
-**Risks recorded (design-l1 level):**
-
-1. Spotify Dashboard acceptance of the custom callback scheme is unverified (OD-S2 step 2); the exact-match validator is independent of the final string, so only the constant changes if the Dashboard requires a different shape.
-2. `product`-based capability can be stale; the play attempt is the honest catch, so the worst case is an extra deep-link hand-off, never a false claim (§11/§13).
-3. FR-SP-002 scenario 3's "neither provider can be asked" depends on the keyless YouTube path remaining as shipped; if that path is ever changed, this design's YouTube-askability predicate must be revisited with it (Reconciliation 2).
-4. The strict log rule (ADR-SP-15) intentionally diverges from `YouTubeTool`'s raw-query tool-log habit; security review should confirm the stricter reading of NFR-SP-002 is the intended one (the requirement text and workflow focus both read that way).
+Residual risks recorded for the record: the PT-identifier and Stage-3 findings are out of scope (no chat); the Phase 0 smoke is a standing prerequisite; OD-M1..M4 remain owner-facing and are implemented as defaults pending T2.

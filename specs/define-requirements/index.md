@@ -1,138 +1,177 @@
-# Requirements — Spotify Music Integration
+# Requirements — Multi-Turn Conversation
 
-Feature: `spotify-music-integration` (worktree branch `feat/spotify-music-integration`, worktree
-`elderly-ai-assistant-spotify-music-integration`).
+Feature: `multi-turn-conversation` (worktree branch `feat/multi-turn-conversation`, worktree
+`elderly-ai-assistant-multi-turn-conversation`).
 Status: **submitted for owner HIL approval** (risk tier T1, per the feature workflow's
 `define-requirements` task); no owner amendment is recorded at lock time — the locked snapshot in
 `define-requirements.lock.yaml` is the drift-detection baseline.
 Task: `define-requirements`, agent `ba`, contract `requirements_doc` + `requirements_lock`.
-Date: 2026-10-06.
+Date: 2026-10-10.
 
 ## Summary
-- Functional requirements: **17** (`FR-SP-001` … `FR-SP-017`)
-- Non-functional requirements: **12** (`NFR-SP-001` … `NFR-SP-012`)
-- Areas covered: Music Playback / Router, Provider Selection, Degradation (free tier, unlinked,
-  network failure, empty search), Spotify Tool and Deep Links, Plugin Architecture, Account
-  Linking (caregiver OAuth), Credential Storage, Intent Routing (deterministic keyword rule,
-  contact-search veto, route-ladder intake), Settings / Privacy Disclosure, Validation /
-  Completion Gate. NFR categories: Performance, Privacy, Security, Reliability, Maintainability,
-  Localisation, Accessibility, Compliance.
-- v1 scope: replace the first-class music stub (`router.musicStub`, `case .music:` in
-  `ios/ElderlyAssistant/Services/Voice/` `CommandRouter.swift` ~line 2640) with real playback
-  (FR-SP-001); search both providers with Spotify winning whenever linked and capable
-  (FR-SP-002/003), YouTube for explicit YouTube requests (FR-SP-005) and the Spotify-cannot-serve
-  fallback (FR-SP-004); `SpotifyPlugin` + `SpotifyTool` + account linking + encrypted credential
-  store (FR-SP-006 … FR-SP-010); honest degradation for free tier / unlinked / network failure /
-  empty search with the `spotify:` deep-link fallback (FR-SP-011/012); deterministic routing work
-  (FR-SP-013/014/015); Settings linking/status with the privacy disclosure (FR-SP-016); and the
-  DV-* device-validation completion gate (FR-SP-017).
-- Primary sources of truth: `specs/spotify-music-integration/constitution.md` (feature
-  constitution — Purpose & Scope, routing & degradation contract, Feature Constraints 1–12, the
-  2026-10-06 amendment record, Open Decisions OD-S1/S2/S3, DV-* completion gate);
-  `specs/spotify-music-integration/workflow.yaml` (the `define-requirements` scope comment);
-  project `constitution.md` (amended 2026-10-06: Architecture Constraint 1 and the
-  Required-integrations list now include Spotify).
-- Read-only stakeholder briefs: `requirements.md` — its §4 "Out of Scope — Post-MVP" table lists
-  "Music and bhajan playback" at lines 675–676 as Post-MVP; that placement is **superseded** by
-  this feature (the project constitution is the operative document; the supersession is recorded
-  in FR-SP-001). `requirements-dementia-supplement.md` is context only and changes nothing here.
+
+- Functional requirements: **20** (`FR-MTC-001` … `FR-MTC-020`)
+- Non-functional requirements: **12** (`NFR-MTC-001` … `NFR-MTC-012`)
+- Areas covered: Dialogue Frame / Core, Music Path / Probe Trigger, Probes (slot-fill,
+  did-you-mean), Answer Capture (forms, escape), Answer Merge / Execution, Probe Policy,
+  Interception / Routing (pre-ladder, cancel, barge-in), Safety / Emergency, Timeout / Recovery,
+  Session State, Option Catalog, Probe Generation / Localisation, Cache Discipline, NLU Training
+  (Phase 2), Rollout (Phase 3), Validation / Completion Gate. NFR categories: Performance,
+  Reliability, Privacy, Security, Localisation, Accessibility, Compliance.
+- Phase structure (preserved from the study §7 and the workflow "PHASE STRUCTURE"):
+  **Phase 0** = PR #156 voice-OOM hardening merged (`437631e`, 2026-10-10) with its Anzaan device
+  smoke outstanding (the prerequisite gate, bound by FR-MTC-020); **Phase 1** = the deterministic
+  MVP, shippable alone (FR-MTC-001 … FR-MTC-017, all MUST) — the owner's bhajan example must work
+  end-to-end with no training run; **Phase 2** = the follow-up NLU fine-tune v17 with the frame
+  clause, shipping ONLY with the training iteration (FR-MTC-018, SHOULD pending OD-M3);
+  **Phase 3** = reminder/calendar rollover (FR-MTC-019, SHOULD pending OD-M4) plus the DV-*
+  device-validation closure (FR-MTC-020, MUST).
+- v1 scope: give the single-turn voice pipeline a one-deep dialogue frame (`DialogueManager` +
+  `DialogueFrame`, FR-MTC-001) with two first-class probe kinds — `.slotFill` for a missing slot
+  such as the bhajan deity (FR-MTC-002/003) and `.candidateChoice`/didYouMean for a
+  not-understood utterance (FR-MTC-004) — voice answer capture by name, index word, repetition or
+  free-form (FR-MTC-005), the deterministic merge that executes through the normal music path
+  (FR-MTC-006), the bounded probe budget with default execution (FR-MTC-007), the say-it-again
+  escape (FR-MTC-008), pre-ladder interception (FR-MTC-009) with cancel, emergency, barge-in and
+  45 s timeout rules (FR-MTC-010 … FR-MTC-013), the `awaitingSlotAnswer` state (FR-MTC-014), the
+  curated on-device catalog (FR-MTC-015), template-only probes (FR-MTC-016), the transcript-cache
+  bypass (FR-MTC-017), and the Phase 2/3 follow-ups (FR-MTC-018/019) closing with the DV-* gate
+  (FR-MTC-020).
+- Primary sources of truth: `specs/multi-turn-conversation/constitution.md` (feature constitution
+  — Purpose & Scope, Probe Kinds & Answer-Capture Contract, Safety-Relevant Constraints 1–4,
+  Feature Constraints 1–10, Integration Surfaces, Success Criteria, DV-* completion gate, Open
+  Decisions OD-M1..M4); `specs/multi-turn-conversation/workflow.yaml` (the `define-requirements`
+  scope comment and phase structure); `docs/multi-turn-conversation-feasibility.md` (the owner's
+  study — §5 measured constraints, §6 recommended design, §7 phasing, §8 risks, §9 open
+  decisions); project `constitution.md` (inherited constraints, release gates).
+- Read-only stakeholder briefs: `requirements.md` — a read-only input; it does not address
+  multi-turn dialogue. Its FR-008 "conversational response generation" clause is **not** delivered
+  or superseded by this feature (open-ended chat stays explicitly out of scope per the owner's
+  2026-10-10 study and the feature constitution); its §4 Post-MVP "Music and bhajan playback"
+  line (~675-676) was already superseded by the shipped spotify-music-integration feature, which
+  this feature extends rather than re-opens.
 
 ## Contents
-- [FR/index.md](FR/index.md) — functional requirements (17 files, `FR-SP-001` … `FR-SP-017`)
-- [NFR/index.md](NFR/index.md) — non-functional requirements (12 files, `NFR-SP-001` … `NFR-SP-012`)
+
+- [FR/index.md](FR/index.md) — functional requirements (20 files, `FR-MTC-001` … `FR-MTC-020`)
+- [NFR/index.md](NFR/index.md) — non-functional requirements (12 files, `NFR-MTC-001` …
+  `NFR-MTC-012`)
 - [../define-requirements.md](../define-requirements.md) — consolidated, human-readable copy of
   this set (the `requirements_doc` contract artifact)
 - [../define-requirements.lock.yaml](../define-requirements.lock.yaml) — locked snapshot with
   per-requirement content hashes (the `requirements_lock` contract artifact)
 
 Note: the `FR/` and `NFR/` folders also still contain the previously shipped
-live-camera-translation (`FR-LCT-*`, `NFR-LCT-*`) and profile-interview (`FR-PI-*`, `NFR-PI-*`)
-requirement files, left in place untouched; the indexes on this page and the lock cover the
-`spotify-music-integration` set only.
+live-camera-translation (`FR-LCT-*`, `NFR-LCT-*`), profile-interview (`FR-PI-*`, `NFR-PI-*`) and
+spotify-music-integration (`FR-SP-*`, `NFR-SP-*`) requirement files, left in place untouched; the
+indexes on this page and the lock cover the `multi-turn-conversation` set only.
 
 ### Functional requirements
-Core flip and provider selection: [FR-SP-001](FR/FR-SP-001-music-requests-start-real-playback.md),
-[FR-SP-002](FR/FR-SP-002-both-provider-search.md),
-[FR-SP-003](FR/FR-SP-003-spotify-preferred-when-linked-and-capable.md),
-[FR-SP-004](FR/FR-SP-004-youtube-fallback-when-spotify-cannot-serve.md),
-[FR-SP-005](FR/FR-SP-005-explicit-youtube-requests-unchanged.md) ·
-Surfaces: [FR-SP-006](FR/FR-SP-006-spotifyplugin-assistantplugin-twin.md),
-[FR-SP-007](FR/FR-SP-007-spotifytool-search-and-deeplink.md),
-[FR-SP-008](FR/FR-SP-008-spotify-account-linking-by-caregiver.md),
-[FR-SP-009](FR/FR-SP-009-encrypted-spotify-credential-store.md),
-[FR-SP-010](FR/FR-SP-010-unlink-wipes-credentials-and-revokes.md) ·
-Degradation: [FR-SP-011](FR/FR-SP-011-free-tier-deeplink-degradation.md),
-[FR-SP-012](FR/FR-SP-012-honest-outcomes-no-silent-failure.md) ·
-Routing: [FR-SP-013](FR/FR-SP-013-keyword-intent-rule-music-domain.md),
-[FR-SP-014](FR/FR-SP-014-contact-search-veto-parity.md),
-[FR-SP-015](FR/FR-SP-015-music-request-intake-in-route-ladder.md) ·
-Settings and completion gate: [FR-SP-016](FR/FR-SP-016-settings-linking-and-privacy-disclosure.md),
-[FR-SP-017](FR/FR-SP-017-device-validation-checklist-recorded-and-passed.md)
+
+Frame and probes: [FR-MTC-001](FR/FR-MTC-001-dialogue-frame-lifecycle.md),
+[FR-MTC-002](FR/FR-MTC-002-degenerate-music-query-detection.md),
+[FR-MTC-003](FR/FR-MTC-003-slot-fill-probe.md),
+[FR-MTC-004](FR/FR-MTC-004-candidate-choice-did-you-mean-probe.md) ·
+Answer capture and merge: [FR-MTC-005](FR/FR-MTC-005-voice-answer-capture.md),
+[FR-MTC-006](FR/FR-MTC-006-deterministic-frame-merge-and-execution.md),
+[FR-MTC-007](FR/FR-MTC-007-probe-budget-two-then-defaults.md),
+[FR-MTC-008](FR/FR-MTC-008-say-it-again-escape.md) ·
+Interception and recovery: [FR-MTC-009](FR/FR-MTC-009-pre-ladder-answer-interception.md),
+[FR-MTC-010](FR/FR-MTC-010-cancel-drops-the-frame.md),
+[FR-MTC-011](FR/FR-MTC-011-emergency-precedence-mid-frame.md),
+[FR-MTC-012](FR/FR-MTC-012-barge-in-strong-new-command.md),
+[FR-MTC-013](FR/FR-MTC-013-timeout-silent-rearm.md) ·
+State, catalog and generation: [FR-MTC-014](FR/FR-MTC-014-awaiting-slot-answer-state.md),
+[FR-MTC-015](FR/FR-MTC-015-curated-on-device-catalog.md),
+[FR-MTC-016](FR/FR-MTC-016-template-generated-probes.md),
+[FR-MTC-017](FR/FR-MTC-017-transcript-cache-bypass.md) ·
+Later phases and gate: [FR-MTC-018](FR/FR-MTC-018-follow-up-nlu-fine-tune-v17.md),
+[FR-MTC-019](FR/FR-MTC-019-reminder-calendar-frame-rollover.md),
+[FR-MTC-020](FR/FR-MTC-020-device-validation-completion-gate.md)
 
 ### Non-functional requirements
-[NFR-SP-001](NFR/NFR-SP-001-provider-search-responsiveness.md) responsiveness ·
-[NFR-SP-002](NFR/NFR-SP-002-log-safety.md) log safety ·
-[NFR-SP-003](NFR/NFR-SP-003-no-new-network-egress.md) no new egress ·
-[NFR-SP-004](NFR/NFR-SP-004-prompt-budget-preserved.md) prompt budget ·
-[NFR-SP-005](NFR/NFR-SP-005-localisation.md) localisation ·
-[NFR-SP-006](NFR/NFR-SP-006-no-regression.md) no regression ·
-[NFR-SP-007](NFR/NFR-SP-007-credential-encryption-at-rest.md) encryption at rest ·
-[NFR-SP-008](NFR/NFR-SP-008-deeplink-uri-hardening.md) URI hardening ·
-[NFR-SP-009](NFR/NFR-SP-009-oauth-redirect-and-token-lifecycle.md) OAuth lifecycle ·
-[NFR-SP-010](NFR/NFR-SP-010-accessibility-of-new-surfaces.md) accessibility ·
-[NFR-SP-011](NFR/NFR-SP-011-compliance-and-release-gates.md) compliance gates ·
-[NFR-SP-012](NFR/NFR-SP-012-plugin-isolation-and-model-stack-invariance.md) plugin isolation
+
+[NFR-MTC-001](NFR/NFR-MTC-001-probe-turn-latency.md) latency envelope ·
+[NFR-MTC-002](NFR/NFR-MTC-002-prompt-budget-and-token-ceiling.md) prompt budget ·
+[NFR-MTC-003](NFR/NFR-MTC-003-no-new-network-egress.md) no new egress ·
+[NFR-MTC-004](NFR/NFR-MTC-004-log-safety.md) log safety ·
+[NFR-MTC-005](NFR/NFR-MTC-005-degraded-brain-deterministic-path.md) degraded-brain path ·
+[NFR-MTC-006](NFR/NFR-MTC-006-localisation.md) localisation ·
+[NFR-MTC-007](NFR/NFR-MTC-007-sustained-multi-turn-stability.md) sustained stability ·
+[NFR-MTC-008](NFR/NFR-MTC-008-answer-sanitisation-and-injection-safety.md) answer-path security ·
+[NFR-MTC-009](NFR/NFR-MTC-009-voice-only-accessibility.md) voice-only accessibility ·
+[NFR-MTC-010](NFR/NFR-MTC-010-frame-trap-resistance.md) trap resistance ·
+[NFR-MTC-011](NFR/NFR-MTC-011-kv-prefix-stability.md) KV-prefix stability ·
+[NFR-MTC-012](NFR/NFR-MTC-012-compliance-and-release-gates.md) compliance gates
 
 ## Open decisions
-Carried from the feature constitution verbatim; **not resolved here**. None blocks the
-requirement set; each has an owner-visible resolution point. Full text in the consolidated doc's
-Open decisions section.
+
+Carried from the feature constitution (feasibility study §9) verbatim in substance; **not
+resolved here**. None blocks the requirement set; each has an owner-visible resolution point.
+Full text in the consolidated doc's Open decisions section.
 
 | # | Decision | Status in this requirement set | Resolve at |
 |---|---|---|---|
-| OD-S1 | **Client-secret handling for the Spotify search flow** — family-entered credential per the `YouTubeConfigStore`/`SearchConfigStore` Keychain precedent vs PKCE-only options where the flow permits; must satisfy constraint 2 and interact cleanly with OD-S2 | Open — architect / security review. The requirements bind the storage/log discipline for whichever path resolves (FR-SP-009, NFR-SP-002, NFR-SP-007) | design-l1 (recorded in `security-design-review` too) |
-| OD-S2 | **Spotify development-mode rollout and quota-extension plan** — which accounts are registered during development/device validation, when the quota-extension request is filed, and what unregistered users experience before approval (honest messaging, no silent failure); includes the Developer Dashboard registration (client ID + secret, redirect URI, scopes) | Open — owner / architect. The requirements bind honest behaviour for unregistered users regardless (FR-SP-012, FR-SP-016) | owner + design-l1 |
-| OD-S3 | **Premium-account degradation path** — exact UX and precedence when Spotify cannot perform playback (free tier, unlinked, network/service failure, empty search): which cases degrade to the `spotify:` deep-link fallback, which fall back to YouTube, the exact localized copy, and how both-provider search behaves in each case; must satisfy constraints 1, 5 and 9 | Open — architect. The requirements bind that each path is non-silent and honest (FR-SP-011, FR-SP-012, FR-SP-004); composition stays open | design-l1 / design-l2 |
+| OD-M1 | **Probe policy** — 1 probe vs up-to-2 before executing with defaults, and the default-play wording ('जे पनि बजाऊ'). Study recommendation: 2 probes max, default offered on the first probe | Open — owner. The requirements bind a bounded budget, the always-present default and default execution on exhaustion (FR-MTC-007, FR-MTC-003); the exact cap (1 vs 2) and copy stay open | owner (recorded in design-l1) |
+| OD-M2 | **Probe option source** — curated on-device catalog (recommended for MVP: zero latency, on-device stance) vs live Spotify playlist search (richer; needs a `SpotifyTool` extension + network per probe) | Open — owner. The requirements bind the curated on-device catalog for Phase 1 (FR-MTC-015) and no new egress (NFR-MTC-003); a later live-search enrichment resolves here | owner + design-l1 |
+| OD-M3 | **Sequencing** — ship Phase 1 deterministic-only first vs run Phase 2 + v17 in parallel. Study recommendation: Phase 1 first (it covers the bhajan example), v17 data authoring in parallel | Open — owner. The requirements mark Phase 2 as SHOULD pending this resolution (FR-MTC-018); Phase 1 is complete and shippable alone | owner |
+| OD-M4 | **Scope** — whether Phase 3's reminder/calendar answer-capture rides the same release as the music probe | Open — owner. The requirements keep reminder/calendar unchanged in Phase 1 (FR-MTC-019 Phase 1 guard; NFR-MTC-012) and carry the Phase 3 target as SHOULD | owner |
 
 ### Assumptions recorded during this requirements pass
+
 Recorded so nothing is silently assumed; all are design-input notes, not scope changes. The full
 list is in the lock file (`assumptions`).
 
-- The mapped integration surfaces exist as named in the feature constitution (YouTube pattern
-  files, `CommandRouter` seams, `AppCoordinator` registration, Settings surfaces, string catalog);
-  the scaffold probe (`specs/spotify-music-integration/init-report.md`) records the folder, not a
-  code probe.
-- The golden-corpus music block holds 15 utterances pinned to intent `music` at
-  `ios/ElderlyAssistantTests/` `Services/Voice/GoldenCorpus.swift` lines 142–157, while the
-  feature constitution says "16 utterances"; implementation reconciles the count against the
-  source and records the result (NFR-SP-006).
-- Provider identifiers used in examples are synthetic placeholders; no real identifier, credential
-  or secret is recorded in this requirement set.
-- Exact user-facing copy for the degradation paths is OD-S3; the Nepali/English examples in this
-  set are illustrative and localization-bound (the keys must exist, NFR-SP-005).
+- The integration surfaces exist as named in the feature constitution; the cited anchors were
+  spot-verified against the worktree source at requirements time (`CommandRouter.route` at 740,
+  the confirmation hook at 785-886, the keyword-ladder music arm at 1223-1234,
+  `routeKeywordRemainder` at 1968-2030, `selectMusicOutcome`/`fireMusicRequest`/`runMusicTurn` at
+  2614/2667/2684, the interpreted `.music` path at 3336-3355, `musicQuery` at 752-779,
+  `VoiceSessionStateMachine` states/timer at 9-17/93-96/183-203, the 60 s voice watchdog, the
+  `IntentPromptTests` 3,000-character pin, `maxTokenCount: 1024`). Remaining study §10 line
+  references not cited above are study-derived.
+- Exact user-facing copy (probe wording, default-play phrase, cancel/escape lines, honest lines)
+  is OD-M1/OD-M2/design-dependent; the Nepali/English examples in this set are illustrative and
+  localization-bound (the keys must exist in both languages — NFR-MTC-006).
+- The curated catalog's exact contents (e.g. the bhajan deity list) are data refined at design
+  time; the requirement binds the catalog's existence, on-device sourcing, localisability and
+  canonicalisation behaviour (FR-MTC-015).
+- "v16"/"v17" are the study's and constitution's iteration labels for the existing slot-canonical
+  fine-tune and the Phase 2 follow-up fine-tune; the actual artifacts land via the Phase 2 training
+  iteration (FR-MTC-018) — nothing in Phase 1 depends on a training run.
+- The project's known pre-existing test failures (unrelated to this feature) remain the baseline
+  for NFR-MTC-012; the feature's own suites and touched suites must pass, with baseline failures
+  recorded rather than silently included or excluded.
+- The 45 s deadline is the existing confirmation timer value
+  (`VoiceSessionStateMachine.confirmationTimeoutSeconds = 45`); reuse mechanics are design's to
+  fix, the value is binding.
+- `DialogueManager`/`DialogueFrame`/`awaitingSlotAnswer`/the curated catalog were confirmed
+  absent from the worktree source at requirements time — they are genuinely new surfaces.
 
 ## Out of scope
+
 Explicitly not in scope (feature constitution "Out of scope (must not change)" plus the workflow
 scope comment's explicit non-goals) — recorded so nothing is silently half-built:
 
-- **Cloud LLM on the music path** — voice intent parsing and routing stay on-device; music
-  queries go to the provider APIs directly (NFR-SP-003).
-- **Brain/router model-stack changes** — no model, catalog, weights or routing-model changes
-  beyond the pinned intent wording (NFR-SP-012, NFR-SP-004).
-- **A new backend** — the Spotify Web API is called directly from the app; nothing is provisioned
-  on our side (NFR-SP-003).
-- **Explicit-YouTube routing changes** — 'युट्युबमा गीत चलाऊ' must still reach YouTube exactly as
-  today (FR-SP-005).
-- **Library/playlist edits and account modifications** — playback is read-only, user-initiated
-  media control; no playlist mutations, no library writes (feature constitution Out of scope).
-- **Emergency / medication / health surfaces** — no change of any kind; no new safety path is
-  added or altered by this feature.
-- **Any network egress beyond the two provider APIs** — no other host, no widened scope
-  (NFR-SP-003).
-- **Wake-word work, Android, and other deferred project items** — untouched by this feature.
+- **Open-ended conversation/chat** — the fine-tunes have no conversational mode; stage-3 chat was
+  never done and shipped-brain chat is a known problem. Probes are the only new dialogue.
+- **Raw transcript history in prompts** — the 1024-token ceiling (study §5.1); dialogue state
+  lives in the app (NFR-MTC-002).
+- **Model-generated probe text** — probes are template-generated, ne/en (FR-MTC-016).
+- **Cloud / BYO-LLM anything** — no new egress, on-device stance unchanged (NFR-MTC-003).
+- **Persistent dialogue state across sessions** — in-memory frames only; cold start has no frame
+  (FR-MTC-001).
+- **Reminder/calendar changes in Phase 1** — those turns are unchanged until Phase 3 and OD-M4
+  (FR-MTC-019 Phase 1 guard).
+- **Android** — no platform scope beyond the existing iOS app.
+- **Emergency/medication behaviour changes** — none of any kind; emergency precedence is
+  preserved absolutely (FR-MTC-011).
+- **Any new compliance regime, permission, store or egress host** (NFR-MTC-012).
 
 ## Related
+
 - Consolidated copy: [`../define-requirements.md`](../define-requirements.md)
 - Locked snapshot: [`../define-requirements.lock.yaml`](../define-requirements.lock.yaml)
-- Feature constitution: [`../spotify-music-integration/constitution.md`](../spotify-music-integration/constitution.md)
-- Feature workflow (scope comment): [`../spotify-music-integration/workflow.yaml`](../spotify-music-integration/workflow.yaml)
+- Feature constitution: [`../multi-turn-conversation/constitution.md`](../multi-turn-conversation/constitution.md)
+- Feature workflow (scope comment): [`../multi-turn-conversation/workflow.yaml`](../multi-turn-conversation/workflow.yaml)
+- Owner's feasibility study: [`../../docs/multi-turn-conversation-feasibility.md`](../../docs/multi-turn-conversation-feasibility.md)

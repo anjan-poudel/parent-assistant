@@ -107,6 +107,51 @@ protocol VoiceCommandCoordinating: AnyObject {
     func startRephraseConfirmation(_ command: InterpretedCommand, sourceTranscript: String?)
     func takePendingRephraseCommand() -> (command: InterpretedCommand, sourceTranscript: String?)?
 
+    // [MULTI-TURN] (2026-10-10, C-MTC-05 §12.1) The dialogue-frame
+    // surface the router's pre-ladder interception needs. The coordinator
+    // owns the single `DialogueManager`, the answer window and the state
+    // machine hop (T-136); the router only reads the live frame, arms a
+    // frame, notes an invalid attempt, resolves through the one funnel
+    // and prepares the answer text. Each member is a REQUIREMENT with an
+    // inert extension default below (the established pattern — the
+    // router holds its coordinator as a protocol reference, so an
+    // extension-only member would bind statically and AppCoordinator's
+    // implementation could never be reached).
+
+    /// The live dialogue frame, nil when absent OR expired (the
+    /// coordinator drops an expired frame on read — the interception's
+    /// half-open-window guarantee, design-l2 §8). Main-queue read; the
+    /// router calls it once per turn.
+    var activeDialogueFrame: DialogueFrame? { get }
+
+    /// Arms the frame AND opens the answer window (state machine hop), in
+    /// that order (design-l2 §21 step 3). false = a window is already
+    /// open (confirmation or frame) or the draft cannot resolve; the
+    /// caller then takes its non-probe fallback path (never a dead end).
+    func startDialogueFrame(_ frame: DialogueFrame) -> Bool
+
+    /// Invalid-answer accounting: attempts += 1, deadline restamped,
+    /// window timer refreshed (L2-D6). Returns the updated attempt count.
+    /// Silent — the router emits the event.
+    @discardableResult func noteDialogueAttempt() -> Int
+
+    /// The single resolution funnel: clear the frame, cancel the timer,
+    /// close the window through legal edges, emit `dialogue_frame_resolved`
+    /// for the resolutions the coordinator owns (timeout, emergency,
+    /// supersession — design-l2 §26's component split). Idempotent.
+    func resolveDialogueFrame(_ resolution: DialogueFrameResolution)
+
+    /// Emergency/supersession clear — `resolveDialogueFrame` with a
+    /// reason the caller states (L2-D16): the §12.3 emergency side-effect
+    /// and the session-transition supersession both travel here.
+    func clearDialogueFrame(reason: DialogueFrameResolution)
+
+    /// The answer text through the exact seam every turn uses: sanitise
+    /// (.quarantine) then the shared input seam (L2-D14). Never the
+    /// model. The router's fallback when unimplemented is the plain
+    /// `.quarantine` sanitise — the same text the default below returns.
+    func prepareDialogueAnswerText(_ raw: String) -> String
+
     /// Call-confirmation correction hook (spec §7.2 correction protocol).
     /// While a call confirmation is outstanding, the router hands each
     /// response utterance here FIRST: an utterance carrying a method
@@ -511,6 +556,25 @@ extension VoiceCommandCoordinating {
     // prompt composes exactly as it did before the feature and every
     // pre-feature expectation (pinned digests, byte-identity tests) holds.
     var profilePersonalization: ProfilePersonalizationReading? { nil }
+    // [MULTI-TURN] (2026-10-10, C-MTC-05 §12.1) Inert dialogue defaults —
+    // a conformer that does not opt in (every mock/double) has no frame,
+    // no window and no accounting: the interception block never fires
+    // (nil frame), a degenerate trigger's arm cannot succeed and falls
+    // back to the pre-feature request, and every pre-feature expectation
+    // holds. Only a coordinator that explicitly implements the members
+    // (T-136's AppCoordinator, and a scripted mock under test) opens
+    // frames. `prepareDialogueAnswerText`'s default is the same
+    // `.quarantine` sanitise the router's nil-coordinator fallback uses,
+    // so an un-opted-in conformer still never hands the classifier raw,
+    // unclamped text.
+    var activeDialogueFrame: DialogueFrame? { nil }
+    func startDialogueFrame(_ frame: DialogueFrame) -> Bool { false }
+    @discardableResult func noteDialogueAttempt() -> Int { 0 }
+    func resolveDialogueFrame(_ resolution: DialogueFrameResolution) {}
+    func clearDialogueFrame(reason: DialogueFrameResolution) {}
+    func prepareDialogueAnswerText(_ raw: String) -> String {
+        InputSanitiser.sanitise(raw, level: .quarantine)
+    }
 }
 
 /// Turns a raw transcript into a coordinator call and a spoken reply.
@@ -779,6 +843,14 @@ final class CommandRouter {
         if Self.emergencyPhrases.contains(where: { Self.containsPhrase($0, in: preText) }) {
             emit(eventType: "command_emergency_keyword", outcome: "success")
             handleEmergency()
+            // [MULTI-TURN] (2026-10-10, C-MTC-05 §12.3) Emergency outranks
+            // any live dialogue frame: drop it (the coordinator emits the
+            // `.emergency` resolution event itself — §26's component
+            // split). POST-dispatch and side-effect only: it contributes
+            // no condition, delay or gate to the emergency path (L1
+            // ADR-MTC-02; a test pins dispatch with the clear forced to a
+            // no-op).
+            coordinator?.clearDialogueFrame(reason: .emergency)
             return .emergencyTriggered
         }
 
@@ -803,9 +875,70 @@ final class CommandRouter {
                     }
                     return .unrecognised(transcript: raw)
                 }
-                _ = coordinator?.takePendingRephraseCommand()
+                // [MTC-T134] rephrase-discard upgrade (design-l2 §12.4
+                // edit 5; C-5 review-l2): the taken hypothesis was
+                // previously DROPPED here — it is now bound and re-offered
+                // as the candidate frame's LAST candidate alongside the
+                // original utterance's near-matches (R2: never alone).
+                // `speakDialogueDidYouMean` speaks the composed
+                // `dialogue.understood.no` honest lead plus the
+                // `dialogue.didYouMean` question in ONE utterance (the
+                // composer's candidateChoice body already carries the
+                // lead — speaking it separately would repeat the line);
+                // with zero candidates, or a window that cannot open, the
+                // shipped discard line stands byte-identically (never
+                // fabricate, FR-MTC-004; NFR-MTC-012).
+                let taken = coordinator?.takePendingRephraseCommand()
                 emit(eventType: "rephrase_discarded", outcome: "info")
-                speak(key: "router.rephrase.discard")
+                let rephraseSource = taken?.sourceTranscript ?? raw
+                let rephraseCandidates = DialogueCandidateBuilder.build(
+                    for: rephraseSource,
+                    excludingDomain: nil,
+                    rephraseHypothesis: taken?.command)
+                // [W4 review F-1, 2026-10-10] The arm + probe pair is
+                // DEFERRED by exactly one main tick. Ordering proof:
+                // `takePendingRephraseCommand()` has just QUEUED its
+                // `.awaitingConfirmation → .idle` hop (block A) on the
+                // main queue and this branch runs before that hop lands.
+                // Arming synchronously would bridge the still-
+                // `.awaitingConfirmation` session to `.awaitingSlotAnswer`
+                // (the opener's legal `.idle` bridge), and block A would
+                // then land on the freshly armed window: it closes it
+                // (`.awaitingSlotAnswer → .idle`, cancelling the slot
+                // timer) and the queued session-exit observer, seeing a
+                // live frame with the window gone, resolves it as
+                // `.superseded` — the just-spoken probe is answer-dead
+                // (T-134 Gherkin 4 / design-l2 §12.4 edit 5). Deferring
+                // makes the order: block A (`.awaitingConfirmation →
+                // .idle`; the observer hop finds no frame yet — a no-op)
+                // → block B below (`openSlotAnswerWindow` from `.idle`
+                // directly; the observer sees `.awaitingSlotAnswer` — a
+                // no-op; the frame arms; the probe is spoken exactly
+                // once). The synchronous legs stay synchronous: zero
+                // candidates or no coordinator keep the shipped line with
+                // no defer (NFR-MTC-012), and a deallocated router speaks
+                // nothing and opens nothing. The start call happens ONLY
+                // inside block B, immediately followed by the speak on
+                // success, so no window is ever opened without its probe;
+                // the arm-failure / deallocated-coordinator legs speak the
+                // shipped line byte-identically (NFR-MTC-012).
+                if coordinator != nil, !rephraseCandidates.isEmpty {
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self else { return }
+                        guard let coordinator = self.coordinator,
+                              coordinator.startDialogueFrame(
+                                  DialogueFrame.candidateChoice(
+                                      candidates: rephraseCandidates,
+                                      sourceTranscript: rephraseSource)) else {
+                            self.speak(key: "router.rephrase.discard")
+                            return
+                        }
+                        self.speakDialogueDidYouMean(rephraseCandidates,
+                                                     locale: coordinator.activeLocale)
+                    }
+                } else {
+                    speak(key: "router.rephrase.discard")
+                }
                 return .unrecognised(transcript: raw)
             }
             // Call-confirmation correction protocol (spec §7.2): a
@@ -883,6 +1016,115 @@ final class CommandRouter {
             emit(eventType: "confirmation_ambiguous", outcome: "info")
             speak(key: "router.confirmationAmbiguous")
             return .unrecognised(transcript: raw)
+        }
+
+        // [MULTI-TURN] (2026-10-10, C-MTC-05 §12.2) Dialogue-frame
+        // interception. Runs after the confirmation hook (whose body is
+        // untouched — a pending confirmation outranks a live frame) and
+        // before the safety net; consumes an answer, re-probes, or falls
+        // through to the ladder unchanged. Every state mutation goes
+        // through the coordinator hooks; this block never speaks a
+        // model-generated line and never writes to the console (V-2).
+        //
+        // Classification is the pure `DialogueAnswerPath.classify`; the
+        // live medication vocabulary is computed here exactly as the
+        // keyword stage computes it (one source, no drift) so B6's
+        // medication-photo reading is live at this call site (W2 review
+        // F-1 — the §12.2 snippet's erratum). Consumed arms (escape,
+        // cancel, answer, candidate, exhaustion) return BEFORE the
+        // interpreter and the transcript cache (FR-MTC-017); `.bargeIn`
+        // resolves and deliberately falls through so the ladder executes
+        // the strong command exactly once with its normal tiers
+        // (L2-D18); `.expired` falls through as a fresh command.
+        if let frame = coordinator?.activeDialogueFrame {
+            let prepared = coordinator?.prepareDialogueAnswerText(raw)
+                ?? InputSanitiser.sanitise(raw, level: .quarantine)
+            let medicationNames = (coordinator?.medicationVoiceEntries ?? []).flatMap {
+                MedicationVoiceVocabulary.voiceKeys(for: $0)
+            }
+            let classification = DialogueAnswerPath.classify(
+                raw: raw,
+                prepared: prepared,
+                frame: frame,
+                catalog: dialogueCatalog,
+                locale: coordinator?.activeLocale ?? Locale(identifier: "ne-NP"),
+                now: Date(),
+                medicationNames: medicationNames
+            )
+            switch classification {
+            case .expired:
+                // The window closed before this utterance — it is a
+                // fresh command; the ladder below handles it unaltered.
+                break
+            case .escape:
+                coordinator?.resolveDialogueFrame(.escaped)
+                emitDialogueFrameResolved(.escaped)
+                speak(key: "dialogue.escape")
+                return .unrecognised(transcript: raw)
+            case .cancel:
+                coordinator?.resolveDialogueFrame(.cancelled)
+                emitDialogueFrameResolved(.cancelled)
+                speak(key: "dialogue.cancelled")
+                return .unrecognised(transcript: raw)
+            case .bargeIn:
+                // Resolve and fall through: the ladder below executes
+                // the strong command exactly once with its normal tiers
+                // (L1 ADR-MTC-05; the `.bargedIn` resolution has already
+                // cleared the frame and closed the window).
+                coordinator?.resolveDialogueFrame(.bargedIn)
+                emitDialogueFrameResolved(.bargedIn)
+            case .candidatePick(let index, let capture):
+                // The spoken position is 1-based; the executor addresses
+                // 0-based (design §12.2).
+                return executeDialogueCandidate(index - 1, capture: capture,
+                                                queryOverride: nil,
+                                                frame: frame, raw: raw)
+            case .answer(let merge):
+                return executeDialogueAnswer(merge, frame: frame, raw: raw)
+            case .freeFormForCandidate(let index, let value):
+                // Already 0-based (design §12.2) — consumed directly.
+                return executeDialogueCandidate(index, capture: .freeText,
+                                                queryOverride: value,
+                                                frame: frame, raw: raw)
+            case .invalid(let reason):
+                let attempts = coordinator?.noteDialogueAttempt()
+                    ?? DialogueConfig.maxProbes
+                // C-3 (review-l2 F-3): the `reason` metadata is built by
+                // direct `ObservabilityEvent` construction — the
+                // two-argument `emit` helper hardcodes empty metadata and
+                // would silently drop the reason vocabulary.
+                observabilityBus.emit(ObservabilityEvent(
+                    component: "command_router",
+                    eventType: "dialogue_answer",
+                    durationMs: nil,
+                    outcome: "invalid",
+                    errorCode: nil,
+                    metadata: ["reason": reason.rawValue]
+                ))
+                // Attempt budget (FR-MTC-007/§24): one re-probe after the
+                // first invalid answer, then the honest close. The
+                // manager's count has already taken this attempt
+                // (`noteAttempt` restamps the deadline, L2-D6); a count
+                // within the budget speaks the retry probe — the frame
+                // copy carries the fresh ordinal so the probe event's
+                // `attempt` metadata is the probe's own number.
+                //
+                // §12.2's pinned comparison (`attempts < maxProbes`) is
+                // an erratum: `noteAttempt` returns the post-increment
+                // count (>= 2 on the first invalid answer), so `<` makes
+                // the retry branch unreachable and contradicts the
+                // task-file Gherkin ("attempt one … re-probes with the
+                // retry variant") and §24's "one honest re-probe, then
+                // the honest exhausted line".
+                if attempts <= DialogueConfig.maxProbes {
+                    var reprobe = frame
+                    reprobe.attempts = attempts
+                    speakDialogueProbe(frame: reprobe, retry: true)
+                } else {
+                    return resolveDialogueExhaustion(frame: frame, raw: raw)
+                }
+                return .unrecognised(transcript: raw)
+            }
         }
 
         // Deterministic safety net FIRST (spec 2026-09-05 §4 routing
@@ -1230,7 +1472,17 @@ final class CommandRouter {
                 // utterance so the turn always has a query. Terminal for
                 // the turn, exactly like the YouTube arm above.
                 emitIntentKeywordMatch(relaxed)
-                fireMusicRequest(query: KeywordIntentRule.musicQuery(from: preText) ?? preText)
+                // [MTC-T134] ladder-degenerate (design-l2 §12.4 edit 3;
+                // §23's ladder intake): a degenerate extraction
+                // (marker/transcript fallback) opens the slot-fill probe
+                // instead of a blind search of the fallback token; a
+                // content extraction fires the shipped blind request with
+                // the identical query — `musicQuery(from:)` is the thin
+                // wrapper over `musicQueryOutcome(from:)`, so a specific
+                // request stays byte-identical (NFR-MTC-012).
+                fireMusicRequestOrProbe(query: KeywordIntentRule.musicQueryOutcome(from: preText),
+                                        raw: raw,
+                                        intake: .ladder)
                 return .unrecognised(transcript: raw)
             case .appLaunch:
                 // [APP-LAUNCHER] (2026-09-16) The launcher's voice fast
@@ -1860,13 +2112,25 @@ final class CommandRouter {
     ]
 
     /// Call-ish vocabulary shared by the post-LLM block
-    /// (`routeKeywordRemainder`) and the [NO-GIBBERISH] pre-answer guard:
-    /// an utterance that both names a topic word AND reads call-ish
-    /// ("मौसम बताउने मान्छेलाई फोन गर") must stay on the interpreter/
-    /// block path — a deterministic topic answer would shadow the call
-    /// intent. Hoisted from `routeKeywordRemainder` (2026-09-07) so the
-    /// pre-answer stage checks the SAME list that blocks.
-    private static let sensitiveCallPhrases = [
+    /// (`routeKeywordRemainder` `:1973-1980`) and the [NO-GIBBERISH]
+    /// pre-answer guard (`:1360`): an utterance that both names a topic
+    /// word AND reads call-ish ("मौसम बताउने मान्छेलाई फोन गर") must stay
+    /// on the interpreter/block path — a deterministic topic answer
+    /// would shadow the call intent. Hoisted from `routeKeywordRemainder`
+    /// (2026-09-07) so the pre-answer stage checks the SAME list that
+    /// blocks.
+    ///
+    /// [MTC L2-D2] (2026-10-10) `sensitiveCallPhrases` `:1869`: widened
+    /// `private` → `internal` so the dialogue barge-in predicate
+    /// (design-l2 §6 B2) consumes this exact list instead of forking a
+    /// second vocabulary — the same extraction reason as
+    /// `isExplicitMedicationAcknowledgement` `:1913`. The answer path
+    /// evaluates it with `containsPhrase` semantics (`:1826` —
+    /// `text.contains(phrase)`) over lowercased text and falls through
+    /// to the ladder, where `:1973-1980` blocks with
+    /// `router.sensitiveBlocked` unchanged. Visibility only: no call
+    /// site moves and no predicate changes.
+    static let sensitiveCallPhrases = [
         "call", "phone", "facetime", "messenger", "whatsapp",
         "फोन", "कल", "भिडियो कल", "म्यासेन्जर", "व्हाट्सएप", "वाट्सएप"
     ]
@@ -2018,7 +2282,16 @@ final class CommandRouter {
                             locale: coordinator?.activeLocale
                                 ?? Locale(identifier: "ne-NP")))
                 } else {
-                    speak(key: "router.reprompt")
+                    // [MTC-T134] keyword-remainder upgrade (design-l2
+                    // §12.4 edit 6): with ≥1 near-match candidate the
+                    // honest `dialogue.retry`-prefixed candidateChoice
+                    // probe is spoken and its frame armed; with zero
+                    // candidates — or a window that cannot open — the
+                    // shipped `router.reprompt` line stands
+                    // byte-identically (NFR-MTC-012). The
+                    // cloud-failure-class branch above and both no-brain
+                    // branches below are untouched.
+                    speakDialogueDidYouMeanOrReprompt(raw)
                 }
             }
         case .downloadingBrain:
@@ -2675,6 +2948,395 @@ final class CommandRouter {
             guard let self else { return }
             await self.runMusicTurn(query: query, locale: locale, startedAt: attemptStartedAt)
         }
+    }
+
+    // MARK: - [MTC] Dialogue frame (multi-turn conversation, design-l2 §12)
+
+    // [MULTI-TURN] (2026-10-10, C-MTC-05 §12.5) The dialogue frame's
+    // router-side helpers: the degenerate trigger, probe speech, the
+    // did-you-mean compositions and the execution arms. Every spoken line
+    // is composed from `dialogue.*` keys (never the model); every event
+    // is closed-vocabulary and content-free (NFR-MTC-004); no arm here
+    // consults the interpreter or the transcript cache (FR-MTC-017),
+    // except the `executeDialogueAnswer`/`executeDialogueDefault` merge
+    // tail, which re-enters the pending command's OWN dispatch (a music
+    // command — terminal, cache-free).
+
+    /// The degenerate music query's intake — the
+    /// `dialogue_degenerate_query` event's closed `intake` metadata
+    /// (design-l2 §23/§26): which of the three trigger sites requested
+    /// the probe. Never content.
+    private enum DialogueDegenerateIntake: String {
+        case ladder
+        case interpreted
+        case candidate
+    }
+
+    /// The one cached catalog load (design-l2 §12.6): loaded lazily on
+    /// first use (main thread, inside a turn) and then immutable. A
+    /// missing or malformed resource degrades to nil — the free-text-only
+    /// probe path (E3), never a fabricated option.
+    private lazy var dialogueCatalog: DialogueOptionCatalog? = {
+        try? DialogueOptionCatalog.load()
+    }()
+
+    /// The slot-fill draft for one degenerate music query (§12.5): the
+    /// candidates are the catalog group the query claims (none when
+    /// nothing claims it — the free-text-only probe), the default is the
+    /// extracted degenerate query itself (the any-option fallback), and
+    /// `activeCommand` carries the pending interpreted command the answer
+    /// merges into (L2-D13) — nil on the keyword/candidate intakes.
+    private func dialogueSlotFillDraft(query: KeywordIntentRule.MusicQueryExtraction,
+                                       raw: String,
+                                       activeCommand: InterpretedCommand?) -> DialogueFrame {
+        let catalog = dialogueCatalog
+        let candidates: [DialogueCandidate]
+        if let group = query.query.flatMap({ catalog?.groupForMusicQuery($0) }),
+           let catalog {
+            candidates = DialogueCandidateBuilder.slotFillCandidates(from: group,
+                                                                     catalog: catalog)
+        } else {
+            candidates = []
+        }
+        return DialogueFrame.slotFill(candidates: candidates,
+                                      defaultQuery: query.query,
+                                      domain: .music,
+                                      activeCommand: activeCommand,
+                                      sourceTranscript: raw)
+    }
+
+    /// The one degenerate trigger helper (§12.5/§23), shared by both
+    /// ladder intakes and by candidate execution: a NON-degenerate
+    /// extraction fires the music request exactly as the pre-feature
+    /// expression did (`query ?? raw` — `musicQuery` is the thin wrapper
+    /// over the outcome extractor, so the ladder intake is byte-identical
+    /// to the shipped line). A degenerate one emits
+    /// `dialogue_degenerate_query {intake}`, arms the slot-fill frame
+    /// through the coordinator and speaks the first probe.
+    ///
+    /// `activeCommand` carries the arrived interpreted command on the
+    /// interpreted intake (nil elsewhere) — the §12.5 pinned signature
+    /// gained this additive, defaulted parameter because the pinned
+    /// three-argument shape had no way to deliver it (§12.5's prose
+    /// requires it: "the interpreted intake passes the arrived `command`
+    /// as `activeCommand`").
+    ///
+    /// Fallbacks, all non-probe (never a dead end): an arm that cannot
+    /// open a window (defensive — a live frame is intercepted before any
+    /// trigger can run; also the no-coordinator case) falls back to
+    /// today's exact blind request.
+    private func fireMusicRequestOrProbe(query: KeywordIntentRule.MusicQueryExtraction,
+                                         raw: String,
+                                         intake: DialogueDegenerateIntake,
+                                         activeCommand: InterpretedCommand? = nil) {
+        guard query.isDegenerate else {
+            fireMusicRequest(query: query.query ?? raw)
+            return
+        }
+        observabilityBus.emit(ObservabilityEvent(
+            component: "command_router",
+            eventType: "dialogue_degenerate_query",
+            durationMs: nil,
+            outcome: "info",
+            errorCode: nil,
+            metadata: ["intake": intake.rawValue]
+        ))
+        let draft = dialogueSlotFillDraft(query: query, raw: raw,
+                                          activeCommand: activeCommand)
+        if coordinator?.startDialogueFrame(draft) == true {
+            speakDialogueProbe(frame: draft, retry: false)
+        } else {
+            fireMusicRequest(query: query.query ?? raw)
+        }
+    }
+
+    /// Speaks one probe (§12.5): composed by `DialogueProbeComposer` from
+    /// `dialogue.*` keys and catalog labels only (FR-MTC-016 — the model
+    /// is never consulted), announced as `dialogue_probe_spoken` with the
+    /// closed metadata (probe kind, the probe's own ordinal, the offered
+    /// option count), then spoken through the normal reply surface so the
+    /// assistant-bubble/speech bookkeeping matches every other reply.
+    /// `errorCode: "catalogUnavailable"` marks the degraded slot-fill
+    /// probe (no catalog — the free-text-only composition, E3); a
+    /// candidateChoice probe never reads the catalog and is never
+    /// degraded. The `locale` parameter is additive/defaulted for
+    /// `speakDialogueDidYouMean`'s pinned signature — call sites inside a
+    /// turn pass nothing and read the coordinator's locale.
+    private func speakDialogueProbe(frame: DialogueFrame, retry: Bool,
+                                    locale: Locale? = nil) {
+        let locale = locale ?? coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        let degraded = frame.probeKind == .slotFill && dialogueCatalog == nil
+        observabilityBus.emit(ObservabilityEvent(
+            component: "command_router",
+            eventType: "dialogue_probe_spoken",
+            durationMs: nil,
+            outcome: degraded ? "degraded" : "success",
+            errorCode: degraded ? "catalogUnavailable" : nil,
+            metadata: [
+                "probe_kind": frame.probeKind.rawValue,
+                "attempt": String(frame.attempts),
+                "option_count": String(dialogueProbeOptionCount(for: frame))
+            ]
+        ))
+        speak(text: DialogueProbeComposer.probeText(for: frame, catalog: dialogueCatalog,
+                                                    retry: retry, locale: locale),
+              locale: locale)
+    }
+
+    /// The probe event's `option_count` (§26: 0…4): the capped
+    /// option/candidate count the probe actually offers. slotFill: the
+    /// group's options, 0 when no group claims the pending query (the
+    /// free-text-only probe offers no addressable options); the
+    /// any-option label is deliberately not counted (it is not a catalog
+    /// option, §11). candidateChoice: the capped candidate count.
+    private func dialogueProbeOptionCount(for frame: DialogueFrame) -> Int {
+        switch frame.probeKind {
+        case .slotFill:
+            guard let query = frame.defaultQuery,
+                  let group = dialogueCatalog?.groupForMusicQuery(query) else { return 0 }
+            return min(group.options.count, DialogueConfig.maxSlotOptions)
+        case .candidateChoice:
+            return min(frame.candidates.count, DialogueConfig.maxCandidates)
+        }
+    }
+
+    /// Speaks the did-you-mean probe for a candidate list (§12.5; the
+    /// rephrase-discard helper, §12.4 edit 5): composed through the same
+    /// `DialogueProbeComposer` candidateChoice path (and emitting the same
+    /// `dialogue_probe_spoken` event) as the frame's own first probe — the
+    /// honest "I didn't understand." lead joined with the capped candidate
+    /// labels, in the caller's locale. The caller owns arming the frame it
+    /// built from the same candidates; this helper only speaks, so an
+    /// unanswerable probe is structurally impossible (no frame, no
+    /// call — the caller's zero-candidate branch keeps its shipped line).
+    private func speakDialogueDidYouMean(_ candidates: [DialogueCandidate], locale: Locale) {
+        let draft = DialogueFrame.candidateChoice(candidates: candidates,
+                                                  sourceTranscript: "")
+        speakDialogueProbe(frame: draft, retry: false, locale: locale)
+    }
+
+    /// The keyword-remainder reprompt upgrade (§12.5; §12.4 edit 6, T-134's
+    /// call site): with at least one near-match candidate the honest
+    /// `dialogue.retry`-prefixed candidateChoice probe is spoken and its
+    /// frame armed; with zero candidates — or a window that cannot open
+    /// (defensive; also the no-coordinator case) — the shipped
+    /// `router.reprompt` line stands byte-identically (NFR-MTC-012).
+    private func speakDialogueDidYouMeanOrReprompt(_ raw: String) {
+        let candidates = DialogueCandidateBuilder.build(for: raw,
+                                                        excludingDomain: nil,
+                                                        rephraseHypothesis: nil)
+        guard !candidates.isEmpty, let coordinator else {
+            speak(key: "router.reprompt")
+            return
+        }
+        let draft = DialogueFrame.candidateChoice(candidates: candidates,
+                                                  sourceTranscript: raw)
+        guard coordinator.startDialogueFrame(draft) else {
+            speak(key: "router.reprompt")
+            return
+        }
+        speakDialogueProbe(frame: draft, retry: true, locale: coordinator.activeLocale)
+    }
+
+    /// Executes a resolved music-slot answer (§12.5, FR-MTC-006):
+    /// resolution first (the funnel clears the frame and closes the
+    /// window), the two events, then the merge executes through the
+    /// pending command's own dispatch. Terminal for the turn — a consumed
+    /// answer never reaches the interpreter or the transcript cache
+    /// (FR-MTC-017).
+    private func executeDialogueAnswer(_ merge: DialogueMerge,
+                                       frame: DialogueFrame,
+                                       raw: String) -> RoutingResult {
+        coordinator?.resolveDialogueFrame(.answered(merge))
+        emitDialogueAnswer(capture: merge.capture, source: merge.source)
+        emitDialogueFrameResolved(.answered(merge))
+        dispatchDialogueMusicValue(merge.value, frame: frame, raw: raw)
+        return .unrecognised(transcript: raw)
+    }
+
+    /// The shared execution tail of the two music-value paths
+    /// (`executeDialogueAnswer`, `executeDialogueDefault`): a pending
+    /// interpreted music command merges the value into its `message` and
+    /// re-enters its own dispatch (every other field copied verbatim —
+    /// T-131's `merging`; the `.music` arm is terminal and cache-free);
+    /// a ladder frame fires the shipped music request directly. The
+    /// value is the user's own words or a catalog query — never model
+    /// text (the merge is deterministic, FR-MTC-006).
+    private func dispatchDialogueMusicValue(_ value: String,
+                                            frame: DialogueFrame,
+                                            raw: String) {
+        if let active = frame.activeCommand, active.action == .music {
+            dispatchInterpreted(active.merging(message: value), raw: raw)
+        } else {
+            fireMusicRequest(query: value)
+        }
+    }
+
+    /// Executes one candidate pick (§12.5) through the ladder arm that
+    /// owns the domain — "as if it had been understood" (ADR-MTC-07) —
+    /// resolution first, events after, then that arm's own seam. `index`
+    /// is 0-based (candidatePick's spoken position was decremented by the
+    /// interception block; the free-form claim arrives 0-based); a
+    /// non-nil `queryOverride` is the free-form claim's extracted value
+    /// (`.answered(capture: .freeText, source: .candidate)`), a nil one is
+    /// an enumerated pick (`.candidateSelected`).
+    ///
+    /// M-5 (security-design-review; the task's executor-bounds row): the
+    /// index is validated against the frame's candidate list BEFORE any
+    /// addressing. classify is total, so a hostile index cannot arrive
+    /// through `route()` — this guard exists so the executor is total too:
+    /// a crafted out-of-range index refuses with the honest exhausted
+    /// close (nothing addressed, nothing executed), never an out-of-range
+    /// read and never a crash. `internal` (not file-private) so the M-5
+    /// test can drive the hostile index directly; the interception block
+    /// is the only production caller.
+    @discardableResult
+    func executeDialogueCandidate(_ index: Int,
+                                  capture: CaptureForm,
+                                  queryOverride: String?,
+                                  frame: DialogueFrame,
+                                  raw: String) -> RoutingResult {
+        guard frame.candidates.indices.contains(index) else {
+            coordinator?.resolveDialogueFrame(.exhausted)
+            emitDialogueFrameResolved(.exhausted)
+            speak(key: "dialogue.exhausted")
+            return .unrecognised(transcript: raw)
+        }
+        let candidate = frame.candidates[index]
+        if let value = queryOverride {
+            let merge = DialogueMerge(value: value, capture: capture, source: .candidate)
+            coordinator?.resolveDialogueFrame(.answered(merge))
+            emitDialogueAnswer(capture: capture, source: .candidate)
+            emitDialogueFrameResolved(.answered(merge))
+        } else {
+            coordinator?.resolveDialogueFrame(.candidateSelected(index: index))
+            emitDialogueAnswer(capture: capture, source: .candidate)
+            emitDialogueFrameResolved(.candidateSelected(index: index))
+        }
+        switch candidate.domain {
+        case .news:
+            // C-2 (review-l2 F-2): the REAL relaxed news arm's hand-off
+            // (`:1210-1217`) mirrored — ack first, the reader owns every
+            // line from here; the strict stage (`:1131-1138`) is the same
+            // triplet. The relaxed stage's `intent_keyword_match`
+            // provenance event is stage-specific and deliberately not
+            // borrowed (no keyword rule fired here).
+            speakPreAck()
+            coordinator?.fireNewsReader()
+            emit(eventType: "news_reader_command", outcome: "success")
+        case .youtube:
+            // The strict YouTube stage's execution (`:1218-1221`): the
+            // builder guarantees an executable query for a youtube
+            // candidate (its executable-query rule); the guard is
+            // defensive totality.
+            guard let query = queryOverride ?? candidate.query else { break }
+            fireYouTubePlay(query: query)
+        case .music:
+            // A real query fires the shipped music arm; a degenerate
+            // pick chains a fresh slot-fill frame sequentially (§23's
+            // candidate intake).
+            fireMusicRequestOrProbe(
+                query: KeywordIntentRule.musicQueryOutcome(
+                    from: queryOverride ?? candidate.query ?? raw),
+                raw: raw,
+                intake: .candidate)
+        case .appLaunch:
+            // The relaxed app-launch arm's hand-off (`:1256-1264`): the
+            // returned line is the coordinator's (the confirmation
+            // question or the honest not-installed line); the caller only
+            // speaks what it is handed.
+            guard let appID = candidate.appID else { break }
+            if let line = coordinator?.requestAppLaunch(appID: appID, confidence: nil) {
+                coordinator?.noteGenericReply(line)
+                speak(text: line)
+            }
+        default:
+            // Not a framable domain — `DialogueCandidateBuilder` never
+            // produces these (defensive totality).
+            break
+        }
+        return .unrecognised(transcript: raw)
+    }
+
+    /// The attempt-cap close (§24; FR-MTC-007): a candidateChoice frame
+    /// closes honestly — `.exhausted`, the `dialogue.exhausted` line,
+    /// nothing executed (R3: executing an unasked candidate is the trap
+    /// FR-MTC-004/FR-MTC-010 forbid); a slotFill frame executes its
+    /// pending default instead (`.defaultExecuted`).
+    private func resolveDialogueExhaustion(frame: DialogueFrame, raw: String) -> RoutingResult {
+        switch frame.probeKind {
+        case .candidateChoice:
+            coordinator?.resolveDialogueFrame(.exhausted)
+            emitDialogueFrameResolved(.exhausted)
+            speak(key: "dialogue.exhausted")
+            return .unrecognised(transcript: raw)
+        case .slotFill:
+            return executeDialogueDefault(frame: frame, raw: raw)
+        }
+    }
+
+    /// The slotFill exhaustion default (§12.5/§24): resolve
+    /// `.defaultExecuted`, the two events, then the same dispatch an
+    /// answered frame uses, with the pending degenerate query as the
+    /// value (or the opening transcript when even that is absent —
+    /// `arm` guarantees one of the two exists for a live frame).
+    private func executeDialogueDefault(frame: DialogueFrame, raw: String) -> RoutingResult {
+        let value = frame.defaultQuery ?? frame.sourceTranscript
+        let merge = DialogueMerge(value: value, capture: .optionName, source: .defaultQuery)
+        coordinator?.resolveDialogueFrame(.defaultExecuted)
+        emitDialogueAnswer(capture: merge.capture, source: merge.source)
+        emitDialogueFrameResolved(.defaultExecuted)
+        dispatchDialogueMusicValue(value, frame: frame, raw: raw)
+        return .unrecognised(transcript: raw)
+    }
+
+    /// `dialogue_answer` for a consumed answer (§26): the closed
+    /// capture-form / merge-source vocabulary, count/enum only — never
+    /// the answer text, never the merged value.
+    private func emitDialogueAnswer(capture: CaptureForm, source: MergeSource) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "command_router",
+            eventType: "dialogue_answer",
+            durationMs: nil,
+            outcome: "success",
+            errorCode: nil,
+            metadata: [
+                "capture_form": capture.rawValue,
+                "merge_source": source.rawValue
+            ]
+        ))
+    }
+
+    /// `dialogue_frame_resolved` for the TURN-TIME resolutions the router
+    /// itself initiates (§26's component split: `command_router` for
+    /// answered/defaultExecuted/candidateSelected/exhausted/cancelled/
+    /// escaped/bargedIn; the coordinator's funnel emits the ones it owns
+    /// — timeout, emergency, supersession — with its own component). The
+    /// outcome rides both the event's outcome field and the `outcome`
+    /// metadata key §26 pins; the vocabulary is the closed ten-case enum,
+    /// mapped in one place.
+    private func emitDialogueFrameResolved(_ resolution: DialogueFrameResolution) {
+        let outcome: String
+        switch resolution {
+        case .answered: outcome = "answered"
+        case .defaultExecuted: outcome = "defaultExecuted"
+        case .candidateSelected: outcome = "candidateSelected"
+        case .exhausted: outcome = "exhausted"
+        case .cancelled: outcome = "cancelled"
+        case .escaped: outcome = "escaped"
+        case .bargedIn: outcome = "bargedIn"
+        case .timedOut: outcome = "timedOut"
+        case .superseded: outcome = "superseded"
+        case .emergency: outcome = "emergency"
+        }
+        observabilityBus.emit(ObservabilityEvent(
+            component: "command_router",
+            eventType: "dialogue_frame_resolved",
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: nil,
+            metadata: ["outcome": outcome]
+        ))
     }
 
     /// One music turn, state machine B (§10) through to execution. The
@@ -3350,9 +4012,25 @@ final class CommandRouter {
             let modelQuery = command.message?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             let interpretedQuery = (modelQuery?.isEmpty == false) ? modelQuery : nil
-            fireMusicRequest(query: interpretedQuery
-                ?? KeywordIntentRule.musicQuery(from: raw)
-                ?? raw)
+            if let interpretedQuery {
+                // The model set its own query — exactly today's request.
+                fireMusicRequest(query: interpretedQuery)
+            } else {
+                // [MTC-T134] interpreted-degenerate (design-l2 §12.4 edit
+                // 4; §23's interpreted intake): the model set no
+                // `message`, so the deterministic extractor reads the
+                // transcript — a degenerate reading opens the slot-fill
+                // probe instead of searching the fallback token, a
+                // content reading fires the identical blind request
+                // (byte-identity, NFR-MTC-012). The arrived command rides
+                // the frame as `activeCommand` (L2-D13) so an answer
+                // merges back into its own dispatch.
+                fireMusicRequestOrProbe(
+                    query: KeywordIntentRule.musicQueryOutcome(from: raw),
+                    raw: raw,
+                    intake: .interpreted,
+                    activeCommand: command)
+            }
         case .sendMessage:
             handleSendMessage(command)
         case .guide:

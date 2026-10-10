@@ -1,181 +1,91 @@
-# W5 Implement Review — Spotify Music Integration
+# Implementation review — W5 (multi-turn-conversation)
 
 **Reviewer:** sdd-reviewer subagent (read-only), orchestrated by the main session
-**Reviewed revision:** worktree `feat/spotify-music-integration`, HEAD `1dce327` + W5 working-tree changes (`AppCoordinator.swift`, `project.pbxproj`, `ios/tools/check-release-log-safety.py`; new `AppCoordinatorSpotifyWiringTests.swift`, `specs/T-119-notes.md`, `specs/T-121-notes.md`)
-**Worktree:** `/Users/anjan/workspace/projects/elderly-ai-assistant-spotify-music-integration`
-**Date:** 2026-10-07
+**Reviewed revision:** branch `feat/multi-turn-conversation`, HEAD `cc065b0` (W4) + uncommitted W5 implementation
+**Date:** 2026-10-10
+**Verdict:** **GO — Confidence 0.90**
+**Blockers:** 0 (1 minor, 2 note-level findings)
 
-## Verdict
+## Scope and method
 
-**GO — Confidence 0.92** (threshold 0.85)
+Units under review: **T-139** (hostile corpus + trap matrix suites), **T-140** (cache-bypass + log/egress suites), **T-143** (device-validation protocol). Test-only + docs wave; no production source.
 
-Both units meet their binding task files and the design of record. All claims in the two notes files were re-derived from code, diffs, gate logs, the xcresult, and independent re-runs; the planted-violation transcript was independently reproduced against the shipped engine. No MAJOR findings. Four MINOR observations, all non-blocking and three of them documentation-only.
+Method: read-only verification in the worktree `/Users/anjan/workspace/projects/elderly-ai-assistant-multi-turn-conversation`. Delta confirmed exact against the dispatch (`git status --short` / `git diff --stat`): `M ios/seniOS.xcodeproj/project.pbxproj` (+16/−0, additions-only — 4 PBXBuildFile, 4 PBXFileReference, 4 group children, 4 Sources entries, one per new test file); `M specs/implement-notes.md` (single line: W4 row `W4HASH` → `cc065b0`); untracked: the four new test files, `specs/T-139-notes.md`, `specs/T-140-notes.md`, `specs/T-143-notes.md`, `specs/MTC-device-validation-protocol.md`. No other file in the delta; **no production source modified**. Gate evidence verified against preserved logs/bundles — not re-run, per dispatch.
 
-## Scope verification
+Files and sha256 (computed):
 
-`git status --porcelain` (run before and after this review, unchanged) shows exactly the expected set:
+| File (worktree-relative) | sha256 | Lines |
+|---|---|---|
+| `ios/ElderlyAssistantTests/Services/Voice/DialogueHostileCorpusTests.swift` | `ec607a15e3bf850c0361cbf02a74cc828b35febe053720545ec06984eb0f131a` | 724 |
+| `ios/ElderlyAssistantTests/Services/Voice/DialogueTrapMatrixTests.swift` | `273f62c3dea4ff6e3b99b0e2e1f14c08443c07c7d083818ceb82cba269b32a63` | 660 |
+| `ios/ElderlyAssistantTests/Services/Voice/DialogueCacheBypassTests.swift` | `aa1ee630519caeb74d593f86e03992ba99c0125b5c8f1626b4bdeeb3605c2452` | 603 |
+| `ios/ElderlyAssistantTests/Services/Observability/DialogueLogAndEgressTests.swift` | `d7703880ced20d46517bc29534b5868469a23fbc66353dee784bcb6bb73de1fc` | 956 |
+| `specs/T-139-notes.md` | `e0360033a0dadd198948a2ba149f193592ffa0b29e3be83ff8c96b7ea23eb530` | 216 |
+| `specs/T-140-notes.md` | `d074a2de177b63692d40fb09f9800cf667963ab182c7c836de4ff60b6e562cae` | 201 |
+| `specs/T-143-notes.md` | `e54d7d70c750d20486676ce24b0b53533fb17d482973ef1587d8be5f14837159` | 226 |
+| `specs/MTC-device-validation-protocol.md` | `b06a76563c9baf8c3ab9e237f5cea2a014056bce9c8eff4449f8ad873e4e7c8a` | 300 |
 
-```
- M ios/ElderlyAssistant/App/AppCoordinator.swift
- M ios/seniOS.xcodeproj/project.pbxproj
- M ios/tools/check-release-log-safety.py
-?? ios/ElderlyAssistantTests/App/AppCoordinatorSpotifyWiringTests.swift
-?? specs/T-119-notes.md
-?? specs/T-121-notes.md
-```
+Authority read for criteria: feature `constitution.md` (DV table :113-117), `design-l2` §12/§22-§26, `security-design-review.md` (E1-E8, V-1..V-4, M-1..M-5, R1/R2), FR-MTC-007/017/020, NFR-MTC-003/004/007/008/012, and prior reviews `specs/implement-review-w1..w4.md` for continuity (closed items not re-litigated).
 
-`git diff --stat`: 3 files, 82 insertions, 0 deletions (69 + 4 + 9). No leftover planted file: `ls ios/ElderlyAssistant/Services/Spotify/` shows the 7 product files only (`ASWebSpotifyAuthSession`, `SpotifyAccountSession`, `SpotifyAuthError`, `SpotifyAuthFlow`, `SpotifyCredentialStore`, `SpotifyTool`, `SpotifyTransport`). This review modified nothing in the repo (scratch work confined to `/tmp`, removed).
+Gate evidence (verified, not re-run):
+- W5 combined gate: `/tmp/mtc-w5-gate.log` → `Executed 157 tests, with 0 failures`, `** TEST SUCCEEDED **`, `GATE rc=0`; bundle `/tmp/mtc-w5-evidence/w5-gate.xcresult` walk: CommandRouterDialogueTests 21, DialogueAnswerPathTests 36, DialogueCacheBypassTests 4, DialogueCoordinatorWiringTests 17, DialogueHostileCorpusTests 8, DialogueLogAndEgressTests 5, DialogueTrapMatrixTests 8, LogSanitiserTests 34, VoiceSessionStateMachineTests 24 — 157 total, all `Passed`.
+- T-139 unit gate: `/tmp/t139-build-run1..4.log`; run 4 green **114/114** (`/tmp/t139-run4-green.xcresult`); honest red history preserved (run 1 own-file compile errors :317/:440; run 2 sibling-file compile block; run 3 one expectation corrected to production normalization).
+- T-140 unit gate: red `/tmp/t140-gate.log` (rc=65, one failure — own file, `DialogueCacheBypassTests.testPendingTranscriptStaysNilOnFrameExecution`) + `/tmp/t140-gate-red.xcresult`; green `/tmp/t140-gate2.log` (rc=0, **117/117**) + `/tmp/t140-gate2.xcresult`.
 
----
+## Flagged-context adjudications
 
-## Unit 1 — T-119 AppCoordinator wiring: **PASS**
+**T-139**
+1. **Timeout row fires `onSlotAnswerTimeout` directly + T-135 1 s clock leg — ACCEPT.** `AppCoordinator.swift:211` declares `let voiceSession = VoiceSessionStateMachine()` (non-injectable); default config `VoiceSessionStateMachine.swift:120` (45 s); the callback is production-installed at `AppCoordinator.swift:3081`. Firing the exact installed seam, plus the bare-machine `Config(confirmationTimeoutSeconds: 1)` leg (:115-120), is deterministic and faithful; one 1 s expectation wait, no sleeps.
+2. **Watchdog row: precondition + terminal consequence — ACCEPT.** Work item is private, `voiceWatchdogSeconds = 60` (`AppCoordinator.swift:4940`), fire guard `if self.voiceSession.state == .listening` (:4946). The row asserts the fire precondition is false mid-window and drives the `.stopped` flip to exercise the session-exit observer (`AppCoordinator.swift:3098-3102` → `:11116-11120`, superseded through the funnel) — the only reachable consequence without waiting out 60 s.
+3. **Expiry row: mock over REAL `DialogueManager(answerWindowSeconds: 4, now:)` — ACCEPT.** The manager's own clock seam exists (`DialogueManager.swift:225-227`); half-open `isExpired` is `now >= deadline` (:94); the absolute epoch (1_800_000_000) avoids FP drift at the boundary; real coordinator window is not injectable, so a file-private mock over the real manager is the closest-real option.
+4. **Candidate-poisoning normalized `"दुर्गा"` — ACCEPT.** The shipped music arm adds the music vocabulary to the drop sets (`KeywordIntentRule.swift` doc block :781-790, markerFallback arm :798+), so `भजन` is dropped from `"दुर्गा भजन"` and the executed query is `"दुर्गा"`. Run 3's one-edit correction pins verified production behavior (comment records it), not the pre-normalization fixture.
 
-Task file: `specs/plan-tasks/tasks/TG-22-plugin-wiring-settings-and-localisation/T-119-app-coordinator-wiring.md` (4 Gherkin scenarios). Design §16 (`specs/design-l2.md:301-323`).
+**T-140**
+5. **One red run then one-edit fix — ACCEPT.** Red log failure is in this unit's own file (`/tmp/t140-gate.log:67`), rc=65; the retry-not-fix protocol applies to sibling-file failures, of which none occurred; both red and green bundles preserved. The one edit was in-unit.
+6. **Raw-read for the router source pin — ACCEPT.** `FeatureSourceScan.codeText(of:)` strips comments by design (`FeatureSourceScan.swift:55-61`), and the six region anchors are comment lines — the red run's `region anchor missing: interception` is exactly that; raw read is also the tighter E8 claim (zero `pendingTranscript` references including comments) and matches the already-passing E6 suite idiom for the same six regions.
+7. **`§12.2` heading anchor at line 1021 — ACCEPT.** Verified in `CommandRouter.swift`: `§12.1` mentions at :110 and :559, the `§12.2` interception heading at :1021; each anchor string occurs exactly once, in order (1021/1130, 2953/3342, 878/944, 1475/1488, 2285/2297, 4019/4034).
+8. **File-private `LogInMemoryProfilePayloadStorage` — ACCEPT.** The established fake is file-scoped (`DialogueCoordinatorWiringTests.swift:790-813`, verified); mirroring its shape in the E4 suite rather than widening another file's private symbol is the right call, and the red run's sibling-compile incident (T-139 run 2) shows exactly why file-private is the safe default.
+9. **Timeout leg drives `voiceSession.onSlotAnswerTimeout?()` — ACCEPT.** Same reasoning as adjudication 1; the `[app_coordinator] … outcome=timedOut` emitter is exercised for real and observed in the sink scan.
+10. **dym fixture pairs hypothesis with near-match `"समाचार"` — ACCEPT.** `DialogueCandidateBuilder.build` appends the hypothesis only alongside non-empty near-matches (`DialogueCandidateBuilder.swift:79-82`, R2 never-alone, verified); the suite additionally asserts the marker is inside the armed frame's candidates and in the spoken text, so the marker-absence claim is non-vacuous.
+11. **E5 allow-list re-verified at runtime — ACCEPT.** Static count at `LogSanitiser.swift:56` = 84 quotes, matching the runtime pin (84, contains `reason`, `reason` ∉ six-key dialogue vocabulary); "verify, don't assume" correctly applied to T-137's static claim.
 
-### 1. Lazy stores — first use, not init
+**T-143**
+12. **DV table lives in the feature constitution (:113-117), not the root — ACCEPT.** Root `constitution.md` contains no `DV-1`; all five DV lines verbatim in the feature constitution, matching design-l1 §6 (:197-209).
+13. **Record merged into protocol §7 — ACCEPT.** The task file's implementation notes permit the appended record section (task file :59-61); §7.3 records all items **BLOCKED** and step zero **OUTSTANDING** — honest current state.
+14. **JetsamEvent two routes (on-device Analytics Data export; `devicectl systemCrashLogs`) — ACCEPT.** Both are documented approaches; the second matches the repo's crash-log pull practice. No canonical command is documented in-repo, so the protocol's dual route is the right level of prescription.
+15. **DV-5 Release route via `build.sh ipa` — ACCEPT.** `ios/device-install.sh:45` builds `Debug-iphoneos` (verified); `ios/build.sh:522-525` + `xcodebuild archive … -configuration Release` (verified :216-224) is the correct Release path for NFR-MTC-007's "6 GB-class reference device in Release configuration".
+16. **DV-4 BLOCKED if not forcible — ACCEPT.** There is no debug toggle to force the pressure pick; design-l1 §6 itself offers "force (or unload)" as the levers, so honestly marking BLOCKED when device-side forcing fails is the correct discipline.
+17. **dym leg optional — ACCEPT.** The candidate probe firing depends on device brain/STT variance; the fixed-fixture proofs remain automated upstream, so an optional device leg is honest.
+18. **Presentation conventions — ACCEPT.** Outer quotes/bold and `" / "` joins are marked conventions; item text otherwise byte-verbatim (spot-checked ≥4 items and 3 gate phrases against constitution/design-l1/FR-MTC-020/NFR-MTC-007/012).
+19. **Three source texts per item — ACCEPT.** Carrying all three (constitution, design-l1, FR/NFR) satisfies the task's "do not paraphrase pass criteria" instruction; verified verbatim.
+20. **DV-3 utterance also pinned in `CommandRouterDegenerateTriggerTests` — ACCEPT.** "मेरो छोरालाई फोन गर" verified at `CommandRouterDegenerateTriggerTests.swift:278`; the deliberate cross-pin is the right device-observability choice.
 
-- `AppCoordinator.swift:1377` — `private(set) lazy var spotifyCredentialStore = MainActor.assumeIsolated { SpotifyCredentialStore(storage: storage) }` (doc 1360-1376).
-- `AppCoordinator.swift:1401-1407` — `private(set) lazy var spotifyAccountSession: SpotifyAccountSession = MainActor.assumeIsolated { let session = SpotifyAccountSession(store: spotifyCredentialStore, flow: ASWebSpotifyAuthSession(), observabilityBus: observabilityBus); session.presenter = { [weak self] in self?.topPresentingViewController() }; return session }` (doc 1381-1400).
+## Per-unit results
 
-Both placed in the shipped keychain-store region, after `newsSourceStore`. `AppCoordinator.init` (`:2497`) never reads `pluginRegistry` (lazy at `:1921`) nor either Spotify property — no init-time keychain work. The test's Mirror read of the compiler's `$__lazy_storage_$_…` slots proves the slots are empty before first use and filled after (`AppCoordinatorSpotifyWiringTests.swift:41-58`), which fails loudly if either stops being lazy (label disappears → explicit XCTFail, `:317-326`).
+| Unit | Verdict | Evidence |
+|---|---|---|
+| T-139 | **PASS** | 8 corpus (E1 pair, 5 E2 rows, M-5) + 8 trap (E3) tests; 114/114 run 4; E1 forced-no-op clear verified (dispatch side effects asserted with clear disabled; `clears` empty; frame survives; interpreter 0); injection-marker re-probe `attempts=2` + causal control leg; M-5 `[-1, 1, 12]` → three `.exhausted` closes component `command_router`; trap rows all end in the terminal triple (`assertNoHalfOpenWindow`, `assertLateHourglassIsANoOp`, `assertResolveTwiceIsANoOp`). |
+| T-140 | **PASS** | 4 + 5 tests; 117/117 green; E8 seeded-entry causal A/B (seeded entry served on control re-route), answer text never interned, `pendingTranscript` nil via Mirror + source pin + positive control; E4 production `ConsoleObservabilityBus` + `LogSanitiser` over 8 legs, marker tokens absent from sink lines, suite pin of the 8-key vocabulary; E5 `[redacted]` OOV + dropped unlisted key + `reason=overLength` producer closure; E6 source regions + 20 spy transports all empty, only `YouTubeTool.appSearchURL` opens. |
+| T-143 | **PASS** | 300-line protocol; DV-1..DV-5 with verbatim tri-source texts, steps, pass/fail, evidence fields; step zero = PR #156 device smoke as HARD PREREQUISITE (OUTSTANDING); §9 capture discipline (NFR-MTC-004); no execution claimed. |
 
-### 2. W2-review D1 — `observabilityBus: observabilityBus` passed by name
+## Cross-cutting checks
 
-`AppCoordinator.swift:1404` passes the app's bus by name. The §26 default it must not rely on is real: `SpotifyAccountSession.swift:188` (`observabilityBus: ObservabilityBus = SpotifyAccountSession.unwiredBus`), the dropping sink at `:757-762` whose `emit` is a no-op. The `calendarShareSession` precedent is `AppCoordinator.swift:9387` (`GoogleAccountSession(observabilityBus: observabilityBus)`). Test scenario 4 pins the construction site with the exact needle `observabilityBus: observabilityBus)` inside the `SpotifyAccountSession(` call block (`AppCoordinatorSpotifyWiringTests.swift:243-249`) and independently verifies bus identity at runtime.
-
-### 3. Presenter resolved at PRESENT time
-
-`AppCoordinator.swift:1405` assigns a `{ [weak self] in self?.topPresentingViewController() }` closure, resolved when `link()` calls it (`SpotifyAccountSession.swift:220`, `guard let presenter, presenter() != nil`), never at construction — textually the `calendarShareSession` precedent at `AppCoordinator.swift:9386-9394`.
-
-### 4. Exactly one store / session instance, app-wide
-
-- The only non-test constructions of `SpotifyAccountSession(` and `SpotifyCredentialStore(` under `ios/ElderlyAssistant/` are the two lazy vars (`:1402`, `:1378`) — verified by repo-wide grep.
-- Plugin seams: the registration (`:2116-2117`) hands over `spotifyAccountSession` / `spotifyCredentialStore`; the test reads the plugin's stored seams via Mirror and asserts ObjectIdentifier equality with the coordinator's instances (scenario 1, passing).
-- Router seams: pinned by source (`:3784-3786`) plus the armed-router identity half (see deviation 2 below).
-
-### 5. Registration — exactly once, pre-existing list untouched
-
-`AppCoordinator.swift:2116-2117`, immediately after the YouTubePlugin registration; the diff is a pure addition (comment 2108-2115 + call). Independently verified full ordered list against the plugin sources:
-
-`nepali_calendar` (`NepaliCalendarPlugin.swift:20`), `appliance_helper` (`ApplianceHelperPlugin.swift:28`), `routine` (`RoutinePlugin.swift:24`), `youtube` (`YouTubePlugin.swift:30`), `spotify` (`SpotifyPlugin.swift:38`), `live_translate` (`LiveTranslatePlugin.swift:91`), `app_launcher` (`AppLauncherPlugin.swift:30`) — matching the test's pinned ID list and type list (`AppCoordinatorSpotifyWiringTests.swift:124-136`). No `#if` anywhere in the registration function (2098-2183), so the list is deterministic. Source pin `register(SpotifyPlugin(accountSession: spotifyAccountSession` count = 1 and `SpotifyPlugin(` count = 1 (re-verified with `grep -o`; the earlier near-miss is discussed under deviation 5).
-
-### 6. CommandRouter construction — exactly three arguments added
-
-Call opens `AppCoordinator.swift:3747`; the three seams are `:3784-3786`. The diff hunk is pure addition (7 comment lines + 3 argument lines); nothing else added, removed or reordered anywhere in the file (0 deletions in `git diff --stat`). The init accepts all three as trailing defaulted optionals (`CommandRouter.swift:698-700`) and stores them under the exact Mirror-visible labels (`:658-660`).
-
-### 7. No console writes, no Spotify value logged
-
-Mechanical scan of every added line (`git diff … | grep '^+' | grep -E 'print\(|os_log|NSLog|debugPrint|fputs|Logger'`) returns nothing. NFR-SP-002 holds for this diff.
-
-### 8. Test file — assertions genuinely prove the scenarios
-
-One test per Gherkin scenario (`AppCoordinatorSpotifyWiringTests.swift`, 458 lines); all four Passed in the xcresult. Verified per scenario:
-
-- **Scenario 1** — lazy-slot Mirror reads, identity across coordinator/plugin/router-value, and source pins. Pins are exact needles with exact counts (not occurrence-loose): re-counted on the real file with `grep -o -F`: `SpotifyAccountSession(` 1, `SpotifyCredentialStore(` 1, `register(SpotifyPlugin(accountSession: spotifyAccountSession` 1, `spotifyAccountSession: spotifyAccountSession` 1, `SpotifyPlugin(` 1, `CommandRouter(` 1. `FeatureSourceScan.codeText` (`FeatureSourceScan.swift:62-123`) strips `//` and `/* */` while preserving strings and line structure, so a documentation example cannot satisfy a pin. `callBlock` extracts the parenthesised call (`:442-457`).
-- **Scenario 2** — runtime pin of the full ordered ID list and type list (a changed, dropped, doubled or reordered plugin fails by name), `spotify` count = 1, plus the source pin of the registration call block.
-- **Scenario 3** — genuinely self-checking: the URLProtocol probe's positive control fires first, against a loopback port that refuses connections, and the test fails if the probe did not answer its own request with the canned 204 (`:167-170`, `:373-383`); only then is `requests == []` asserted around coordinator construction (`:196-198`). Dormancy is asserted in state (`record == nil`, `status == .notLinked`, `product == .unknown`, plugin present) and durably (a fresh `MigratingEncryptedStorage()` reader agrees nothing was written; the coordinator's own `storage` is `MigratingEncryptedStorage` — `AppCoordinator.swift:2513-2514`), with the key cleared through the app's own channel (`SpotifyCredentialStore.storageKey` = "spotify.session").
-- **Scenario 4** — the stdout-capture assertions genuinely observe the app bus: the session's, registry's and coordinator's bus are one `ObjectIdentifier` and are not `unwiredBus` (`:212-224`); the behavioural half drives `unlink()`/`markRevoked()` and asserts `[spotify] spotify_unlink outcome=success` / `outcome=revoked` land on stdout (`:231-238`), which matches the shipped wirings exactly: `ConsoleObservabilityBus.emit` prints `[ts][component] eventType outcome=…` via `print` (`AppCoordinator.swift:11080-11086`), the session's component is `"spotify"` (`SpotifyAccountSession.swift:126`), and the outcome strings are emitted at `SpotifyAccountSession.swift:354` / `:372`. Empty-record clear is a success (delete treats `errSecItemNotFound` as success — `KeychainEncryptedStorage.swift:93`), so the test is hermetic.
-
-### 9. Gate evidence — independently re-verified
-
-- `/tmp/w5-gate-final.log`: build head shows the privacy gate green plus `log-safety fixtures: 24 case(s) over 12 rule(s)` all ✓ inside the build; only-testing line names the 5 classes; tail: 74 tests / 0 failures, `** TEST SUCCEEDED **`, `=== Scoped unit run passed (baseline not advanced) ===`.
-- `xcrun xcresulttool get test-results summary` on `ios/build/DerivedDataTests/Logs/Test/Test-ElderlyAssistant-2026.10.07_02-15-16-+1100.xcresult`: **74 passed / 0 failed / Passed**; `get test-results tests` lists all four scenario tests as Passed, alongside the four shipped suites.
-- `/tmp/spotify-gate-T119-20261007-021148.log`: 39 tests / 0 failures, TEST SUCCEEDED.
-- Red provenance `/tmp/spotify-gate-T119-20261007-020552.log`: 39 tests / 1 failure, failing test = `AppCoordinatorSpotifyWiringTests.testScenario1ServicesConstructLazilyAndOneSessionIsInjectedOnce()` — consistent with the notes' account of the self-inflicted occurrence-count pin (a raw count of `spotifyAccountSession` is indeed 4: declaration `:1401`, registration `:2116`, router line `:3784` twice).
-
----
-
-## Unit 2 — T-121 release log-safety gate FEATURE_ROOTS: **PASS**
-
-Task file: `specs/plan-tasks/tasks/TG-23-release-gates-security-evidence-and-device-validation/T-121-release-log-safety-gate.md`. Design §20 (`design-l2.md:354-358`), plan.md C-2 (`specs/plan-tasks/plan.md:141-143`).
-
-### 1. The diff is exactly what was claimed
-
-`git diff ios/tools/check-release-log-safety.py`: 9 added lines = 7-line comment + two entries, `"Services/Spotify"` (no trailing slash, `check-release-log-safety.py:174`) and `"Services/Plugins/SpotifyPlugin.swift"` (`:175`). FEATURE_ROOTS count: HEAD = 15, worktree = 17, no duplicates (programmatic count on both revisions). **No new rule** (`RULES` still 12; diff touches only FEATURE_ROOTS). `LogSanitiser.allowedKeys` untouched (file unmodified). The `.sh` wrapper and `tools/log-safety-fixtures/` unchanged (git status; wrapper content read — it runs the engine then the fixture suite, exits 1 on either).
-
-### 2. Independent re-runs — all green
-
-```
-bash ios/tools/check-release-log-safety.sh            -> exit 0
-  (gate ✓; "log-safety fixtures: 24 case(s) over 12 rule(s)"; "every rule has a
-   positive and a negative fixture, and every fixture behaves")
-python3 ios/tools/check-release-log-safety-fixtures.py           -> exit 0
-python3 ios/tools/check-release-log-safety-fixtures.py --falsify -> exit 0
-  ("every rule is load-bearing: disabling it makes its positive fixture pass")
-```
-
-Build-path integration is real: `ios/build.sh:431-434` runs the `.sh` and `exit 1`s the build on failure; the consolidated build log shows the gate and fixtures green inside the build before the test scope.
-
-### 3. Planted-violation transcript — independently reproduced, byte-for-byte semantics
-
-- File absent now: no `Services/Spotify/SpotifyPlantedViolationDemo.swift` (directory listing above).
-- I re-created the exact planted file from the notes' code block in `/tmp/t121-repro/Services/Spotify/` and ran the shipped engine against it (`python3 ios/tools/check-release-log-safety.py --source-root /tmp/t121-repro --allow-list ElderlyAssistant/Services/Observability/LogSanitiser.swift`). Output: **identical 7 violations, same lines (16, 8, 12, 16, 16, 12, 20 exactly as recorded), same rules, same order**, exit 1 — including the decisive negative: the raw-error print `print("failed: \(error)")` in the feature root produced only `[feature-console-write]`, i.e. the rule-2 family did not fire outside an ENGINE_FILES name, while the same statement in the file named `heard: \(transcript)` tripped rule 1 globally. The transcript's line ordering (rule 1 offences first, then feature rules in statement order) matches the engine's scan loops (`scan()` at `check-release-log-safety.py:736-747`). This reproduction also independently demonstrates scenario 1's "it inspects the new paths": a file under `Services/Spotify` is classified `feature` and judged by rules 3-6.
-
-### 4. Rule scope — engine source is the authority
-
-`judge_console` runs for every role but gates the raw-error family on `if engine:` (`check-release-log-safety.py:655`), called with `role == "engine"` (`:738-739`); engine role is exactly `ENGINE_FILES` (the two Whisper files, `:817-820`); rules 3-6 run only `if role == "feature"` (`:743-746`). Therefore design §20:356 ("Rules 1–2 … apply to every file") is exact for rule 1 and loose for rule 2; plan.md:141-143's corrected model (rule 1 all files, rule 2 engine files, rules 3–6 feature roots) matches the shipped engine. The task's Gherkin scenario 3 states the same model.
-
-### 5. §20 correction claims — verified
-
-- `Services/Voice/YouTubeTool.swift` exists; `Services/Voice/` has no `SpotifyTool.swift`; `SpotifyTool.swift` lives in `Services/Spotify/` (created on this branch in W1/W2, never in `Services/Voice` — `git log --follow`). The stale-path claim is accurate.
-- Match expression is `path == feature or path.startswith(feature + os.sep)` (`check-release-log-safety.py:819`). Replication probe: no-slash entry matches the tool file True; a trailing-slash entry matches False on both halves (path equality can never hold; `root + os.sep` yields a double slash). The "no trailing slash when annotating" instruction is correct.
-- The gate-source comment itself records the stale-path correction (`:172-173`) — good provenance.
-
-### 6. C-2 record — correct, driver action pending
-
-`plan.md:141-143` states the correct model. Annotation targets are right: design `§20` line 356 is the rule-scope sentence and line 358 is the three-entry change list; `plan.md:24-25` is the release-gate bullet ("T-121 extends `FEATURE_ROOTS` with `Services/Spotify/`, `Voice/SpotifyTool.swift` and `Plugins/SpotifyPlugin.swift`" — line 25). Proposed corrections (stale path dropped, no trailing slash, rule-2 engine scoping) are accurate (see MINOR 3).
-
-### 7. Changed-elsewhere check
-
-`/tmp/w4-gate-final.log:21` confirms the fixture count was `24 case(s) over 12 rule(s)` before this change as well — unchanged by design (the harness is per-rule, not per-root). `LogSanitiser.allowedKeys`, the `.sh`, and the fixtures directory are untouched, so the T-121 change is exactly one file.
-
----
+- **E-row fidelity:** traceable to real methods/assertions on spot-check: E1 forced-no-op clear; E2 injection re-probe + control; M-5 exhaustion render; E3 terminal triple; E8 causal A/B; E4 marker-absence over the production bus; E5 OOV redaction + 84-key runtime pin; E6 unique-ordered anchors + spy transports; V-3 `pendingTranscript` nil + positive control. M-1/M-2/M-3/M-5 tags sit in test names/comments — citable by T-142.
+- **No weakening vs binding carryovers:** the `attempts <= maxProbes` erratum is intact — the re-probe arm stays live (attempts=2 asserted in corpus + M-5 route leg; no code changed). The `dialogue_frame_resolved` component split is intact — router emits the seven turn-time outcomes (`CommandRouter.swift:3318-3340`, component `command_router`; trap cancel asserts exactly 1), the funnel emits only timedOut/emergency/superseded (`AppCoordinator.swift:11093-11107`, :11128-11150; timeout/watchdog rows assert exactly 1), no double-emit asserted in every trap row. NFR-MTC-012 byte-identity: spoken-line assertions go through `L10n.str(key, locale:)` over shipped catalog keys (`dialogue.cancelled` xcstrings:3923, `dialogue.escape` :4025, `router.emergencyAck` :13644) — the same keys the router speaks via `speak(key:)` (`CommandRouter.swift:4497-4503`); no re-typed literals.
+- **Determinism:** no `sleep`/`Thread.`/`RunLoop`/`DispatchTime` anywhere in the four suites; `asyncAfter` only inside the four bounded `waitForDelivery` drains (pre-existing `CommandRouterDialogueTests.swift:101` idiom); clock seams injected absolutely; watchdog/expiry exercised via preconditions + terminal consequences. No flakiness vectors found.
+- **Test hygiene:** doubles sit at sanctioned seams (file-private mirrors of shipped fake shapes); the delta touches no production file; pbxproj additions-only; no sibling test file modified; production-seam references match shipped interfaces (`prepareDialogueAnswerText` `AppCoordinator.swift:11048-11052` + `:11159-11162`; `medicationVoiceEntries` `CommandRouter.swift:432`; `answerWindowSeconds` `DialogueManager.swift:219`; `onSlotAnswerTimeout` `VoiceSessionStateMachine.swift:134`; `startDialogueFrame` protocol `:131`, call site `:929`).
+- **Cross-wave coherence:** harness idioms are the sanctioned ones (`MockObservabilityBus` MedicationSchedulerTests.swift:72; `StubCommandInterpreter` IntentTestHelpers.swift:64/:149; `GeminiInMemoryStorage` GeminiConfigStoreTests.swift:155; `FeatureSourceScan.iosDirectory(file:)`). W1 F-4 (pre-existing Spotify catalog pin red at base) remains routed to T-141 — not a W5 regression.
+- **Protocol fidelity and safety:** no execution claimed; all DV items BLOCKED; step zero OUTSTANDING; no conflict with DV-5's Release requirement; capture discipline bounded to the scripted fixtures per NFR-MTC-004. No sanitizer-class literal found in the protocol.
+- **Sanitizer scan:** of the four new spec files, one hit only — `specs/T-139-notes.md:194` (`evil.example`/`open_url`, backticked table cell). Test files are not scanned; no over-report.
 
 ## Findings
 
-No MAJOR findings.
+- **F-1 (minor) — `specs/T-140-notes.md:49` overstates the marker scan.** It claims the suite "asserts no marker token appears anywhere in the captured console text at all"; the suite's marker scan is scoped to bus-format sink lines (`DialogueLogAndEgressTests.swift:182-184`, `assertSinkHygiene` over `^[HH:mm:ss.SSS][`-format lines). A whole-console scan would in fact be wrong: the dym leg's marker provably reaches spoken output (`:393`) and the legacy `DebugConfiguration` print is accepted residual R1. **Required action:** none in code — scope the claim to sink lines when citing this row in the W5 implement-notes rows and the T-142 index.
+- **F-2 (note) — seeding description mismatch.** `specs/T-140-notes.md:28` says the cache was seeded "via `IntentRouter.recordConfirmedExecution`"; the suite seeds via `cache.record(transcript:command:)` directly (`DialogueCacheBypassTests.swift:164-165`). Effect is identical — the control leg proves the entry is live. No action.
+- **F-3 (note) — sanitizer-class literals in `specs/T-139-notes.md:194`.** The evidence map quotes `evil.example`/`open_url` in backticks. Awareness only: avoid quoting these literals verbatim into scanned records (T-141/T-142 index rows) if OutputSanitizer rules matter; the test files themselves are out of scan scope.
 
-- **[MINOR] T-119: the router clause's runtime half is near-tautological; the source half is the load-bearing one.** The armed-router check (`AppCoordinatorSpotifyWiringTests.swift:75-85`) proves only that `CommandRouter.init` retains the values it is given — non-vacuous (the init could have dropped them) but trivial; the genuine witness for "the launch passes exactly the coordinator's session/transport/opener" is the source pin over the unique `CommandRouter(` block (`:102-110`, needles count = 1 re-verified). The test's type doc (`:22-29`) and notes deviation 2 state this openly. Repro: `sed -n '72,110p' ios/ElderlyAssistantTests/App/AppCoordinatorSpotifyWiringTests.swift`. No action; residual risk LOW.
-- **[MINOR] T-119: "the same stance the live-translate settings-view seam below states explicitly" is slightly imprecise.** The precedent (`AppCoordinator.swift:2152-2160`) checks `Thread.isMainThread` before `assumeIsolated` because it can legitimately run off-main; the two lazy initializers (`:1377`, `:1401`) assume unconditionally (a hard trap on violation). Same API, stricter contract; the trap intent is documented at `:1374-1375`. Repro: `grep -n "assumeIsolated" ios/ElderlyAssistant/App/AppCoordinator.swift`. Cosmetic; no action.
-- **[MINOR] T-121: the driver-owned annotations are still pending.** The stale three-entry list still stands in `specs/design-l2.md:358` and `specs/plan-tasks/plan.md:25`. Repro: `git grep -n "Services/Voice/SpotifyTool.swift" specs/design-l2.md specs/plan-tasks/plan.md` → both hits. This matches the task's plan (driver annotates pre-commit); flagged only so it is not forgotten in the wave commit.
-- **[MINOR] T-119 notes: the red run's exact assertion text is not in the retained log excerpt.** `/tmp/spotify-gate-T119-20261007-020552.log` names the failing test and the suite counts (39 tests / 1 failure) but not the XCTFail message; that message lives in the red xcresult (`Test-…02-06-14`), which was not parsed. The failing-test identity and the count arithmetic (4 occurrences) match the recorded account. No action.
+## Conclusion
 
-## Deviations adjudication
+**GO — Confidence 0.90.** The W5 delta is exactly as dispatched, test-only plus docs, additions-only in the Xcode project, no production source touched. All 20 flagged adjudications verified and accepted; every binding carryover (maxProbes re-probe arm, component split/no double-emit, NFR-MTC-012 byte-identity) is preserved and positively asserted; determinism and hygiene checks pass; gate evidence is consistent and preserved.
 
-| # | Deviation | Assessment | Basis |
-|---|-----------|------------|-------|
-| 1 | T-119: `MainActor.assumeIsolated` wrappers on both lazy initializers | **ACCEPTED — compile-forced and semantically honest.** A minimal `swiftc -typecheck` probe reproduced the exact error the notes claim ("call to main actor-isolated initializer 'init()' in a synchronous nonisolated context") for a `@MainActor` service built from a non-`@MainActor` class. All shipping first-use paths are main-actor by construction: the registry build happens on the first `pluginRegistry` read, which is `AppCoordinator.swift:3472` inside `composePostFirstFrame()` — dispatched via `DispatchQueue.main.async` (`:3277`) — or later main-only surfaces (`presentLiveTranslate` is `@MainActor` `:2407`; Settings is SwiftUI). Off-main first use traps rather than races, which matches the documented intent. | `AppCoordinator.swift:1377`, `:1401`, `:3277`, `:3472`; probe output above |
-| 2 | T-119: router clause pinned as source pin + armed-router identity, not end-to-end through the launch | **ACCEPTED (documented substitute).** The real `commandRouter` is private and built only in `composePostFirstFrame()`; `start()` in the test host trips BGTaskScheduler (documented at `AppCoordinator.swift:3251`). The split is the honest maximum for a unit test: source pin of the unique construction call (counts rule out a second site) + retention proof. Residual gap: the live `commandRouter` instance is not behaviourally observed; recorded, not hidden. | `AppCoordinatorSpotifyWiringTests.swift:22-29`, `:75-110`; `specs/T-119-notes.md` deviation 2 |
-| 3 | T-119: scenario 4 drives `unlink()`/`markRevoked()` only; `link()` untested at runtime | **ACCEPTED.** `link()` would present the real ASWeb flow (bundle has `SpotifyClientID`, `ElderlyAssistant/Info.plist:131`), so it is not hermetic. Both unlink outcomes are observed on the app bus; bus identity is proven 3-way (session = registry = coordinator) and `!= unwiredBus`; the `observabilityBus: observabilityBus` by-name source pin covers the link vocabulary structurally (both event families flow through the one emitter, `SpotifyAccountSession.swift:726-736`). | test `:203-249`; `SpotifyAccountSession.swift:354`, `:372`; `Info.plist:131` |
-| 4 | T-121: §20's `Services/Voice/SpotifyTool.swift` entry dropped as a stale path | **ACCEPTED.** The path does not exist and never did on this branch; the group entry covers `SpotifyTool.swift`. | `Services/Voice/` listing, `git log --follow` |
-| 5 | T-121: group entry recorded without trailing slash | **ACCEPTED — required for correctness.** A trailing-slash entry matches nothing under the shipped expression; a mis-annotated design sentence would invite a broken entry. | `check-release-log-safety.py:819` + replication probe |
-| 6 | T-121: rule-2 engine scoping (design §20:356 correction) | **ACCEPTED.** The engine gates the raw-error family on `role == "engine"`; reproduced: the raw-error print in the feature root was named only `feature-console-write`. plan.md's corrected model matches the code. | `check-release-log-safety.py:655`, `:738`, `:817-820`; reproduction run |
-| 7 | T-121: no new fixture added | **ACCEPTED.** The harness is per-rule (24/12, unchanged before and after — `/tmp/w4-gate-final.log:21` vs my re-run); design §20 says none is required; the scenario-2 requirement is met by the planted run, independently reproduced here and retained as T-123 obligation-6 evidence. | fixtures re-run exit 0; reproduction above |
-
-## Could not verify
-
-- The exact XCTFail message of the red run's single failure — the retained red log names the failing test but not the assertion text, and the red xcresult was not parsed (MINOR 4; the failing-test identity and count arithmetic are consistent).
-- The live-launch `commandRouter` instance's seam values at runtime — structurally unreachable in a unit host; covered by the documented source pin (deviation 2).
-- Device-console behaviour of the new paths (DV-7 capture) — T-124 scope, not this wave.
-- I did not re-execute the iOS unit build myself; the consolidated run was verified from its artifacts (log + independently parsed xcresult), which are internally consistent (gate green, 74/0, the four new tests present and Passing).
-
-## Rationale
-
-Both units are exactly scoped: T-119 touches three additive sites in one file plus one new test file (69 + 4 project lines, 0 deletions), T-121 touches one file (9 additive lines). Every load-bearing claim in both notes files survived independent re-derivation: lazy-first-use and single-instance are proven at runtime and as file-level facts with exact-count pins; the W2-D1 bus argument is passed by name and its omission failure path (dropping sink) is real in the shipped session code; registration order and the router argument diff are add-only and pinned; the T-121 rule-scope model, the trailing-slash semantics, and the stale-path correction were each reproduced against the shipped code, and the planted-violation transcript reproduced exactly (7/7 violations, same lines, rules and order) with the rule-2 engine gating observed directly. The three T-119 deviations are compile-forced or environment-forced, honestly documented, and leave only a narrow, recorded residual gap (the live router instance). The one pending item — the driver-owned §20 / plan.md annotations — is pre-planned wave-closure work, not a defect in the revision. Traceability holds: T-119 to FR-SP-006, FR-SP-008, NFR-SP-012; T-121 to NFR-SP-002, NFR-SP-011; no element of the diff lacks a task source, and the constitution's release-gate standard ("`check-release-log-safety.sh` must pass… build-blocking, not a report") is now extended to the music feature's roots with the gate independently re-run green.
-
-**Verdict: GO — Confidence 0.92.**
-
----
-
-## Post-review driver remediation (2026-10-07, main session)
-
-Applied before the wave commit, per the review's actionable items:
-
-1. **[MINOR 2] applied — comment precision.** `AppCoordinator.swift` credential-store doc block (`:1374-1378`): "the same stance the live-translate settings-view seam below states explicitly" replaced with the precise account — that seam can run off-main and pre-checks `Thread.isMainThread`; these first-use paths are main by construction, so the assumption here is unconditional by intent (the assume-where-it-holds stance). Comment-only; no code semantics changed.
-2. **[MINOR 3] applied — driver-owned closure annotations.** `specs/design-l2.md` §20: (a) the rule-scope sentence (`:356`) now carries the C-2 correction (rule 1 all files; rule 2 engine-files-gated; rules 3–6 feature roots), (b) the change block (`:358`) records the shipped two-entry list, the stale-path drop, and the no-trailing-slash semantics. `specs/plan-tasks/plan.md:24-25` carries the matching annotation.
-3. **[MINOR 1] no action** — the near-tautological armed-router half is documented in the test's own type doc and the notes; the source pin is the load-bearing witness. Accepted as recorded.
-4. **[MINOR 4] no action** — the red run's XCTFail text lives in the red xcresult; failing-test identity and count arithmetic are consistent with the notes. Accepted as recorded.
-
-Re-gate after remediation (comment-only code touch + doc edits): `test:unit AppCoordinatorSpotifyWiringTests CalendarShareSettingsSeamTests PluginRegistryTests` under the xcodebuild lock — exit 0, 20 tests / 0 failures, `** TEST SUCCEEDED **`, `=== Scoped unit run passed (baseline not advanced) ===` (log `/tmp/w5-regate-postreview.log`; xcresult `Test-ElderlyAssistant-2026.10.07_02-22-29-+1100.xcresult`); release log-safety gate + `24 case(s) over 12 rule(s)` fixtures green inside the build.
-
-Reviewed revision ≡ committed revision modulo the above remediation.
+Commit conditions: commit the reviewed delta as-is — the four new test files, `ios/seniOS.xcodeproj/project.pbxproj`, `specs/T-139-notes.md`, `specs/T-140-notes.md`, `specs/T-143-notes.md`, `specs/MTC-device-validation-protocol.md`. Append the W5 rows to `specs/implement-notes.md` after this review (with F-1's scope corrected in the T-140 citation). Do not edit the suites. DV execution, step zero (PR #156 device smoke), and the T-141/T-142 downstream consumption remain open feature-gate items — none block this wave.

@@ -123,6 +123,14 @@ targets:
       # DialectLexicon.bundled() finds nothing.
       - path: ElderlyAssistant/Resources/DialectLexicon.json
         buildPhase: resources
+      # Bundled curated dialogue option catalog ([MULTI-TURN] C-MTC-04,
+      # design-l2 §11 — versioned schema, bhajan deity group: label keys /
+      # canonical queries / alias lists; alias lists are data, extendable
+      # without code). Same single-file pattern as DialectLexicon.json:
+      # without this entry the JSON never lands in the app bundle and
+      # DialogueOptionCatalog.load() finds nothing.
+      - path: ElderlyAssistant/Resources/DialogueOptionCatalog.json
+        buildPhase: resources
       # Official multicolor logos for the quick-access app catalog
       # (Wikimedia Commons PNGs, 2026-09-07 — sources in the catalog's
       # README.md). `Resources` is excluded from the source glob above, so
