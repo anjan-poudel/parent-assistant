@@ -630,6 +630,12 @@ struct LiveTranslateOverlaySurface: Equatable {
     /// sanitisation gate, not a failure the elder can fix, and collapsing it
     /// into the unavailable sentence would tell them to retry something that
     /// will be withheld again (T-005's copy rules).
+    ///
+    /// An already-target source keeps its own wording for the same class of
+    /// reason (owner report, 2026-10-10): the text is already in the
+    /// language the elder reads, so there is nothing to retry and nothing to
+    /// fix — the generic unavailable sentence would read as a failure that
+    /// might go away.
     func stateCopy(for result: TranslationResult) -> String? {
         switch result.outcome {
         case .resolved:
@@ -637,9 +643,14 @@ struct LiveTranslateOverlaySurface: Equatable {
         case .pending:
             return L10n.str("livetranslate.state.pending", locale: locale)
         case .degraded(_, let reason):
-            return reason == .textQuarantined
-                ? L10n.str("livetranslate.state.quarantined", locale: locale)
-                : L10n.str("livetranslate.state.unavailable", locale: locale)
+            switch reason {
+            case .textQuarantined:
+                return L10n.str("livetranslate.state.quarantined", locale: locale)
+            case .sourceAlreadyTarget:
+                return L10n.str("livetranslate.state.alreadyTarget", locale: locale)
+            default:
+                return L10n.str("livetranslate.state.unavailable", locale: locale)
+            }
         }
     }
 

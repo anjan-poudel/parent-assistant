@@ -211,7 +211,15 @@ final class TranslationResultTests: XCTestCase {
             // withheld consent, and the elder-facing wording stays cause-free
             // either way (`livetranslate.state.unavailable` names none of
             // these).
-            "cloud_disabled"
+            "cloud_disabled",
+            // [SOURCE-HYGIENE] (owner report, 2026-10-10): the string was
+            // already written in the target language, so there was no
+            // translation to make and none was attempted. Its own token
+            // because "nothing to translate" is a different fact from "no
+            // tier resolved it" — one is the string's own property, the
+            // other is the cascade's outcome — and the surface draws them
+            // with different sentences.
+            "source_already_target"
         ])
     }
 

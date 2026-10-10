@@ -23,6 +23,14 @@ final class LiveTranslateCopyTests: XCTestCase {
         "livetranslate.state.pending",
         "livetranslate.state.unavailable",
         "livetranslate.state.quarantined",
+        // [SOURCE-HYGIENE] (owner report, 2026-10-10): the sentence a region
+        // gets when the recognized text is already in the target language.
+        // Its own key because it is its own fact — not a withheld send and
+        // not an unavailable translation — and the owner's report is the
+        // whole reason it exists: Devanagari handed to the translate surface
+        // must not come back as a confident non-answer. Draft awaiting the
+        // same OD3 copy review as the rest of the state wording.
+        "livetranslate.state.alreadyTarget",
         "livetranslate.consent.title",
         "livetranslate.consent.body",
         "livetranslate.consent.grant",

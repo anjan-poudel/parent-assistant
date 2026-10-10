@@ -8513,6 +8513,23 @@
         }
       }
     },
+    "livetranslate.state.alreadyTarget" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This text is already in Nepali — nothing to translate."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "यो अक्षर पहिले नै नेपालीमा छ — अनुवाद गर्नु पर्दैन।"
+          }
+        }
+      }
+    },
     "livetranslate.state.pending" : {
       "extractionState" : "manual",
       "localizations" : {

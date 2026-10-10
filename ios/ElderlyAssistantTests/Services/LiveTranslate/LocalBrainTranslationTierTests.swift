@@ -1057,7 +1057,10 @@ final class LocalBrainTranslationTierTests: XCTestCase {
         var config = LiveTranslateConfig.default
         config.brainTranslationMaxCharacters = 10
         try await withTier(config: config) { tier, generator, _ in
-            let long = String(repeating: "क", count: 8)
+            // A translatable (Latin) fixture: a Devanagari one would be
+            // settled by source hygiene before the bound is ever asked
+            // (the rule's own tests are in "The source rule").
+            let long = String(repeating: "a", count: 8)
             generator.output = answer([brainAnswer, secondBrainAnswer])
 
             let outcome = await tier.translate([long, long])
@@ -1148,19 +1151,116 @@ final class LocalBrainTranslationTierTests: XCTestCase {
     /// The script rule is about the *target*, so it is not a rule about
     /// Nepali: the English target refuses an answer with no Latin letter in it
     /// and accepts an English one.
+    ///
+    /// The SOURCE is Nepali here, and since [SOURCE-HYGIENE] it has to be:
+    /// an English source under an English target is by definition already in
+    /// the target language, so the tier would never send it to a model and
+    /// this test would be pinning the source rule instead of the answer's.
     func testTheScriptRuleFollowsTheTargetLanguage() async throws {
+        let nepaliSource = "फार्मेसी"
         try await withTier(targetLanguage: .english) { tier, generator, _ in
             generator.output = answer([brainAnswer])
-            let outcome = await tier.translate([brainText])
+            let outcome = await tier.translate([nepaliSource])
 
             XCTAssertTrue(outcome.translations.isEmpty,
                           "Devanagari is not an English translation")
         }
         try await withTier(targetLanguage: .english) { tier, generator, _ in
             generator.output = answer(["Drug store"])
+            let outcome = await tier.translate([nepaliSource])
+
+            XCTAssertEqual(outcome.translations, [nepaliSource: "Drug store"])
+        }
+    }
+
+    // MARK: The source rule (2026-10-10)
+
+    /// The predicate itself, as cases: it is about LETTERS, about the
+    /// TARGET's script, and about both directions.
+    func testTheSourceRuleIsAboutLettersAndTheTargetScript() {
+        let isAlreadyTarget = { (text: String, language: AppLanguage) in
+            LocalBrainTranslationTier.isAlreadyTargetLanguage(text, targetLanguage: language)
+        }
+
+        // A Devanagari sign under the shipped direction is nothing to
+        // translate…
+        XCTAssertTrue(isAlreadyTarget("भजन", .nepali))
+        // …and digits, punctuation and marks do not participate: a Nepali
+        // sign carrying a year and a danda is still wholly Nepali.
+        XCTAssertTrue(isAlreadyTarget("भजन २०२४।", .nepali))
+        // Latin words are the feature's whole reason to exist.
+        XCTAssertFalse(isAlreadyTarget(brainText, .nepali))
+        // A MIXED sign is translatable: the English half is exactly what the
+        // feature is for.
+        XCTAssertFalse(isAlreadyTarget("Cafe भजन", .nepali))
+        // No letters at all is not "already in the target language" — it is
+        // not in any language — so it takes the normal path rather than
+        // being settled as having nothing to translate.
+        XCTAssertFalse(isAlreadyTarget("2024 • 10", .nepali))
+        // The mirror direction, so the rule is about the target rather than
+        // about Nepali (the same claim the script rule makes above).
+        XCTAssertTrue(isAlreadyTarget("Drug store", .english))
+        XCTAssertFalse(isAlreadyTarget("फार्मेसी", .english))
+    }
+
+    /// The tier never spends a generation on a source that is already in the
+    /// target language. On master this exact fixture SETTLES — a Devanagari
+    /// sign answered with a different Nepali sentence passes every answer
+    /// rule, because they judge only the answer's shape — which is precisely
+    /// the confident non-answer the owner saw (2026-10-10: Devanagari typed
+    /// into the translate surface came back as gibberish).
+    func testASourceAlreadyInTheTargetLanguageIsNeverSentToTheModel() async throws {
+        try await withTier { tier, generator, bus in
+            generator.output = answer([brainAnswer])
+            let outcome = await tier.translate(["भजन"])
+
+            XCTAssertTrue(outcome.translations.isEmpty,
+                          "a Nepali sign has no translation to settle on an en→ne device")
+            XCTAssertTrue(generator.prompts.isEmpty,
+                          "the source is read before the generation is paid for")
+            let event = batchEvent(bus)
+            XCTAssertEqual(event?.metadata["resolvedCount"], "0")
+            XCTAssertEqual(event?.metadata["unresolvedCount"], "1",
+                           "the counts are about the caller's batch: a filtered string reads unresolved")
+            XCTAssertEqual(event?.outcome, "degraded")
+        }
+    }
+
+    /// A mixed batch asks only about the strings that need translating, in
+    /// one generation, and the counts still describe the batch the caller
+    /// handed over.
+    func testAMixedBatchAsksOnlyAboutTheStringsThatNeedTranslating() async throws {
+        try await withTier { tier, generator, bus in
+            generator.output = answer([brainAnswer])
+            let outcome = await tier.translate(["भजन", brainText])
+
+            XCTAssertEqual(outcome.translations, [brainText: brainAnswer],
+                           "the English sign is answered; the Nepali one is left alone")
+            XCTAssertEqual(generator.prompts.count, 1, "one generation for the whole batch")
+            let event = batchEvent(bus)
+            XCTAssertEqual(event?.metadata["resolvedCount"], "1")
+            XCTAssertEqual(event?.metadata["unresolvedCount"], "1")
+        }
+    }
+
+    /// And the source rule follows the target exactly as the script rule
+    /// does: under the English target it is the English source that is
+    /// already translated, and the Devanagari one that is a real question.
+    func testTheSourceRuleFollowsTheTargetLanguage() async throws {
+        try await withTier(targetLanguage: .english) { tier, generator, _ in
+            generator.output = answer(["Drug store"])
             let outcome = await tier.translate([brainText])
 
-            XCTAssertEqual(outcome.translations, [brainText: "Drug store"])
+            XCTAssertTrue(outcome.translations.isEmpty,
+                          "an English sign is already in the English target")
+            XCTAssertTrue(generator.prompts.isEmpty)
+        }
+        try await withTier(targetLanguage: .english) { tier, generator, _ in
+            generator.output = answer(["Drug store"])
+            let outcome = await tier.translate(["फार्मेसी"])
+
+            XCTAssertEqual(outcome.translations, ["फार्मेसी": "Drug store"],
+                           "a Nepali source is a real question under the English target")
         }
     }
 

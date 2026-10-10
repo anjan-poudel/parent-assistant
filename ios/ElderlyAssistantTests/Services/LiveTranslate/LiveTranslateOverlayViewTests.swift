@@ -197,6 +197,38 @@ final class LiveTranslateOverlayViewTests: XCTestCase {
                           + "collapsing them tells the elder to retry something that will be withheld again")
     }
 
+    /// [SOURCE-HYGIENE] (owner report, 2026-10-10): "nothing to translate"
+    /// is its own honest sentence, in both languages — not the generic
+    /// unavailable line, because the elder is not waiting on a translation
+    /// that failed, and not quarantined wording, because nothing was
+    /// withheld.
+    func testTheAlreadyTargetWordingIsItsOwnHonestSentence() {
+        let alreadyTarget = makeSurface(regions: [region(0, "भजन", box: box(0.2, 0.3, 0.8, 0.4))],
+                                        results: [identity(0): .degraded(originalText: "भजन",
+                                                                         reason: .sourceAlreadyTarget)])
+        let alreadyCopy = L10n.str("livetranslate.state.alreadyTarget", locale: nepali)
+        let unavailable = L10n.str("livetranslate.state.unavailable", locale: nepali)
+        let quarantineCopy = L10n.str("livetranslate.state.quarantined", locale: nepali)
+
+        XCTAssertEqual(alreadyTarget.presentations.first?.accessibilityValue, alreadyCopy)
+        XCTAssertNotEqual(alreadyCopy, unavailable,
+                          "the string was translated already; nothing failed")
+        XCTAssertNotEqual(alreadyCopy, quarantineCopy,
+                          "nothing was withheld: the source simply needs no translation")
+        // The region still draws and announces what was recognized — the
+        // degradation never removes a region.
+        XCTAssertEqual(alreadyTarget.presentations.first?.lines.first?.text, "भजन")
+
+        // And the sentence resolves in the other language too, so an English
+        // household is not shown the Nepali copy (the catalog holds both).
+        let englishSurface = makeSurface(regions: [region(0, "भजन", box: box(0.2, 0.3, 0.8, 0.4))],
+                                         results: [identity(0): .degraded(originalText: "भजन",
+                                                                          reason: .sourceAlreadyTarget)],
+                                         locale: Locale(identifier: "en"))
+        XCTAssertEqual(englishSurface.presentations.first?.accessibilityValue,
+                       L10n.str("livetranslate.state.alreadyTarget", locale: Locale(identifier: "en")))
+    }
+
     // MARK: - Scenario: the original text is always reachable
 
     func testTheOriginalTextStaysReachableForAResolvedRegion() {
