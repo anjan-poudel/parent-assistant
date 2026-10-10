@@ -695,14 +695,7 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
                 let biasPlan = resolvedDialectBias()
                 var options = DecodingOptions(
                     task: .transcribe,
-                    language: Self.decodeLanguageCode(biasPlanState: biasPlan.state),
-                    // [SPECIAL-TOKEN-LEAK 2026-10-10] WhisperKit defaults
-                    // skipSpecialTokens to false; left unset, a fine-tune
-                    // ADDED token (the manifest convention `<unintelligible>`
-                    // for unclear audio) can appear in the transcript
-                    // verbatim. Special tokens are never part of what the
-                    // user said.
-                    skipSpecialTokens: true)
+                    language: Self.decodeLanguageCode(biasPlanState: biasPlan.state))
                 // [ACCENT-ADAPT] dialect-tagged prompt biasing (doc
                 // accent-adaptation.md P0.3): composed lexicon + profile
                 // terms + calibrated ids, capped at 100 tokens. A plan
@@ -736,11 +729,14 @@ final class WhisperKitSpeechRecognizer: SpeechRecognizerProtocol {
                                                        decodeOptions: options)
                 let ms = Int((CFAbsoluteTimeGetCurrent() - start) * 1000)
                 let joinedRaw = results.first??.map(\.text).joined(separator: " ") ?? ""
-                // [SPECIAL-TOKEN-LEAK 2026-10-10] Defense in depth: strip
-                // any `<...>`-shaped token the decoder emitted despite
-                // skipSpecialTokens — a tag like `<unintelligible>` is a
-                // dataset convention, never something the user said. Safe
-                // on Devanagari text, which never carries angle brackets.
+                // [SPECIAL-TOKEN-LEAK 2026-10-10] Strip any `<...>`-shaped
+                // token the decoder emitted — a tag like `<unintelligible>`
+                // is a dataset convention, never something the user said.
+                // Safe on Devanagari text, which never carries angle
+                // brackets. `skipSpecialTokens` deliberately stays OFF:
+                // enabling it stripped real words on device with this
+                // fine-tuned tokenizer's broad added-token set (2026-10-10
+                // regression) — this strip is the whole fix.
                 let joined = joinedRaw
                     .replacingOccurrences(of: "<[^>]*>", with: "",
                                           options: .regularExpression)
