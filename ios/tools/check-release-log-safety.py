@@ -164,6 +164,15 @@ FEATURE_ROOTS = [
     "App/ProfileSettingsModel.swift",
     "App/OnboardingDrafts.swift",
     "App/ProfileInterviewSteps.swift",
+    # [SPOTIFY-MUSIC-INTEGRATION T-121 / §20] The music feature's own roots:
+    # the whole Services/Spotify group (tool, transport, credential store,
+    # auth flow, session) and the plugin. Household music queries are user
+    # content: a Release console write or a content-derived event field
+    # anywhere in these files fails the gate — no exemptions for the new
+    # surfaces (design §20's `Services/Voice/SpotifyTool.swift` entry is a
+    # stale path; the tool lives in the Services/Spotify group below).
+    "Services/Spotify",
+    "Services/Plugins/SpotifyPlugin.swift",
 ]
 
 # The shipped allow-list the feature's metadata keys must be declared in.

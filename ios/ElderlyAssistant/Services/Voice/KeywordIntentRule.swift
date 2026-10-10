@@ -55,12 +55,31 @@ import Foundation
 /// evaluated last of all — after the festival rule and every launcher
 /// rule — and the router resolves the key it matched back through the same
 /// live schedule.
+///
+/// [SPOTIFY] (2026-10-06) The music domain gives the same relaxed
+/// shape to bare music requests: [musicMarkers ∧ musicVerbFamily],
+/// ordered after news and YouTube and BEFORE every launcher rule, and
+/// structurally EXCLUDING the YouTube marker family (ADR-SP-06), so an
+/// explicit YouTube utterance can never be reclassified as music
+/// (FR-SP-005) even where the YouTube rule itself declines.
+/// `musicQuery(from:)` extracts the song query for the router's music
+/// path and `mentionsMusic(_:)` is the contact-search veto's predicate
+/// (C-SP-08) — both pure statics, no model, no prompt tokens
+/// (constraint 3).
 enum KeywordIntentRule {
 
     /// Safe domains the relaxed rules may claim.
     enum Domain: String {
         case news
         case youtube
+        /// [SPOTIFY] (2026-10-06) A bare music request ("भजन बजाऊ",
+        /// "गीत चलाऊ", "play a song") — the zero-prompt-token path into
+        /// the music route (FR-SP-013, C-SP-07). The rule structurally
+        /// excludes the YouTube marker family (ADR-SP-06), so an
+        /// explicit YouTube utterance can never be claimed here; the
+        /// router turns a `.music` match into the real music path
+        /// (`fireMusicRequest`), never the old stub.
+        case music
         /// [APP-LAUNCHER] (2026-09-16) A spoken app-launch request
         /// ("क्यामेरा खोल", "open WhatsApp", "फोटो खिच्न"). The matched
         /// rule carries the catalog id in `Match.appID`.
@@ -147,6 +166,16 @@ enum KeywordIntentRule {
         let text = canonical(raw)
         guard !text.isEmpty else { return nil }
         for rule in rules {
+            // [SPOTIFY] (2026-10-06) Rule-level exclusion, evaluated
+            // BEFORE any variant (ADR-SP-06): an excluded group's
+            // presence disqualifies the whole rule, so the music rule
+            // can never act on an utterance carrying a YouTube marker.
+            // The YouTube rule itself is ordered first and usually
+            // claims such utterances; this check is the structural
+            // belt-and-braces for the ones it declines.
+            if rule.excluded.contains(where: { firstMatchingKey(in: $0, text: text) != nil }) {
+                continue
+            }
             for variant in rule.variants {
                 var matched: [String] = []
                 var complete = true
@@ -252,7 +281,12 @@ enum KeywordIntentRule {
     ///    ("युट्युबमा" ⊃ "युट्युब") and for verb families the virama
     ///    merges ("सुनाइदिनुस्" does NOT token-equal "सुनाऊ" —
     ///    grapheme-cluster rule of 2026-09-07).
-    private enum Alternative {
+    ///
+    /// [SPOTIFY] Internal (not private) only so the shared
+    /// `musicMarkers` family can be exposed to the contact-search veto
+    /// (C-SP-08) and the test seams (design-l2 §29). Matching semantics
+    /// are unchanged.
+    enum Alternative {
         case token(String)
         case phrase(String)
 
@@ -275,7 +309,11 @@ enum KeywordIntentRule {
 
     /// One required group: ANY alternative may match. All groups of a
     /// variant must match for the variant to fire.
-    private typealias Group = [Alternative]
+    ///
+    /// [SPOTIFY] Internal (not private) for the same reason as
+    /// `Alternative` — the shared `musicMarkers` family is part of the
+    /// C-SP-08 seam.
+    typealias Group = [Alternative]
 
     /// One way a domain can fire: all its groups co-occur.
     private typealias Variant = [Group]
@@ -288,10 +326,20 @@ enum KeywordIntentRule {
         /// (not the caller) so a match can never carry an id that the
         /// fired rule did not name.
         let appID: String?
+        /// [SPOTIFY] (2026-10-06) Rule-level exclusion (ADR-SP-06): a
+        /// variant of this rule never fires when ANY of these groups
+        /// matches the transcript. The music rule excludes the YouTube
+        /// marker family with it, so explicit-YouTube wording wins
+        /// before any music classification can act — even where the
+        /// YouTube rule itself declines (FR-SP-005). Every pre-existing
+        /// rule keeps the empty default and is untouched.
+        let excluded: [Group]
 
-        init(domain: Domain, appID: String? = nil, variants: [Variant]) {
+        init(domain: Domain, appID: String? = nil, excluded: [Group] = [],
+             variants: [Variant]) {
             self.domain = domain
             self.appID = appID
+            self.excluded = excluded
             self.variants = variants
         }
     }
@@ -311,6 +359,21 @@ enum KeywordIntentRule {
             // YouTube word ∧ play/search verb, anywhere in the sentence
             // (no adjacency, no full-form requirement).
             [youtubeKeywords, youtubeVerbFamily]
+        ]),
+        // [SPOTIFY] (2026-10-06) The music domain — a bare music request
+        // ("भजन बजाऊ", "गीत चलाऊ", "play a song") without a YouTube
+        // word, exactly the youtube rule's relaxed co-occurrence shape
+        // ([musicMarkers, musicVerbFamily]). `excluded` is the
+        // ADR-SP-06 structural guarantee: the moment a YouTube marker
+        // appears the rule cannot act at all, even where the youtube
+        // rule itself declines — "युट्युबमा गीत सुनाऊ" (सुनाऊ is a
+        // listen verb, not a YouTube play/search verb) stays a YouTube
+        // utterance and falls to the interpreter, never to music
+        // (FR-SP-005). Ordered BEFORE every appLaunch rule so a play
+        // request still wins over a launch word — "युट्युब खोल र गीत
+        // चलाऊ" resolves exactly as the strict ladder would.
+        Rule(domain: .music, excluded: [youtubeKeywords], variants: [
+            [musicMarkers, musicVerbFamily]
         ]),
         // [APP-LAUNCHER] (2026-09-16) The launcher's fast path — ordered
         // LAST, so an utterance carrying both an app word and a video
@@ -453,6 +516,74 @@ enum KeywordIntentRule {
         .phrase("खोजिदेउ"), .phrase("खोजिदेऊ"), .phrase("खोजिदेऊँ")
     ]
 
+    // MARK: - Music groups ([SPOTIFY] 2026-10-06)
+
+    /// The music marker family — the SHARED vocabulary of the music
+    /// rule, the contact-search veto (`mentionsMusic`) and the query
+    /// extractor's marker fallback. Internal so the C-SP-08 veto reads
+    /// the same alternatives the rule is gated by; the veto can never
+    /// be wider or narrower than this family.
+    ///
+    /// Devanagari markers are substring-matched because postpositions
+    /// fuse onto the stem ("गीतहरू" ⊃ "गीत", "भजनको" ⊃ "भजन" — the
+    /// grapheme-cluster rule of 2026-09-07); the Latin markers are
+    /// whole tokens, exactly like the YouTube word: "song" must not
+    /// eat "songwriter" any more than "news" may eat "newspaper". The
+    /// plural "songs" is deliberately NOT a marker (outside the
+    /// reviewed vocabulary) — such an utterance still reaches the
+    /// music path through the interpreter's existing `music` intent,
+    /// which is why the rule can afford to stay narrow.
+    static let musicMarkers: Group = [
+        .phrase("भजन"), .phrase("गीत"), .phrase("गाना"),
+        .phrase("संगीत"), .phrase("सङ्गीत"),
+        .token("music"), .token("song"), .token("bhajan")
+    ]
+
+    /// The music verb family — play/listen/sing. English verbs are
+    /// whole tokens; the narration guard (design L2-D9) deliberately
+    /// ships the progressive forms and EXCLUDES the past forms
+    /// `played`, `listened`, `sang`, `sung`, exactly as
+    /// `youtubeVerbFamily` excludes `searched` so a narration never
+    /// fires the stage. The Nepali families are the full grapheme
+    /// enumerations the shipped families keep (the virama/matra rule:
+    /// "चलाउनुहोस्" does not contain "चलाऊ", so every form ships
+    /// explicitly): the play families verbatim from
+    /// `youtubeVerbFamily`, the listen family verbatim from
+    /// `newsVerbFamily`'s सुनाऊ block, and the sing family new.
+    ///
+    /// The खोज search family is deliberately NOT here — "गीत खोज" is a
+    /// search phrase the interpreter owns (design §14), and adding it
+    /// would widen the deterministic stage past the reviewed shape.
+    private static let musicVerbFamily: Group = [
+        // English play family (whole-token — containment would eat
+        // "playlist"; `played` is the excluded narration form).
+        .token("play"), .token("plays"), .token("playing"),
+        // English listen family (`listened` excluded — narration).
+        .token("listen"), .token("listens"), .token("listening"),
+        // English sing family (`sang`/`sung` excluded — narration).
+        .token("sing"), .token("sings"), .token("singing"),
+        // Nepali play families (identical to youtubeVerbFamily).
+        .phrase("चलाऊ"), .phrase("चलाऊँ"), .phrase("चलाउ"), .phrase("चलाउनुहोस्"), .phrase("चलाउनुस्"),
+        .phrase("चलाइदिनुहोस्"), .phrase("चलाइदिनुस्"), .phrase("चलाइदिनु"),
+        .phrase("चलाइदेऊ"), .phrase("चलाइदेऊँ"), .phrase("चलाइदेउ"),
+        .phrase("बजाऊ"), .phrase("बजाऊँ"), .phrase("बजाउ"), .phrase("बजाउनुहोस्"), .phrase("बजाउनुस्"),
+        .phrase("बजाइदिनुहोस्"), .phrase("बजाइदिनुस्"), .phrase("बजाइदिनु"),
+        .phrase("बजाइदेऊ"), .phrase("बजाइदेऊँ"), .phrase("बजाइदेउ"),
+        .phrase("लगाऊ"), .phrase("लगाऊँ"), .phrase("लगाउ"), .phrase("लगाउँ"),
+        .phrase("लगाउनुहोस्"), .phrase("लगाउनुस्"),
+        .phrase("लगाइदिनुहोस्"), .phrase("लगाइदिनुस्"), .phrase("लगाइदिनु"),
+        .phrase("लगाइदेऊ"), .phrase("लगाइदेऊँ"), .phrase("लगाइदेउ"),
+        // Nepali listen family (identical to newsVerbFamily's block).
+        .phrase("सुनाऊ"), .phrase("सुनाऊँ"), .phrase("सुनाउ"),
+        .phrase("सुनाउनुहोस्"), .phrase("सुनाउनुस्"),
+        .phrase("सुनाइदिनुहोस्"), .phrase("सुनाइदिनुस्"), .phrase("सुनाइदिनु"),
+        .phrase("सुनाइदेऊ"), .phrase("सुनाइदेऊँ"), .phrase("सुनाइदेउ"),
+        // Nepali sing family (new — the music domain's own verbs).
+        .phrase("गाऊ"), .phrase("गाऊँ"), .phrase("गाउ"), .phrase("गाउनुहोस्"), .phrase("गाउनुस्"),
+        .phrase("गाइदिनुहोस्"), .phrase("गाइदिनुस्"), .phrase("गाइदिनु"),
+        .phrase("गाइदेऊ"), .phrase("गाइदेऊँ"), .phrase("गाइदेउ")
+    ]
+
     // MARK: - App-launch groups ([APP-LAUNCHER] 2026-09-16)
 
     /// The words an elder says for a catalog app: the catalog's own
@@ -581,6 +712,143 @@ enum KeywordIntentRule {
         .token("खिच"), .token("खिच्न"), .token("खिच्नु"), .token("खिच्नुहोस्"),
         .token("खिच्नुस्"), .token("खिच्ने")
     ]
+
+    // MARK: - Music query extraction ([SPOTIFY] 2026-10-06)
+
+    /// Upper bound on the extracted music query — mirrors
+    /// `YouTubeRoute.maxQueryLength`: a song search is a phrase, not a
+    /// sentence, and anything longer is STT noise around the trigger
+    /// words. Exposed for the router and the extractor's own cap tests.
+    static let maxMusicQueryLength = 100
+
+    /// True when the text carries any music marker — the predicate the
+    /// contact-search route vetoes on (C-SP-08). Canonicalizes
+    /// internally, so the call is order-independent relative to the
+    /// route's own canonicalization, and reuses the rule's own
+    /// `musicMarkers` alternatives, so the veto and the rule can never
+    /// disagree about what "a music utterance" is.
+    static func mentionsMusic(_ raw: String) -> Bool {
+        let text = canonical(raw)
+        guard !text.isEmpty else { return false }
+        return musicMarkers.contains { $0.matches(text) }
+    }
+
+    /// Extracts the song query from a music request — the marker/verb
+    /// scaffolding removed, the remainder normalized. Mirrors
+    /// `YouTubeRoute.extractQuery`'s mechanics exactly (per-token
+    /// punctuation + danda trim, whole-token Latin/Devanagari drop
+    /// sets, Devanagari containment drops, `NepaliTextNormalizer`),
+    /// with the music vocabulary added to the drop sets, plus the
+    /// never-empty fallback of design L2-D10:
+    ///
+    ///   1. the tokens surviving the drop sets, joined;
+    ///   2. else the FIRST music-marker token ("भजन बजाऊ" → "भजन");
+    ///   3. else the raw transcript's tokens.
+    ///
+    /// Returns nil only when the input canonicalizes to nothing. The
+    /// canonicalization happens first (lowercase + whitespace
+    /// collapse), so a direct call with a raw transcript behaves like
+    /// one with the router's pre-canonicalized text.
+    static func musicQuery(from raw: String,
+                           maxLength: Int = KeywordIntentRule.maxMusicQueryLength) -> String? {
+        let text = canonical(raw)
+        var tokens: [String] = []
+        for piece in text.components(separatedBy: .whitespacesAndNewlines) {
+            let token = piece.trimmingCharacters(
+                in: CharacterSet.punctuationCharacters.union(CharacterSet(charactersIn: "।॥")))
+            guard !token.isEmpty else { continue }
+            tokens.append(token)
+        }
+        guard !tokens.isEmpty else { return nil }
+
+        var kept = tokens.filter { !isMusicDropToken($0) }
+        if kept.isEmpty {
+            // [SPOTIFY] L2-D10 — a query of marker + verb only ("भजन
+            // बजाऊ") must never extract empty: search the marker word,
+            // never the verb phrase, and only when there is no marker
+            // at all fall back to the raw transcript's tokens.
+            if let marker = tokens.first(where: { isMusicMarkerToken($0) }) {
+                kept = [marker]
+            } else {
+                kept = tokens
+            }
+        }
+        var query = NepaliTextNormalizer.normalize(kept.joined(separator: " "))
+        query = String(query.prefix(maxLength))
+        return query.isEmpty ? nil : query
+    }
+
+    /// The music extractor's drop sets: the YouTubeRoute sets, verbatim,
+    /// plus the music vocabulary (markers and the listen/sing/play verb
+    /// forms). Whole-token only on both scripts — a containment "for"
+    /// would eat "foreigner", and a containment Devanagari marker would
+    /// eat a contact name ("गीता"), which is exactly the grapheme-cluster
+    /// discipline the shipped extractor keeps.
+    private static let musicLatinDrops: [String] = [
+        // The YouTubeRoute latinDrops set, verbatim.
+        "play", "plays", "playing", "played",
+        "youtube", "on", "in", "for", "the", "a", "an", "to", "of",
+        "and", "or", "please", "me", "my", "some", "that", "this",
+        "from", "with", "search", "searches", "searching", "searched",
+        // Music markers, the provider name, and the listen/sing verbs.
+        "music", "song", "bhajan", "spotify",
+        "listen", "listens", "listening",
+        "sing", "sings", "singing"
+    ]
+
+    /// The music extractor's Devanagari whole-token drops: the
+    /// YouTubeRoute set, verbatim, plus the music markers and the
+    /// listen/sing verb families. The खोज search family stays in the
+    /// set (it is sentence scaffolding in a music request too: "गीत
+    /// खोज" extracts the marker, not the verb).
+    private static let musicDevanagariDrops: [String] = [
+        // play verbs (the YouTube set, verbatim)
+        "चलाऊ", "चलाऊँ", "चलाउ", "चलाउनुहोस्", "चलाउनुस्",
+        "चलाइदिनुहोस्", "चलाइदिनुस्", "चलाइदिनु", "चलाइदेऊ", "चलाइदेऊँ", "चलाइदेउ",
+        "बजाऊ", "बजाऊँ", "बजाउ", "बजाउनुहोस्", "बजाउनुस्",
+        "बजाइदिनुहोस्", "बजाइदिनुस्", "बजाइदिनु", "बजाइदेऊ", "बजाइदेऊँ", "बजाइदेउ",
+        "लगाऊ", "लगाऊँ", "लगाउ", "लगाउँ", "लगाउनुहोस्", "लगाउनुस्",
+        "लगाइदिनुहोस्", "लगाइदिनुस्", "लगाइदिनु", "लगाइदेऊ", "लगाइदेऊँ", "लगाइदेउ",
+        // search verbs
+        "खोज", "खोज्नुहोस्", "खोज्नुस्", "खोज्नुभयो", "खोज्ने", "खोज्न",
+        "खोजेर", "खोजे",
+        "खोजिदिनुहोस्", "खोजिदिनुस्", "खोजिदिनु", "खोजिदेउ", "खोजिदेऊ", "खोजिदेऊँ",
+        // particles / politeness
+        "मा", "मलाई", "लाई", "कृपया", "हजुर", "नमस्ते", "नमस्कार",
+        "सुप्रभात", "एउटा", "एउटै", "केही", "केहि", "अनि", "र",
+        // music markers
+        "भजन", "गीत", "गाना", "संगीत", "सङ्गीत",
+        // listen family
+        "सुनाऊ", "सुनाऊँ", "सुनाउ", "सुनाउनुहोस्", "सुनाउनुस्",
+        "सुनाइदिनुहोस्", "सुनाइदिनुस्", "सुनाइदिनु", "सुनाइदेऊ", "सुनाइदेऊँ", "सुनाइदेउ",
+        // sing family
+        "गाऊ", "गाऊँ", "गाउ", "गाउनुहोस्", "गाउनुस्",
+        "गाइदिनुहोस्", "गाइदिनुस्", "गाइदिनु", "गाइदेऊ", "गाइदेऊँ", "गाइदेउ"
+    ]
+
+    /// Devanagari tokens CONTAINING one of these are dropped wholesale —
+    /// the trigger morphemes, extended by the provider marker
+    /// ("स्पोटिफाइमा" must not search the provider name). No real query
+    /// contains them.
+    private static let musicDevanagariContainmentDrops = ["युट्युब", "स्पोटिफाइ"]
+
+    private static func isMusicDropToken(_ token: String) -> Bool {
+        let devanagari = token.unicodeScalars.contains { $0.value >= 0x0900 && $0.value <= 0x097F }
+        if devanagari {
+            return musicDevanagariDrops.contains(token)
+                || musicDevanagariContainmentDrops.contains { token.contains($0) }
+        }
+        return musicLatinDrops.contains(token)
+    }
+
+    /// True when the token is itself a music marker — the L2-D10
+    /// fallback's search key. Uses the same `musicMarkers` alternatives
+    /// the rule matches by (Devanagari substring, Latin whole-token),
+    /// so the fallback can never pick a token the rule would not have
+    /// recognised.
+    private static func isMusicMarkerToken(_ token: String) -> Bool {
+        musicMarkers.contains { $0.matches(token) }
+    }
 
     // MARK: - Helpers
 

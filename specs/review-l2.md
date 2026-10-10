@@ -1,216 +1,194 @@
-# Review — L2 Component Design (Profile Interview + Address-as)
+# Review — L2 Component Design (Spotify Music Integration)
 
-**Task:** `review-l2` (contract `review_report`) · **Agent:** `reviewer` (direct dispatch)
-**Artifact under review:** `specs/design-l2.md` (1,203 lines, contract `component_design_l2`)
-**Feature:** `profile-interview` · worktree branch `worktree-...-profile-interview` · 2026-10-05
+**Task:** `review-l2` (contract `review_report`) · **Agent:** `reviewer`
+**Artifacts under review (the design chain):** `specs/design-l1.md` (623 lines, contract `architecture_l1`)
+and `specs/design-l2.md` (845 lines, contract `component_design_l2`)
+**Feature:** `spotify-music-integration` · worktree `elderly-ai-assistant-spotify-music-integration`
+(branch `feat/spotify-music-integration`)
 **Workflow exit condition:** `review.decision == GO`.
+**Inputs.** The two design artifacts; `specs/define-requirements.md` (17 FR-SP + 12 NFR-SP, Gherkin,
+out-of-scope table); `specs/spotify-music-integration/constitution.md` (constraints 1–12, routing/degradation
+contract, OD-S1…OD-S3, DV-1…DV-5, the 2026-10-06 amendment record); the project `constitution.md`
+(Standards, Architecture Constraints, release gates, Agent Principles); `specs/spotify-music-integration/workflow.yaml`.
+This review is read-only — no artifact under review was modified.
 
-**Inputs.** The artifact; `specs/design-l1.md` (C01–C12, ADR-01…ADR-11, hand-off §16, hooks §17);
-`specs/profile-interview/constitution.md` (Field Contract, Address-as Behaviour Contract, Feature
-Constraints 1–8, OD-F1…OD-F3, OD-PI-4 / OD-PI-5); the project `constitution.md` (Standards,
-Architecture Constraints, release gates); `specs/define-requirements.lock.yaml` and all 16 FR-PI /
-11 NFR-PI requirement files; `specs/profile-interview/workflow.yaml`. This review is read-only —
-no artifact under review was modified.
+**Verification method.** Beyond the documentary review, the design’s claims about shipped code were checked
+by reading that code (listed below), and the central measurements were reproduced independently rather than
+taken on trust.
 
-**Verification method.** Beyond the documentary review, the design's claims about shipped code were
-checked by reading that code (25+ spots, listed below), and the central budget measurements were
-reproduced independently rather than taken on trust.
-
-- Code claims verified: `OnboardingState.swift` (4-case `Step` enum; `status(of:)` ignoring unknown
-  raw values via `flatMap`; `pendingSteps` / `firstPendingStep`); `OnboardingWizardView.swift`
-  (`startingAt:` init at line 18; the four-case `stepContent`; `finishOnboarding()` calls
-  `coordinator.start()`); `ContentView.swift` (wizard/Home branch; the `XCTestConfigurationFilePath`
-  boot guard at line 27); `HomeView.swift` (`showWizard` fullScreenCover reading
-  `firstPendingStep` at 208–209; reminder-card `onResumeSetup` at 372); `IntentPrompt.swift` (the
-  three clause anchors at lines 99 / 185 / 249; `pluginSections` returning `""` when empty); the
-  two `InterpreterContext(` construction sites (`CommandRouter.swift:1412`,
-  `AppCoordinator.swift:3601`); `VoicePipeline.swift` (`handleWakeDetected` 714, guard +
-  `captureGeneration` epoch 723–729, `simulateWakeWordDetection()` routing through the same
-  handler 492–494); `Speaker.swift` (non-throwing `speak(_:locale:) async`; `PiperVoiceSpeaker`);
-  coordinator `noteSpeakingStarted` / `noteSpeakingEnded`; `suspendForSampleCapture()` returning
-  `true` with no live pipeline (10958–10959); `addFamilyContact` / `updateFamilyContact` carrying
-  `isEmergencyContact` (6029 / 6080); `preferredEmergencyContact` first-flagged rule (6249–6251);
-  the storage chain (`RawEncryptedStorage`; `EncryptedLocalStorage` typed write/read/delete;
-  `MigratingEncryptedStorage` read precedence snapshot → files → Keychain + migration;
-  `EncryptedFileStorage.url(for:)` nil root; Envelope {key, payload}; sha256 file naming;
-  `.atomic` + `.completeFileProtection` + excluded-from-backup; `StoragePlacementPolicy`);
-  `LogSanitiser` (`outcome` / `error_code` / `duration_ms` allow-listed; redaction applied before
-  the allow-list filter); `check-release-log-safety.py` `FEATURE_ROOTS` (line 141); `L10n.str` /
-  `L10n.fmt`; the planned `wakeAck` / `onboarding.aboutYou` / `profile.*` keys absent from the
-  catalog; `SettingsTabMappingTests` visible-row count 20 (line 56).
-- Budget proof independently reproduced: the `build()` literal was extracted from
-  `IntentPrompt.swift` with Swift multiline-literal semantics (dedent by the closing delimiter;
-  the blank line before the close yields one trailing `\n` — verified by compiling the shape),
-  the fixture values substituted (`ne`, `(none)`, the weather transcript) and counted by the Swift
-  compiler: **2,506 Characters / 2,718 UTF-8 bytes**, matching the design's measured table exactly.
-  Template with placeholder tokens: **2,698 bytes** (matches). The seed file under
-  `tools/train-intent` measures **2,699 bytes ending `request.\n\n`** (matches §13 item 3).
+- Code claims verified (all held at the stated line/region unless a finding says otherwise):
+  `CommandRouter.swift` — music stub at 2640 (`case .music:`), `command_music_stub` event at 2642,
+  `router.musicStub` speech at 2643; tool seams 646–648 with nil-default init params; ladder sites
+  898 / 1146 / 1189; `fireYouTubePlay` at 2386 (the keyless leg opens YouTube search); `logToolRequest`
+  at ~2544 (nil store = no-op); `handlePluginCommand` at ~2922. `AppCoordinator.swift` — lazy stores
+  1328–1360; plugin registration at ~2058; router construction 3704–3717; `topPresentingViewController()`
+  as the presenter precedent. `YouTubePlugin.swift` — ids, prompt fragment, result shapes, nil
+  presentation (the twin precedent). `VoiceContactSearchRoute.swift` — direct-call veto first, YouTube
+  veto next (the insertion point), grapheme-cluster rules. `KeywordIntentRule.swift` — Domain set,
+  rule-table shape, youtube keyword family (against L2 §14/§29). `SettingsTabs.swift` / `SettingsView.swift`
+  — 21 visible rows, six hidden sheet rows (6 → 7 after the addition), `YouTubeSettingsView` at 768.
+  `Localizable.xcstrings` — 1,341 keys, no `spotify*` keys yet, `router.musicStub` present; `App/L10n.swift`
+  — `L10n.str` / `L10n.fmt` exist as the design uses them. `ToolLogReviewView.swift` — the kind → key
+  mapping and the second exhaustive kind switch (see F-4). `GoldenCorpus.swift` — the 15-entry music
+  block and the `>= 15` floor test. `IntentPrompt.swift` / `IntentPromptTests` — music wording already
+  present; digest pins and the character baseline/ceiling exist. `check-release-log-safety.py` — the
+  engine / feature / other role model with the rule scoping of F-2; per-rule fixtures present.
+  `Info.plist` — no `spotify` scheme yet, one `CFBundleURLTypes` entry, a public-client-ID precedent.
+  `StoragePlacement.swift` / `DependencyProtocols.swift` — the keychain-resident set and `StorageError`
+  as §25 uses them.
+- Measurements reproduced independently: YouTube plugin prompt fragment = **341 characters**; the L2 §27
+  Spotify fragment text = **376 characters** (F-1). Golden music entries = **15** (F-3). Catalog keys =
+  **1,341** (matches the L2’s stated baseline).
 
 ## Summary
 
-**All seven checklist items pass; no blocking findings. The design is cleared to feed
-`security-design-review`.**
+**The design chain is cleared to feed `security-design-review`: no BLOCKER findings, one MAJOR (an
+internal pin contradiction resolvable mechanically at implement), three MINOR and three NOTE items.**
+All seven checklist items pass.
 
 ### 1. Explicit error return types — PASS
 
-Every interface in §5 declares its failure surface explicitly; nothing returns `any Error` or an
-`unknown`-style placeholder (the design states this at §5, lines 372–374, and the claim holds).
+Every new interface declares its failure surface with concrete types; no `any`/`unknown`-style placeholder
+crosses a component boundary. `SpotifyTool.FetchError` and `SpotifyTool.PlayError` (both `Error, Equatable`,
+every case mapped to a matrix row), `SpotifyAuthError` (15 named cases covering configure / present /
+cancel / redirect / state / provider / exchange / parse / verify / scope / refresh / revoke / storage /
+network / presentation), `StorageError` for the store’s `Result<Void, StorageError>` returns, and
+`Result<String, SpotifyAuthError>` from `validAccessToken()` and the callback parser. The JSON parsers
+document their nil/throw semantics; the shapes mirror the shipped YouTube precedents.
 
-- `UserProfileStoring.load() -> ProfileLoadResult` (enum carries `ProfileStoreError`) and
-  `save(_:) -> Result<Void, ProfileStoreError>` — §5.1, lines 421–429.
-- `ProfilePayloadStorage.readRawData(key:) -> Data?` / `hasPayload(key:) -> Bool?` — the optionals
-  are explicitly documented tri-state semantics ("`nil` = unknowable… Never read as absent",
-  lines 413–418); the absent-vs-unreadable discrimination is completed by the exhaustive
-  load-state mapping table (§5.1, lines 472–484), which assigns every probe/read/decode outcome a
-  defined route. Argued explicitly, as the checklist permits.
-- `guarded(_:) -> String?` — nil semantics documented per case (§5.3, lines 617–633) with the
-  drop route argued in C07 Errors (line 210: quarantine event + un-personalized turn).
-- `WakeAcknowledging.begin/cancel` — no error return, argued: "No thrown errors; failures are the
-  synchronous fallback completion plus a content-free event" (line 175), with the full failure
-  mapping in the §7.1 state-machine table.
-- `coldStartInterviewRoute() -> OnboardingState.Step?` — argued: "No error return: every failure
-  mode has a defined route (C13's edge table) — the method never throws" (§5.8, lines 823–828).
-- `saveProfile(...) -> Result<Void, ProfileStoreError>`; `currentProfileSnapshot() ->
-  ProfileLoadResult` (§5.6, lines 779–788); `phrase(...) -> String?` nil-route documented (§5.4,
-  lines 690–694); pure helpers (`clamped`, `merged(into:)`, `isComplete`, `terms(for:)`) have no
-  failure mode.
+### 2. Async/external calls: failure modes and recovery — PASS
 
-### 2. Async/external calls: failure modes and named timeouts — PASS
+Every network operation is single-shot with a named outcome: searches, play attempts, deep-link opens and
+link flows have no implicit retry; the only automatic retry anywhere is the single token refresh per
+request. Each failure class routes to a defined recovery — `invalid_grant` wipes and takes unlinked
+treatment (row 10); transport-only refresh failure takes the search-failure shape (row 11); play 403/404/
+network falls to the deep link (row 2); search empty/failed falls to YouTube where serveable, else the
+honest line (rows 6/7); link failures store nothing (row 12). The 300-second link-flow timeout cancels
+the seam into `.userCancelled`. No silent failure exists anywhere in the matrix — every row ends in
+exactly one spoken line.
 
-- The one added async call is `Speaker.speak` from the ack service; its bound is the named
-  configurable `wakeAckMaxHoldSeconds` (default 2.5, declared in the service init, wired in
-  `AppCoordinator.start()` — §8 table, lines 975–976). Silent synthesis death is explicitly mapped
-  to the timeout path (§7.1 note, lines 902–906). Recovery is documented: playback end, timer,
-  failure or cancel all reach the single `settle` exit (line 900); worst case is today's silent
-  start (E5/E6, §7.2).
-- The store adds no async call and no timeout — argued, not omitted: synchronous local-disk I/O
-  behind its lock, no network (§8, lines 983–986).
-- The enrollment session keeps the existing mechanism with no new timeout (§8, line 986) — absence
-  justified by the call-site-only contract (C12, NFR-PI-009).
-- C13 adds no async call and no timeout — a single synchronous cached read, argued at §5.8
-  (line 824) and §8 (lines 988–990).
+### 3. Timeouts and retry limits are configurable — PASS
 
-### 3. Traceability — PASS (claims 16/16 FR + 11/11 NFR; spot-checks verified)
+All bounds are named parameters with injected defaults (§32): fetch timeout 8.0 s (`defaultFetchTimeoutSeconds`,
+overridable at every call site), refresh attempts 1, capability staleness 3,600 s, link-flow timeout 300 s,
+expiry skew 60 s, query caps 100. No timeout is a bare literal in the new code. The PKCE verifier/challenge
+lengths are protocol-fixed, not tunable — a correct exclusion, argued in place.
 
-§11 (lines 1079–1104) claims coverage of 16/16 FR-PI and 11/11 NFR-PI. All 16 FR and 11 NFR ids
-are present in the table; no id in the lock file is missing. Spot-checks against the actual
-sections:
+### 4. Traceability — PASS (29/29)
 
-- **FR-PI-016 → C13 / §5.8**: the route rule (lines 333–339), the seven-row edge table (341–351),
-  the shell wiring (353–367) and the §5.8 signature match the requirement: routing at the first
-  pending step via the existing `pendingSteps`/`firstPendingStep`, mandatory-missing hard route to
-  the earlier of the first pending step and About-you, optional-pending route with the soft-skip,
-  complete → nil, failure → defined route.
-- **FR-PI-002 / FR-PI-004 → §5.2**: `AboutYouDraft.isComplete` = trimmed non-empty name AND
-  address-as (line 519–520); Skip stays, every step skippable (lines 498–501). Matches FR-PI-002's
-  Next gate and FR-PI-004's skippable/pending pattern.
-- **FR-PI-003 / FR-PI-015 → §5.1**: the load-state mapping table (472–484) is exhaustive;
-  absent vs unreadable is real (the probe, 445–470); corrupt payload discarded, never retried in a
-  loop, never partially applied, no placeholder — matches FR-PI-015's three scenarios.
-- **FR-PI-008 / FR-PI-010 + NFR-PI-008 → §7.1 / §5.4**: phrase composition speaks the term
-  verbatim inside a localized template (lines 690–694); the state machine gives the bounded hold
-  and the fallback to today's silent start (886–906).
-- **NFR-PI-005 → §9.1 / §9.2**: the measured budget proof (2,506 + 80 = 2,586 ≤ 3,000, headroom
-  414; lines 996–1011) and the seed-mirror gate (1013–1030) — independently reproduced (above).
+All 17 FR-SP and 12 NFR-SP ids appear in the design-l2 traceability section mapped to components, seams,
+tests and DV items; no unmapped requirement. Spot-checks against sections held: FR-SP-013 → §14 rule and
+extractor fixtures; FR-SP-014 → §15 veto insertion (verified against the shipped veto site); FR-SP-016 →
+§17/§31; FR-SP-017 → §23 DV protocol; NFR-SP-002 → §20/§28/§33; NFR-SP-008 → §24 grammar; NFR-SP-012 →
+seams and diff-surface checks.
 
-### 4. User/operator-visible behaviour — PASS
+### 5. Operator-visible behaviour — PASS
 
-The overview carries an operator/user-visible summary (lines 74–81), and §7.5 (lines 955–965)
-tabulates success and failure for every flow: About-you Next, emergency step, fingerprint,
-Settings save, wake with term, store unreadable, and cold-start routing ("corrupt/unreadable
-state → wizard from the first pending step; still skippable; no crash or stall"). §7.2 gives the
-per-error user view and the content-free operator event. The route outcome itself is described
-where the user meets it.
+The matrix describes what the user sees and hears in every state and failure mode (nine distinct spoken
+outcomes across twelve rows, all honest, never the stub); the settings surface states linked/free/
+not-linked/link-failed with the rollout note; DV-1…DV-7 (the constitution’s DV-1…DV-5 expanded with the
+app-absent path and the console/sysdiagnose capture) record the device-visible acceptance.
 
-### 5. FR-PI-016 coverage — PASS (all six sub-items)
+### 6. Soundness claims — PASS (with the F-1 caveat)
 
-- **Existing resume mechanism, no new state**: "No new persisted state"; the resume is
-  `OnboardingState.pendingSteps` / `firstPendingStep` + the wizard's `startingAt:` reopen
-  (lines 302–304, 333, 355); the only addition is a shell `@State` one-shot (line 364). Verified
-  against the shipped code: the mechanics and the `startingAt:` init exist as claimed.
-- **Mandatory-missing hard route**: "The mandatory-missing route is a hard route on start"
-  (line 338); edge row "Mandatory missing while About-you is marked completed" → `.aboutYou`
-  (line 349); test pinned in §12 (`ColdStartRoutingTests`, line 1124).
-- **Optional-pending route with the OD-F3 soft-skip preserved**: edge row at line 348 ("the
-  soft-skip preserved, never trapped"); the route rule keeps the ADR-04 soft gate (lines 337–339).
-- **Complete → no routing**: edge row "Interview complete" → none (line 347).
-- **Corrupt/unreadable → no crash, stall, loop or trap**: edge row "Status map corrupt" reads as
-  nothing recorded and routes without crash/stall/loop (line 350); E8 and §7.5 state the same;
-  the routing read is a single synchronous evaluation (line 323) with no polling (§9.4, line 1055).
-- **Background→foreground decision made and documented**: cold start only, no foreground re-check
-  in v1, with the interruption rationale and revisit conditions (C13 Decision, lines 324–330;
-  §8, line 990; §15, lines 1202–1203). This settles FR-PI-016's left-open question.
+Dormant-nil seams (`spotifyAccountSession`, `spotifyTransport`, `spotifyLinkOpener` defaulting nil) preserve
+every pre-existing construction site and test, matching the verified 646–648 pattern and the 3704–3717
+construction. L2-R1 (the keyless YouTube leg is not pre-opened when Spotify wins) is coherent with the
+shipped keyless path. L2-R2 (link-time verification or scope failure stores nothing) matches state machine
+A, where every failure transition is `record: none` and only a store-write failure leaves the prior record
+unchanged. The golden-corpus supersession leaves the 15-entry music block unedited and the prompt digest
+and baseline pins intact (dispatch-level supersession recorded in the music test suite). ADR-SP-15’s
+tool-log contract is stricter than the YouTube precedent (empty query/response fields) and mechanical.
 
-### 6. Consistency with L1 and the resolved open decisions — PASS
+### 7. Scope and non-goals — PASS
 
-- **C13 is the single addition**, recorded under the 2026-10-05 owner amendment (FR-PI-016,
-  Feature Constraint 8): scope statement (lines 298–304) and §13 item 6 (1155–1159), which records
-  that the amendment supersedes the L1 §4.1 sentence for the app-start path while the
-  `pendingSteps` / `firstPendingStep` / `startingAt:` mechanism stands — exactly the owner-recorded
-  supersession this review is instructed to accept.
-- **OD-F1** carried as ADR-02: C11 and §5.2 use the existing `isEmergencyContact` designation,
-  no standalone next-of-kin field (lines 266–280); verified against the shipped coordinator APIs.
-- **OD-F2** carried as ADR-06: on-demand TTS through the existing `Speaker`, localized template +
-  term-as-data, not the pre-rendered AckFastLane cache (C05 / §5.4); the base-speaker wiring
-  avoids double bookkeeping (§6, lines 876–880).
-- **OD-F3** carried as ADR-04: Next gated, header Skip stays (soft gate) — §5.2, C13.
-- **OD-PI-4**: chips + custom field via `AddressAsPresets` + free text (C03, §5.2).
-- **OD-PI-5**: plain Settings editor, no new auth (C04, lines 144–158; §5.7).
-- L1 §16 hand-off items all have settlements (front table, lines 52–61); §13 corrections 1–5 are
-  evidenced (item 1's Swift semantics are accurate: a `let` property with a default is omitted
-  from the synthesized memberwise init, so L1's sketch could not be set). L1's interface sketches
-  are refined only within the announced hand-offs.
+No out-of-scope elements: read-only playback control (no library edits or mutations anywhere in the
+interfaces), no backend, explicit-YouTube routing byte-identical (ladder ordering plus the rule-level
+YouTube exclusion, ADR-SP-06), plugin isolation preserved (one plugin + three router seams), no
+brain/router model-stack change, no cloud LLM on the music path, no new egress beyond the two providers.
+Every component traces to an FR/NFR; no unspecified features found.
 
-### 7. Scope — PASS
+### Findings
 
-No out-of-scope elements: zero new egress (only the guarded term enters existing prompt paths,
-§9.4 lines 1043–1055; NFR-PI-003 row); no new permissions and `Info.plist` untouched (line 1052);
-wake-word recognition untouched — the diff is a seam property and a body extraction in
-`VoicePipeline` (§5.4, lines 700–726); the fingerprint step is a call site only (C12); no forced
-address-as — the clause says "never every sentence" (§5.5, line 752) and R9 keeps the per-turn
-fallback non-punitive. No new components beyond C13; no persistence schema beyond the new store
-key and the step enum.
+| id | severity | finding | evidence | blocks GO? |
+|---|---|---|---|---|
+| F-1 | MAJOR | The plugin fragment’s size pin and its “exact text” contradict: the pin requires at-or-under the YouTube fragment’s size (341 chars measured), the §27 text is 376 chars — the pinned test cannot pass as written. | design-l2 §12, §22, §27 vs measured `YouTubePlugin.swift` fragment | No — mechanical, tripwired by its own pinned test; implement condition C-1 |
+| F-2 | MINOR | “Rules 1–2 … apply to every file” misstates the verified gate: rule 1 is judged for every file, rule 2 for engine files only; rules 3–6 for feature roots. The operative `FEATURE_ROOTS` edit is correct as specified. | design-l2 §20 vs `check-release-log-safety.py` role model / judge call sites | No — doc precision; C-2 |
+| F-3 | MINOR | The feature constitution says the golden music block has “16 utterances” at `GoldenCorpus.swift:142–157`; the block holds exactly 15 entries. design-l2 uses the correct 15 and keeps the floor test green. | `specs/spotify-music-integration/constitution.md` constraint 5 vs the corpus file | No — correct the count; C-3 |
+| F-4 | MINOR | “The view file is not otherwise changed” / “one mapping case”: the tool-log view has a second exhaustive switch over `Kind` (the icon switch) with no default, so the new kind fails to compile until an icon case is added. | design-l2 §21, §30 vs `ToolLogReviewView.swift` lines 130–147 | No — compile-enforced, one line; C-4 |
+| F-5 | NOTE | The design-l2 header self-describes Contract `design_l2`; the workflow state records `component_design_l2`. The path contract is honored. | design-l2 header vs workflow-state.json | No — cosmetic |
+| F-6 | NOTE | Contact-veto residual: a contact whose name literally contains a full music marker (e.g. भजन) is no longer reachable via a search-marker utterance containing it; near-misses are protected by grapheme-cluster semantics. Deliberate trade-off under FR-SP-014. | design-l2 §15 vs `VoiceContactSearchRoute.swift` | No — accepted trade-off, recorded |
+| F-7 | NOTE | `spotifySettings.removeConfirm` (“Music will use YouTube only.”) is slightly stronger than matrix row 8, which after unlink can still open the `spotify:search:` hand-off when YouTube is not serveable. Honest-line rules and DV-4 unaffected. | design-l2 §31 vs §13 row 8 | No — copy option |
+
+**F-1 in full.** §12 pins the fragment “at or under the YouTube fragment’s size”; the §22/§27 test list pins
+the assertion “length ≤ the YouTube fragment’s length”; §27 then fixes the “exact text”. Both cannot hold:
+the YouTube fragment measures 341 characters, the §27 text measures 376. Resolve by trimming the §27 text
+to ≤ 341 characters while keeping the required tokens (`spotify.play`, `query`) and the sentence routing
+general music requests to the `music` intent (L2-D15); the length assertion is itself the tripwire. No
+architecture, security or user-visible property depends on the exact wording.
 
 ### Independent corroboration of the measured facts
 
-The design's central NFR-PI-005 evidence was reproduced from the shipped source, not accepted on
-assertion: extracted `build()` literal + Swift compiler count → **2,506 Characters / 2,718 UTF-8
-bytes** (design: 2,506 / 2,718); placeholder template **2,698 bytes** (design: 2,698); seed file
-**2,699 bytes** ending `request.\n\n` (design §13 item 3: 2,699, `request.\n\n`). The clause
-arithmetic (56 static + 24 term = 80; 2,586 ≤ 3,000; headroom 414) is correct. The 18-byte
-`{address_as_clause}` placeholder and the net 2,716-byte seed figure are arithmetically
-consistent (2,699 − 1 + 18 = 2,716).
+The design’s own size model was reproduced from the shipped source: the YouTube plugin’s prompt fragment
+was extracted with Swift multiline-literal semantics (dedent by the closing delimiter) and counts 341
+characters; the L2 §27 fragment text was extracted the same way and counts 376. The golden music block
+holds exactly 15 entries against a `>= 15` floor test; the Localizable catalog holds exactly 1,341 keys
+at this baseline; the release gate’s role model was read directly (engine prefix / feature prefix / other)
+and the judge call sites confirm the rule scoping stated in F-2.
 
-### Observations (non-blocking; no rework required)
+### Observations (non-blocking)
 
-- **OB-1.** L1's `WakeAcknowledging` docstring says "always calls `completion` exactly once";
-  §5.4/§7.1 refine this for the `cancel()` path (completion dropped when stale by definition).
-  The refinement is documented in place and sits inside the L2 state-machine hand-off, but it is
-  not listed in §13's corrections table. A one-line §13 entry at the next touch would keep the
-  table exhaustive.
-- **OB-2.** The wizard merge base when the snapshot is `.absent` / `.unreadable` (the
-  `merged(into: base)` helpers take a non-optional `UserProfile`) is implied — an empty record —
-  but not spelled out; C13's edge table relies on the ordinary Next-and-save gate repairing the
-  record (line 349). Worth one clarifying clause at implementation time.
-- **OB-3.** FR-PI-013's requirement file still carries its "No force-migration" scenario text
-  unannotated; the supersession for the app-start path is recorded in FR-PI-016's file and in
-  design-l2 §11/§13. Accepted, owner-recorded; an annotation on FR-PI-013 when the set is next
-  touched would remove the residual text.
-- **OB-4.** §9.2's phrasing "byte-identical to the pre-feature rendered prompt" is loose (it
-  refers to the rendered/seed equivalence); the enforceable contract (gate byte equality between
-  the extracted template and the seed) and the arithmetic are correct.
-- **OB-5.** OD-A1 (device-measured ack latency vs the 1 s activation budget) and OD-A2 (English
-  ack copy, owner eyeball) are correctly carried as evidence/eyeball items to
-  `implement` / `security-test` and the owner (§15), not as design gaps.
+- The 1,024-token on-device context is untouched by construction: plugin fragments compose only on the
+  cloud path, and the on-device path composes none — the design states this and the source confirms the
+  composition site.
+- The `sahayak-spotify://callback` constant is shared by the plist entry, the validator and the planned
+  Dashboard registration; the single-constant contingency for Dashboard refusal is coherent and flagged
+  to `security-design-review` by the design itself.
+- The DV protocol artifact is planned at implement time with the LCT precedent on disk; the design does
+  not pre-invent results.
 
 ## Decision
 
 decision: GO
 
-**Rationale.** The L2 component design is a faithful, buildable fold of the 16 FR / 11 NFR locked
-set (including the FR-PI-016 owner amendment), with candidate-error-free interfaces, complete
-failure/route documentation, verified traceability, an independently reproduced budget proof, and
-no scope growth beyond the owner-authorised C13. All seven checklist items pass; the observations
-above are refinements that can ride implementation or a later documentation touch — none blocks.
-The feature proceeds to `security-design-review` (where its STRIDE focus areas are already
-sharpened in §14) under the workflow exit condition `review.decision == GO`.
+**Rationale.** The design chain covers all 29 requirements with verified traceability, honors the feature
+constitution’s constraints 1–12 and its non-goals, resolves OD-S1 as a coherent PKCE-only public-client
+flow (no secret anywhere, scopes at sign-in, exact-match callback validation, single-refresh bound, wipe
+semantics coherent), and resolves OD-S3 as a total 12-row ladder with an honest spoken line in every state.
+The security-relevant interfaces — URI grammar, callback validation, token lifecycle, log discipline, gate
+roots — are sound and independently verified against the worktree source. All seven checklist items pass.
+No BLOCKER findings; the one MAJOR item is an internal contradiction that is mechanical and tripwired by
+its own pinned test, and the remaining items are documentation-, edit-list- and copy-level refinements.
+This GO is conditioned on the items below.
+
+### Conditions (implement)
+
+1. **C-1 (from F-1):** trim the §27 fragment to ≤ 341 characters keeping the required tokens and the
+   L2-D15 routing sentence, or re-derive the size assertion with the rationale recorded. The fragment-size
+   assertion in the plugin test suite is the guard; without C-1 that test cannot pass.
+2. **C-2 (from F-2):** correct the §20 sentence to the verified rule scope (rule 1 all files; rule 2
+   engine-only; rules 3–6 feature roots).
+3. **C-3 (from F-3):** correct the feature constitution’s golden-count sentence (or annotate it) to the
+   code’s 15 entries.
+4. **C-4 (from F-4):** add the icon case alongside the label case in the tool-log view (the edit list
+   should name both switches).
+
+### Carry-forwards (security-design-review)
+
+1. **OAuth token lifecycle:** verify the PKCE-only resolution end-to-end (no secret in the repo or the app
+   image), the scopes-at-sign-in set, exact-match callback validation, the single-refresh bound, and the
+   second-401 / `invalid_grant` wipe paths and the unlink / no-remote-revoke stance.
+2. **Redirect / scheme hijack:** assess the custom scheme interception residual against PKCE and state;
+   confirm the Dashboard-acceptance contingency (one constant; the design’s marked gap 2).
+3. **Deep-link / URI injection:** the base62-22 grammar, percent-encoding, scheme allowlist,
+   titles-never-in-URIs, the hostile corpus, and the gate’s documented static-analysis limits where the
+   design relies on runtime validation.
+4. **Log sanitisation:** closed event vocabularies, empty metadata everywhere, the tool-log contract,
+   the `FEATURE_ROOTS` additions, and the DV-7 console/sysdiagnose capture.
+5. **Privacy disclosure:** the settings privacy copy against the actual data flow (music queries to
+   Spotify; nothing else).
+6. **OD-S2 owner inputs:** the Dashboard-owning account, the client-ID paste-in, test-user registration,
+   the quota-extension filing, rollout-note copy approval, and the final-sign-off line.
+
+Carried records, no action required for this gate: the keyless-YouTube dependency and the quota-window
+recording, both marked in the design with revisit conditions.

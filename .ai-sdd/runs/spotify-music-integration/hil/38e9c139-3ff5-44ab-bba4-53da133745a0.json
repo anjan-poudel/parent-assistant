@@ -1,0 +1,44 @@
+{
+  "id": "38e9c139-3ff5-44ab-bba4-53da133745a0",
+  "task_id": "define-requirements",
+  "workflow_id": "spotify-music-integration",
+  "status": "RESOLVED",
+  "reason": "T1 human sign-off — feature story for spotify-music-integration. The requirement set is complete and locked: 17 functional requirements (FR-SP-001..017, the stub->real-playback flip, both-provider search with Spotify preferred when linked and capable, explicit-YouTube unchanged, honest degradation for free-tier/unlinked/network-failure/empty-search, account linking by the caregiver, encrypted credential store and wipe-on-unlink) and 12 non-functional requirements (NFR-SP-001..012, latency budget, log safety, no new egress, prompt budget, localisation, no regression, encryption at rest, URI hardening, OAuth lifecycle, accessibility, compliance gates, plugin isolation), with 95 Gherkin acceptance scenarios. The owner is asked to approve the feature story before design work begins: confirm the scope and the Spotify-preferred preference semantics (constraint 9), the honest-degradation framing, and the acceptance of OD-S1/OD-S2/OD-S3 remaining open into design (OD-S2 is owner-involved: dev-mode rollout and quota-extension plan). Supersession note: the requirements.md Post-MVP placement of music playback is superseded by this feature (recorded in FR-SP-001 and the doc header).",
+  "context": {
+    "task_description": "Business-analyst requirements pass: one file per requirement (FR/NFR), indexes, consolidated requirements doc, and a lock file computed last as the drift baseline.",
+    "risk_tier": "T1",
+    "agent": "ba",
+    "artifacts": [
+      "specs/define-requirements.md",
+      "specs/define-requirements.lock.yaml",
+      "specs/define-requirements/index.md",
+      "specs/define-requirements/FR/index.md",
+      "specs/define-requirements/NFR/index.md"
+    ],
+    "artifact_counts": {
+      "functional_requirements": 17,
+      "non_functional_requirements": 12,
+      "acceptance_scenarios": 95
+    },
+    "lock_verified": "All 29 per-file sha256 hashes re-verified against disk; snapshot_sha256 matches specs/define-requirements.md; lock parses (locked_at 2026-10-06T11:22:10Z).",
+    "branch": "feat/spotify-music-integration",
+    "branch_tip": "b897ea6",
+    "artifacts_uncommitted": true,
+    "open_decisions": [
+      "OD-S1 — client-secret handling for the Spotify search flow (architect / security-design-review; requirements bind storage/log discipline either way)",
+      "OD-S2 — dev-mode rollout, quota-extension plan, Dashboard registration (owner / architect)",
+      "OD-S3 — Premium degradation precedence and exact localized copy (architect; requirements bind every path is non-silent and honest)"
+    ],
+    "assumptions_recorded": [
+      "Golden music block holds 15 entries at GoldenCorpus.swift lines 142-157 while the constitution says 16 — implementation must reconcile against source.",
+      "Deep-link fallback presumes the Spotify app is installed on the reference device.",
+      "Account linking is performed by the family member/caregiver only; the elderly user never touches OAuth.",
+      "Identifier examples in requirements are synthetic placeholders.",
+      "Degradation copy and precedence are OD-S3 (open)."
+    ],
+    "note": "Item created by the dispatching session because the task was dispatched directly (not via the ai-sdd run command), which is the path that normally creates it. Left PENDING for the human. Artifacts are uncommitted in the feature worktree; commit follows the owner decision."
+  },
+  "created_at": "2026-10-06T11:22:52.000Z",
+  "notes": "Owner-approved as-is (T1 feature-story sign-off). Decision relayed via the main conversation 2026-10-06. Dispositions: (1) requirement set approved as-is; (2) OD-S2 kept OPEN into design - architect drafts the dev-mode rollout + quota-extension plan in design-l1; owner approves it at the final T2 sign-off; (3) golden-corpus 15-vs-16 discrepancy left as recorded - implementation reconciles against source.",
+  "resolved_at": "2026-10-06T11:28:16.341Z"
+}

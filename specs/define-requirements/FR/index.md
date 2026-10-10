@@ -1,35 +1,47 @@
-# Functional Requirements — Profile Interview + Address-as (v1)
+# Functional Requirements — Spotify Music Integration (v1)
 
-16 functional requirements. IDs are namespaced `FR-PI-NNN` to avoid colliding with the
+17 functional requirements. IDs are namespaced `FR-SP-NNN` to avoid colliding with the
 project-level `FR-NNN` set in the root stakeholder brief (`requirements.md`) — the same
-convention the live-camera-translation feature uses with `FR-LCT-NNN` and the dementia
-supplement with `FR-DNN`.
+convention the live-camera-translation feature uses with `FR-LCT-NNN`, the dementia supplement
+with `FR-DNN` and the profile-interview feature with `FR-PI-NNN`. This page covers the
+`spotify-music-integration` set (`FR-SP-*`) only; the earlier feature files remain in this folder
+and are not part of this feature's requirements or lock.
 
 | ID | Title | Area | Priority |
 |----|-------|------|----------|
-| [FR-PI-001](FR-PI-001-interview-step-order.md) | Interview step order in the first-run wizard | Onboarding Wizard | MUST |
-| [FR-PI-002](FR-PI-002-about-you-mandatory-fields.md) | About-you mandatory fields gate Next | Onboarding Wizard / About-you | MUST |
-| [FR-PI-003](FR-PI-003-encrypted-profile-store.md) | Encrypted profile store | Profile Storage | MUST |
-| [FR-PI-004](FR-PI-004-optional-step-skippable-pattern.md) | Optional steps remain skippable with pending status | Onboarding Wizard | MUST |
-| [FR-PI-005](FR-PI-005-family-and-friends-step.md) | Family & friends step extension | Family & Friends | MUST |
-| [FR-PI-006](FR-PI-006-emergency-contacts-step.md) | Emergency contacts step | Emergency Contacts | MUST |
-| [FR-PI-007](FR-PI-007-voice-fingerprint-step.md) | Voice fingerprint step (reuse of existing enrollment) | Voice Fingerprint | MUST |
-| [FR-PI-008](FR-PI-008-wake-acknowledgment-address-as.md) | Personalized wake acknowledgment | Wake Acknowledgment / Address-as | MUST |
-| [FR-PI-009](FR-PI-009-brain-reply-style-address-as.md) | Address-as in brain reply-style rules (cloud and on-device) | Brain Personalization | MUST |
-| [FR-PI-010](FR-PI-010-address-as-spoken-verbatim.md) | Address-as spoken verbatim (never translated) | Address-as Data Handling | MUST |
-| [FR-PI-011](FR-PI-011-unpersonalized-path-unchanged.md) | Un-personalized path behaves exactly as today | No-Regression | MUST |
-| [FR-PI-012](FR-PI-012-settings-profile-editor.md) | Settings profile editor | Settings | MUST |
-| [FR-PI-013](FR-PI-013-wizard-reopen-for-existing-users.md) | Wizard reopen path for existing users | Onboarding Wizard | MUST |
-| [FR-PI-014](FR-PI-014-safety-path-data-availability.md) | Profile data available to existing safety paths | Safety Integration | MUST |
-| [FR-PI-015](FR-PI-015-profile-read-failure-fallback.md) | Profile read failures degrade to the un-personalized path | Error Handling | MUST |
-| [FR-PI-016](FR-PI-016-app-start-interview-routing.md) | App-start interview-status routing (resume where the user left off) | Onboarding Wizard / App Start | MUST |
+| [FR-SP-001](FR-SP-001-music-requests-start-real-playback.md) | Music requests start real playback (stub replacement) | Music Playback / Router | MUST |
+| [FR-SP-002](FR-SP-002-both-provider-search.md) | Both-provider search for music requests | Provider Selection | MUST |
+| [FR-SP-003](FR-SP-003-spotify-preferred-when-linked-and-capable.md) | Spotify preferred whenever linked and capable | Provider Selection | MUST |
+| [FR-SP-004](FR-SP-004-youtube-fallback-when-spotify-cannot-serve.md) | YouTube fallback when Spotify cannot serve | Provider Selection / Degradation | MUST |
+| [FR-SP-005](FR-SP-005-explicit-youtube-requests-unchanged.md) | Explicit YouTube requests unchanged | No-Regression / Routing | MUST |
+| [FR-SP-006](FR-SP-006-spotifyplugin-assistantplugin-twin.md) | SpotifyPlugin as an AssistantPlugin (YouTubePlugin twin) | Plugin Architecture | MUST |
+| [FR-SP-007](FR-SP-007-spotifytool-search-and-deeplink.md) | SpotifyTool search and spotify: deep-link construction | Spotify Tool | MUST |
+| [FR-SP-008](FR-SP-008-spotify-account-linking-by-caregiver.md) | Spotify account linking by the caregiver (OAuth) | Account Linking | MUST |
+| [FR-SP-009](FR-SP-009-encrypted-spotify-credential-store.md) | Encrypted Spotify credential and account store | Credential Storage | MUST |
+| [FR-SP-010](FR-SP-010-unlink-wipes-credentials-and-revokes.md) | Unlink wipes credentials and revokes access | Account Linking / Security | MUST |
+| [FR-SP-011](FR-SP-011-free-tier-deeplink-degradation.md) | Free-tier degradation to the spotify: deep-link fallback | Degradation | MUST |
+| [FR-SP-012](FR-SP-012-honest-outcomes-no-silent-failure.md) | Honest localized outcomes — no silent failure on any path | Degradation / Honesty | MUST |
+| [FR-SP-013](FR-SP-013-keyword-intent-rule-music-domain.md) | Deterministic music-domain rule in KeywordIntentRule | Intent Routing (no-model path) | MUST |
+| [FR-SP-014](FR-SP-014-contact-search-veto-parity.md) | Music-request veto parity in VoiceContactSearchRoute | Intent Routing | MUST |
+| [FR-SP-015](FR-SP-015-music-request-intake-in-route-ladder.md) | Music-request intake in the voice route ladder | Intent Routing | MUST |
+| [FR-SP-016](FR-SP-016-settings-linking-and-privacy-disclosure.md) | Settings linking, status surface and privacy disclosure | Settings / Privacy | MUST |
+| [FR-SP-017](FR-SP-017-device-validation-checklist-recorded-and-passed.md) | Device-validation checklist recorded and passed (DV-* completion gate) | Validation / Completion Gate | MUST |
 
 ## Areas
-Onboarding Wizard (3), Onboarding Wizard / About-you (1), Onboarding Wizard / App Start (1),
-Profile Storage (1), Family & Friends (1), Emergency Contacts (1), Voice Fingerprint (1), Wake
-Acknowledgment / Address-as (1), Brain Personalization (1), Address-as Data Handling (1),
-No-Regression (1), Settings (1), Safety Integration (1), Error Handling (1).
+Music Playback / Router (1), Provider Selection (2), Provider Selection / Degradation (1),
+No-Regression / Routing (1), Plugin Architecture (1), Spotify Tool (1), Account Linking (1),
+Account Linking / Security (1), Credential Storage (1), Degradation (1), Degradation / Honesty (1),
+Intent Routing (no-model path) (1), Intent Routing (2), Settings / Privacy (1),
+Validation / Completion Gate (1).
+
+## Traceability anchors
+Every requirement traces to the feature constitution (Feature Purpose & Scope, Feature
+Constraints 1–12, the routing & degradation contract, the amendment record, the DV-* completion
+gate) and/or the `define-requirements` scope comment in `specs/spotify-music-integration/workflow.yaml`.
+Nothing is derived from outside those sources; the supersession of `requirements.md`'s Post-MVP
+music placement (lines 675–676) is recorded in [FR-SP-001](FR-SP-001-music-requests-start-real-playback.md).
 
 ## Related
-- [NFR index](../NFR/index.md) — 11 non-functional requirements
+- [NFR index](../NFR/index.md) — 12 non-functional requirements
 - [Requirements index](../index.md)
+- [Consolidated copy](../../define-requirements.md)

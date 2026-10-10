@@ -41,6 +41,16 @@
 				<string>com.googleusercontent.apps.906771099595-cdqhrgvdqqm1um8ml76sqm92llriqhfv</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.elderlyassistant.spotify</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>sahayak-spotify</string>
+			</array>
+		</dict>
 	</array>
 	<key>CFBundleVersion</key>
 	<string>10</string>
@@ -74,6 +84,7 @@
 		<string>telprompt</string>
 		<string>photos-redirect</string>
 		<string>sms</string>
+		<string>spotify</string>
 		<string>x-apple-health</string>
 		<string>x-apple-reminderkit</string>
 		<string>tel</string>
@@ -117,6 +128,8 @@
 	<string>Reminders you keep in the Reminders app can be read so they appear here with a reminder. Nothing is ever written to them. The app works fully even if you say no.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Speech recognition turns your voice into text for the assistant. The default engine is Gemini (cloud): your audio is sent to Gemini for transcription. You can switch to a fully on-device engine any time in Settings → Voice Engine.</string>
+	<key>SpotifyClientID</key>
+	<string>1aa5ca19720646e4bc46dea1acac5d37</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>

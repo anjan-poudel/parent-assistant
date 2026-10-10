@@ -11931,6 +11931,23 @@
         }
       }
     },
+    "plugin.spotify.name" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spotify"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "स्पोटिफाइ"
+          }
+        }
+      }
+    },
     "plugin.youtube.name" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -18420,6 +18437,312 @@
         }
       }
     },
+    "spotify.appMissing" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The Spotify app isn't on this phone, so I can't play the music."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "यो फोनमा स्पोटिफाइ एप छैन, त्यसैले संगीत बजाउन सकिनँ।"
+          }
+        }
+      }
+    },
+    "spotify.notFound" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "I couldn't find that music on Spotify."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "स्पोटिफाइमा त्यो संगीत भेटिएन।"
+          }
+        }
+      }
+    },
+    "spotify.notLinked" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spotify isn't set up yet. A family member can add it in Settings."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "स्पोटिफाइ अझै जोडिएको छैन। परिवारका सदस्यले सेटिङमा जोड्न सक्नुहुन्छ।"
+          }
+        }
+      }
+    },
+    "spotify.openApp" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Opening Spotify — play it there."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "स्पोटिफाइ खोल्दैछु — त्यहाँ बजाउनुहोस्।"
+          }
+        }
+      }
+    },
+    "spotify.openSearch" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Opening Spotify search."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "स्पोटिफाइमा खोज खोल्दैछु।"
+          }
+        }
+      }
+    },
+    "spotify.playing" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Playing %@ on Spotify."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "स्पोटिफाइमा %@ चलाउँदैछु।"
+          }
+        }
+      }
+    },
+    "spotify.rolloutLimited" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spotify hasn't approved this account yet. Please try again later."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "स्पोटिफाइले यो खातालाई अझै स्वीकृति दिएको छैन। पछि फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "spotify.unavailable" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spotify isn't available right now. Please try again."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "अहिले स्पोटिफाइ उपलब्ध छैन। फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "spotifySettings.link" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connect Spotify"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "स्पोटिफाइ जोड्नुहोस्"
+          }
+        }
+      }
+    },
+    "spotifySettings.privacy" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "What you ask for — including play commands — is sent to Spotify to find music and control playback; no other app data is sent."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "गीत खोज्न र बजाउन तपाईंले भन्नुभएको कुरा — बजाउने आदेश सहित — स्पोटिफाइमा पठाइन्छ; अरू कुनै डेटा पठाइँदैन।"
+          }
+        }
+      }
+    },
+    "spotifySettings.removeConfirm" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove the Spotify connection? Music will use YouTube only."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "स्पोटिफाइ जडान हटाउने हो? संगीत युट्युबबाट मात्र बज्नेछ।"
+          }
+        }
+      }
+    },
+    "spotifySettings.rolloutNote" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spotify's service is still being tested; for now only approved accounts can connect."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "स्पोटिफाइ सेवा अझै परीक्षणमा छ; अहिले स्वीकृत खाताले मात्र जोड्न सकिन्छ।"
+          }
+        }
+      }
+    },
+    "spotifySettings.status.freeTier" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connected (free — playback opens the Spotify app)"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "जोडिएको (निःशुल्क — गीत स्पोटिफाइ एपमा खुल्छ)"
+          }
+        }
+      }
+    },
+    "spotifySettings.status.linkFailed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Couldn't connect. Please try again."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "जोड्न सकिएन। फेरि प्रयास गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "spotifySettings.status.linked" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connected (Premium)"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "जोडिएको (प्रिमियम)"
+          }
+        }
+      }
+    },
+    "spotifySettings.status.notLinked" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not connected"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "जोडिएको छैन"
+          }
+        }
+      }
+    },
+    "spotifySettings.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spotify"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "स्पोटिफाइ"
+          }
+        }
+      }
+    },
+    "spotifySettings.unlink" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove Spotify"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "स्पोटिफाइ हटाउनुहोस्"
+          }
+        }
+      }
+    },
     "startup.degraded" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -20167,6 +20490,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "वेब खोज"
+          }
+        }
+      }
+    },
+    "toolLog.kind.spotify" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spotify"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "स्पोटिफाइ"
           }
         }
       }

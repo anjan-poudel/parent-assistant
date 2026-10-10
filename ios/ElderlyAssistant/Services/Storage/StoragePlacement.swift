@@ -51,6 +51,11 @@ enum StoragePlacementPolicy {
         // The chosen Gemini model name: a small scalar kept beside the key
         // it is used with, so one store is not split across two channels.
         "gemini.model",
+        // [T-108 / FR-SP-009] The single Spotify session record
+        // (access/refresh tokens, expiry, product, scope, linkedAt):
+        // a small secret that keeps the Keychain item's per-item
+        // protection, and one key so the unlink wipe is a single delete.
+        "spotify.session",
     ]
 
     static func placement(for key: String) -> StoragePlacement {

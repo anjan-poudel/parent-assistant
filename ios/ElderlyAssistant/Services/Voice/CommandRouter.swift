@@ -647,6 +647,18 @@ final class CommandRouter {
     private let youtubeTransport: LocalToolTransport?
     private let youtubeLinkOpener: CallLinkOpening?
 
+    // [SPOTIFY] (2026-10-07) Music-path seams (T-116, C-SP-06 §13/§28) —
+    // every one defaults to dormant (nil), exactly like the YouTube
+    // seams above, so pre-existing router construction sites and every
+    // existing router test keep compiling and behaving as before
+    // (NFR-SP-012): without a session the turn reads as not linked (the
+    // honest unlinked treatment), without a transport no Spotify request
+    // can be built, and without an opener nothing is ever opened. Only
+    // `AppCoordinator` (T-119) and scripted test routers arm the seams.
+    private let spotifyAccountSession: SpotifyAccountSession?
+    private let spotifyTransport: LocalToolTransport?
+    private let spotifyLinkOpener: CallLinkOpening?
+
     /// [TOOL-DEBUG-LOG] (2026-09-07) Encrypted on-device debug log of
     /// every local-tool (weather/search) request + outcome — the store
     /// behind Settings → Tool requests. Nil = dormant (pre-existing
@@ -689,6 +701,9 @@ final class CommandRouter {
          youtubeConfigStore: YouTubeConfigStore? = nil,
          youtubeTransport: LocalToolTransport? = nil,
          youtubeLinkOpener: CallLinkOpening? = nil,
+         spotifyAccountSession: SpotifyAccountSession? = nil,
+         spotifyTransport: LocalToolTransport? = nil,
+         spotifyLinkOpener: CallLinkOpening? = nil,
          preAckPlayer: PreAckPlaying? = nil,
          turnTracer: VoiceTurnLatencyTracer? = nil) {
         self.coordinator = coordinator
@@ -709,6 +724,9 @@ final class CommandRouter {
         self.youtubeConfigStore = youtubeConfigStore
         self.youtubeTransport = youtubeTransport
         self.youtubeLinkOpener = youtubeLinkOpener
+        self.spotifyAccountSession = spotifyAccountSession
+        self.spotifyTransport = spotifyTransport
+        self.spotifyLinkOpener = spotifyLinkOpener
         // [LAT-M2] A fast-lane ack's playback settled (finished, decode
         // error, or cancelled) — the same per-utterance speak
         // bookkeeping the lane's tail fires for synthesized utterances.
@@ -1201,6 +1219,18 @@ final class CommandRouter {
                 guard let query = YouTubeRoute.extractQuery(from: preText) else { break }
                 emitIntentKeywordMatch(relaxed)
                 fireYouTubePlay(query: query)
+                return .unrecognised(transcript: raw)
+            case .music:
+                // [SPOTIFY] (2026-10-07) T-116: the real music path — the
+                // ladder's deterministic intake (FR-SP-015). The extractor
+                // resolves the search query from the same
+                // pre-canonicalized text the rule matched (zero prompt
+                // tokens, no interpreter round-trip); a transcript the
+                // extractor canonicalizes empty falls back to the whole
+                // utterance so the turn always has a query. Terminal for
+                // the turn, exactly like the YouTube arm above.
+                emitIntentKeywordMatch(relaxed)
+                fireMusicRequest(query: KeywordIntentRule.musicQuery(from: preText) ?? preText)
                 return .unrecognised(transcript: raw)
             case .appLaunch:
                 // [APP-LAUNCHER] (2026-09-16) The launcher's voice fast
@@ -2359,6 +2389,30 @@ final class CommandRouter {
 
     // MARK: - [YOUTUBE] Voice YouTube search/play (youtube-plugin, 2026-09-08)
 
+    /// [T-114][M-1] Log projection for the reusable YouTube helpers
+    /// (`fireYouTubePlay` / `deliverYouTubeFailure`).
+    ///
+    /// Explicit-YouTube turns keep the shipped behavior — `.explicit` is
+    /// the default, so every pre-existing call site is untouched and the
+    /// query is logged verbatim (the FR-SP-005 baseline). Music turns
+    /// that fall back to YouTube (the §13 fallback rows) pass
+    /// `.queryFree`: there the music query is the sensitive value and
+    /// must never reach the tool log (NFR-SP-002 / security finding
+    /// M-1). The projection changes the LOGGED query only — routing,
+    /// speech and network behavior are identical for both cases.
+    enum YouTubeLogProjection {
+        case explicit
+        case queryFree
+
+        /// The `query` value the tool log records for a helper call.
+        func loggedQuery(_ query: String) -> String {
+            switch self {
+            case .explicit: return query
+            case .queryFree: return ""
+            }
+        }
+    }
+
     /// The YouTube stage's execution (see the stage comment in `route`).
     /// Called only after `YouTubeRoute.decide` matched with an extracted
     /// query. Two honest paths:
@@ -2371,7 +2425,9 @@ final class CommandRouter {
     ///     confirmation. The title goes through the SPOKEN path ONLY: no
     ///     visible card, never into the observability bus or the debug
     ///     log (the log entry for the success path carries the query +
-    ///     outcome, an EMPTY response by design — see `logToolRequest`).
+    ///     outcome, an EMPTY response by design — see `logToolRequest`;
+    ///     music-turn callers pass `.queryFree`, which blanks the logged
+    ///     query — [T-114][M-1]).
     ///   · No key: open the SEARCH deeplink directly
     ///     (`youtube://www.youtube.com/results` → https fallback) and
     ///     speak `youtube.openingSearch` — the user accepted
@@ -2383,7 +2439,8 @@ final class CommandRouter {
     ///   honest localized fallback — `youtube.notFound` for an empty
     ///   result set, `youtube.unavailable` otherwise — never a
     ///   fabricated title, never a dead end.
-    private func fireYouTubePlay(query: String) {
+    private func fireYouTubePlay(query: String,
+                                 logProjection: YouTubeLogProjection = .explicit) {
         let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
         // [VOICE-ACK] The lookup/deeplink open takes a beat — ack before
         // the attempt, the outcome line follows through the lane.
@@ -2396,6 +2453,7 @@ final class CommandRouter {
         guard let apiKey = youtubeConfigStore?.apiKey else {
             guard let opener = youtubeLinkOpener else {
                 deliverYouTubeFailure(locale: locale, query: query,
+                                      logProjection: logProjection,
                                       fallbackKey: "youtube.unavailable",
                                       statusCode: nil, startedAt: attemptStartedAt)
                 return
@@ -2410,7 +2468,8 @@ final class CommandRouter {
             // convention); response stays EMPTY on the ok path so the
             // encrypted store never gains text the design keeps to
             // speech.
-            logToolRequest(kind: .youtube, query: query, response: "", outcome: "ok",
+            logToolRequest(kind: .youtube, query: logProjection.loggedQuery(query),
+                           response: "", outcome: "ok",
                            statusCode: nil,
                            durationMs: Self.elapsedMilliseconds(since: attemptStartedAt))
             return
@@ -2423,6 +2482,7 @@ final class CommandRouter {
             guard let transport = self.youtubeTransport else {
                 await MainActor.run {
                     self.deliverYouTubeFailure(locale: locale, query: query,
+                                               logProjection: logProjection,
                                                fallbackKey: "youtube.unavailable",
                                                statusCode: nil, startedAt: attemptStartedAt)
                 }
@@ -2435,6 +2495,7 @@ final class CommandRouter {
                 await MainActor.run {
                     guard let opener = self.youtubeLinkOpener else {
                         self.deliverYouTubeFailure(locale: locale, query: query,
+                                                   logProjection: logProjection,
                                                    fallbackKey: "youtube.unavailable",
                                                    statusCode: nil, startedAt: attemptStartedAt)
                         return
@@ -2449,25 +2510,29 @@ final class CommandRouter {
                     // entry below records the attempt with an EMPTY
                     // response for exactly that reason.
                     self.speak(text: text, locale: locale)
-                    self.logToolRequest(kind: .youtube, query: query, response: "",
+                    self.logToolRequest(kind: .youtube, query: logProjection.loggedQuery(query),
+                                        response: "",
                                         outcome: "ok", statusCode: 200,
                                         durationMs: Self.elapsedMilliseconds(since: attemptStartedAt))
                 }
             } catch YouTubeTool.FetchError.noResults {
                 await MainActor.run {
                     self.deliverYouTubeFailure(locale: locale, query: query,
+                                               logProjection: logProjection,
                                                fallbackKey: "youtube.notFound",
                                                statusCode: 200, startedAt: attemptStartedAt)
                 }
             } catch YouTubeTool.FetchError.invalidResponse(let statusCode) {
                 await MainActor.run {
                     self.deliverYouTubeFailure(locale: locale, query: query,
+                                               logProjection: logProjection,
                                                fallbackKey: "youtube.unavailable",
                                                statusCode: statusCode, startedAt: attemptStartedAt)
                 }
             } catch {
                 await MainActor.run {
                     self.deliverYouTubeFailure(locale: locale, query: query,
+                                               logProjection: logProjection,
                                                fallbackKey: "youtube.unavailable",
                                                statusCode: nil, startedAt: attemptStartedAt)
                 }
@@ -2478,14 +2543,18 @@ final class CommandRouter {
     /// Failure delivery for the YouTube stage — the honest localized
     /// fallback line (`youtube.notFound` / `youtube.unavailable`), a
     /// `youtube` component `fail` event, and one "fail" debug-log entry
-    /// carrying the line the user actually heard (never a title).
+    /// carrying the line the user actually heard (never a title; the
+    /// logged query follows `logProjection` — blanked on music turns,
+    /// [T-114][M-1]).
     private func deliverYouTubeFailure(locale: Locale, query: String,
+                                       logProjection: YouTubeLogProjection = .explicit,
                                        fallbackKey: String,
                                        statusCode: Int?, startedAt: Date) {
         emitYouTube(eventType: "youtube", outcome: "fail")
         speakWithVisibleOutcome(key: fallbackKey)
         let line = L10n.str(fallbackKey, locale: locale)
-        logToolRequest(kind: .youtube, query: query, response: line, outcome: "fail",
+        logToolRequest(kind: .youtube, query: logProjection.loggedQuery(query),
+                       response: line, outcome: "fail",
                        statusCode: statusCode,
                        durationMs: Self.elapsedMilliseconds(since: startedAt))
     }
@@ -2505,6 +2574,633 @@ final class CommandRouter {
             errorCode: nil,
             metadata: [:]
         ))
+    }
+
+    // MARK: - [SPOTIFY] Music path (T-116, C-SP-06 §13/§28)
+
+    /// [SPOTIFY] (2026-10-07) What one music turn resolves to — the
+    /// selection step's total output (§28). Pure data: the enum carries
+    /// at most the validated track the search resolved — never a token,
+    /// a status or provider text.
+    enum MusicOutcome: Equatable {
+        /// Premium-capable and a usable track: attempt remote playback.
+        case spotifyRemote(SpotifyTool.TrackResult)
+        /// Hand the validated track to the app through the deep link
+        /// (free/unknown tier — L2-D14 — and never a remote attempt).
+        case spotifyDeepLink(SpotifyTool.TrackResult)
+        /// Unlinked account with no YouTube leg: hand the query to the
+        /// app's own search (`spotify:search:`).
+        case spotifySearchHandoff
+        /// The YouTube fallback owns the turn (`fireYouTubePlay`
+        /// verbatim, ADR-SP-06).
+        case youtube
+        /// An honest static line: `spotify.notFound` / `unavailable` /
+        /// `notLinked` / `appMissing`.
+        case honestLine(String)
+    }
+
+    /// §28's ordered conditions, total over every state the router can
+    /// reach, and the one place the 12-row matrix's selection logic
+    /// lives (pure — pinned data-driven by `CommandRouterMusicTests`).
+    ///
+    /// Order note: the design lists the unlinked condition last among
+    /// the *qualified* conditions (remote-capable / deep-link-capable /
+    /// search-failure are all stated for a linked account); as an
+    /// evaluation order the unlinked test must come first, because an
+    /// unlinked turn never runs a search and every later condition
+    /// presumes the linked state. `linked+transport missing` and the
+    /// defensive `search == nil` arm both take the row-7 shape exactly
+    /// as §28 states.
+    static func selectMusicOutcome(spotifyLinked: Bool,
+                                   spotifyTransportPresent: Bool,
+                                   search: Result<SpotifyTool.TrackResult, SpotifyTool.FetchError>?,
+                                   product: SpotifyAccountSession.Product,
+                                   deepLinkCapable: Bool,
+                                   youtubeServeable: Bool,
+                                   spotifySearchOpenerPresent: Bool) -> MusicOutcome {
+        guard spotifyLinked else {
+            if youtubeServeable { return .youtube }
+            if spotifySearchOpenerPresent { return .spotifySearchHandoff }
+            return .honestLine("spotify.notLinked")
+        }
+        guard spotifyTransportPresent else {
+            // §28: "linked+transport missing → the row-7 branch".
+            return youtubeServeable ? .youtube : .honestLine("spotify.unavailable")
+        }
+        guard let search else {
+            // Reached only through the row-11 token path (a search never
+            // ran): the same search-failure treatment.
+            return youtubeServeable ? .youtube : .honestLine("spotify.unavailable")
+        }
+        switch search {
+        case .success(let track):
+            if product == .premium { return .spotifyRemote(track) }
+            if deepLinkCapable { return .spotifyDeepLink(track) }
+            // Usable track but not remote-capable and the app cannot
+            // open it: row 4's "not capable" leg.
+            return youtubeServeable ? .youtube : .honestLine("spotify.appMissing")
+        case .failure(.noResults):
+            return youtubeServeable ? .youtube : .honestLine("spotify.notFound")
+        case .failure:
+            return youtubeServeable ? .youtube : .honestLine("spotify.unavailable")
+        }
+    }
+
+    /// §13's `youtubeAskable`, the selection's `youtubeServeable` — the
+    /// YouTube leg's own outcome decides success (ADR-SP-06).
+    private var musicYouTubeServeable: Bool {
+        youtubeConfigStore?.apiKey != nil || youtubeLinkOpener != nil
+    }
+
+    /// L2-R1: the concurrent YouTube leg runs only when the YouTube path
+    /// is KEYED (there is a fetch to join). The keyless path is askable
+    /// but is never pre-opened — its "search" is its outcome.
+    private var musicYouTubeKeyed: Bool {
+        youtubeConfigStore?.apiKey != nil && youtubeTransport != nil
+    }
+
+    /// The music path's entry (routes from the ladder's `case .music:`
+    /// and from the interpreted `.music` action). Sync main-thread entry
+    /// exactly like `fireYouTubePlay`: locale resolution, the pre-ack,
+    /// then the attempt on a Task; every delivery hop returns to the
+    /// main actor before speaking, emitting or logging.
+    private func fireMusicRequest(query: String) {
+        let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        // [VOICE-ACK] The token/search/play round-trips take a beat —
+        // ack before the attempt, the outcome line follows through the
+        // lane (parity with `fireYouTubePlay`).
+        speakPreAck(locale: locale)
+        let attemptStartedAt = Date()
+        Task { [weak self] in
+            guard let self else { return }
+            await self.runMusicTurn(query: query, locale: locale, startedAt: attemptStartedAt)
+        }
+    }
+
+    /// One music turn, state machine B (§10) through to execution. The
+    /// turn writes at most one `.spotify` tool-log entry and speaks
+    /// exactly one outcome line (plus the pre-ack) on every branch.
+    @MainActor
+    private func runMusicTurn(query: String, locale: Locale, startedAt: Date) async {
+        let linked = spotifyAccountSession?.isLinked ?? false
+        let product = spotifyAccountSession?.product ?? .unknown
+        let transport = spotifyTransport
+        let youtubeServeable = musicYouTubeServeable
+        let searchOpenerPresent = spotifyLinkOpener != nil
+        let youtubePrefetch: (apiKey: String, transport: LocalToolTransport)? = {
+            guard musicYouTubeKeyed,
+                  let apiKey = youtubeConfigStore?.apiKey,
+                  let youtubeTransport else { return nil }
+            return (apiKey, youtubeTransport)
+        }()
+
+        var effectiveLinked = linked
+        // A linked account's turn always writes the turn entry (the
+        // matrix's linked rows 1–7 and row 11); the unlinked treatment
+        // writes one only when its own search hand-off attempts a link.
+        var entryRequired = linked
+        var token: String?
+        var search: Result<SpotifyTool.TrackResult, SpotifyTool.FetchError>?
+        var searchStatus: Int?
+
+        if linked, let transport {
+            let tokenResult = await spotifyAccountSession?.validAccessToken()
+            switch tokenResult {
+            case .success(let value):
+                token = value
+                let found = await performMusicSearch(query: query, token: value,
+                                                     transport: transport,
+                                                     youtubePrefetch: youtubePrefetch)
+                search = found.result
+                searchStatus = found.statusCode
+                // §28's `spotify_search` vocabulary — emitted uniformly
+                // whenever a search actually ran (the matrix rows that
+                // list it read as highlights of the rows' distinctive
+                // events, not an exhaustive log; "emit the event pair" in
+                // the turn flow presumes it on every searched turn).
+                switch found.result {
+                case .success:
+                    emitSpotify(eventType: "spotify_search", outcome: "usable",
+                                durationMs: nil, errorCode: nil)
+                case .failure(.noResults):
+                    emitSpotify(eventType: "spotify_search", outcome: "empty",
+                                durationMs: nil, errorCode: nil)
+                case .failure:
+                    emitSpotify(eventType: "spotify_search", outcome: "failed",
+                                durationMs: nil, errorCode: nil)
+                }
+            case .failure(.revoked):
+                // Row 10: the session wiped itself on the provider's
+                // `invalid_grant` (its `spotify_unlink` revoked event is
+                // the session's to emit). The turn is an unlinked turn;
+                // none of its own attempts happened.
+                effectiveLinked = false
+                entryRequired = false
+            case .failure, .none:
+                // Row 11: the record was kept (transport / refresh /
+                // store failure) — the search-failure shape. The matrix
+                // mandates the `.spotify` fail entry for this row even
+                // though no search ran; there is no HTTP status.
+                await executeMusicTurn(Self.selectMusicOutcome(spotifyLinked: true,
+                                                               spotifyTransportPresent: true,
+                                                               search: nil,
+                                                               product: product,
+                                                               deepLinkCapable: false,
+                                                               youtubeServeable: youtubeServeable,
+                                                               spotifySearchOpenerPresent: searchOpenerPresent),
+                                       query: query, locale: locale, startedAt: startedAt,
+                                       token: nil, transport: nil, searchStatus: nil,
+                                       entryRequired: true)
+                return
+            }
+        }
+        // (linked && transport == nil falls straight to the selection:
+        // §28 names the row-7 branch for it; §10B's askability wording
+        // would say unlinked — §28's ordered conditions win, recorded in
+        // the task notes.)
+
+        // §13's `spotifyDeepLinkCapable`: the opener seam exists AND the
+        // platform probe accepts the resolved track URI. Probed only
+        // where it can matter (the non-premium branch); premium selection
+        // never consults it.
+        var deepLinkCapable = false
+        if effectiveLinked, product != .premium,
+           case .success(let track)? = search,
+           let uri = SpotifyTool.trackURI(id: track.id),
+           let opener = spotifyLinkOpener {
+            deepLinkCapable = opener.canOpenURL(uri)
+        }
+
+        let outcome = Self.selectMusicOutcome(spotifyLinked: effectiveLinked,
+                                              spotifyTransportPresent: transport != nil,
+                                              search: search,
+                                              product: product,
+                                              deepLinkCapable: deepLinkCapable,
+                                              youtubeServeable: youtubeServeable,
+                                              spotifySearchOpenerPresent: searchOpenerPresent)
+        await executeMusicTurn(outcome, query: query, locale: locale, startedAt: startedAt,
+                               token: token, transport: transport, searchStatus: searchStatus,
+                               entryRequired: entryRequired)
+    }
+
+    /// The Spotify search phase with the §13 row-1 concurrency: when the
+    /// YouTube path is keyed, both fetches are fired together and joined
+    /// (NFR-SP-001: bounded by the larger provider budget, never the
+    /// sum). Returns the search verdict plus the HTTP status the turn
+    /// should record (the matrix's `statusCode` conventions: 200 for a
+    /// 2xx search, the failure status when the provider answered one).
+    private func performMusicSearch(query: String, token: String,
+                                    transport: LocalToolTransport,
+                                    youtubePrefetch: (apiKey: String, transport: LocalToolTransport)?)
+        async -> (result: Result<SpotifyTool.TrackResult, SpotifyTool.FetchError>, statusCode: Int?) {
+        let fetched: Result<SpotifyTool.TrackResult, SpotifyTool.FetchError>
+        if let youtubePrefetch {
+            async let spotifyLeg = fetchSpotifyResult(query: query, token: token,
+                                                      transport: transport)
+            async let youtubeLeg: Void = prefetchYouTubeLeg(query: query,
+                                                            apiKey: youtubePrefetch.apiKey,
+                                                            transport: youtubePrefetch.transport)
+            let (spotifyResult, _) = await (spotifyLeg, youtubeLeg)
+            fetched = spotifyResult
+        } else {
+            fetched = await fetchSpotifyResult(query: query, token: token, transport: transport)
+        }
+        switch fetched {
+        case .success:
+            return (fetched, 200)
+        case .failure(.noResults):
+            // 2xx with zero tracks (row 6's status convention).
+            return (fetched, 200)
+        case .failure(.invalidResponse(let statusCode)):
+            return (fetched, statusCode)
+        case .failure:
+            return (fetched, nil)
+        }
+    }
+
+    /// One Spotify search attempt, classified into the tool's closed
+    /// error vocabulary — exactly one request (the tool owns that
+    /// discipline).
+    private func fetchSpotifyResult(query: String, token: String,
+                                    transport: LocalToolTransport) async
+        -> Result<SpotifyTool.TrackResult, SpotifyTool.FetchError> {
+        do {
+            let track = try await SpotifyTool.fetchTopTrack(query: query,
+                                                            accessToken: token,
+                                                            transport: transport)
+            return .success(track)
+        } catch let error as SpotifyTool.FetchError {
+            return .failure(error)
+        } catch {
+            // `fetchTopTrack` only throws `FetchError`; anything else is
+            // a transport anomaly (row 7).
+            return .failure(.transportUnavailable)
+        }
+    }
+
+    /// L2-R1: the concurrent YouTube leg runs only on the keyed fetch
+    /// path, and its result is never consumed — when Spotify cannot
+    /// serve, the turn falls back through `fireYouTubePlay` verbatim
+    /// (ADR-SP-06), so the pre-fetched page can never change what is
+    /// opened or spoken. Errors are swallowed; the fallback's own call
+    /// owns every failure line. The keyless path is NOT pre-opened.
+    private func prefetchYouTubeLeg(query: String, apiKey: String,
+                                    transport: LocalToolTransport) async {
+        _ = try? await YouTubeTool.fetchTopResult(query: query, apiKey: apiKey,
+                                                  transport: transport)
+    }
+
+    /// Executes the selection's outcome. Every branch reaches exactly
+    /// one spoken outcome line (plus the pre-ack) before returning.
+    @MainActor
+    private func executeMusicTurn(_ outcome: MusicOutcome, query: String, locale: Locale,
+                                  startedAt: Date, token: String?,
+                                  transport: LocalToolTransport?, searchStatus: Int?,
+                                  entryRequired: Bool) async {
+        switch outcome {
+        case .spotifyRemote(let track):
+            guard let token, let transport else {
+                // Defensive: the selection yields remote only with a
+                // token and transport in hand. The honest terminal beats
+                // a crash.
+                deliverMusicLine(locale: locale, key: "spotify.appMissing",
+                                 statusCode: searchStatus, outcome: "app_missing",
+                                 startedAt: startedAt)
+                return
+            }
+            await executeRemoteMusicPlay(track: track, query: query, token: token,
+                                         transport: transport, locale: locale,
+                                         startedAt: startedAt, searchStatus: searchStatus)
+        case .spotifyDeepLink(let track):
+            executeMusicDeepLink(track: track, locale: locale, startedAt: startedAt,
+                                 playStatus: nil, playFailed: false,
+                                 searchStatus: searchStatus)
+        case .spotifySearchHandoff:
+            executeMusicSearchHandoff(query: query, locale: locale, startedAt: startedAt)
+        case .youtube:
+            deliverYouTubeFallback(query: query, locale: locale, startedAt: startedAt,
+                                   statusCode: searchStatus, writeEntry: entryRequired)
+        case .honestLine(let key):
+            if entryRequired {
+                deliverMusicLine(locale: locale, key: key, statusCode: searchStatus,
+                                 outcome: Self.musicFallbackOutcome(forKey: key),
+                                 startedAt: startedAt)
+            } else {
+                // Rows 9/10/12: nothing was attempted — the fallback
+                // event and the honest line, no tool-log entry (the
+                // matrix rows' "none").
+                emitSpotify(eventType: "spotify_fallback",
+                            outcome: Self.musicFallbackOutcome(forKey: key),
+                            durationMs: nil, errorCode: nil)
+                speakWithVisibleOutcome(key: key)
+            }
+        }
+    }
+
+    /// The remote-play leg (rows 1/2, §10B): one attempt; a 401 triggers
+    /// exactly one forced token acquisition and one retry; a second 401
+    /// wipes through the session (`markRevoked` — §26 names this
+    /// "the router's second-401 path") and takes the unlinked treatment
+    /// (row 10). Every other failure falls to the deep link (row 2) —
+    /// never to a second play attempt.
+    @MainActor
+    private func executeRemoteMusicPlay(track: SpotifyTool.TrackResult, query: String,
+                                        token: String, transport: LocalToolTransport,
+                                        locale: Locale, startedAt: Date,
+                                        searchStatus: Int?) async {
+        guard let uri = SpotifyTool.trackURI(id: track.id) else {
+            // Defensive: a validated `TrackResult` always builds a URI;
+            // if it ever did not, the honest app-absent terminal is the
+            // answer.
+            deliverMusicLine(locale: locale, key: "spotify.appMissing",
+                             statusCode: searchStatus, outcome: "app_missing",
+                             startedAt: startedAt)
+            return
+        }
+
+        var failure: SpotifyTool.PlayError
+        do {
+            try await SpotifyTool.playTrack(uri: uri, accessToken: token, transport: transport)
+            deliverRemoteMusicSuccess(track: track, locale: locale, startedAt: startedAt)
+            return
+        } catch let error as SpotifyTool.PlayError {
+            failure = error
+        } catch {
+            // `playTrack` only throws `PlayError`; anything else is a
+            // transport anomaly (row 2's network leg).
+            failure = .transportUnavailable
+        }
+        emitSpotify(eventType: "spotify_play", outcome: Self.spotifyPlayOutcome(failure),
+                    durationMs: nil, errorCode: nil)
+
+        if case .unauthorized = failure {
+            guard let session = spotifyAccountSession else {
+                executeMusicDeepLink(track: track, locale: locale, startedAt: startedAt,
+                                     playStatus: Self.spotifyPlayStatus(failure),
+                                     playFailed: true, searchStatus: searchStatus)
+                return
+            }
+            switch await session.validAccessToken() {
+            case .success(let refreshedToken):
+                do {
+                    try await SpotifyTool.playTrack(uri: uri, accessToken: refreshedToken,
+                                                    transport: transport)
+                    deliverRemoteMusicSuccess(track: track, locale: locale,
+                                              startedAt: startedAt)
+                    return
+                } catch let retryError as SpotifyTool.PlayError {
+                    emitSpotify(eventType: "spotify_play",
+                                outcome: Self.spotifyPlayOutcome(retryError),
+                                durationMs: nil, errorCode: nil)
+                    if case .unauthorized = retryError {
+                        // §10B: the second 401 is the provider's
+                        // definitive rejection — wipe (the session emits
+                        // `spotify_unlink` revoked) and take the unlinked
+                        // treatment.
+                        _ = await session.markRevoked()
+                        await deliverUnlinkedMusicTreatment(query: query, locale: locale,
+                                                            startedAt: startedAt)
+                        return
+                    }
+                    executeMusicDeepLink(track: track, locale: locale, startedAt: startedAt,
+                                         playStatus: Self.spotifyPlayStatus(retryError),
+                                         playFailed: true, searchStatus: searchStatus)
+                    return
+                } catch {
+                    emitSpotify(eventType: "spotify_play", outcome: "network_failed",
+                                durationMs: nil, errorCode: nil)
+                    executeMusicDeepLink(track: track, locale: locale, startedAt: startedAt,
+                                         playStatus: nil, playFailed: true,
+                                         searchStatus: searchStatus)
+                    return
+                }
+            case .failure(.revoked):
+                // The refresh itself was rejected: the session already
+                // wiped (and emitted) — the turn is unlinked (row 10).
+                await deliverUnlinkedMusicTreatment(query: query, locale: locale,
+                                                    startedAt: startedAt)
+                return
+            case .failure:
+                // No new token could be obtained honestly (transport /
+                // refresh / store failure): no second play attempt is
+                // possible — the deep link replaces it (row 2's shape),
+                // never a futile retry with a rejected token.
+                executeMusicDeepLink(track: track, locale: locale, startedAt: startedAt,
+                                     playStatus: Self.spotifyPlayStatus(failure),
+                                     playFailed: true, searchStatus: searchStatus)
+                return
+            }
+        }
+
+        executeMusicDeepLink(track: track, locale: locale, startedAt: startedAt,
+                             playStatus: Self.spotifyPlayStatus(failure),
+                             playFailed: true, searchStatus: searchStatus)
+    }
+
+    /// Row 1's success delivery: the honest confirmation with the
+    /// provider's track name — SPOKEN ONLY (never carded, never logged,
+    /// never an event field; NFR-SP-002) — and the turn's `ok` entry
+    /// (204, empty query/response by the §21 contract).
+    private func deliverRemoteMusicSuccess(track: SpotifyTool.TrackResult, locale: Locale,
+                                           startedAt: Date) {
+        emitSpotify(eventType: "spotify_play", outcome: "ok", durationMs: nil, errorCode: nil)
+        speak(text: L10n.fmt("spotify.playing", locale: locale, track.title), locale: locale)
+        logToolRequest(kind: .spotify, query: "", response: "", outcome: "ok",
+                       statusCode: 204,
+                       durationMs: Self.elapsedMilliseconds(since: startedAt))
+    }
+
+    /// The deep-link leg (rows 2/3/4/5): probe and open `spotify:track:`
+    /// through the opener seam. `playFailed` marks a fallback that
+    /// followed a failed remote attempt — its verdict (row 2's `fail`)
+    /// and status survive into the entry; a clean free-tier hand-off is
+    /// row 3's `ok`/nil. A not-opened attempt is row 5's terminal: the
+    /// deeplink event is the turn's last observable, no chaining, and
+    /// the honest line is the entry's response.
+    @MainActor
+    private func executeMusicDeepLink(track: SpotifyTool.TrackResult, locale: Locale,
+                                      startedAt: Date, playStatus: Int?, playFailed: Bool,
+                                      searchStatus: Int?) {
+        guard let uri = SpotifyTool.trackURI(id: track.id) else {
+            deliverMusicLine(locale: locale, key: "spotify.appMissing",
+                             statusCode: playStatus ?? searchStatus,
+                             outcome: "app_missing", startedAt: startedAt)
+            return
+        }
+        guard let opener = spotifyLinkOpener else {
+            // No opener seam: nothing can be attempted (no deeplink
+            // event — the vocabulary counts attempts), the honest
+            // terminal is the entry's response.
+            emitSpotify(eventType: "spotify_fallback", outcome: "app_missing",
+                        durationMs: nil, errorCode: nil)
+            speakWithVisibleOutcome(key: "spotify.appMissing")
+            logToolRequest(kind: .spotify, query: "",
+                           response: L10n.str("spotify.appMissing", locale: locale),
+                           outcome: "fail",
+                           statusCode: playStatus ?? searchStatus,
+                           durationMs: Self.elapsedMilliseconds(since: startedAt))
+            return
+        }
+        switch SpotifyTool.open(uri, opener: opener) {
+        case .opened:
+            emitSpotify(eventType: "spotify_deeplink", outcome: "opened",
+                        durationMs: nil, errorCode: nil)
+            // Hand-off line: spoken only — the app itself shows what
+            // happens next (the `youtube.openingSearch` precedent).
+            speak(text: L10n.str("spotify.openApp", locale: locale), locale: locale)
+            logToolRequest(kind: .spotify, query: "", response: "",
+                           outcome: playFailed ? "fail" : "ok",
+                           statusCode: playFailed ? playStatus : nil,
+                           durationMs: Self.elapsedMilliseconds(since: startedAt))
+        case .notOpened:
+            emitSpotify(eventType: "spotify_deeplink", outcome: "not_opened",
+                        durationMs: nil, errorCode: nil)
+            speakWithVisibleOutcome(key: "spotify.appMissing")
+            logToolRequest(kind: .spotify, query: "",
+                           response: L10n.str("spotify.appMissing", locale: locale),
+                           outcome: "fail",
+                           statusCode: playFailed ? playStatus : searchStatus,
+                           durationMs: Self.elapsedMilliseconds(since: startedAt))
+        }
+    }
+
+    /// Row 8's search hand-off: unlinked, no YouTube leg, an opener
+    /// present — hand the query to the app's own search. An opened
+    /// hand-off is `ok` with no HTTP status (§21); a not-opened attempt
+    /// is the terminal not-linked line (its deeplink event marks it; no
+    /// fallback event — same no-chaining shape as row 5).
+    @MainActor
+    private func executeMusicSearchHandoff(query: String, locale: Locale, startedAt: Date) {
+        guard let opener = spotifyLinkOpener, let uri = SpotifyTool.searchURI(query: query) else {
+            // Defensive: the selection offers the hand-off only with the
+            // opener seam present; an unbuildable URI (empty/over-cap)
+            // degrades to the same honest line — no attempt, no entry.
+            emitSpotify(eventType: "spotify_fallback", outcome: "not_linked",
+                        durationMs: nil, errorCode: nil)
+            speakWithVisibleOutcome(key: "spotify.notLinked")
+            return
+        }
+        switch SpotifyTool.open(uri, opener: opener) {
+        case .opened:
+            emitSpotify(eventType: "spotify_deeplink", outcome: "opened",
+                        durationMs: nil, errorCode: nil)
+            speak(text: L10n.str("spotify.openSearch", locale: locale), locale: locale)
+            logToolRequest(kind: .spotify, query: "", response: "", outcome: "ok",
+                           statusCode: nil,
+                           durationMs: Self.elapsedMilliseconds(since: startedAt))
+        case .notOpened:
+            emitSpotify(eventType: "spotify_deeplink", outcome: "not_opened",
+                        durationMs: nil, errorCode: nil)
+            speakWithVisibleOutcome(key: "spotify.notLinked")
+            logToolRequest(kind: .spotify, query: "",
+                           response: L10n.str("spotify.notLinked", locale: locale),
+                           outcome: "fail", statusCode: nil,
+                           durationMs: Self.elapsedMilliseconds(since: startedAt))
+        }
+    }
+
+    /// The unlinked treatment rows 8/10/12 share: YouTube where it can
+    /// serve, else the search hand-off where an opener exists, else the
+    /// honest not-linked line. No `.spotify` entry of its own — only the
+    /// hand-off leg's attempt writes one (row 8's "only if a Spotify
+    /// attempt happened").
+    @MainActor
+    private func deliverUnlinkedMusicTreatment(query: String, locale: Locale,
+                                               startedAt: Date) async {
+        let outcome = Self.selectMusicOutcome(spotifyLinked: false,
+                                              spotifyTransportPresent: false,
+                                              search: nil,
+                                              product: .unknown,
+                                              deepLinkCapable: false,
+                                              youtubeServeable: musicYouTubeServeable,
+                                              spotifySearchOpenerPresent: spotifyLinkOpener != nil)
+        await executeMusicTurn(outcome, query: query, locale: locale, startedAt: startedAt,
+                               token: nil, transport: nil, searchStatus: nil,
+                               entryRequired: false)
+    }
+
+    /// §13's fallback contract: the `spotify_fallback` marker first, the
+    /// YouTube helper VERBATIM (ADR-SP-06 — the query-free projection
+    /// keeps the music query out of the tool log; [T-114][M-1]), then
+    /// the turn's own `.spotify` fail entry when a Spotify attempt
+    /// happened.
+    private func deliverYouTubeFallback(query: String, locale: Locale, startedAt: Date,
+                                        statusCode: Int?, writeEntry: Bool) {
+        emitSpotify(eventType: "spotify_fallback", outcome: "youtube",
+                    durationMs: nil, errorCode: nil)
+        fireYouTubePlay(query: query, logProjection: .queryFree)
+        guard writeEntry else { return }
+        logToolRequest(kind: .spotify, query: "", response: "", outcome: "fail",
+                       statusCode: statusCode,
+                       durationMs: Self.elapsedMilliseconds(since: startedAt))
+    }
+
+    /// The static-line delivery (§28's signature): the fallback event
+    /// with the key's closed outcome, the localized line made visible
+    /// (the honest lines are cards, the `deliverYouTubeFailure`
+    /// precedent), and the turn's `.spotify` fail entry carrying the
+    /// exact line the user heard — never a query, title, id or token.
+    private func deliverMusicLine(locale: Locale, key: String, statusCode: Int?,
+                                  outcome: String, startedAt: Date) {
+        emitSpotify(eventType: "spotify_fallback", outcome: outcome,
+                    durationMs: nil, errorCode: nil)
+        speakWithVisibleOutcome(key: key)
+        logToolRequest(kind: .spotify, query: "",
+                       response: L10n.str(key, locale: locale), outcome: "fail",
+                       statusCode: statusCode,
+                       durationMs: Self.elapsedMilliseconds(since: startedAt))
+    }
+
+    /// §28's closed event vocabulary, component `spotify`, `metadata: [:]`
+    /// on every event — no query, title, id or token can reach the bus.
+    private func emitSpotify(eventType: String, outcome: String,
+                             durationMs: Int?, errorCode: String?) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "spotify",
+            eventType: eventType,
+            durationMs: durationMs,
+            outcome: outcome,
+            errorCode: errorCode,
+            metadata: [:]
+        ))
+    }
+
+    /// `PlayError` → §28's closed `spotify_play` outcome set.
+    private static func spotifyPlayOutcome(_ error: SpotifyTool.PlayError) -> String {
+        switch error {
+        case .premiumRequired: return "premium_required"
+        case .restricted: return "restricted"
+        case .noActiveDevice: return "no_active_device"
+        case .unauthorized: return "unauthorized"
+        case .invalidResponse, .timedOut, .transportUnavailable, .invalidURI:
+            return "network_failed"
+        }
+    }
+
+    /// `PlayError` → the HTTP status the turn's entry records (the
+    /// matrix's 403/404/nil pair plus the general "from the last HTTP
+    /// response when one exists"); timeouts and transport failures carry
+    /// no status.
+    private static func spotifyPlayStatus(_ error: SpotifyTool.PlayError) -> Int? {
+        switch error {
+        case .premiumRequired, .restricted: return 403
+        case .noActiveDevice: return 404
+        case .unauthorized: return 401
+        case .invalidResponse(let statusCode): return statusCode
+        case .timedOut, .transportUnavailable, .invalidURI: return nil
+        }
+    }
+
+    /// Honest-line L10n key → §28's closed `spotify_fallback` outcome
+    /// set.
+    private static func musicFallbackOutcome(forKey key: String) -> String {
+        switch key {
+        case "spotify.notFound": return "not_found"
+        case "spotify.unavailable": return "unavailable"
+        case "spotify.notLinked": return "not_linked"
+        case "spotify.appMissing": return "app_missing"
+        default: return "unavailable"
+        }
     }
 
     // MARK: - [TOOL-DEBUG-LOG] Local-tool request log
@@ -2638,9 +3334,25 @@ final class CommandRouter {
             emit(eventType: "command_health_query_stub", outcome: "info")
             speakWithVisibleOutcome(key: "router.healthNotAvailable")
         case .music:
-            // First-class stub intent (spec §5.1).
-            emit(eventType: "command_music_stub", outcome: "info")
-            speakWithVisibleOutcome(key: "router.musicStub")
+            // [SPOTIFY] (2026-10-07) T-116: the model-resolved music
+            // intent routes to the same music path the ladder stage
+            // uses. The stub dies here — `command_music_stub` and
+            // `router.musicStub` have no reachable emission left
+            // (ADR-SP-11 keeps the catalog key, unreachable).
+            //
+            // The frozen 12-action grammar carries no query slot for
+            // this action, so the §13 order
+            // (`interpretedQuery ?? musicQuery ?? transcript`) reads
+            // against this repo's `InterpretedCommand` shape: the
+            // command's free-text `message` entity is the model's query
+            // when it set one, else the deterministic extractor, else
+            // the raw transcript.
+            let modelQuery = command.message?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let interpretedQuery = (modelQuery?.isEmpty == false) ? modelQuery : nil
+            fireMusicRequest(query: interpretedQuery
+                ?? KeywordIntentRule.musicQuery(from: raw)
+                ?? raw)
         case .sendMessage:
             handleSendMessage(command)
         case .guide:

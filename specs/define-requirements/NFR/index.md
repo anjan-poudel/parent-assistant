@@ -1,33 +1,40 @@
-# Non-Functional Requirements — Profile Interview + Address-as (v1)
+# Non-Functional Requirements — Spotify Music Integration (v1)
 
-11 non-functional requirements. IDs are namespaced `NFR-PI-NNN` to avoid colliding with the
-project-level `NFR-NNN` set in the root stakeholder brief (`requirements.md`).
+12 non-functional requirements. IDs are namespaced `NFR-SP-NNN` to avoid colliding with the
+project-level `NFR-NNN` set in the root stakeholder brief (`requirements.md`) — the same
+convention the live-camera-translation feature uses with `NFR-LCT-NNN` and profile-interview with
+`NFR-PI-NNN`. This page covers the `spotify-music-integration` set (`NFR-SP-*`) only; the earlier
+feature files remain in this folder and are not part of this feature's requirements or lock.
 
 | ID | Title | Category | Priority |
 |----|-------|----------|----------|
-| [NFR-PI-001](NFR-PI-001-profile-encryption-at-rest.md) | Profile encryption at rest | Security | MUST |
-| [NFR-PI-002](NFR-PI-002-log-safety.md) | Log safety — no new PII in logs | Privacy / Security | MUST |
-| [NFR-PI-003](NFR-PI-003-no-new-egress.md) | No new network egress or cloud processing | Privacy | MUST |
-| [NFR-PI-004](NFR-PI-004-profile-string-injection-hardening.md) | Untrusted profile-string hardening (injection) | Security | MUST |
-| [NFR-PI-005](NFR-PI-005-prompt-budget-and-seed-mirror.md) | Prompt token budget and seed mirror preserved | Reliability / Maintainability | MUST |
-| [NFR-PI-006](NFR-PI-006-localisation.md) | Localisation of new UI strings | Localisation | MUST |
-| [NFR-PI-007](NFR-PI-007-accessibility.md) | Accessibility of the new interview UI | Accessibility | MUST |
-| [NFR-PI-008](NFR-PI-008-wake-ack-latency-and-fallback.md) | Wake-acknowledgment latency and failure fallback | Performance / Reliability | MUST |
-| [NFR-PI-009](NFR-PI-009-voice-biometric-unchanged.md) | Voice-biometric mechanism unchanged | Security / Compliance | MUST |
-| [NFR-PI-010](NFR-PI-010-no-regression-existing-flows.md) | No regression to existing behaviours | Reliability | MUST |
-| [NFR-PI-011](NFR-PI-011-compliance-and-release-gates.md) | Compliance and release gates | Compliance | MUST |
+| [NFR-SP-001](NFR-SP-001-provider-search-responsiveness.md) | Provider search responsiveness and timeout budget | Performance | MUST |
+| [NFR-SP-002](NFR-SP-002-log-safety.md) | Log safety — no credentials, queries or provider bodies in logs | Privacy / Security | MUST |
+| [NFR-SP-003](NFR-SP-003-no-new-network-egress.md) | No new network egress; music stays off any cloud LLM | Privacy | MUST |
+| [NFR-SP-004](NFR-SP-004-prompt-budget-preserved.md) | Prompt token budget preserved | Reliability / Maintainability | MUST |
+| [NFR-SP-005](NFR-SP-005-localisation.md) | Localisation of all Spotify strings (ne/en) | Localisation | MUST |
+| [NFR-SP-006](NFR-SP-006-no-regression.md) | No regression to existing flows | Reliability | MUST |
+| [NFR-SP-007](NFR-SP-007-credential-encryption-at-rest.md) | Credential and token encryption at rest | Security | MUST |
+| [NFR-SP-008](NFR-SP-008-deeplink-uri-hardening.md) | Deep-link URI construction hardening | Security | MUST |
+| [NFR-SP-009](NFR-SP-009-oauth-redirect-and-token-lifecycle.md) | OAuth redirect validation and token lifecycle | Security | MUST |
+| [NFR-SP-010](NFR-SP-010-accessibility-of-new-surfaces.md) | Accessibility of the new touch surfaces | Accessibility | MUST |
+| [NFR-SP-011](NFR-SP-011-compliance-and-release-gates.md) | Compliance and release gates | Compliance | MUST |
+| [NFR-SP-012](NFR-SP-012-plugin-isolation-and-model-stack-invariance.md) | Plugin isolation and model-stack invariance | Maintainability / Architecture | MUST |
 
-## Coverage of the security-relevant surfaces
-| Surface (workflow focus) | Covered by |
+## Coverage of the security-relevant surfaces (workflow focus areas)
+
+| Surface (workflow `security-design-review` / `security-test` focus) | Covered by |
 |---|---|
-| Profile-string prompt injection into IntentPrompt templates (cloud + on-device) | [NFR-PI-004](NFR-PI-004-profile-string-injection-hardening.md), [FR-PI-009](../FR/FR-PI-009-brain-reply-style-address-as.md) |
-| Profile PII at rest (name, address-as, DOB, GP, hospital, next of kin) | [NFR-PI-001](NFR-PI-001-profile-encryption-at-rest.md), [FR-PI-003](../FR/FR-PI-003-encrypted-profile-store.md) |
-| Log surface PII (no name/term/DOB/contact values) | [NFR-PI-002](NFR-PI-002-log-safety.md) |
-| Egress discipline (no new network egress; only name/term in prompts) | [NFR-PI-003](NFR-PI-003-no-new-egress.md) |
-| Voice fingerprint enrollment spoofing/replay (reuse existing threat model) | [NFR-PI-009](NFR-PI-009-voice-biometric-unchanged.md), [FR-PI-007](../FR/FR-PI-007-voice-fingerprint-step.md) |
-| Wake-acknowledgment path (no new egress; no sensitive data beyond the term) | [FR-PI-008](../FR/FR-PI-008-wake-acknowledgment-address-as.md), [NFR-PI-008](NFR-PI-008-wake-ack-latency-and-fallback.md) |
-| Un-personalized fallback integrity (no placeholder; no regression) | [FR-PI-011](../FR/FR-PI-011-unpersonalized-path-unchanged.md), [FR-PI-015](../FR/FR-PI-015-profile-read-failure-fallback.md) |
+| OAuth token lifecycle: scopes at sign-in, encrypted at rest, refresh, revocation on unlink, no tokens in logs | [NFR-SP-009](NFR-SP-009-oauth-redirect-and-token-lifecycle.md), [FR-SP-008](../FR/FR-SP-008-spotify-account-linking-by-caregiver.md), [FR-SP-010](../FR/FR-SP-010-unlink-wipes-credentials-and-revokes.md), [NFR-SP-007](NFR-SP-007-credential-encryption-at-rest.md) |
+| Client-secret handling for the client-credentials search flow (OD-S1 — open): bundled secrets extractable; family-entered credential per the SearchConfigStore precedent is the candidate pattern | [FR-SP-009](../FR/FR-SP-009-encrypted-spotify-credential-store.md), [NFR-SP-002](NFR-SP-002-log-safety.md) (property binding either OD-S1 resolution) |
+| Deep-link/URI injection: remote-controlled track names/IDs validated before URI construction; a crafted result must not open arbitrary schemes | [NFR-SP-008](NFR-SP-008-deeplink-uri-hardening.md), [FR-SP-007](../FR/FR-SP-007-spotifytool-search-and-deeplink.md) |
+| OAuth redirect validation: mismatched redirect URIs rejected (token interception via app-scheme hijacking) | [NFR-SP-009](NFR-SP-009-oauth-redirect-and-token-lifecycle.md), [FR-SP-008](../FR/FR-SP-008-spotify-account-linking-by-caregiver.md) |
+| Log sanitisation: music queries, provider responses and error bodies must not reach logs (check-release-log-safety.sh coverage) | [NFR-SP-002](NFR-SP-002-log-safety.md), [NFR-SP-011](NFR-SP-011-compliance-and-release-gates.md) |
+| Privacy disclosure: music-query/playback data flow to Spotify disclosed | [FR-SP-016](../FR/FR-SP-016-settings-linking-and-privacy-disclosure.md), [NFR-SP-011](NFR-SP-011-compliance-and-release-gates.md) |
+| Credential wipe/revocation on unlink | [FR-SP-010](../FR/FR-SP-010-unlink-wipes-credentials-and-revokes.md), [NFR-SP-007](NFR-SP-007-credential-encryption-at-rest.md) |
+| No new egress / no cloud LLM on the music path | [NFR-SP-003](NFR-SP-003-no-new-network-egress.md) |
 
 ## Related
-- [FR index](../FR/index.md) — 15 functional requirements
+- [FR index](../FR/index.md) — 17 functional requirements
 - [Requirements index](../index.md)
+- [Consolidated copy](../../define-requirements.md)

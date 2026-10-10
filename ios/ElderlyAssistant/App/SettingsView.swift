@@ -867,6 +867,232 @@ struct YouTubeSettingsView: View {
     }
 }
 
+// MARK: - Spotify (spotify-music-integration, 2026-10-07)
+
+/// [SPOTIFY] T-120 — the caregiver-facing Spotify section (C-SP-10 /
+/// design-l2 §17; FR-SP-016, FR-SP-010, NFR-SP-010): the account link's
+/// status card with the Link/Unlink action, the M-2 privacy disclosure,
+/// the rollout note and the confirm-then-wipe dialog.
+///
+/// The card renders `SpotifyAccountSession.status` through
+/// `SpotifySettingsLeafState` — one total mapping, never optimistic
+/// (design §17), so "the surface cannot disagree with the session" is a
+/// unit test over the real session and its real store, not a rendering
+/// claim.
+///
+/// No credential UI of any kind (ADR-SP-01): the link happens in the
+/// provider's own consent sheet, the tokens live only in the encrypted
+/// store, and this surface has no field, no token echo, no debug
+/// affordance and no log line (NFR-SP-002).
+struct SpotifySettingsView: View {
+    @Environment(\.appAppearance) private var appearance
+    /// The coordinator's ONE session (T-119): the same instance the plugin
+    /// and the router hold, so the card cannot show a second account
+    /// (L2-R2). Observed, so a link attempt's outcome repaints the card
+    /// the moment `status` publishes.
+    @ObservedObject var session: SpotifyAccountSession
+    /// The unlink confirmation (design §17: destructive confirmed, cancel
+    /// = `common.back`).
+    @State private var confirmingUnlink = false
+
+    private var leafState: SpotifySettingsLeafState {
+        SpotifySettingsLeafState(state: session.status)
+    }
+
+    var body: some View {
+        LeafScreen(titleKey: "spotifySettings.title") {
+            VStack(alignment: .leading, spacing: 16) {
+                statusCard
+
+                // FR-SP-016's visible half: the M-2 amended disclosure
+                // (the copy T-123's obligation 7 is checked against).
+                Text("spotifySettings.privacy")
+                    .font(.system(size: appearance.typography.captionPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                // OD-S2(c): the Dashboard app is still in development mode
+                // (the extended-quota filing is an open owner action), so
+                // only approved accounts can connect. The client cannot
+                // observe the console-side mode, so the note is shown
+                // unconditionally while that remains true — honest, never
+                // hidden behind a placebo flag; when OD-S2 completes the
+                // note leaves with the copy inventory (§31), not silently
+                // gated.
+                Text("spotifySettings.rolloutNote")
+                    .font(.system(size: appearance.typography.captionPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .confirmationDialog("spotifySettings.removeConfirm", isPresented: $confirmingUnlink) {
+            Button("spotifySettings.unlink", role: .destructive) {
+                // The wipe. A wipe that fails leaves the record — and so
+                // the linked status — untouched (the store's own
+                // guarantee), which is why the card keeps saying
+                // "Connected".
+                _ = session.unlink()
+            }
+            Button("common.back", role: .cancel) {}
+        }
+    }
+
+    /// The status card: the state as TEXT first (never colour or icon
+    /// alone, NFR-SP-010) plus the one primary action.
+    private var statusCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                Image(systemName: leafState.statusIcon)
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(leafState.tone == .connected
+                                     ? appearance.colors.accentForeground
+                                     : appearance.colors.textSecondary)
+                    // Decorative: the status line below is the label.
+                    .accessibilityHidden(true)
+                Text(LocalizedStringKey(leafState.statusKey))
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
+                    .foregroundStyle(appearance.colors.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("settings.spotify.status")
+
+            actionButton
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
+    }
+
+    /// The single primary action, worded and full-width (never icon-only),
+    /// ≥44 pt tall (the house tap-target token). While an attempt is in
+    /// flight it stays visible but disabled (design §17's "buttons
+    /// disabled"), so the screen can neither open a second consent sheet
+    /// nor lose its only affordance.
+    private var actionButton: some View {
+        Button {
+            switch leafState.action {
+            case .link:
+                // The presenter seam is already wired (T-119); the outcome
+                // lands in the published status — the button does not
+                // guess at it.
+                Task { _ = await session.link() }
+            case .unlink:
+                confirmingUnlink = true
+            }
+        } label: {
+            Text(LocalizedStringKey(leafState.actionKey))
+                .font(.system(size: appearance.typography.bodyPointSize, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: DesignTokens.minTapTargetSize)
+                .background(leafState.actionEnabled
+                            ? appearance.colors.accent
+                            : appearance.colors.textSecondary.opacity(0.4))
+                .clipShape(RoundedRectangle(cornerRadius: DesignTokens.bubbleCornerRadius))
+        }
+        .buttonStyle(.plain)
+        .disabled(!leafState.actionEnabled)
+        .accessibilityLabel(Text(LocalizedStringKey(leafState.actionKey)))
+        .accessibilityIdentifier("settings.spotify.action")
+    }
+}
+
+/// The Spotify section's leaf state machine (design-l2 §17), total over
+/// `SpotifyAccountSession.Status`. The four caregiver-visible states each
+/// render exactly one shipped status line and one action; `.linking` is
+/// the in-flight state where the buttons disable.
+enum SpotifySettingsLeafState: Equatable {
+    /// `status.notLinked` — primary action: Link.
+    case notLinked
+    /// An attempt is in flight; no outcome is announced until one exists.
+    case linking
+    /// `linked(.premium)` — primary action: Unlink.
+    case linkedPremium
+    /// `linked(.free)` and `linked(.unknown)`: L2-D14 makes unknown behave
+    /// as free ("playback opens the Spotify app"), so both render the
+    /// free-tier line.
+    case linkedFree
+    /// `linkFailed` — primary action: Link again.
+    case linkFailed
+
+    init(state: SpotifyAccountSession.Status) {
+        switch state {
+        case .notLinked: self = .notLinked
+        case .linking: self = .linking
+        case .linked(.premium): self = .linkedPremium
+        case .linked(.free), .linked(.unknown): self = .linkedFree
+        case .linkFailed: self = .linkFailed
+        }
+    }
+
+    /// The status line's catalog key. `.linking` keeps the not-linked
+    /// line: no account exists yet, so "Not connected" is the truth and
+    /// no outcome is announced early (design §17 "no status change until
+    /// an outcome exists"); the four shipped lines stay the only copy
+    /// this surface can show.
+    var statusKey: String {
+        switch self {
+        case .notLinked, .linking: return "spotifySettings.status.notLinked"
+        case .linkedPremium: return "spotifySettings.status.linked"
+        case .linkedFree: return "spotifySettings.status.freeTier"
+        case .linkFailed: return "spotifySettings.status.linkFailed"
+        }
+    }
+
+    /// The one primary action per state.
+    var action: SpotifySettingsAction {
+        switch self {
+        case .notLinked, .linking, .linkFailed: return .link
+        case .linkedPremium, .linkedFree: return .unlink
+        }
+    }
+
+    /// Disabled exactly while an attempt is in flight (design §17).
+    var actionEnabled: Bool { self != .linking }
+
+    /// The action's localised label — the same key the dialog's confirm
+    /// button carries, so the button the caregiver tapped and the button
+    /// that confirms say the same words.
+    var actionKey: String {
+        action == .link ? "spotifySettings.link" : "spotifySettings.unlink"
+    }
+
+    /// The status glyph (always beside the status TEXT — glyphs and
+    /// colour never carry the state alone).
+    var statusIcon: String {
+        switch self {
+        case .notLinked: return "music.note"
+        case .linking: return "ellipsis.circle"
+        case .linkedPremium, .linkedFree: return "checkmark.circle.fill"
+        // The retry glyph — maintenance, not an alarm.
+        case .linkFailed: return "arrow.clockwise"
+        }
+    }
+
+    /// The colour tone the view maps to appearance colours. Deliberately
+    /// neutral for `.linkFailed` ([W2-review D3]): the provider expires
+    /// refresh tokens after 6 months (verified 2026-10-07, T-110 V-1), so
+    /// an unlink → relink cycle is routine maintenance for every linked
+    /// household and the surface must not paint it as a fault.
+    var tone: Tone {
+        switch self {
+        case .linkedPremium, .linkedFree: return .connected
+        case .notLinked, .linking, .linkFailed: return .neutral
+        }
+    }
+
+    enum Tone: Equatable { case neutral, connected }
+}
+
+/// The surface's single primary action.
+enum SpotifySettingsAction: Equatable {
+    case link
+    case unlink
+}
+
 /// Cost-governance card inside the Gemini settings screen (open item #5,
 /// 2026-09-06). `@ObservedObject` on the governor so today's count and
 /// the cap value update live while the screen is open (the governor

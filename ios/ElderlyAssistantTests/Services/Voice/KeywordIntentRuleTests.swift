@@ -86,7 +86,14 @@ final class KeywordIntentRuleTests: XCTestCase {
     // MARK: - Required keyword absent → never fires
 
     func testYoutubeRuleNeverFiresWithoutTheYoutubeWordDataDriven() {
-        for utterance in ["play some music", "play", "गीत चलाऊ", "अलार्म बजाऊ", "search songs"] {
+        // [SPOTIFY] (2026-10-06) Deliberate supersession: "play some
+        // music" and "गीत चलाऊ" moved to the music-domain fixtures
+        // below — they are bare music REQUESTS now (FR-SP-013), so the
+        // whole table resolves them to `.music`. They never fired the
+        // YouTube rule, which is what this list pins, and they still
+        // don't. The remaining fixtures keep the no-YouTube-word
+        // discipline intact.
+        for utterance in ["play", "अलार्म बजाऊ", "search songs"] {
             XCTAssertNil(KeywordIntentRule.match(transcript: utterance),
                          "\(utterance) has a verb but no YouTube word — the required set must stay intact")
         }
@@ -283,6 +290,283 @@ final class KeywordIntentRuleTests: XCTestCase {
                        .youtube)
         XCTAssertEqual(KeywordIntentRule.match(transcript: "समाचार खोल, समाचार सुनाऊ")?.domain,
                        .news)
+    }
+
+    // MARK: - The music domain ([SPOTIFY] 2026-10-06, C-SP-07 / FR-SP-013)
+
+    /// The golden corpus' verb-bearing music rows: a marker ∧ a
+    /// play/listen/sing verb co-occurring in any order, any surrounding
+    /// grammar — every one classifies as the music domain with no model
+    /// call. This is the zero-prompt-token path (constraint 3).
+    func testMusicRuleFiresOnTheGoldenVerbBearingUtterancesDataDriven() {
+        for utterance in [
+            "भजन बजाउनुस्",
+            "गीत चलाऊ",
+            "रामायणको भजन लगाइदेऊ",
+            "गाना बजाऊ",
+            "कुनै भजन सुनाऊ",
+            "शिवको भजन बजाऊ",
+            "नयाँ गीत सुनाउनुस्",
+            "play a song",
+            "पुरानो हिन्दी गीत बजाऊ",
+            "भजन गाउनुस्",
+            "संगीत बजाऊ",
+            "लोक गीत सुनाऊ",
+            "कृष्ण भजन बजाऊ",
+            "गीत सुनाउनुस्"
+        ] {
+            XCTAssertEqual(KeywordIntentRule.match(transcript: utterance)?.domain, .music,
+                           "\(utterance) must resolve to the music rule — marker ∧ verb, no model")
+        }
+    }
+
+    /// The marker and verb fixture tables, crossed: every marker form
+    /// pairs with every verb form, in both scripts. Co-occurrence is
+    /// the whole gate — no adjacency, no full-form requirement.
+    func testMusicRuleFiresAcrossTheMarkerAndVerbTablesDataDriven() {
+        let markers = ["भजन", "गीत", "गाना", "संगीत", "सङ्गीत", "music", "song", "bhajan"]
+        let verbs = ["बजाऊ", "चलाऊ", "सुनाऊ", "लगाऊ", "गाऊ", "play", "listen", "sing"]
+        for marker in markers {
+            for verb in verbs {
+                XCTAssertEqual(KeywordIntentRule.match(transcript: "\(marker) \(verb)")?.domain,
+                               .music,
+                               "\(marker) \(verb) must classify as music")
+            }
+        }
+    }
+
+    func testMusicRuleFiresOnNoisySurroundingTextDataDriven() {
+        for utterance in [
+            "हजुर, आज मलाई पुरानो भजन बजाइदिनुहोस् न है",
+            "please play some bhajan for me",
+            "can you listen to some music with me",
+            "मलाई संगीत सुनाइदिनु न त",
+            "sing a song please"
+        ] {
+            XCTAssertEqual(KeywordIntentRule.match(transcript: utterance)?.domain, .music,
+                           "\(utterance) must resolve to the music rule — keyword co-occurrence, not form")
+        }
+    }
+
+    /// The matched keys are the FIRST matching alternative of each
+    /// required group — fixed rule vocabulary for the
+    /// `intent_keyword_match` event, never user text.
+    func testMusicMatchCarriesTheMatchedKeys() {
+        XCTAssertEqual(KeywordIntentRule.match(transcript: "भजन बजाऊ"),
+                       KeywordIntentRule.Match(domain: .music,
+                                               matchedKeys: ["भजन", "बजाऊ"]))
+        XCTAssertEqual(KeywordIntentRule.match(transcript: "play a song")?.matchedKeys,
+                       ["song", "play"])
+        // The music match carries no app/festival/medication ids — the
+        // fields mean "the rule that fired resolved this catalog id".
+        let match = KeywordIntentRule.match(transcript: "गीत चलाऊ")
+        XCTAssertNil(match?.appID)
+        XCTAssertNil(match?.festivalID)
+        XCTAssertNil(match?.medicationName)
+    }
+
+    // MARK: - Music rule: excluded forms (design §14)
+
+    /// The deliberate conservative choice (design §14): a noun-only
+    /// musical phrase does not fire the deterministic stage. "देवीको
+    /// भजन" is the golden corpus row that pins the interpreter's
+    /// existing `music` intent — the rule must not double-claim it.
+    func testMusicRuleNeverFiresOnTheNounOnlyGoldenPhrase() {
+        XCTAssertNil(KeywordIntentRule.match(transcript: "देवीको भजन"))
+    }
+
+    func testMusicRuleNeverFiresOnBareMusicNounsDataDriven() {
+        for utterance in ["गीत", "भजन", "गाना", "संगीत", "सङ्गीत",
+                          "music", "song", "bhajan",
+                          "मलाई गीत मन पर्छ", "songs are nice", "i like music"] {
+            XCTAssertNil(KeywordIntentRule.match(transcript: utterance),
+                         "\(utterance) is a mention, not a request — a verb co-occurrence is required")
+        }
+    }
+
+    /// The narration guard (design L2-D9): the past forms are excluded
+    /// from `musicVerbFamily`, exactly as `searched` is excluded from
+    /// the YouTube family, so a narration never fires the stage.
+    func testMusicRuleNeverFiresOnNarrationDataDriven() {
+        for utterance in ["i played a song for her",
+                          "i listened to music yesterday",
+                          "she sang a bhajan",
+                          "the song was sung by him",
+                          "मैले हिजो गीत सुनेँ",
+                          "हिजो भजन बज्यो"] {
+            XCTAssertNil(KeywordIntentRule.match(transcript: utterance),
+                         "\(utterance) narrates — the music stage must not fire on it")
+        }
+    }
+
+    /// The homonyms and non-music verb uses: alarms use the same
+    /// बजाऊ/लगाऊ verbs as music, and marker-stem contact names can
+    /// collide. Note (W1 review F-1): under the pinned grapheme-cluster
+    /// semantics a contact named गीता does NOT carry the substring गीत
+    /// (the fused forms गीतहरू / गीतमाया / भजनको do) — these fixtures
+    /// pass on the missing music verb, and the fused-marker over-block
+    /// class is pinned with T-113's veto fixtures.
+    func testExcludedFormsNeverFireTheMusicRule() {
+        for utterance in ["गीतालाई फोन गर", "call geeta", "गीता पढ",
+                          "अलार्म बजाऊ", "टाइमर लगाऊ", "घण्टी बजाऊ",
+                          "बिहानको अलार्म बजाउनुहोस्",
+                          "अलार्म चलाऊ", "फोन लगाऊ",
+                          // Fused-marker class (W1 review F-1): here the
+                          // marker stem SURVIVES the grapheme clusters
+                          // ("गीत" ⊂ "गीतमाया", "भजन" ⊂ "भजनलाई"), so
+                          // the marker group matches — but the utterance
+                          // carries no music verb, so the music rule
+                          // still stays nil. The veto-side over-block
+                          // for this same class is pinned in T-113's
+                          // VoiceContactSearchRouteTests (F-6 trade-off).
+                          "भजनलाई फोन गर", "गीतमाया"] {
+            XCTAssertNil(KeywordIntentRule.match(transcript: utterance),
+                         "\(utterance) is not a music request — the required marker set must stay intact")
+        }
+    }
+
+    /// The pinned Devanagari grapheme-cluster semantics (2026-09-07):
+    /// the markers are substring alternatives, so a fused postposition
+    /// still matches ("भजनको" ⊃ "भजन") — and the Latin markers keep
+    /// whole-token discipline ("songwriter" must never fire "song").
+    func testMusicGraphemeClusterMatchingIsPreserved() {
+        XCTAssertEqual(KeywordIntentRule.match(transcript: "भजनको सुनाऊ")?.domain, .music)
+        XCTAssertEqual(KeywordIntentRule.match(transcript: "गीतहरू सुनाऊ")?.domain, .music)
+        XCTAssertNil(KeywordIntentRule.match(transcript: "play songs"),
+                     "'songs' is outside the reviewed marker vocabulary — the plural stays out")
+        XCTAssertNil(KeywordIntentRule.match(transcript: "i am a songwriter"),
+                     "whole-token Latin discipline: 'songwriter' must not fire 'song'")
+    }
+
+    // MARK: - Music rule ordering (strict ladder mirror)
+
+    func testMusicRuleRunsAfterYoutubeAndBeforeAppLaunch() {
+        // A YouTube-marked utterance keeps resolving as the strict
+        // ladder would: the YouTube rule precedes music.
+        XCTAssertEqual(KeywordIntentRule.match(transcript: "युट्युब खोल र गीत चलाऊ")?.domain,
+                       .youtube)
+        // A music request wins over a co-occurring launch word — the
+        // music rule is ordered before every appLaunch rule.
+        XCTAssertEqual(KeywordIntentRule.match(transcript: "गीत चलाऊ, क्यामेरा खोल")?.domain,
+                       .music)
+        // News still precedes both.
+        XCTAssertEqual(KeywordIntentRule.match(transcript: "समाचार सुनाऊ, गीत पनि सुनाऊ")?.domain,
+                       .news)
+    }
+
+    // MARK: - YouTube precedence under the music rule (FR-SP-005, ADR-SP-06)
+
+    /// The shipped explicit-YouTube fixtures classify exactly as before
+    /// and are never re-classified to music.
+    func testYoutubeMarkedUtterancesStillMatchTheYoutubeDomainDataDriven() {
+        let utterances: [(String, [String])] = [
+            ("हाम्लाई युट्युबमा नेपाली न्युज चलाइदिनुस् न है त", ["युट्युब", "चलाइदिनुस्"]),
+            ("search songs on youtube", ["youtube", "search"]),
+            ("can you search youtube for old songs", ["youtube", "search"]),
+            ("please play some bhajan on youtube for me", ["youtube", "play"]),
+            // The matched verb key is the FULL enumerated form — the
+            // pinned grapheme-cluster behaviour of 2026-09-07 means
+            // "खोजिदिनुस्" does NOT contain a bare "खोज" substring, so
+            // the first matching alternative is the form itself.
+            ("युट्युबमा गीत खोजिदिनुस् न", ["युट्युब", "खोजिदिनुस्"])
+        ]
+        for (utterance, keys) in utterances {
+            let match = KeywordIntentRule.match(transcript: utterance)
+            XCTAssertEqual(match?.domain, .youtube,
+                           "\(utterance) must stay a YouTube utterance")
+            XCTAssertNotEqual(match?.domain, .music,
+                              "\(utterance) must NEVER be re-classified to music (FR-SP-005)")
+            XCTAssertEqual(match?.matchedKeys, keys)
+        }
+    }
+
+    /// The ADR-SP-06 structural exclusion: an utterance carrying a
+    /// YouTube marker is disqualified from the music rule even when the
+    /// youtube rule itself declines it (these verbs are listen/sing
+    /// verbs, not YouTube play/search verbs) — it falls through to the
+    /// interpreter, never to music.
+    func testYoutubeMarkedUtterancesAreNeverReclassifiedAsMusic() {
+        for utterance in ["युट्युबमा गीत सुनाऊ", "युट्युबमा भजन सुनाऊ",
+                          "युट्युबमा गीत गाऊ", "youtube song singing",
+                          "on youtube music listen"] {
+            XCTAssertNil(KeywordIntentRule.match(transcript: utterance),
+                         "\(utterance) carries a YouTube marker — never the music domain")
+        }
+    }
+
+    // MARK: - Music query extraction (design §14 fixtures, pinned)
+
+    func testMusicQueryExtractsTheSongDataDriven() {
+        let fixtures: [(String, String)] = [
+            ("भजन बजाऊ", "भजन"),
+            ("पुरानो हिन्दी गीत बजाऊ", "पुरानो हिन्दी"),
+            ("देवीको भजन", "देवीको"),
+            ("युट्युबमा गीत चलाऊ", "गीत"),
+            ("play a song", "song"),
+            ("स्पोटिफाइमा गीत चलाऊ", "गीत"),
+            ("गीत चलाऊ", "गीत"),
+            ("भजन बजाउनुस्", "भजन"),
+            ("रामायणको भजन लगाइदेऊ", "रामायणको"),
+            ("नयाँ गीत सुनाउनुस्", "नयाँ")
+        ]
+        for (utterance, query) in fixtures {
+            XCTAssertEqual(KeywordIntentRule.musicQuery(from: utterance), query,
+                           "\(utterance) must extract \"\(query)\"")
+        }
+    }
+
+    /// The provider and YouTube marker morphemes are query noise: no
+    /// music search may search for "spotify" or "youtube", and a fused
+    /// Devanagari token is dropped whole.
+    func testMusicQueryDropsProviderAndYoutubeMarkers() {
+        XCTAssertEqual(KeywordIntentRule.musicQuery(from: "spotify गीत बजाऊ"), "गीत")
+        XCTAssertEqual(KeywordIntentRule.musicQuery(from: "गीत चलाऊ युट्युबमा"), "गीत")
+        XCTAssertEqual(KeywordIntentRule.musicQuery(from: "स्पोटिफाइमा भजन सुनाऊ"), "भजन")
+    }
+
+    /// L2-D10: the extractor never leaves an empty query — when every
+    /// token is scaffolding, the first music-marker token is searched;
+    /// when there is none, the raw transcript's tokens stand in.
+    /// Returns nil only when the input canonicalizes to nothing.
+    func testMusicQueryFallbacksAndCap() {
+        XCTAssertEqual(KeywordIntentRule.musicQuery(from: "चलाऊ"), "चलाऊ",
+                       "no marker token → the raw transcript's tokens stand in (L2-D10 step 3)")
+
+        let long = Array(repeating: "रामायण", count: 60).joined(separator: " ")
+        XCTAssertEqual(KeywordIntentRule.musicQuery(from: long)?.count,
+                       KeywordIntentRule.maxMusicQueryLength)
+        XCTAssertEqual(KeywordIntentRule.musicQuery(from: long, maxLength: 12)?.count, 12)
+
+        XCTAssertNil(KeywordIntentRule.musicQuery(from: ""))
+        XCTAssertNil(KeywordIntentRule.musicQuery(from: "   "))
+        XCTAssertNil(KeywordIntentRule.musicQuery(from: "। ॥"))
+    }
+
+    // MARK: - mentionsMusic: the contact-search veto predicate (C-SP-08)
+
+    /// The veto fires on the SHARED marker family — the same
+    /// alternatives the rule is gated by — and canonicalizes
+    /// internally, so it is order-independent relative to the route's
+    /// own canonicalization.
+    func testMentionsMusicIsTrueOnTheMusicVocabularyDataDriven() {
+        for text in ["गीत चलाऊ", "भजन बजाऊ", "play a song", "संगीत सुनाऊ",
+                     "सङ्गीत बजाऊ", "युट्युबमा गीत खोज", "भजनको",
+                     "गीतहरू बजाउनुहोस्", "  Bhajan   Bajau "] {
+            XCTAssertTrue(KeywordIntentRule.mentionsMusic(text),
+                          "\(text) carries a music marker — the veto must fire")
+        }
+    }
+
+    /// The non-over-block proof (design §15): a contact request without
+    /// a music marker is untouched by the veto, and the Latin markers
+    /// keep whole-token discipline ("songs" is not "song").
+    func testMentionsMusicIsFalseWithoutAMarkerDataDriven() {
+        for text in ["आरवलाई फोन गर", "call ram", "मेरो छोरालाई फोन लगाऊ",
+                     "अलार्म बजाऊ", "समाचार सुनाऊ", "youtube खोज",
+                     "play songs", "search videos"] {
+            XCTAssertFalse(KeywordIntentRule.mentionsMusic(text),
+                           "\(text) carries no music marker — the veto must not fire")
+        }
     }
 
     // MARK: - Safety pins: relaxed rules never claim safety vocabulary

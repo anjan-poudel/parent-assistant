@@ -106,4 +106,86 @@ final class LocalToolLogStoreTests: XCTestCase {
         let store = LocalToolLogStore(storage: GeminiInMemoryStorage())
         XCTAssertNil(store.exportJSON())
     }
+
+    // MARK: - [SPOTIFY] (2026-10-06, C-SP-14) — kind round-trip + §21 contract
+
+    func testSpotifyKindRoundTripsAcrossStoreInstances() {
+        // The encrypted payload round-trips the raw string "spotify"; a
+        // rawValue the enum cannot decode fails the WHOLE array decode
+        // (loadLocked reads as empty), so this pins the storage contract,
+        // not just the in-memory enum case.
+        let storage = GeminiInMemoryStorage()
+        let servedRemote = LocalToolLogEntry(kind: .spotify, query: "",
+                                             response: "", outcome: "ok",
+                                             statusCode: 204, durationMs: 431)
+        let terminalHonest = LocalToolLogEntry(
+            kind: .spotify, query: "",
+            response: "Spotify is not available right now.", outcome: "fail")
+
+        LocalToolLogStore(storage: storage).record(servedRemote)
+        LocalToolLogStore(storage: storage).record(terminalHonest)
+
+        let reloaded = LocalToolLogStore(storage: storage)
+        XCTAssertEqual(reloaded.entries(), [terminalHonest, servedRemote],
+                       "both §21 row shapes must survive the encrypted round trip")
+        XCTAssertEqual(reloaded.entries().map(\.kind.rawValue),
+                       ["spotify", "spotify"],
+                       "the persisted kind string is 'spotify' — the stable storage/export contract")
+    }
+
+    func testSpotifyRowsRespectTheLogContract() throws {
+        // Contract §21 / ADR-SP-15: query is "" in EVERY spotify row;
+        // response is "" except the terminal honest line (the static
+        // spoken fallback); the served remote path records 204, the
+        // deep-link path nil. No query text, track title, track id,
+        // token or provider body exists anywhere on the row — the shape
+        // has no field that could carry one (NFR-SP-002).
+        let store = LocalToolLogStore(storage: GeminiInMemoryStorage())
+        let servedRemote = makeEntry(kind: .spotify, query: "", response: "",
+                                     outcome: "ok", statusCode: 204)
+        let servedDeepLink = makeEntry(kind: .spotify, query: "", response: "",
+                                       outcome: "ok", statusCode: nil)
+        let failedFallback = makeEntry(kind: .spotify, query: "", response: "",
+                                       outcome: "fail", statusCode: 403)
+        let terminalHonest = makeEntry(
+            kind: .spotify, query: "",
+            response: "Spotify is not available right now.", outcome: "fail")
+        for entry in [servedRemote, servedDeepLink, failedFallback, terminalHonest] {
+            store.record(entry)
+        }
+
+        // Newest first: the honest line was recorded last.
+        XCTAssertEqual(store.entries(),
+                       [terminalHonest, failedFallback, servedDeepLink, servedRemote],
+                       "every §21 row shape must round-trip field-for-field")
+        let rows = store.entries()
+        XCTAssertTrue(rows.allSatisfy { $0.query.isEmpty },
+                      "a spotify row must never carry query text (NFR-SP-002)")
+        XCTAssertEqual(rows.filter { !$0.response.isEmpty }, [terminalHonest],
+                       "only the terminal honest line carries a response")
+        XCTAssertTrue(rows.allSatisfy { ["ok", "fail"].contains($0.outcome) },
+                      "spotify rows use the ok/fail classifications of the §21 table")
+
+        // The export must not grow a field that could carry provider
+        // content, and must keep the query empty on every row.
+        let url = try XCTUnwrap(store.exportJSON())
+        let data = try Data(contentsOf: url)
+        let parsed = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        let allowedKeys: Set<String> = ["id", "timestamp", "kind", "query",
+                                        "response", "outcome", "statusCode", "durationMs"]
+        XCTAssertEqual(parsed.count, 4, "every spotify row must be exported")
+        for row in parsed {
+            let unexpected = Set(row.keys).subtracting(allowedKeys)
+            XCTAssertTrue(unexpected.isEmpty,
+                          "unexpected exported fields \(unexpected.sorted()) — the row shape " +
+                          "must not grow a field that could carry a token or provider body")
+            XCTAssertEqual(row["kind"] as? String, "spotify")
+            XCTAssertEqual(row["query"] as? String, "",
+                           "the exported spotify row must keep query empty")
+        }
+        let exportedHonest = parsed.first { ($0["response"] as? String)?.isEmpty == false }
+        XCTAssertEqual(exportedHonest?["response"] as? String,
+                       terminalHonest.response,
+                       "the one non-empty response is the terminal honest line, verbatim")
+    }
 }

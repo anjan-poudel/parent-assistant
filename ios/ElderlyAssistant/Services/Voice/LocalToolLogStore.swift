@@ -19,6 +19,16 @@ struct LocalToolLogEntry: Codable, Equatable, Identifiable {
         /// open. The `response` field is EMPTY for ok entries by design:
         /// the title-bearing confirmation is spoken-only, never recorded.
         case youtube
+        /// Spotify music request ([SPOTIFY] 2026-10-06, C-SP-14) — the
+        /// linked-account search/play round-trip or the deep-link open;
+        /// no entry at all is written when no Spotify attempt was made
+        /// (the YouTube leg then writes its own existing entry).
+        /// Contract §21 (ADR-SP-15, stricter than YouTube): `query` is
+        /// ALWAYS empty and `response` is empty except the terminal
+        /// honest line (the static spoken fallback, carried verbatim in
+        /// `response`). No query text, track title, track id, token or
+        /// provider body ever reaches this row (NFR-SP-002).
+        case spotify
     }
 
     let id: UUID
@@ -28,10 +38,14 @@ struct LocalToolLogEntry: Codable, Equatable, Identifiable {
     /// snapshotted before the request went out (never a trimmed or
     /// post-parsed copy). Privacy (C9): this is user speech, which is why
     /// the log is encrypted on-device only — see `LocalToolLogStore`.
+    /// The Spotify kind is the contract §21 exception: its rows keep
+    /// this EMPTY — no query text is ever recorded (NFR-SP-002).
     let query: String
     /// What the app answered: the spoken/delivered line — the conditions
     /// sentence (hedge included), the search summary, or the honest
     /// fallback/cap line. Empty for the rare failure with no delivery.
+    /// Spotify rows keep this empty too, except the terminal honest line
+    /// (contract §21; see `Kind.spotify`).
     let response: String
     /// "ok" | "cap" | "fail" | "fallback" — see `logToolRequest` in
     /// CommandRouter for what each means per tool.

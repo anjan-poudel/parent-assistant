@@ -1,285 +1,239 @@
-# Task Breakdown — Profile Interview (v1)
+# Task Breakdown — Spotify Music Integration (v1)
 
-**Feature:** `profile-interview` · **Branch:** `feat/profile-interview` · 2026-10-05
-**Task:** `plan-tasks` (agent `le`) · **Contract:** `task_breakdown_l3` → this file + `specs/plan-tasks/tasks/`
-**Inputs folded in:** `specs/design-l2.md` (L2 component design C01–C13, `review-l2` GO at 2026-10-05;
-includes the C13 app-start routing under the 2026-10-05 owner amendment FR-PI-016);
-`specs/security-design-review.md` (`SECURITY-GO`, STRIDE, findings SD-1 … SD-7, amendments
-AM-1 … AM-4, 10 evidence obligations, accepted residuals); `specs/review-l2.md` (GO, observations
-OB-1 … OB-5); the signed-off requirement set `specs/define-requirements.lock.yaml` +
-`specs/define-requirements/` (16 FR-PI / 11 NFR-PI); `constitution.md` and
-`specs/profile-interview/constitution.md`.
+**Feature:** `spotify-music-integration` (brownfield, iOS only)
+**Worktree:** `elderly-ai-assistant-spotify-music-integration` · branch `feat/spotify-music-integration`
+**Task:** `plan-tasks` (contract `task_breakdown_l3`) · **Agent:** `lead-engineer`
+**Inputs:** `specs/design-l1.md`, `specs/design-l2.md`, `specs/review-l2.md` (GO),
+`specs/security-design-review.md` (SECURITY-GO, no BLOCKERs), `specs/define-requirements.md`
+(17 FR-SP + 12 NFR-SP), the feature constitution and the project `constitution.md`.
 
 ## Summary
 
-- **Task groups: 4** (Jira Epics) — TG-14 … TG-17
-- **Total tasks: 16** — T-090 … T-105, all leaf task files (no subtasks: single iOS codebase, no
-  platform split, and no task's deliverables are separable enough to justify a second tracker level)
-- **ID numbering convention:** the accumulated global maxima before this plan are T-089 and TG-13,
-  so Profile Interview continues at T-090 and TG-14 (stated per the dispatch rule; computed by the
-  prescribed scan before writing). No existing T-NNN or TG-NN file or folder is reused.
-- **Estimated effort:** ~41–52 developer-days of work; ~21–26 days elapsed with two developers,
-  bounded below by the critical path (~19–22 sequential days on the chain), which a third developer
-  cannot shorten
-- **Critical path:** `T-090 → T-097 → T-098 → T-099 → T-102 → T-104 → T-105`
-- **Security work:** every amendment AM-1 … AM-4 has a named task, and all 10 evidence obligations
-  have a named task and DoD line (both maps below). No blocker exists (`SECURITY-GO`); the
-  amendments are folded non-blockingly, and no finding was turned into a gate.
-- **Requirement coverage:** all 16 FR-PI and all 11 NFR-PI map to at least one task. Nothing is
-  unmapped.
-- **Scope:** iOS only; no task touches an out-of-scope capability. No post-MVP work, no new egress,
-  no new permission, no `Info.plist` change, and no Android work appear anywhere; several tasks
-  carry an acceptance scenario that would fail if an absent capability were introduced rather than
-  stubbed.
+- **Task groups:** 6 (TG-18..TG-23).
+- **Total tasks:** 19 (T-106..T-124), 0 subtasks — every task is a single-owner leaf task
+  (rationale under Marked gaps).
+- **Estimated effort:** ~45.5 developer-days nominal; ~26–30 days elapsed with two
+  developers. Critical-path floor ~24 days.
+- **Critical path:** T-109 → T-110 → T-116 → T-119 → T-120 → T-123 → T-124.
+- **Requirement coverage:** all 29 requirement documents (17 FR-SP, 12 NFR-SP) link from
+  at least one task; map below.
+- **Security work:** the three security requirements M-1..M-3 and verifications V-1..V-4
+  from `security-design-review` are folded into named tasks; the nine evidence obligations
+  each have a producer task and a DoD line; no BLOCKERs exist.
+- **Release gate:** `ios/tools/` + `check-release-log-safety.sh` (wired into `ios/build.sh`)
+  is binding; T-121 extends `FEATURE_ROOTS` with `Services/Spotify/`,
+  `Voice/SpotifyTool.swift` and `Plugins/SpotifyPlugin.swift`. [W5-closure annotation,
+  2026-10-07: shipped as two entries — `Services/Spotify` (no trailing slash; the match is
+  equality-or-prefix) and `Services/Plugins/SpotifyPlugin.swift`; `Voice/SpotifyTool.swift`
+  is a stale path (the tool lives in `Services/Spotify`). The corrected rule-scope model is
+  the C-2 disposition below (:141-143); design §20 carries the matching annotation.]
+- **Scope:** MVP only. No brain/router model-stack changes, no backend, no cloud LLM on
+  the music path, no post-MVP items appear as tasks.
 
 ### Recommended execution order and parallelism
 
-Tasks are numbered in dependency order, so executing T-090 → T-105 in order always satisfies every
-dependency (the `implement` dispatch is a single sequential pass; this order is that pass). The
-waves below are the recommended parallel packing for two developers.
+Dependencies point at lower IDs only, so ascending ID order is a valid topological order.
+Waves below are file-disjoint within each wave.
 
-| Wave | Tasks (parallel within a wave) | Note |
-|---|---|---|
-| 1 | T-090, T-093, T-095 | store, strings and the pipeline extraction are dependency-free and open three independent tracks |
-| 2 | T-091, T-097 | the guard needs the store; the drafts need the record type |
-| 3 | T-092, T-098, T-101 | the coordinator seam needs the guard; the field needs bounds and clamp; the fingerprint step needs only copy |
-| 4 | T-094, T-096, T-099, T-100, T-103 | the clause/seed unit, the ack service, two wizard steps and the Settings editor all open once their foundations exist |
-| 5 | T-102 | the enum and routing wait for all three step views so the exhaustive switch compiles |
-| 6 | T-104 | the log-safety coverage needs every feature source in place |
-| 7 | T-105 | the release evidence bundle needs the gate and the whole journey |
-
-Two independent tracks make the parallelism real: the **reply/prompt track** (T-090 → T-091 →
-T-092 → T-094, with the mirror gate) and the **wake/ack track** (T-095 → T-096). The wizard track
-(T-097 → T-098 → T-099 → T-102) joins them at T-102, and the Settings/evidence track (T-103 →
-T-104 → T-105) closes the feature.
+| Wave | Tasks | Note |
+|------|-------|------|
+| W1 | T-106, T-108, T-109, T-112, T-114, T-115, T-117 | all foundational, no deps |
+| W2 | T-107, T-110, T-111, T-113 | build on W1 |
+| W3 | T-116 | router music path — the integration point |
+| W4 | T-118, T-122 | plugin + corpus supersession |
+| W5 | T-119, T-121 | wiring + release gate |
+| W6 | T-120 | settings surface (needs the wired app) |
+| W7 | T-123 | evidence bundle (needs gate + surface + guard) |
+| W8 | T-124 | device validation (owner/device-dependent) |
 
 ### Critical path
 
 ```
-T-090 (encrypted store)
-  → T-097 (drafts, bounds, mandatory predicate)
-    → T-098 (address-as field)
-      → T-099 (about-you step)
-        → T-102 (step enum + cold-start routing + shell wiring)
-          → T-104 (log-safety coverage)
-            → T-105 (release evidence bundle)
+T-109 ──► T-110 ──► T-116 ──► T-119 ──► T-120 ──► T-123 ──► T-124
+ PKCE      session    router    wiring     settings   evidence   device record
+ (4d)      (4d)       (6d)      (1.5d)     (3d)       (2d)       (3d)
 ```
 
-Sequential effort on this chain is roughly 19–22 days, and it is the longest chain because the
-routing predicate is single-sourced with the About-you Next gate (T-097 must exist first), the
-step views must compile before the exhaustive `stepContent` switch gains its cases (T-099 before
-T-102), and the release evidence cannot run before the gate covers the final sources (T-104 before
-T-105). The **second-critical chain** is the reply track:
-`T-090 → T-091 → T-092 → T-103 → T-104 → T-105` (~16–19.5 days), which the store work clusters
-behind. The ack track (`T-095 → T-096 → T-105`) is the shortest of the three and must land on the
-other developer.
+T-108 sits beside T-109 (both feed T-110). The chain runs through the OAuth lifecycle
+because every user-visible outcome depends on the session's truth; it then passes through
+the single integration point (T-116), the wiring that makes it reachable (T-119), the
+surface the caregiver uses (T-120), and closes on evidence and the device record. Nothing
+on this chain parallelises: T-124 cannot start before the app is wired and the gate is in,
+and the constitution's DV completion gate makes it non-skippable.
 
 ### Key risks
 
-1. **HIGH — seed/template drift on a one-byte boundary (T-094, R3/R11).** The seed ends with an
-   extra newline today (2,699 vs 2,698 bytes); the template edit, the seed edit, the renderer
-   default and the new build-blocking gate must land as one unit, or byte equality breaks in the
-   middle of the change. The worst-case composition (2,586 of the pinned 3,000 Characters) is
-   re-measured in the same task so the next trim starts from truth.
-2. **HIGH — the capture-start extraction must be behavior-preserving (T-095, NFR-PI-010).** Moving
-   the capture-start body into `beginCapture` changes the pipeline's most safety-adjacent path;
-   the nil-seam path must equal today's code exactly and the existing seam suites must stay green
-   unchanged. AM-3 additionally requires the racing-detection window to be covered.
-3. **HIGH — acknowledgement latency vs the activation budget (T-096, T-105, OD-A1, R1/R5).** The
-   detection-to-first-audio budget (≤ 1 s) is unmeasured on device; the hold bound is injectable
-   and the design's fallback ladder (warm engine, memory-only pre-synthesis, shorter copy) is the
-   lever. No default changes without the T-105 measurement and a recorded decision.
-4. **HIGH — corrupt-store removal semantics (T-090, R7, FR-PI-015).** A present-but-undecodable
-   payload is removed exactly once and cached; any retry loop or partial application would turn a
-   corrupt record into a startup hazard. Absent vs unreadable must stay distinct through the
-   tri-state probe.
-5. **HIGH — guard policy boundary for instruction-shaped terms (T-091, T-094, SD-1/AM-1).** The
-   shared marker table is English/transliterated by design, so out-of-table shapes (including the
-   requirement's own example) pass as quoted data; the containment statement and the split fixtures
-   (in-table vs out-of-table, with an A/B routing assertion) make the boundary explicit and
-   evidenced rather than silently assumed.
-6. **MEDIUM — guard false positives reject a legitimate term (T-091, R9).** A benign term phrased
-   like a marker is dropped for that turn only: no crash, no user error, the event makes it
-   visible, and the acknowledgement still speaks the stored term verbatim.
-7. **MEDIUM — Devanagari grapheme handling in clamps (T-091, T-098, R10).** Every clamp goes
-   through `Character` prefixes and the tests pin a Devanagari conjunct fixture, where a naive
-   count would split a cluster.
-8. **MEDIUM — cold-start routing repeats until the interview is completed (T-102, R13).** The
-   repetition is the owner's amendment, not an implementation choice; the soft-skip and the
-   dismissible presentation guarantee the user is never trapped, and the decision is once per
-   process (no foreground re-check).
-9. **MEDIUM — shared-file regressions in the coordinator and the shell (T-092, T-102,
-   NFR-PI-010).** Both edits must be additive; the existing coordinator and wizard suites keep
-   passing, and the boot guard keeps hosted unit tests on today's behavior.
-10. **MEDIUM — log-safety coverage gap in shared files (T-104, SD-4/AM-4).** The strict gate rules
-    cover the feature's dedicated sources (including the dedicated step-view file); the coordinator
-    edits remain best-effort by the amendment's own wording, contained by the runtime
-    redaction/allow-list choke point; the gate exit-0 obligation is carried in the release
-    checklist (T-105).
+1. **T-116 (CRITICAL) — matrix breadth.** Twelve state x outcome rows, each with an
+   honest spoken line and exactly one side effect. Mitigation: one named test per row, the
+   never-stub pin, and the byte-identical explicit-YouTube assertion.
+2. **T-114 (HIGH) — M-1 log regression.** The query-free variant must not change
+   explicit-YouTube behaviour. Mitigation: baseline capture before the change; byte-identical
+   assertion after; every entry of a music turn walked, not just the terminal one.
+3. **T-118 (HIGH) — C-1 fragment trim.** The §27 text measures 376 characters against a
+   341-character budget pin. Mitigation: trim while keeping the `spotify.play` / `query`
+   tokens and the L2-D15 routing sentence; the length assertion is the tripwire.
+4. **T-109 / T-110 (HIGH) — OAuth lifecycle.** Exact-match callback, single refresh,
+   wipe-on-definitive-rejection. Mitigation: callback reject matrix test, refresh-bound
+   call-count assertions, V-3 registry constraint, and the V-1 stance verification recorded
+   into the evidence bundle before close.
+5. **T-124 (HIGH) — owner/device dependency.** No simulator or agent substitute satisfies
+   FR-SP-017. Mitigation: protocol authored early; execution scheduled against the owner's
+   device and the OD-S2 registration; a failed item blocks completion.
+6. **T-111 / T-124 (MEDIUM) — V-2 Dashboard scheme acceptance.** Contingency is a single
+   shared constant plus the plist entry; owner action, re-verified on device (DV-2).
+7. **T-113 (MEDIUM) — F-6 contact-veto trade-off.** A contact whose name contains a full
+   music marker is unreachable via search-marker utterances; accepted, recorded at the
+   documenting fixture.
+8. **T-117 / T-120 (MEDIUM) — F-7 copy nuance.** The remove-confirm copy is stronger than
+   matrix row 8 (search hand-off can still occur when YouTube cannot serve); if kept, the
+   deviation is recorded explicitly.
 
-### Owner actions (not agent work — these gate `final-sign-off`)
+### Owner actions (not agent work)
 
-These are recorded here as owner-held, and no task in this plan performs them:
+- **OD-S2 Dashboard registration:** owning account, client-ID paste-in, redirect-scheme
+  registration (`sahayak-spotify://callback`, V-2), test-user registration, quota-extension
+  filing, rollout-note copy approval, final sign-off. Marked as a dependency at T-109
+  (M-3 scope step), T-111 (V-2), T-123 (scope-equality column) and T-124 (execution).
+- **Device validation execution (T-124):** owner's device, real Spotify account; the
+  constitution's DV completion gate is binding.
+- **M-3 advisory:** decide trim vs justify for `user-read-playback-state` before the
+  Dashboard registration step; the pinned scope test in T-109 is the tripwire.
+- **Quota-window recording** (carried design note) stays with the owner's registration
+  records.
 
-- **OD-A2 — English ack copy eyeball.** The en template `Yes, %@` is confirmed by the owner at
-  review of the T-093 / T-096 changes; the term is never translated or reformatted.
-- **App Store privacy-disclosure update** for the new profile fields (NFR-PI-011 item 2) — an
-  owner/compliance action inside the 2026-10-13 window; named in the T-105 bundle so it is not
-  lost.
-- **Accepted residual (OD-PI-5 / SD-6): plain Settings editor, no biometric gate.** Owner-accepted
-  2026-10-05; the project-wide gate remains a recorded follow-up outside this feature. T-103
-  references the record; no agent work re-litigates it.
-- **Optional, not scheduled:** extending the shared injection-marker family is a project-level
-  decision recorded by SD-1; this feature neither requires nor performs it.
+### Condition fold-ins (review-l2)
 
-### Security findings and mandatory amendments (AM-1 … AM-4, SD-1 … SD-7)
+| Condition | Where it lands |
+|-----------|----------------|
+| C-1 fragment ≤ 341 chars | T-118 — trim keeping tokens + L2-D15 sentence; length assertion is the tripwire |
+| C-2 gate rule-scope wording | No implement task — documentation-only correction of the §20 sentence; recorded below under Marked gaps |
+| C-3 golden block = 15 entries | T-122 — 15-entry block unedited, count annotated, guard added; T-116 must not edit the corpus |
+| C-4 icon switch | T-115 — both exhaustive `Kind` switches (label and icon) get the case; no default arm |
 
-| Amendment / finding | Landed in | Also required by |
-|---|---|---|
-| AM-1 containment statement + split fixtures for in-table vs out-of-table terms (SD-1) | **T-091** (documentation + in-table fixtures), **T-094** (A/B routing assertion) | T-105 (evidence index) |
-| AM-2 quote-family neutralisation incl. U+2018 / U+2019 / U+201C / U+201D and backtick (SD-2) | **T-091** | — |
-| AM-3 correct the "closes the gate synchronously" claim + racing-detection test (SD-3) | **T-095** (documentation + seam test), **T-096** (supersede test) | — |
-| AM-4 step views inside the strict gate rules via a dedicated file; keep the gate exit-0 obligation in the release checklist (SD-4) | **T-104** (scan roots), **T-099 / T-100 / T-101** (dedicated file), **T-105** (checklist item) | T-105 |
-| SD-5 ack temp WAV evidence | T-096 (pin), T-105 (device run) | evidence obligation 5 |
-| SD-6 plain editor residual | T-103 (referenced, accepted) | owner action above |
-| SD-7 routing tampering/corrupt map accepted | T-102 (documented, stores nothing) | evidence obligation 9 |
+### Security fold-ins (security-design-review)
 
-**Blocker status:** none. `security-design-review` returned `SECURITY-GO` with no blocker; every
-amendment is a non-blocking precision or coverage item and is folded into the tasks above. No
-non-blocking finding was turned into a gate.
+| Item | Where it lands |
+|------|----------------|
+| M-1 query-free logging on music turns | T-114 (variant; explicit-YouTube byte-identical) + T-116 (usage; every-entry tool-log walk) |
+| M-2 privacy copy names playback activity | T-117 (copy, both locales) + T-120 (surface) + T-123 obligation 7 |
+| M-3 least-privilege scope trim | T-109 — pinned scope set; trim-or-justify before Dashboard registration; owner step marked |
+| V-1 revocation-endpoint stance verification | T-110 — verified and recorded into the T-123 bundle before close |
+| V-2 Dashboard scheme acceptance | T-111 (single-constant contingency + plist) + T-124 DV item; owner action |
+| V-3 `providerError(code:)` constrained | T-109 — only OAuth-registry codes; unknown codes map to `malformedResponse` |
+| V-4 `OpenOutcome` pinned to probe | T-107 — pinned to the `canOpenURL` probe result |
 
 ### Security evidence obligations → task and DoD line
 
-| # | Obligation (from the security review) | Task(s) | Where the DoD line lives |
-|---|---|---|---|
-| 1 | In-table marker term: quarantine fires, un-personalized turn, byte-identical prompt, content-free event | T-091, T-094 | T-091 "Evidence (obligation 1)"; T-094 "Evidence (obligation 1, clause half)" |
-| 2 | Out-of-table payloads (the requirement's example + a Nepali instruction-shaped term) with the A/B routing assertion | T-091, T-094 | T-091 "Evidence (obligation 2)"; T-094 "Evidence (obligation 2, clause half)" |
-| 3 | Quote-family break attempts + grapheme-boundary truncation against the 24-grapheme bound and the pinned budget | T-091, T-094 | T-091 "Evidence (obligation 3, guard half)"; T-094 "Evidence (obligation 3, clause half)" |
-| 4 | Personalized Release session: zero profile values in console, logs, telemetry; extended gate exits 0 | T-104, T-105 | T-104 "Evidence (obligation 4, gate half)"; T-105 "Evidence (obligation 4)" |
-| 5 | Container inspection: no plaintext anywhere; ack WAV gone after playback; key material required | T-090, T-096, T-105 | T-090 "Evidence (obligation 5, store half)"; T-096 "Evidence (obligation 5, WAV half)"; T-105 "Evidence (obligation 5)" |
-| 6 | Corrupt-payload run: removed once, never partially applied, no loop, startup unaffected | T-090 | T-090 "Evidence (obligation 6)" |
-| 7 | Offline full journey: zero feature-attributable network | T-105 | T-105 "Evidence (obligation 7)" |
-| 8 | Ack failure injection: unresolved template, timeout, cancel — silent start, completion exactly once, balanced bookkeeping | T-096 | T-096 "Evidence (obligation 8)" |
-| 9 | Cold-start routing: corrupt map and unreadable profile — no crash, stall, loop or trap; skip/dismiss present | T-102 | T-102 "Evidence (obligation 9)" |
-| 10 | Voice fingerprint: diff-level mechanism/storage/permission non-change; no biometric value in the new store, logs or payloads | T-101 | T-101 "Nothing about the mechanism changed" scenario + DoD |
+| # | Obligation | Producer | DoD line |
+|---|-----------|----------|----------|
+| 1 | Artifact secret scan (repo + app image) | T-123 | "no secrets, tokens or query text inside the bundle"; scan output recorded |
+| 2 | Keychain placement and post-wipe sweep | T-108 | "Keychain placement sweep test asserts zero credential material after wipe" |
+| 3 | Callback reject matrix | T-109 | "Callback reject matrix complete: one named assertion per rejection class" |
+| 4 | Refresh / revocation bounds | T-110 | "Refresh-bound and wipe-path tests assert call counts and stored state" |
+| 5 | Hostile corpus | T-107 | "the full hostile corpus has one test case per fixture" |
+| 6 | Log-surface checks incl. DV-7 capture | T-121 + T-124 | "zero sensitive material" gate fixture + DV-7 capture inspection |
+| 7 | Disclosure copy vs data flow | T-117 + T-120 | "M-2 disclosure wording confirmed against FR-SP-016 in both languages" |
+| 8 | Scope equality (requested = pinned = Dashboard) | T-109 (+ OD-S2) | "Scope-pinning test asserts exact equality with the least-privilege set" |
+| 9 | Egress allowlist | T-116 | "no network call targets a host outside the two provider hosts" |
 
-### Review observations folded into tasks (OB-1 … OB-5)
+### Planning assumptions and marked gaps
 
-| Observation | Landed in |
-|---|---|
-| OB-1 `WakeAcknowledging` "always calls completion exactly once" refined by the state machine's cancel exception | T-096 (contract documented incl. the cancel path) |
-| OB-2 wizard merge base for `.absent` / `.unreadable` spelled out as the empty record | T-097 (documented in the helpers) |
-| OB-3 FR-PI-013's "No force-migration" scenario superseded for the app-start path | Context only — no task; the supersession is recorded in FR-PI-016 and design-l2, and an annotation on FR-PI-013 rides the next touch of the set |
-| OB-4 §9.2's "byte-identical" phrasing made precise | T-094 (the renderer-default equality is asserted directly, not only through the gate) |
-| OB-5 OD-A1 and OD-A2 carried as evidence/eyeball items | T-105 (OD-A1 protocol) + the owner action for OD-A2 above |
-
-### Out-of-scope guardrails (absent, not stubbed)
-
-No task creates: a step that blocks the interview (every step stays skippable; the About-you gate
-applies to its Next button only); any new persisted state for routing; a background-to-foreground
-re-check; a second profile store or any plaintext copy; new egress, permissions or plist changes;
-prompt changes beyond the one clause and its seed mirror; per-language fine-tuned models; or any
-Android work. Tasks T-100 (emergency-call path unchanged), T-101 (mechanism unchanged), T-102
-(stores nothing, grants nothing), T-103 (no new authentication) and T-096 (single bookkeeping
-owner) each carry an acceptance scenario that would fail if the absent capability were introduced.
-
-### Planning assumptions for the driver to flag
-
-1. **No subtasks were used.** The feature is a single iOS codebase with no platform split; the repo
-   precedent for this shape uses leaf tasks only. If the driver prefers the parent/subtask shape,
-   the natural candidates are T-090 (store) and T-102 (enum + routing).
-2. **ID numbering continues the global maxima** (T-089 → this plan starts at T-090; TG-13 → starts
-   at TG-14), per the dispatch convention; the pre-existing TG-01 … TG-13 files and folders are
-   untouched, and only the two replaced files carry the new feature's content.
-3. **The step views land in a dedicated `App/ProfileInterviewSteps.swift`** (AM-4's option) even
-   though design-l2 sketched them inside the wizard file; AM-4's text is the binding one and the
-   dedicated file is what puts them inside the strict gate rules.
-4. **The seed, template, renderer and mirror gate land as one task (T-094)** per design-l2's
-   hand-off note; splitting them would break byte equality mid-landing.
-5. **`implement` is a single sequential dispatch** — numeric order is a valid topological order
-   (every dependency points at a lower id), so the driver can execute top-to-bottom without
-   re-planning.
-6. **`ios/build.sh` is the build/test gate** (it runs `xcodebuild test`); the new suites live under
-   `ElderlyAssistantTests/` mirroring the source paths, so the project's test-impact mapping covers
-   them without a mapping change.
-7. **OD-A1's fallback ladder is invoked only if the T-105 measurement misses the budget**; any
-   default change is a recorded decision (`wakeAckMaxHoldSeconds` is injectable by design), not a
-   silent edit.
-8. **No new observability metadata keys are introduced**; every event the feature emits uses
-   `outcome` / `error_code` / `duration_ms`, all already in the shipped allow-list, and the five
-   profile field names are added to the redaction set only (fail-closed).
+- **ID numbering.** This tree accumulates across features (TG-01..TG-10, TG-14..TG-17 on
+  disk from earlier features). New IDs continue at the global maxima: **TG-18..TG-23**,
+  **T-106..T-124**. The generic TG-01/T-001 boilerplate in older templates is not
+  applicable — those IDs are taken.
+- **C-2 disposition.** Documentation-only correction of the §20 rule-scope sentence (rule 1
+  all files, rule 2 engine files, rules 3–6 feature roots). No task exists for it because
+  no code changes; T-121 implements the correct scoping and notes this.
+- **No subtasks.** Every task is a single-owner leaf. The two natural split candidates —
+  the router music path and the auth flow — share single files (`CommandRouter.swift`,
+  the auth component files) and shared test files, so parallel subtasks would collide on
+  the same working tree. Instead the router unit was carved into three sequential tasks
+  (T-114, T-115, T-116) and the remaining tasks are wave-disjoint. If the implement phase
+  needs finer units, it should split by file, not by scenario.
+- **Design section references.** Task files cite component IDs (C-SP-01..16) as the stable
+  anchor; section numbers are used only where the review reproduced them.
+- **DV wording.** The constitution's DV table plus the design's expansion to DV-7 is the
+  source of record for each item's text; T-124 adopts it verbatim rather than re-inventing
+  item wording.
+- **Gate scope.** The binding local release check is `ios/build.sh` including the
+  log-safety gate; there is no Android/other-platform work.
 
 ## Contents
 
-- [tasks/index.md](tasks/index.md) — all task groups
-- [tasks/TG-14-profile-foundations/index.md](tasks/TG-14-profile-foundations/index.md) — store, guard, coordinator seams and strings
-- [tasks/TG-15-personalization-paths/index.md](tasks/TG-15-personalization-paths/index.md) — prompt clause, seed mirror gate, wake acknowledgement
-- [tasks/TG-16-interview-wizard-and-startup-routing/index.md](tasks/TG-16-interview-wizard-and-startup-routing/index.md) — drafts, steps and app-start routing
-- [tasks/TG-17-settings-release-and-evidence/index.md](tasks/TG-17-settings-release-and-evidence/index.md) — Settings editor, log-safety coverage and the release evidence bundle
-
-Requirement IDs referenced by the tasks resolve under `specs/define-requirements/` (`FR/` and
-`NFR/` per-requirement files); component IDs (C01 … C13) and parameter names are used verbatim from
-`specs/design-l2.md`; amendment and finding IDs come from `specs/security-design-review.md`;
-observation IDs come from `specs/review-l2.md`.
+- [tasks/index.md](tasks/index.md) — all task groups and the ID numbering convention
+- [TG-18 — Spotify Tool and Deep-Link Hardening](tasks/TG-18-spotify-tool-and-deep-link-hardening/index.md)
+- [TG-19 — Account Linking, Credential Store and Session](tasks/TG-19-account-linking-credential-store-and-session/index.md)
+- [TG-20 — Music Intent Intake and Contact Veto](tasks/TG-20-music-intent-intake-and-contact-veto/index.md)
+- [TG-21 — Router Music Path, Degradation and Tool Log](tasks/TG-21-router-music-path-degradation-and-tool-log/index.md)
+- [TG-22 — Plugin, Wiring, Settings and Localisation](tasks/TG-22-plugin-wiring-settings-and-localisation/index.md)
+- [TG-23 — Release Gates, Security Evidence and Device Validation](tasks/TG-23-release-gates-security-evidence-and-device-validation/index.md)
 
 ### Task groups
 
-| Group | Title | Tasks | Effort | Critical for |
-|---|---|---|---|---|
-| [TG-14](tasks/TG-14-profile-foundations/index.md) | Profile Foundations — store, guard, seams, strings | 4 | ~9.5–12 days | every other group |
-| [TG-15](tasks/TG-15-personalization-paths/index.md) | Personalization Paths — prompt clause, seed mirror, wake ack | 3 | ~9.5–12 days | FR-PI-008 … 011 |
-| [TG-16](tasks/TG-16-interview-wizard-and-startup-routing/index.md) | Interview Wizard and Startup Routing | 6 | ~14.5–18 days | FR-PI-001 … 007, 013, 016 |
-| [TG-17](tasks/TG-17-settings-release-and-evidence/index.md) | Settings, Log Safety and Release Evidence | 3 | ~8–10 days | `security-test`, `final-sign-off` |
+| Group | Title | Tasks | Effort | Risk profile |
+|-------|-------|-------|--------|--------------|
+| TG-18 | Spotify Tool and Deep-Link Hardening | 2 | ~5.5 d | 2x HIGH |
+| TG-19 | Account Linking, Credential Store and Session | 4 | ~11 d | 3x HIGH, 1x MEDIUM |
+| TG-20 | Music Intent Intake and Contact Veto | 2 | ~3.5 d | 1x HIGH, 1x MEDIUM |
+| TG-21 | Router Music Path, Degradation and Tool Log | 3 | ~8 d | 1x CRITICAL, 2x HIGH/MEDIUM |
+| TG-22 | Plugin, Wiring, Settings and Localisation | 4 | ~9.5 d | 2x HIGH, 2x MEDIUM |
+| TG-23 | Release Gates, Security Evidence and Device Validation | 4 | ~8 d | 3x HIGH, 1x MEDIUM |
 
 ### All tasks
 
-| ID | Title | Group | Depends on | Scope (one line) | Effort | Risk |
-|---|---|---|---|---|---|---|
-| [T-090](tasks/TG-14-profile-foundations/T-090-user-profile-store.md) | `UserProfileStore` — encrypted profile record (C01) | TG-14 | — | one encrypted record, whole-record decode, tri-state absent/unreadable discrimination, atomic writes, content-free events | L | HIGH |
-| [T-091](tasks/TG-14-profile-foundations/T-091-profile-prompt-guard-and-personalization.md) | `ProfilePromptTextGuard` + `ProfilePersonalization` (C07, AM-1, AM-2) | TG-14 | T-090 | the guard pipeline, quote-family neutralisation, grapheme clamp, and the guarded/verbatim read seam | M | HIGH |
-| [T-092](tasks/TG-14-profile-foundations/T-092-coordinator-profile-seams.md) | Coordinator profile seams — writer, snapshot, personalization (C01) | TG-14 | T-090, T-091 | the single writer, the cached snapshot and the `init()`-built personalization seam | M | MEDIUM |
-| [T-093](tasks/TG-14-profile-foundations/T-093-l10n-catalog-additions.md) | L10n catalogue additions (C09) | TG-14 | — | every new string keyed in en + ne, the ack template included; data never catalogued | M | MEDIUM |
-| [T-094](tasks/TG-15-personalization-paths/T-094-prompt-clause-and-seed-mirror-gate.md) | Prompt clause + seed mirror + build gate (C06, C08) | TG-15 | T-091, T-092 | the clause at its three anchors, the seed placeholder, the renderer default and the build-blocking mirror gate as one unit | L | HIGH |
-| [T-095](tasks/TG-15-personalization-paths/T-095-capture-extraction-and-ack-seam.md) | `VoicePipeline.beginCapture` extraction + ack seam (C05) | TG-15 | — | behavior-preserving extraction, the nil-default seam, the `stop()` cancel and the epoch protection | M | HIGH |
-| [T-096](tasks/TG-15-personalization-paths/T-096-wake-acknowledgment-service.md) | `WakeAcknowledgmentService` + coordinator wiring (C05) | TG-15 | T-092, T-093, T-095 | the two-state ack machine, phrase composition, the timeout/cancel paths and the base-speaker wiring | L | HIGH |
-| [T-097](tasks/TG-16-interview-wizard-and-startup-routing/T-097-onboarding-drafts-and-bounds.md) | Onboarding drafts, bounds and mandatory predicate (C02) | TG-16 | T-090 | pure draft/merge helpers, entry bounds and the single-sourced trimmed-non-empty predicate | S | MEDIUM |
-| [T-098](tasks/TG-16-interview-wizard-and-startup-routing/T-098-address-as-field.md) | `AddressAsField` — chips + custom entry (C03) | TG-16 | T-091, T-093, T-097 | preset chips as data plus a grapheme-clamped free-text field, shared by wizard and Settings | M | MEDIUM |
-| [T-099](tasks/TG-16-interview-wizard-and-startup-routing/T-099-about-you-step.md) | About-you step (C02) | TG-16 | T-092, T-093, T-097, T-098 | name, address-as and optional component-only DOB with the gated Next and the open Skip | M | MEDIUM |
-| [T-100](tasks/TG-16-interview-wizard-and-startup-routing/T-100-emergency-contacts-step.md) | Emergency contacts step + family list (C02, C11) | TG-16 | T-092, T-093, T-097 | singular kin designation through existing APIs, GP/hospital, and the family-step confirmation list | M | MEDIUM |
-| [T-101](tasks/TG-16-interview-wizard-and-startup-routing/T-101-voice-fingerprint-step.md) | Voice fingerprint step (C12) | TG-16 | T-093 | hosts the existing enrollment session as an optional skippable step — a call site only | M | MEDIUM |
-| [T-102](tasks/TG-16-interview-wizard-and-startup-routing/T-102-step-enum-and-cold-start-routing.md) | Step enum extension + cold-start routing + shell wiring (C02, C13) | TG-16 | T-092, T-097, T-099, T-100, T-101 | the three enum cases, the exhaustive switch, the route rule and its once-per-process consumption | L | HIGH |
-| [T-103](tasks/TG-17-settings-release-and-evidence/T-103-profile-settings-editor.md) | Profile Settings editor + destination row (C04) | TG-17 | T-092, T-093, T-097, T-098 | the post-interview editor, the destination row and the updated Settings expectations | M | MEDIUM |
-| [T-104](tasks/TG-17-settings-release-and-evidence/T-104-log-safety-coverage.md) | Log-safety coverage — redacted keys + feature roots (C10) | TG-17 | T-102, T-103 | fail-closed redaction for the five field names and strict gate coverage for the feature's sources | M | HIGH |
-| [T-105](tasks/TG-17-settings-release-and-evidence/T-105-release-evidence-and-device-validation.md) | Release evidence bundle + device validation (obligations 4, 5, 7; OD-A1) | TG-17 | T-094, T-096, T-102, T-103, T-104 | the Release-session, container and offline-journey evidence plus the device latency measurement | L | HIGH |
+| ID | Title | Group | Depends on | Effort | Risk |
+|----|-------|-------|------------|--------|------|
+| [T-106](tasks/TG-18-spotify-tool-and-deep-link-hardening/T-106-spotify-tool-search-and-play.md) | SpotifyTool search and remote-play client | TG-18 | — | L | HIGH |
+| [T-107](tasks/TG-18-spotify-tool-and-deep-link-hardening/T-107-deep-link-grammar-and-hardening.md) | Deep-link grammar, hostile corpus and open probe | TG-18 | T-106 | M | HIGH |
+| [T-108](tasks/TG-19-account-linking-credential-store-and-session/T-108-spotify-credential-store.md) | SpotifyCredentialStore with keychain-resident encrypted record | TG-19 | — | M | HIGH |
+| [T-109](tasks/TG-19-account-linking-credential-store-and-session/T-109-spotify-auth-flow-pkce.md) | SpotifyAuthFlow: PKCE authorize, callback validation, exchange, refresh | TG-19 | — | L | HIGH |
+| [T-110](tasks/TG-19-account-linking-credential-store-and-session/T-110-spotify-account-session.md) | SpotifyAccountSession: link, refresh, unlink, status | TG-19 | T-108, T-109 | L | HIGH |
+| [T-111](tasks/TG-19-account-linking-credential-store-and-session/T-111-web-auth-session-and-plist.md) | ASWebSpotifyAuthSession presenter and Info.plist declarations | TG-19 | T-109 | M | MEDIUM |
+| [T-112](tasks/TG-20-music-intent-intake-and-contact-veto/T-112-keyword-intent-rule-music.md) | KeywordIntentRule music domain, markers and extractor | TG-20 | — | L | HIGH |
+| [T-113](tasks/TG-20-music-intent-intake-and-contact-veto/T-113-contact-search-music-veto.md) | VoiceContactSearchRoute music veto | TG-20 | T-112 | S | MEDIUM |
+| [T-114](tasks/TG-21-router-music-path-degradation-and-tool-log/T-114-youtube-query-free-logging.md) | Query-free logging variant for reused YouTube helpers (M-1) | TG-21 | — | M | HIGH |
+| [T-115](tasks/TG-21-router-music-path-degradation-and-tool-log/T-115-tool-log-spotify-kind.md) | LocalToolLogStore spotify kind and tool-log view switches (C-4) | TG-21 | — | S | MEDIUM |
+| [T-116](tasks/TG-21-router-music-path-degradation-and-tool-log/T-116-router-music-path.md) | Router music path: seams, matrix, intake and pins | TG-21 | T-106, T-107, T-110, T-112, T-113, T-114, T-115 | XL | CRITICAL |
+| [T-117](tasks/TG-22-plugin-wiring-settings-and-localisation/T-117-localisation-catalog.md) | Localisation catalog: 20 keys ne/en incl. privacy disclosure (M-2) | TG-22 | — | M | HIGH |
+| [T-118](tasks/TG-22-plugin-wiring-settings-and-localisation/T-118-spotify-plugin-and-prompt-fragment.md) | SpotifyPlugin and trimmed prompt fragment (C-1) | TG-22 | T-106, T-107, T-110, T-117 | L | HIGH |
+| [T-119](tasks/TG-22-plugin-wiring-settings-and-localisation/T-119-app-coordinator-wiring.md) | AppCoordinator wiring for the Spotify services | TG-22 | T-110, T-111, T-116, T-118 | M | MEDIUM |
+| [T-120](tasks/TG-22-plugin-wiring-settings-and-localisation/T-120-settings-surface.md) | Settings linking surface, unlink and privacy disclosure | TG-22 | T-110, T-117, T-119 | L | MEDIUM |
+| [T-121](tasks/TG-23-release-gates-security-evidence-and-device-validation/T-121-release-log-safety-gate.md) | Release log-safety gate FEATURE_ROOTS extension | TG-23 | T-107, T-110, T-118 | S | HIGH |
+| [T-122](tasks/TG-23-release-gates-security-evidence-and-device-validation/T-122-golden-corpus-supersession.md) | Golden-corpus supersession mechanics and pinned-surface guard (C-3) | TG-23 | T-116 | M | HIGH |
+| [T-123](tasks/TG-23-release-gates-security-evidence-and-device-validation/T-123-security-evidence-bundle.md) | Security evidence bundle (nine obligations) | TG-23 | T-120, T-121, T-122 | M | HIGH |
+| [T-124](tasks/TG-23-release-gates-security-evidence-and-device-validation/T-124-device-validation-protocol.md) | DV-1..DV-7 device-validation protocol and record (FR-SP-017) | TG-23 | T-119, T-120, T-121 | L | HIGH |
 
 ### Requirement → task trace
 
 | Requirement | Tasks |
-|---|---|
-| FR-PI-001 | T-099, T-100, T-101, T-102 |
-| FR-PI-002 | T-097, T-098, T-099, T-102 |
-| FR-PI-003 | T-090, T-092 |
-| FR-PI-004 | T-099, T-100, T-101, T-102 |
-| FR-PI-005 | T-100 |
-| FR-PI-006 | T-100 |
-| FR-PI-007 | T-101 |
-| FR-PI-008 | T-095, T-096 |
-| FR-PI-009 | T-094 |
-| FR-PI-010 | T-091, T-094, T-096, T-098, T-099, T-103 |
-| FR-PI-011 | T-090, T-091, T-095, T-096, T-103 |
-| FR-PI-012 | T-092, T-103 |
-| FR-PI-013 | T-102 (the resume mechanics; FR-PI-016 supersedes its "No force-migration" scenario for the app-start path, recorded in FR-PI-016) |
-| FR-PI-014 | T-090, T-100 |
-| FR-PI-015 | T-090, T-092, T-102 |
-| FR-PI-016 | T-097 (predicate), T-102 (route + shell) |
-| NFR-PI-001 | T-090, T-096, T-100, T-105 |
-| NFR-PI-002 | T-090, T-091, T-096, T-104 |
-| NFR-PI-003 | T-090, T-105 |
-| NFR-PI-004 | T-091, T-094 |
-| NFR-PI-005 | T-094 |
-| NFR-PI-006 | T-093, T-098, T-103 |
-| NFR-PI-007 | T-098, T-099, T-103 |
-| NFR-PI-008 | T-096 |
-| NFR-PI-009 | T-101, T-105 |
-| NFR-PI-010 | T-090, T-092, T-095, T-096, T-101, T-102 |
-| NFR-PI-011 | T-104, T-105, plus the owner action above |
+|-------------|-------|
+| FR-SP-001 music requests start real playback | T-116 |
+| FR-SP-002 both-provider search | T-106, T-116 |
+| FR-SP-003 Spotify preferred when linked and capable | T-116 |
+| FR-SP-004 YouTube fallback when Spotify cannot serve | T-114, T-116 |
+| FR-SP-005 explicit YouTube requests unchanged | T-112, T-114, T-116 |
+| FR-SP-006 SpotifyPlugin / AssistantPlugin twin | T-118, T-119 |
+| FR-SP-007 SpotifyTool search and deep link | T-106, T-107, T-118 |
+| FR-SP-008 account linking by caregiver | T-109, T-110, T-111, T-119, T-124 |
+| FR-SP-009 encrypted Spotify credential store | T-108 |
+| FR-SP-010 unlink wipes credentials and revokes | T-108, T-110, T-120 |
+| FR-SP-011 free-tier deep-link degradation | T-107, T-116, T-124 |
+| FR-SP-012 honest outcomes, no silent failure | T-106, T-110, T-115, T-116 |
+| FR-SP-013 keyword intent rule music domain | T-112 |
+| FR-SP-014 contact-search veto parity | T-113 |
+| FR-SP-015 music request intake in route ladder | T-116 |
+| FR-SP-016 settings linking and privacy disclosure | T-117, T-120 |
+| FR-SP-017 device validation recorded and passed | T-124 |
+| NFR-SP-001 provider search responsiveness | T-106 |
+| NFR-SP-002 log safety | T-106, T-107, T-108, T-109, T-110, T-111, T-114, T-115, T-116, T-118, T-120, T-121, T-123, T-124 |
+| NFR-SP-003 no new network egress | T-106, T-109, T-116 |
+| NFR-SP-004 prompt budget preserved | T-118, T-122 |
+| NFR-SP-005 localisation | T-117, T-120 |
+| NFR-SP-006 no regression | T-112, T-113, T-114, T-116, T-122 |
+| NFR-SP-007 credential encryption at rest | T-108 |
+| NFR-SP-008 deep-link URI hardening | T-107 |
+| NFR-SP-009 OAuth redirect and token lifecycle | T-109, T-110, T-111 |
+| NFR-SP-010 accessibility of new surfaces | T-120 |
+| NFR-SP-011 compliance and release gates | T-111, T-121, T-123 |
+| NFR-SP-012 plugin isolation and model-stack invariance | T-116, T-118, T-119, T-122 |

@@ -1,12 +1,11 @@
-# Requirements — Profile Interview + Address-as
+# Requirements — Spotify Music Integration
 
-**Project:** Elderly AI Assistant · **Feature:** `profile-interview` (v1) ·
-**Branch:** `feat/profile-interview` (worktree `elderly-ai-assistant-profile-interview`)
+**Project:** Elderly AI Assistant · **Feature:** `spotify-music-integration` (v1) ·
+**Branch:** `feat/spotify-music-integration` (worktree `elderly-ai-assistant-spotify-music-integration`)
 **Task:** `define-requirements` (agent `ba`; contracts `requirements_doc` + `requirements_lock`)
-**Date:** 2026-10-05 · **Status:** owner-approved — the HIL gate at risk tier T1 was approved
-2026-10-05, and the owner amendment of the same date (adds FR-PI-016, app-start interview-status
-routing) is incorporated; the locked snapshot in `define-requirements.lock.yaml` is
-re-baselined.
+**Date:** 2026-10-06 · **Status:** submitted for owner HIL approval (risk tier T1, per the feature
+workflow's `define-requirements` task); no owner amendment recorded at lock time — the locked
+snapshot in `define-requirements.lock.yaml` is the drift-detection baseline.
 
 This is the consolidated, human-readable copy of the feature requirements. The structured source
 of the same set is the folder [`define-requirements/`](define-requirements/index.md): one file per
@@ -15,47 +14,55 @@ per-requirement files are the unit of change, this document plus the lock file a
 downstream tasks (`design-l1`, `design-l2`, `review-l2`, `security-design-review`, `plan-tasks`,
 `implement`, `security-test`, `final-sign-off`) consume.
 
-**ID convention.** Requirement IDs are namespaced `FR-PI-NNN` / `NFR-PI-NNN`. The project-level
+**ID convention.** Requirement IDs are namespaced `FR-SP-NNN` / `NFR-SP-NNN`. The project-level
 stakeholder brief (`requirements.md`) already uses the bare `FR-NNN` / `NFR-NNN` series, so a
-feature-scoped namespace avoids collisions in downstream traceability — the same convention the
-dementia supplement uses (`FR-DNN`) and live-camera-translation used (`FR-LCT-NNN`). One file per
-requirement; every requirement carries at least one Gherkin scenario, and every security-relevant
-requirement carries a failure scenario.
+feature-scoped namespace avoids collisions in downstream traceability — the same convention
+live-camera-translation used (`FR-LCT-NNN`), profile-interview used (`FR-PI-NNN`) and the dementia
+supplement uses (`FR-DNN`). One file per requirement; every requirement carries at least one
+Gherkin scenario, and every security-relevant requirement carries a failure scenario.
+
+**Supersession note.** `requirements.md` lines 675–676 list "Music and bhajan playback" as
+Post-MVP. That placement is superseded by this feature: the project constitution is the operative
+document, and its 2026-10-06 amendment adds Spotify to Architecture Constraint 1's permitted
+integrations and to the Required-integrations list (recorded in
+`specs/spotify-music-integration/constitution.md`). The supersession is carried by FR-SP-001.
 
 ## Summary
 
-- **Functional requirements: 16** (`FR-PI-001` … `FR-PI-016`)
-- **Non-functional requirements: 11** (`NFR-PI-001` … `NFR-PI-011`)
-- **Areas covered:** Onboarding Wizard (including About-you and the reopen path), Profile Storage,
-  Family & Friends, Emergency Contacts, Voice Fingerprint, Wake Acknowledgment, Brain
-  Personalization, Address-as Data Handling, Settings, Safety Integration, No-Regression, Error
-  Handling. NFR categories: Security, Privacy, Performance, Reliability, Maintainability,
+- **Functional requirements: 17** (`FR-SP-001` … `FR-SP-017`)
+- **Non-functional requirements: 12** (`NFR-SP-001` … `NFR-SP-012`)
+- **Areas covered:** Music Playback / Router, Provider Selection, Degradation (free tier, unlinked
+  account, network failure, empty search), Spotify Tool and deep links, Plugin Architecture,
+  Account Linking (caregiver OAuth), Credential Storage, Intent Routing (deterministic keyword
+  rule, contact-search veto, route-ladder intake), Settings / Privacy Disclosure, Validation /
+  Completion Gate. NFR categories: Performance, Privacy, Security, Reliability, Maintainability,
   Localisation, Accessibility, Compliance.
-- **v1 scope:** three new first-run interview steps — about-you (name + address-as required, DOB
-  optional), emergency contacts (next of kin, GP, hospital — all optional), voice fingerprint
-  (optional, reusing the existing enrollment) — plus the extension of the family & friends step, a
-  new encrypted profile store, address-as injected into the wake acknowledgment
-  (`हजुर <address-as>`) and the brain reply-style rules (`IntentPrompt.build` / `buildChat` /
-  `buildUnderstanding` + interpreter context, cloud Gemini and on-device LLaMA), a Settings
-  editor, the wizard reopen path for existing users, and the rule that the assistant behaves
-  exactly as today until a term is recorded.
-- **Primary sources of truth:** owner brief (2026-10-05, recorded in
-  `specs/profile-interview/init-report.md`); `specs/profile-interview/constitution.md` (feature
-  constitution — Field Contract, Address-as Behaviour Contract, Open Decisions OD-F1/OD-F2/OD-F3,
-  out-of-scope list); `specs/profile-interview/workflow.yaml` (the `define-requirements` scope
-  comment); project `constitution.md` (Architecture Constraints, Standards, release gates).
-- **Read-only stakeholder briefs:** `requirements.md` (baseline; its FR-042 in-app configuration
-  clause and NFR-003 wake-latency target are cited) and `requirements-dementia-supplement.md`
-  (context only; its personalized-copy examples already presuppose the assistant knows the user's
-  form of address).
+- **v1 scope:** replace the first-class music stub (`router.musicStub`, `case .music:` in
+  `ios/ElderlyAssistant/Services/Voice/` `CommandRouter.swift` ~line 2640) with real playback
+  (FR-SP-001); search both providers with Spotify winning whenever linked and capable
+  (FR-SP-002/003), YouTube for explicit YouTube requests (FR-SP-005) and the Spotify-cannot-serve
+  fallback (FR-SP-004); `SpotifyPlugin` + `SpotifyTool` + caregiver account linking + encrypted
+  credential store (FR-SP-006 … FR-SP-010); honest degradation for free tier / unlinked / network
+  failure / empty search with the `spotify:` deep-link fallback (FR-SP-011/012); deterministic
+  routing work (FR-SP-013/014/015); Settings linking/status with the privacy disclosure
+  (FR-SP-016); and the DV-* device-validation completion gate (FR-SP-017).
+- **Primary sources of truth:** `specs/spotify-music-integration/constitution.md` (feature
+  constitution — Purpose & Scope, the routing & degradation contract, Feature Constraints 1–12,
+  the 2026-10-06 amendment record, Open Decisions OD-S1/S2/S3, the DV-* completion gate);
+  `specs/spotify-music-integration/workflow.yaml` (the `define-requirements` scope comment);
+  project `constitution.md` (amended 2026-10-06: Architecture Constraint 1 and the
+  Required-integrations list).
+- **Read-only stakeholder briefs:** `requirements.md` — its §4 "Out of Scope — Post-MVP" table
+  lists "Music and bhajan playback" at lines 675–676 (superseded, see above).
+  `requirements-dementia-supplement.md` is context only; it changes nothing here.
 
 ## Contents
 
 - [`define-requirements/index.md`](define-requirements/index.md) — top-level feature index
 - [`define-requirements/FR/index.md`](define-requirements/FR/index.md) — functional requirement
-  list (16 files: `define-requirements/FR/FR-PI-NNN-*.md`)
+  list (17 files: `define-requirements/FR/FR-SP-NNN-*.md`)
 - [`define-requirements/NFR/index.md`](define-requirements/NFR/index.md) — non-functional
-  requirement list (11 files: `define-requirements/NFR/NFR-PI-NNN-*.md`)
+  requirement list (12 files: `define-requirements/NFR/NFR-SP-NNN-*.md`)
 - [`define-requirements.lock.yaml`](define-requirements.lock.yaml) — locked snapshot with
   per-requirement content hashes (contract `requirements_lock`)
 - Sections below: [Functional requirements](#functional-requirements) ·
@@ -64,1249 +71,1509 @@ requirement carries a failure scenario.
   [How this set is verified downstream](#how-this-set-is-verified-downstream)
 
 The `define-requirements/FR/` and `define-requirements/NFR/` folders also still contain the
-previously shipped live-camera-translation files (`FR-LCT-NNN-*`, `NFR-LCT-NNN-*`), left in place;
-the indexes and this document cover the `profile-interview` set only.
+previously shipped live-camera-translation (`FR-LCT-*`, `NFR-LCT-*`) and profile-interview
+(`FR-PI-*`, `NFR-PI-*`) requirement files, left in place untouched; the indexes, this document and
+the lock cover the `spotify-music-integration` set only.
 
 ### Requirement index
 
 | ID | Title | Area / Category | Priority | File |
 |----|-------|-----------------|----------|------|
-| [FR-PI-001](define-requirements/FR/FR-PI-001-interview-step-order.md) | Interview step order in the first-run wizard | Onboarding Wizard | MUST | `FR-PI-001-interview-step-order.md` |
-| [FR-PI-002](define-requirements/FR/FR-PI-002-about-you-mandatory-fields.md) | About-you mandatory fields gate Next | Onboarding Wizard / About-you | MUST | `FR-PI-002-about-you-mandatory-fields.md` |
-| [FR-PI-003](define-requirements/FR/FR-PI-003-encrypted-profile-store.md) | Encrypted profile store | Profile Storage | MUST | `FR-PI-003-encrypted-profile-store.md` |
-| [FR-PI-004](define-requirements/FR/FR-PI-004-optional-step-skippable-pattern.md) | Optional steps remain skippable with pending status | Onboarding Wizard | MUST | `FR-PI-004-optional-step-skippable-pattern.md` |
-| [FR-PI-005](define-requirements/FR/FR-PI-005-family-and-friends-step.md) | Family & friends step extension | Family & Friends | MUST | `FR-PI-005-family-and-friends-step.md` |
-| [FR-PI-006](define-requirements/FR/FR-PI-006-emergency-contacts-step.md) | Emergency contacts step | Emergency Contacts | MUST | `FR-PI-006-emergency-contacts-step.md` |
-| [FR-PI-007](define-requirements/FR/FR-PI-007-voice-fingerprint-step.md) | Voice fingerprint step (reuse of existing enrollment) | Voice Fingerprint | MUST | `FR-PI-007-voice-fingerprint-step.md` |
-| [FR-PI-008](define-requirements/FR/FR-PI-008-wake-acknowledgment-address-as.md) | Personalized wake acknowledgment | Wake Acknowledgment / Address-as | MUST | `FR-PI-008-wake-acknowledgment-address-as.md` |
-| [FR-PI-009](define-requirements/FR/FR-PI-009-brain-reply-style-address-as.md) | Address-as in brain reply-style rules (cloud and on-device) | Brain Personalization | MUST | `FR-PI-009-brain-reply-style-address-as.md` |
-| [FR-PI-010](define-requirements/FR/FR-PI-010-address-as-spoken-verbatim.md) | Address-as spoken verbatim (never translated) | Address-as Data Handling | MUST | `FR-PI-010-address-as-spoken-verbatim.md` |
-| [FR-PI-011](define-requirements/FR/FR-PI-011-unpersonalized-path-unchanged.md) | Un-personalized path behaves exactly as today | No-Regression | MUST | `FR-PI-011-unpersonalized-path-unchanged.md` |
-| [FR-PI-012](define-requirements/FR/FR-PI-012-settings-profile-editor.md) | Settings profile editor | Settings | MUST | `FR-PI-012-settings-profile-editor.md` |
-| [FR-PI-013](define-requirements/FR/FR-PI-013-wizard-reopen-for-existing-users.md) | Wizard reopen path for existing users | Onboarding Wizard | MUST | `FR-PI-013-wizard-reopen-for-existing-users.md` |
-| [FR-PI-014](define-requirements/FR/FR-PI-014-safety-path-data-availability.md) | Profile data available to existing safety paths | Safety Integration | MUST | `FR-PI-014-safety-path-data-availability.md` |
-| [FR-PI-015](define-requirements/FR/FR-PI-015-profile-read-failure-fallback.md) | Profile read failures degrade to the un-personalized path | Error Handling | MUST | `FR-PI-015-profile-read-failure-fallback.md` |
-| [FR-PI-016](define-requirements/FR/FR-PI-016-app-start-interview-routing.md) | App-start interview-status routing (resume where the user left off) | Onboarding Wizard / App Start | MUST | `FR-PI-016-app-start-interview-routing.md` |
-| [NFR-PI-001](define-requirements/NFR/NFR-PI-001-profile-encryption-at-rest.md) | Profile encryption at rest | Security | MUST | `NFR-PI-001-profile-encryption-at-rest.md` |
-| [NFR-PI-002](define-requirements/NFR/NFR-PI-002-log-safety.md) | Log safety — no new PII in logs | Privacy / Security | MUST | `NFR-PI-002-log-safety.md` |
-| [NFR-PI-003](define-requirements/NFR/NFR-PI-003-no-new-egress.md) | No new network egress or cloud processing | Privacy | MUST | `NFR-PI-003-no-new-egress.md` |
-| [NFR-PI-004](define-requirements/NFR/NFR-PI-004-profile-string-injection-hardening.md) | Untrusted profile-string hardening (injection) | Security | MUST | `NFR-PI-004-profile-string-injection-hardening.md` |
-| [NFR-PI-005](define-requirements/NFR/NFR-PI-005-prompt-budget-and-seed-mirror.md) | Prompt token budget and seed mirror preserved | Reliability / Maintainability | MUST | `NFR-PI-005-prompt-budget-and-seed-mirror.md` |
-| [NFR-PI-006](define-requirements/NFR/NFR-PI-006-localisation.md) | Localisation of new UI strings | Localisation | MUST | `NFR-PI-006-localisation.md` |
-| [NFR-PI-007](define-requirements/NFR/NFR-PI-007-accessibility.md) | Accessibility of the new interview UI | Accessibility | MUST | `NFR-PI-007-accessibility.md` |
-| [NFR-PI-008](define-requirements/NFR/NFR-PI-008-wake-ack-latency-and-fallback.md) | Wake-acknowledgment latency and failure fallback | Performance / Reliability | MUST | `NFR-PI-008-wake-ack-latency-and-fallback.md` |
-| [NFR-PI-009](define-requirements/NFR/NFR-PI-009-voice-biometric-unchanged.md) | Voice-biometric mechanism unchanged | Security / Compliance | MUST | `NFR-PI-009-voice-biometric-unchanged.md` |
-| [NFR-PI-010](define-requirements/NFR/NFR-PI-010-no-regression-existing-flows.md) | No regression to existing behaviours | Reliability | MUST | `NFR-PI-010-no-regression-existing-flows.md` |
-| [NFR-PI-011](define-requirements/NFR/NFR-PI-011-compliance-and-release-gates.md) | Compliance and release gates | Compliance | MUST | `NFR-PI-011-compliance-and-release-gates.md` |
+| [FR-SP-001](define-requirements/FR/FR-SP-001-music-requests-start-real-playback.md) | Music requests start real playback (stub replacement) | Music Playback / Router | MUST | `FR-SP-001-music-requests-start-real-playback.md` |
+| [FR-SP-002](define-requirements/FR/FR-SP-002-both-provider-search.md) | Both-provider search for music requests | Provider Selection | MUST | `FR-SP-002-both-provider-search.md` |
+| [FR-SP-003](define-requirements/FR/FR-SP-003-spotify-preferred-when-linked-and-capable.md) | Spotify preferred whenever linked and capable | Provider Selection | MUST | `FR-SP-003-spotify-preferred-when-linked-and-capable.md` |
+| [FR-SP-004](define-requirements/FR/FR-SP-004-youtube-fallback-when-spotify-cannot-serve.md) | YouTube fallback when Spotify cannot serve | Provider Selection / Degradation | MUST | `FR-SP-004-youtube-fallback-when-spotify-cannot-serve.md` |
+| [FR-SP-005](define-requirements/FR/FR-SP-005-explicit-youtube-requests-unchanged.md) | Explicit YouTube requests unchanged | No-Regression / Routing | MUST | `FR-SP-005-explicit-youtube-requests-unchanged.md` |
+| [FR-SP-006](define-requirements/FR/FR-SP-006-spotifyplugin-assistantplugin-twin.md) | SpotifyPlugin as an AssistantPlugin (YouTubePlugin twin) | Plugin Architecture | MUST | `FR-SP-006-spotifyplugin-assistantplugin-twin.md` |
+| [FR-SP-007](define-requirements/FR/FR-SP-007-spotifytool-search-and-deeplink.md) | SpotifyTool search and spotify: deep-link construction | Spotify Tool | MUST | `FR-SP-007-spotifytool-search-and-deeplink.md` |
+| [FR-SP-008](define-requirements/FR/FR-SP-008-spotify-account-linking-by-caregiver.md) | Spotify account linking by the caregiver (OAuth) | Account Linking | MUST | `FR-SP-008-spotify-account-linking-by-caregiver.md` |
+| [FR-SP-009](define-requirements/FR/FR-SP-009-encrypted-spotify-credential-store.md) | Encrypted Spotify credential and account store | Credential Storage | MUST | `FR-SP-009-encrypted-spotify-credential-store.md` |
+| [FR-SP-010](define-requirements/FR/FR-SP-010-unlink-wipes-credentials-and-revokes.md) | Unlink wipes credentials and revokes access | Account Linking / Security | MUST | `FR-SP-010-unlink-wipes-credentials-and-revokes.md` |
+| [FR-SP-011](define-requirements/FR/FR-SP-011-free-tier-deeplink-degradation.md) | Free-tier degradation to the spotify: deep-link fallback | Degradation | MUST | `FR-SP-011-free-tier-deeplink-degradation.md` |
+| [FR-SP-012](define-requirements/FR/FR-SP-012-honest-outcomes-no-silent-failure.md) | Honest localized outcomes — no silent failure on any path | Degradation / Honesty | MUST | `FR-SP-012-honest-outcomes-no-silent-failure.md` |
+| [FR-SP-013](define-requirements/FR/FR-SP-013-keyword-intent-rule-music-domain.md) | Deterministic music-domain rule in KeywordIntentRule | Intent Routing (no-model path) | MUST | `FR-SP-013-keyword-intent-rule-music-domain.md` |
+| [FR-SP-014](define-requirements/FR/FR-SP-014-contact-search-veto-parity.md) | Music-request veto parity in VoiceContactSearchRoute | Intent Routing | MUST | `FR-SP-014-contact-search-veto-parity.md` |
+| [FR-SP-015](define-requirements/FR/FR-SP-015-music-request-intake-in-route-ladder.md) | Music-request intake in the voice route ladder | Intent Routing | MUST | `FR-SP-015-music-request-intake-in-route-ladder.md` |
+| [FR-SP-016](define-requirements/FR/FR-SP-016-settings-linking-and-privacy-disclosure.md) | Settings linking, status surface and privacy disclosure | Settings / Privacy | MUST | `FR-SP-016-settings-linking-and-privacy-disclosure.md` |
+| [FR-SP-017](define-requirements/FR/FR-SP-017-device-validation-checklist-recorded-and-passed.md) | Device-validation checklist recorded and passed (DV-* completion gate) | Validation / Completion Gate | MUST | `FR-SP-017-device-validation-checklist-recorded-and-passed.md` |
+| [NFR-SP-001](define-requirements/NFR/NFR-SP-001-provider-search-responsiveness.md) | Provider search responsiveness and timeout budget | Performance | MUST | `NFR-SP-001-provider-search-responsiveness.md` |
+| [NFR-SP-002](define-requirements/NFR/NFR-SP-002-log-safety.md) | Log safety — no credentials, queries or provider bodies in logs | Privacy / Security | MUST | `NFR-SP-002-log-safety.md` |
+| [NFR-SP-003](define-requirements/NFR/NFR-SP-003-no-new-network-egress.md) | No new network egress; music stays off any cloud LLM | Privacy | MUST | `NFR-SP-003-no-new-network-egress.md` |
+| [NFR-SP-004](define-requirements/NFR/NFR-SP-004-prompt-budget-preserved.md) | Prompt token budget preserved | Reliability / Maintainability | MUST | `NFR-SP-004-prompt-budget-preserved.md` |
+| [NFR-SP-005](define-requirements/NFR/NFR-SP-005-localisation.md) | Localisation of all Spotify strings (ne/en) | Localisation | MUST | `NFR-SP-005-localisation.md` |
+| [NFR-SP-006](define-requirements/NFR/NFR-SP-006-no-regression.md) | No regression to existing flows | Reliability | MUST | `NFR-SP-006-no-regression.md` |
+| [NFR-SP-007](define-requirements/NFR/NFR-SP-007-credential-encryption-at-rest.md) | Credential and token encryption at rest | Security | MUST | `NFR-SP-007-credential-encryption-at-rest.md` |
+| [NFR-SP-008](define-requirements/NFR/NFR-SP-008-deeplink-uri-hardening.md) | Deep-link URI construction hardening | Security | MUST | `NFR-SP-008-deeplink-uri-hardening.md` |
+| [NFR-SP-009](define-requirements/NFR/NFR-SP-009-oauth-redirect-and-token-lifecycle.md) | OAuth redirect validation and token lifecycle | Security | MUST | `NFR-SP-009-oauth-redirect-and-token-lifecycle.md` |
+| [NFR-SP-010](define-requirements/NFR/NFR-SP-010-accessibility-of-new-surfaces.md) | Accessibility of the new touch surfaces | Accessibility | MUST | `NFR-SP-010-accessibility-of-new-surfaces.md` |
+| [NFR-SP-011](define-requirements/NFR/NFR-SP-011-compliance-and-release-gates.md) | Compliance and release gates | Compliance | MUST | `NFR-SP-011-compliance-and-release-gates.md` |
+| [NFR-SP-012](define-requirements/NFR/NFR-SP-012-plugin-isolation-and-model-stack-invariance.md) | Plugin isolation and model-stack invariance | Maintainability / Architecture | MUST | `NFR-SP-012-plugin-isolation-and-model-stack-invariance.md` |
 
 ## Functional requirements
 
-### FR-PI-001: Interview step order in the first-run wizard
+### FR-SP-001: Music requests start real playback (stub replacement)
 
 #### Metadata
-- **Area:** Onboarding Wizard
+- **Area:** Music Playback / Router
 - **Priority:** MUST
-- **Source:** Feature constitution "Feature Purpose & Scope" (ordered step list) and "Integration Surfaces" (`OnboardingState.swift`); owner brief 2026-10-05; workflow `define-requirements` scope comment
+- **Source:** Feature constitution "Feature Purpose & Scope" (the broken-to-working flip), "Music Request Routing & Degradation Contract" and "Success Criteria" (DV-1); workflow `define-requirements` scope comment; the current stub at `ios/ElderlyAssistant/Services/Voice/` `CommandRouter.swift` (`case .music:`, ~line 2640, speaking `router.musicStub`)
 
 #### Description
-The first-run wizard **must** be extended with three new interview steps inserted in the owner-brief order, so the full sequence is: language, permissions, **about-you**, family & friends (the existing step, extended), **emergency contacts**, **voice fingerprint**, models. About-you is placed after permissions and before family & friends; emergency contacts after family & friends; voice fingerprint before models.
+A voice music request that reaches the music intent today **must** start a real playback flow instead of the first-class stub. The `case .music:` branch in `ios/ElderlyAssistant/Services/Voice/` `CommandRouter.swift` currently emits a `command_music_stub` event and speaks `router.musicStub` ("Music isn't ready yet. Coming soon." / "संगीत सुविधा अहिले तयार छैन। चाँडै आउनेछ।"). That branch **must** be replaced by the real music path:
 
-The new steps are `OnboardingState.Step` cases with the same per-step status semantics as the existing steps (per-step status persisted; `pendingSteps` / `firstPendingStep` ordering unchanged in mechanism). The existing steps keep their positions relative to each other and their behaviour. The wizard presents one step at a time with the existing step chrome and navigation affordances.
+- the request is resolved through both-provider search (FR-SP-002) with Spotify preferred whenever linked and capable (FR-SP-003);
+- the outcome is a real one — playback control, the `spotify:` deep-link fallback (FR-SP-011), the YouTube fallback where YouTube can serve (FR-SP-004), or an explicit localized line (FR-SP-012);
+- the user **must never** hear the stub wording ("Music isn't ready yet" / "संगीत सुविधा अहिले तयार छैन") on a music request in a build that ships this feature.
+
+The neighbouring stub intents are untouched: the health-query stub (`router.healthNotAvailable`) and the video stub (`router.featureNotYet`) keep their current honest lines (NFR-SP-006).
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: Interview step order in the first-run wizard
+Feature: Music requests start real playback
 
-  Scenario: Fresh install presents the steps in the required order
-    Given a fresh installation with no onboarding status
-    When the wizard is opened
-    Then the steps are presented in the order: language, permissions, about-you, family & friends, emergency contacts, voice fingerprint, models
-    And the existing steps keep their positions relative to each other
+  Scenario: A bare Nepali music request produces a real outcome, not the stub
+    Given the assistant is configured with at least one provider able to serve music
+    When the user says "भजन बजाऊ"
+    Then the request enters the music playback path
+    And a real outcome is produced (playback started, a provider deep link opened, or a provider fallback line spoken)
+    And the user does not hear the "Music isn't ready yet" stub line
 
-  Scenario: New step status persists like existing steps
-    Given the user moves through the new steps
-    When the wizard is closed and reopened
-    Then each new step's status is persisted and restored through the existing per-step status mechanism
+  Scenario: The English bare music request behaves the same
+    Given the assistant is configured as above
+    When the user says "play a song"
+    Then the request enters the music playback path and produces a real outcome
+
+  Scenario: A total failure is still an explicit spoken outcome, never silence
+    Given neither provider is reachable
+    When the user says "गीत चलाऊ"
+    Then the assistant speaks an explicit localized failure line
+    And no silent success and no silent failure occurs
+
+  Scenario: The stub wording is not reachable through the music intent
+    Given the feature is built
+    When every music-path branch is exercised in tests
+    Then no music branch speaks the stub wording
+    And the non-music stub intents keep their existing lines
 ```
 
 #### Related
-- NFR: NFR-PI-010 (no regression to existing flows)
+- NFR: NFR-SP-006 (no regression), NFR-SP-012 (plugin isolation)
+- Depends on: FR-SP-002 (both-provider search), FR-SP-003 (Spotify preference)
+
+### FR-SP-002: Both-provider search for music requests
+
+#### Metadata
+- **Area:** Provider Selection
+- **Priority:** MUST
+- **Source:** Feature constitution Feature Constraint 9 (preference semantics — top-level rule) and "Music Request Routing & Degradation Contract" (routing table); DV-2
+
+#### Description
+For a music request — a bare request such as 'भजन बजाऊ', 'गीत चलाऊ' or 'play a song' with no explicit YouTube marker — the system **must** search both providers before selection:
+
+- **Spotify** via the Spotify Web API, when the account is linked and Spotify credentials are configured (FR-SP-008, FR-SP-009);
+- **YouTube** via the existing YouTube tool, when a YouTube API key is configured (keyed lookup) and, where YouTube is the selected provider, through its existing search-deeplink path.
+
+A provider that cannot be asked (unlinked account, no credential, in-flight failure) **must not** block the other provider's search; the failure is recorded and resolved by the degradation rules (FR-SP-004, FR-SP-011, FR-SP-012). The search **must** use the user's spoken query (or its resolved music query) and **must** treat every provider response as untrusted data (NFR-SP-008). The recorded observability events carry no query text (NFR-SP-002).
+
+#### Acceptance criteria
+
+```gherkin
+Feature: Both-provider search for music requests
+
+  Scenario: A music request searches both configured providers
+    Given a Spotify account is linked with credentials configured
+    And a YouTube API key is configured
+    When the user says "भजन बजाऊ"
+    Then a Spotify search and a YouTube search are both attempted for the request
+    And the recorded selection shows which provider won
+
+  Scenario: An unavailable provider does not block the other
+    Given the Spotify account is not linked
+    And a YouTube API key is configured
+    When the user says "गीत चलाऊ"
+    Then the YouTube search proceeds
+    And the outcome is resolved by the Spotify-cannot-serve fallback rules
+
+  Scenario: Neither provider can be asked
+    Given no Spotify account is linked and no YouTube key is configured
+    When the user says "play a song"
+    Then no silent outcome occurs
+    And an explicit localized line is spoken (FR-SP-012)
+```
+
+#### Related
+- FR: FR-SP-003 (preference), FR-SP-004 (YouTube fallback), FR-SP-007 (Spotify search tool)
+- NFR: NFR-SP-003 (no new egress), NFR-SP-008 (untrusted provider results)
+- Depends on: FR-SP-001 (real playback path)
+
+### FR-SP-003: Spotify preferred whenever linked and capable
+
+#### Metadata
+- **Area:** Provider Selection
+- **Priority:** MUST
+- **Source:** Feature constitution Feature Constraint 9 (top-level rule: "Spotify wins whenever it is linked and capable"); "Music Request Routing & Degradation Contract" (routing table row 1); DV-2
+
+#### Description
+For a music request, Spotify **must** win the selection whenever it is linked and capable of serving the request. "Linked and capable" means: the account is linked and credentials are present (FR-SP-008, FR-SP-009), the Spotify search resolves a usable result for the request (FR-SP-007), and at least one Spotify outcome is available — remote playback control or the `spotify:` deep-link fallback (FR-SP-011). The spoken confirmation **must** name the provider that actually served the request in the user's language, for example:
+
+- playing: "स्पोटिफाइमा %@ चलाउँदैछु।" / "Playing %@ on Spotify." (illustrative copy, mirroring `youtube.playing`);
+- deep-link fallback: "स्पोटिफाइ खोल्दैछु — त्यहाँ बजाउनुहोस्।" / "Opening Spotify — play it there." (illustrative; exact copy for degradation paths is OD-S3).
+
+Spotify **must not** be preferred into silence: when Spotify is linked but cannot serve (empty search, failure, free tier), selection falls through per FR-SP-004 and FR-SP-011, and the outcome is always spoken (FR-SP-012). Explicit YouTube requests are not subject to this preference (FR-SP-005).
+
+#### Acceptance criteria
+
+```gherkin
+Feature: Spotify preferred whenever linked and capable
+
+  Scenario: Spotify wins a music request while linked and capable
+    Given a Spotify account is linked and capable of serving the request
+    When the user says "भजन बजाऊ"
+    Then the Spotify result is selected
+    And the spoken confirmation names Spotify
+
+  Scenario: A linked Spotify that cannot serve falls through, never into silence
+    Given a Spotify account is linked
+    And the Spotify search yields no usable result for the request
+    When the user says "गीत चलाऊ"
+    Then the request falls through to the fallback rules (FR-SP-004, FR-SP-011)
+    And an explicit spoken outcome is produced
+
+  Scenario: The preference does not capture explicit YouTube requests
+    Given a Spotify account is linked and capable
+    When the user says "युट्युबमा गीत चलाऊ"
+    Then YouTube serves the request exactly as before (FR-SP-005)
+    And the Spotify preference is not applied
+```
+
+#### Related
+- FR: FR-SP-002 (both-provider search), FR-SP-004 (YouTube fallback), FR-SP-005 (explicit YouTube unchanged), FR-SP-011 (deep-link fallback)
+- NFR: NFR-SP-006 (no regression)
+
+### FR-SP-004: YouTube fallback when Spotify cannot serve
+
+#### Metadata
+- **Area:** Provider Selection / Degradation
+- **Priority:** MUST
+- **Source:** Feature constitution Feature Constraint 5 ("Spotify-unavailable/unlinked falls back to YouTube") and the routing table ("Spotify cannot serve the request → YouTube fallback where it can serve; otherwise an honest localized line"); DV-2
+
+#### Description
+When Spotify cannot serve a music request — unlinked account, missing credentials, empty search result, provider failure, or free-tier remote-control unavailability — and YouTube can serve it, the request **must** fall back to the existing YouTube path:
+
+- the request goes through the existing YouTube route/plugin behaviour (`youtube.play`, `youtube.*` localized lines) with no new YouTube-side semantics;
+- the fallback **must** follow the pinned YouTube behaviour (FR-SP-005) so the fallback result is the same YouTube outcome the user would get from an explicit YouTube request;
+- the spoken line names YouTube as the serving provider (mirroring `youtube.playing` / `youtube.openingSearch` / `youtube.notFound`).
+
+When neither provider can serve, the request **must** end in an explicit localized line (FR-SP-012), never silence. The exact precedence between the free-tier deep-link fallback (FR-SP-011) and the YouTube fallback, case by case, and the copy for each path, is OD-S3 — this requirement binds only that the fallback exists wherever YouTube can serve and that no path is silent.
+
+#### Acceptance criteria
+
+```gherkin
+Feature: YouTube fallback when Spotify cannot serve
+
+  Scenario: An unlinked Spotify request is served by YouTube
+    Given no Spotify account is linked
+    And YouTube can serve the request
+    When the user says "भजन बजाऊ"
+    Then the request is served through the existing YouTube path
+    And the spoken line names YouTube
+
+  Scenario: An empty Spotify search falls back to YouTube where it can serve
+    Given a Spotify account is linked
+    And the Spotify search yields no usable result
+    And YouTube can serve the request
+    When the user says "गीत चलाऊ"
+    Then the request is served through the existing YouTube path
+    And the user hears the YouTube outcome, not a fabricated Spotify outcome
+
+  Scenario: Neither provider can serve — explicit line, no silence
+    Given Spotify cannot serve the request and YouTube cannot serve it either
+    When the user says "गीत चलाऊ"
+    Then the assistant speaks an explicit localized line naming the situation
+    And nothing is claimed to have played
+```
+
+#### Related
+- FR: FR-SP-003 (preference), FR-SP-005 (explicit YouTube unchanged), FR-SP-011 (deep-link fallback), FR-SP-012 (honest outcomes)
+- NFR: NFR-SP-006 (no regression)
+- Depends on: FR-SP-002 (both-provider search)
+
+### FR-SP-005: Explicit YouTube requests unchanged
+
+#### Metadata
+- **Area:** No-Regression / Routing
+- **Priority:** MUST
+- **Source:** Feature constitution Feature Constraint 5 ("Must-not-break paths") and "Out of scope" ('युट्युबमा गीत चलाऊ' must still reach YouTube exactly as today); routing table row 2; DV-3
+
+#### Description
+An explicit YouTube request **must** route to YouTube exactly as it does today. 'युट्युबमा गीत चलाऊ' ("play a song on YouTube"), 'युट्युबमा भजन खोज' and every utterance the existing YouTube route recognizes **must** keep:
+
+- the same route decision (`ios/ElderlyAssistant/Services/Voice/` `YouTubeRoute.swift` behaviour and its marker/veto rules);
+- the same plugin execution (`youtube.play` through `YouTubePlugin`, `ios/ElderlyAssistant/Services/Plugins/` `YouTubePlugin.swift`);
+- the same localized lines and the same honest failure behaviour;
+- the same existing tests and golden expectations (`YouTubeRouteTests`, `YouTubePluginTests`, `CommandRouterYouTubeTests`).
+
+The music feature **must not** re-route, delay, re-order or duplicate-handle an explicit YouTube request: the Spotify preference (FR-SP-003) is not applied to it, and the music path (FR-SP-015) must not fire in addition. Golden-corpus and route-expectation changes against explicit YouTube utterances are permitted only where this feature deliberately supersedes them, and each such move **must** be recorded with its new expectation alongside (NFR-SP-006).
+
+#### Acceptance criteria
+
+```gherkin
+Feature: Explicit YouTube requests unchanged
+
+  Scenario: An explicit Nepali YouTube request still reaches YouTube
+    Given the music feature is built and a Spotify account is linked
+    When the user says "युट्युबमा गीत चलाऊ"
+    Then the request routes to the YouTube path exactly as before
+    And the YouTube plugin serves it with the existing localized lines
+    And the music/Spotify path does not also handle it
+
+  Scenario: The existing YouTube behaviour holds under the new routing
+    Given the music feature is built
+    When the existing YouTube route, plugin and router test suites run
+    Then they pass with no change other than recorded deliberate supersessions
+
+  Scenario: A bare music request is not treated as an explicit YouTube request
+    Given the music feature is built
+    When the user says "भजन बजाऊ" with no YouTube word
+    Then the explicit-YouTube route does not fire for it (FR-SP-015 applies)
+```
+
+#### Related
+- FR: FR-SP-003 (preference), FR-SP-004 (YouTube fallback), FR-SP-015 (route-ladder intake)
+- NFR: NFR-SP-006 (no regression)
+
+### FR-SP-006: SpotifyPlugin as an AssistantPlugin (YouTubePlugin twin)
+
+#### Metadata
+- **Area:** Plugin Architecture
+- **Priority:** MUST
+- **Source:** Feature constitution "Feature Purpose & Scope" (ships as an `AssistantPlugin`), Feature Constraint 11 (plugin isolation), "Integration Surfaces" (NEW `ios/ElderlyAssistant/Services/Plugins/` `SpotifyPlugin.swift` — twin of `YouTubePlugin`)
+
+#### Description
+Spotify **must** ship as an `AssistantPlugin` (`ios/ElderlyAssistant/Services/Plugins/` `SpotifyPlugin.swift`), a structural twin of `YouTubePlugin`:
+
+- it declares the action `spotify.play` (mirroring `youtube.play`) with a `query` entity, a `displayNameKey`, and plugin metadata in the registry shape;
+- it executes through the shared tool (`SpotifyTool`, FR-SP-007) and the shared router seams (config store, transport, link opener), not through bespoke networking;
+- its failure contract **must** return explicit failures with a localized spoken apology (mirroring `YouTubePlugin`'s `failed(spokenApology:)` lines) — never a silent success;
+- it emits observability events in the plugin/action vocabulary without query text (NFR-SP-002);
+- it is registered (and its store wired) through the existing `AppCoordinator` registration pattern, and it introduces no entanglement beyond the mapped `CommandRouter` seams (Feature Constraint 11, NFR-SP-012).
+
+Without a linked account or configured credential the plugin **must** remain inert in the honest sense: it does not fire `spotify.play` into a dead end; the router's degradation rules (FR-SP-004, FR-SP-011, FR-SP-012) own the outcome.
+
+#### Acceptance criteria
+
+```gherkin
+Feature: SpotifyPlugin as an AssistantPlugin
+
+  Scenario: The plugin declares the spotify.play action in the registry
+    Given the app registers its plugins
+    When the plugin registry is inspected
+    Then SpotifyPlugin is registered with the spotify.play action and its query entity
+    And the declaration mirrors the YouTubePlugin registry shape
+
+  Scenario: A plugin execution failure is an explicit localized apology
+    Given SpotifyPlay is invoked and the tool fails
+    When the plugin returns
+    Then the result is an explicit failure carrying the localized Spotify apology
+    And no silent success is returned
+
+  Scenario: The plugin is dormant without a linked account
+    Given no Spotify account is linked
+    When the app is constructed
+    Then the Spotify plugin cannot produce a fabricated playback claim
+    And the degradation path owns the spoken outcome (FR-SP-011, FR-SP-012)
+```
+
+#### Related
+- FR: FR-SP-007 (Spotify tool), FR-SP-008 (linking), FR-SP-015 (routing intake)
+- NFR: NFR-SP-002 (log safety), NFR-SP-012 (plugin isolation)
+
+### FR-SP-007: SpotifyTool search and spotify: deep-link construction
+
+#### Metadata
+- **Area:** Spotify Tool
+- **Priority:** MUST
+- **Source:** Feature constitution "Integration Surfaces" (NEW `ios/ElderlyAssistant/Services/Voice/` `SpotifyTool.swift` — Spotify Web API search + `spotify:` deep-link construction, mirroring `YouTubeTool`; credential/account store on `EncryptedLocalStorage`); workflow security-design-review focus ("Deep-link/URI injection: track names/IDs must be validated before URI construction; a crafted result must not open arbitrary schemes")
+
+#### Description
+The Spotify tool **must** provide, mirroring `YouTubeTool`:
+
+- **Search** via the Spotify Web API (`https://api.spotify.com/v1/search`), resolving the top usable result for the spoken query. With a working search the result is a REAL API hit — its identifier and title are used as returned; never a fabricated title, and a title is spoken only once (honesty contract mirroring `YouTubeTool`).
+- **Deep-link construction**: `spotify:` URIs built from validated components only (e.g. `spotify:track:<id>`, `spotify:search:<query>`), opened through the `CallLinkOpening` seam with the honest open outcome (app accepted / cannot open). The `spotify` query scheme is declared in the app's `Info.plist` `LSApplicationQueriesSchemes` so the installed-check is honest.
+- **Failure mapping**: every failure (timeout, network error, non-200/quota/rate-limit, empty or malformed payload, unusable result) maps to an explicit case that the router turns into an honest localized line (FR-SP-012). No guess, no fabricated fallback.
+- **Untrusted-input discipline**: track names, identifiers and any provider-controlled text are remote-controlled input. Before URI construction the identifier **must** be validated against the expected identifier shape and any query component **must** be percent-encoded; a crafted result containing scheme text, delimiters, control characters or path traversal **must not** produce a URI outside the `spotify:` scheme (NFR-SP-008). Titles are never composed into a URI.
+- **Seams**: network goes through the `LocalToolTransport`-style seam and link-opening through `CallLinkOpening`, so tests exercise URL shape, parsing and open decisions with no real network (mirroring `YouTubeTool`), and the timeout is a configurable parameter, not a hardcoded constant (project Agent Principles for design agents).
+
+#### Acceptance criteria
+
+```gherkin
+Feature: SpotifyTool search and deep-link construction
+
+  Scenario: A real search result becomes a validated spotify: deep link
+    Given a configured Spotify search transport returns a top result with identifier "01AbCdEfGhIjKlMnOpQrStU" (synthetic base62-shaped placeholder)
+    When the tool constructs the playback deep link
+    Then the URI is "spotify:track:01AbCdEfGhIjKlMnOpQrStU"
+    And it is opened through the link-opener seam with the observed open outcome
+
+  Scenario: A hostile track name or identifier cannot open an arbitrary scheme
+    Given a search result whose title contains "https://evil.example/x" and whose identifier contains scheme or delimiter characters
+    When the tool constructs the deep link
+    Then the constructed URI uses only the spotify: scheme with a validated identifier or the result is rejected
+    And no non-spotify scheme is opened
+    And the title does not appear in any URI
+
+  Scenario: An empty or malformed payload is an honest failure
+    Given the search transport returns an empty, malformed or non-200 payload
+    When the tool resolves the request
+    Then it returns the corresponding explicit failure
+    And no title is fabricated and no deep link is opened
+
+  Scenario: The app is not present for the deep link
+    Given the spotify: scheme cannot be opened by any installed app
+    When the tool attempts the open
+    Then the outcome is recorded as "not opened"
+    And the spoken line follows the honest-app-absent rule (FR-SP-012)
+```
+
+#### Related
+- FR: FR-SP-006 (plugin), FR-SP-009 (credential store), FR-SP-011 (deep-link fallback), FR-SP-012 (honest outcomes)
+- NFR: NFR-SP-002 (log safety), NFR-SP-008 (URI hardening)
+
+### FR-SP-008: Spotify account linking by the caregiver (OAuth)
+
+#### Metadata
+- **Area:** Account Linking
+- **Priority:** MUST
+- **Source:** Feature constitution Constitutional Amendment Record 2026-10-06 ("Account-linking discipline (calendar-share Google OAuth pattern). Scopes are requested at sign-in (`addScopes`), tokens are verified, tokens are stored encrypted on-device") and Feature Constraint 2; "Integration Surfaces" (NEW Spotify account-linking service — `GoogleAccountSession` precedent); workflow `define-requirements` scope comment (caregiver-performed)
+
+#### Description
+A Spotify account-linking service **must** implement user OAuth following the `GoogleAccountSession` precedent (calendar-share), performed by the family member/caregiver — the elderly primary user never touches OAuth:
+
+- **Scopes at sign-in**: the required scopes are requested at sign-in/at the linking step itself (`addScopes` precedent; scope-at-consent-screen-only was the calendar-share 401 root cause and is not acceptable);
+- **Token verification**: a token is verified before it is trusted for a request (the tokeninfo-style truth check precedent);
+- **Redirect validation**: the OAuth redirect URI **must** be validated by exact match; a mismatched redirect or a hijacked app-scheme callback **must be rejected** and **must not** result in a stored token;
+- **Storage**: tokens land only in the encrypted on-device store (FR-SP-009); the linking service stores nothing of its own outside it;
+- **Status**: the link state (not linked / linked / linked-but-unusable-free-tier) is observable to the Settings surface (FR-SP-016) and to the router's degradation rules (FR-SP-011, FR-SP-012);
+- **Honest failure**: a cancelled or denied authorization leaves no partial state and produces an explicit status; a failed linking attempt **must not** silently present as linked.
+
+The client-secret handling for the search flow (client-credentials) is OD-S1 and remains open; whatever the resolution, no credential may enter the repository or a log (NFR-SP-002, NFR-SP-007).
+
+#### Acceptance criteria
+
+```gherkin
+Feature: Spotify account linking by the caregiver
+
+  Scenario: The caregiver completes linking and the account becomes usable
+    Given the caregiver is on the Spotify linking surface in Settings
+    When they complete the OAuth flow with the required scopes granted
+    Then the account is linked and the status surface shows connected
+    And the token is verified before first use
+    And the token is stored only in the encrypted on-device store
+
+  Scenario: A denied or cancelled authorization leaves no partial state
+    Given the caregiver starts the linking flow
+    When they cancel or deny the authorization
+    Then no token or account state is stored
+    And the status remains not linked
+    And the failure is explicit on the surface, never a silent half-link
+
+  Scenario: A mismatched redirect is rejected
+    Given an authorization callback arrives for a redirect URI that does not exactly match the registered callback
+    When the linking service validates the callback
+    Then the callback is rejected
+    And no token is stored
+    And the rejection is recorded without any token or code in the log
+
+  Scenario: An unverified token is not trusted
+    Given a stored token fails verification
+    When a music request needs Spotify
+    Then the account is treated as not usable per the degradation rules
+    And the user hears an explicit localized outcome (never a silent failure)
+```
+
+#### Related
+- FR: FR-SP-009 (credential store), FR-SP-010 (unlink), FR-SP-011 (free-tier degradation), FR-SP-016 (Settings surface)
+- NFR: NFR-SP-007 (encryption at rest), NFR-SP-009 (redirect validation and token lifecycle)
 - Depends on: —
 
-
-### FR-PI-002: About-you mandatory fields gate Next
+### FR-SP-009: Encrypted Spotify credential and account store
 
 #### Metadata
-- **Area:** Onboarding Wizard / About-you
+- **Area:** Credential Storage
 - **Priority:** MUST
-- **Source:** Feature constitution "Field Contract" and "Rules" (mandatory gates Next; Skip affordance is OD-F3); owner brief 2026-10-05; workflow scope comment ("About-you: name + address-as REQUIRED, DOB optional")
+- **Source:** Feature constitution Constitutional Amendment Record 2026-10-06 (tokens stored encrypted on-device — Keychain / `EncryptedLocalStorage`, Data Protection Complete; credentials never in the repository or any log — header, never URL) and Feature Constraint 2; "Integration Surfaces" (Spotify credential/account store on `EncryptedLocalStorage`; the `YouTubeConfigStore` / `SearchConfigStore` Keychain precedent); OD-S1 (client-secret handling — open)
 
 #### Description
-The About-you step **must** collect three fields: **name** (required), **address-as term** (required), **date of birth** (optional). The step's Next button **must** stay disabled until both name and address-as are filled (non-empty after trimming whitespace). DOB **must not** gate Next.
+The Spotify credential/account store **must** mirror the `YouTubeConfigStore` / `SearchConfigStore` precedent:
 
-The address-as term is what the assistant will call the user; it is stored and spoken verbatim (FR-PI-010). Whether the step's header Skip affordance also changes on first run is OD-F3 (open, architect) — whichever way it resolves, the mandatory gate binds the Next path, and already-onboarded users reach the step through the wizard reopen (FR-PI-013) and the Settings editor (FR-PI-012).
+- **Storage**: all Spotify credentials, tokens and account state live in `EncryptedLocalStorage` (Keychain-backed, Data Protection class Complete). Never `UserDefaults`, never a plist, never a plain file, never the repository, never a log (NFR-SP-002, NFR-SP-007).
+- **Access shape**: an observable store (`ObservableObject`-style, mirroring `YouTubeConfigStore`) exposing save, clear and `isConfigured`-style status; empty input clears; clearing stops the keyed path and degrades honestly (FR-SP-012).
+- **Transport discipline**: any credential presented to a provider travels in a request header, never in a URL; query strings, error bodies and diagnostics never carry it (the B2/T-050 precedent — `ios/tools/check-release-log-safety.sh`).
+- **Family-entered credential path**: where the resolved OD-S1 design uses a family-entered credential (the `SearchConfigStore` precedent), the store accepts it from the Settings surface (FR-SP-016); where OD-S1 resolves to a flow without an app-held secret, the store holds only tokens. The requirement binds the storage discipline for whichever path OD-S1 selects.
+- **Free of side effects at rest**: no credential is written outside the encrypted store on any path, including diagnostics, crash metadata or debug logs.
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: About-you mandatory fields
+Feature: Encrypted Spotify credential and account store
 
-  Scenario: Next stays disabled until both required fields are filled
-    Given the About-you step is shown with both required fields empty
-    When the user enters a name only
-    Then Next remains disabled
-    When the user also enters an address-as term
-    Then Next is enabled
+  Scenario: Credentials and tokens are readable only from the encrypted store
+    Given a Spotify credential and a token have been saved
+    When the app relaunches and reads its configuration
+    Then the values are read back from the encrypted store
+    And a storage-placement check shows no Spotify value in UserDefaults or any plain file
 
-  Scenario: Date of birth is optional
-    Given name and address-as are filled
-    When the user leaves date of birth empty
-    Then Next is enabled and the step can be completed
+  Scenario: Saving empty input clears the credential
+    Given a Spotify credential is configured
+    When the family member saves an empty value
+    Then the stored credential is cleared
+    And the Spotify keyed path stops firing and the feature degrades to the honest outcomes
 
-  Scenario: Required values are persisted
-    Given the user has entered name and address-as and completes the step
-    Then both values are persisted to the new profile store (FR-PI-003)
-    And the address-as value is stored exactly as entered
+  Scenario: No credential is written to any log or repository path
+    Given a Release build with a configured Spotify credential
+    When a music session and its error paths are exercised
+    Then no credential, token or authorization header value appears in any log
+    And the release log-safety gate covers the new paths and exits 0
 ```
 
 #### Related
-- FR: FR-PI-003 (profile store), FR-PI-010 (spoken verbatim), FR-PI-012 (Settings editor), FR-PI-013 (wizard reopen)
-- Depends on: FR-PI-001 (step order)
+- FR: FR-SP-007 (tool), FR-SP-008 (linking), FR-SP-010 (unlink), FR-SP-016 (Settings surface)
+- NFR: NFR-SP-002 (log safety), NFR-SP-007 (encryption at rest)
+- Depends on: FR-SP-008 (the linking flow that populates the store)
 
-
-### FR-PI-003: Encrypted profile store
+### FR-SP-010: Unlink wipes credentials and revokes access
 
 #### Metadata
-- **Area:** Profile Storage
+- **Area:** Account Linking / Security
 - **Priority:** MUST
-- **Source:** Feature constitution "In scope" (new profile store under `Services/Storage/` following the `EncryptedFileStorage` pattern), "Field Contract" (storage column), Feature Constraint 5; project constitution Standards (Security: encrypted app storage, Keychain, Data Protection Complete)
+- **Source:** Workflow `security-design-review` and `security-test` focus ("OAuth token lifecycle … revocation on unlink", "credential wipe on unlink"); feature constitution amendment (credential handling discipline); project constitution Standards (Security)
 
 #### Description
-A new profile store **must** exist under `ios/ElderlyAssistant/Services/Storage/`, following the existing `EncryptedFileStorage` pattern, holding the new profile fields: **name**, **address-as term**, **date of birth**, **emergency doctor / GP**, **local hospital**, and **next of kin** (data shape per OD-F1 — standalone field in this store, or the existing `isEmergencyContact` designation on a family contact).
+Unlinking Spotify **must** remove the account's access from the device, cleanly:
 
-Rules:
-
-- The store is the single source of truth for these fields; the wake path (FR-PI-008), the prompt builders (FR-PI-009) and the Settings editor (FR-PI-012) read from it.
-- Family members remain in the existing `FamilyContactStore` (FR-PI-005) and voice-fingerprint data remains in the existing Secure Enclave mechanism (FR-PI-007) — neither is duplicated into this store.
-- Reads and writes are durable and consistent: an interruption must never leave a half-written profile that breaks the assistant.
-- A missing, corrupt or undecryptable payload degrades per FR-PI-015 — never fabricated, never partially applied.
+- **Wipe**: the unlink action clears every Spotify token, credential and account-state value from the encrypted store (FR-SP-009) — after unlink, the store reads as not configured; a storage sweep finds no recoverable Spotify credential.
+- **Revocation**: where the linking service supports it, the grant is revoked upstream; where it does not, the local wipe is the guarantee. A token that the provider reports as revoked/invalid **must** be treated as unlinked: the cached grant is dropped, no retry loop runs against a dead grant, and the user is not told a lie about being connected.
+- **Behaviour after unlink**: music requests follow the unlinked-account rules (FR-SP-002, FR-SP-004, FR-SP-012) — an explicit localized outcome every time. The status surface (FR-SP-016) shows not linked.
+- **No residue**: no credential survives in logs, diagnostics, caches or backups of the encrypted store beyond what the platform's Data Protection semantics allow (NFR-SP-007); the wipe itself logs only a non-content outcome (NFR-SP-002).
+- **Re-link**: after unlink, the caregiver can re-link through the same flow (FR-SP-008) without a residual-state conflict.
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: Encrypted profile store
+Feature: Unlink wipes credentials and revokes access
 
-  Scenario: All interview fields persist and read back
-    Given the user completes About-you and the emergency contacts step
-    When the profile store is read after an app relaunch
-    Then it returns name, address-as, date of birth (if entered), GP, hospital, and next of kin per the recorded OD-F1 shape
+  Scenario: Unlink removes all stored Spotify credentials
+    Given a linked Spotify account with stored tokens
+    When the caregiver unlinks the account
+    Then the encrypted store holds no Spotify token or credential
+    And the status surface shows not linked
+    And a later music request follows the unlinked-account degradation rules
 
-  Scenario: Store content is not readable as plaintext
-    Given profile data has been written
-    When the app container is inspected
-    Then no file contains the name, address-as, date of birth, GP, hospital or next-of-kin values in readable form (NFR-PI-001)
+  Scenario: A revoked grant is treated as unlinked, without a retry loop
+    Given a linked account whose grant the provider rejects as revoked
+    When a music request reaches Spotify
+    Then the cached grant is dropped
+    And the request follows the unlinked-account path with an explicit localized outcome
+    And no unbounded retry against the revoked token occurs
 
-  Scenario: A corrupt payload does not break the assistant
-    Given the stored profile payload is unreadable
-    When the assistant starts
-    Then it runs un-personalized exactly as today (FR-PI-015)
-    And it does not crash or stall
+  Scenario: The wipe leaves no credential in logs
+    Given the unlink action runs in a Release build
+    When the console and log output are inspected
+    Then no token, credential or authorization header value appears
+    And only a non-content unlink outcome is recorded
+
+  Scenario: Re-linking after unlink succeeds cleanly
+    Given the account was unlinked
+    When the caregiver completes the linking flow again
+    Then the account is linked with fresh credentials
+    And no stale state from the previous link affects the new one
 ```
 
 #### Related
-- NFR: NFR-PI-001 (encryption at rest), NFR-PI-002 (log safety)
-- Depends on: FR-PI-002 (About-you)
+- FR: FR-SP-008 (linking), FR-SP-009 (store), FR-SP-016 (status surface)
+- NFR: NFR-SP-002 (log safety), NFR-SP-007 (encryption at rest), NFR-SP-009 (token lifecycle)
+- Depends on: FR-SP-008, FR-SP-009
 
-
-### FR-PI-004: Optional steps remain skippable with pending status
+### FR-SP-011: Free-tier degradation to the spotify: deep-link fallback
 
 #### Metadata
-- **Area:** Onboarding Wizard
+- **Area:** Degradation
 - **Priority:** MUST
-- **Source:** Feature constitution "Field Contract" rules (every other new field optional; existing skippable-step + Home reminder-card pattern; no hard gate on those steps) and "Integration Surfaces" (`OnboardingState` pendingSteps/firstPendingStep); owner brief 2026-10-05
+- **Source:** Feature constitution Feature Constraint 1 ("Premium reality is an NFR — degradation must be honest… free-tier or unlinked-account remote control must degrade to the `spotify:` deep-link fallback with clear messaging, never a silent failure") and "Music Request Routing & Degradation Contract" (degradation bullets); DV-4; OD-S3 (exact precedence and copy — open)
 
 #### Description
-Every new field other than name and address-as is optional. The new steps — family & friends (extended), emergency contacts, voice fingerprint — **must** follow the existing skippable-step pattern:
+Playback control requires a Spotify Premium account. When a music request reaches a linked Spotify account that cannot be remote-controlled — free tier, or any account state where remote control is unavailable — the system **must** degrade to the `spotify:` deep-link fallback with clear messaging:
 
-- no hard gate beyond About-you's Next gate; Skip completes the step;
-- per-step status is persisted in `OnboardingState` with stable step IDs;
-- a skipped or incomplete step remains pending in `pendingSteps`, which drives the Home reminder card and the wizard reopen position (FR-PI-013);
-- the user is never blocked from finishing the wizard, and a partially filled optional step (for example a GP but no hospital) completes without requiring all fields.
+- a validated `spotify:` deep link (FR-SP-007) is opened for the resolved request (e.g. the track, or `spotify:search:<encoded query>`);
+- the user hears an explicit localized line that says what actually happened, never a claim that remote playback was started. Illustrative copy (exact copy for the degradation paths is OD-S3): "स्पोटिफाइ खोल्दैछु — त्यहाँ बजाउनुहोस्।" / "Opening Spotify — play it there.";
+- the honest free-tier line **must not** be skipped in favour of pretending control succeeded, and the deep link **must not** be suppressed silently;
+- if the `spotify:` scheme cannot be opened (app absent — Feature Constraint 8), the outcome follows the honest-app-absent rule (FR-SP-012), never a fabricated success.
+
+The precedence between this free-tier deep-link path and the YouTube fallback (FR-SP-004), per account/service state, and the exact copy for each path, is OD-S3. Both rules bind; OD-S3 resolves composition. Whether a Premium account is detected ahead of the request or by the provider response is a design decision constrained only by this honesty rule.
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: Optional steps remain skippable
+Feature: Free-tier degradation to the spotify: deep-link fallback
 
-  Scenario: Skipping an optional step advances the wizard
-    Given the emergency contacts step is shown
-    When the user skips it
-    Then the wizard advances with no hard gate
-    And the step's pending status follows the existing skippable-step pattern
+  Scenario: A free-tier linked account degrades to the deep link with clear messaging
+    Given a Spotify account is linked on the free tier
+    When the user says "भजन बजाऊ" and Spotify cannot remote-control playback
+    Then a validated spotify: deep link is opened for the request
+    And the user hears an explicit localized line saying Spotify was opened
+    And the line does not claim remote playback was started
 
-  Scenario: Partial fill is accepted
-    Given the user fills only the GP in the emergency contacts step
-    When the user continues
-    Then the GP is persisted and the other optional fields remain empty without blocking
+  Scenario: The deep link cannot be opened — honest outcome, no pretense
+    Given the free-tier degradation path is chosen
+    And the spotify: scheme cannot be opened on the device
+    Then the user hears the honest app-absent line (FR-SP-012)
+    And no playback success is claimed
 
-  Scenario: Pending optional steps drive the reminder card
-    Given one or more new optional steps remain incomplete
-    When the user returns Home
-    Then the reminder card reflects the pending new steps through the existing pendingSteps ordering
+  Scenario: A controllable Premium account does not take this path
+    Given a Premium linked account capable of remote control
+    When the user says "गीत चलाऊ"
+    Then playback control is attempted normally
+    And the free-tier deep-link messaging is not used
 ```
 
 #### Related
-- FR: FR-PI-002 (the only hard gate), FR-PI-005, FR-PI-006, FR-PI-007, FR-PI-013
-- Depends on: FR-PI-001
+- FR: FR-SP-003 (preference), FR-SP-004 (YouTube fallback), FR-SP-007 (deep-link construction), FR-SP-012 (honest outcomes)
+- NFR: NFR-SP-006 (no regression)
 
-
-### FR-PI-005: Family & friends step extension
+### FR-SP-012: Honest localized outcomes — no silent failure on any path
 
 #### Metadata
-- **Area:** Family & Friends
+- **Area:** Degradation / Honesty
 - **Priority:** MUST
-- **Source:** Feature constitution "In scope" (family & friends extends the existing step + `FamilyContactStore`) and "Integration Surfaces" (`FamilyContactStore.swift`; `isEmergencyContact` already exists — OD-F1); "Field Contract" (family members optional, existing store)
+- **Source:** Feature constitution Feature Constraint 1 and the degradation contract ("Never a silent failure anywhere in the chain. Unlinked account, free tier, network failure, and empty search each produce an explicit, localized, spoken outcome"); root constitution Agent Principles ("No silent stubs"); DV-4
 
 #### Description
-The existing family & friends step **must** be extended to collect and confirm family members into the existing `FamilyContactStore`, using its existing model. It **must not** fork, duplicate or replace the store. Existing step and store behaviour (add, edit, remove family members and everything else the store serves today) is preserved; the step remains optional and skippable per FR-PI-004.
+Every music path **must** end in an explicit, localized, spoken outcome. The enumerated paths that must each produce one:
 
-If OD-F1 resolves to the designation shape, next of kin is expressed through the existing `isEmergencyContact` flag on a family contact. If OD-F1 resolves to a standalone field, the next-of-kin value lives in the new profile store (FR-PI-006) and this step is unaffected.
+| Path | Required outcome |
+|---|---|
+| Unlinked account | An explicit line (and the YouTube fallback where it can serve, FR-SP-004) |
+| Linked, free tier / remote control unavailable | The deep-link degradation line (FR-SP-011) |
+| Network failure / timeout | An explicit service-unavailable line; where YouTube can serve, the fallback (FR-SP-004); never a hang |
+| Empty search result | An explicit not-found line, or the YouTube fallback where it can serve |
+| Provider error (non-200, quota/rate-limit, malformed payload) | The network/service failure treatment above, never a raw error spoken or logged |
+| Deep link cannot open (app absent, Feature Constraint 8) | The honest app-absent line |
+| Spotify linked but not usable (credential missing after wipe, revoked token) | The unlinked-account treatment (FR-SP-010) |
+
+Rules that bind every row:
+
+- **Never silence**: no path may return without speaking; no path may end in a spinner, a log-only failure, or a dropped request.
+- **Never pretense**: "Playing…" / "चलाउँदैछु" is spoken only when playback or an open actually happened; a failure is described as a failure.
+- **Localized**: every line exists in Nepali and English via `spotify.*` keys (NFR-SP-005), mirroring the YouTube plugin's line family (`spotify.unavailable`, `spotify.notFound`, `spotify.notLinked`, `spotify.openApp`, …).
+- **Observable**: the outcome classification (success / fallback / unavailable / not-found / not-linked / free-tier) is recorded without query text (NFR-SP-002).
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: Family & friends step extension
+Feature: Honest localized outcomes on every music path
 
-  Scenario: Family members are recorded through the existing store
-    Given the user adds a family member in the family & friends step
-    When the step completes
-    Then the member is persisted in the existing FamilyContactStore using the existing model
-    And the member is visible wherever family contacts are shown today
+  Scenario: Network failure is spoken, not silent
+    Given the Spotify search transport times out or errors
+    When the user says "भजन बजाऊ"
+    Then the user hears an explicit localized service-unavailable outcome (or the YouTube fallback where it can serve)
+    And no path returns without an audible outcome
 
-  Scenario: The step remains optional
-    Given the family & friends step is shown
-    When the user skips it
-    Then the wizard advances and no hard gate is introduced
+  Scenario: Empty search is spoken as not found, never fabricated
+    Given both providers return no usable result
+    When the user says "गीत चलाऊ"
+    Then the user hears the explicit not-found line
+    And no title is fabricated and no playback is claimed
+
+  Scenario: An unlinked account is spoken as not linked
+    Given no Spotify account is linked and YouTube cannot serve the request
+    When the user says "play a song"
+    Then the user hears the explicit not-linked/not-available line in the active language
+
+  Scenario: No "playing" claim without a real open or playback
+    Given any failure path above is exercised
+    When the spoken output is inspected
+    Then no line claims music is playing or being played
 ```
 
 #### Related
-- FR: FR-PI-004 (skippable pattern), FR-PI-006 (emergency contacts — OD-F1)
-- NFR: NFR-PI-010 (no regression)
-- Depends on: FR-PI-001
+- FR: FR-SP-001 (the flip), FR-SP-004 (YouTube fallback), FR-SP-007 (tool failures), FR-SP-011 (free tier)
+- NFR: NFR-SP-005 (localisation), NFR-SP-002 (log safety)
 
-
-### FR-PI-006: Emergency contacts step
+### FR-SP-013: Deterministic music-domain rule in KeywordIntentRule
 
 #### Metadata
-- **Area:** Emergency Contacts
+- **Area:** Intent Routing (no-model path)
 - **Priority:** MUST
-- **Source:** Feature constitution "In scope" (emergency contacts: next of kin, emergency doctor/GP, local hospital) and "Field Contract" (all optional; next of kin per OD-F1); owner brief 2026-10-05; workflow scope comment
+- **Source:** Feature constitution "Integration Surfaces" (`ios/ElderlyAssistant/Services/Voice/` `KeywordIntentRule.swift` — deterministic music domain rule, no-model path) and "Feature Purpose & Scope"; Feature Constraint 3 (prompt budget — the deterministic rule is the no-prompt-token path);
 
 #### Description
-A new emergency contacts step **must** collect three optional contact types:
+The deterministic no-model intent path **must** classify bare music requests into the music domain, so a music request works without a model call and without prompt-budget growth:
 
-- **Next of kin** — data shape per OD-F1 (standalone field in the new profile store, or an `isEmergencyContact` designation on a family contact).
-- **Emergency doctor / GP** — stored in the new profile store.
-- **Local hospital contact** — stored in the new profile store.
+- a music keyword group (the natural Nepali and English families: भजन, गीत, गाना, संगीत/सङ्गीत, "song", "music", "bhajan" …) combined with the play/listen verb families routes to the music domain, mirroring the structure of the existing `youtube` rule (`youtubeKeywords` × `youtubeVerbFamily`);
+- the rule **must not** capture explicit YouTube utterances: an utterance carrying a YouTube marker (युट्युब / "youtube") continues to match the YouTube domain, not music (FR-SP-005);
+- narration guards follow the existing YouTube-rule discipline (a narration such as "I listened to music yesterday" style phrasing must not fire the stage, mirroring the `youtubeVerbFamily` narration comment);
+- the emitted intent/domain for the example golden utterances stays `music` (the pinned music golden block, NFR-SP-006).
 
-All three are optional and skippable with no hard gate (FR-PI-004); partial fill is accepted; values persist per FR-PI-003. The step adds no emergency-call logic: the collected data becomes available to the existing safety paths but their behaviour is unchanged (FR-PI-014).
+The rule is the zero-prompt-token path (Feature Constraint 3); any prompt-layer music wording added alongside it must fit the pinned budget (NFR-SP-004).
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: Emergency contacts step
+Feature: Deterministic music-domain rule
 
-  Scenario: Contact values are collected and persist
-    Given the user fills next of kin, GP, and local hospital in the emergency contacts step
-    When the step completes
-    Then each value is persisted per the recorded OD-F1 shape and the new profile store
-    And each value survives an app relaunch
+  Scenario: A bare music request matches the music domain without a model call
+    Given the keyword intent rule is evaluated
+    When the transcript is "भजन बजाऊ"
+    Then the matched domain is music
+    And no model call is required for the classification
 
-  Scenario: The step is optional and skippable
-    Given the emergency contacts step is shown
-    When the user skips it entirely
-    Then the wizard advances with no hard gate
-    And the profile store simply holds no emergency-contact values
+  Scenario: A YouTube-marked utterance still matches the YouTube domain
+    Given the keyword intent rule is evaluated
+    When the transcript is "युट्युबमा गीत चलाऊ"
+    Then the matched domain is youtube, not music
+    And the existing YouTube rule behaviour is unchanged
 
-  Scenario: Partial fill is accepted
-    Given only the GP is entered
-    When the step completes
-    Then the GP is persisted and the other fields remain empty without blocking
+  Scenario: A narration is not captured as a request
+    Given the keyword intent rule is evaluated
+    When a text mentions music in narration form without a request shape
+    Then the music stage does not fire
 ```
 
 #### Related
-- FR: FR-PI-003 (profile store), FR-PI-004 (skippable), FR-PI-014 (data available to safety paths)
-- Open decision: OD-F1 (next-of-kin data shape)
-- Depends on: FR-PI-001
+- FR: FR-SP-005 (explicit YouTube unchanged), FR-SP-014 (contact veto), FR-SP-015 (route intake)
+- NFR: NFR-SP-004 (prompt budget), NFR-SP-006 (no regression)
 
-
-### FR-PI-007: Voice fingerprint step (reuse of existing enrollment)
+### FR-SP-014: Music-request veto parity in VoiceContactSearchRoute
 
 #### Metadata
-- **Area:** Voice Fingerprint
+- **Area:** Intent Routing
 - **Priority:** MUST
-- **Source:** Feature constitution "In scope" (voice fingerprint — optional enrollment) and "Field Contract" (existing `SpeakerBiometricService` / `VoiceEnrollmentRecorder` flow); "Out of scope" (no changes to the existing voice-biometric mechanisms)
+- **Source:** Feature constitution "Integration Surfaces" (`ios/ElderlyAssistant/Services/Voice/` `VoiceContactSearchRoute.swift` — YouTube-veto parity so music requests never open the Contacts screen); Feature Constraint 5 (must-not-break paths)
 
 #### Description
-A new voice fingerprint step **must** offer the existing on-device voice-biometric enrollment flow (`SpeakerBiometricService` / `VoiceEnrollmentRecorder`, as surfaced today in `VoiceSettingsView`) as an optional, skippable step. The step is an entry point, not a modification:
+A music request **must never** open the Contacts screen. The existing contact-search route already runs a YouTube veto ("a YouTube utterance is a YouTube search, never a contact search"); the music feature **must** add music-request veto parity so that an utterance such as 'गीत चलाऊ' or 'भजन बजाऊ' — whose tokens can resemble a contact search ("play <name>") — is not misread as a contact search:
 
-- the enrollment and verification mechanism **must not** change;
-- biometric data **must** remain exclusively in the existing Secure Enclave storage (NFR-PI-009) — never in the new profile store, never transmitted, never logged;
-- no new permission is introduced.
-
-If enrollment is skipped, declined or fails, the step **must not** block the wizard; the fingerprint remains available later through the existing Settings surface.
+- the music veto **must** recognize the same music families the keyword rule recognizes (FR-SP-013) and must run before the contact-search decision, in the same order position as the existing YouTube veto;
+- the veto is a *veto*, not a capture: it prevents the Contacts screen from opening; the music path (FR-SP-015) owns the request;
+- the veto **must not over-block**: a genuine contact request that carries no music marker still opens contact search exactly as today (NFR-SP-006);
+- the existing YouTube veto behaviour is unchanged (FR-SP-005).
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: Voice fingerprint step
+Feature: Music requests never open the Contacts screen
 
-  Scenario: Enrollment runs through the existing flow
-    Given the user chooses to enroll in the voice fingerprint step
-    When enrollment runs
-    Then it uses the existing VoiceEnrollmentRecorder / SpeakerBiometricService flow
-    And the biometric data is stored exactly as the existing flow stores it
-    And no new permission or mechanism is introduced
+  Scenario: A bare music request is vetoed from contact search
+    Given the contact-search route is evaluated
+    When the transcript is "गीत चलाऊ" or "भजन बजाऊ"
+    Then the contact search does not fire
+    And the Contacts screen is not opened
 
-  Scenario: Skip or failure does not block the wizard
-    Given the user skips enrollment, or enrollment fails
-    When the step ends
-    Then the wizard advances with no hard gate
-    And the assistant continues to work without a fingerprint
+  Scenario: The music veto does not over-block a genuine contact request
+    Given the contact-search route is evaluated
+    When the transcript is a plain contact request with no music marker (for example "आरवलाई फोन गर")
+    Then the contact search fires exactly as before
+
+  Scenario: The YouTube veto still holds alongside the music veto
+    Given the contact-search route is evaluated
+    When the transcript is "युट्युबमा गीत खोज"
+    Then the YouTube veto fires as before and contact search does not open
 ```
 
 #### Related
-- NFR: NFR-PI-009 (voice-biometric mechanism unchanged), NFR-PI-010 (no regression)
-- Depends on: FR-PI-001
+- FR: FR-SP-013 (keyword rule), FR-SP-015 (route intake), FR-SP-005 (explicit YouTube unchanged)
+- NFR: NFR-SP-006 (no regression)
+- Depends on: FR-SP-013 (shared music-family recognition)
 
-
-### FR-PI-008: Personalized wake acknowledgment
+### FR-SP-015: Music-request intake in the voice route ladder
 
 #### Metadata
-- **Area:** Wake Acknowledgment / Address-as
+- **Area:** Intent Routing
 - **Priority:** MUST
-- **Source:** Feature constitution "Address-as Behaviour Contract" (wake acknowledgment; `VoicePipeline.handleWakeDetected`) and "Integration Surfaces"; workflow scope comment ("hajur <address-as>")
+- **Source:** Feature constitution "Integration Surfaces" (`ios/ElderlyAssistant/Services/Voice/` `YouTubeRoute.swift` — a bare "play some music" with no YouTube word deliberately falls through today; the music path changes or sits alongside it while explicit YouTube must still reach YouTube); routing table row 1; Feature Constraint 5
 
 #### Description
-When the wake word is detected and an address-as term is recorded, `VoicePipeline.handleWakeDetected` **must** speak a wake acknowledgment that includes the term, following the form `हजुर <address-as>` (exact phrasing and the mechanism — TTS of a template vs pre-rendered `AckFastLane` variants — are OD-F2, the architect's call). The term is spoken verbatim (FR-PI-010).
+Bare music requests **must** reach the music playback path through the voice route ladder:
 
-Wake-word recognition itself is untouched and out of scope. When no term is recorded, or the profile read fails, the path **must** behave exactly as today — today it starts listening with no spoken greeting; no neutral placeholder is invented (FR-PI-011, FR-PI-015).
+- today a bare "play some music" with no YouTube word deliberately falls through the YouTube route (and can then be mis-handled by downstream stages). The music feature **must** add music-request intake such that a bare music utterance — 'भजन बजाऊ', 'गीत चलाऊ', 'play a song' — is recognized as a music request at the route stage and handed to the music path (FR-SP-001);
+- the intake **must** run so that explicit YouTube requests still reach YouTube first (FR-SP-005): a YouTube-marked utterance is never claimed by the music intake;
+- **no double-handling**: an utterance is handled by exactly one of the YouTube path and the music path, and the stage ordering must make that deterministic (whether the music intake changes `YouTubeRoute` or sits alongside it is the architect's call in design-l1/design-l2);
+- the intake **must not** capture non-music utterances: chat, queries, calls and other domains keep their current handling (NFR-SP-006);
+- the route decision for the ladder's other stages (including the contact-search veto, FR-SP-014) is unchanged except for the music intake itself.
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: Personalized wake acknowledgment
+Feature: Music requests reach the music path from the route ladder
 
-  Scenario: Term recorded — the acknowledgment speaks it
-    Given an address-as term is recorded
-    When the wake word is detected
-    Then the assistant speaks the wake acknowledgment containing the term exactly as recorded (for example "हजुर <address-as>")
-    And the existing listening flow continues as today
+  Scenario: A bare music request is recognized and handed to the music path
+    Given the voice route ladder is evaluated
+    When the transcript is "भजन बजाऊ" with no YouTube word
+    Then the music intake fires and hands the request to the music path
+    And the request is not dropped, and not answered as a chat/query
 
-  Scenario: No term recorded — behaves exactly as today
-    Given no address-as term is recorded
-    When the wake word is detected
-    Then no new spoken greeting is introduced
-    And the assistant starts listening exactly as today, with no placeholder term
+  Scenario: An explicit YouTube request still reaches YouTube first
+    Given the voice route ladder is evaluated
+    When the transcript is "युट्युबमा गीत चलाऊ"
+    Then the YouTube stage fires exactly as before
+    And the music intake does not also handle the utterance
 
-  Scenario: Speech failure does not block listening
-    Given the acknowledgment cannot be spoken (TTS unavailable)
-    When the wake word is detected
-    Then the assistant proceeds to listen without the greeting
-    And no crash or retry loop occurs
+  Scenario: A non-music utterance is not captured by the music intake
+    Given the voice route ladder is evaluated
+    When a non-music utterance (for example a chat or a call request) is spoken
+    Then the music intake does not fire
+    And the utterance follows its existing stage
 ```
 
 #### Related
-- FR: FR-PI-010 (verbatim), FR-PI-011 (un-personalized path), FR-PI-015 (read-failure fallback)
-- NFR: NFR-PI-008 (latency and fallback)
-- Open decision: OD-F2 (phrasing and locale handling)
-- Depends on: FR-PI-003 (term recorded)
+- FR: FR-SP-001 (playback flip), FR-SP-005 (explicit YouTube unchanged), FR-SP-013 (keyword rule), FR-SP-014 (contact veto)
+- NFR: NFR-SP-006 (no regression)
+- Depends on: FR-SP-013
 
-
-### FR-PI-009: Address-as in brain reply-style rules (cloud and on-device)
+### FR-SP-016: Settings linking, status surface and privacy disclosure
 
 #### Metadata
-- **Area:** Brain Personalization
+- **Area:** Settings / Privacy
 - **Priority:** MUST
-- **Source:** Feature constitution "Address-as Behaviour Contract" (brain replies; `IntentPrompt.build/buildChat/buildUnderstanding` plus interpreter context; cloud Gemini and on-device LLaMA) and "Integration Surfaces"; workflow scope comment ("yes <address-as>")
+- **Source:** Feature constitution Constitutional Amendment Record 2026-10-06 ("Privacy disclosure. Linking the account sends the user's music queries and playback activity to Spotify. The privacy/settings surface discloses this") and "Integration Surfaces" (`ios/ElderlyAssistant/App/` `SettingsView.swift` + `SettingsTabs.swift` — Spotify linking/status surface, mirror of `YouTubeSettingsView`); Feature Constraint 12 (localization)
 
 #### Description
-The reply-style rules in `IntentPrompt.build` / `buildChat` / `buildUnderstanding`, plus the interpreter context, **must** receive the recorded address-as term so replies can use it naturally — for example "yes <address-as>" instead of "yes". The contract:
+The Settings app **must** carry a Spotify linking and status surface, mirroring `YouTubeSettingsView`:
 
-- **Both reply paths.** The personalization applies to the cloud (Gemini) engine and the on-device (LLaMA) brain through the one shared prompt builder — the term is composed in the shared path, not in per-engine forks.
-- **Untrusted input.** The user-entered term and name **must** pass the project's `InputSanitiser` discipline before entering any prompt (NFR-PI-004); the term must not be able to alter reply-style rules, tool/intent routing, or safety behaviour.
-- **Natural use only.** The rules must instruct natural use where it fits and **must not** contain a rule that forces the term into every sentence. Exact phrasing is the architect's call; the term itself is spoken verbatim (FR-PI-010).
-- **Budget and mirror.** Prompt edits preserve the pinned token budget and the byte-identical seed mirror (NFR-PI-005).
-- **No term recorded.** The prompt paths behave exactly as today — no term, no placeholder (FR-PI-011, FR-PI-015).
+- **Status**: shows whether Spotify is linked/connected, and the state the router will act on (linked / not linked / linked but remote control unavailable — free tier). Status is derived from the credential store (FR-SP-009), never optimistic.
+- **Actions**: the caregiver can link (starts the OAuth flow, FR-SP-008) and unlink (wipes credentials, FR-SP-010), with the same confirm pattern as the YouTube surface (`youtubeSettings.removeConfirm` precedent); where OD-S1 resolves to a family-entered credential, the surface carries that field in the `credentialField` style (secure entry, never echoed).
+- **Privacy disclosure**: the surface **must** state, in plain language and in both languages, that linking sends the user's music queries and playback activity to Spotify — mirroring the existing `youtubeSettings.privacy` disclosure shape. Illustrative copy: "गीत खोज्न तपाईंले भन्नुभएको कुरा स्पोटिफाइमा पठाइन्छ; अरू केही पठाइँदैन।" / "What you say is sent to Spotify to find the music; nothing else is sent."
+- **Honesty about rollout**: while Spotify development mode limits service to registered test users (OD-S2), the surface **must not** hide that reality; the unregistered case still behaves honestly at request time (FR-SP-012).
+- **Localization**: all surface strings live under the `spotify.*` key family (including the settings sub-family mirroring `youtubeSettings.*`) with ne/en entries (NFR-SP-005); the surface follows the project accessibility standards (NFR-SP-010).
+- The elderly primary user is never asked to handle OAuth or credentials; the surface is written for and operated by the family member/caregiver (amendment; `YouTubeSettingsView` family framing).
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: Address-as in brain reply-style rules
+Feature: Settings linking, status and privacy disclosure
 
-  Scenario: Both engines compose the term from the shared builder
-    Given an address-as term is recorded
-    When replies are generated through the cloud (Gemini) path and through the on-device (LLaMA) path
-    Then both compose the term into the shared reply-style context from the one shared prompt builder
+  Scenario: The linked state is shown truthfully
+    Given a Spotify account is linked
+    When the caregiver opens the Spotify Settings surface
+    Then the connected status is shown
+    And an unlink action is available
 
-  Scenario: Replies may use the term naturally
-    Given a term is recorded
-    When a reply where a form of address fits is generated
-    Then the reply may include the term naturally (for example "yes <address-as>")
-    And the term is spoken verbatim
+  Scenario: The unlinked state offers linking
+    Given no Spotify account is linked
+    When the caregiver opens the Spotify Settings surface
+    Then the surface shows not linked and offers the linking action
+    And the linking flow follows the caregiver-performed OAuth requirement (FR-SP-008)
 
-  Scenario: Natural use only — no mechanical insertion rule
-    Given the prompt templates
-    When the reply-style rules are inspected
-    Then they instruct natural use and contain no rule that forces the term into every sentence
-    And a reply that omits the term remains valid
+  Scenario: The privacy disclosure is present and localized
+    Given the Spotify Settings surface is presented in Nepali and in English
+    When the disclosure text is inspected
+    Then it states that music queries and playback activity are sent to Spotify
+    And it is present in both languages via spotify.* keys
 
-  Scenario: No term recorded — prompt changes are inert
-    Given no term is recorded
-    When prompts are built
-    Then they behave as today with no term and no placeholder
+  Scenario: Unlink is confirm-guarded and effective
+    Given a linked account
+    When the caregiver confirms unlink
+    Then the surface shows not linked
+    And the credentials are wiped (FR-SP-010)
 ```
 
 #### Related
-- FR: FR-PI-010 (verbatim), FR-PI-011 (un-personalized path), FR-PI-015 (read-failure fallback)
-- NFR: NFR-PI-003 (no new egress), NFR-PI-004 (injection hardening), NFR-PI-005 (budget and mirror)
-- Depends on: FR-PI-003 (term recorded)
+- FR: FR-SP-008 (linking), FR-SP-009 (store), FR-SP-010 (unlink), FR-SP-012 (honest outcomes)
+- NFR: NFR-SP-005 (localisation), NFR-SP-010 (accessibility), NFR-SP-011 (compliance gates)
 
-
-### FR-PI-010: Address-as spoken verbatim (never translated)
+### FR-SP-017: Device-validation checklist recorded and passed (DV-* completion gate)
 
 #### Metadata
-- **Area:** Address-as Data Handling
+- **Area:** Validation / Completion Gate
 - **Priority:** MUST
-- **Source:** Feature constitution "Address-as Behaviour Contract" (stored and spoken verbatim; never translated; never routed through the L10n string catalogs) and Feature Constraint 3; "Field Contract" (Address-as term)
+- **Source:** Feature constitution "Success Criteria & Completion Gate" (the DV-* device-validation checklist is the completion gate; the feature is done only when it carries the checklist and passes it on the reference device, Anzaan); the DV-1..DV-16 pattern used by prior shipped features
 
 #### Description
-The address-as term is user data. It **must** be stored and spoken exactly as entered, in every surface where it is used (the wake acknowledgment, FR-PI-008, and brain replies, FR-PI-009). It **must not** be translated, transliterated, substituted for, or routed through the L10n string catalogs. The surrounding acknowledgment/reply copy may be localized in the active app language — the term itself is emitted verbatim. The name follows the same rule wherever it is spoken.
+The feature **must** carry a DV-* style acceptance checklist recorded with the feature (the pattern used by prior shipped features) and **must** pass it on the reference device (Anzaan) before it is considered done. The checklist **must** cover at minimum the constitution's items:
 
-Script/language mixing between the term and the active app language is handled by the localized surrounding copy; the acknowledgment phrasing and per-language templates are OD-F2 (architect).
+| Item | What it validates |
+|---|---|
+| DV-1 | Stub → real playback flip: a bare music request produces sound |
+| DV-2 | Spotify-preferred selection: both-provider search with Spotify winning while linked and capable |
+| DV-3 | Explicit-YouTube routing unchanged: 'युट्युबमा गीत चलाऊ' still reaches YouTube |
+| DV-4 | Honest lines for free-tier, unlinked-account, network-failure and empty-search paths (no silent failure) |
+| DV-5 | Nepali-language end-to-end on the Anzaan reference device |
+
+Requirements on the checklist itself:
+
+- it is **recorded with the feature** (the feature's spec/validation artifacts), with each item's steps, expected outcome and observed result;
+- every item has an explicit pass/fail record; a failed item is recorded as failing — the feature is **not** declared done on an unmet item;
+- results are captured on a Release build on the reference device where the item's nature requires it (the project's pre-release device-check discipline applies to console output too, NFR-SP-002);
+- the checklist is the completion gate regardless of unit-test status: tests are necessary, the device run is what signs the feature off.
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: Address-as spoken verbatim
+Feature: DV-* device-validation checklist is recorded and passed
 
-  Scenario: Verbatim in both surfaces
-    Given the term is recorded as entered
-    When the wake acknowledgment is spoken and when a reply uses the term
-    Then each utterance/text contains exactly the recorded string, with no translation or transliteration
+  Scenario: The checklist exists with at least the constitution's coverage
+    Given the feature deliverable set
+    When the recorded device-validation checklist is inspected
+    Then it contains at least DV-1 (flip), DV-2 (Spotify preferred), DV-3 (explicit YouTube), DV-4 (honest degradation lines) and DV-5 (Nepali end-to-end)
+    And each item carries steps, expected outcome and a result record
 
-  Scenario: The term is data, not a catalog string
-    Given the L10n string catalogs and the personalization code paths
-    When they are inspected
-    Then the term does not appear as a catalog entry
-    And no code path passes the term through a localization lookup
+  Scenario: An unmet item blocks the completion claim
+    Given a checklist item fails on the reference device
+    When completion is assessed
+    Then the item is recorded as failing
+    And the feature is not declared done until the item passes or the deviation is explicitly resolved with the owner
+
+  Scenario: The passed checklist is recorded with the feature
+    Given the checklist items pass on the Anzaan reference device
+    When the feature is signed off
+    Then the results are recorded alongside the feature artifacts
+    And the record names the device and build used
 ```
 
 #### Related
-- NFR: NFR-PI-006 (localisation of UI strings)
-- Open decision: OD-F2 (acknowledgment phrasing and locale handling)
-- Depends on: FR-PI-003 (profile store)
-
-
-### FR-PI-011: Un-personalized path behaves exactly as today
-
-#### Metadata
-- **Area:** No-Regression
-- **Priority:** MUST
-- **Source:** Feature constitution "Address-as Behaviour Contract" (final bullet: until a term is recorded — step skipped, existing user not yet re-interviewed, including any fallback path — the assistant behaves exactly as today; no neutral placeholder is invented); workflow non-goals comment
-
-#### Description
-Until an address-as term is recorded — because the step was skipped, because an existing user has not yet been re-interviewed, or because of any profile read failure — the assistant **must** behave exactly as today:
-
-- wake detection starts listening with no spoken greeting, exactly as the pre-feature baseline (FR-PI-008);
-- prompts and replies contain no term and no substitute: no "default name", no placeholder, no neutral invented form of address (FR-PI-009);
-- no other behaviour changes.
-
-The feature adds personalization; it **must not** regress the un-personalized path, and there is no state in which an invented term is spoken or composed into a prompt.
-
-#### Acceptance criteria
-
-```gherkin
-Feature: Un-personalized path behaves exactly as today
-
-  Scenario: Fresh install without a recorded term
-    Given a fresh installation with no address-as term recorded
-    When the wake word is detected and replies are generated
-    Then behaviour is identical to the pre-feature baseline
-    And no placeholder term is spoken or composed into any prompt
-
-  Scenario: Existing user not yet re-interviewed
-    Given an installation that completed onboarding before this feature
-    And the user has not completed the new steps
-    When the assistant runs
-    Then the same today-behaviour holds, with no term and no placeholder
-```
-
-#### Related
-- FR: FR-PI-008 (wake ack), FR-PI-009 (reply style), FR-PI-015 (read-failure fallback)
-- NFR: NFR-PI-010 (no regression to existing flows)
-- Depends on: —
-
-
-### FR-PI-012: Settings profile editor
-
-#### Metadata
-- **Area:** Settings
-- **Priority:** MUST
-- **Source:** Feature constitution "In scope" (a Settings editor) and "Rules" (existing users reach the new steps via the wizard reopen and the Settings editor) and "Integration Surfaces"; "Field Contract" (existing users are not force-migrated)
-
-#### Description
-A Settings editor **must** let the user, or a helping family member, view and edit the profile after onboarding: name, address-as term, date of birth, emergency contacts (GP, hospital, next of kin per OD-F1). Family members are edited through the existing family contacts surface. Edits persist to the same stores (FR-PI-003) and take effect on subsequent use without a reinstall or a wizard re-run — the next wake acknowledgment and subsequent replies use the updated term.
-
-The editor is reachable for already-onboarded users. Whether the editor sits behind voice-biometric or PIN authentication is an open decision raised in elicitation (OD-PI-2: `requirements.md` FR-042 requires in-app configuration behind authentication, while the biometric/PIN gate is recorded as unwired with accepted residual risk in project constitution Open Decision 11, B3). This requirement binds the editor's existence, reachability, persistence and effect — not the authentication gate.
-
-#### Acceptance criteria
-
-```gherkin
-Feature: Settings profile editor
-
-  Scenario: Edit takes effect without re-onboarding
-    Given an onboarded user opens the Settings profile editor and changes the address-as term
-    When the change is saved
-    Then the next wake acknowledgment and subsequent replies use the new term
-    And no reinstall or wizard re-run is required
-
-  Scenario: Reachable for existing users
-    Given an installation that completed onboarding before this feature
-    When the user opens Settings
-    Then the profile editor is reachable and the profile fields are editable
-
-  Scenario: Edits persist
-    Given a profile field is edited in Settings
-    When the app relaunches and the store is read
-    Then the edited value is returned
-    And no field is silently lost
-```
-
-#### Related
-- FR: FR-PI-003 (profile store), FR-PI-013 (wizard reopen)
-- NFR: NFR-PI-007 (accessibility), NFR-PI-002 (log safety)
-- Open decision: OD-PI-2 (editor authentication gate)
-- Depends on: FR-PI-003
-
-
-### FR-PI-013: Wizard reopen path for existing users
-
-#### Metadata
-- **Area:** Onboarding Wizard
-- **Priority:** MUST
-- **Source:** Feature constitution "In scope" (the wizard's reminder-card reopen path; new step IDs are pending by definition for existing users — absent from the persisted status map) and "Rules" (existing users are not force-migrated); "Integration Surfaces" (`pendingSteps` drives the reminder card and the reopen position)
-
-#### Description
-For users who completed onboarding before this feature, the new step IDs are absent from the persisted status map and are therefore pending by definition. The existing reminder-card reopen path **must** surface them:
-
-- `pendingSteps` (with the existing `firstPendingStep` ordering) includes the new steps, so the Home reminder card reflects them;
-- reopening the wizard lands at the first pending new step in the configured order (FR-PI-001);
-- existing users are **not** force-migrated: the wizard is not auto-presented over the assistant and nothing blocks normal use until the steps are completed; the Settings editor (FR-PI-012) is the alternative path.
-
-#### Acceptance criteria
-
-```gherkin
-Feature: Wizard reopen path for existing users
-
-  Scenario: New steps are pending for existing users
-    Given an installation whose persisted onboarding status predates the new steps
-    When pendingSteps is computed
-    Then the new steps (about-you, emergency contacts, voice fingerprint) are treated as pending
-    And the Home reminder card reflects them through the existing mechanism
-
-  Scenario: Reopen lands on the first pending new step
-    Given the user taps the reminder card
-    When the wizard reopens
-    Then it opens at the first pending new step in the configured order
-
-  Scenario: No force-migration
-    Given an existing user with pending new steps
-    When the app starts normally
-    Then the wizard is not auto-presented
-    And the assistant works as today until the user chooses to complete the steps
-```
-
-#### Related
-- FR: FR-PI-004 (pending status), FR-PI-012 (Settings editor), FR-PI-011 (today-behaviour)
-- Depends on: FR-PI-001
-
-
-### FR-PI-014: Profile data available to existing safety paths
-
-#### Metadata
-- **Area:** Safety Integration
-- **Priority:** MUST
-- **Source:** Feature constitution "Out of scope" (collected profile/emergency data becomes available to the existing safety paths — emergency contact selection, family notification — but those paths' behaviour is unchanged) and Feature Constraint 7 (safety delta: none)
-
-#### Description
-The collected profile and emergency data **must** be made available (readable) to the existing safety paths — emergency contact selection and family notification — through the profile store (FR-PI-003), so those paths can consult it where they already operate.
-
-The paths' logic and behaviour **must not** change: no new emergency-call logic, no new notification triggers, no new thresholds, no new stub. The known descoped state of those paths is unchanged by this feature (project constitution Open Decision 11: no emergency-call module; health/family alert stubs return success silently), and this feature neither fixes nor extends them.
-
-#### Acceptance criteria
-
-```gherkin
-Feature: Profile data availability to safety paths
-
-  Scenario: Recorded data is readable by the safety paths
-    Given next of kin, GP, or hospital values are recorded
-    When the existing emergency contact selection path consults the profile
-    Then the recorded values are available through the profile store
-
-  Scenario: Safety behaviour is unchanged
-    Given the feature's changes are in the build
-    When the existing safety paths (emergency contact selection, family notification) run
-    Then their triggers, outputs and failure behaviour are identical to the pre-feature baseline
-    And no new emergency-call logic, notification trigger or stub is introduced
-```
-
-#### Related
-- FR: FR-PI-003 (profile store), FR-PI-006 (emergency contacts)
-- NFR: NFR-PI-010 (no regression to existing flows)
-- Depends on: FR-PI-003
-
-
-### FR-PI-015: Profile read failures degrade to the un-personalized path
-
-#### Metadata
-- **Area:** Error Handling
-- **Priority:** MUST
-- **Source:** Feature constitution "Address-as Behaviour Contract" (including any fallback path, the assistant behaves exactly as today) and Feature Constraint 5 (encrypted local storage); project constitution Agent Principles (no silent stubs; deferred/absent capability is never faked)
-
-#### Description
-Any failure to read the profile — missing store (fresh install, not yet written), corrupt or unreadable payload, decryption failure — **must** degrade to the un-personalized path:
-
-- the assistant behaves exactly as today (FR-PI-011): it never crashes, stalls or blocks at startup;
-- no term is fabricated; no placeholder is invented; no partially read value is used;
-- a corrupt payload is discarded or rebuilt rather than retried in a loop;
-- the failure is recorded in logs without PII (NFR-PI-002).
-
-Writes **must** never leave a half-written profile that a subsequent read could misinterpret.
-
-#### Acceptance criteria
-
-```gherkin
-Feature: Profile read failures degrade cleanly
-
-  Scenario: Missing store on a fresh install
-    Given no profile has been written
-    When the assistant starts and the wake word is detected
-    Then behaviour is today's baseline, with no term and no greeting
-    And no error is surfaced to the user
-
-  Scenario: A corrupt payload does not break startup
-    Given the stored profile payload is unreadable
-    When the assistant starts
-    Then it runs un-personalized, discards or rebuilds the corrupt payload, and does not crash or stall
-
-  Scenario: No partial application and no placeholder
-    Given a read failure occurs partway through the profile
-    When the profile is consumed
-    Then no partially read term or field is used
-    And no placeholder value is invented
-```
-
-#### Related
-- FR: FR-PI-003 (profile store), FR-PI-011 (today-behaviour)
-- NFR: NFR-PI-002 (log safety)
-- Depends on: FR-PI-003
-
-
-### FR-PI-016: App-start interview-status routing (resume where the user left off)
-
-#### Metadata
-- **Area:** Onboarding Wizard / App Start
-- **Priority:** MUST
-- **Source:** Owner amendment 2026-10-05 (owner sign-off); specs/profile-interview/constitution.md Feature Constraint 8
-
-#### Description
-On app start the app **must** check the onboarding interview's completion status (the per-step status in `OnboardingState`, including the mandatory fields of FR-PI-002) and route accordingly:
-
-- **Mandatory fields missing** (name or address-as — FR-PI-002): the user **must** be routed to the interview screen (the wizard) at the first pending step — About-you — resuming where the user left off. This is a hard route on app start.
-- **Optional interview steps pending** (FR-PI-004): the user **must** also be routed to the wizard, at the first pending optional step, with the OD-F3 soft-skip affordance preserved — the user can still skip and is never trapped.
-- **Interview complete:** the app starts normally, with no routing to the interview screen.
-
-The resume mechanism **must** be the existing `OnboardingState.pendingSteps` / `firstPendingStep` computation plus the wizard's `startingAt:` reopen path (FR-PI-013) — no new resume state is introduced. The first pending step follows the configured order (FR-PI-001).
-
-Cold start is the minimum trigger for this requirement. Whether a background-to-foreground transition also re-checks is a design decision for the architect (design-l1 / design-l2), not a requirement of this set.
-
-Relationship to FR-PI-013: this owner amendment (2026-10-05) supersedes FR-PI-013's "No force-migration" scenario for the app-start path — pending steps are now surfaced on start — while preserving its non-blocking intent through the skippable steps (FR-PI-004 / OD-F3). FR-PI-013's `pendingSteps` / `firstPendingStep` / `startingAt:` mechanics are unchanged and are the resume mechanism used here.
-
-A failure to read the interview completion status **must not** crash or stall app start and **must not** trap the user (FR-PI-015; FR-PI-004).
-
-#### Acceptance criteria
-
-```gherkin
-Feature: App-start interview-status routing
-
-  Scenario: Mandatory fields missing on cold start — hard route to About-you
-    Given the app cold-starts with name or address-as not recorded
-    And the first pending step is About-you
-    When the app starts
-    Then the user is routed to the interview screen (the wizard)
-    And the wizard opens at About-you, so the interview resumes where the user left off
-
-  Scenario: Optional steps pending on cold start — routed but never trapped
-    Given the app cold-starts with name and address-as recorded
-    And at least one optional interview step is pending
-    When the app starts
-    Then the user is routed to the interview screen (the wizard)
-    And the wizard opens at the first pending optional step
-    And the OD-F3 soft-skip affordance is available, so the user can skip and is never trapped
-
-  Scenario: Interview complete — no routing on cold start
-    Given the app cold-starts with the interview complete
-    When the app starts
-    Then the app starts normally with no routing to the interview screen
-
-  Scenario: A status read failure does not crash or trap
-    Given the interview completion status cannot be read (corrupt or unreadable state)
-    When the app starts
-    Then the app starts without crashing, stalling or looping on the status check
-    And the user is never trapped in the wizard
-```
-
-#### Related
-- FR: FR-PI-002 (mandatory gate), FR-PI-004 (optional skippable pattern), FR-PI-013 (reopen path; its "No force-migration" scenario is superseded for the app-start path by this amendment), FR-PI-015 (no crash or trap on read failure)
-- NFR: NFR-PI-010 (no regression)
-- Depends on: FR-PI-001 (step order), FR-PI-013 (resume mechanism)
-
+- FR: FR-SP-001 (DV-1), FR-SP-003 (DV-2), FR-SP-005 (DV-3), FR-SP-012 (DV-4)
+- NFR: NFR-SP-011 (compliance and release gates)
 
 ## Non-functional requirements
 
-### NFR-PI-001: Profile encryption at rest
+### NFR-SP-001: Provider search responsiveness and timeout budget
 
 #### Metadata
-- **Category:** Security
+- **Category:** Performance
 - **Priority:** MUST
-- **Source:** Feature constitution Feature Constraint 5 (DOB and emergency contacts are personal data stored in the existing encrypted local storage — Keychain, Data Protection Complete); "Field Contract" storage column; project constitution Standards (Security: emergency contact data in encrypted app storage; Data Protection class Complete)
+- **Source:** Feature constitution "Integration Surfaces" (the Spotify tool mirrors `YouTubeTool`, whose fetch budget is the project's tool-timeout precedent) and the degradation contract (no silent failure / no hang); project constitution Agent Principles (timeouts are configurable parameters, not hardcoded constants)
 
 #### Description
-Every new profile field — name, address-as term, date of birth, GP, hospital, next of kin — is personal data and **must** be stored encrypted at rest using the existing encrypted-storage pattern (`EncryptedFileStorage`; Keychain key material; iOS Data Protection class Complete).
+A music request **must** resolve to a spoken outcome within a bounded time — an elderly voice-first user is never left in silence with no feedback. Measurable targets:
 
-Measurable properties:
-
-- **Zero plaintext copies** of any profile value anywhere on disk, including temporary files used during writes and any debug artifacts.
-- The store is readable only with the app's key material; no plaintext backup of the values exists.
-- A corrupt or undecryptable payload is treated as a read failure (FR-PI-015) — it is discarded, never exposed and never partially applied.
-- Removing the app removes the profile data; no new cloud or file-based backup path is introduced for it (NFR-PI-003).
+- **Provider round-trip budget**: each provider search uses a configurable timeout with a default of **8 s**, mirroring `YouTubeTool.fetchTimeoutSeconds` = 8 s (the same budget as the weather/search tools). The timeout is a parameter of the tool, not a hardcoded constant.
+- **Outcome budget**: when at least one configured provider answers within its budget, the user hears the outcome (playback line, deep-link line, or fallback line) within **10 s** of the request being recognized, on a working network.
+- **Negative budget**: when a provider exceeds its budget, the honest timeout outcome (FR-SP-012) is produced by the budget deadline; **no path blocks for more than 16 s total** (two sequential provider budgets) before speaking.
+- **No unbounded waits**: no music path waits on an unbounded socket, an infinite retry, or a revoked-grant loop (FR-SP-010); retries are bounded and counted.
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: Profile encryption at rest
+Feature: Provider search responsiveness
 
-  Scenario: No readable PII on disk
-    Given all profile fields have been saved
-    When the app container is inspected
-    Then no file contains the name, address-as, date of birth, GP, hospital or next-of-kin values in readable form
-    And the payload requires the app's Keychain key material to read
+  Scenario: An answered request produces a spoken outcome within the budget
+    Given a working network and a provider that answers within its budget
+    When the user says "भजन बजाऊ"
+    Then the spoken outcome occurs within 10 s of the request being recognized
 
-  Scenario: An undecryptable payload is discarded, not exposed
-    Given the stored payload cannot be decrypted
-    When the store loads
-    Then the data is not exposed and no partial value is used
-    And the assistant degrades per FR-PI-015
+  Scenario: A slow provider is cut off at the budget with an honest line
+    Given a provider that does not answer
+    When the budget (default 8 s) elapses
+    Then the timeout outcome is produced by the deadline
+    And the user hears the corresponding localized line
+
+  Scenario: The timeouts are configurable, not hardcoded
+    Given the tool is constructed with an injected timeout
+    When the value differs from the default
+    Then the tool uses the injected value in its request budget
 ```
 
 #### Related
-- FR: FR-PI-003 (profile store), FR-PI-015 (read-failure fallback)
+- FR: FR-SP-002 (search), FR-SP-007 (tool), FR-SP-012 (honest outcomes)
+- NFR: NFR-SP-006 (no regression)
 
-
-### NFR-PI-002: Log safety — no new PII in logs
+### NFR-SP-002: Log safety — no credentials, queries or provider bodies in logs
 
 #### Metadata
 - **Category:** Privacy / Security
 - **Priority:** MUST
-- **Source:** Feature constitution Feature Constraint 5 (logs must not contain the new PII — project Privacy standard, log sanitiser); project constitution Standards (Privacy: logs must not contain PII — log sanitiser required) and release gates (release-build log-surface gate)
+- **Source:** Feature constitution Feature Constraint 2 (credentials never in the repository or logs — header, never URL; the B2/T-050 release-log-gate precedent `ios/tools/check-release-log-safety.sh` is binding) and the amendment; workflow `security-design-review` focus ("Log sanitisation: music queries, provider responses and error bodies must not reach logs"); project constitution Standards (Privacy: logs must not contain PII; release gates)
 
 #### Description
-The new PII — name, address-as term, date of birth, GP, hospital, next of kin — **must not** appear in any log, in any build, on any path this feature adds or touches (store, wizard, wake acknowledgment, prompt composition, settings, error paths).
+No Spotify credential, token, authorization header, music query text or raw provider body **must** reach any log, telemetry event or diagnostic surface, in any build. Measurable properties:
 
-Measurable properties:
-
-- **Zero occurrences** of any profile value in console output, log files or telemetry metadata in a Release build exercising a fully personalized session.
-- Observability may record non-content facts only: "profile present: yes/no", step completion booleans, error classifications — never the values.
-- The log sanitiser covers the new fields; diagnostic call sites that would carry them are redacted or omit them.
-- The release-build log-surface gate `ios/tools/check-release-log-safety.sh` (wired into `ios/build.sh`) covers the new profile, wake-acknowledgment and settings paths and **exits 0** — a build-blocking gate, not a report.
+- **Zero occurrences**: in a Release build exercising linking, unlinking, a successful music session, every failure path (timeout, non-200, malformed payload, revoked token) and the settings surface, the console and log output contain **0** credentials, tokens, client secrets, authorization header values, query strings or raw response/error bodies.
+- **Header, never URL**: credentials travel in request headers; no credential appears in any URL, query parameter or deeplink — checked over the new code paths.
+- **Sanitiser coverage**: the log sanitiser treats the new fields/values as sensitive; diagnostic call sites redact or omit them; observability events carry only non-content classifications ("provider: spotify; outcome: not_found") and never query text (mirroring `YouTubeTool`'s "observability events carry no query text" discipline).
+- **Release gate**: `ios/tools/check-release-log-safety.sh` (wired into `ios/build.sh`) covers the new Spotify plugin, tool, linking and settings paths and **exits 0** — a build-blocking gate, not a report. The pre-release device console check (project release gates) covers the same paths.
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: Log safety for profile data
+Feature: Log safety for the Spotify paths
 
-  Scenario: A personalized session produces no PII in logs
-    Given a Release build with a recorded profile triggers the wake acknowledgment and replies
-    When the console and log output are inspected
-    Then no name, address-as term, date of birth or emergency-contact value appears
-    And no raw profile payload or error body appears
+  Scenario: A full linked session produces no sensitive output
+    Given a Release build with a linked Spotify account
+    When a music request, a fallback, a failure and an unlink are exercised
+    Then no credential, token, authorization header, query text or provider body appears in the console or logs
 
-  Scenario: A diagnostic reference to the term is sanitised
-    Given a diagnostic event would reference the address-as term
-    When it is logged
-    Then the value is redacted or omitted by the log sanitiser
+  Scenario: A provider error body is never logged raw
+    Given the provider returns an error body
+    When the failure is handled
+    Then only a non-content classification is recorded
+    And no raw body or provider message reaches the log
 
-  Scenario: The release log-safety gate covers the new paths
+  Scenario: The release log-safety gate covers the new paths and exits 0
     Given the feature's logging paths exist in the build
     When ios/tools/check-release-log-safety.sh runs
     Then it exits 0
-    And it inspects the new profile, wake-acknowledgment and settings paths
+    And it inspects the new Spotify plugin, tool, linking and settings paths
 ```
 
 #### Related
-- FR: FR-PI-003, FR-PI-008, FR-PI-012, FR-PI-015
-- NFR: NFR-PI-011 (compliance and release gates)
+- FR: FR-SP-007 (tool), FR-SP-008 (linking), FR-SP-009 (store), FR-SP-010 (unlink)
+- NFR: NFR-SP-007 (encryption at rest), NFR-SP-011 (compliance gates)
 
-
-### NFR-PI-003: No new network egress or cloud processing
+### NFR-SP-003: No new network egress; music stays off any cloud LLM
 
 #### Metadata
 - **Category:** Privacy
 - **Priority:** MUST
-- **Source:** Feature constitution "Out of scope" (any new cloud processing — no new network egress) and Feature Constraint 5; project constitution Architecture Constraint 1 (all AI inference on-device; recorded exceptions Open Decisions 12 and 13 are untouched)
+- **Source:** Feature constitution Feature Constraint 4 ("On-device stance. Voice intent parsing and routing stay on-device; music queries go to the provider APIs directly, never through a cloud LLM. No network egress beyond the two provider APIs"), Constraint 6 ("No new backend"), and the amendment ("Scope limited to Spotify. No other network egress is added or widened"); project constitution Architecture Constraint 1 (amended)
 
 #### Description
-The feature **must** add zero new network calls, endpoints, request shapes or data flows.
+The feature adds exactly two outbound surfaces and nothing else. Measurable properties:
 
-Measurable properties:
-
-- **Zero network requests attributable to the feature** across the full journey: interview, wizard close, wake acknowledgment, reply generation, Settings edit — the whole feature works fully offline (on-device engines).
-- All new stored fields stay on-device. Only the **name** and **address-as term** may be composed into the existing reply prompt paths, alongside the content those paths already carry.
-- **Zero occurrences** of date of birth, GP, hospital, next-of-kin, family-member or biometric values in any prompt or outbound payload.
-- On a reply path that uses the existing consent-gated cloud engine, the term is carried only inside that engine's existing flow, under its existing consent status and recorded exception — no new egress category and no new disclosure obligation are created.
+- **Egress allowlist**: network calls on the music path go only to the Spotify OAuth endpoint (`accounts.spotify.com`), the Spotify Web API (`api.spotify.com`), and the pre-existing YouTube endpoints used by the YouTube path. **Zero** calls to any other host are introduced by the feature.
+- **No new backend**: nothing is provisioned server-side; the app calls the Spotify Web API directly.
+- **No cloud LLM on the music path**: the spoken query, its text and any provider response are never sent to a cloud LLM/chat provider; classification and routing stay on-device (the deterministic rule, FR-SP-013, is a no-prompt path). The recorded cloud exceptions (project Open Decisions 12/13: voice transcription, OCR text translation) are untouched and are not invoked by this feature's music path.
+- **Deep links are OS hand-offs, not egress**: opening `spotify:` / `youtube:` / https deep links hands the request to another installed app; the feature itself does not fetch those pages.
+- **Verifiable**: a network-seam test (the `LocalToolTransport` pattern) asserts the exact request set per flow; no other host is contacted for any of the exercises in the scenarios below.
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: No new network egress or cloud processing
+Feature: No new network egress on the music path
 
-  Scenario: The full journey works with no network
-    Given the device is offline
-    When the interview is completed, the wizard closes, the wake word fires, and on-device replies run
-    Then every step of the journey works
-    And zero network requests are attempted by the feature
+  Scenario: A music session contacts only the allowlisted hosts
+    Given a linked account and a configured YouTube key
+    When a full music request, a fallback request and a linking request are exercised
+    Then only accounts.spotify.com, api.spotify.com and the existing YouTube endpoints are contacted
+    And no other host is contacted
 
-  Scenario: Only name and term may enter prompts
-    Given a profile with all fields filled
-    When prompt payloads for both reply engines are inspected
-    Then the name and/or address-as appear only where the reply-style rules use them
-    And date of birth, GP, hospital, next-of-kin, family and biometric values appear in no prompt or outbound payload
+  Scenario: The music path never reaches a cloud LLM
+    Given any of the music flows is exercised
+    When egress is inspected
+    Then no request carries the spoken query or provider content to any cloud LLM/chat provider
 
-  Scenario: No new endpoint or request shape is introduced
-    Given the feature's outbound code paths
-    When request construction is inspected
-    Then no new endpoint or request shape exists beyond the existing engine paths
+  Scenario: No new backend is introduced
+    Given the feature change set
+    When its network surfaces are inspected
+    Then the app calls the Spotify Web API directly
+    And nothing new is provisioned on the project's side
 ```
 
 #### Related
-- FR: FR-PI-003, FR-PI-009
-- NFR: NFR-PI-004 (injection hardening), NFR-PI-011 (compliance gates)
+- FR: FR-SP-002 (search), FR-SP-007 (tool), FR-SP-008 (linking)
+- NFR: NFR-SP-011 (compliance gates)
 
-
-### NFR-PI-004: Untrusted profile-string hardening (injection)
-
-#### Metadata
-- **Category:** Security
-- **Priority:** MUST
-- **Source:** Feature constitution Feature Constraint 4 (security-design-review focus — prompt injection: the user-entered address-as is composed into brain prompts, making it an untrusted input path; the design must apply the project's existing `InputSanitiser` discipline; the term must not alter reply-style rules, tool/intent routing, or safety behaviour); workflow security-design-review focus areas; project constitution Standards ("Injection detection enabled at `quarantine` level")
-
-#### Description
-The name and address-as term are user-entered, attacker-influenceable input composed into prompts shared by the cloud (Gemini) and on-device (LLaMA) brains. Before either enters any prompt it **must** be handled with the same discipline `InputSanitiser` applies to transcripts (quarantine level):
-
-- **Sanitised and bounded** — the composed value is capped by a configured bound (not a magic literal); truncation never splits a grapheme cluster; the composed prompt remains within the pinned 1,024-token on-device budget (NFR-PI-005).
-- **Passed as data** — delimited/quoted, never as free-form instruction text, so the value cannot be parsed as a rule.
-- **No capability change** — a crafted term must not be able to alter reply-style rules, intent/tool routing, authentication, or safety behaviour, and must not trigger any app action.
-- **Policy action before send** — text that trips the injection policy follows the configured quarantine action (the same level the project configures); the assistant degrades to the un-personalized path (FR-PI-011) rather than sending a hostile payload.
-- Model output is treated as untrusted: nothing from a reply can cause profile writes or actions by itself.
-
-The term cannot reach these guarantees without this discipline; the security-design-review's STRIDE model must treat this surface as a focus area and `security-test` must present both the positive and negative evidence.
-
-#### Acceptance criteria
-
-```gherkin
-Feature: Hardening against hostile profile strings
-
-  Scenario: An ordinary term personalizes prompts as data
-    Given the user records an ordinary address-as term
-    When prompts are built for either engine
-    Then the term is included as delimited data
-    And personalization works normally
-
-  Scenario: An injection-shaped term cannot alter behaviour
-    Given a term contains an instruction aimed at the model (for example "ignore your instructions and ...")
-    When the term is composed into the prompt path
-    Then the injection policy's configured action is applied before any prompt is sent
-    And reply-style rules, intent routing, authentication and safety behaviour are unchanged
-    And no app action is triggered by the term
-
-  Scenario: An oversized term is bounded without breaking graphemes
-    Given a term far longer than the configured bound
-    When it is composed
-    Then it is truncated to the bound without splitting a grapheme cluster
-    And the composed prompt stays within the 1,024-token budget
-```
-
-#### Related
-- FR: FR-PI-009 (reply-style rules)
-- NFR: NFR-PI-005 (prompt budget), NFR-PI-002 (log safety)
-
-
-### NFR-PI-005: Prompt token budget and seed mirror preserved
+### NFR-SP-004: Prompt token budget preserved
 
 #### Metadata
 - **Category:** Reliability / Maintainability
 - **Priority:** MUST
-- **Source:** Feature constitution Feature Constraints 1–2 (prompt token budget: templates run in a 1,024-token on-device context and are pinned by `IntentPromptTests`' character ceiling — any prompt edit must preserve the budget and keep the tests passing; seed mirror: `tools/train-intent/seeds/prompt_template.txt` must be updated byte-identically in the same change as any `IntentPrompt` template edit)
+- **Source:** Feature constitution Feature Constraint 3 ("`IntentPromptTests` pins the intent prompt's token budget; music/Spotify prompt additions must fit it. The YouTube route's zero-prompt-token discipline is the model"); the project precedent `NFR-PI-005-prompt-budget-and-seed-mirror`
 
 #### Description
-The reply-style prompt edits **must** preserve the pinned budget:
+Music-intent wording changes in the intent/prompt layer **must** fit inside the existing pinned prompt budget, without raising the pin. Measurable properties:
 
-- The templates run in a **1,024-token** on-device context; the character ceiling pinned by `IntentPromptTests` **must not** be raised to fit the personalization, and `IntentPromptTests` must pass with a term recorded and with no term recorded.
-- The address-as composition is bounded (NFR-PI-004), so the budget holds for arbitrarily long user input.
-- `tools/train-intent/seeds/prompt_template.txt` **must** be updated **byte-identically** to the shipped template in the same change as any template edit — byte identity is the measurable property (a checksum equality).
+- **Pinned budget holds**: `IntentPromptTests` (the token/character ceiling on the intent prompt) passes unchanged; the pinned ceiling value is not increased to accommodate music wording.
+- **Zero-token preference is exercised**: the deterministic keyword path (FR-SP-013) is the primary music classification route, so the model prompt's music wording can stay small; whatever wording is added must fit the remaining budget.
+- **Seed mirror**: if any prompt template text changes, the byte-mirrored training seed (`tools/train-intent/seeds/prompt_template.txt`) is updated in the same change and the project's prompt-mirror check passes (`ios/tools/check-prompt-mirror.sh`).
+- **No behaviour drift**: the budget-preservation must not regress existing intents — the prompt's other rules are unchanged except for the deliberate music wording (NFR-SP-006).
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: Prompt budget and seed mirror
+Feature: Prompt budget preserved
 
-  Scenario: The pinned budget is preserved with the term recorded
-    Given the personalized prompt templates with an address-as term recorded
+  Scenario: The pinned intent prompt budget still passes with music wording
+    Given the music wording has been added to the intent/prompt layer
     When IntentPromptTests run
-    Then they pass within the pinned character ceiling
-    And the composed prompt fits the 1,024-token on-device context
+    Then they pass with the pinned ceiling unchanged
 
-  Scenario: The seed file is byte-identical to the template
-    Given the prompt template change
-    When tools/train-intent/seeds/prompt_template.txt is compared with the shipped template
-    Then the two are byte-identical (checksums equal)
+  Scenario: The prompt and seed mirror stay in sync
+    Given the intent prompt template text changed
+    When the prompt-mirror check runs
+    Then the training seed mirror matches byte-for-byte
+    And the check passes
+
+  Scenario: An over-budget wording change is rejected, not accommodated
+    Given a wording change that would exceed the pinned ceiling
+    When the change is proposed
+    Then it fails IntentPromptTests
+    And the pinned ceiling is not raised to accept it
 ```
 
 #### Related
-- FR: FR-PI-009 (reply-style rules)
-- NFR: NFR-PI-004 (injection hardening), NFR-PI-010 (no regression)
+- FR: FR-SP-013 (deterministic rule — the zero-prompt path), FR-SP-015 (routing)
+- NFR: NFR-SP-006 (no regression)
 
-
-### NFR-PI-006: Localisation of new UI strings
+### NFR-SP-005: Localisation of all Spotify strings (ne/en)
 
 #### Metadata
 - **Category:** Localisation
 - **Priority:** MUST
-- **Source:** Feature constitution "In scope" (all new UI strings externalized to the L10n string catalogs) and Feature Constraint 3; project constitution Standards (Localisation: all UI strings externalised; primary user's language for TTS)
+- **Source:** Feature constitution Feature Constraint 12 ("All Spotify user-facing strings are localized (ne/en) via `spotify.*` keys, mirroring the YouTube plugin's L10n pattern; spoken output follows the same formatting discipline as the rest of the voice stack") and the amendment; project constitution Standards (Localisation: all UI strings externalised; TTS output in the user's configured language)
 
 #### Description
-All new user-visible strings introduced by this feature — step titles and descriptions, field labels and hints, emergency-contact labels, voice-fingerprint step copy, Settings editor labels, and error/degradation copy — **must** be externalised to the L10n string catalogs with Nepali alongside the existing languages. Measurable: **100%** of the feature's user-visible strings have catalog entries; **zero** hardcoded user-visible strings in Swift literals.
+Every user-facing string this feature adds **must** be localized, in both launch languages, through the `spotify.*` key family. Measurable properties:
 
-The address-as term and the user's name are data: they **must never** be catalog entries and are never localized (FR-PI-010); they render and speak verbatim. Existing wizard copy remains in the catalogs.
+- **Key coverage**: 100% of the new user-facing strings exist as keys under the `spotify.*` family (including the settings sub-family mirroring `youtubeSettings.*`) with both **ne** and **en** values present in `ios/ElderlyAssistant/Resources/` `Localizable.xcstrings`; a missing translation is a failure, not a fallback to English.
+- **No hardcoded literals**: the new plugin, tool, linking, settings and router paths contain **zero** hardcoded user-facing strings (spoken or displayed); all go through the L10n lookup/format helpers.
+- **Spoken discipline**: spoken lines use the existing formatting discipline (locale-aware formatting helpers; spoken-only text never logged — NFR-SP-002). The provider name is spoken in the user's language ("स्पोटिफाइ" in Nepali sessions).
+- **Coverage of the degradation set**: the lines required by FR-SP-011 and FR-SP-012 (free tier, unlinked, unavailable, not found, app absent) exist in both languages — exact copy per OD-S3, but the keys must exist and be localized at implementation time.
 
 #### Acceptance criteria
 
 ```gherkin
-Feature: Localisation of the feature's strings
+Feature: Spotify strings are localized in Nepali and English
 
-  Scenario: All new UI strings are externalised
-    Given the feature's new UI strings (steps, field labels, fingerprint copy, settings labels, error copy)
-    When the string catalogs are inspected
-    Then each string has a catalog entry with a Nepali translation
-    And no feature string is hardcoded in the view code
+  Scenario: Every new key has both languages
+    Given the feature's string changes
+    When the string catalog is inspected
+    Then every spotify.* key has both a ne and an en value
+    And no key is missing a translation
 
-  Scenario: The address-as term is never localized
-    Given the catalogs and the rendering paths
-    When the term is displayed or spoken
-    Then it is emitted verbatim
-    And it is absent from the catalogs
+  Scenario: A Nepali session speaks Nepali lines on every path
+    Given the app's configured language is Nepali
+    When a music request, a fallback and each degradation path are exercised
+    Then the spoken lines are Nepali
+    And no English fallback line is spoken
+
+  Scenario: No hardcoded user-facing literal exists in the new paths
+    Given the new Spotify code paths
+    When they are inspected for user-facing literals
+    Then all display and spoken strings resolve through the L10n keys
 ```
 
 #### Related
-- FR: FR-PI-010 (verbatim term), FR-PI-012 (Settings editor)
-- NFR: NFR-PI-007 (accessibility)
+- FR: FR-SP-011 (free-tier line), FR-SP-012 (honest outcomes), FR-SP-016 (settings surface)
+- NFR: NFR-SP-006 (no regression)
 
-
-### NFR-PI-007: Accessibility of the new interview UI
-
-#### Metadata
-- **Category:** Accessibility
-- **Priority:** MUST
-- **Source:** Project constitution Standards (Accessibility: 44×44 pt minimum tap targets; minimum 18 pt body text; high-contrast text; voice-first UI) and Compliance constraints (clear plain-language explanation visible to elderly users)
-
-#### Description
-The new wizard steps and the Settings profile editor **must** meet the project accessibility standards:
-
-- Interactive targets (buttons, input fields, list rows, Skip/Next controls) are at least **44 × 44 pt**.
-- Body text is at least **18 pt**; the layout must not override system scaling in a way that reduces text below this minimum at supported sizes.
-- Colours meet WCAG AA contrast — at least **4.5:1** for body text, **3:1** for large text and UI components.
-- Devanagari (Nepali) renders correctly through the app's existing text rendering, and copy is plain-language (no technical terms) for the elderly primary user as well as a helping family member.
-
-#### Acceptance criteria
-
-```gherkin
-Feature: Accessibility of the new interview UI
-
-  Scenario: Tap targets and text sizes meet the minimums
-    Given a rendered new wizard step or Settings editor screen
-    When targets and text sizes are measured
-    Then every interactive target is at least 44 by 44 points
-    And body text is at least 18 pt
-
-  Scenario: Contrast meets AA
-    Given the rendered labels and controls
-    When contrast ratios are measured
-    Then body text meets at least 4.5:1
-    And large text and UI components meet at least 3:1
-```
-
-#### Related
-- FR: FR-PI-002 (About-you), FR-PI-012 (Settings editor)
-- NFR: NFR-PI-006 (localisation)
-
-
-### NFR-PI-008: Wake-acknowledgment latency and failure fallback
-
-#### Metadata
-- **Category:** Performance / Reliability
-- **Priority:** MUST
-- **Source:** Feature constitution "Address-as Behaviour Contract" (wake acknowledgment; behaves exactly as today including any fallback path); project stakeholder brief NFR-003 (wake-word activation within 1 second); owner brief 2026-10-05
-
-#### Description
-The personalized acknowledgment **must not** regress wake responsiveness:
-
-- The acknowledgment speech **begins within 1 second** of wake-word detection (the existing activation budget of `requirements.md` NFR-003).
-- The existing listening flow continues as today; the acknowledgment must not introduce an unbounded wait or block intent capture beyond the current pipeline's behaviour — the exact sequencing and mechanism are OD-F2 (architect).
-- If the acknowledgment cannot be spoken (TTS engine unavailable or failed), the path **must** fall back to today's silent start: no crash, no blocking, no retry loop, and listening still begins.
-
-#### Acceptance criteria
-
-```gherkin
-Feature: Wake-acknowledgment responsiveness
-
-  Scenario: The acknowledgment begins within the activation budget
-    Given an address-as term is recorded
-    When the wake word is detected
-    Then the acknowledgment begins within 1 second
-    And the existing listening flow continues as today
-
-  Scenario: TTS failure falls back to today's silent start
-    Given the acknowledgment cannot be spoken (TTS unavailable)
-    When the wake word is detected
-    Then the assistant starts listening as today, with no greeting
-    And no crash, blocking wait or retry loop occurs
-```
-
-#### Related
-- FR: FR-PI-008 (wake ack), FR-PI-011 (today-behaviour)
-- NFR: NFR-PI-010 (no regression)
-- Open decision: OD-F2 (phrasing and mechanism)
-
-
-### NFR-PI-009: Voice-biometric mechanism unchanged
-
-#### Metadata
-- **Category:** Security / Compliance
-- **Priority:** MUST
-- **Source:** Feature constitution "Out of scope" (no changes to the existing voice-biometric enrollment/verification mechanisms; the fingerprint step reuses them as-is) and Feature Constraint 6 (Secure Enclave; no change to that mechanism); project constitution Standards (voice biometric enrolment and verification stored on-device only — Secure Enclave / Keystore)
-
-#### Description
-The voice fingerprint step (FR-PI-007) is a new entry point into the existing flow; it **must not** modify it.
-
-Measurable properties:
-
-- **Zero changes** to `SpeakerBiometricService` / `VoiceEnrollmentRecorder` behaviour, contracts or algorithm (the diff adds a call site, not modifications).
-- Biometric data remains **exclusively** in the existing Secure Enclave / secure storage: zero biometric values in the new profile store, in logs, or in any outbound payload.
-- **Zero new permissions** or purpose strings for the fingerprint step (`Info.plist` unchanged for it).
-- The existing voice-biometric threat model applies unchanged; `security-design-review` covers it by reference (workflow focus: "voice fingerprint enrollment spoofing/replay — reuse existing threat model").
-
-#### Acceptance criteria
-
-```gherkin
-Feature: Voice-biometric mechanism unchanged
-
-  Scenario: Enrollment uses the existing mechanism and storage
-    Given the fingerprint step runs an enrollment
-    When the enrollment completes
-    Then the biometric data is stored exactly as the existing flow stores it (Secure Enclave)
-    And no behaviour, contract or algorithm change to the enrollment/verification code is introduced
-
-  Scenario: No new permission and no biometric leakage
-    Given the shipped Info.plist and the feature's storage paths
-    When they are inspected
-    Then no new permission or purpose string is added for the fingerprint step
-    And no biometric value appears in the profile store, logs or outbound payloads
-```
-
-#### Related
-- FR: FR-PI-007 (voice fingerprint step), FR-PI-014 (safety paths)
-- NFR: NFR-PI-011 (compliance and release gates)
-
-
-### NFR-PI-010: No regression to existing behaviours
+### NFR-SP-006: No regression to existing flows
 
 #### Metadata
 - **Category:** Reliability
 - **Priority:** MUST
-- **Source:** Feature constitution "Out of scope (must not change)" (wake-word recognition itself; emergency-call logic; voice-biometric mechanisms) and "Address-as Behaviour Contract" (behaves exactly as today until a term is recorded); Feature Constraints 6–7; workflow non-goals comment
+- **Source:** Feature constitution Feature Constraint 5 ("Must-not-break paths") and "Success Criteria" ("Explicit YouTube requests behave exactly as before — existing route, plugin, and golden tests hold"); project constitution Standards (Quality)
 
 #### Description
-The feature **must not** change existing behaviour outside its scope. Specifically:
+The feature changes only what FR-SP-001 through FR-SP-016 require. Measurable properties:
 
-- **Wake-word recognition** — the wake word and its detection logic are untouched; only post-detection acknowledgment behaviour is added.
-- **Existing wizard steps** — their behaviour and their positions relative to each other are preserved; new steps are insertions.
-- **Family contacts store** — `FamilyContactStore` behaviour is preserved; the feature extends its use, not its contract.
-- **Safety paths** — emergency contact selection and family notification logic is unchanged (FR-PI-014); no new emergency-call logic, trigger or stub.
-- **Voice-biometric mechanisms** — unchanged (NFR-PI-009).
-- **Un-personalized baseline** — identical to today (FR-PI-011).
-
-Measurable: the affected existing test suites stay green under the project's build/test gate, and shared components touched by the feature (`OnboardingState`, `VoicePipeline`, `IntentPrompt`) keep their existing contracts — additions are extensions, not modifications.
+- **Explicit YouTube unchanged**: `YouTubeRouteTests`, `YouTubePluginTests` and `CommandRouterYouTubeTests` pass; 'युट्युबमा गीत चलाऊ' reaches YouTube with the same route, action and lines (FR-SP-005).
+- **Golden corpus holds**: the pinned music golden block in `ios/ElderlyAssistantTests/` `Services/Voice/GoldenCorpus.swift` (currently 15 utterances pinned to intent `music`, lines 142–157; the feature constitution refers to "16 utterances" — the implementation reconciles the count against the source and records the result) still resolves to intent `music`; any entry that the feature deliberately supersedes moves **with its new expectation recorded alongside** — no silent golden churn.
+- **Other intents unchanged**: non-music stub intents (health query `router.healthNotAvailable`, video `router.featureNotYet`) and unrelated domains behave exactly as before; the touched suites listed in the feature constitution (`KeywordIntentRuleTests`, `VoiceContactSearchRouteTests`, `SettingsTabMappingTests`, `StoragePlacementTests`, plus the new Spotify suites) pass.
+- **Dormant-seam discipline**: the existing router construction sites and legacy tests keep compiling and behaving as before when the Spotify seams are dormant (nil), mirroring the `[YOUTUBE]` seam pattern.
+- **Project baseline recorded**: the unit gate runs against the project's known baseline; pre-existing failures unrelated to this feature are recorded as such (not silently included or excluded).
 
 #### Acceptance criteria
 
 ```gherkin
 Feature: No regression to existing behaviours
 
-  Scenario: Existing tests stay green
-    Given the feature's changes are in the build
-    When the affected existing test suites run under the project's build/test gate
-    Then they pass unchanged
+  Scenario: The pinned YouTube suites pass unchanged
+    Given the feature is built
+    When the YouTube route, plugin and router test suites run
+    Then they pass with no change other than recorded deliberate supersessions
 
-  Scenario: Wake-word recognition is untouched
-    Given the feature's diff
-    When the wake-word detection path is inspected
-    Then the wake word and its detection logic are unchanged
-    And only the post-detection acknowledgment behaviour is added
+  Scenario: The pinned music golden entries still resolve to the music intent
+    Given the feature is built
+    When the golden corpus music entries are exercised
+    Then each entry resolves to intent "music"
+    And any amended expectation is recorded alongside its entry
 
-  Scenario: Shared components keep their contracts
-    Given OnboardingState, VoicePipeline and IntentPrompt as used by existing features
-    When the feature's changes are inspected
-    Then their existing behaviour is unchanged
-    And the feature's additions are extensions (new cases, new parameters, new call sites), not modifications
+  Scenario: Non-music stubs keep their honest lines
+    Given the feature is built
+    When the health-query and video stub paths are exercised
+    Then they speak their existing lines (router.healthNotAvailable, router.featureNotYet)
+    And the music feature does not alter them
+
+  Scenario: Dormant seams preserve legacy behaviour
+    Given a router constructed without Spotify seams (nil)
+    When an existing test scenario is exercised
+    Then behaviour matches the pre-feature baseline
 ```
 
 #### Related
-- FR: FR-PI-011 (un-personalized path), FR-PI-014 (safety paths)
-- NFR: NFR-PI-005 (seed mirror), NFR-PI-009 (voice biometrics)
+- FR: FR-SP-001 (flip), FR-SP-005 (explicit YouTube unchanged), FR-SP-013, FR-SP-014, FR-SP-015
+- NFR: NFR-SP-004 (prompt budget), NFR-SP-012 (plugin isolation)
 
+### NFR-SP-007: Credential and token encryption at rest
 
-### NFR-PI-011: Compliance and release gates
+#### Metadata
+- **Category:** Security
+- **Priority:** MUST
+- **Source:** Feature constitution Amendment Record 2026-10-06 ("tokens are stored encrypted on-device (Keychain / `EncryptedLocalStorage`, Data Protection Complete)") and Feature Constraint 2; project constitution Standards (Security: sensitive data in encrypted app storage, Data Protection class Complete; key material never in plaintext)
+
+#### Description
+Every Spotify credential, token and account-state value **must** be encrypted at rest, exclusively in the platform-protected store. Measurable properties:
+
+- **Storage location**: 100% of Spotify credential/token values live behind `EncryptedLocalStorage` (Keychain-backed) with Data Protection class **Complete**; **zero** Spotify values appear in `UserDefaults`, plists, plain files, caches or the repository — proven by a storage-placement test (mirroring the existing `StoragePlacementTests` discipline) across save, read-back, relaunch and clear.
+- **Read-back**: values survive relaunch through the encrypted store only; a corrupt/unreadable store degrades to not-configured and an honest outcome (FR-SP-012), never a crash.
+- **Unlink semantics**: after unlink (FR-SP-010), a storage sweep finds no recoverable Spotify credential; the store reports not configured.
+- **No weak fallbacks**: no plaintext fallback is permitted if the secure store is unavailable — the feature degrades to not-linked with honest messaging instead.
+
+#### Acceptance criteria
+
+```gherkin
+Feature: Spotify credentials encrypted at rest
+
+  Scenario: Values are stored in the encrypted store only
+    Given a Spotify credential and token are saved
+    When storage placement is inspected across the app's stores
+    Then every value is in the Keychain-backed encrypted store with Data Protection Complete
+    And no Spotify value exists in UserDefaults or any plain file
+
+  Scenario: Read-back survives relaunch
+    Given a saved linked state
+    When the app relaunches
+    Then the linked state and credentials are read back from the encrypted store
+
+  Scenario: An unavailable secure store degrades honestly, not insecurely
+    Given the encrypted store cannot be read
+    When a music request is made
+    Then the account is treated as not configured
+    And the user hears the honest line (no plaintext fallback, no crash)
+
+  Scenario: After unlink nothing is recoverable
+    Given the account is unlinked
+    When the storage is swept
+    Then no Spotify credential or token is found
+```
+
+#### Related
+- FR: FR-SP-009 (store), FR-SP-010 (unlink), FR-SP-008 (linking)
+- NFR: NFR-SP-002 (log safety), NFR-SP-009 (token lifecycle)
+
+### NFR-SP-008: Deep-link URI construction hardening
+
+#### Metadata
+- **Category:** Security
+- **Priority:** MUST
+- **Source:** Workflow `security-design-review` focus ("Deep-link/URI injection: `spotify:` URIs are built from remote-controlled search results — track names/IDs must be validated before URI construction; a crafted result must not open arbitrary schemes") and `security-test` focus ("hostile track titles/IDs producing only validated `spotify:` URIs"); feature constitution Safety & Compliance Delta (new integration-class concern)
+
+#### Description
+Track names and identifiers from provider search results are **remote-controlled input** and must never be trusted as URI components. Measurable properties:
+
+- **Scheme allowlist**: 100% of URIs constructed by the Spotify tool use only the `spotify:` scheme (and, in the YouTube fallback, only the pre-existing `youtube:`/https YouTube URI shapes). A hostile corpus of crafted titles/IDs (scheme text, `//`, quotes, control characters, path traversal, percent-encoded traps, very long strings) yields **zero** constructions outside the allowlist and **zero** opens of a non-allowlisted scheme.
+- **Component validation**: identifiers are matched against the expected Spotify identifier shape before use (rejected otherwise); query components are percent-encoded; titles are never composed into a URI; rejected results resolve to an honest outcome (FR-SP-012), never a partial URI.
+- **No silent pass-through**: an invalid result is dropped or the request fails honestly — it is never forwarded as-is "because the provider returned it".
+- **Verifiable corpus**: the tool's test suite includes a hostile-input corpus (the `YouTubeTool`-style URL/parse seams make this testable with no real network) with at least the cases above, each asserting the constructed URI or the rejection.
+
+#### Acceptance criteria
+
+```gherkin
+Feature: Untrusted provider results cannot fabricate arbitrary URIs
+
+  Scenario: A hostile identifier is rejected before URI construction
+    Given a search result whose identifier contains scheme delimiters, control characters or path traversal
+    When the tool builds the deep link
+    Then no URI is constructed from the identifier, or the identifier is rejected
+    And the outcome is an honest failure
+
+  Scenario: A hostile title cannot leak into a URI or an open
+    Given a search result title containing "spotify://", "https://", quotes and control characters
+    When the tool builds and opens the deep link
+    Then the constructed URI contains no title text
+    And only the spotify: scheme is opened
+
+  Scenario: The hostile corpus yields zero escapes
+    Given the hostile-input test corpus (at least the cases above)
+    When the tool is exercised over the whole corpus
+    Then every constructed URI uses an allowlisted scheme
+    And zero non-allowlisted schemes are opened
+```
+
+#### Related
+- FR: FR-SP-007 (tool and deep-link construction), FR-SP-012 (honest outcomes)
+- NFR: NFR-SP-009 (OAuth redirect validation)
+
+### NFR-SP-009: OAuth redirect validation and token lifecycle
+
+#### Metadata
+- **Category:** Security
+- **Priority:** MUST
+- **Source:** Workflow `security-design-review` focus ("OAuth redirect validation: reject mismatched redirect URIs (token interception via app-scheme hijacking)"; "OAuth token lifecycle: scopes at sign-in, Keychain/EncryptedLocalStorage at rest, refresh handling, revocation on unlink; no tokens in logs"); feature constitution amendment (account-linking discipline); `GoogleAccountSession` precedent
+
+#### Description
+The Spotify OAuth implementation **must** hold the calendar-share discipline as measurable properties:
+
+- **Redirect validation**: the callback redirect URI is validated by **exact match** against the registered callback; a mismatch is rejected and **no token, code or account state is stored** — zero exceptions. App-scheme callback hijack attempts therefore yield no token.
+- **Scopes at sign-in**: the required scopes are requested during the sign-in/linking step itself (the `addScopes` lesson from calendar-share: consent-screen-only scopes produced 401s); a session with missing scopes is treated as not usable for the request and degrades honestly.
+- **Token verification**: a token is verified before first trusted use; verification failure ⇒ not-linked treatment (FR-SP-010), never a blind retry loop.
+- **Refresh and expiry**: token expiry/refresh is handled with a bounded, counted retry; a failed refresh produces an explicit status and an honest re-link prompt rather than a silent hang or a repeated failing call.
+- **Revocation on unlink**: unlink revokes upstream where supported and always wipes locally (FR-SP-010).
+- **Log safety**: zero tokens/authorization codes in logs across the linking, refresh, failure and unlink paths (NFR-SP-002).
+
+#### Acceptance criteria
+
+```gherkin
+Feature: OAuth redirect validation and token lifecycle
+
+  Scenario: A mismatched redirect is rejected with no token stored
+    Given a callback whose redirect URI does not exactly match the registered callback
+    When the linking service validates it
+    Then the callback is rejected
+    And no token, code or account state is stored
+    And nothing sensitive is written to the log
+
+  Scenario: Scopes are requested at sign-in
+    Given the caregiver starts the linking flow
+    When the authorization request is built
+    Then the required Spotify scopes are requested in that flow
+    And a session lacking them is treated as not usable, with an honest outcome
+
+  Scenario: A failed refresh produces an explicit re-link state, not a loop
+    Given a stored token that can no longer be refreshed
+    When a music request needs Spotify
+    Then the account is treated as not linked
+    And a bounded number of retries is made, after which the user hears the honest line
+
+  Scenario: Revocation on unlink is effective
+    Given a linked account
+    When the caregiver unlinks it
+    Then the grant is revoked where the service supports it
+    And the local credentials are wiped
+```
+
+#### Related
+- FR: FR-SP-008 (linking), FR-SP-010 (unlink), FR-SP-012 (honest outcomes)
+- NFR: NFR-SP-002 (log safety), NFR-SP-007 (encryption at rest)
+
+### NFR-SP-010: Accessibility of the new touch surfaces
+
+#### Metadata
+- **Category:** Accessibility
+- **Priority:** MUST
+- **Source:** Project constitution Standards (Accessibility: large tap targets minimum 44x44 pt; minimum 18 pt body text; high-contrast text; voice-first UI); feature constitution "Integration Surfaces" (the Settings linking/status surface mirrors `YouTubeSettingsView`)
+
+#### Description
+The touch surfaces this feature adds — the Settings Spotify linking/status surface (FR-SP-016) — **must** meet the project's accessibility standards, because a caregiver and, in the family-helps pattern, potentially the elderly user interact with it. Measurable properties:
+
+- **Tap targets**: every interactive control is at least **44 x 44 pt** (the project `DesignTokens.minTapTargetSize` pattern used by `YouTubeSettingsView`).
+- **Text size**: body text at least **18 pt** equivalent and rendered through the appearance typography tokens, not fixed sizes; the surface respects the app's configured appearance/contrast.
+- **Contrast**: text and controls use the appearance colour roles (no ad-hoc colours with insufficient contrast).
+- **VoiceOver/labels**: every control carries a meaningful accessibility label (localized through the `spotify.*` key family); status is announced as status, not implied by colour alone.
+- **Voice-first parity**: where a setting has a voice-reachable effect, the state change is honest and observable by voice (the status the router uses matches what the surface shows).
+
+#### Acceptance criteria
+
+```gherkin
+Feature: The Spotify settings surface is accessible
+
+  Scenario: Controls meet the tap-target minimum
+    Given the Spotify Settings surface is presented
+    When each interactive control is measured
+    Then each is at least 44 x 44 pt
+
+  Scenario: Text meets the minimum and uses appearance tokens
+    Given the surface is presented at the app's default appearance
+    When text styles are inspected
+    Then body text is at least the 18 pt-equivalent token size
+    And no fixed-size ad-hoc text style is used
+
+  Scenario: Labels and status are announced
+    Given VoiceOver is enabled
+    When the surface is traversed
+    Then every control has a localized label
+    And the linked/not-linked status is announced as text, not only by colour
+
+  Scenario: The surface's status matches the router's state
+    Given the account is linked or unlinked
+    When the surface's status and the router's acting state are compared
+    Then they agree
+```
+
+#### Related
+- FR: FR-SP-016 (settings surface)
+- NFR: NFR-SP-005 (localisation)
+
+### NFR-SP-011: Compliance and release gates
 
 #### Metadata
 - **Category:** Compliance
 - **Priority:** MUST
-- **Source:** Project constitution Compliance constraints (App Store guidelines 5.1.1/5.1.3; permissions at point of use) and release gates; workload gates (security-design-review STRIDE, security-test, final-sign-off T2 + HIL); Feature Constraints 4–5
+- **Source:** Project constitution Standards (Security: TLS 1.2+ for outbound connections, encrypted storage, STRIDE at security design review; Privacy: logs without PII, log sanitiser; release gates) and the feature constitution amendment; workflow gates (`security-design-review` SECURITY-GO, `security-test` SECURITY-GO, `final-sign-off` T2 with the release-build log gate)
 
 #### Description
-The feature may ship only with the following gates satisfied and evidenced:
+The feature **must** satisfy the project's compliance and release gates, measurably:
 
-1. **No new permissions / no HealthKit** — zero new permission requests or purpose strings; permissions remain requested at point of use with plain-language explanation (FR-PI-007/NFR-PI-009).
-2. **Privacy disclosure updated** — the app's data-collection disclosure covers the new profile fields (name, address-as, date of birth, emergency contacts) per App Store Guideline 5.1.1; the update is drafted and reviewed before the first App Store submission, alongside the existing Open Decision 11/12/13 review window (2026-10-13).
-3. **STRIDE threat model** — `security-design-review` returns `SECURITY-GO` with a STRIDE model covering the workflow's focus areas: profile-string prompt injection (NFR-PI-004), profile PII at rest (NFR-PI-001), and the voice-fingerprint reuse (NFR-PI-009).
-4. **Security evidence** — `security-test` returns `SECURITY-GO` evidencing injection hardening (NFR-PI-004), PII-free logs (NFR-PI-002), encrypted storage (NFR-PI-001), and no new egress (NFR-PI-003).
-5. **Release gates** — `ios/tools/check-release-log-safety.sh` exits 0 (NFR-PI-002); the `ios/build.sh` test scope passes; the T2 final-sign-off gate (HIL) is recorded.
+- **Transport security**: every Spotify endpoint the app calls uses **TLS 1.2+** (no cleartext, no downgrade); the OAuth callback uses the declared app scheme and validated redirect (NFR-SP-009).
+- **Store compliance**: the `spotify` query scheme and OAuth callback URL are declared correctly in `Info.plist` (`LSApplicationQueriesSchemes` for the installed-check) and the privacy disclosure (FR-SP-016) is in place; App Store policy obligations for the new integration are recorded in the release checklist.
+- **Untrusted input**: provider-controlled text is treated as untrusted throughout (NFR-SP-008); injection detection at the project's `quarantine` level applies to any untrusted content that reaches a prompt (the music path should add none — NFR-SP-003).
+- **Release gates**: `ios/tools/check-release-log-safety.sh` exits **0** and covers the new paths (NFR-SP-002); the pre-release device console/sysdiagnose check (project release gates) is performed on a Release build; the DV-* checklist (FR-SP-017) is recorded and passed.
+- **Workflow gates**: `security-design-review` returns **SECURITY-GO** against the STRIDE focus areas of this feature, `security-test` returns **SECURITY-GO** against the evidence (token storage, log surface, hostile URIs, redirect validation, wipe on unlink), and `final-sign-off` (T2) records the release-gate results.
 
 #### Acceptance criteria
 
 ```gherkin
 Feature: Compliance and release gates
 
-  Scenario: Gates are evidenced before sign-off
-    Given the feature is ready for sign-off
-    When the release checklist is assembled
-    Then the log-safety gate has exited 0
-    And the security reviews have returned SECURITY-GO for the focus areas above
-    And the privacy disclosure update is recorded (or explicitly open for the 2026-10-13 review window)
+  Scenario: All Spotify traffic is TLS 1.2 or better
+    Given the Spotify OAuth, search and deep-link paths
+    When their endpoints are inspected
+    Then every network endpoint uses TLS 1.2+
+    And no cleartext call exists
 
-  Scenario: No new permission is introduced
-    Given the shipped app
-    When Info.plist and the permission flows are inspected
-    Then no new permission or purpose string was added by this feature
+  Scenario: The release log-surface gate passes with the new paths covered
+    Given the feature's code is in the build
+    When ios/tools/check-release-log-safety.sh runs
+    Then it exits 0
+    And the new Spotify paths are within its coverage
+
+  Scenario: The device-validation checklist is recorded and passed
+    Given the feature is complete
+    When the DV-* checklist (FR-SP-017) is inspected
+    Then it is recorded with results from the reference device
+    And all minimum items pass before sign-off
+
+  Scenario: The security gates close on this feature's focus areas
+    Given the design and implementation are complete
+    When security-design-review and security-test run
+    Then both return SECURITY-GO against the feature's threat focus areas
 ```
 
 #### Related
-- NFR: NFR-PI-001, NFR-PI-002, NFR-PI-003, NFR-PI-004, NFR-PI-009
+- FR: FR-SP-017 (DV checklist), FR-SP-016 (disclosure), FR-SP-008, FR-SP-010
+- NFR: NFR-SP-002 (log safety), NFR-SP-007, NFR-SP-008, NFR-SP-009
 
+### NFR-SP-012: Plugin isolation and model-stack invariance
+
+#### Metadata
+- **Category:** Maintainability / Architecture
+- **Priority:** MUST
+- **Source:** Feature constitution Feature Constraint 11 ("The feature ships as an `AssistantPlugin` (`SpotifyPlugin`) with no entanglement beyond the mapped `CommandRouter` seams, preserving the plugin-isolation architecture… No changes to the brain/router model stack") and "Out of scope" (no brain/router model-stack changes); project constitution Architecture Constraint 1 (on-device inference unchanged)
+
+#### Description
+The feature **must** keep the plugin-isolation architecture and the model stack untouched. Measurable properties:
+
+- **Change surface**: the implementation diff is confined to the new Spotify files (plugin, tool, linking service, credential store), the mapped seams named in the feature constitution (`ios/ElderlyAssistant/Services/Voice/` `CommandRouter.swift` tool seams, `YouTubeRoute.swift`, `KeywordIntentRule.swift`, `VoiceContactSearchRoute.swift`), `ios/ElderlyAssistant/App/` `AppCoordinator.swift` registration/wiring and `SettingsView.swift`/`SettingsTabs.swift`, the string catalog and `Info.plist` — plus tests. **Zero** changes to brain/model-stack files: no model catalog entries, no model weights, no router-model prompts beyond the pinned intent-wording change (NFR-SP-004).
+- **Plugin conformance**: `SpotifyPlugin` conforms to the `AssistantPlugin` contract and registers through the existing plugin registry/`AppCoordinator` pattern; the registry test shows the action declared once.
+- **Dormant seams**: every new router seam defaults to dormant (nil) like the `[YOUTUBE]` seams, so pre-existing construction sites compile and behave as before (NFR-SP-006).
+- **Removability smoke**: with the Spotify plugin registration removed, the app compiles and the non-music paths behave as today — evidence that the entanglement is only the mapped seams.
+- **No new backend**: nothing is provisioned server-side (NFR-SP-003).
+
+#### Acceptance criteria
+
+```gherkin
+Feature: Plugin isolation and model-stack invariance
+
+  Scenario: The diff is confined to the mapped surfaces
+    Given the feature change set
+    When the changed files are inspected against the mapped-seam list
+    Then no brain/router model-stack file is changed
+    And the changes are confined to the new Spotify files, the mapped seams, settings, strings, Info.plist and tests
+
+  Scenario: The plugin conforms and registers once
+    Given the app builds its plugin registry
+    When the registry is inspected
+    Then SpotifyPlugin is present exactly once with the spotify.play action
+    And it conforms to the AssistantPlugin contract
+
+  Scenario: Dormant seams preserve the legacy construction path
+    Given a router constructed without any Spotify seam
+    When the existing scenarios run
+    Then the behaviour matches the pre-feature baseline
+
+  Scenario: Removing the registration leaves the rest intact
+    Given the Spotify plugin registration is removed
+    When the app is built and the non-music paths are exercised
+    Then the app compiles and behaves as today on those paths
+```
+
+#### Related
+- FR: FR-SP-006 (plugin), FR-SP-015 (routing intake)
+- NFR: NFR-SP-003 (no new egress), NFR-SP-006 (no regression)
 
 ## Open decisions
 
-Carried forward from the feature constitution (verbatim) plus two raised during elicitation. None
-blocks design work; each has an owner-visible resolution point.
+Carried from the feature constitution verbatim; **not resolved here**. None blocks the
+requirement set; each has an owner-visible resolution point.
 
 ### Carried from the feature constitution
 
-**OD-F1 — Next-of-kin data shape (OPEN — architect).** *Verbatim:*
+**OD-S1 — Client-secret handling for the Spotify search flow (OPEN — architect / security
+review).** *Verbatim:*
 
-> Standalone next-of-kin field in the new profile store, or a designation on an existing
-> `FamilyContact` via the existing `isEmergencyContact` flag? Both data paths already exist.
-> Architect decides in design-l1/design-l2; the choice must be reflected in the field table above
-> and the emergency-contacts step design.
+> Spotify client-credentials search requires the app to hold the client secret, and there is no
+> backend. Choose: family-entered credential per the `YouTubeConfigStore`/`SearchConfigStore`
+> Keychain precedent (never in the repo, header not URL, never logged — B2 is the binding
+> precedent) versus PKCE-only options where the flow permits. The choice must satisfy constraint 2
+> and interact cleanly with the dev-mode test-user limit (OD-S2).
 
-Status in this requirement set: both paths remain open by design; the requirements are written to
-hold either way — FR-PI-005 (family & friends), FR-PI-006 (emergency contacts), FR-PI-003 (profile
-store). Resolve at: design-l1 / design-l2.
+Status in this requirement set: open. The requirements bind the storage/log discipline for
+whichever path resolves — FR-SP-009 (encrypted store), NFR-SP-002 (log safety), NFR-SP-007
+(encryption at rest). Resolve at: design-l1; recorded in `security-design-review` as well.
 
-**OD-F2 — Wake-acknowledgment phrasing and locale handling (OPEN — architect).** *Verbatim:*
-
-> Exact phrasing and mechanism of the spoken wake acknowledgment (TTS of a `हजुर <address-as>`
-> template vs. pre-rendered `AckFastLane` variants), and locale handling: how the surrounding
-> acknowledgment copy is localized when the user's term (user data, spoken verbatim) is in a
-> different script/language from the active app language, and how the per-language acknowledgment
-> templates are managed. The term itself must always be spoken verbatim; exact phrasing is the
-> architect's call.
-
-Status in this requirement set: the requirements bind the term spoken verbatim (FR-PI-010), the
-acknowledgment including the term (FR-PI-008), and the ≤ 1 s activation budget with a TTS-failure
-fallback (NFR-PI-008); phrasing and mechanism are the architect's call. Resolve at: design-l1 /
-design-l2.
-
-**OD-F3 — About-you skip affordance vs. the wizard's "no hard gate" contract (OPEN — architect).**
+**OD-S2 — Spotify development-mode rollout and quota-extension plan (OPEN — owner / architect).**
 *Verbatim:*
 
-> The existing wizard is documented as "every step is skippable — there is no hard gate anywhere"
-> (`OnboardingState`), while the brief makes name + address-as mandatory with Next disabled until
-> both are filled. Does the About-you step keep the header Skip on first run (soft gate — deferral
-> via the Home reminder card) or is Skip disabled (hard gate)? Either way the reminder-card reopen +
-> Settings editor path applies to already-onboarded users. Architect decides so implementation and
-> tests agree.
+> The Spotify app in development mode works only for registered test users until a quota-extension
+> request is approved. Define which accounts are registered during development and device
+> validation, when and how the quota-extension request is filed, and what unregistered users
+> experience before approval (honest messaging; no silent failure). This includes the console-side
+> Spotify Developer Dashboard registration (client ID + secret, redirect URI, scopes) — the same
+> class as the Google OAuth console work from calendar-share.
 
-Status in this requirement set: the mandatory Next gate binds either way (FR-PI-002); the
-skippable pattern for all other steps is FR-PI-004; the reopen and Settings paths are FR-PI-013
-and FR-PI-012. Resolve at: design-l1 / design-l2.
+Status in this requirement set: open. The requirements bind honest behaviour for unregistered
+users regardless — FR-SP-012 (no silent failure), FR-SP-016 (the Settings surface must not hide
+the rollout reality). Resolve at: owner + design-l1.
 
-### Raised during elicitation (this requirements pass)
+**OD-S3 — Premium-account degradation path (OPEN — architect).** *Verbatim:*
 
-**OD-PI-4 — Address-as input affordance (OPEN — architect).** Free-text entry vs a preset list of
-common terms (for example आमा / बुबा / दाइ), and what counts as "filled" beyond non-blank after
-trimming. The requirements bind "required, gates Next" (FR-PI-002); the input widget, help copy
-and any additional validation are design decisions. Resolve at: design-l1 / design-l2.
+> The exact UX and precedence when Spotify cannot perform playback: free-tier linked account,
+> unlinked account, network/service failure, empty search. Which cases degrade to the `spotify:`
+> deep-link fallback with clear messaging (constraint 1), which fall back to YouTube where it can
+> serve (constraint 5), the exact localized copy for each, and how the both-provider search
+> behaves in each case. Must satisfy constraints 1, 5, and 9 and the no-silent-failure rule.
+> Resolve in design-l1/design-l2.
 
-**OD-PI-5 — Settings editor authentication (OPEN — owner/architect).** `requirements.md` FR-042
-requires in-app configuration to sit behind voice-biometric or PIN authentication, while the
-biometric/PIN gate is recorded as unwired with accepted residual risk (project constitution Open
-Decision 11, finding B3; review 2026-10-13). Does editing the profile in Settings require
-authentication in this release? FR-PI-012 binds the editor's existence, reachability, persistence
-and effect — not the authentication gate. Resolve at: owner review at this HIL gate / design-l1.
+Status in this requirement set: open. The requirements bind that each path is non-silent and
+honest — FR-SP-011 (free-tier deep-link fallback), FR-SP-012 (honest outcomes), FR-SP-004
+(YouTube fallback) — while the composition and exact copy stay open. Resolve at: design-l1 /
+design-l2.
+
+### Assumptions recorded during this requirements pass
+
+Recorded so nothing is silently assumed; all are design-input notes, not scope changes. The full
+list is in the lock file (`assumptions`).
+
+- The mapped integration surfaces exist as named in the feature constitution (YouTube pattern
+  files, `CommandRouter` seams, `AppCoordinator` registration, Settings surfaces, string catalog);
+  the scaffold probe (`specs/spotify-music-integration/init-report.md`) records only the scaffold
+  step, not a code probe.
+- The golden-corpus music block holds 15 utterances pinned to intent `music`
+  (`ios/ElderlyAssistantTests/` `Services/Voice/GoldenCorpus.swift` lines 142–157), while the
+  feature constitution says "16 utterances"; implementation reconciles the count against the
+  source and records the result (NFR-SP-006).
+- Provider identifiers used in the examples are synthetic placeholders; no real identifier,
+  credential or secret is recorded in this requirement set.
+- Exact user-facing copy for the degradation paths is OD-S3; the Nepali/English examples in this
+  set are illustrative and localization-bound (the keys must exist in both languages —
+  NFR-SP-005).
+- The project's known pre-existing unit-test failures (unrelated to this feature) remain the
+  baseline for NFR-SP-006; the feature's own suites must pass.
 
 ## Out of scope
 
-Explicitly not in scope (feature constitution "Out of scope (must not change)", plus elicitation
-clarifications) — recorded so nothing is silently half-built:
+Explicitly not in scope (feature constitution "Out of scope (must not change)" plus the workflow
+scope comment's explicit non-goals) — recorded so nothing is silently half-built:
 
 | Non-goal | Why it is stated |
 |---|---|
-| Wake-word recognition changes | The wake word and its detection are untouched; only the post-detection acknowledgment is added (FR-PI-008, NFR-PI-010). |
-| Any new cloud processing / new network egress | The feature adds zero new calls; only name/address-as may enter the existing prompt paths (NFR-PI-003). |
-| Emergency-call logic changes | Collected data becomes available to the existing safety paths; their logic, triggers and stubs are unchanged (FR-PI-014). |
-| Forcing address-as into every sentence | Natural use only — "hajur <address-as>", "yes <address-as>" (FR-PI-009). |
-| New permissions, HealthKit use, voice-biometric mechanism changes | The fingerprint step reuses the existing enrollment as-is (FR-PI-007, NFR-PI-009). |
-| Scheduled auto-activation / daily-briefing and reminder copy | Surfaces that already reference the user by name in the dementia supplement's examples are unchanged; the injection surfaces are the wake acknowledgment and reply-style rules only. |
-| Remote companion-app push of profile fields | The interview is completed at the device; a helping family member may fill it in on the user's behalf (feature purpose). |
-| Profile export/deletion flows | GDPR deferred (project constitution Open Decision 2); the store must not block future erasure/export, but no flow ships here. |
+| Cloud LLM on the music path | Voice intent parsing and routing stay on-device; music queries go to the provider APIs directly (NFR-SP-003). |
+| Brain/router model-stack changes | No model, catalog, weights or routing-model changes beyond the pinned intent wording (NFR-SP-012, NFR-SP-004). |
+| A new backend | The Spotify Web API is called directly from the app; nothing is provisioned on our side (feature constraint 6; NFR-SP-003). |
+| Explicit-YouTube routing changes | 'युट्युबमा गीत चलाऊ' must still reach YouTube exactly as today (FR-SP-005). |
+| Library/playlist edits and account modifications | Playback is read-only, user-initiated media control — no playlist mutations, no library writes (feature constitution Out of scope). |
+| Emergency / medication / health surface changes | No change of any kind; no new safety path is added or altered by this feature. |
+| Any network egress beyond the two provider APIs | No other host, no widened scope (NFR-SP-003). |
+| Wake-word work, Android, and other deferred project items | Untouched by this feature. |
 
 ## How this set is verified downstream
 
 | Gate | What it checks against this set |
 |---|---|
-| `design-l1` / `design-l2` | Resolve OD-F1, OD-F2, OD-F3, OD-PI-4, OD-PI-5; design the store, wizard, prompt-injection point and wake-ack path. |
+| `design-l1` / `design-l2` | Resolve OD-S1 and OD-S3; address OD-S2 (owner/architect); design the musicStub replacement at `CommandRouter.swift:2640`, the `YouTubeRoute` fall-through interplay, the Spotify plugin/tool seams, the account-linking service and store, and the pinned golden-corpus music entries (NFR-SP-006). |
 | `review-l2` | `review.decision == GO` against the component design and this set. |
-| `security-design-review` | STRIDE focus: profile-string prompt injection (NFR-PI-004, FR-PI-009), PII at rest (NFR-PI-001, FR-PI-003), voice-fingerprint reuse (NFR-PI-009, FR-PI-007), wake-ack path (FR-PI-008, NFR-PI-008); `SECURITY-GO` required. |
-| `security-test` | Evidence: injection hardening (NFR-PI-004), PII-free logs (NFR-PI-002), encrypted storage (NFR-PI-001), no new egress (NFR-PI-003), voice-biometric data at rest (NFR-PI-009); `SECURITY-GO` required. |
-| `final-sign-off` | T2 + HIL; release gate `ios/tools/check-release-log-safety.sh` exits 0 (NFR-PI-002, NFR-PI-011); privacy disclosure update recorded. |
+| `security-design-review` | STRIDE focus: OAuth token lifecycle (NFR-SP-009, FR-SP-008/010), credential storage (NFR-SP-007, FR-SP-009), deep-link/URI injection (NFR-SP-008, FR-SP-007), redirect validation (NFR-SP-009), log sanitisation (NFR-SP-002), privacy disclosure (FR-SP-016); `SECURITY-GO` required. |
+| `plan-tasks` / `implement` | Units trace back to `FR-SP-*` / `NFR-SP-*` ids; paired review and the 0.85 confidence threshold on implementation output; rework bound 5. |
+| `security-test` | Evidence: token storage (NFR-SP-007), release log-surface coverage of the new paths (NFR-SP-002), hostile track titles/IDs producing only validated `spotify:` URIs (NFR-SP-008), OAuth redirect validation (NFR-SP-009), credential wipe on unlink (FR-SP-010); `SECURITY-GO` required. |
+| `final-sign-off` | T2 + HIL; release gate `ios/tools/check-release-log-safety.sh` exits 0 (NFR-SP-002, NFR-SP-011); the DV-* checklist is recorded and passed on the reference device (FR-SP-017); the privacy disclosure is recorded (FR-SP-016). |

@@ -30,6 +30,7 @@ Required integrations:
 - Apple HealthKit (iOS) and Android Health Connect (Android) — blood pressure, medication tracking, activity data
 - WhatsApp (messaging and voice/video calls via supported API or deep link)
 - YouTube (video playback)
+- Spotify (music playback and search; account linking via user OAuth; amendment recorded 2026-10-06 — see `specs/spotify-music-integration/constitution.md`)
 - Facebook (social feed and messaging)
 - On-device voice recognition with accent and regional dialect support (Nepali at launch)
 - Voice biometric authentication (primary)
@@ -40,7 +41,7 @@ Required integrations:
 
 The following constraints are non-negotiable. They must be enforced in all design and implementation decisions.
 
-1. All AI inference on-device only. No cloud LLM API calls. User voice, conversations, health data, and personal profiles must never leave the device for AI processing. Network access is permitted only for third-party integrations (Calendar API, WhatsApp, YouTube, Facebook) and encrypted remote configuration push. **Recorded exceptions:** the cloud voice stack (Open Decision 12) is a consent-gated exception covering voice transcription only; the live camera translation tier (Open Decision 13) is a consent-gated exception covering OCR'd text translation only. It is not hypothetical and not off-by-default: the shipped engine stack falls back to the cloud engine (`?? .gemini`, `ios/ElderlyAssistant/App/AppCoordinator.swift:1612-1613`), so this exception is what makes the shipped behaviour conformant, and the consent/disclosure requirements in Open Decision 12 are binding.
+1. All AI inference on-device only. No cloud LLM API calls. User voice, conversations, health data, and personal profiles must never leave the device for AI processing. Network access is permitted only for third-party integrations (Calendar API, WhatsApp, YouTube, Facebook, Spotify — added by amendment 2026-10-06, see `specs/spotify-music-integration/constitution.md`) and encrypted remote configuration push. **Recorded exceptions:** the cloud voice stack (Open Decision 12) is a consent-gated exception covering voice transcription only; the live camera translation tier (Open Decision 13) is a consent-gated exception covering OCR'd text translation only. It is not hypothetical and not off-by-default: the shipped engine stack falls back to the cloud engine (`?? .gemini`, `ios/ElderlyAssistant/App/AppCoordinator.swift:1612-1613`), so this exception is what makes the shipped behaviour conformant, and the consent/disclosure requirements in Open Decision 12 are binding.
 
 2. Remote configuration must be end-to-end encrypted. Family members push config (schedules, contacts, reminders, thresholds) to the parent's phone. The remote config channel must use end-to-end encryption so that no intermediate server can read the configuration payload.
 
