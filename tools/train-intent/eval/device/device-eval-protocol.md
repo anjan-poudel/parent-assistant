@@ -62,20 +62,20 @@ DEVICE_ID="$(xcrun devicectl list devices | awk '/available \(paired\)|connected
 xcrun devicectl device copy to --device "$DEVICE_ID" \
   --source ../tools/train-intent/eval/device/prompts.jsonl \
   --destination Documents/device-eval/prompts.jsonl \
-  --domain-type appDataContainer --domain-identifier com.elderlyassistant.app
+  --domain-type appDataContainer --domain-identifier ai.voicebridge.senior.assistant
 
 # --- run the on-device eval (app debug harness) and stream its console -----
 # Each completed interpret must print ONE line:
 #   {"id": "<prompt id>", "pass": "cold|warm", "latency_ms": <float>,
 #    "peak_rss_mb": <float|null>}
 xcrun devicectl device process launch --console --device "$DEVICE_ID" \
-  com.elderlyassistant.app | tee /tmp/device-console.log
+  ai.voicebridge.senior.assistant | tee /tmp/device-console.log
 
 # --- pull the measurements file the app wrote ------------------------------
 xcrun devicectl device copy from --device "$DEVICE_ID" \
   --source Documents/device-eval/measurements_ios.jsonl \
   --destination eval/device/measurements_ios.jsonl \
-  --domain-type appDataContainer --domain-identifier com.elderlyassistant.app
+  --domain-type appDataContainer --domain-identifier ai.voicebridge.senior.assistant
 
 # --- score + append evidence (exit 0 = gate passed) ------------------------
 cd ../tools/train-intent

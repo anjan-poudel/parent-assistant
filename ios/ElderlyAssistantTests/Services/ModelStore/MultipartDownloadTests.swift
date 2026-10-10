@@ -929,7 +929,7 @@ final class MultipartDownloadTests: XCTestCase {
     ///  - CLI: drop the marker in the app's data container —
     ///
     ///        P=$(xcrun simctl get_app_container booted \
-    ///              com.elderlyassistant.app data)
+    ///              ai.voicebridge.senior.assistant data)
     ///        touch "$P/Documents/catalog-live-url-check"
     ///
     ///    then run the single test as usual.

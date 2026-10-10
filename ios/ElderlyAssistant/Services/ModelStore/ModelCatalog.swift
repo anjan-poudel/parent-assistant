@@ -467,7 +467,7 @@ enum ModelCatalog {
     ///
     /// This is the path a tester can always construct: `devicectl` copies a
     /// file into the app data container (`--domain-type appDataContainer
-    /// --domain-identifier com.elderlyassistant.app --destination
+    /// --domain-identifier ai.voicebridge.senior.assistant --destination
     /// Documents/`) but never exposes the container UUID, so an absolute
     /// `/var/mobile/Containers/Data/Application/<uuid>/Documents/…` path
     /// cannot be written down from outside the device.
@@ -527,7 +527,7 @@ enum ModelCatalog {
     ///     directory and is resolved against it. This exists because
     ///     `devicectl` can copy a file into the app data container
     ///     (`--domain-type appDataContainer --domain-identifier
-    ///     com.elderlyassistant.app --destination Documents/`) but does not
+    ///     ai.voicebridge.senior.assistant --destination Documents/`) but does not
     ///     expose the container UUID, so the tester cannot construct the
     ///     absolute `/var/mobile/Containers/Data/Application/<uuid>/
     ///     Documents/…` path. Staging the zip into `Documents/` and setting
