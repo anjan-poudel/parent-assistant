@@ -94,6 +94,16 @@ enum TranslationUnavailableReason: String, Equatable, CaseIterable {
     /// evidence, how often the cloud was declined by policy rather than by a
     /// person.
     case cloudDisabled = "cloud_disabled"
+    /// The string is already written in the target language, so there is no
+    /// translation to be made and none was attempted (owner report,
+    /// 2026-10-10: Devanagari handed to the translate surface came back as a
+    /// confident non-answer). Distinct from `no_tier_resolved` by contract:
+    /// nothing failed, no tier was asked, and the fact cannot heal — a Nepali
+    /// string is Nepali on every future sighting. The elder-facing wording is
+    /// its own (`livetranslate.state.alreadyTarget`): the generic unavailable
+    /// sentence would read as a failure and invite a retry that changes
+    /// nothing, the same reason quarantine keeps its own wording.
+    case sourceAlreadyTarget = "source_already_target"
 }
 
 // MARK: - Outcome

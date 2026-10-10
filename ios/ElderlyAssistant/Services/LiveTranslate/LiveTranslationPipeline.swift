@@ -1244,6 +1244,19 @@ actor LiveTranslationPipeline {
             // translated view's "every pending region", which is the shipped
             // behaviour and stays the default.
             if let key, regionKey != key { continue }
+            // [SOURCE-HYGIENE] A string already written in the target
+            // language has no stored answer to take, ever: nothing
+            // legitimate can have been stored for it (the plan settles such
+            // strings before any tier is asked — `runResolution`'s step 0b),
+            // so a hit can only be pre-fix poison — an en→ne model's
+            // confident non-answer that the old answer rules passed and the
+            // store kept. Skipped here so the plan settles the string with
+            // the honest reason instead, and the owner's reported gibberish
+            // cannot outlive the fix on a device whose store already has it.
+            if LocalBrainTranslationTier.isAlreadyTargetLanguage(region.text,
+                                                                 targetLanguage: targetLanguage) {
+                continue
+            }
             // This run's memory layer first, then the session's store. The
             // order is the focused read's, for the same reason: the nearer
             // layer answers without touching the disk at all, and a string the
@@ -1770,6 +1783,47 @@ actor LiveTranslationPipeline {
         //    finding 11). The `defer` above still releases its claims, so the
         //    string is askable by the next plan.
         guard !Task.isCancelled, !isClosed else { return answers }
+
+        // 0b. Source hygiene, before either clock runs: a string already
+        //     written in the target language is not translated and cannot be
+        //     — no tier is asked for it, and it is settled here, terminally,
+        //     through the one terminal writer, with a reason of its own
+        //     (`sourceAlreadyTarget`). Without this the string would be
+        //     dispatched, and an en→ne model answering a Devanagari source
+        //     produces a confident non-answer that the answer rules cannot
+        //     tell from a translation because they judge only its shape
+        //     (owner report, 2026-10-10). The check is the tier's own
+        //     predicate, so the two cannot disagree about what "already in
+        //     the target language" means.
+        //
+        //     This is a settlement, not an ask: it spends no batch, claims
+        //     nothing new and is paced by neither clock — nothing about it is
+        //     worth making the elder wait for, unlike the generations the
+        //     clocks exist to space out. It also costs the cloud nothing: an
+        //     already-target string that reaches the router is a "sentence"
+        //     shape and would otherwise lead with the paid tier.
+        let alreadyTarget = items.filter {
+            LocalBrainTranslationTier.isAlreadyTargetLanguage($0.text,
+                                                              targetLanguage: targetLanguage)
+        }
+        if !alreadyTarget.isEmpty {
+            // Through `commit`, so the degradation is emitted exactly once by
+            // the one writer (`settleTerminal`) and travels to the live
+            // picture the same way every other settled answer does.
+            await commit(alreadyTarget.map { item in
+                (item, TranslationResult.degraded(originalText: item.text,
+                                                  reason: .sourceAlreadyTarget))
+            },
+                         to: plan,
+                         into: &answers,
+                         origins: [:])
+        }
+        let translatable = items.filter {
+            !LocalBrainTranslationTier.isAlreadyTargetLanguage($0.text,
+                                                               targetLanguage: targetLanguage)
+        }
+        guard !translatable.isEmpty else { return answers }
+
         let moment = now()
         if request.urgency == .tick {
             if let last = lastDispatchAt,
@@ -1810,7 +1864,7 @@ actor LiveTranslationPipeline {
         // all fixed first.
         var onDeviceFirst: [CloudTranslationTier.Item] = []
         var cloudFirst: [CloudTranslationTier.Item] = []
-        for item in items {
+        for item in translatable {
             switch leadingTier(for: item, mode: request.mode) {
             case .onDevice: onDeviceFirst.append(item)
             case .cloud: cloudFirst.append(item)

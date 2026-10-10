@@ -2619,6 +2619,93 @@ final class LiveTranslationPipelineTests: XCTestCase {
                       "tier 0 answers it; the cascade does not escalate past an answered question")
     }
 
+    /// [SOURCE-HYGIENE] (owner report, 2026-10-10): a string already written
+    /// in the target language is settled as such — no tier is asked, on the
+    /// device or in the cloud, nothing is sent, and the elder hears the
+    /// honest sentence instead of a confident non-answer. On master this
+    /// scene routes as a "sentence": the cloud would lead it, the elder
+    /// would be prompted, and an en→ne model answering a Nepali source could
+    /// settle gibberish that passes every answer rule.
+    @MainActor
+    func testScenarioASourceAlreadyInTheTargetLanguageIsSettledWithNoTierAsked() async throws {
+        let harness = makeHarness()
+        await harness.pipeline.updateLayout(layout)
+        let songSign = "भजन"
+        harness.recogniser.defaultStep = .regions([detected(songSign)])
+
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        let asked = songSign
+        await waitUntil("the already-target settlement to be published") {
+            guard let latest = await harness.recorder.latest,
+                  let region = latest.regions.first(where: { $0.text == asked }) else {
+                return false
+            }
+            return latest.result(for: region).degradedReason == .sourceAlreadyTarget
+        }
+
+        let publication = try await latest(harness)
+        let region = try XCTUnwrap(region(songSign, in: publication))
+        let result = publication.result(for: region)
+        XCTAssertTrue(result.degraded)
+        XCTAssertEqual(result.text, songSign,
+                       "the region still draws and announces what was recognized")
+
+        XCTAssertTrue(harness.brain.calls.isEmpty, "the device is never asked")
+        XCTAssertEqual(harness.transport.requestCount, 0, "and neither is the cloud")
+        XCTAssertFalse(harness.controller.isPromptPresented,
+                       "nothing leaves the device, so there is nothing to consent to")
+
+        let degraded = harness.bus.events(named: "translation_degraded")
+        XCTAssertEqual(degraded.count, 1, "one string degraded is one event")
+        XCTAssertEqual(degraded.first?.metadata["reason"],
+                       TranslationUnavailableReason.sourceAlreadyTarget.rawValue,
+                       "the reason is the string's own property, not a generic cascade outcome")
+        XCTAssertEqual(degraded.first?.metadata["regionCount"], "1")
+    }
+
+    /// And a store that already holds a pre-fix answer for such a string
+    /// must not keep serving it ([SOURCE-HYGIENE]): the device's own read
+    /// path skips the lookup, and the plan settles the string with the
+    /// honest reason — so the owner's reported gibberish cannot outlive the
+    /// fix on a device whose store already has it.
+    @MainActor
+    func testScenarioAStoredPreFixAnswerForAnAlreadyTargetSourceIsNeverServed() async throws {
+        let harness = makeHarness()
+        let songSign = "भजन"
+        // The pre-fix poison: an en→ne model's confident non-answer,
+        // persisted as a "translation" of a Nepali sign (the answer rules of
+        // the day judged its shape and passed it).
+        _ = harness.cache.store(text: songSign,
+                                translation: "यो भजन हो भजन",
+                                tier: .onDeviceBrain)
+        await harness.pipeline.updateLayout(layout)
+        harness.recogniser.defaultStep = .regions([detected(songSign)])
+
+        let frame = try makeFrame()
+        await harness.pipeline.ingest(frame)
+        await harness.pipeline.ingest(frame)
+
+        let asked = songSign
+        await waitUntil("the honest settlement to be published") {
+            guard let latest = await harness.recorder.latest,
+                  let region = latest.regions.first(where: { $0.text == asked }) else {
+                return false
+            }
+            return latest.result(for: region).degradedReason == .sourceAlreadyTarget
+        }
+
+        let publication = try await latest(harness)
+        let region = try XCTUnwrap(region(songSign, in: publication))
+        let result = publication.result(for: region)
+        XCTAssertTrue(result.degraded, "the stored answer is not served: the string is settled honestly")
+        XCTAssertEqual(result.text, songSign, "the region still draws what was recognized")
+        XCTAssertTrue(harness.brain.calls.isEmpty)
+        XCTAssertEqual(harness.transport.requestCount, 0)
+    }
+
     @MainActor
     func testScenarioABrainAnswerIsNeverSentToTheCloud() async throws {
         // Consent declined and no provider key: the brain path must not need

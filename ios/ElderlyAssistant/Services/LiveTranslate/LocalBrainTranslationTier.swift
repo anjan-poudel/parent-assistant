@@ -733,6 +733,38 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
                          mustBeATranslationModel: Bool) async -> LocalBrainTranslationOutcome {
         guard !strings.isEmpty else { return .none }
 
+        // [SOURCE-HYGIENE] A string already written in the target language is
+        // never sent to the model. The answer rules (`rejection`) judge only
+        // the shape of what a model produced, so an en→ne model handed a
+        // Devanagari source can settle a confident non-answer that passes
+        // every one of them — and it did (owner report, 2026-10-10:
+        // Devanagari typed into the translate surface came back as
+        // gibberish). The honest place to refuse is the SOURCE, and the
+        // honest time is before the generation is paid for.
+        //
+        // The strings stay ABSENT from `translations` — unresolved, exactly
+        // as "the tier did not answer" already reads — and the count
+        // semantics above are untouched: they are about the batch the caller
+        // handed over, so a filtered string is reported as unresolved like
+        // any other the tier did not answer. The shipped callers never reach
+        // this guard (the pipeline's plan and the translate-test probe settle
+        // such strings with `.sourceAlreadyTarget` before any tier is asked);
+        // it is here so the invariant is the tier's own property, not a
+        // property of every caller remembering.
+        let asked = strings.filter {
+            !Self.isAlreadyTargetLanguage($0, targetLanguage: targetLanguage)
+        }
+        guard !asked.isEmpty else {
+            // Every string was already in the target language: nothing was
+            // attempted, nothing is dropped, and the batch event says so in
+            // the same shape the over-bound refusal uses — a capture can
+            // tell this apart from a filter that never ran.
+            events.brainTranslationBatch(resolvedCount: 0,
+                                         unresolvedCount: strings.count,
+                                         durationMs: 0)
+            return .none
+        }
+
         // [DYNAMIC-TIMEOUT] (owner directive, 2026-09-20, re-landed on the
         // owner's 21:16/21:18 captures: the flat 25 s bound refused the
         // medical-page batches — one string of 110–180 characters, which
@@ -740,7 +772,7 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
         // floor plus the source text's length, clamped to the kill-safe
         // ceiling. Computed once here, so the generation call below and
         // the tier's own deadline record agree.
-        let timeout = Self.effectiveTimeout(for: strings, config: config)
+        let timeout = Self.effectiveTimeout(for: asked, config: config)
 
         #if canImport(LLM)
         guard let modelStore, let modelID = model,
@@ -795,7 +827,7 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
                                                 evictedForRoom: gate.evicted)
         }
 
-        let batch = boundedBatch(strings)
+        let batch = boundedBatch(asked)
         guard !batch.isEmpty else {
             // Every string is over the batch bound on its own — nothing was
             // attempted, and none of it is dropped: the whole input is left to
@@ -1535,19 +1567,63 @@ actor LocalBrainTranslationTier: LocalBrainTranslating {
     /// translation. Both directions are covered, so the rule is about the
     /// target and not about Nepali specifically.
     static func usesTheTargetScript(_ text: String, targetLanguage: AppLanguage) -> Bool {
+        text.unicodeScalars.contains { isInTargetScript($0, targetLanguage: targetLanguage) }
+    }
+
+    /// Whether one scalar belongs to the target language's script ranges.
+    ///
+    /// The one place the ranges are spelled, so the answer rule above and the
+    /// source rule below cannot disagree about what "the target's script" is.
+    private static func isInTargetScript(_ scalar: Unicode.Scalar,
+                                         targetLanguage: AppLanguage) -> Bool {
         switch targetLanguage {
         case .nepali:
             // Devanagari, including the extended block (the Vedic and
             // extended-sign ranges a transliteration or a name may carry).
-            return text.unicodeScalars.contains { (0x0900...0x097F).contains($0.value)
-                                                    || (0xA8E0...0xA8FF).contains($0.value) }
+            return (0x0900...0x097F).contains(scalar.value)
+                || (0xA8E0...0xA8FF).contains(scalar.value)
         case .english:
             // ASCII letters. The English target is not the shipped one, so
             // this is the conservative reading: an answer with no Latin letter
             // in it at all is certainly not English.
-            return text.unicodeScalars.contains { (0x41...0x5A).contains($0.value)
-                                                    || (0x61...0x7A).contains($0.value) }
+            return (0x41...0x5A).contains(scalar.value)
+                || (0x61...0x7A).contains(scalar.value)
         }
+    }
+
+    /// Whether `text` is **already written in the target language**: it
+    /// carries at least one letter of the target script and no letter of any
+    /// other script.
+    ///
+    /// The question the answer rules cannot ask. `rejection` judges only the
+    /// shape of what the model produced, so a Devanagari source handed to an
+    /// en→ne model can settle a confident non-answer that passes every rule —
+    /// it is Devanagari, it is not an echo, and it "has Nepali evidence"
+    /// (owner report, 2026-10-10: Devanagari typed into the translate surface
+    /// came back as gibberish). A source that is already in the target
+    /// language has no translation to produce, so this predicate is asked of
+    /// the SOURCE, and a string it answers `true` for is never sent to the
+    /// model (`attempt`) and is settled terminally by the callers with
+    /// `.sourceAlreadyTarget` rather than translated.
+    ///
+    /// Deliberately conservative:
+    ///  - digits, punctuation, symbols and marks do not participate — none of
+    ///    them is a letter, so `भजन २०२४।` is already Nepali while a
+    ///    numerals-only sign (no letters at all) returns `false` and takes
+    ///    the normal path;
+    ///  - a MIXED string is translatable and returns `false` (`Cafe भजन`
+    ///    carries Latin letters, and the English half of such a sign is
+    ///    exactly what the feature exists for);
+    ///  - the two directions are symmetric, so the predicate is about the
+    ///    target and not about Nepali specifically.
+    static func isAlreadyTargetLanguage(_ text: String,
+                                        targetLanguage: AppLanguage) -> Bool {
+        var sawTargetLetter = false
+        for scalar in text.unicodeScalars where CharacterSet.letters.contains(scalar) {
+            guard isInTargetScript(scalar, targetLanguage: targetLanguage) else { return false }
+            sawTargetLetter = true
+        }
+        return sawTargetLetter
     }
 
     private static func reason(for failure: BrainGenerationFailure) -> LiveTranslateBrainUnavailableReason {

@@ -1805,8 +1805,11 @@ final class SnapshotModeTests: XCTestCase {
     /// hands the freeze, and one no snapshot test used before.
     @MainActor
     func testTheFrozenCardsRowsAreTheRecognisedStringsBeforeAnyTranslationAnswers() async throws {
-        // No consent and no curated table: nothing can resolve, so every row is
-        // pending and the only text there is to read is the source text.
+        // No consent and no curated table, and both strings are already the
+        // target language: nothing can resolve, so every row settles with the
+        // honest source_already_target reason (or stays pending — either way
+        // no tier answers) and the only text there is to read is the source
+        // text.
         let harness = makeHarness()
         reportLayout(harness)
         harness.parts.engine.regions = [detected("टिकट काउन्टर", box: (0.08, 0.10, 0.62, 0.20)),

@@ -415,6 +415,21 @@ struct LocalBrainProbeEngine: TranslateProbeEngine {
     /// not the tier's return value — is what says whether a string was ever
     /// handed to the brain (see `LocalBrainDisposition`).
     let config: LiveTranslateConfig
+    /// The direction the screen is translating in — the same value the one
+    /// shared tier is built with. The source-hygiene guard in `probe`
+    /// ([SOURCE-HYGIENE]) asks "is this already in the target language?",
+    /// which is a question about the target, so the engine holds the target.
+    ///
+    /// **Defaulted to the shipped direction** (`defaultTargetLanguage`), the
+    /// value the screen itself starts from: a hand-built engine in a suite
+    /// keeps the direction it had, and production wires the screen's own.
+    /// This is the `admissionForLoad` precedent — the default is what "no
+    /// information" already answered — not the model parameter's, where a
+    /// silent default would have measured a different artifact. (A defaulted
+    /// `var` like the two seams above it, so the synthesized memberwise
+    /// initializer keeps accepting it; a defaulted `let` would be omitted
+    /// from that initializer.)
+    var targetLanguage: AppLanguage = LiveTranslationPipeline.defaultTargetLanguage
     /// Injectable clock, the seam convention the shipped tiers use
     /// (`LiveTranslateConsentGate.now`, `CloudTranslationTier.sleep`) so a
     /// suite can pin a latency instead of racing one.
@@ -480,6 +495,26 @@ struct LocalBrainProbeEngine: TranslateProbeEngine {
     }
 
     func probe(_ text: String) async -> TranslateProbeOutcome {
+        // [SOURCE-HYGIENE] A source already written in the target language is
+        // no tier's to translate, and it is a question asked of the SOURCE
+        // rather than of what a model answers (owner report,
+        // 2026-10-10: Devanagari typed into this instrument came back as
+        // gibberish — an en→ne model answering a Nepali source, with the
+        // answer rules unable to refuse it because they judge only its
+        // shape). The honest reading is "nothing to translate": no model is
+        // asked, no latency is shown for work that never happened, and the
+        // card carries the reason the plan settles the same string with on
+        // the device. Asked BEFORE the bound: a Devanagari paragraph over the
+        // batch bound is still first of all a source with no translation to
+        // make.
+        guard !LocalBrainTranslationTier.isAlreadyTargetLanguage(text,
+                                                                 targetLanguage: targetLanguage) else {
+            return TranslateProbeOutcome(
+                result: .degraded(originalText: text, reason: .sourceAlreadyTarget),
+                latencyMs: 0,
+                localDisposition: .neverAttempted)
+        }
+
         // The bound is asked FIRST, before the brain is touched, because the
         // outcome the brain returns cannot answer this: a string over the
         // character bound never reaches it, and tier 1 returns the same empty
@@ -580,6 +615,20 @@ struct CloudProbeEngine: TranslateProbeEngine {
     }
 
     func probe(_ text: String) async -> TranslateProbeOutcome {
+        // [SOURCE-HYGIENE] The same rule the pipeline settles before any
+        // tier is asked, and the local adapter before its own bound: a
+        // source already written in the target language is nothing to
+        // translate, so nothing is sent — which here also means nothing is
+        // PAID for. First, before the switch and key guards, because it is
+        // a property of the string rather than of the household's settings
+        // (the pipeline settles such strings before its own clocks for the
+        // same reason).
+        guard !LocalBrainTranslationTier.isAlreadyTargetLanguage(text,
+                                                                 targetLanguage: targetLanguage) else {
+            return TranslateProbeOutcome(
+                result: .degraded(originalText: text, reason: .sourceAlreadyTarget),
+                latencyMs: 0)
+        }
         // Refused here as well as in `readiness`, because a race is real:
         // the switch can be turned off between the screen's check and the
         // tap. The refusal is the taxonomy's own `.cloudDisabled`, so the
@@ -831,7 +880,8 @@ struct TranslateTestDependencies {
                                                         // will drive, so the readiness line is the run's own
                                                         // answer and not a second opinion about it.
                                                         admissionForLoad: { await brain.admissionForLoad(of: $0) },
-                                                        config: config)
+                                                        config: config,
+                                                        targetLanguage: targetLanguage)
         }
         engines[.gemini] = CloudProbeEngine(tier: CloudTranslationTier(cache: cache,
                                                                        consentGate: consentGate,

@@ -1190,6 +1190,64 @@ final class TranslateTestEngineAdapterTests: XCTestCase {
         XCTAssertEqual(outcome.result.degraded, true)
     }
 
+    /// [SOURCE-HYGIENE] (owner report, 2026-10-10): a source already in the
+    /// target language is not a question for any model, and the screen says
+    /// so with the reason the device settles the same string with — never a
+    /// confident non-answer from an en→ne model answering a Nepali source.
+    /// Asked before the bound, so a Devanagari paragraph over the batch
+    /// bound still reads as what it first of all is.
+    func testLocalAdapterNeverAsksTheBrainForAlreadyTargetText() async {
+        let brain = FakeBrain(outcome: LocalBrainTranslationOutcome(translations: [:], durationMs: 0))
+        let engine = LocalBrainProbeEngine(brain: brain,
+                                           model: ModelID("named"),
+                                           isInstalled: { _ in true },
+                                           unavailabilityReason: { _ in nil },
+                                           config: config())
+
+        let outcome = await engine.probe("भजन")
+
+        XCTAssertEqual(outcome.result.degradedReason, .sourceAlreadyTarget)
+        XCTAssertEqual(outcome.localDisposition, .neverAttempted)
+        XCTAssertEqual(outcome.latencyMs, 0, "nothing ran, so nothing took time")
+        XCTAssertTrue(brain.asked.isEmpty, "the source rule is checked before the brain is touched")
+
+        // Over the bound as well: the source question is asked first, so the
+        // card reports the honest reason rather than the tier fault the
+        // bound alone would produce (`noTierResolved`).
+        let boundedBrain = FakeBrain(outcome: LocalBrainTranslationOutcome(translations: [:], durationMs: 0))
+        let bounded = LocalBrainProbeEngine(brain: boundedBrain,
+                                            model: ModelID("named"),
+                                            isInstalled: { _ in true },
+                                            unavailabilityReason: { _ in nil },
+                                            config: config(maxCharacters: 4))
+        let overBound = await bounded.probe("भजन भजन भजन भजन भजन भजन भजन")
+        XCTAssertEqual(overBound.result.degradedReason, .sourceAlreadyTarget)
+        XCTAssertTrue(boundedBrain.asked.isEmpty)
+    }
+
+    /// And the source rule follows the probe's target, the same way the
+    /// device's answer rules do: under an English direction the English
+    /// string is the one with nothing to translate, and the Devanagari one
+    /// is a real question.
+    func testLocalAdaptersSourceRuleFollowsTheTargetLanguage() async {
+        let englishTarget = FakeBrain(outcome: LocalBrainTranslationOutcome(translations: [:], durationMs: 0))
+        let engine = LocalBrainProbeEngine(brain: englishTarget,
+                                           model: ModelID("named"),
+                                           isInstalled: { _ in true },
+                                           unavailabilityReason: { _ in nil },
+                                           config: config(),
+                                           targetLanguage: .english)
+
+        let english = await engine.probe("hello")
+        XCTAssertEqual(english.result.degradedReason, .sourceAlreadyTarget)
+        XCTAssertEqual(english.localDisposition, .neverAttempted)
+        XCTAssertTrue(englishTarget.asked.isEmpty)
+
+        _ = await engine.probe("नमस्ते")
+        XCTAssertEqual(englishTarget.askedStrings, [["नमस्ते"]],
+                       "a Devanagari source is not the English target — the brain IS asked")
+    }
+
     /// On disk is not runnable. A model the ledger refuses by device class
     /// used to read "Ready" here, offering a button whose only possible
     /// outcome was the refusal this screen now shows up front ([MODEL-KIND]
@@ -1475,6 +1533,26 @@ final class TranslateTestEngineAdapterTests: XCTestCase {
         // key" is advice for a door that is still locked.
         let readiness = await engine.readiness()
         XCTAssertEqual(readiness, .cloudDisabled)
+    }
+
+    /// [SOURCE-HYGIENE] An already-target source never reaches tier 2
+    /// either: the request would be spent reproducing the very failure this
+    /// change exists to remove (a Nepali string answered by an en→ne
+    /// instruction), and the card names the string's own fact rather than a
+    /// cloud fault. Asked before the switch and the key, so the reason is
+    /// the string's and not the household's settings.
+    func testCloudAdapterNeverSpendsARequestOnAlreadyTargetText() async {
+        let tier = FakeCloudTier()
+        let engine = CloudProbeEngine(tier: tier,
+                                      targetLanguage: .nepali,
+                                      isProviderConfigured: { true },
+                                      isCloudEnabled: { true })
+
+        let outcome = await engine.probe("भजन")
+
+        XCTAssertEqual(outcome.result.degradedReason, .sourceAlreadyTarget)
+        XCTAssertEqual(outcome.latencyMs, 0)
+        XCTAssertEqual(tier.resolveCount, 0, "the tier is not asked to fail for us")
     }
 
     // MARK: - Production wiring
