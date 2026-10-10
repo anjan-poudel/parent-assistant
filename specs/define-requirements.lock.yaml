@@ -1,384 +1,412 @@
-# Requirements lock — Spotify music integration (v1)
+# Requirements lock — Multi-Turn Conversation (v1)
 #
 # Contract: requirements_lock (ai-sdd task define-requirements).
 # Snapshot of the feature requirements set produced from
 # specs/define-requirements.md + specs/define-requirements/ (FR/ and NFR/).
 # Downstream tasks (design-l1, design-l2, review-l2, security-design-review,
-# plan-tasks, implement, security-test, final-sign-off) consume this file to
-# stay in scope and to detect drift: if a requirement file's sha256 no longer
-# matches, the requirement set has changed since this lock.
+# plan-tasks, implement, review-implementation, security-test, final-sign-off)
+# consume this file to stay in scope and to detect drift: if a requirement
+# file's sha256 no longer matches, the requirement set has changed since this
+# lock.
 #
 # Status: submitted for owner HIL approval (risk tier T1). Re-lock after any
-# sign-off change; the hashes below are the drift-detection baseline.
+# sign-off change; the hashes below are the drift-detection baseline. The open
+# decisions OD-M1..M4 (owner) are carried unresolved by design — the
+# requirements bind bounded behaviour around each.
 #
 # Note on scope: the FR/ and NFR/ folders also still contain the previously
-# shipped live-camera-translation files (FR-LCT-NNN-*, NFR-LCT-NNN-*) and the
-# profile-interview files (FR-PI-NNN-*, NFR-PI-NNN-*); they are left in place
-# and are NOT part of this lock. This lock covers the spotify-music-integration
-# set only (FR-SP-* / NFR-SP-*).
+# shipped live-camera-translation files (FR-LCT-NNN-*, NFR-LCT-NNN-*),
+# profile-interview files (FR-PI-NNN-*, NFR-PI-NNN-*) and
+# spotify-music-integration files (FR-SP-NNN-*, NFR-SP-NNN-*); they are left
+# in place and are NOT part of this lock. This lock covers the
+# multi-turn-conversation set only (FR-MTC-* / NFR-MTC-*).
 
 version: "1"
 task: define-requirements
-feature: spotify-music-integration
+feature: multi-turn-conversation
 agent: ba
 contract: requirements_lock
-locked_at: "2026-10-06T11:22:10Z"
+locked_at: "2026-10-10T01:37:40Z"
 snapshot_of: "specs/define-requirements.md"
-snapshot_sha256: 18e3c6060c99efd0286e290b3befde93e876a0974a0552dc4ffebc3cb3838179
+snapshot_sha256: e4f1362101cb7861dc96b1afb90f8954c46644c48186e5b7c5c72bf7a9f12eac
 index: "specs/define-requirements/index.md"
 counts:
-  functional_requirements: 17
+  functional_requirements: 20
   non_functional_requirements: 12
 
 requirements:
-  - id: FR-SP-001
-    title: "Music requests start real playback (stub replacement)"
+  - id: FR-MTC-001
+    title: "Dialogue frame lifecycle and one-deep state"
     kind: FR
-    area: "Music Playback / Router"
+    area: "Dialogue Frame / Core"
     priority: MUST
-    file: specs/define-requirements/FR/FR-SP-001-music-requests-start-real-playback.md
-    sha256: e4fead0f9a5a697dce6aa58ab1292e33e8072d1869b3fbe100aa521a5791426e
+    file: specs/define-requirements/FR/FR-MTC-001-dialogue-frame-lifecycle.md
+    sha256: 2852c3262c1d11d120a9f70f4ce54998e8d0bba4acfd56d410c601511fc78442
+    acceptance_scenarios: 3
+  - id: FR-MTC-002
+    title: "Degenerate music-query detection before playback"
+    kind: FR
+    area: "Music Path / Probe Trigger"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-MTC-002-degenerate-music-query-detection.md
+    sha256: af3c371bce617f22022cdb2328b7ab4cf3aad2f6d82251d6649c074424090d46
+    acceptance_scenarios: 3
+  - id: FR-MTC-003
+    title: "`.slotFill` probe — a short kind-of-request question with options and a default"
+    kind: FR
+    area: "Probes / Slot-Fill"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-MTC-003-slot-fill-probe.md
+    sha256: f26da507a56486d339eb2c84ee0277644b0d0edfb31b81a8331a490418e0599e
+    acceptance_scenarios: 3
+  - id: FR-MTC-004
+    title: "`.candidateChoice` (didYouMean) probe — honest not-understood line plus narrowing candidates"
+    kind: FR
+    area: "Probes / Did-You-Mean"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-MTC-004-candidate-choice-did-you-mean-probe.md
+    sha256: 41a5c5889ca24baf04e5cb36a1ae04caf4e53832d724741e78853061bb3c9a68
+    acceptance_scenarios: 3
+  - id: FR-MTC-005
+    title: "Voice answer capture — name, index word, repetition, free-form"
+    kind: FR
+    area: "Answer Capture"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-MTC-005-voice-answer-capture.md
+    sha256: 18306b51b3c9a0d39b0cd8cf10d26e625ed76189eacee10073f1b6070c95f929
     acceptance_scenarios: 4
-  - id: FR-SP-002
-    title: "Both-provider search for music requests"
+  - id: FR-MTC-006
+    title: "Deterministic frame merge and execution"
     kind: FR
-    area: "Provider Selection"
+    area: "Answer Merge / Execution"
     priority: MUST
-    file: specs/define-requirements/FR/FR-SP-002-both-provider-search.md
-    sha256: f50ca7ad95a1f04548cf5550ee2b1c4a10b1232a7f53f14250b8ccfb1cb75bac
-    acceptance_scenarios: 3
-  - id: FR-SP-003
-    title: "Spotify preferred whenever linked and capable"
-    kind: FR
-    area: "Provider Selection"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-SP-003-spotify-preferred-when-linked-and-capable.md
-    sha256: 073f7d9e6bd16ce9d13488415b343bf85381cc536082c7fe29ab6d05753a5ca5
-    acceptance_scenarios: 3
-  - id: FR-SP-004
-    title: "YouTube fallback when Spotify cannot serve"
-    kind: FR
-    area: "Provider Selection / Degradation"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-SP-004-youtube-fallback-when-spotify-cannot-serve.md
-    sha256: fab8c8a2888312f4afc3de02a2a84a817bd0059d3c1bb557285dcefee182fb5c
-    acceptance_scenarios: 3
-  - id: FR-SP-005
-    title: "Explicit YouTube requests unchanged"
-    kind: FR
-    area: "No-Regression / Routing"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-SP-005-explicit-youtube-requests-unchanged.md
-    sha256: 702b251852ff0010084361e3eb3be262c84303ffc9a17d9968426fe35ad330ea
-    acceptance_scenarios: 3
-  - id: FR-SP-006
-    title: "SpotifyPlugin as an AssistantPlugin (YouTubePlugin twin)"
-    kind: FR
-    area: "Plugin Architecture"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-SP-006-spotifyplugin-assistantplugin-twin.md
-    sha256: 41bf4ef2c59c0ccf21fa4ffc6f3faf16cb3da5bdc5b43df2085e8bd3cc68570c
-    acceptance_scenarios: 3
-  - id: FR-SP-007
-    title: "SpotifyTool search and spotify: deep-link construction"
-    kind: FR
-    area: "Spotify Tool"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-SP-007-spotifytool-search-and-deeplink.md
-    sha256: 2b69ce0b2e07e529fe7f29be69c255f07e3e6261c87ec22138f11f44be47666d
+    file: specs/define-requirements/FR/FR-MTC-006-deterministic-frame-merge-and-execution.md
+    sha256: b69347dd31d8d2148dd9721e784ce5f7c101aab7cffd7a434af9738627b4ba3f
     acceptance_scenarios: 4
-  - id: FR-SP-008
-    title: "Spotify account linking by the caregiver (OAuth)"
+  - id: FR-MTC-007
+    title: "Probe budget — bounded probes, then execute with defaults"
     kind: FR
-    area: "Account Linking"
+    area: "Probe Policy"
     priority: MUST
-    file: specs/define-requirements/FR/FR-SP-008-spotify-account-linking-by-caregiver.md
-    sha256: be8523043fcc195aa0a384dccc23a80bcd08a6e389b2be8000ea9950439c6ea4
+    file: specs/define-requirements/FR/FR-MTC-007-probe-budget-two-then-defaults.md
+    sha256: bcf3094a8748c7d1cf8a5237d8fa691e1a645ce2c8dc9afad4d37ab0b6c02e9f
+    acceptance_scenarios: 3
+  - id: FR-MTC-008
+    title: "\"No — let me say it again\" escape re-arms a fresh capture"
+    kind: FR
+    area: "Answer Capture / Escape"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-MTC-008-say-it-again-escape.md
+    sha256: d363577a19be93beaea79ed5bad77e6198c2aa1b1eeac19eb6d634f34ae9e895
+    acceptance_scenarios: 3
+  - id: FR-MTC-009
+    title: "Pre-ladder answer interception"
+    kind: FR
+    area: "Interception / Routing"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-MTC-009-pre-ladder-answer-interception.md
+    sha256: cfca9ad3500a8a2d555f780623e58c48c787bc35cbd147820cf457e64d040df1
+    acceptance_scenarios: 3
+  - id: FR-MTC-010
+    title: "Cancel words drop the frame with an honest line"
+    kind: FR
+    area: "Interception / Cancel"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-MTC-010-cancel-drops-the-frame.md
+    sha256: 6423753f27a379117d9019ff8a976de02f8ee6f28a122b6f69670be1cfd583ae
+    acceptance_scenarios: 3
+  - id: FR-MTC-011
+    title: "Emergency precedence is absolute mid-frame"
+    kind: FR
+    area: "Safety / Emergency"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-MTC-011-emergency-precedence-mid-frame.md
+    sha256: 37028bc7edc5e707897f326e058770929f077f5502d67ec6cc4d65040840fe3b
+    acceptance_scenarios: 3
+  - id: FR-MTC-012
+    title: "Barge-in — a strong new command drops the frame"
+    kind: FR
+    area: "Interception / Barge-in"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-MTC-012-barge-in-strong-new-command.md
+    sha256: 9186d6d72fc10205d4d13353356b16c940f91ae66dadd01700a274c3e52b09cb
+    acceptance_scenarios: 3
+  - id: FR-MTC-013
+    title: "45 s timeout — silent drop and re-arm"
+    kind: FR
+    area: "Timeout / Recovery"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-MTC-013-timeout-silent-rearm.md
+    sha256: b938efd91fefe25498499aae53b7878ff0317f582bb2db4a22065e3f8df83464
+    acceptance_scenarios: 3
+  - id: FR-MTC-014
+    title: "`awaitingSlotAnswer` session state with the 45 s timer reuse"
+    kind: FR
+    area: "Session State"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-MTC-014-awaiting-slot-answer-state.md
+    sha256: 065b23a94c19a020a47870681e446baadfe89f86a29b3ea0c3249502138714cb
+    acceptance_scenarios: 3
+  - id: FR-MTC-015
+    title: "Curated on-device option catalog"
+    kind: FR
+    area: "Option Catalog"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-MTC-015-curated-on-device-catalog.md
+    sha256: c088e8fbe225178a2e91488642654a6bcea1af01d2644bdf867eb89d6e77f412
+    acceptance_scenarios: 3
+  - id: FR-MTC-016
+    title: "Template-generated probes, localized ne/en — never model-generated"
+    kind: FR
+    area: "Probe Generation / Localisation"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-MTC-016-template-generated-probes.md
+    sha256: e48818e2f24fd6b93c227c7c8e3b8d2ff1ebc59285b98b8b25af163ef9255237
+    acceptance_scenarios: 3
+  - id: FR-MTC-017
+    title: "Transcript-cache bypass during answer capture"
+    kind: FR
+    area: "Cache Discipline"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-MTC-017-transcript-cache-bypass.md
+    sha256: 725a082b02795f8b8d626eb19a7284a8d415bb3b4294f33e4c3bf15ade0633f4
+    acceptance_scenarios: 3
+  - id: FR-MTC-018
+    title: "Phase 2 — follow-up NLU fine-tune v17 with the frame clause"
+    kind: FR
+    area: "NLU Training (Phase 2)"
+    priority: SHOULD
+    file: specs/define-requirements/FR/FR-MTC-018-follow-up-nlu-fine-tune-v17.md
+    sha256: c139cb866a17a598297ace8f00350ceed5618f53788728fc1387bfcba95e114f
     acceptance_scenarios: 4
-  - id: FR-SP-009
-    title: "Encrypted Spotify credential and account store"
+  - id: FR-MTC-019
+    title: "Phase 3 — reminder/calendar missing-slot re-prompts on the frame path"
     kind: FR
-    area: "Credential Storage"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-SP-009-encrypted-spotify-credential-store.md
-    sha256: 4a9357b04ea6340d1a5b600a7934bef0f7b6552e98cfaa9065bc78c9c4cb0e0e
+    area: "Rollout (Phase 3)"
+    priority: SHOULD
+    file: specs/define-requirements/FR/FR-MTC-019-reminder-calendar-frame-rollover.md
+    sha256: d0b0042b08bad67beb66918fc3bf9f91b902d992641564812fa5ed52422646e9
     acceptance_scenarios: 3
-  - id: FR-SP-010
-    title: "Unlink wipes credentials and revokes access"
-    kind: FR
-    area: "Account Linking / Security"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-SP-010-unlink-wipes-credentials-and-revokes.md
-    sha256: de2c2cc3770271c98bfb8cd993fe5b88d71219d84322d0d1bd2144faef530008
-    acceptance_scenarios: 4
-  - id: FR-SP-011
-    title: "Free-tier degradation to the spotify: deep-link fallback"
-    kind: FR
-    area: "Degradation"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-SP-011-free-tier-deeplink-degradation.md
-    sha256: d761834ee514d3c95b36522170046beba342dabcdfd6a692cb3a81f54d2b1c2e
-    acceptance_scenarios: 3
-  - id: FR-SP-012
-    title: "Honest localized outcomes — no silent failure on any path"
-    kind: FR
-    area: "Degradation / Honesty"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-SP-012-honest-outcomes-no-silent-failure.md
-    sha256: 1fa972c45182a86a67adcf3da474d4adbc23df1243bcf4af853e3b5a789b9849
-    acceptance_scenarios: 4
-  - id: FR-SP-013
-    title: "Deterministic music-domain rule in KeywordIntentRule"
-    kind: FR
-    area: "Intent Routing (no-model path)"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-SP-013-keyword-intent-rule-music-domain.md
-    sha256: 154679d296c68bd857567c6c1b41aba3544263f3f89bc61c6b5c592da355485e
-    acceptance_scenarios: 3
-  - id: FR-SP-014
-    title: "Music-request veto parity in VoiceContactSearchRoute"
-    kind: FR
-    area: "Intent Routing"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-SP-014-contact-search-veto-parity.md
-    sha256: 108a9362d9b6d6f0dc8045af25ec939cb1cde2494f2147fc13326c53cbf178d4
-    acceptance_scenarios: 3
-  - id: FR-SP-015
-    title: "Music-request intake in the voice route ladder"
-    kind: FR
-    area: "Intent Routing"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-SP-015-music-request-intake-in-route-ladder.md
-    sha256: 6bebc9078e040abbbb4cd56db592923b01e88f2b877694e7c8fbe4e47877bb5e
-    acceptance_scenarios: 3
-  - id: FR-SP-016
-    title: "Settings linking, status surface and privacy disclosure"
-    kind: FR
-    area: "Settings / Privacy"
-    priority: MUST
-    file: specs/define-requirements/FR/FR-SP-016-settings-linking-and-privacy-disclosure.md
-    sha256: 252a220b3c9968fe5baee6104e2a085ed06653a9aa07054969af476beab63fd0
-    acceptance_scenarios: 4
-  - id: FR-SP-017
-    title: "Device-validation checklist recorded and passed (DV-* completion gate)"
+  - id: FR-MTC-020
+    title: "DV-* device validation recorded and passed (completion gate)"
     kind: FR
     area: "Validation / Completion Gate"
     priority: MUST
-    file: specs/define-requirements/FR/FR-SP-017-device-validation-checklist-recorded-and-passed.md
-    sha256: 2001bae571e7fb873ad691e921ee13c86e6409f3d98d887fee3b782e1f420e6f
+    file: specs/define-requirements/FR/FR-MTC-020-device-validation-completion-gate.md
+    sha256: 71af203543735e28823f1f6dff3c2b8d3c855f0cc6d0c52cead4224424ec7c5e
     acceptance_scenarios: 3
-  - id: NFR-SP-001
-    title: "Provider search responsiveness and timeout budget"
+  - id: NFR-MTC-001
+    title: "Probe and answer turns stay within the existing turn envelope"
     kind: NFR
     area: "Performance"
     priority: MUST
-    file: specs/define-requirements/NFR/NFR-SP-001-provider-search-responsiveness.md
-    sha256: 243b2b3847b6babd02a32fcf4e0710573d6034453eb266c8093af2e9811057d1
+    file: specs/define-requirements/NFR/NFR-MTC-001-probe-turn-latency.md
+    sha256: 2cb4432715f4a8ef2b4838e02f1d1ce0ab25266f449c844bfb7011f3b04175ea
     acceptance_scenarios: 3
-  - id: NFR-SP-002
-    title: "Log safety — no credentials, queries or provider bodies in logs"
-    kind: NFR
-    area: "Privacy / Security"
-    priority: MUST
-    file: specs/define-requirements/NFR/NFR-SP-002-log-safety.md
-    sha256: 4d5f2e08726ea6aae04620343719acd41b62745b00ac864df2ffb536b573277d
-    acceptance_scenarios: 3
-  - id: NFR-SP-003
-    title: "No new network egress; music stays off any cloud LLM"
-    kind: NFR
-    area: "Privacy"
-    priority: MUST
-    file: specs/define-requirements/NFR/NFR-SP-003-no-new-network-egress.md
-    sha256: e21b934a2783929bbb86a7d404ed7cbff5ccea6cec1c2926e9d0aa74de9deba1
-    acceptance_scenarios: 3
-  - id: NFR-SP-004
-    title: "Prompt token budget preserved"
+  - id: NFR-MTC-002
+    title: "1024-token ceiling and the pinned prompt budget are preserved"
     kind: NFR
     area: "Reliability / Maintainability"
     priority: MUST
-    file: specs/define-requirements/NFR/NFR-SP-004-prompt-budget-preserved.md
-    sha256: ae78df9e9aa90696bac846fb5f0c2d1ef482e25f2cb69784b2d8fee4a1435bcc
+    file: specs/define-requirements/NFR/NFR-MTC-002-prompt-budget-and-token-ceiling.md
+    sha256: 20ed118f7c61a30f6c63c85d4954a2e005b3047afe7df750df663bd3812fdd7f
     acceptance_scenarios: 3
-  - id: NFR-SP-005
-    title: "Localisation of all Spotify strings (ne/en)"
+  - id: NFR-MTC-003
+    title: "No new network egress — probes and answers stay on-device"
     kind: NFR
-    area: "Localisation"
+    area: "Privacy"
     priority: MUST
-    file: specs/define-requirements/NFR/NFR-SP-005-localisation.md
-    sha256: ec1e168beec0df0966901efe47d033048100fd1c3bde3b8669fdbd8214d8a76f
+    file: specs/define-requirements/NFR/NFR-MTC-003-no-new-network-egress.md
+    sha256: 5afee0d53cdcc6290848d13d6ba7df7f98ec9649ed85df68ab2daf4ea0738b62
+    acceptance_scenarios: 2
+  - id: NFR-MTC-004
+    title: "Log safety — probe and answer text never reach logs"
+    kind: NFR
+    area: "Privacy / Security"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-MTC-004-log-safety.md
+    sha256: fbba2f8adad0c39f8626c1e24fc375cde689472e5a09b71c87534b285840f35a
     acceptance_scenarios: 3
-  - id: NFR-SP-006
-    title: "No regression to existing flows"
+  - id: NFR-MTC-005
+    title: "The frame survives a degraded or absent brain — deterministic path"
     kind: NFR
     area: "Reliability"
     priority: MUST
-    file: specs/define-requirements/NFR/NFR-SP-006-no-regression.md
-    sha256: e7a94d616df8411abe9524a16f7fc34c997498df4047a58c8574b0b3307fd0dc
-    acceptance_scenarios: 4
-  - id: NFR-SP-007
-    title: "Credential and token encryption at rest"
-    kind: NFR
-    area: "Security"
-    priority: MUST
-    file: specs/define-requirements/NFR/NFR-SP-007-credential-encryption-at-rest.md
-    sha256: 60354ac082aaff0f8a4680fbc01d3e399dc35a3dc96c9063fbf24cc9fc57c371
-    acceptance_scenarios: 4
-  - id: NFR-SP-008
-    title: "Deep-link URI construction hardening"
-    kind: NFR
-    area: "Security"
-    priority: MUST
-    file: specs/define-requirements/NFR/NFR-SP-008-deeplink-uri-hardening.md
-    sha256: cfd39a8b3880af3ea4838bda23b1528b65962b98980b2bcf2c262ac90c029096
+    file: specs/define-requirements/NFR/NFR-MTC-005-degraded-brain-deterministic-path.md
+    sha256: 9128ca1c21fcaac576a3b2629a6615021bb97132c32cf73e94c5648eeb6fc787
     acceptance_scenarios: 3
-  - id: NFR-SP-009
-    title: "OAuth redirect validation and token lifecycle"
+  - id: NFR-MTC-006
+    title: "Localisation of every dialogue string (ne/en)"
+    kind: NFR
+    area: "Localisation"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-MTC-006-localisation.md
+    sha256: 4f319790f141826427e3a6a234a1e75eebb316861c44afd775a13f4f1e175ef3
+    acceptance_scenarios: 3
+  - id: NFR-MTC-007
+    title: "Sustained multi-turn stability on 6 GB devices — no jetsam"
+    kind: NFR
+    area: "Reliability / Performance"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-MTC-007-sustained-multi-turn-stability.md
+    sha256: 24ce7e34b6af85a9320d735f87671d8aa9ef22329aa468dddb69be6fb1292505
+    acceptance_scenarios: 2
+  - id: NFR-MTC-008
+    title: "Answer-path sanitisation and injection safety"
     kind: NFR
     area: "Security"
     priority: MUST
-    file: specs/define-requirements/NFR/NFR-SP-009-oauth-redirect-and-token-lifecycle.md
-    sha256: 16dbcf40cbb97f53df11f2b581a2081994a2a810efe61b09d5fa18f3665fae1e
-    acceptance_scenarios: 4
-  - id: NFR-SP-010
-    title: "Accessibility of the new touch surfaces"
+    file: specs/define-requirements/NFR/NFR-MTC-008-answer-sanitisation-and-injection-safety.md
+    sha256: 0ee121edd8a940744f276ddfb1a40e986b6bdbcf207db4d7ee608c3625abe9b3
+    acceptance_scenarios: 3
+  - id: NFR-MTC-009
+    title: "Voice-only accessibility of probes and answer capture"
     kind: NFR
     area: "Accessibility"
     priority: MUST
-    file: specs/define-requirements/NFR/NFR-SP-010-accessibility-of-new-surfaces.md
-    sha256: 492f95d48facf2ad55f68aecb9d7fd65b41e0aaf4830e808db2fde272f584afa
-    acceptance_scenarios: 4
-  - id: NFR-SP-011
-    title: "Compliance and release gates"
+    file: specs/define-requirements/NFR/NFR-MTC-009-voice-only-accessibility.md
+    sha256: 38acf0055f058b3af8bb95878e7e2c8e1c3b5d97b68121a24449e75cc4e74493
+    acceptance_scenarios: 3
+  - id: NFR-MTC-010
+    title: "Frame-trap resistance — zero stuck states"
+    kind: NFR
+    area: "Reliability / Safety"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-MTC-010-frame-trap-resistance.md
+    sha256: 42317bdfc148afe7bee1f4e09a951fc38b47dd75a488216bf113544390ee7126
+    acceptance_scenarios: 3
+  - id: NFR-MTC-011
+    title: "KV-prefix stability — the frame clause never mutates the template prefix"
+    kind: NFR
+    area: "Performance / Reliability"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-MTC-011-kv-prefix-stability.md
+    sha256: 30047addfb9931b81b1e594692b8843b3d2d0e3735f77605a1448fecf631e8fd
+    acceptance_scenarios: 3
+  - id: NFR-MTC-012
+    title: "Compliance, no-regression and release gates"
     kind: NFR
     area: "Compliance"
     priority: MUST
-    file: specs/define-requirements/NFR/NFR-SP-011-compliance-and-release-gates.md
-    sha256: b9ab0a559b6093f9d5eca9c5074e071aea2946da5a1be2781c245b52cea89390
-    acceptance_scenarios: 4
-  - id: NFR-SP-012
-    title: "Plugin isolation and model-stack invariance"
-    kind: NFR
-    area: "Maintainability / Architecture"
-    priority: MUST
-    file: specs/define-requirements/NFR/NFR-SP-012-plugin-isolation-and-model-stack-invariance.md
-    sha256: 956137fa7da06caa7eec0e8895d8ed18f0cccd21717b97a26da95ace155b0c6d
-    acceptance_scenarios: 4
+    file: specs/define-requirements/NFR/NFR-MTC-012-compliance-and-release-gates.md
+    sha256: 601704b664cb8f50e0660e2af0315a230761ee29edc03a26a947fc9ff87b1d9f
+    acceptance_scenarios: 3
 
 assumptions:
   - id: A1
-    statement: "The integration surfaces exist as named in the feature constitution's surface table: the YouTube pattern files (YouTubePlugin/YouTubeTool/YouTubeRoute and their test suites), the CommandRouter tool seams (the configStore/transport/linkOpener pattern around lines 639-648), AppCoordinator plugin registration and store wiring (around line 2058), SettingsView/SettingsTabs, and the Localizable.xcstrings + Info.plist surfaces. The scaffold probe (specs/spotify-music-integration/init-report.md) records the scaffold step only, not a code probe."
-    source: "feature constitution Integration Surfaces; specs/spotify-music-integration/init-report.md"
+    statement: "The integration surfaces exist as named in the feature constitution; the cited anchors were spot-verified against the worktree source at requirements time (CommandRouter.route at 740, the confirmation hook at 785-886, the keyword-ladder music arm at 1223-1234, routeKeywordRemainder at 1968-2030, selectMusicOutcome/fireMusicRequest/runMusicTurn at 2614/2667/2684, the interpreted .music path at 3336-3355, KeywordIntentRule.musicQuery at 752-779, VoiceSessionStateMachine states/timer at 9-17/93-96/183-203, the 60 s voice watchdog, the IntentPromptTests 3,000-character pin, maxTokenCount: 1024). Remaining feasibility-study §10 line references not cited above are study-derived."
   - id: A2
-    statement: "The stub line being replaced is the router.musicStub string ('Music isn't ready yet. Coming soon.' / 'संगीत सुविधा अहिले तयार छैन। चाँडै आउनेछ।'), spoken from the case .music: branch; the key may remain in the string catalog but must not be spoken on a music path once the feature ships."
-    source: "feature constitution Purpose & Scope; CommandRouter case .music:"
+    statement: "Exact user-facing copy (probe wording, default-play phrase, cancel/escape lines, honest lines) is OD-M1/OD-M2/design-dependent; the Nepali/English examples in this set are illustrative and localization-bound — the L10n keys must exist in both languages (NFR-MTC-006)."
   - id: A3
-    statement: "The golden-corpus music block currently holds 15 utterances pinned to intent music (ios/ElderlyAssistantTests/ Services/Voice/GoldenCorpus.swift lines 142-157), while the feature constitution says 16 utterances; implementation reconciles the count against the source and records the result."
-    source: "feature constitution Feature Constraint 5; source inspection at requirements time"
+    statement: "The curated catalog's exact contents (e.g. the bhajan deity list) are data refined at design time; the requirement binds the catalog's existence, on-device sourcing, localisability and canonicalisation behaviour (FR-MTC-015)."
   - id: A4
-    statement: "The spotify: deep-link fallback presumes the Spotify app is installed for that path (the device expectation); where it is absent, the honest-messaging rule applies instead of any fallback claim."
-    source: "feature constitution Feature Constraint 8"
+    statement: "v16 and v17 are the study's and constitution's iteration labels for the existing slot-canonical fine-tune and the Phase 2 follow-up fine-tune; the actual artifacts land via the Phase 2 training iteration (FR-MTC-018) — nothing in Phase 1 depends on a training run."
   - id: A5
-    statement: "The caregiver/family member performs linking and credential setup at the device; the elderly primary user never handles OAuth or keys, and this feature adds no remote companion-app flow for Spotify linking."
-    source: "feature constitution Purpose & Scope (primary/secondary user); established family-handles-credentials pattern"
+    statement: "The project's known pre-existing test failures (unrelated to this feature) remain the baseline for NFR-MTC-012; the feature's own suites and touched suites must pass, with baseline failures recorded rather than silently included or excluded."
   - id: A6
-    statement: "Provider identifiers used in requirement examples are synthetic placeholders; no real track ID, client ID, secret, token or other credential is recorded anywhere in this requirement set."
-    source: "this requirements pass (SEC-002 discipline)"
+    statement: "The 45 s deadline is the existing confirmation timer value (VoiceSessionStateMachine.confirmationTimeoutSeconds = 45); reuse mechanics are design's to fix, the value is binding."
   - id: A7
-    statement: "Exact user-facing copy for the degradation paths is OD-S3; the Nepali/English example lines in this set are illustrative, and the requirement binds that the keys exist and are localized in both languages."
-    source: "feature constitution OD-S3; Feature Constraint 12"
-  - id: A8
-    statement: "The project unit-test baseline includes known pre-existing failures unrelated to this feature; NFR-SP-006 binds the feature's suites and the touched suites, with baseline failures recorded rather than silently included or excluded."
-    source: "project test baseline; feature constitution Feature Constraint 5"
-  - id: A9
-    statement: "The project build gate is ios/build.sh, and the release-build log-surface gate ios/tools/check-release-log-safety.sh is wired into it; both are binding for this feature."
-    source: "project constitution Release gates; feature constitution Feature Constraint 2"
+    statement: "DialogueManager, DialogueFrame, awaitingSlotAnswer, probeKind and the curated catalog were confirmed absent from the worktree source at requirements time — they are genuinely new surfaces."
 
 constraints:
   - id: C1
-    statement: "Architecture Constraint 1 (amended 2026-10-06) permits Spotify as a network integration for search and user-initiated playback hand-off; the on-device AI stance is unchanged and no other network egress is added or widened."
-    source: "project constitution Architecture Constraint 1 + amendment; feature constitution amendment record"
+    statement: "Emergency precedence is absolute: emergency keywords always win mid-dialogue; the override is checked before any frame merge; emergency dispatch and medication re-fire are frame-independent and behave exactly as today; a hostile or corrupted answer cannot bypass the emergency precedence rule."
+    source: "feature constitution Safety-Relevant Constraint 1 (verified: worktree emergency handling precedes the ladder)"
   - id: C2
-    statement: "No Spotify code without the constitutional amendment: the 2026-10-06 amendment (Constraint 1 + Required-integrations list) is part of the feature change set."
-    source: "feature constitution Feature Constraint 10"
+    statement: "Frames must never trap the user: cancel words drop the frame with an honest line; a strong new-command barge-in drops the frame and executes the new command; ambiguous utterances are treated as answers; a 45 s timeout silently drops and re-arms. Zero stuck states; no persistence across sessions."
+    source: "feature constitution Safety-Relevant Constraint 2"
   - id: C3
-    statement: "Credential discipline: scopes requested at sign-in (addScopes), tokens verified, encrypted on-device storage (Keychain / EncryptedLocalStorage, Data Protection Complete), no credentials in the repository or any log; keys travel in a header, never a URL; the check-release-log-safety.sh gate is binding."
-    source: "feature constitution Feature Constraint 2 + amendment; project constitution Standards/release gates"
+    statement: "Privacy & log-safety stance unchanged: no new network egress; no new compliance regime; the on-device stance and existing encrypted stores are unchanged; free-text answers are sanitised through the existing input seam (InputSanitiser discipline) before any use; no raw transcripts may reach logs (B2/T-050 precedent) and ios/tools/check-release-log-safety.sh must keep passing."
+    source: "feature constitution Safety-Relevant Constraint 3"
   - id: C4
-    statement: "Prompt budget: IntentPromptTests pins the intent prompt's token budget; music/Spotify wording must fit it and must not raise the pin; the deterministic keyword rule is the zero-prompt-token model."
-    source: "feature constitution Feature Constraint 3"
+    statement: "Security-review focus — the answer-capture path: STRIDE must treat it as a focus area; no new injection surface into routing; no log-safety regressions; a hostile or corrupted answer cannot bypass the emergency precedence rule; existing sanitisation discipline applies before the answer enters any routing or prompt context."
+    source: "feature constitution Safety-Relevant Constraint 4"
   - id: C5
-    statement: "Must-not-break paths: explicit YouTube requests ('युट्युबमा गीत चलाऊ') still route to YouTube exactly as today; Spotify-unavailable/unlinked falls back to YouTube; golden-corpus and route expectations change only where deliberately superseded, with the new expectation recorded alongside."
-    source: "feature constitution Feature Constraint 5"
+    statement: "1024-token ceiling: the brain context is a measured memory ceiling (2048 crashed 6 GB devices); dialogue state lives in the app, never as transcript history in prompts; any prompt clause must fit the ~300-token headroom inside the pinned IntentPromptTests budget."
+    source: "feature constitution Feature Constraint 1; feasibility study §5.1"
   - id: C6
-    statement: "No new backend: the Spotify Web API is called directly from the app; development-mode rollout is limited to registered test users until a quota-extension request is approved, and unregistered users still see honest behaviour."
-    source: "feature constitution Feature Constraints 6-7"
+    statement: "Template-generated probes only (localized ne/en). Never model-generated. The model never writes probe text."
+    source: "feature constitution Feature Constraint 2"
   - id: C7
-    statement: "Premium reality: playback control requires Spotify Premium; free-tier or unlinked remote control degrades to the spotify: deep-link fallback with clear messaging, never a silent failure."
-    source: "feature constitution Feature Constraint 1; root Agent Principle (no silent stubs)"
+    statement: "Probe budget: max 2 probes then execute with defaults; 3-4 spoken options with a default always offered (slotFill), 2-3 for candidateChoice; free-text answers always accepted."
+    source: "feature constitution Feature Constraint 3"
   - id: C8
-    statement: "Device expectation: the Spotify app is installed for the spotify: deep-link fallback; behaviour without it follows the honest-messaging rule."
-    source: "feature constitution Feature Constraint 8"
+    statement: "Deterministic merge works with the brain absent or degraded — Phase 1's core guarantee: the frame survives a degraded or skipped brain turn and executes via the deterministic merge; the PR #156 hardening stays intact (per-turn STT release, pressure-tiered brain pick); brain-assisted merge is Phase 2 only."
+    source: "feature constitution Feature Constraint 4"
   - id: C9
-    statement: "Plugin isolation: the feature ships as an AssistantPlugin (SpotifyPlugin) with no entanglement beyond the mapped CommandRouter seams; no brain/router model-stack changes; no cloud LLM on the music path."
-    source: "feature constitution Feature Constraint 11 and Feature Constraint 4"
+    statement: "The Phase 2 frame clause ships only together with the v17 training iteration; the clause stays inside the pinned prompt budget, is mirrored byte-identically in tools/train-intent/seeds/prompt_template.txt in the same change, and must not alter the .raw framing; no clause without training data."
+    source: "feature constitution Feature Constraint 5"
   - id: C10
-    statement: "Localization discipline: all Spotify user-facing strings are localized (ne/en) via spotify.* keys, mirroring the YouTube plugin's L10n pattern."
-    source: "feature constitution Feature Constraint 12"
+    statement: "KV-prefix stability: the frame clause must not mutate the byte-stable template prefix (the vendored LLM prefix-reuse path depends on it)."
+    source: "feature constitution Feature Constraint 6; feasibility study §5.3"
+  - id: C11
+    statement: "Cache bypass: during awaitingSlotAnswer, the transcript cache (IntentCommandCache) is bypassed — answers are never cacheable inputs; only confirmed merged commands are recorded."
+    source: "feature constitution Feature Constraint 7"
+  - id: C12
+    statement: "Delivery gates: focused tests + typecheck per unit; full suite once at the end; device validation is the DV-* checklist on Anzaan (reference device)."
+    source: "feature constitution Feature Constraint 8"
+  - id: C13
+    statement: "Phase 0 prerequisite: PR #156 voice-OOM hardening is merged (437631e, 2026-10-10); its device smoke (conversation → no jetsam → pull JetsamEvent logs) is outstanding — that outstanding smoke is the Phase 0 prerequisite for this feature."
+    source: "feature constitution Feature Constraint 9"
+  - id: C14
+    statement: "iOS only. No platform scope beyond the existing iOS app."
+    source: "feature constitution Feature Constraint 10"
 
 open_decisions:
-  - id: OD-S1
-    statement: "Client-secret handling for the Spotify search flow: family-entered credential per the YouTubeConfigStore/SearchConfigStore Keychain precedent versus PKCE-only options where the flow permits; must satisfy constraint 2 and interact cleanly with the dev-mode test-user limit. The requirements bind the storage/log discipline for whichever path resolves."
-    resolves_at: "design-l1 (recorded in security-design-review as well)"
-    owner: "architect / security review"
-  - id: OD-S2
-    statement: "Spotify development-mode rollout and quota-extension plan: which accounts are registered during development and device validation, when the quota-extension request is filed, what unregistered users experience before approval, and the console-side Developer Dashboard registration (client ID + secret, redirect URI, scopes). The requirements bind honest behaviour for unregistered users regardless."
+  - id: OD-M1
+    statement: "Probe policy: 1 probe vs up-to-2 before executing with defaults, and the default-play wording ('जे पनि बजाऊ'). Study recommendation: 2 probes max, default offered on the first probe. The requirements bind a bounded probe budget, the always-present default and execution-with-defaults on exhaustion (FR-MTC-007, FR-MTC-003); the exact cap and default copy stay open."
+    resolves_at: "owner; recorded in design-l1"
+    owner: "owner"
+  - id: OD-M2
+    statement: "Probe option source: curated on-device catalog (recommended for MVP: zero latency, on-device stance) vs live Spotify playlist search (richer; needs a SpotifyTool extension + network per probe). The requirements bind the curated on-device catalog for Phase 1 (FR-MTC-015) and no new egress (NFR-MTC-003); a later live-search enrichment resolves here."
     resolves_at: "owner + design-l1"
     owner: "owner / architect"
-  - id: OD-S3
-    statement: "Premium-account degradation path: exact UX and precedence when Spotify cannot perform playback (free tier, unlinked, network/service failure, empty search) - which cases degrade to the spotify: deep-link fallback, which fall back to YouTube, the exact localized copy, and how both-provider search behaves in each case. The requirements bind that each path is non-silent and honest; composition and copy stay open."
-    resolves_at: "design-l1 / design-l2"
-    owner: "architect"
+  - id: OD-M3
+    statement: "Sequencing: ship Phase 1 deterministic-only first vs run Phase 2 + v17 in parallel. Study recommendation: Phase 1 first (it covers the bhajan example), v17 data authoring in parallel. The requirements mark Phase 2 (FR-MTC-018) as SHOULD pending this resolution; Phase 1 is complete and shippable alone."
+    resolves_at: "owner"
+    owner: "owner"
+  - id: OD-M4
+    statement: "Scope: whether Phase 3's reminder/calendar answer-capture (fixing today's stateless re-prompts) rides the same release as the music probe. The requirements keep reminder/calendar unchanged in Phase 1 (FR-MTC-019 Phase 1 guard; NFR-MTC-012) and carry the Phase 3 target as SHOULD."
+    resolves_at: "owner"
+    owner: "owner"
 
 out_of_scope:
-  - "Cloud LLM on the music path (voice intent parsing and routing stay on-device; music queries go to the provider APIs directly)"
-  - "Brain/router model-stack changes (no model, catalog, weights or routing-model changes beyond the pinned intent wording)"
-  - "A new backend (the Spotify Web API is called directly from the app; nothing provisioned on our side)"
-  - "Explicit-YouTube routing changes ('युट्युबमा गीत चलाऊ' still reaches YouTube exactly as today)"
-  - "Library/playlist edits and account modifications (playback is read-only, user-initiated media control)"
-  - "Emergency / medication / health surface changes (none of any kind; no new safety path added or altered)"
-  - "Any network egress beyond the two provider APIs (Spotify Web API/OAuth and the existing YouTube endpoints)"
-  - "Wake-word work, Android, and other deferred project items"
+  - "Open-ended conversation/chat (the fine-tunes have no conversational mode; probes are the only new dialogue; the stakeholder brief's FR-008 conversational-response clause is not delivered or superseded by this feature)"
+  - "Raw transcript history in prompts (the 1024-token ceiling is a measured memory limit; dialogue state lives in the app)"
+  - "Model-generated probe text (probes are template-generated, localized ne/en; the model's only multi-turn job is classifying the answer)"
+  - "Cloud / BYO-LLM anything (no new network egress; the on-device stance is unchanged)"
+  - "Persistent dialogue state across sessions (frames are in-memory only; a cold start has no frame)"
+  - "Reminder/calendar changes in Phase 1 (those turns are unchanged until Phase 3 and the OD-M4 resolution)"
+  - "Android (no platform scope beyond the existing iOS app)"
+  - "Emergency/medication behaviour changes of any kind (emergency precedence preserved absolutely)"
+  - "Any new compliance regime, permission, data store or egress host (existing disclosures and gates unchanged)"
 
 security_surfaces:
-  - surface: "OAuth token lifecycle (scopes at sign-in, Keychain/EncryptedLocalStorage at rest, refresh handling, revocation on unlink; no tokens in logs)"
-    requirements: ["NFR-SP-009", "NFR-SP-007", "FR-SP-008", "FR-SP-010"]
-  - surface: "Client-secret handling for the client-credentials search flow (OD-S1 - open; bundled secrets are extractable)"
-    requirements: ["FR-SP-009", "NFR-SP-002"]
-  - surface: "Deep-link/URI injection: spotify: URIs are built from remote-controlled search results; track names/IDs validated before URI construction; a crafted result must not open arbitrary schemes"
-    requirements: ["NFR-SP-008", "FR-SP-007"]
-  - surface: "OAuth redirect validation: mismatched redirect URIs rejected (token interception via app-scheme hijacking)"
-    requirements: ["NFR-SP-009", "FR-SP-008"]
-  - surface: "Log sanitisation: music queries, provider responses and error bodies must not reach logs; check-release-log-safety.sh coverage"
-    requirements: ["NFR-SP-002", "NFR-SP-011"]
-  - surface: "Privacy disclosure: music-query/playback data flow to Spotify disclosed"
-    requirements: ["FR-SP-016", "NFR-SP-011"]
-  - surface: "Credential wipe/revocation on unlink"
-    requirements: ["FR-SP-010", "NFR-SP-007"]
-  - surface: "No new egress / no cloud LLM on the music path"
-    requirements: ["NFR-SP-003"]
+  - surface: "Emergency precedence mid-dialogue: emergency keywords win mid-frame; a hostile or corrupted answer cannot bypass the override"
+    requirements: ["FR-MTC-011", "NFR-MTC-010"]
+  - surface: "Free-text answer injection: answers enter routing mid-frame; the interception must open no new injection surface into routing or prompt context"
+    requirements: ["NFR-MTC-008", "FR-MTC-009", "FR-MTC-017"]
+  - surface: "Frame-trap resistance: cancel, barge-in and the 45 s timeout must always recover; zero stuck states"
+    requirements: ["FR-MTC-010", "FR-MTC-012", "FR-MTC-013", "NFR-MTC-010"]
+  - surface: "Log sanitisation: probe texts and captured answers must not reach logs (B2/T-050 precedent); check-release-log-safety.sh coverage"
+    requirements: ["NFR-MTC-004", "NFR-MTC-012"]
+  - surface: "No new egress: probes and answers stay on-device (no cloud/BYO-LLM path)"
+    requirements: ["NFR-MTC-003"]
+  - surface: "Degraded-brain path: the deterministic merge must not weaken the emergency/safety gates"
+    requirements: ["NFR-MTC-005", "FR-MTC-011"]
 
 traceability:
   - gate: "design-l1"
-    checks: "Resolve OD-S1 and OD-S3; address OD-S2 (owner/architect). Design the musicStub replacement at CommandRouter.swift:2640, the YouTubeRoute fall-through interplay, the SpotifyTool/plugin seams, the account-linking service and credential store; reconcile the pinned golden-corpus music entries."
+    checks: "Resolve/design with OD-M1..M4 (the study's recommendations are inputs): DialogueFrame shape + probeKind enum; the interception seam in CommandRouter.route (generalize the confirmation hook ~785-886) and its ordering vs emergency keywords; awaitingSlotAnswer + 45 s timer reuse; degenerate-query detection in the music path (KeywordIntentRule.musicQuery); the curated catalog format (localizable ne/en); how the frame survives the degradation ladder (PR #156 pressure-tiered picks); the Phase 2 frame-clause budget within the pinned prompt and the v17 training-mirror requirement."
   - gate: "design-l2"
-    checks: "Component design against this set; interface contracts for SpotifyPlugin, SpotifyTool, the linking service, the credential store and the Settings surface."
+    checks: "Component design against this set; interface contracts for DialogueManager/DialogueFrame, the interception seam, the catalog, the probe templates and the session state."
   - gate: "review-l2"
     checks: "review.decision == GO against the component design and this set."
   - gate: "security-design-review"
-    checks: "STRIDE for the security_surfaces above (OAuth lifecycle, client-secret handling, URI injection, redirect validation, log sanitisation, disclosure); SECURITY-GO required."
+    checks: "STRIDE with the answer-capture path as a named focus: emergency precedence mid-dialogue (FR-MTC-011, NFR-MTC-010); free-text answer injection (NFR-MTC-008, FR-MTC-009, FR-MTC-017); frame-trap resistance (FR-MTC-010/012/013); log sanitisation of probe/answer text (NFR-MTC-004); no new egress (NFR-MTC-003); degraded-brain deterministic path must not weaken safety gates (NFR-MTC-005, FR-MTC-011); SECURITY-GO required."
   - gate: "plan-tasks / implement"
-    checks: "Plan units and implementation trace back to FR-SP-* / NFR-SP-* ids; paired review and 0.85 confidence on implementation output; rework bound 5."
+    checks: "Units trace back to FR-MTC-* / NFR-MTC-* ids; paired review and the 0.85 confidence threshold on implementation output; rework bound 5; unit-based dependency waves."
   - gate: "security-test"
-    checks: "Evidence: token storage (NFR-SP-007), release log-surface coverage (NFR-SP-002), hostile titles/IDs producing only validated spotify: URIs (NFR-SP-008), OAuth redirect validation (NFR-SP-009), credential wipe on unlink (FR-SP-010); SECURITY-GO required."
+    checks: "Evidence: emergency precedence verified mid-frame (FR-MTC-011); probe/answer text never reaches logs and check-release-log-safety.sh covers the new paths (NFR-MTC-004, NFR-MTC-012); cancel/timeout/barge-in recovery (FR-MTC-010/012/013, NFR-MTC-010); degraded-brain fallback honored (NFR-MTC-005); the didYouMean candidate list cannot be induced to bypass the ladder (FR-MTC-004, NFR-MTC-008); SECURITY-GO required."
   - gate: "final-sign-off"
-    checks: "T2 + HIL; ios/tools/check-release-log-safety.sh exits 0 (NFR-SP-002/NFR-SP-011); DV-* checklist recorded and passed on the reference device (FR-SP-017); privacy disclosure recorded (FR-SP-016)."
+    checks: "T2 + HIL; ios/tools/check-release-log-safety.sh exits 0 (NFR-MTC-004, NFR-MTC-012); the DV-* checklist is recorded and passed on the reference device incl. the Phase 0 PR #156 smoke (FR-MTC-020, NFR-MTC-007)."

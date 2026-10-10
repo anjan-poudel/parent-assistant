@@ -4,8 +4,8 @@
 
 | Task | Path | Contract | Status | Date |
 |------|------|----------|--------|------|
-| define-requirements | `specs/define-requirements.lock.yaml` | `requirements_lock` | COMPLETED | 2026-10-06 |
-| define-requirements | `specs/define-requirements.md` | `requirements_doc` | COMPLETED | 2026-10-06 |
+| define-requirements | `specs/define-requirements.lock.yaml` | `requirements_lock` | COMPLETED | 2026-10-10 |
+| define-requirements | `specs/define-requirements.md` | `requirements_doc` | COMPLETED | 2026-10-10 |
 | design-l1 | `specs/design-l1.md` | `architecture_l1` | COMPLETED | 2026-10-06 |
 | design-l2 | `specs/design-l2.md` | `component_design_l2` | COMPLETED | 2026-10-06 |
 | plan-tasks | `specs/plan-tasks/plan.md` | `task_breakdown_l3` | COMPLETED | 2026-10-06 |

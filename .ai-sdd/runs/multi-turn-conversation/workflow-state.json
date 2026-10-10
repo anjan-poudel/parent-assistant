@@ -1,0 +1,108 @@
+{
+  "schema_version": "1",
+  "workflow": "multi-turn-conversation",
+  "project": "/Users/anjan/workspace/projects/elderly-ai-assistant-multi-turn-conversation",
+  "started_at": "2026-10-10T01:28:45.217Z",
+  "updated_at": "2026-10-10T01:54:26.895Z",
+  "tasks": {
+    "define-requirements": {
+      "status": "COMPLETED",
+      "started_at": null,
+      "completed_at": "2026-10-10T01:54:24.335Z",
+      "outputs": [
+        {
+          "path": "specs/define-requirements.md",
+          "contract": "requirements_doc"
+        },
+        {
+          "path": "specs/define-requirements.lock.yaml",
+          "contract": "requirements_lock"
+        }
+      ],
+      "iterations": 0,
+      "pending_at": "2026-10-10T01:25:08.594Z",
+      "last_activity_at": "2026-10-10T01:25:08.594Z"
+    },
+    "design-l1": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-10T01:25:08.594Z",
+      "last_activity_at": "2026-10-10T01:25:08.594Z"
+    },
+    "design-l2": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-10T01:25:08.594Z",
+      "last_activity_at": "2026-10-10T01:25:08.594Z"
+    },
+    "review-l2": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-10T01:25:08.594Z",
+      "last_activity_at": "2026-10-10T01:25:08.594Z"
+    },
+    "security-design-review": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-10T01:25:08.594Z",
+      "last_activity_at": "2026-10-10T01:25:08.594Z"
+    },
+    "plan-tasks": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-10T01:25:08.594Z",
+      "last_activity_at": "2026-10-10T01:25:08.594Z"
+    },
+    "implement": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-10T01:25:08.594Z",
+      "last_activity_at": "2026-10-10T01:25:08.594Z"
+    },
+    "review-implementation": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-10T01:25:08.594Z",
+      "last_activity_at": "2026-10-10T01:25:08.594Z"
+    },
+    "security-test": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-10T01:25:08.594Z",
+      "last_activity_at": "2026-10-10T01:25:08.594Z"
+    },
+    "final-sign-off": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-10T01:25:08.594Z",
+      "last_activity_at": "2026-10-10T01:25:08.594Z"
+    }
+  }
+}
