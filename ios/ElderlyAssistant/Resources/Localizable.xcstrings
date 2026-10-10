@@ -15902,6 +15902,40 @@
         }
       }
     },
+    "settings.hidden.ignoreRamTier.hint" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Warning: a model bigger than this device's memory can crash the app or make voice unresponsive. For temporary testing only — turn it back off afterwards."
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "चेतावनी: यो फोनको मेमोरीभन्दा ठूलो मोडेलले एप बन्द गर्न वा आवाज सुस्त बनाउन सक्छ। अस्थायी परीक्षणका लागि मात्र — पछि फेरि बन्द गर्नुहोस्।"
+          }
+        }
+      }
+    },
+    "settings.hidden.ignoreRamTier.label" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow downloads this phone may not run safely"
+          }
+        },
+        "ne" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "यो फोनले सुरक्षित रूपमा चलाउन नसक्ने डाउनलोडलाई अनुमति दिनुहोस्"
+          }
+        }
+      }
+    },
     "settings.hidden.note" : {
       "extractionState" : "manual",
       "localizations" : {

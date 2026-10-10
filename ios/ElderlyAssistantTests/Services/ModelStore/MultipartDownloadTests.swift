@@ -471,6 +471,65 @@ final class MultipartDownloadTests: XCTestCase {
                       "neither resource guard may reach the transport")
     }
 
+    /// [OWNER-OVERRIDE 2026-10-11] The RAM-tier bypass's contract: with the
+    /// override on, the RAM floor is skipped and the download proceeds; the
+    /// size cap, the disk guard and the iOS tier are untouched (pinned by
+    /// the guard tests above and the existing dev-screen pins). The OFF
+    /// direction proves an unset key leaves the RAM floor refusing exactly
+    /// as before — the override is a persisted, default-off switch, not a
+    /// shipping behaviour.
+    func testTheRamTierOverrideSkipsOnlyTheRamFloorGuard() throws {
+        XCTAssertEqual(ModelDownloadDebugSettings.ignoreRamTierKey,
+                       "modelDownload.ignoreRamTierForDownloads",
+                       "the key is a persisted contract — the switch row and the service must share it")
+
+        let suiteName = "ramtier-override-\(UUID().uuidString)"
+        let freshStore = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { freshStore.removePersistentDomain(forName: suiteName) }
+        XCTAssertFalse(ModelDownloadDebugSettings.ignoresRamTier(in: freshStore),
+                       "an unset key is OFF — nobody bypasses the RAM floor by default")
+
+        // ON direction: the override skips the RAM guard and the download
+        // reaches the transport.
+        let onRAM = makeEntry(id: "synthetic-ramtier-on", sizeBytes: 1_000,
+                              minRAM: UInt64.max)
+        let ramSkipped = ModelDownloadService(
+            store: try makeStore(),
+            observabilityBus: bus,
+            sessionFactory: stubSessionFactory(),
+            availableBytesProvider: roomyFreeSpace,
+            availabilityProvider: { _ in .available },
+            ignoresRamTier: { true })
+        ramSkipped.start(onRAM)
+        waitUntil("the download proceeds past the RAM guard") {
+            if case .downloading = ramSkipped.states[onRAM.id] { return true }
+            if case .failed = ramSkipped.states[onRAM.id] ?? .notStarted { return true }
+            return false
+        }
+        XCTAssertNotEqual(ramSkipped.states[onRAM.id],
+                          .failed(reason: "device does not have enough memory for this model"),
+                          "with the override on, the RAM floor must not refuse the download")
+
+        // OFF direction: the production reader on an unset key still refuses.
+        let offEntry = makeEntry(id: "synthetic-ramtier-off", sizeBytes: 1_000,
+                                 minRAM: UInt64.max)
+        let ramHeld = ModelDownloadService(
+            store: try makeStore(),
+            observabilityBus: bus,
+            sessionFactory: stubSessionFactory(),
+            availableBytesProvider: roomyFreeSpace,
+            availabilityProvider: { _ in .available },
+            ignoresRamTier: { ModelDownloadDebugSettings.ignoresRamTier(in: freshStore) })
+        ramHeld.start(offEntry)
+        waitUntil("the RAM refusal with the switch off") {
+            if case .failed = ramHeld.states[offEntry.id] ?? .notStarted { return true }
+            return false
+        }
+        XCTAssertEqual(ramHeld.states[offEntry.id],
+                       .failed(reason: "device does not have enough memory for this model"),
+                       "an unset override key leaves the RAM floor refusing exactly as before")
+    }
+
     /// [DEVSCREEN-DOWNLOAD] THE OFF DIRECTION, and the half that keeps this a
     /// developer switch rather than a shipping behaviour: the production
     /// reader (`ModelDownloadDebugSettings.ignoresFitPolicy`) answers FALSE

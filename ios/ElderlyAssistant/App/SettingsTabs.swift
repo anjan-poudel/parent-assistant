@@ -467,6 +467,10 @@ struct HiddenSettingsSheet: View {
     /// step. Default OFF: an untouched install never bypasses the policy.
     @AppStorage(ModelDownloadDebugSettings.ignoreFitPolicyKey)
     private var ignoreFitPolicyForDownloads = false
+    /// [OWNER-OVERRIDE 2026-10-11] The RAM-tier bypass switch — same
+    /// single-source-of-truth pattern as the row above.
+    @AppStorage(ModelDownloadDebugSettings.ignoreRamTierKey)
+    private var ignoreRamTierForDownloads = false
 
     var body: some View {
         NavigationStack {
@@ -538,6 +542,24 @@ struct HiddenSettingsSheet: View {
                         .tint(appearance.colors.accent)
                         .frame(minHeight: DesignTokens.minTapTargetSize)
                         Text("settings.hidden.ignoreFitPolicy.hint")
+                            .font(.system(size: appearance.typography.captionPointSize))
+                            .foregroundStyle(appearance.colors.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    // [OWNER-OVERRIDE 2026-10-11] The RAM-tier bypass —
+                    // allows downloads this phone's own RAM floor refuses,
+                    // WITH the warning below. Temporary testing only.
+                    VStack(alignment: .leading, spacing: 4) {
+                        Toggle(isOn: $ignoreRamTierForDownloads) {
+                            Text("settings.hidden.ignoreRamTier.label")
+                                .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
+                                .foregroundStyle(appearance.colors.textPrimary)
+                        }
+                        .tint(appearance.colors.accent)
+                        .frame(minHeight: DesignTokens.minTapTargetSize)
+                        Text("settings.hidden.ignoreRamTier.hint")
                             .font(.system(size: appearance.typography.captionPointSize))
                             .foregroundStyle(appearance.colors.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)

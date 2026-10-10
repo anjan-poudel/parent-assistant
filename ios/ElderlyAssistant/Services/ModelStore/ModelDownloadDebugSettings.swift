@@ -40,4 +40,18 @@ enum ModelDownloadDebugSettings {
     static func ignoresFitPolicy(in defaults: UserDefaults = .standard) -> Bool {
         defaults.bool(forKey: ignoreFitPolicyKey)
     }
+
+    /// [OWNER-OVERRIDE 2026-10-11] The RAM-tier bypass — a SEPARATE switch
+    /// from `ignoreFitPolicyKey` so the A/B tool's pinned contract
+    /// ("skips the class verdict and nothing else") stays intact. The
+    /// owner asked to download models the phone's own RAM floor refuses,
+    /// for temporary testing, WITH a warning: this switch skips the
+    /// `MemoryProbe.canFit` guard only. The size cap, the disk guard and
+    /// the iOS tier still apply — those are facts, not policy.
+    static let ignoreRamTierKey = "modelDownload.ignoreRamTierForDownloads"
+
+    /// Whether the download's RAM-floor guard may be skipped.
+    static func ignoresRamTier(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: ignoreRamTierKey)
+    }
 }

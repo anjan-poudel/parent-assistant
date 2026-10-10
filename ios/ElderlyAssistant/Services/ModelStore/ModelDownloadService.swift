@@ -69,6 +69,11 @@ final class ModelDownloadService: NSObject, ObservableObject {
     /// service built without this argument behaves exactly as it did before
     /// the switch existed.
     private let ignoresFitPolicy: () -> Bool
+    /// [OWNER-OVERRIDE 2026-10-11] Whether the RAM-floor guard may be
+    /// skipped for a download — the separate persisted switch for the
+    /// owner's temporary unsafe-download testing, read per call like
+    /// `ignoresFitPolicy`.
+    private let ignoresRamTier: () -> Bool
     private var tasks: [ModelID: URLSessionDownloadTask] = [:]
     /// Multipart downloads in flight, keyed by model. A multipart model
     /// has NO entry in `tasks` — its parts are owned by the runner, which
@@ -100,12 +105,16 @@ final class ModelDownloadService: NSObject, ObservableObject {
          sessionFactory: (() -> URLSession)? = nil,
          availableBytesProvider: (() -> Int64?)? = nil,
          availabilityProvider: ((ModelCatalogEntry) -> ModelAvailability)? = nil,
-         ignoresFitPolicy: (() -> Bool)? = nil) {
+         ignoresFitPolicy: (() -> Bool)? = nil,
+         ignoresRamTier: (() -> Bool)? = nil) {
         self.store = store
         self.observabilityBus = observabilityBus
         self.availabilityProvider = availabilityProvider ?? { _ in .available }
         self.ignoresFitPolicy = ignoresFitPolicy ?? {
             ModelDownloadDebugSettings.ignoresFitPolicy()
+        }
+        self.ignoresRamTier = ignoresRamTier ?? {
+            ModelDownloadDebugSettings.ignoresRamTier()
         }
         self.sessionFactory = sessionFactory ?? {
             let config = URLSessionConfiguration.default
@@ -189,7 +198,12 @@ final class ModelDownloadService: NSObject, ObservableObject {
             return
         }
 
-        guard MemoryProbe.canFit(entry.minDeviceRAMBytes) else {
+        // [OWNER-OVERRIDE 2026-10-11] The RAM floor is a fact about the
+        // phone, but the owner's temporary override lets it be skipped
+        // WITH the Settings warning — everything above (size, disk) and
+        // below (class verdict via its own switch, iOS tier) keeps its
+        // own guard.
+        guard ignoresRamTier() || MemoryProbe.canFit(entry.minDeviceRAMBytes) else {
             update(id, .failed(reason: "device does not have enough memory for this model"))
             emit("download_ram_tier_rejected", outcome: "failure", modelId: id, errorCode: "ram_tier")
             return
