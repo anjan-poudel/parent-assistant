@@ -82,6 +82,21 @@ enum VoiceContactSearchRoute {
         // ran.
         if isYouTubeUtterance(text) { return .notSearch }
 
+        // [SPOTIFY] (2026-10-06) Music-marked utterances belong to the
+        // music stage, which runs LATER in the ladder — position parity
+        // with the YouTube veto above, exactly as design L2 §15 (the
+        // reviewed contract) places it: after that veto, before the
+        // search-marker check. A marker from the shared
+        // `KeywordIntentRule.musicMarkers` family ("गीत", "भजन",
+        // "गाना", "संगीत", "music", "song", …) means the utterance is
+        // a music request, never a contact lookup, even where a search
+        // marker co-occurs ("गीत खोज" belongs to the interpreter's
+        // music intent, not to a Phone screen prefilled "गीत"). The
+        // veto calls the rule's own predicate, so the two stages can
+        // never disagree about what a music utterance is; the
+        // direct-call veto above is untouched and still runs first.
+        if KeywordIntentRule.mentionsMusic(text) { return .notSearch }
+
         guard isSearchMarkerHit(text) else { return .notSearch }
         return .openPhone(extractQuery(from: text))
     }
@@ -119,7 +134,17 @@ enum VoiceContactSearchRoute {
     ]
     private static let directCallTokens = ["call", "calls", "calling", "dial"]
 
-    private static func isDirectCallUtterance(_ text: String) -> Bool {
+    /// [MTC L2-D2] (2026-10-10) `isDirectCallUtterance` `:137-140`:
+    /// widened `private` → `internal` for the dialogue barge-in
+    /// predicate's second call site (design-l2 §6 B3). One table, never
+    /// duplicated.
+    ///
+    /// Lower-case input contract — unchanged by the widening: the caller
+    /// passes canonical text. The shipped call site
+    /// `decide(transcript:)` `:67` (the `.openPhone` search decision)
+    /// lowercases at `:68` before its veto `:74`; the answer path
+    /// lowercases before evaluating B3. This tester folds no case itself.
+    static func isDirectCallUtterance(_ text: String) -> Bool {
         directCallPhrases.contains { text.contains($0) }
             || directCallTokens.contains { token($0, in: text) }
     }

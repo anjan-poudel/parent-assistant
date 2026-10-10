@@ -1,200 +1,184 @@
-# Final sign-off — live camera translation (English → Nepali, v1)
+# Final sign-off — multi-turn conversation (Phase 1)
 
 **Task:** final-sign-off (T2 human gate) — decision pack
-**Date:** 2026-09-17
-**Branch under review:** worktree-live-camera-translation (pushed to origin; master merged in at b032fb0; tip at the owner's sign-off was 8aae456). Not yet integrated into master.
-**What this document is:** the pack the owner read in order to decide, and now the record of the decision. The reviewer's recommendation is unchanged; the sign-off itself was the owner's, given through the separate human approval step.
+**Feature:** multi-turn-conversation (elderly-ai-assistant) — Phase 1
+**Worktree:** /Users/anjan/workspace/projects/elderly-ai-assistant-multi-turn-conversation — branch feat/multi-turn-conversation
+**Date:** 2026-10-11
+**Reviewed revision:** production content 134d77e (W7); records HEAD 433ad07
+**Diff base:** 0cbe4e6 (master at the branch point)
+**Commit range:** 437d4dc..433ad07 — 15 commits (six design-chain, seven waves, two records)
+**Scope:** Phase 1 as designed and planned. Phase 2 (v17 authorship, FR-MTC-018) and Phase 3 (FR-MTC-019 rollover) are recorded later-phase scope, not part of this delivery. Device validation is the outstanding completion gate (FR-MTC-020).
 
-**Amended at sign-off (2026-09-17).** The owner gave the T2 sign-off on 2026-09-17 and accepted the consent/disclosure copy as it stands (Open Decision 3 / OA-3). Two consequences are recorded in place below: the copy review is complete (Gate 2), and the disclosure version stamp has been bumped to drop the word "draft" — it now reads livetranslate.disclosure.16sep2026.r1, wording unchanged. No consent grant could exist under the old stamp: the feature is not on master and no build of it has ever been distributed, so the bump retires nothing in the field. The release log-safety gate was re-run after the stamp edit and passed (Gate 3). Everything else in this pack stands as it was when the recommendation was made.
+**What this document is.** The decision pack for the T2 sign-off: the consolidated result of the feature's full stage chain — requirements, design L1/L2, the L2 review, the security design review, the 19-unit plan, implementation waves W1-W7, the implementation review of record, the security test of record, and this review. It states what is verified, what is not, and what remains the owner's to decide.
 
-**How this review was done:** the design, security and evidence documents were read; the recorded test result bundles were re-read with the standard bundle tool (no suite is cited here without a non-zero test count — a suite that runs zero tests still reports success); the two cheap log-safety script gates were re-run in the worktree, both exit 0; no build or test target was run; no artifact was modified.
+**How this pack was produced.** Read-only review from the feature worktree. Every figure below was taken from, or re-verified against, the committed stage records and the retained evidence bundles listed under References; no new test, build, simulator or device run was performed for this pack. The fresh re-runs cited are the security test's own runs of 2026-10-11, with outputs retained.
 
 ## Summary
 
-**What was built, in outcome terms.** The user points the phone's camera at printed English text — an appliance panel, a remote, packaging, a sign, a menu — and sees it translated into the app's language (Nepali at launch), live, as an overlay on the camera view, without a photo ever being taken. A voice command and a Home-screen tile both open it. Translation is attempted first from an on-device dictionary. Only when the dictionary cannot resolve a phrase may the text — and only the text, never the picture — be sent to the assistant's cloud service, and only after the user has agreed. If the user withdraws agreement, or there is no network, the feature keeps working offline with the dictionary and cached translations. When nothing can translate a phrase, the original stays visible with an offline badge: the feature never invents a translation and never reports success when it did not translate.
+The feature gives the voice assistant a one-deep dialogue frame. When a turn is degenerate or needs one clarification, the assistant speaks a short template probe (curated on-device catalog; no model, no network); the next utterance is captured as the answer (option name, index word, repetition, or free-form correction); a deterministic, model-free merge produces the intended command; and the ordinary pipeline executes it. The frame is in-memory and main-queue-confined, never persisted. Cancel, escape, barge-in and a silent 45 s timeout always return the user to the normal path, and emergency handling always outranks the frame.
 
-**The change is additive.** No existing behaviour was replaced. It adds a new feature area (Services/LiveTranslate/), an app-layer view, one plugin registration, and small additive extensions to shared pieces: the log-sanitiser allow-list, the localisation string catalogue, and the camera purpose string. The shipped appliance helper's dictionary and cache were extended, not modified.
+What the chain verified (engineering record):
 
-**What is verified.** All three release gates this final gate exists to check, reported in full in Release gates verified below: the recorded constitution exception (Open Decision 13) is present and text-only; the camera purpose string is updated and discloses both required facts; the release log-safety gate and its fixture harness both pass and cover the new OCR/translation paths, with every rule proven load-bearing. On top of that: the recorded test gates are green (205 tests in the TG10 gate bundle across 14 suites; 307 in the T033 gate bundle across 18 suites; 13 security-evidence tests; 174 tests across 11 suites in two scoped runs made after the master merge), and every cited suite was confirmed to have run a non-zero count. The STRIDE security design review and the security test both returned SECURITY-GO; all ten mandatory amendments are discharged with named tests.
+- All 32 requirements trace to an implementation witness and a test/evidence witness, or to an explicitly recorded later-phase scope (Phase 2/3) — table below; full detail with file anchors in specs/review-implementation.md section 3.
+- The production delta is exactly the designed set: 14 changed production Swift files (five new dialogue units plus IntentTranscriptPreparation plus nine touched files) plus the catalog JSON resource and the strings catalog — 16 app-source production files, no file outside the set, no debug leftovers.
+- Seven wave reviews stand GO at 0.90 with zero blockers (W4 from a base NO_GO with one blocker fixed pre-commit, red to green on a real-seam test); the implementation review stands GO at 0.90 with zero blockers; the security design review and the security test stand SECURITY-GO at 0.90 with zero blockers, all five focus areas PASS with source anchors.
+- The release log-safety gate is green and falsification-proven (24 cases over 12 rules; 36 falsification cases; every rule load-bearing); new network egress is zero across the 14 changed production files; human gates are respected (no code path auto-resolves a gate).
+- The one full-suite run at W6 (per the unit-gate policy) is baseline-classified: 6638/6620/8/10 at HEAD against a directly measured base of 6403/6357/36/10, strictly redder at base in every paired comparison; the scoped comparison is 4 failures at HEAD against 13 at base.
 
-**What is NOT verified — the things to weigh before deciding.**
-1. **No device validation was performed.** All sixteen device checks (DV-1 to DV-16) are NOT RUN and every measurement in the record is a simulator measurement. The feature has not been run on a phone. Camera behaviour in real light, battery use and heat over sustained use, real airplane mode, the device speaker, and the real encrypted container are unmeasured. The three value decisions that depend on those measurements (OD1, OD2, OD5) are unmeasured — not "probably fine". Nothing in this pack is device evidence.
-2. **No real cloud call was ever made in testing.** Every network assertion was made against a recorded request with a stub; live provider behaviour is unverified.
+What is not verified — stated plainly:
 
-The third item this section carried when the recommendation was made — the consent/disclosure copy review owed by the owner under Open Decision 3 — was discharged at sign-off on 2026-09-17: see Gate 2 below.
+- No device run exists. DV-1..DV-5 are BLOCKED and step zero (the Phase 0 PR #156 device smoke) is OUTSTANDING; no observation was recorded — none may be — from a simulator or unit run. The protocol and the empty record are in specs/MTC-device-validation-protocol.md; the owner fills the record on Anzaan. FR-MTC-020 makes this record part of the completion gate.
+- The owner's copy review of the 17 dialogue keys is outstanding (owner action OA-5).
+- OD-M1..OD-M4 (the designed defaults: two probes; curated catalog; Phase 1 first; music probe only) await the owner's re-confirmation at this gate.
+- A ledger of note-level carried items (no blockers) — findings F-1..F-10, wave-review obligations, the FR-MTC-019 ask-lines boundary, the R1 residual log surfaces, and the M-2 scope note — is enumerated under Open items.
 
-Recommendation: see the Decision section.
+Reviewer recommendation: GO at confidence 0.90, conditional on the owner acknowledging the carried items. The authoritative T2 sign-off is the owner's, given through the HIL gate this pack feeds (see Decision). Merging and completing are separable — see Owner decision point 3.
 
 ## Release gates verified
 
-### Gate 1 — the recorded constitution exception (Open Decision 13): PRESENT
+**Gate 1 — Release log-safety gate (NFR-MTC-004, NFR-MTC-012).** Re-run fresh on 2026-10-11 from the worktree: exit 0, "24 case(s) over 12 rule(s)"; the fixtures falsification mode: exit 0, "36 case(s) over 12 rule(s)", "every rule is load-bearing". The gate is wired into ios/build.sh ahead of every test scope; feature roots extended 17 to 21; fixtures 38 to 55. Outputs retained at /tmp/mtc-st-gate.log and /tmp/mtc-st-falsify.log; citation: specs/security-test.md, "Independent re-runs", items 2-3.
 
-Recorded in the project constitution on this branch as Open Decision 13, "Cloud text-translation exception (live camera translation)", RECORDED AS AN EXCEPTION WITH CONSENT AMENDMENT (2026-09-16), owner Anjan Poudel. The operative wording:
+**Gate 2 — No new network egress (NFR-MTC-003).** Fresh diff scan on 2026-10-11: 0 matches for the network-symbol set (URLSession, URLRequest, http/https URL literals, NWConnection, Network.framework, socket, curl) across the 14 changed production files; independently, the E6 evidence shows 20 spy transports empty across five legs. Retained: /tmp/mtc-st-prod.txt, /tmp/mtc-st-diffnames.txt.
 
-- Scope: "OCR'd text strings ONLY (never images, never photos) may be sent to Gemini for translation into the user's active language, when the on-device dictionary cannot resolve them AND the user has consented. … No health data, contacts, profile content, or camera imagery."
-- Consent and disclosure: "explicit user consent at first cloud use with plain-language disclosure; a visible indicator while the cloud tier is active; revocable at any time — revoking degrades the feature to offline mode (dictionary + cached translations), never blocks it. Info.plist NSCameraUsageDescription must disclose the live-translation use and the text-to-cloud fallback."
+**Gate 3 — Human gates respected (NFR-001; T1/T2).** T1 story approval: owner, 2026-10-10. T2: this pack — the authoritative sign-off is the HIL gate, pending until the owner decides. NFR-001 (only the operator resolves a gate — framework rule): verified — the diff carries no code path that auto-resolves a human gate, and a direct-transition search in the feature's hook region is empty.
 
-The amendment is also cross-referenced from the constitution's Architecture Constraint 1 — "the live camera translation tier (Open Decision 13) is a consent-gated exception covering OCR'd text translation only" — and from the Privacy standard: "No personal data … transmitted to cloud for AI processing, except under the recorded exceptions (Open Decision 12, voice transcription; Open Decision 13, OCR'd text translation), each of which requires explicit user consent and plain-language disclosure. The shipped default engine stack is the cloud engine, so the consent/disclosure obligation attaches to the default path, not only to an opt-in."
+**Gate 4 — Test discipline.** Per-unit scoped gates green (W1 270/270; W2 65/65; W3 99/99; W4 204/204 with the pre-fix red retained; W5 157/157; T-139 114/114; T-140 117/117; T-142 structural validation 0 failures). One full suite per the unit-gate policy: W6 at 5860878 — 6638/6620/8/10 against the directly measured base 6403/6357/36/10 (strictly redder at base in every paired comparison; all 8 HEAD failures baseline-classified; the measured base inventory supersedes the older rough estimate). Scoped comparison: HEAD 173/169/4 against base 173/160/13.
 
-The two confirmations requested of this review:
+**Gate 5 — Security gates.** Security design review: SECURITY-GO (mitigations M-1..M-5 pinned; verifications V-1..V-4 recorded; obligations E1..E8; residuals R1..R5 accepted). Security test of record: SECURITY-GO, 0.90, zero blockers; five focus areas PASS — emergency precedence mid-frame; probe/answer text never reaching logs; cancel, barge-in and the 45 s timeout always recovering; the degraded-brain fallback honoured; the candidate list unable to skip the routing ladder — each with source anchors. Index integrity: structural validator exit 0 (E 8/8, V 4/4, M 5/5, R 5/5; 43/43 tokens; FAILURES 0).
 
-- **Does it cover text only?** Yes. The scope clause says "OCR'd text strings ONLY (never images, never photos)", and the same bullet excludes health data, contacts, profile content and camera imagery.
-- **Do the consent/disclosure obligations attach to the default path rather than an opt-in?** Yes. The Privacy standard records that the obligation "attaches to the default path, not only to an opt-in"; and the feature constitution (rule 3) records that "the default configuration must not reach tier 2 without recorded consent". The cloud text tier is part of the feature's default ladder (not behind an experimental setting), which is exactly why the consent gate and the disclosure obligations are what make the shipped behaviour conformant.
+## Change summary
 
-Where it lives and when it lands: the amendment is committed on this branch in its own commits (separate from the feature code) and is part of the same change that would ship the feature; the branch is pushed to origin. It is not yet on master, because the branch has not been integrated. The cloud tier must not ship without the amendment, and it cannot: the amendment and the code travel in the same merge.
+**Shape of the change.** One deep, in-memory dialogue frame on the voice path:
 
-### Gate 2 — consent/disclosure copy and camera purpose string
+- Frame lifecycle — DialogueManager.swift / DialogueFrame: arm on a degenerate turn or a did-you-mean trigger; note attempts; resolve once through a single idempotent funnel (terminal triple: no half-open window, late notifications are no-ops, double resolves are no-ops). One frame at a time; main-queue confined; nothing persisted.
+- Probe kinds — .slotFill (e.g. a bhajan request without a kind) and .candidateChoice (did-you-mean for music near-matches; the hypothesis is only offered alongside real matches, never fabricated; an empty list yields no frame — the honest dead-end is kept).
+- Answer capture — four forms: option name, index word, repetition, free-form correction (CaptureForm). The transcript is read raw once for the length bound; every decision is made from the sanitised value.
+- Deterministic merge — model-free and pure: slotFill fills the slot; candidateChoice resolves to the arrived command; the design's S6 gates are enforced; execution proceeds through the ordinary pipeline (the interpreter is not consulted; FR-MTC-017 causality pinned by an A/B row).
+- Pre-ladder interception — in CommandRouter.swift between the confirmation hook and the deterministic safety net (block :1021-:1129); consumed arms return before the interpreter and before the transcript-cache write. Emergency precedence sits above it: the emergency dispatch runs first and the frame clear (:853) is a post-dispatch side effect, not a dependency (E1 pins dispatch with the clear forced to a no-op).
+- Exits — cancel tokens; escape phrases; barge-in (B1..B7, including a negation counterexample that must not barge) falls through to the new command exactly once; a silent 45 s timeout drops the frame with no spoken line, and the next utterance is processed fresh (drop-and-re-arm; expiry is half-open; the window value is injected at construction — one source, no literal held in the manager).
+- Probe budget — two probes maximum, then defaults; the implemented comparison attempts <= maxProbes yields exactly two probes and is an accepted erratum against the design snippet's stricter form — it must not be reverted. The budget and the 45 s window are injected/configurable values with single sources, not scattered constants.
+- Curated catalog — DialogueOptionCatalog.json (v1; on-device resource; includes the bhajan group); template probes are composed from catalog keys only; 17 dialogue keys in the strings catalog, both languages (the catalog grew by exactly those keys).
+- Log safety — LogSanitiser.swift extends its closed vocabulary from 78 to 84 keys (intake, probe_kind, attempt, option_count, capture_form, merge_source; reason reused); out-of-vocabulary values are redacted and unlisted keys are dropped fail-closed.
+- Tests — 14 new suites plus 7 edited test files, including the dialogue frame, answer path, candidate builder, catalog, transcript preparation, trap matrix, hostile corpus, and the acceptance sweep; accepted red histories retained in the wave records.
 
-Camera purpose string, current, from ios/ElderlyAssistant/Info.plist:
+**Execution.** 19 planned units (T-125..T-143) ran in seven implementation waves, W1..W7; every wave closed with a paired implementation review (all GO 0.90, zero blockers; W4 from a base NO_GO with its blocker fixed pre-commit). Commit chain, 7-char refs: requirements 437d4dc (T1 owner-approved); design L1 59b66d9; design L2 ab43526; L2 review GO 1ed8c21; security design review SECURITY-GO 60850db; plan of 19 tasks b71ca2a; waves 76b28b9 (W1), 3b44c0c (W2), cf416ac (W3), cc065b0 (W4), ac89744 (W5), 5860878 (W6), 134d77e (W7); records a55e22c (implementation review) and 433ad07 (security test).
 
-"The camera is used to verify medication intake, to photograph appliances, remotes, or screens when you ask for help using them, and to take an ordinary photo when you ask for one — that photo is then saved to your photo library. The camera is also used to read printed text aloud in your language with live translation. Appliance photos are sent to the assistant's cloud service so it can guide you. For live translation, only the text seen by the camera is sent — and only when the phone's own dictionary cannot translate it. Photos of that text are never sent."
+**Diff census at the content revision.** 168 changed files, +26,876/-3,888: 16 app-source production files (the 14 Swift files above plus the catalog JSON and the strings catalog); 21 test-tree files (14 new suites, 7 edited); 99 spec files; 10 run-state files (the framework's per-feature worktree convention); 1 docs file; 21 other iOS files (the regenerated project file, the project.yml resource entry, the release log-safety script and its added fixture trees).
 
-- **(a) Does it disclose that the camera reads printed text for live translation?** Yes: "The camera is also used to read printed text aloud in your language with live translation."
-- **(b) Does it disclose that only text — never the photo — is sent, and only when the on-device dictionary cannot translate?** Yes: "For live translation, only the text seen by the camera is sent — and only when the phone's own dictionary cannot translate it. Photos of that text are never sent."
-- Wording nuance the owner considered at the copy review and accepted: the translation sentence says the text "is sent" without repeating "to the assistant's cloud service"; the cloud destination is named in the preceding sentence (about appliance photos). That is a wording judgement, not a missing fact.
+**Two documented baseline test repairs (both bounded, both explained in-file).** The Spotify catalog pin 1341 to 1361, with the arithmetic and provenance in its comment (red at base, green at HEAD); the second allow-list pin widened by exactly the six dialogue keys (a feature-caused regression caught by the full sweep, fixed in-unit; the cross-check still computes the declared union, so it is not a rubber stamp).
 
-Two planning comments in the repository still describe this string as not yet updated (a comment in the workflow definition and a parenthetical in the feature constitution's Standards section). Both predate the update; the shipped string is the one quoted above, and the copy test asserts the disclosure is present in the real file.
-
-The consent prompt shown at first cloud need exists in the string catalogue, Nepali first. Its central disclosure line, English: "When a word isn't in the phone's own dictionary, the text on this screen — only the text, never the picture — is sent to the assistant's cloud service to be translated. Nothing is sent until you agree, and you can stop it any time." Prompt title: "Use the internet to translate?"; accept: "Yes, use the internet"; decline: "No, keep it on this phone"; stop control: "Stop using the internet for translation".
-
-The disclosure version stamp recorded on a consent grant read livetranslate.disclosure.draft.16sep2026.r1 — with "draft" in it — while the review was open. At the owner's review on 2026-09-17 it became livetranslate.disclosure.16sep2026.r1. The recorded rule (owner action OA-3): if the copy changes when it is reviewed, this stamp must be bumped so previously granted consents do not carry over to the new wording. The wording did not change, so no wording-driven carry-over arises; the bump was applied so that the stamp no longer reads "draft", and it is the mechanism that would have retired a stale grant had one existed. None did: the feature is absent from master (verified — master holds no file under Services/LiveTranslate/) and no build of it has been distributed, so there was no field consent to invalidate.
-
-**Consent/disclosure copy review (Open Decision 3): COMPLETE — owner review, 2026-09-17; copy accepted as written.** The two catalogue keys that were held DRAFT, exactly as they stand and as accepted:
-
-| Catalogue key | English | Nepali | Status |
-|---|---|---|---|
-| livetranslate.snapshot.capture | "Hold this picture" | "यो दृश्य रोक्नुहोस्" | ACCEPTED at sign-off 2026-09-17. Catalogue comment still reads "DRAFT: awaiting the owner's OD3 copy review at final sign-off" — see the staleness note below. |
-| livetranslate.snapshot.live | "Go live again" | "फेरि चलाउनुहोस्" | ACCEPTED at sign-off 2026-09-17. Catalogue comment still reads "DRAFT: awaiting the owner's OD3 copy review at final sign-off" — see the staleness note below. |
-
-**One residual left by that acceptance, recorded rather than tidied.** The DRAFT wording lives in the two catalogue comments in ios/ElderlyAssistant/Resources/Localizable.xcstrings (and in a comment in the copy test that pins those keys). Those comments now describe a review that is complete. They are developer-facing comments, not user-visible strings — the shipped English and Nepali values are the ones in the table above and are unchanged. They were left untouched deliberately: the comments are the pin that made the copy debt visible, and editing a pinned artifact in the same change that records the sign-off would blur the two. Clearing them is a follow-up, not a condition of this sign-off.
-
-These are the freeze-frame control's two labels (one control, two states). They are pinned by the copy test so that a third unreviewed string cannot be added silently. All 26 feature strings have both English and Nepali values and pass the copy tests, which assert properties (present, localised, truthful) rather than final wording.
-
-### Gate 3 — release log-safety gate: PASSES, and covers the new OCR/translation paths
-
-Re-run in this worktree for this review; both commands exited 0. The release gate was run once more after the sign-off stamp edit (the only source change made at sign-off) and passed again, exit 0, with the same 24 fixtures over 12 rules.
-
-- The release gate script (ios/tools/check-release-log-safety.sh): passes. It runs the rule engine over the whole source tree — including the feature's new roots — and then runs the gate's own fixture suite. Reported output: no transcript content or raw error object can be printed in a non-Debug configuration, and the live-camera-translation sources carry no console write or content-bearing event field.
-- The fixture harness (ios/tools/check-release-log-safety-fixtures.py) with its falsification flag: passes. 36 cases over 12 rules; every rule proven load-bearing (disabling a rule makes its positive fixture pass — i.e. the rule was catching something real). The build-path run is 24 fixtures over 12 rules; every rule has a positive and a negative fixture, and a missing fixture fails the gate rather than skipping it.
-
-Coverage of the new paths: four feature rule families were added — any console write in the feature's sources (Release builds only), any print that renders recognised or translated text (every build configuration), any event metadata key outside the sanitiser's allow-list, and any text value interpolated into an event field. The gate is wired into the build script's test path ahead of every test scope (unit, UI and full), so no test gate can run with a re-introduced raw content print; it is build-blocking, not a report.
-
-Stated limits, recorded by the gate itself and repeated in the evidence index: it is a source-level check that cannot follow every indirection (a helper's return value, a wrapper function, a metadata variable), and the falsification run is a recorded manual run rather than a per-build step. The runtime allow-list tests are the primary safeguard; the gate is the second line.
-
-## Change summary (what changed)
-
-- New feature sources: the Services/LiveTranslate/ service area — camera session with no photo output, text detector, region stabiliser, curated-dictionary extension, encrypted translation cache, consent gate and prompt, text-only cloud tier, overlay placement and views, in-session commands, config.
-- App layer: the feature's screen and the Home tile entry.
-- Plugin registration: one registration in the plugin registry (AppCoordinator.swift), built lazily — registering costs nothing until the feature is opened.
-- Shared seams extended additively: the log-sanitiser metadata allow-list (45 keys = 27 shipped + 18 new, with the set-equality verified); the localisation catalogue (26 new strings, Nepali first); the camera purpose string; a detect-only accessor on the transcript sanitiser so the marker list has one source; the curated dictionary (~120 entries).
-- Owner-directed additions beyond the 30 planned tasks: T-032 (the translation cache and consent record now sit under a real cipher — AES-GCM, Keychain-held key, versioned envelope; key loss recovers as an empty cache) and T-033 (snapshot / freeze-frame mode, in-memory only). T-031 (a Devanagari recogniser) was dropped when the platform probe found the on-device OCR has no Devanagari capability on the target runtime; v1 is English source only, re-locked with owner sign-off.
+**User-visible behaviour (what the user hears when the feature runs and when it fails).** A short clarifying probe is spoken in the user's language when the assistant needs one clarification; the user answers by name or index word; the merged request executes and plays through the ordinary path; a timeout is silent and the next utterance is treated fresh; cancel, escape and barge-in all fall back to normal behaviour; emergency handling always wins; nothing is persisted between sessions. Every failure path recovers through the one idempotent resolve funnel (the trap matrix pins cancel, escape, barge-in, timeout, expiry, Talk-mid-window, watchdog and session exit).
 
 ## Requirements traceability
 
-23 functional requirements (FR-LCT-001…023) and 13 non-functional (NFR-LCT-001…013), in a hash-locked snapshot (36/36 hashes recomputed at the security-test gate; the lock records the one owner-signed amendment — FR-LCT-003 narrowed to English source only). Two supporting documents carry the detail: specs/LCT-security-evidence-index.md maps every binding security amendment (AM-1…AM-10) to the named tests that discharge it, and specs/implement-notes.md records the per-group gate counts.
+Summarized from specs/review-implementation.md section 3 (32 requirements: FR-MTC-001..020, NFR-MTC-001..012). PHASE marks recorded later-phase scope.
 
-| Area | Requirements | Implementation | Test evidence (all suites non-zero, all passed) |
-|---|---|---|---|
-| Camera capture and disclosure | FR-LCT-001, FR-LCT-002 | No photo output; permission surfaces; purpose string | camera-capture 6; copy 10; snapshot 25 |
-| Detection and stabilisation | FR-LCT-003 (English source, as amended), FR-LCT-004…006 | Text detector; stabiliser (hysteresis, declutter, region cap) | text detector 17; stabiliser 18; OCR fixture page 1 (8 regions from an 8-line page, 6/6 words read) |
-| Dictionary and cache | FR-LCT-007, FR-LCT-019, FR-LCT-020; NFR-LCT-008 | Curated dictionary; persistent encrypted shared cache (T-032) | cache 21; cipher storage 16 (plus a recorded falsification run of the byte-level ciphertext assertion) |
-| Cloud tier and consent | FR-LCT-009…014, FR-LCT-023; NFR-LCT-005/006/007/009 | Fail-closed consent gate; text-only request; activity indicator; sanitiser | consent gate 29; consent prompt and revocation 22; tier 25; client translate 15; allow-list 24; scene sanitiser 17; detect-only seam 11; events 17; source hygiene 6; boundary 7; evidence index 5; pipeline 18 |
-| Overlay and accessibility | FR-LCT-015…018; NFR-LCT-003 | Smart-mix overlay; callouts; always-show-original toggle; honest states | overlay placement 28; overlay view 14; toggle 11; app-layer hygiene 11 |
-| Voice and session | FR-LCT-021, FR-LCT-022 | Command parser; spoken output; plugin entry and lifecycle | parser 49; command capture 26; speech 33–34; plugin 10; session model 17 |
-| Cost governance | FR-LCT-013; NFR-LCT-013 | Shipped per-day governor shared with voice (OD7 directive); fails closed, latches for the session | tier suite 25 |
-| Release and compliance | NFR-LCT-013 | Log-safety gate and fixtures; requirements lock | both gates re-run green today; 36/36 lock hashes |
-| Shared-behaviour integrity | NFR-LCT-012 | Additive edits only to shared seams | appliance-helper area 137 tests, unedited sources |
+| Req | Topic | Witness summary |
+|---|---|---|
+| FR-MTC-001 | Frame lifecycle | arm / noteAttempt / resolve in DialogueManager.swift; one-deep frame value; frame tests 17/17; trap matrix 8/8 (every outcome clears; no half-open window) |
+| FR-MTC-002 | Degenerate detection | keyword-rule provenance + isDegenerate; probe fired from the degenerate intake; provenance tests 23/23; trigger tests 13/13; acceptance S1 |
+| FR-MTC-003 | Slot-fill probe | slotFill frame factory; composer branch; catalog group resolution; composition rows; router probe/default rows; acceptance S1 |
+| FR-MTC-004 | Candidate choice (did-you-mean) | builder near-matches with hypothesis-last-only-alongside; builder tests 29/29; empty list yields no frame (honest dead-end kept) |
+| FR-MTC-005 | Capture forms | classify vectors (index word / option name / repetition / free text) + CaptureForm payload; answer-path tests 36/36; hostile corpus E2 |
+| FR-MTC-006 | Merge and execution | merge (S6 gates) + executeDialogueAnswer dispatching the arrived command; merge and wiring rows; acceptance S1 (canonical query executed, interpreter 0) |
+| FR-MTC-007 | Budget then defaults | maxProbes comparison; default execution; exhausted close; router budget row (attempts=2 then re-probe); corpus injection row; M-5 exhaustion row |
+| FR-MTC-008 | Escape | escape-phrase table leading to escaped + catalog acknowledgement; answer-path escape vector; router and trap rows |
+| FR-MTC-009 | Interception placement | the block between the confirmation hook and the safety net; router placement row (content anchors); cache A/B causality row |
+| FR-MTC-010 | Cancel | cancel tokens leading to cancelled + acknowledgement; answer-path cancel vectors; router and trap rows |
+| FR-MTC-011 | Emergency precedence | emergency path above the frame; post-dispatch clear; E1 pair (dispatch with clear forced to a no-op; clears ordering) |
+| FR-MTC-012 | Barge-in | isBargeIn B1..B7; barge-in falls through once; B rows incl. the negation counterexample; router and trap rows |
+| FR-MTC-013 | Timeout drop and re-arm | timer arms only from the awaited state; silent callback; state-machine tests 24/24; trap timeout row (production callback + 1 s clock leg); half-open boundary |
+| FR-MTC-014 | Awaited-answer state | state enum and edges; opener; state-machine tests 24/24; wiring scenarios 4/5; UI mappings are inert placeholders (F-4) |
+| FR-MTC-015 | Curated catalog | loader + JSON resource + project entry; catalog tests 10/10 incl. the ships-in-bundle row |
+| FR-MTC-016 | Template probes | composer, catalog keys only; composer rows; localization coverage 10/10 (verbatim both languages) |
+| FR-MTC-017 | Cache bypass | consumed arms return before the interpreter and the cache write; cache-bypass suite 4/4 (seeded-entry A/B); router causality row |
+| FR-MTC-018 | PHASE — Phase 2 (v17) | designed, not shipped in Phase 1; feature vocabulary absent from all three prompt files; digests byte-identical; recorded; owner decision OD-M3 |
+| FR-MTC-019 | PHASE — Phase 3 rollover | Phase-1 guard shipped (reminder/calendar/medication turns open no frame; S2 A/B equality); the literal missing-slot ask-lines are untested everywhere — recorded boundary (F-5); owner decision OD-M4 |
+| FR-MTC-020 | Device-validation completion gate | protocol + record with named dependencies; DV-1..DV-5 BLOCKED; step zero OUTSTANDING (protocol section 7.3) — open by design until the owner device run |
+| NFR-MTC-001 | Turn envelope | the frame turn is model-free; the 22/45/60 s timers unchanged; timeout-injection tests (24/24); device latency rides DV-1 |
+| NFR-MTC-002 | Prompt budget | Phase 1 adds zero prompt delta; S3: 2,506 under the 3,000 budget; both prompt digests re-derived |
+| NFR-MTC-003 | No new egress | new files import Foundation only; no new call sites; E6 (20 spy transports) + the fresh 0-symbol diff scan |
+| NFR-MTC-004 | Log safety | closed vocabularies; six new keys; fail-closed value bounding; four gate roots; E4/E5: gate exit 0 (24 cases / 12 rules); 8-leg runtime capture; sanitiser suite 34/34 |
+| NFR-MTC-005 | Degraded brain | deterministic classify/merge before any model call; E7 determinism half; interpreter-0 rows; DV-4 device leg |
+| NFR-MTC-006 | Localization | 17 dialogue keys ne/en; per-locale composition; localization coverage 10/10 (verbatim both languages); composer locale rows |
+| NFR-MTC-007 | Sustained stability | one bounded frame; no new long-lived buffers; trap suite rows; device leg rides DV-5 |
+| NFR-MTC-008 | Answer-path security | raw-once bound; decisions from the sanitised value; production seam non-nil; hostile corpus E2/E8; transcript-preparation tests 8/8; M-3 pin |
+| NFR-MTC-009 | Voice-only accessibility | all probes spoken; candidates pickable by index word; no visual dependency; composer, builder and answer-path rows; UI inert (F-4) |
+| NFR-MTC-010 | Trap resistance | terminal triple holds in every trap row; trap matrix 8/8 (no half-open window; late notifications no-op; double resolve no-op) |
+| NFR-MTC-011 | Prompt-prefix stability | no prompt change in Phase 1 (frame clause deferred); S3 digests and absence pins; Phase 2 pins untouched (2,506 baseline) |
+| NFR-MTC-012 | Compliance and release gates | release log gate covers the four new files; prompt mirror; no release-capable debug prints in new code; T-138 gate + fixtures (roots 17 to 21, fixtures 38 to 55) |
 
-Recorded runs, all re-read from the result bundles for this review: TG10 gate 205/205 across 14 suites; T033 gate 307/307 across 18 suites; security-evidence 13/13 across 3 suites; post-merge scoped 151 + 23 = 174 across 11 suites.
+Phase note: FR-MTC-018 (Phase 2) and FR-MTC-019 (Phase 3) are later-phase requirements by design — Phase 1 ships the guards and records the boundaries; FR-MTC-020 is the completion gate, open until the device run (see Device validation status). Row-level file:line anchors are in specs/review-implementation.md section 3.
 
 ## Security posture
 
-The security design review (STRIDE, all six categories, checked against the actual code) returned SECURITY-GO with ten mandatory amendments (AM-1…AM-10). Its strongest properties are structural rather than procedural:
+- **Security design review (60850db): SECURITY-GO.** Mitigations M-1..M-5 pinned (pipeline guard; all four arming sites; the production sanitiser seam; the six keys with reason untouched; candidate-index bounds end to end); verifications V-1..V-4 recorded; obligations E1..E8; accepted residuals R1..R5.
+- **Security test of record (433ad07): SECURITY-GO, confidence 0.90, zero blockers.** Five focus areas PASS with source anchors: F1 emergency precedence mid-frame (the check runs on the raw transcript before every content handler and does not depend on the frame clear); F2 probe/answer text never reaches logs (six new closed keys; out-of-vocabulary redacted; unlisted keys dropped fail-closed); F3 cancel, barge-in and the 45 s timeout always recover through one idempotent resolve funnel; F4 the degraded path is model-free and pure; F5 the candidate list is bounded, total, and cannot skip the routing ladder or any existing confirmation tier.
+- **Evidence index** (specs/MTC-security-evidence-index.md), sha256 d03d8dc4dc001807018145b6b58a1c99e26872bd532891b1cf84997c4c430617; structural validator exit 0 (E 8/8, V 4/4, M 5/5, R 5/5; 43/43 tokens; FAILURES 0). The digest was re-checked by the security test — the file of record is the file reviewed.
+- **Honest bounds carried.** Residuals R1..R5 (legacy debug prints on non-release surfaces; static-gate blind spots; unconstrained values for allow-listed string keys; transcript policy unchanged; guard ordering shipped) and coverage boundaries 1..7 (including the sink-line-scoped marker scan, the FR-MTC-019 ask-lines boundary, the measured-base inventory, and the open device validation). No boundary conceals a failure; none makes a verdict-weight claim false or unproven.
 
-- Image egress is impossible rather than forbidden: the camera session configures no photo output, nothing writes a frame anywhere, and the one translation request builder has no parameter an image could travel in. Tests decode every outgoing request — including the retry — with a positive control proving the check does find a real image part where one legitimately travels (the shipped appliance-photo path).
-- The translation request has no action surface: one text part, no tools, only the requested ids with string values accepted; nothing in the feature acts on model output.
-- The consent gate fails closed on every non-granted state; a withdrawal denies in memory first, cancels work in flight, and cannot be defeated by the retry (the one genuine evasion window found in design — a cancelled request looking transient — was closed and is pinned by test).
-- The cloud-activity indicator has one input, is released when the last request ends, and cannot be suppressed while a request is in flight.
-- The cache and the consent record are encrypted at rest under a real cipher (T-032), asserted at the byte level rather than by round-trip alone.
+## Device validation status
 
-The security test review re-derived the evidence and returned SECURITY-GO: all ten amendments discharged with named tests; per-category passes for the consent gate, text-only egress, log safety, offline-degradation honesty, cost governor, cipher at rest, snapshot inclusion, and the requirements lock; the merge-touched security surfaces re-run after the merge with 174 tests and zero failures.
-
-### Not verified — the eight residuals carried forward from the security test report
-
-1. Device validation was not performed: DV-1 through DV-16 are NOT RUN, OD1, OD2 and OD5 are unmeasured, and owner actions OA-1 through OA-5 are open, as recorded in the device-validation protocol and results files. All evidence in this review is simulator-only; camera permission flows, Keychain and data-protection behaviour on hardware, and provider behaviour on device are not verified.
-2. Real provider calls were not exercised: all egress evidence is at the client boundary with stubs and decoders. Live endpoint behaviour, provider-side handling, and real upstream error text are not verified; the no-upstream-derived-error-code invariant is verified structurally, not against live traffic.
-3. The post-merge re-runs are scoped, not full-suite: the egress boundary, snapshot, tier, plugin and capture suites were not re-executed after the merge; "that suite passes on the post-merge tree" is an inference from unchanged inputs, not a recorded re-run. (The two bundles were also cited by no spec note until the security-test review located them.)
-4. The master unit baseline remains red (about 21 pre-existing failures, unrelated to this feature). The scoped suites are the mitigation; no full-suite green is claimed.
-5. One load-sensitive determinism test was observed flaky during the snapshot task; it is attributed in the notes, not eliminated.
-6. The release log-safety gate cannot see through indirection; that limit is stated in the design, and the typed emitters plus the source-hygiene suite are its complement, not a replacement.
-7. Two copy keys were held DRAFT pending the consent and disclosure copy review at final sign-off (owner), together with Open Decision 3. That review was completed at sign-off on 2026-09-17 with the copy accepted as written; the stamp was bumped and the catalogue comments that still say DRAFT are noted as stale in Gate 2.
-8. Residual SR-1 (the provider's block reason emitted from one pre-existing shared site — pinned to that site, never on a feature event) and residuals T-2 (the consent record's on-device integrity rests on platform file protection, not an authentication tag) and SD-5 (with the cloud voice engine active, one screen can have two cloud paths but only the translation indicator; input to the joint Open Decision 12 / 13 review) stand as ruled in the security design review.
+- **State at this sign-off: no device run has occurred.** No session block exists; every DV item is BLOCKED with its named dependency, and step zero — the Phase 0 PR #156 device smoke (PR #156 merged 437631e; one real conversation turn with the explicit 4B pick active: no jetsam kill, then a fresh JetsamEvent pull) — is OUTSTANDING. Nothing in the record is a device observation; no row was filled from a simulator or unit-test run. Owner actions OA-1..OA-5 are open.
+- **The five items, all BLOCKED** on step zero plus the owner's device and the Release build (protocol section 7.3): DV-1 probe, answer, correct playback (the bhajan example); DV-2 the 45 s timeout drops the frame silently and re-arms; DV-3 barge-in mid-probe (call placement); DV-4 a mid-dialogue degraded-brain turn carried by the deterministic merge (the degraded state must be observed in force — never passed on a healthy-brain run); DV-5 a sustained scripted session (at least 10 consecutive dialogue turns including probe-answer pairs and one degraded-brain turn; Release configuration) with a post-session JetsamEvent pull compared against the step-zero pull.
+- **Completion-gate relationship (FR-MTC-020; protocol section 8).** Only PASS closes an item; FAIL and BLOCKED both hold the gate; a failed step zero stops the session without partial results; a failed item is fixed, re-run on the fixed build, and recorded. The workflow's own final-gate statement: "DV-* device validation on Anzaan is part of the completion gate."
+- **Merging and completing are separable.** Merging the branch puts the code on master; the DV record completes the feature. The completion claim stays blocked until the record shows PASS on all five items — the reviewer's recommendation (Owner decision point 3) is to approve the merge with the DV record remaining the outstanding completion gate.
 
 ## Open items
 
-Owner actions (OA-3 closed at sign-off; the rest open; owner: Anjan Poudel):
+Numbered ledger of carried items. None of these blocks the engineering or security verdicts; each is owner-facing, a recorded boundary, a next-touch fixup, or bookkeeping.
 
-| # | Action | Why it is the owner's | State |
-|---|---|---|---|
-| OA-1 | OD1 — fix or confirm the OCR cadence and thermal values | needs device checks DV-2 / DV-10 / DV-15 | Open — unmeasured |
-| OA-2 | OD2 — confirm the always-show-original default and the in-place rule | needs the DV-3 device demo | Open — unmeasured |
-| OA-3 | OD3 — review the consent/disclosure copy and the purpose-string wording; if the copy changes, bump the disclosure version stamp | a copy and disclosure judgement, with a reader in front of the prompt (DV-6) | CLOSED 2026-09-17 — owner accepted the copy as written; stamp bumped to livetranslate.disclosure.16sep2026.r1 |
-| OA-4 | OD5 — confirm the declutter thresholds | needs DV-13 / DV-16 on real dense pages | Open — unmeasured |
-| OA-5 | Run the device validation itself (DV-1…DV-16), then the constitution's pre-release device console check on a Release build before submission | only the owner has the hardware | Open |
-
-Draft and known-limitation items carried forward:
-
-- The two catalogue comments that still say DRAFT (Gate 2) — the copy debt they pinned is discharged, but the comments are the stale half of the pin and were left for a follow-up rather than edited in the change that records the sign-off.
-- The log-safety gate's two stated limits: indirection, and falsification being a manual recorded run (a rule could regress to firing only in company between runs; the build path still catches a rule that stops firing entirely).
-- The aborted result bundle TG10-ocr.xcresult holds zero tests and must never be cited as evidence; the real OCR evidence is inside TG10-gate.xcresult.
-- Evidence retention: one earlier gate bundle can no longer be read by the result-bundle tool, and two groups retained no bundle, so three group counts rest on the notes rather than on recorded bundles.
-- Closed since the review-implementation report was written: specs/implement-notes.md section 1 previously mapped the task groups to the wrong task IDs from TG-02 onward (for example it gave TG-03 as T-011…T-013 rather than T-009/T-010). The table was corrected against the task tree, the corrected version is what is committed at HEAD, and the plan and task files were always correct. No evidence ever depended on it. (The review-implementation report flagged this correctly; the copy of the finding carried into an earlier draft of this section was stale.)
-- The snapshot-view coverage figure is a test-selection artefact, declared rather than dressed up.
-- Closed since the notes were written: the design document's cache-encryption invariant row now names the cipher layer (corrected at 7f8d248).
-
-Load-sensitive determinism test: one pipeline determinism test added by this feature failed once under heavy machine load and passed on every other run, including the retained final gates. The difference was exactly when a cloud answer was published relative to a fixed sleep — a wall-clock race under load, in synchronisation this feature added. It is reported rather than hidden; the fix belongs to the task that owns that file.
-
-Residual security risks: SR-1, T-2 and SD-5 (detail in Security posture). SR-1's recommended hardening (validating the provider's block reason against a closed token set) is explicitly out of this feature's scope.
+1. **Device validation — the outstanding completion gate.** DV-1..DV-5 BLOCKED; step zero OUTSTANDING; OA-1..OA-5 open; the owner fills the record on Anzaan at run time. This is the only item that keeps the feature from being called complete. Details above.
+2. **OD-M1..OD-M4 re-confirmation at this gate.** The designed defaults are implemented and tested: a two-probe budget; a curated on-device catalog; Phase 1 first; the music probe only. The owner confirms or changes.
+3. **Owner copy review of the 17 dialogue keys (OA-5).** The readings are draft-quality by design; no agent changes owner-facing copy. Owner-facing.
+4. **FR-MTC-019 ask-lines boundary.** The literal missing-slot ask-lines of the Phase-1 rollover guard are tested nowhere; the reminder/calendar handlers are source-untouched and Phase 1 scopes them as no-change. Recorded (W6 F-3; index boundary 3). Carried, not blocking.
+5. **Minor findings F-1..F-10 (all note-level; none blocks).** F-1/F-2 comment citation fixups at the next touch of CommandRouter.swift; F-3 queued spec-wording fixups; F-4 the awaited-answer UI mappings are compile-forced, inert placeholders (device validation DV-1/DV-2 is where they become observable); F-5 is item 4; F-6 is item 3; F-7 is item 9; F-8 the opener's frame supersede also covers the pending-app-launch and voice-ack confirmation paths, behaviourally untested (A/B candidate at the next touch); F-9 optional scan-anchor extension; F-10 scanner-class awareness carried to record files.
+6. **Wave-review carried obligations (all note-level; dispositions recorded in the wave reviews and specs/implement-notes.md).** W1/W2 spec-wording fixups; W3's erratum-comment citation; optional scan anchors (W3 F-5 / W4 F-5); the CommandRouter.swift :912-913 comment wording (net behaviour pinned and doubly guarded — a next-touch fixup); W5/W6 awareness items. None affects behaviour.
+7. **Residual log surfaces (R1).** The marker scan covers bus-format sink lines only; the did-you-mean spoken output and a legacy debug print sit outside it (a spoken surface and a non-release surface, stated honestly; security-test Gaps item 3).
+8. **M-2 medication-challenge scope note.** The medication-challenge supersede path is behaviourally untested; only the four arming sites are source-pinned (T-136 F-4); no auto-resolution exists (security-test Gaps item 4).
+9. **Inherited-filename collision at integration.** 10 tracked spec files at the base share names with this branch's records: implement-review-w1 through w7 plus review-implementation.md, security-test.md and final-sign-off.md. The base copies hold other features' sign-off records (including a security-test record for profile-interview and a review record for the voice-OOM quickfix). The integration step must resolve the numbering deliberately rather than letting the merge pick silently (finding F-7; Owner decision point 4). The base's implement-review-w8.md belongs to the Spotify feature and is untouched by this branch.
+10. **Process and bookkeeping note (fully disclosed; no verdict affected).** One stray evidence record pair (run "default") appears in the append-only tasks.jsonl from a mis-targeted completion call during the review-implementation step; the default run's state file was restored to its committed content, and the multi-turn records are correct; also, the review-implementation reviewer performed its own completion call instead of returning content to the session — the returned content was verified correct against the committed file. Separately, the measured base inventory supersedes the older failure-count estimate; no older figure should be re-read as current.
 
 ## Rollback plan
 
-In plain terms there are four real levers, and no others. There is no CI pipeline and no deployment machinery in this repository — integration and rollback are manual; and there is no remote kill switch, because the encrypted remote-configuration channel is not implemented (a recorded descope).
-
-1. Before integration — do nothing. The feature exists only on the branch worktree-live-camera-translation (pushed to origin); master does not contain it (verified: no file under Services/LiveTranslate/ on master). Not merging it is a complete rollback.
-2. After integration — revert the change. Integration is expected via a pull request; after a merge, roll back by reverting that merge commit (the git revert command with -m 1 against the merge commit). The change is additive — new directories plus small additive edits — so the revert restores the previous behaviour cleanly. Then verify the way every change is verified here: build the app, run the scoped tests, re-run the two log-safety script gates. The constitution amendment (Open Decision 13) sits in its own commits, so it can be retained deliberately for a future re-landing while the code is reverted.
-3. After shipping — in-product levers, best first:
-   - The user (or family) revokes translation consent: the cloud text send stops immediately and the feature continues in offline mode. This is the product-level off switch this feature has; it is reachable from the translation screen and from Settings.
-   - Unregister the plugin: remove the single registration in the app's plugin registry (AppCoordinator.swift). The voice command and the Home tile then report "unavailable" explicitly through a recorded, tested error path (an event plus a spoken line) instead of failing silently; the feature becomes unreachable.
-   - Lower the family-set cloud budget (Settings → Gemini AI) to its floor of 10 calls per day: bounds spend, but it is shared with the voice pipeline and cannot go to zero.
-   - Remove the Gemini API key: stops all Gemini use, including the cloud voice engine. Blunt and not translation-specific; last resort.
-4. Not available: a remote flag to disable only this feature in the field. Any field change requires a new app build. Also note there is no App Store build of this feature yet — no archive or TestFlight build exists (recorded in the device-validation results) — so today a rollback is purely a repository action.
+- **Revert route.** Revert the merge commit on master, or drop the branch before merge. The change is one feature branch; reverting it is a single revert with no data migration and no follow-up cleanup.
+- **No persisted state.** The frame is in-memory and dies with the process; nothing in the feature writes to disk (no user data, no provider state, no network state, no training artifacts). Rollback has no residual state to unwind.
+- **Additive resources.** The catalog JSON resource and the 17 strings-catalog keys are additions; reverting removes them with the branch. The only pre-existing-file edits outside the feature are the two documented baseline test repairs (test-only, bounded).
+- **Log-safety additions.** The six new LogSanitiser.swift keys are additive and fail-closed (unlisted keys drop, out-of-vocabulary values redact). Reverting narrows the allow-list back; no log consumer depends on the new keys.
+- **Device validation unaffected.** DV runs can be performed on a build of the branch or of post-merge master; the record's build identity (protocol section 2) names whichever build was used, so rollback ordering does not invalidate the protocol.
 
 ## Compliance checklist
 
-| Item | Verdict |
+| Check | Result |
 |---|---|
-| Constitution exception (Open Decision 13) recorded, text-only scope, consent-gated | PASS — recorded 2026-09-16; quoted in Gate 1; committed on the branch |
-| Consent/disclosure obligations attach to the default path, not an opt-in | PASS — recorded in the Privacy standard and feature constitution rule 3 |
-| Consent gate enforced before any egress | PASS — fail-closed gate; withdrawal mid-scene leaves zero further requests, including on the retry (boundary evidence suite) |
-| No image egress on any path, including the retry | PASS — structurally impossible; every recorded request decoded: one text part, no media; positive control proves the check works |
-| Log safety gated at build time and covering the new OCR/translation paths | PASS — wired ahead of every test scope; both gates re-run green today; 12/12 rules proven load-bearing |
-| Camera purpose string updated and disclosing both required facts | PASS — quoted in Gate 2 |
-| Consent/disclosure copy reviewed | PASS — owner review completed 2026-09-17 (Open Decision 3 / OA-3); copy accepted as written; stamp bumped to livetranslate.disclosure.16sep2026.r1; stale catalogue DRAFT comments noted in Gate 2 |
-| Device validation | NOT PERFORMED — DV-1…DV-16 NOT RUN; simulator-only evidence; OD1 / OD2 / OD5 unmeasured |
-| Requirements lock intact | PASS — 23 FR / 13 NFR; 36/36 hashes recompute; the FR-LCT-003 narrowing is owner-signed and recorded |
-| No regression to shared behaviour (NFR-LCT-012) | PASS within the evidence — appliance-helper suites green; shared governor and overlay mapper untouched against the merge base |
+| Release log-safety gate wired into ios/build.sh ahead of every test scope | PASS — in-build gates green in every wave and both full runs (specs/review-implementation.md section 5) |
+| No new network egress (NFR-MTC-003) | PASS — 0 network symbols across the 14 changed production files (fresh scan; E6) |
+| Log safety, fail-closed (NFR-MTC-004) | PASS — gate exit 0 (24 cases / 12 rules); falsification exit 0 (36 cases); 8-leg runtime capture |
+| New spoken copy localized ne/en (NFR-MTC-006) | PASS — all 17 dialogue keys present verbatim in both languages (localization coverage 10/10) |
+| Human gates respected (NFR-001; T1/T2) | PASS — no code path auto-resolves a gate; T1 approved 2026-10-10; T2 pending, this pack |
+| Unit-gate policy honoured (focused per unit; one full suite at the end) | PASS — one full suite at W6, baseline-classified; every unit gate green |
+| No secrets in the delta | PASS — scans clean across the reviewed files; no credential material added |
+| Phase discipline (Phase 1 scope; Phases 2/3 recorded) | PASS — later-phase requirements recorded, guards shipped, no Phase 2/3 code |
+
+## Owner decision points
+
+1. **T2 sign-off** — decide the authoritative human gate on the implementation and verification bundle as written here (the chain's GO/SECURITY-GO verdicts and the carried ledger). The reviewer's recommendation: GO.
+2. **Re-confirm OD-M1..OD-M4** (the designed defaults: two probes; curated catalog; Phase 1 first; music probe only) — or record changes; any change becomes a scoped follow-up, not rework of what is verified here.
+3. **Device-validation disposition** — (a) approve the merge now with the DV record remaining the outstanding completion gate (recommended), or (b) hold the merge until the DV run completes. Why (a): the engineering chain is complete and green on every rung; DV is gated only on the owner's device time (step zero first); the merge ships nothing to users — it is not a release — and is a clean revert; holding would only increase integration drift against an active master, while protocol section 8 keeps the completion claim blocked until the DV record shows PASS on all items. This separation is the design's own: merging puts the code on master; the DV record completes the feature.
+4. **Integration handling at run end** — open a PR against master (the standing integration rule) and resolve the inherited-filename collisions deliberately (item 9): decide the numbering of this feature's review records against the base copies that hold other features' records.
+
+## References
+
+- **Stage records:** specs/review-implementation.md; specs/security-test.md; specs/implement-notes.md; specs/MTC-security-evidence-index.md; specs/MTC-device-validation-protocol.md; specs/plan-tasks/plan.md; specs/define-requirements/ (20 FR + 12 NFR); the wave reviews specs/implement-review-w1.md through implement-review-w7.md; specs/multi-turn-conversation/constitution.md.
+- **Evidence bundles and logs:** /tmp/mtc-w5-evidence/ (incl. w5-gate.xcresult); /tmp/mtc-w6-evidence/ (full-run bundles and base summaries); /tmp/mtc-t142-validate.log; /tmp/mtc-st-gate.log; /tmp/mtc-st-falsify.log; /tmp/mtc-st-prod.txt; /tmp/mtc-st-diffnames.txt.
+- **Artifacts:** DialogueOptionCatalog.json; Localizable.xcstrings; ios/tools/check-release-log-safety.sh and its fixture scripts; ios/build.sh.
 
 ## Decision
 
 decision: GO
+confidence: 0.90
+blockers: 0
 
-**GO — recommended by this review and signed by the owner.** Every gate criterion this review can verify is met, and each was re-checked rather than taken on trust: the exception amendment is recorded (Gate 1); the purpose string is updated and discloses both required facts (Gate 2); the log-safety gate passes and covers the new paths, with every rule proven load-bearing (Gate 3); all ten security amendments are discharged with named, passing tests; and the recorded test gates are green with every cited suite confirmed non-zero.
+All criteria met. The multi-turn conversation Phase 1 is fully implemented per the approved design chain, and every rung of the chain stands at GO or SECURITY-GO with zero blockers, reconciled against the committed bytes: the seven wave reviews, the implementation review, the security design review and the security test of record. The 32 requirements trace to witnesses or to explicitly recorded later-phase scope; the production delta is exactly the designed set; the release log-safety gate and its falsification discipline are green; new network egress is zero; and no new test failures are attributable to the feature (the measured base is strictly redder in every paired comparison).
 
-This recommendation was not itself the sign-off. **The owner gave the T2 sign-off on 2026-09-17** through the human approval step (HIL item b6d85d84-1847-4849-9688-39d89091686f, resolved 2026-09-17T02:37:01Z), accepting the consent/disclosure copy as written.
-
-Two things remain, and they are the owner's. Neither was a condition of the sign-off; both are conditions of shipping:
-
-1. The device validation run (DV-1…DV-16), then the constitution's pre-release device console check, before any store submission. The feature has not been tested on a phone, and nothing in this pack is device evidence. DV-1…DV-16 stand recorded as the pre-submission owner action.
-2. The OD1 / OD2 / OD5 value decisions, once item 1 produces measurements.
-
-The third item this section carried when the recommendation was made — the consent/disclosure copy review — closed at sign-off: see Gate 2. If the owner prefers to hold the change until the device run is complete, nothing here resists that: the engineering work is complete and additive, and the Open items section is the list of what remains.
+This GO is the reviewer's recommendation to the owner. **The authoritative T2 senior-human sign-off is the HIL gate, which remains PENDING until the owner decides**; the recommendation is conditional on the owner acknowledging the carried items (Open items 1-10). Nothing in this pack is a device observation: the device-validation record (FR-MTC-020) remains the outstanding completion gate, and merging and completing are separable (Owner decision point 3).

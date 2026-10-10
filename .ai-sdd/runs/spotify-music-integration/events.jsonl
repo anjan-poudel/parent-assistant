@@ -1,0 +1,1 @@
+{"type":"workflow.started","run_id":"c8ede2ad-35eb-4d23-945f-102aa4511559","workflow_id":"spotify-music-integration","timestamp":"2026-10-06T11:12:10.510Z","data":{"workflow_name":"spotify-music-integration","task_count":10,"adapter_type":"claude_code","dry_run":true}}

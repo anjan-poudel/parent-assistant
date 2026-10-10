@@ -107,6 +107,51 @@ protocol VoiceCommandCoordinating: AnyObject {
     func startRephraseConfirmation(_ command: InterpretedCommand, sourceTranscript: String?)
     func takePendingRephraseCommand() -> (command: InterpretedCommand, sourceTranscript: String?)?
 
+    // [MULTI-TURN] (2026-10-10, C-MTC-05 §12.1) The dialogue-frame
+    // surface the router's pre-ladder interception needs. The coordinator
+    // owns the single `DialogueManager`, the answer window and the state
+    // machine hop (T-136); the router only reads the live frame, arms a
+    // frame, notes an invalid attempt, resolves through the one funnel
+    // and prepares the answer text. Each member is a REQUIREMENT with an
+    // inert extension default below (the established pattern — the
+    // router holds its coordinator as a protocol reference, so an
+    // extension-only member would bind statically and AppCoordinator's
+    // implementation could never be reached).
+
+    /// The live dialogue frame, nil when absent OR expired (the
+    /// coordinator drops an expired frame on read — the interception's
+    /// half-open-window guarantee, design-l2 §8). Main-queue read; the
+    /// router calls it once per turn.
+    var activeDialogueFrame: DialogueFrame? { get }
+
+    /// Arms the frame AND opens the answer window (state machine hop), in
+    /// that order (design-l2 §21 step 3). false = a window is already
+    /// open (confirmation or frame) or the draft cannot resolve; the
+    /// caller then takes its non-probe fallback path (never a dead end).
+    func startDialogueFrame(_ frame: DialogueFrame) -> Bool
+
+    /// Invalid-answer accounting: attempts += 1, deadline restamped,
+    /// window timer refreshed (L2-D6). Returns the updated attempt count.
+    /// Silent — the router emits the event.
+    @discardableResult func noteDialogueAttempt() -> Int
+
+    /// The single resolution funnel: clear the frame, cancel the timer,
+    /// close the window through legal edges, emit `dialogue_frame_resolved`
+    /// for the resolutions the coordinator owns (timeout, emergency,
+    /// supersession — design-l2 §26's component split). Idempotent.
+    func resolveDialogueFrame(_ resolution: DialogueFrameResolution)
+
+    /// Emergency/supersession clear — `resolveDialogueFrame` with a
+    /// reason the caller states (L2-D16): the §12.3 emergency side-effect
+    /// and the session-transition supersession both travel here.
+    func clearDialogueFrame(reason: DialogueFrameResolution)
+
+    /// The answer text through the exact seam every turn uses: sanitise
+    /// (.quarantine) then the shared input seam (L2-D14). Never the
+    /// model. The router's fallback when unimplemented is the plain
+    /// `.quarantine` sanitise — the same text the default below returns.
+    func prepareDialogueAnswerText(_ raw: String) -> String
+
     /// Call-confirmation correction hook (spec §7.2 correction protocol).
     /// While a call confirmation is outstanding, the router hands each
     /// response utterance here FIRST: an utterance carrying a method
@@ -511,6 +556,25 @@ extension VoiceCommandCoordinating {
     // prompt composes exactly as it did before the feature and every
     // pre-feature expectation (pinned digests, byte-identity tests) holds.
     var profilePersonalization: ProfilePersonalizationReading? { nil }
+    // [MULTI-TURN] (2026-10-10, C-MTC-05 §12.1) Inert dialogue defaults —
+    // a conformer that does not opt in (every mock/double) has no frame,
+    // no window and no accounting: the interception block never fires
+    // (nil frame), a degenerate trigger's arm cannot succeed and falls
+    // back to the pre-feature request, and every pre-feature expectation
+    // holds. Only a coordinator that explicitly implements the members
+    // (T-136's AppCoordinator, and a scripted mock under test) opens
+    // frames. `prepareDialogueAnswerText`'s default is the same
+    // `.quarantine` sanitise the router's nil-coordinator fallback uses,
+    // so an un-opted-in conformer still never hands the classifier raw,
+    // unclamped text.
+    var activeDialogueFrame: DialogueFrame? { nil }
+    func startDialogueFrame(_ frame: DialogueFrame) -> Bool { false }
+    @discardableResult func noteDialogueAttempt() -> Int { 0 }
+    func resolveDialogueFrame(_ resolution: DialogueFrameResolution) {}
+    func clearDialogueFrame(reason: DialogueFrameResolution) {}
+    func prepareDialogueAnswerText(_ raw: String) -> String {
+        InputSanitiser.sanitise(raw, level: .quarantine)
+    }
 }
 
 /// Turns a raw transcript into a coordinator call and a spoken reply.
@@ -647,6 +711,18 @@ final class CommandRouter {
     private let youtubeTransport: LocalToolTransport?
     private let youtubeLinkOpener: CallLinkOpening?
 
+    // [SPOTIFY] (2026-10-07) Music-path seams (T-116, C-SP-06 §13/§28) —
+    // every one defaults to dormant (nil), exactly like the YouTube
+    // seams above, so pre-existing router construction sites and every
+    // existing router test keep compiling and behaving as before
+    // (NFR-SP-012): without a session the turn reads as not linked (the
+    // honest unlinked treatment), without a transport no Spotify request
+    // can be built, and without an opener nothing is ever opened. Only
+    // `AppCoordinator` (T-119) and scripted test routers arm the seams.
+    private let spotifyAccountSession: SpotifyAccountSession?
+    private let spotifyTransport: LocalToolTransport?
+    private let spotifyLinkOpener: CallLinkOpening?
+
     /// [TOOL-DEBUG-LOG] (2026-09-07) Encrypted on-device debug log of
     /// every local-tool (weather/search) request + outcome — the store
     /// behind Settings → Tool requests. Nil = dormant (pre-existing
@@ -689,6 +765,9 @@ final class CommandRouter {
          youtubeConfigStore: YouTubeConfigStore? = nil,
          youtubeTransport: LocalToolTransport? = nil,
          youtubeLinkOpener: CallLinkOpening? = nil,
+         spotifyAccountSession: SpotifyAccountSession? = nil,
+         spotifyTransport: LocalToolTransport? = nil,
+         spotifyLinkOpener: CallLinkOpening? = nil,
          preAckPlayer: PreAckPlaying? = nil,
          turnTracer: VoiceTurnLatencyTracer? = nil) {
         self.coordinator = coordinator
@@ -709,6 +788,9 @@ final class CommandRouter {
         self.youtubeConfigStore = youtubeConfigStore
         self.youtubeTransport = youtubeTransport
         self.youtubeLinkOpener = youtubeLinkOpener
+        self.spotifyAccountSession = spotifyAccountSession
+        self.spotifyTransport = spotifyTransport
+        self.spotifyLinkOpener = spotifyLinkOpener
         // [LAT-M2] A fast-lane ack's playback settled (finished, decode
         // error, or cancelled) — the same per-utterance speak
         // bookkeeping the lane's tail fires for synthesized utterances.
@@ -761,6 +843,14 @@ final class CommandRouter {
         if Self.emergencyPhrases.contains(where: { Self.containsPhrase($0, in: preText) }) {
             emit(eventType: "command_emergency_keyword", outcome: "success")
             handleEmergency()
+            // [MULTI-TURN] (2026-10-10, C-MTC-05 §12.3) Emergency outranks
+            // any live dialogue frame: drop it (the coordinator emits the
+            // `.emergency` resolution event itself — §26's component
+            // split). POST-dispatch and side-effect only: it contributes
+            // no condition, delay or gate to the emergency path (L1
+            // ADR-MTC-02; a test pins dispatch with the clear forced to a
+            // no-op).
+            coordinator?.clearDialogueFrame(reason: .emergency)
             return .emergencyTriggered
         }
 
@@ -785,9 +875,70 @@ final class CommandRouter {
                     }
                     return .unrecognised(transcript: raw)
                 }
-                _ = coordinator?.takePendingRephraseCommand()
+                // [MTC-T134] rephrase-discard upgrade (design-l2 §12.4
+                // edit 5; C-5 review-l2): the taken hypothesis was
+                // previously DROPPED here — it is now bound and re-offered
+                // as the candidate frame's LAST candidate alongside the
+                // original utterance's near-matches (R2: never alone).
+                // `speakDialogueDidYouMean` speaks the composed
+                // `dialogue.understood.no` honest lead plus the
+                // `dialogue.didYouMean` question in ONE utterance (the
+                // composer's candidateChoice body already carries the
+                // lead — speaking it separately would repeat the line);
+                // with zero candidates, or a window that cannot open, the
+                // shipped discard line stands byte-identically (never
+                // fabricate, FR-MTC-004; NFR-MTC-012).
+                let taken = coordinator?.takePendingRephraseCommand()
                 emit(eventType: "rephrase_discarded", outcome: "info")
-                speak(key: "router.rephrase.discard")
+                let rephraseSource = taken?.sourceTranscript ?? raw
+                let rephraseCandidates = DialogueCandidateBuilder.build(
+                    for: rephraseSource,
+                    excludingDomain: nil,
+                    rephraseHypothesis: taken?.command)
+                // [W4 review F-1, 2026-10-10] The arm + probe pair is
+                // DEFERRED by exactly one main tick. Ordering proof:
+                // `takePendingRephraseCommand()` has just QUEUED its
+                // `.awaitingConfirmation → .idle` hop (block A) on the
+                // main queue and this branch runs before that hop lands.
+                // Arming synchronously would bridge the still-
+                // `.awaitingConfirmation` session to `.awaitingSlotAnswer`
+                // (the opener's legal `.idle` bridge), and block A would
+                // then land on the freshly armed window: it closes it
+                // (`.awaitingSlotAnswer → .idle`, cancelling the slot
+                // timer) and the queued session-exit observer, seeing a
+                // live frame with the window gone, resolves it as
+                // `.superseded` — the just-spoken probe is answer-dead
+                // (T-134 Gherkin 4 / design-l2 §12.4 edit 5). Deferring
+                // makes the order: block A (`.awaitingConfirmation →
+                // .idle`; the observer hop finds no frame yet — a no-op)
+                // → block B below (`openSlotAnswerWindow` from `.idle`
+                // directly; the observer sees `.awaitingSlotAnswer` — a
+                // no-op; the frame arms; the probe is spoken exactly
+                // once). The synchronous legs stay synchronous: zero
+                // candidates or no coordinator keep the shipped line with
+                // no defer (NFR-MTC-012), and a deallocated router speaks
+                // nothing and opens nothing. The start call happens ONLY
+                // inside block B, immediately followed by the speak on
+                // success, so no window is ever opened without its probe;
+                // the arm-failure / deallocated-coordinator legs speak the
+                // shipped line byte-identically (NFR-MTC-012).
+                if coordinator != nil, !rephraseCandidates.isEmpty {
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self else { return }
+                        guard let coordinator = self.coordinator,
+                              coordinator.startDialogueFrame(
+                                  DialogueFrame.candidateChoice(
+                                      candidates: rephraseCandidates,
+                                      sourceTranscript: rephraseSource)) else {
+                            self.speak(key: "router.rephrase.discard")
+                            return
+                        }
+                        self.speakDialogueDidYouMean(rephraseCandidates,
+                                                     locale: coordinator.activeLocale)
+                    }
+                } else {
+                    speak(key: "router.rephrase.discard")
+                }
                 return .unrecognised(transcript: raw)
             }
             // Call-confirmation correction protocol (spec §7.2): a
@@ -865,6 +1016,115 @@ final class CommandRouter {
             emit(eventType: "confirmation_ambiguous", outcome: "info")
             speak(key: "router.confirmationAmbiguous")
             return .unrecognised(transcript: raw)
+        }
+
+        // [MULTI-TURN] (2026-10-10, C-MTC-05 §12.2) Dialogue-frame
+        // interception. Runs after the confirmation hook (whose body is
+        // untouched — a pending confirmation outranks a live frame) and
+        // before the safety net; consumes an answer, re-probes, or falls
+        // through to the ladder unchanged. Every state mutation goes
+        // through the coordinator hooks; this block never speaks a
+        // model-generated line and never writes to the console (V-2).
+        //
+        // Classification is the pure `DialogueAnswerPath.classify`; the
+        // live medication vocabulary is computed here exactly as the
+        // keyword stage computes it (one source, no drift) so B6's
+        // medication-photo reading is live at this call site (W2 review
+        // F-1 — the §12.2 snippet's erratum). Consumed arms (escape,
+        // cancel, answer, candidate, exhaustion) return BEFORE the
+        // interpreter and the transcript cache (FR-MTC-017); `.bargeIn`
+        // resolves and deliberately falls through so the ladder executes
+        // the strong command exactly once with its normal tiers
+        // (L2-D18); `.expired` falls through as a fresh command.
+        if let frame = coordinator?.activeDialogueFrame {
+            let prepared = coordinator?.prepareDialogueAnswerText(raw)
+                ?? InputSanitiser.sanitise(raw, level: .quarantine)
+            let medicationNames = (coordinator?.medicationVoiceEntries ?? []).flatMap {
+                MedicationVoiceVocabulary.voiceKeys(for: $0)
+            }
+            let classification = DialogueAnswerPath.classify(
+                raw: raw,
+                prepared: prepared,
+                frame: frame,
+                catalog: dialogueCatalog,
+                locale: coordinator?.activeLocale ?? Locale(identifier: "ne-NP"),
+                now: Date(),
+                medicationNames: medicationNames
+            )
+            switch classification {
+            case .expired:
+                // The window closed before this utterance — it is a
+                // fresh command; the ladder below handles it unaltered.
+                break
+            case .escape:
+                coordinator?.resolveDialogueFrame(.escaped)
+                emitDialogueFrameResolved(.escaped)
+                speak(key: "dialogue.escape")
+                return .unrecognised(transcript: raw)
+            case .cancel:
+                coordinator?.resolveDialogueFrame(.cancelled)
+                emitDialogueFrameResolved(.cancelled)
+                speak(key: "dialogue.cancelled")
+                return .unrecognised(transcript: raw)
+            case .bargeIn:
+                // Resolve and fall through: the ladder below executes
+                // the strong command exactly once with its normal tiers
+                // (L1 ADR-MTC-05; the `.bargedIn` resolution has already
+                // cleared the frame and closed the window).
+                coordinator?.resolveDialogueFrame(.bargedIn)
+                emitDialogueFrameResolved(.bargedIn)
+            case .candidatePick(let index, let capture):
+                // The spoken position is 1-based; the executor addresses
+                // 0-based (design §12.2).
+                return executeDialogueCandidate(index - 1, capture: capture,
+                                                queryOverride: nil,
+                                                frame: frame, raw: raw)
+            case .answer(let merge):
+                return executeDialogueAnswer(merge, frame: frame, raw: raw)
+            case .freeFormForCandidate(let index, let value):
+                // Already 0-based (design §12.2) — consumed directly.
+                return executeDialogueCandidate(index, capture: .freeText,
+                                                queryOverride: value,
+                                                frame: frame, raw: raw)
+            case .invalid(let reason):
+                let attempts = coordinator?.noteDialogueAttempt()
+                    ?? DialogueConfig.maxProbes
+                // C-3 (review-l2 F-3): the `reason` metadata is built by
+                // direct `ObservabilityEvent` construction — the
+                // two-argument `emit` helper hardcodes empty metadata and
+                // would silently drop the reason vocabulary.
+                observabilityBus.emit(ObservabilityEvent(
+                    component: "command_router",
+                    eventType: "dialogue_answer",
+                    durationMs: nil,
+                    outcome: "invalid",
+                    errorCode: nil,
+                    metadata: ["reason": reason.rawValue]
+                ))
+                // Attempt budget (FR-MTC-007/§24): one re-probe after the
+                // first invalid answer, then the honest close. The
+                // manager's count has already taken this attempt
+                // (`noteAttempt` restamps the deadline, L2-D6); a count
+                // within the budget speaks the retry probe — the frame
+                // copy carries the fresh ordinal so the probe event's
+                // `attempt` metadata is the probe's own number.
+                //
+                // §12.2's pinned comparison (`attempts < maxProbes`) is
+                // an erratum: `noteAttempt` returns the post-increment
+                // count (>= 2 on the first invalid answer), so `<` makes
+                // the retry branch unreachable and contradicts the
+                // task-file Gherkin ("attempt one … re-probes with the
+                // retry variant") and §24's "one honest re-probe, then
+                // the honest exhausted line".
+                if attempts <= DialogueConfig.maxProbes {
+                    var reprobe = frame
+                    reprobe.attempts = attempts
+                    speakDialogueProbe(frame: reprobe, retry: true)
+                } else {
+                    return resolveDialogueExhaustion(frame: frame, raw: raw)
+                }
+                return .unrecognised(transcript: raw)
+            }
         }
 
         // Deterministic safety net FIRST (spec 2026-09-05 §4 routing
@@ -1201,6 +1461,28 @@ final class CommandRouter {
                 guard let query = YouTubeRoute.extractQuery(from: preText) else { break }
                 emitIntentKeywordMatch(relaxed)
                 fireYouTubePlay(query: query)
+                return .unrecognised(transcript: raw)
+            case .music:
+                // [SPOTIFY] (2026-10-07) T-116: the real music path — the
+                // ladder's deterministic intake (FR-SP-015). The extractor
+                // resolves the search query from the same
+                // pre-canonicalized text the rule matched (zero prompt
+                // tokens, no interpreter round-trip); a transcript the
+                // extractor canonicalizes empty falls back to the whole
+                // utterance so the turn always has a query. Terminal for
+                // the turn, exactly like the YouTube arm above.
+                emitIntentKeywordMatch(relaxed)
+                // [MTC-T134] ladder-degenerate (design-l2 §12.4 edit 3;
+                // §23's ladder intake): a degenerate extraction
+                // (marker/transcript fallback) opens the slot-fill probe
+                // instead of a blind search of the fallback token; a
+                // content extraction fires the shipped blind request with
+                // the identical query — `musicQuery(from:)` is the thin
+                // wrapper over `musicQueryOutcome(from:)`, so a specific
+                // request stays byte-identical (NFR-MTC-012).
+                fireMusicRequestOrProbe(query: KeywordIntentRule.musicQueryOutcome(from: preText),
+                                        raw: raw,
+                                        intake: .ladder)
                 return .unrecognised(transcript: raw)
             case .appLaunch:
                 // [APP-LAUNCHER] (2026-09-16) The launcher's voice fast
@@ -1830,13 +2112,25 @@ final class CommandRouter {
     ]
 
     /// Call-ish vocabulary shared by the post-LLM block
-    /// (`routeKeywordRemainder`) and the [NO-GIBBERISH] pre-answer guard:
-    /// an utterance that both names a topic word AND reads call-ish
-    /// ("मौसम बताउने मान्छेलाई फोन गर") must stay on the interpreter/
-    /// block path — a deterministic topic answer would shadow the call
-    /// intent. Hoisted from `routeKeywordRemainder` (2026-09-07) so the
-    /// pre-answer stage checks the SAME list that blocks.
-    private static let sensitiveCallPhrases = [
+    /// (`routeKeywordRemainder` `:1973-1980`) and the [NO-GIBBERISH]
+    /// pre-answer guard (`:1360`): an utterance that both names a topic
+    /// word AND reads call-ish ("मौसम बताउने मान्छेलाई फोन गर") must stay
+    /// on the interpreter/block path — a deterministic topic answer
+    /// would shadow the call intent. Hoisted from `routeKeywordRemainder`
+    /// (2026-09-07) so the pre-answer stage checks the SAME list that
+    /// blocks.
+    ///
+    /// [MTC L2-D2] (2026-10-10) `sensitiveCallPhrases` `:1869`: widened
+    /// `private` → `internal` so the dialogue barge-in predicate
+    /// (design-l2 §6 B2) consumes this exact list instead of forking a
+    /// second vocabulary — the same extraction reason as
+    /// `isExplicitMedicationAcknowledgement` `:1913`. The answer path
+    /// evaluates it with `containsPhrase` semantics (`:1826` —
+    /// `text.contains(phrase)`) over lowercased text and falls through
+    /// to the ladder, where `:1973-1980` blocks with
+    /// `router.sensitiveBlocked` unchanged. Visibility only: no call
+    /// site moves and no predicate changes.
+    static let sensitiveCallPhrases = [
         "call", "phone", "facetime", "messenger", "whatsapp",
         "फोन", "कल", "भिडियो कल", "म्यासेन्जर", "व्हाट्सएप", "वाट्सएप"
     ]
@@ -1988,7 +2282,16 @@ final class CommandRouter {
                             locale: coordinator?.activeLocale
                                 ?? Locale(identifier: "ne-NP")))
                 } else {
-                    speak(key: "router.reprompt")
+                    // [MTC-T134] keyword-remainder upgrade (design-l2
+                    // §12.4 edit 6): with ≥1 near-match candidate the
+                    // honest `dialogue.retry`-prefixed candidateChoice
+                    // probe is spoken and its frame armed; with zero
+                    // candidates — or a window that cannot open — the
+                    // shipped `router.reprompt` line stands
+                    // byte-identically (NFR-MTC-012). The
+                    // cloud-failure-class branch above and both no-brain
+                    // branches below are untouched.
+                    speakDialogueDidYouMeanOrReprompt(raw)
                 }
             }
         case .downloadingBrain:
@@ -2359,6 +2662,30 @@ final class CommandRouter {
 
     // MARK: - [YOUTUBE] Voice YouTube search/play (youtube-plugin, 2026-09-08)
 
+    /// [T-114][M-1] Log projection for the reusable YouTube helpers
+    /// (`fireYouTubePlay` / `deliverYouTubeFailure`).
+    ///
+    /// Explicit-YouTube turns keep the shipped behavior — `.explicit` is
+    /// the default, so every pre-existing call site is untouched and the
+    /// query is logged verbatim (the FR-SP-005 baseline). Music turns
+    /// that fall back to YouTube (the §13 fallback rows) pass
+    /// `.queryFree`: there the music query is the sensitive value and
+    /// must never reach the tool log (NFR-SP-002 / security finding
+    /// M-1). The projection changes the LOGGED query only — routing,
+    /// speech and network behavior are identical for both cases.
+    enum YouTubeLogProjection {
+        case explicit
+        case queryFree
+
+        /// The `query` value the tool log records for a helper call.
+        func loggedQuery(_ query: String) -> String {
+            switch self {
+            case .explicit: return query
+            case .queryFree: return ""
+            }
+        }
+    }
+
     /// The YouTube stage's execution (see the stage comment in `route`).
     /// Called only after `YouTubeRoute.decide` matched with an extracted
     /// query. Two honest paths:
@@ -2371,7 +2698,9 @@ final class CommandRouter {
     ///     confirmation. The title goes through the SPOKEN path ONLY: no
     ///     visible card, never into the observability bus or the debug
     ///     log (the log entry for the success path carries the query +
-    ///     outcome, an EMPTY response by design — see `logToolRequest`).
+    ///     outcome, an EMPTY response by design — see `logToolRequest`;
+    ///     music-turn callers pass `.queryFree`, which blanks the logged
+    ///     query — [T-114][M-1]).
     ///   · No key: open the SEARCH deeplink directly
     ///     (`youtube://www.youtube.com/results` → https fallback) and
     ///     speak `youtube.openingSearch` — the user accepted
@@ -2383,7 +2712,8 @@ final class CommandRouter {
     ///   honest localized fallback — `youtube.notFound` for an empty
     ///   result set, `youtube.unavailable` otherwise — never a
     ///   fabricated title, never a dead end.
-    private func fireYouTubePlay(query: String) {
+    private func fireYouTubePlay(query: String,
+                                 logProjection: YouTubeLogProjection = .explicit) {
         let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
         // [VOICE-ACK] The lookup/deeplink open takes a beat — ack before
         // the attempt, the outcome line follows through the lane.
@@ -2396,6 +2726,7 @@ final class CommandRouter {
         guard let apiKey = youtubeConfigStore?.apiKey else {
             guard let opener = youtubeLinkOpener else {
                 deliverYouTubeFailure(locale: locale, query: query,
+                                      logProjection: logProjection,
                                       fallbackKey: "youtube.unavailable",
                                       statusCode: nil, startedAt: attemptStartedAt)
                 return
@@ -2410,7 +2741,8 @@ final class CommandRouter {
             // convention); response stays EMPTY on the ok path so the
             // encrypted store never gains text the design keeps to
             // speech.
-            logToolRequest(kind: .youtube, query: query, response: "", outcome: "ok",
+            logToolRequest(kind: .youtube, query: logProjection.loggedQuery(query),
+                           response: "", outcome: "ok",
                            statusCode: nil,
                            durationMs: Self.elapsedMilliseconds(since: attemptStartedAt))
             return
@@ -2423,6 +2755,7 @@ final class CommandRouter {
             guard let transport = self.youtubeTransport else {
                 await MainActor.run {
                     self.deliverYouTubeFailure(locale: locale, query: query,
+                                               logProjection: logProjection,
                                                fallbackKey: "youtube.unavailable",
                                                statusCode: nil, startedAt: attemptStartedAt)
                 }
@@ -2435,6 +2768,7 @@ final class CommandRouter {
                 await MainActor.run {
                     guard let opener = self.youtubeLinkOpener else {
                         self.deliverYouTubeFailure(locale: locale, query: query,
+                                                   logProjection: logProjection,
                                                    fallbackKey: "youtube.unavailable",
                                                    statusCode: nil, startedAt: attemptStartedAt)
                         return
@@ -2449,25 +2783,29 @@ final class CommandRouter {
                     // entry below records the attempt with an EMPTY
                     // response for exactly that reason.
                     self.speak(text: text, locale: locale)
-                    self.logToolRequest(kind: .youtube, query: query, response: "",
+                    self.logToolRequest(kind: .youtube, query: logProjection.loggedQuery(query),
+                                        response: "",
                                         outcome: "ok", statusCode: 200,
                                         durationMs: Self.elapsedMilliseconds(since: attemptStartedAt))
                 }
             } catch YouTubeTool.FetchError.noResults {
                 await MainActor.run {
                     self.deliverYouTubeFailure(locale: locale, query: query,
+                                               logProjection: logProjection,
                                                fallbackKey: "youtube.notFound",
                                                statusCode: 200, startedAt: attemptStartedAt)
                 }
             } catch YouTubeTool.FetchError.invalidResponse(let statusCode) {
                 await MainActor.run {
                     self.deliverYouTubeFailure(locale: locale, query: query,
+                                               logProjection: logProjection,
                                                fallbackKey: "youtube.unavailable",
                                                statusCode: statusCode, startedAt: attemptStartedAt)
                 }
             } catch {
                 await MainActor.run {
                     self.deliverYouTubeFailure(locale: locale, query: query,
+                                               logProjection: logProjection,
                                                fallbackKey: "youtube.unavailable",
                                                statusCode: nil, startedAt: attemptStartedAt)
                 }
@@ -2478,14 +2816,18 @@ final class CommandRouter {
     /// Failure delivery for the YouTube stage — the honest localized
     /// fallback line (`youtube.notFound` / `youtube.unavailable`), a
     /// `youtube` component `fail` event, and one "fail" debug-log entry
-    /// carrying the line the user actually heard (never a title).
+    /// carrying the line the user actually heard (never a title; the
+    /// logged query follows `logProjection` — blanked on music turns,
+    /// [T-114][M-1]).
     private func deliverYouTubeFailure(locale: Locale, query: String,
+                                       logProjection: YouTubeLogProjection = .explicit,
                                        fallbackKey: String,
                                        statusCode: Int?, startedAt: Date) {
         emitYouTube(eventType: "youtube", outcome: "fail")
         speakWithVisibleOutcome(key: fallbackKey)
         let line = L10n.str(fallbackKey, locale: locale)
-        logToolRequest(kind: .youtube, query: query, response: line, outcome: "fail",
+        logToolRequest(kind: .youtube, query: logProjection.loggedQuery(query),
+                       response: line, outcome: "fail",
                        statusCode: statusCode,
                        durationMs: Self.elapsedMilliseconds(since: startedAt))
     }
@@ -2505,6 +2847,1022 @@ final class CommandRouter {
             errorCode: nil,
             metadata: [:]
         ))
+    }
+
+    // MARK: - [SPOTIFY] Music path (T-116, C-SP-06 §13/§28)
+
+    /// [SPOTIFY] (2026-10-07) What one music turn resolves to — the
+    /// selection step's total output (§28). Pure data: the enum carries
+    /// at most the validated track the search resolved — never a token,
+    /// a status or provider text.
+    enum MusicOutcome: Equatable {
+        /// Premium-capable and a usable track: attempt remote playback.
+        case spotifyRemote(SpotifyTool.TrackResult)
+        /// Hand the validated track to the app through the deep link
+        /// (free/unknown tier — L2-D14 — and never a remote attempt).
+        case spotifyDeepLink(SpotifyTool.TrackResult)
+        /// Unlinked account with no YouTube leg: hand the query to the
+        /// app's own search (`spotify:search:`).
+        case spotifySearchHandoff
+        /// The YouTube fallback owns the turn (`fireYouTubePlay`
+        /// verbatim, ADR-SP-06).
+        case youtube
+        /// An honest static line: `spotify.notFound` / `unavailable` /
+        /// `notLinked` / `appMissing`.
+        case honestLine(String)
+    }
+
+    /// §28's ordered conditions, total over every state the router can
+    /// reach, and the one place the 12-row matrix's selection logic
+    /// lives (pure — pinned data-driven by `CommandRouterMusicTests`).
+    ///
+    /// Order note: the design lists the unlinked condition last among
+    /// the *qualified* conditions (remote-capable / deep-link-capable /
+    /// search-failure are all stated for a linked account); as an
+    /// evaluation order the unlinked test must come first, because an
+    /// unlinked turn never runs a search and every later condition
+    /// presumes the linked state. `linked+transport missing` and the
+    /// defensive `search == nil` arm both take the row-7 shape exactly
+    /// as §28 states.
+    static func selectMusicOutcome(spotifyLinked: Bool,
+                                   spotifyTransportPresent: Bool,
+                                   search: Result<SpotifyTool.TrackResult, SpotifyTool.FetchError>?,
+                                   product: SpotifyAccountSession.Product,
+                                   deepLinkCapable: Bool,
+                                   youtubeServeable: Bool,
+                                   spotifySearchOpenerPresent: Bool) -> MusicOutcome {
+        guard spotifyLinked else {
+            if youtubeServeable { return .youtube }
+            if spotifySearchOpenerPresent { return .spotifySearchHandoff }
+            return .honestLine("spotify.notLinked")
+        }
+        guard spotifyTransportPresent else {
+            // §28: "linked+transport missing → the row-7 branch".
+            return youtubeServeable ? .youtube : .honestLine("spotify.unavailable")
+        }
+        guard let search else {
+            // Reached only through the row-11 token path (a search never
+            // ran): the same search-failure treatment.
+            return youtubeServeable ? .youtube : .honestLine("spotify.unavailable")
+        }
+        switch search {
+        case .success(let track):
+            if product == .premium { return .spotifyRemote(track) }
+            if deepLinkCapable { return .spotifyDeepLink(track) }
+            // Usable track but not remote-capable and the app cannot
+            // open it: row 4's "not capable" leg.
+            return youtubeServeable ? .youtube : .honestLine("spotify.appMissing")
+        case .failure(.noResults):
+            return youtubeServeable ? .youtube : .honestLine("spotify.notFound")
+        case .failure:
+            return youtubeServeable ? .youtube : .honestLine("spotify.unavailable")
+        }
+    }
+
+    /// §13's `youtubeAskable`, the selection's `youtubeServeable` — the
+    /// YouTube leg's own outcome decides success (ADR-SP-06).
+    private var musicYouTubeServeable: Bool {
+        youtubeConfigStore?.apiKey != nil || youtubeLinkOpener != nil
+    }
+
+    /// L2-R1: the concurrent YouTube leg runs only when the YouTube path
+    /// is KEYED (there is a fetch to join). The keyless path is askable
+    /// but is never pre-opened — its "search" is its outcome.
+    private var musicYouTubeKeyed: Bool {
+        youtubeConfigStore?.apiKey != nil && youtubeTransport != nil
+    }
+
+    /// The music path's entry (routes from the ladder's `case .music:`
+    /// and from the interpreted `.music` action). Sync main-thread entry
+    /// exactly like `fireYouTubePlay`: locale resolution, the pre-ack,
+    /// then the attempt on a Task; every delivery hop returns to the
+    /// main actor before speaking, emitting or logging.
+    private func fireMusicRequest(query: String) {
+        let locale = coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        // [VOICE-ACK] The token/search/play round-trips take a beat —
+        // ack before the attempt, the outcome line follows through the
+        // lane (parity with `fireYouTubePlay`).
+        speakPreAck(locale: locale)
+        let attemptStartedAt = Date()
+        Task { [weak self] in
+            guard let self else { return }
+            await self.runMusicTurn(query: query, locale: locale, startedAt: attemptStartedAt)
+        }
+    }
+
+    // MARK: - [MTC] Dialogue frame (multi-turn conversation, design-l2 §12)
+
+    // [MULTI-TURN] (2026-10-10, C-MTC-05 §12.5) The dialogue frame's
+    // router-side helpers: the degenerate trigger, probe speech, the
+    // did-you-mean compositions and the execution arms. Every spoken line
+    // is composed from `dialogue.*` keys (never the model); every event
+    // is closed-vocabulary and content-free (NFR-MTC-004); no arm here
+    // consults the interpreter or the transcript cache (FR-MTC-017),
+    // except the `executeDialogueAnswer`/`executeDialogueDefault` merge
+    // tail, which re-enters the pending command's OWN dispatch (a music
+    // command — terminal, cache-free).
+
+    /// The degenerate music query's intake — the
+    /// `dialogue_degenerate_query` event's closed `intake` metadata
+    /// (design-l2 §23/§26): which of the three trigger sites requested
+    /// the probe. Never content.
+    private enum DialogueDegenerateIntake: String {
+        case ladder
+        case interpreted
+        case candidate
+    }
+
+    /// The one cached catalog load (design-l2 §12.6): loaded lazily on
+    /// first use (main thread, inside a turn) and then immutable. A
+    /// missing or malformed resource degrades to nil — the free-text-only
+    /// probe path (E3), never a fabricated option.
+    private lazy var dialogueCatalog: DialogueOptionCatalog? = {
+        try? DialogueOptionCatalog.load()
+    }()
+
+    /// The slot-fill draft for one degenerate music query (§12.5): the
+    /// candidates are the catalog group the query claims (none when
+    /// nothing claims it — the free-text-only probe), the default is the
+    /// extracted degenerate query itself (the any-option fallback), and
+    /// `activeCommand` carries the pending interpreted command the answer
+    /// merges into (L2-D13) — nil on the keyword/candidate intakes.
+    private func dialogueSlotFillDraft(query: KeywordIntentRule.MusicQueryExtraction,
+                                       raw: String,
+                                       activeCommand: InterpretedCommand?) -> DialogueFrame {
+        let catalog = dialogueCatalog
+        let candidates: [DialogueCandidate]
+        if let group = query.query.flatMap({ catalog?.groupForMusicQuery($0) }),
+           let catalog {
+            candidates = DialogueCandidateBuilder.slotFillCandidates(from: group,
+                                                                     catalog: catalog)
+        } else {
+            candidates = []
+        }
+        return DialogueFrame.slotFill(candidates: candidates,
+                                      defaultQuery: query.query,
+                                      domain: .music,
+                                      activeCommand: activeCommand,
+                                      sourceTranscript: raw)
+    }
+
+    /// The one degenerate trigger helper (§12.5/§23), shared by both
+    /// ladder intakes and by candidate execution: a NON-degenerate
+    /// extraction fires the music request exactly as the pre-feature
+    /// expression did (`query ?? raw` — `musicQuery` is the thin wrapper
+    /// over the outcome extractor, so the ladder intake is byte-identical
+    /// to the shipped line). A degenerate one emits
+    /// `dialogue_degenerate_query {intake}`, arms the slot-fill frame
+    /// through the coordinator and speaks the first probe.
+    ///
+    /// `activeCommand` carries the arrived interpreted command on the
+    /// interpreted intake (nil elsewhere) — the §12.5 pinned signature
+    /// gained this additive, defaulted parameter because the pinned
+    /// three-argument shape had no way to deliver it (§12.5's prose
+    /// requires it: "the interpreted intake passes the arrived `command`
+    /// as `activeCommand`").
+    ///
+    /// Fallbacks, all non-probe (never a dead end): an arm that cannot
+    /// open a window (defensive — a live frame is intercepted before any
+    /// trigger can run; also the no-coordinator case) falls back to
+    /// today's exact blind request.
+    private func fireMusicRequestOrProbe(query: KeywordIntentRule.MusicQueryExtraction,
+                                         raw: String,
+                                         intake: DialogueDegenerateIntake,
+                                         activeCommand: InterpretedCommand? = nil) {
+        guard query.isDegenerate else {
+            fireMusicRequest(query: query.query ?? raw)
+            return
+        }
+        observabilityBus.emit(ObservabilityEvent(
+            component: "command_router",
+            eventType: "dialogue_degenerate_query",
+            durationMs: nil,
+            outcome: "info",
+            errorCode: nil,
+            metadata: ["intake": intake.rawValue]
+        ))
+        let draft = dialogueSlotFillDraft(query: query, raw: raw,
+                                          activeCommand: activeCommand)
+        if coordinator?.startDialogueFrame(draft) == true {
+            speakDialogueProbe(frame: draft, retry: false)
+        } else {
+            fireMusicRequest(query: query.query ?? raw)
+        }
+    }
+
+    /// Speaks one probe (§12.5): composed by `DialogueProbeComposer` from
+    /// `dialogue.*` keys and catalog labels only (FR-MTC-016 — the model
+    /// is never consulted), announced as `dialogue_probe_spoken` with the
+    /// closed metadata (probe kind, the probe's own ordinal, the offered
+    /// option count), then spoken through the normal reply surface so the
+    /// assistant-bubble/speech bookkeeping matches every other reply.
+    /// `errorCode: "catalogUnavailable"` marks the degraded slot-fill
+    /// probe (no catalog — the free-text-only composition, E3); a
+    /// candidateChoice probe never reads the catalog and is never
+    /// degraded. The `locale` parameter is additive/defaulted for
+    /// `speakDialogueDidYouMean`'s pinned signature — call sites inside a
+    /// turn pass nothing and read the coordinator's locale.
+    private func speakDialogueProbe(frame: DialogueFrame, retry: Bool,
+                                    locale: Locale? = nil) {
+        let locale = locale ?? coordinator?.activeLocale ?? Locale(identifier: "ne-NP")
+        let degraded = frame.probeKind == .slotFill && dialogueCatalog == nil
+        observabilityBus.emit(ObservabilityEvent(
+            component: "command_router",
+            eventType: "dialogue_probe_spoken",
+            durationMs: nil,
+            outcome: degraded ? "degraded" : "success",
+            errorCode: degraded ? "catalogUnavailable" : nil,
+            metadata: [
+                "probe_kind": frame.probeKind.rawValue,
+                "attempt": String(frame.attempts),
+                "option_count": String(dialogueProbeOptionCount(for: frame))
+            ]
+        ))
+        speak(text: DialogueProbeComposer.probeText(for: frame, catalog: dialogueCatalog,
+                                                    retry: retry, locale: locale),
+              locale: locale)
+    }
+
+    /// The probe event's `option_count` (§26: 0…4): the capped
+    /// option/candidate count the probe actually offers. slotFill: the
+    /// group's options, 0 when no group claims the pending query (the
+    /// free-text-only probe offers no addressable options); the
+    /// any-option label is deliberately not counted (it is not a catalog
+    /// option, §11). candidateChoice: the capped candidate count.
+    private func dialogueProbeOptionCount(for frame: DialogueFrame) -> Int {
+        switch frame.probeKind {
+        case .slotFill:
+            guard let query = frame.defaultQuery,
+                  let group = dialogueCatalog?.groupForMusicQuery(query) else { return 0 }
+            return min(group.options.count, DialogueConfig.maxSlotOptions)
+        case .candidateChoice:
+            return min(frame.candidates.count, DialogueConfig.maxCandidates)
+        }
+    }
+
+    /// Speaks the did-you-mean probe for a candidate list (§12.5; the
+    /// rephrase-discard helper, §12.4 edit 5): composed through the same
+    /// `DialogueProbeComposer` candidateChoice path (and emitting the same
+    /// `dialogue_probe_spoken` event) as the frame's own first probe — the
+    /// honest "I didn't understand." lead joined with the capped candidate
+    /// labels, in the caller's locale. The caller owns arming the frame it
+    /// built from the same candidates; this helper only speaks, so an
+    /// unanswerable probe is structurally impossible (no frame, no
+    /// call — the caller's zero-candidate branch keeps its shipped line).
+    private func speakDialogueDidYouMean(_ candidates: [DialogueCandidate], locale: Locale) {
+        let draft = DialogueFrame.candidateChoice(candidates: candidates,
+                                                  sourceTranscript: "")
+        speakDialogueProbe(frame: draft, retry: false, locale: locale)
+    }
+
+    /// The keyword-remainder reprompt upgrade (§12.5; §12.4 edit 6, T-134's
+    /// call site): with at least one near-match candidate the honest
+    /// `dialogue.retry`-prefixed candidateChoice probe is spoken and its
+    /// frame armed; with zero candidates — or a window that cannot open
+    /// (defensive; also the no-coordinator case) — the shipped
+    /// `router.reprompt` line stands byte-identically (NFR-MTC-012).
+    private func speakDialogueDidYouMeanOrReprompt(_ raw: String) {
+        let candidates = DialogueCandidateBuilder.build(for: raw,
+                                                        excludingDomain: nil,
+                                                        rephraseHypothesis: nil)
+        guard !candidates.isEmpty, let coordinator else {
+            speak(key: "router.reprompt")
+            return
+        }
+        let draft = DialogueFrame.candidateChoice(candidates: candidates,
+                                                  sourceTranscript: raw)
+        guard coordinator.startDialogueFrame(draft) else {
+            speak(key: "router.reprompt")
+            return
+        }
+        speakDialogueProbe(frame: draft, retry: true, locale: coordinator.activeLocale)
+    }
+
+    /// Executes a resolved music-slot answer (§12.5, FR-MTC-006):
+    /// resolution first (the funnel clears the frame and closes the
+    /// window), the two events, then the merge executes through the
+    /// pending command's own dispatch. Terminal for the turn — a consumed
+    /// answer never reaches the interpreter or the transcript cache
+    /// (FR-MTC-017).
+    private func executeDialogueAnswer(_ merge: DialogueMerge,
+                                       frame: DialogueFrame,
+                                       raw: String) -> RoutingResult {
+        coordinator?.resolveDialogueFrame(.answered(merge))
+        emitDialogueAnswer(capture: merge.capture, source: merge.source)
+        emitDialogueFrameResolved(.answered(merge))
+        dispatchDialogueMusicValue(merge.value, frame: frame, raw: raw)
+        return .unrecognised(transcript: raw)
+    }
+
+    /// The shared execution tail of the two music-value paths
+    /// (`executeDialogueAnswer`, `executeDialogueDefault`): a pending
+    /// interpreted music command merges the value into its `message` and
+    /// re-enters its own dispatch (every other field copied verbatim —
+    /// T-131's `merging`; the `.music` arm is terminal and cache-free);
+    /// a ladder frame fires the shipped music request directly. The
+    /// value is the user's own words or a catalog query — never model
+    /// text (the merge is deterministic, FR-MTC-006).
+    private func dispatchDialogueMusicValue(_ value: String,
+                                            frame: DialogueFrame,
+                                            raw: String) {
+        if let active = frame.activeCommand, active.action == .music {
+            dispatchInterpreted(active.merging(message: value), raw: raw)
+        } else {
+            fireMusicRequest(query: value)
+        }
+    }
+
+    /// Executes one candidate pick (§12.5) through the ladder arm that
+    /// owns the domain — "as if it had been understood" (ADR-MTC-07) —
+    /// resolution first, events after, then that arm's own seam. `index`
+    /// is 0-based (candidatePick's spoken position was decremented by the
+    /// interception block; the free-form claim arrives 0-based); a
+    /// non-nil `queryOverride` is the free-form claim's extracted value
+    /// (`.answered(capture: .freeText, source: .candidate)`), a nil one is
+    /// an enumerated pick (`.candidateSelected`).
+    ///
+    /// M-5 (security-design-review; the task's executor-bounds row): the
+    /// index is validated against the frame's candidate list BEFORE any
+    /// addressing. classify is total, so a hostile index cannot arrive
+    /// through `route()` — this guard exists so the executor is total too:
+    /// a crafted out-of-range index refuses with the honest exhausted
+    /// close (nothing addressed, nothing executed), never an out-of-range
+    /// read and never a crash. `internal` (not file-private) so the M-5
+    /// test can drive the hostile index directly; the interception block
+    /// is the only production caller.
+    @discardableResult
+    func executeDialogueCandidate(_ index: Int,
+                                  capture: CaptureForm,
+                                  queryOverride: String?,
+                                  frame: DialogueFrame,
+                                  raw: String) -> RoutingResult {
+        guard frame.candidates.indices.contains(index) else {
+            coordinator?.resolveDialogueFrame(.exhausted)
+            emitDialogueFrameResolved(.exhausted)
+            speak(key: "dialogue.exhausted")
+            return .unrecognised(transcript: raw)
+        }
+        let candidate = frame.candidates[index]
+        if let value = queryOverride {
+            let merge = DialogueMerge(value: value, capture: capture, source: .candidate)
+            coordinator?.resolveDialogueFrame(.answered(merge))
+            emitDialogueAnswer(capture: capture, source: .candidate)
+            emitDialogueFrameResolved(.answered(merge))
+        } else {
+            coordinator?.resolveDialogueFrame(.candidateSelected(index: index))
+            emitDialogueAnswer(capture: capture, source: .candidate)
+            emitDialogueFrameResolved(.candidateSelected(index: index))
+        }
+        switch candidate.domain {
+        case .news:
+            // C-2 (review-l2 F-2): the REAL relaxed news arm's hand-off
+            // (`:1210-1217`) mirrored — ack first, the reader owns every
+            // line from here; the strict stage (`:1131-1138`) is the same
+            // triplet. The relaxed stage's `intent_keyword_match`
+            // provenance event is stage-specific and deliberately not
+            // borrowed (no keyword rule fired here).
+            speakPreAck()
+            coordinator?.fireNewsReader()
+            emit(eventType: "news_reader_command", outcome: "success")
+        case .youtube:
+            // The strict YouTube stage's execution (`:1218-1221`): the
+            // builder guarantees an executable query for a youtube
+            // candidate (its executable-query rule); the guard is
+            // defensive totality.
+            guard let query = queryOverride ?? candidate.query else { break }
+            fireYouTubePlay(query: query)
+        case .music:
+            // A real query fires the shipped music arm; a degenerate
+            // pick chains a fresh slot-fill frame sequentially (§23's
+            // candidate intake).
+            fireMusicRequestOrProbe(
+                query: KeywordIntentRule.musicQueryOutcome(
+                    from: queryOverride ?? candidate.query ?? raw),
+                raw: raw,
+                intake: .candidate)
+        case .appLaunch:
+            // The relaxed app-launch arm's hand-off (`:1256-1264`): the
+            // returned line is the coordinator's (the confirmation
+            // question or the honest not-installed line); the caller only
+            // speaks what it is handed.
+            guard let appID = candidate.appID else { break }
+            if let line = coordinator?.requestAppLaunch(appID: appID, confidence: nil) {
+                coordinator?.noteGenericReply(line)
+                speak(text: line)
+            }
+        default:
+            // Not a framable domain — `DialogueCandidateBuilder` never
+            // produces these (defensive totality).
+            break
+        }
+        return .unrecognised(transcript: raw)
+    }
+
+    /// The attempt-cap close (§24; FR-MTC-007): a candidateChoice frame
+    /// closes honestly — `.exhausted`, the `dialogue.exhausted` line,
+    /// nothing executed (R3: executing an unasked candidate is the trap
+    /// FR-MTC-004/FR-MTC-010 forbid); a slotFill frame executes its
+    /// pending default instead (`.defaultExecuted`).
+    private func resolveDialogueExhaustion(frame: DialogueFrame, raw: String) -> RoutingResult {
+        switch frame.probeKind {
+        case .candidateChoice:
+            coordinator?.resolveDialogueFrame(.exhausted)
+            emitDialogueFrameResolved(.exhausted)
+            speak(key: "dialogue.exhausted")
+            return .unrecognised(transcript: raw)
+        case .slotFill:
+            return executeDialogueDefault(frame: frame, raw: raw)
+        }
+    }
+
+    /// The slotFill exhaustion default (§12.5/§24): resolve
+    /// `.defaultExecuted`, the two events, then the same dispatch an
+    /// answered frame uses, with the pending degenerate query as the
+    /// value (or the opening transcript when even that is absent —
+    /// `arm` guarantees one of the two exists for a live frame).
+    private func executeDialogueDefault(frame: DialogueFrame, raw: String) -> RoutingResult {
+        let value = frame.defaultQuery ?? frame.sourceTranscript
+        let merge = DialogueMerge(value: value, capture: .optionName, source: .defaultQuery)
+        coordinator?.resolveDialogueFrame(.defaultExecuted)
+        emitDialogueAnswer(capture: merge.capture, source: merge.source)
+        emitDialogueFrameResolved(.defaultExecuted)
+        dispatchDialogueMusicValue(value, frame: frame, raw: raw)
+        return .unrecognised(transcript: raw)
+    }
+
+    /// `dialogue_answer` for a consumed answer (§26): the closed
+    /// capture-form / merge-source vocabulary, count/enum only — never
+    /// the answer text, never the merged value.
+    private func emitDialogueAnswer(capture: CaptureForm, source: MergeSource) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "command_router",
+            eventType: "dialogue_answer",
+            durationMs: nil,
+            outcome: "success",
+            errorCode: nil,
+            metadata: [
+                "capture_form": capture.rawValue,
+                "merge_source": source.rawValue
+            ]
+        ))
+    }
+
+    /// `dialogue_frame_resolved` for the TURN-TIME resolutions the router
+    /// itself initiates (§26's component split: `command_router` for
+    /// answered/defaultExecuted/candidateSelected/exhausted/cancelled/
+    /// escaped/bargedIn; the coordinator's funnel emits the ones it owns
+    /// — timeout, emergency, supersession — with its own component). The
+    /// outcome rides both the event's outcome field and the `outcome`
+    /// metadata key §26 pins; the vocabulary is the closed ten-case enum,
+    /// mapped in one place.
+    private func emitDialogueFrameResolved(_ resolution: DialogueFrameResolution) {
+        let outcome: String
+        switch resolution {
+        case .answered: outcome = "answered"
+        case .defaultExecuted: outcome = "defaultExecuted"
+        case .candidateSelected: outcome = "candidateSelected"
+        case .exhausted: outcome = "exhausted"
+        case .cancelled: outcome = "cancelled"
+        case .escaped: outcome = "escaped"
+        case .bargedIn: outcome = "bargedIn"
+        case .timedOut: outcome = "timedOut"
+        case .superseded: outcome = "superseded"
+        case .emergency: outcome = "emergency"
+        }
+        observabilityBus.emit(ObservabilityEvent(
+            component: "command_router",
+            eventType: "dialogue_frame_resolved",
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: nil,
+            metadata: ["outcome": outcome]
+        ))
+    }
+
+    /// One music turn, state machine B (§10) through to execution. The
+    /// turn writes at most one `.spotify` tool-log entry and speaks
+    /// exactly one outcome line (plus the pre-ack) on every branch.
+    @MainActor
+    private func runMusicTurn(query: String, locale: Locale, startedAt: Date) async {
+        let linked = spotifyAccountSession?.isLinked ?? false
+        let product = spotifyAccountSession?.product ?? .unknown
+        let transport = spotifyTransport
+        let youtubeServeable = musicYouTubeServeable
+        let searchOpenerPresent = spotifyLinkOpener != nil
+        let youtubePrefetch: (apiKey: String, transport: LocalToolTransport)? = {
+            guard musicYouTubeKeyed,
+                  let apiKey = youtubeConfigStore?.apiKey,
+                  let youtubeTransport else { return nil }
+            return (apiKey, youtubeTransport)
+        }()
+
+        var effectiveLinked = linked
+        // A linked account's turn always writes the turn entry (the
+        // matrix's linked rows 1–7 and row 11); the unlinked treatment
+        // writes one only when its own search hand-off attempts a link.
+        var entryRequired = linked
+        var token: String?
+        var search: Result<SpotifyTool.TrackResult, SpotifyTool.FetchError>?
+        var searchStatus: Int?
+
+        if linked, let transport {
+            let tokenResult = await spotifyAccountSession?.validAccessToken()
+            switch tokenResult {
+            case .success(let value):
+                token = value
+                let found = await performMusicSearch(query: query, token: value,
+                                                     transport: transport,
+                                                     youtubePrefetch: youtubePrefetch)
+                search = found.result
+                searchStatus = found.statusCode
+                // §28's `spotify_search` vocabulary — emitted uniformly
+                // whenever a search actually ran (the matrix rows that
+                // list it read as highlights of the rows' distinctive
+                // events, not an exhaustive log; "emit the event pair" in
+                // the turn flow presumes it on every searched turn).
+                switch found.result {
+                case .success:
+                    emitSpotify(eventType: "spotify_search", outcome: "usable",
+                                durationMs: nil, errorCode: nil)
+                case .failure(.noResults):
+                    emitSpotify(eventType: "spotify_search", outcome: "empty",
+                                durationMs: nil, errorCode: nil)
+                case .failure:
+                    emitSpotify(eventType: "spotify_search", outcome: "failed",
+                                durationMs: nil, errorCode: nil)
+                }
+            case .failure(.revoked):
+                // Row 10: the session wiped itself on the provider's
+                // `invalid_grant` (its `spotify_unlink` revoked event is
+                // the session's to emit). The turn is an unlinked turn;
+                // none of its own attempts happened.
+                effectiveLinked = false
+                entryRequired = false
+            case .failure, .none:
+                // Row 11: the record was kept (transport / refresh /
+                // store failure) — the search-failure shape. The matrix
+                // mandates the `.spotify` fail entry for this row even
+                // though no search ran; there is no HTTP status.
+                await executeMusicTurn(Self.selectMusicOutcome(spotifyLinked: true,
+                                                               spotifyTransportPresent: true,
+                                                               search: nil,
+                                                               product: product,
+                                                               deepLinkCapable: false,
+                                                               youtubeServeable: youtubeServeable,
+                                                               spotifySearchOpenerPresent: searchOpenerPresent),
+                                       query: query, locale: locale, startedAt: startedAt,
+                                       token: nil, transport: nil, searchStatus: nil,
+                                       entryRequired: true)
+                return
+            }
+        }
+        // (linked && transport == nil falls straight to the selection:
+        // §28 names the row-7 branch for it; §10B's askability wording
+        // would say unlinked — §28's ordered conditions win, recorded in
+        // the task notes.)
+
+        // §13's `spotifyDeepLinkCapable`: the opener seam exists AND the
+        // platform probe accepts the resolved track URI. Probed only
+        // where it can matter (the non-premium branch); premium selection
+        // never consults it.
+        var deepLinkCapable = false
+        if effectiveLinked, product != .premium,
+           case .success(let track)? = search,
+           let uri = SpotifyTool.trackURI(id: track.id),
+           let opener = spotifyLinkOpener {
+            deepLinkCapable = opener.canOpenURL(uri)
+        }
+
+        let outcome = Self.selectMusicOutcome(spotifyLinked: effectiveLinked,
+                                              spotifyTransportPresent: transport != nil,
+                                              search: search,
+                                              product: product,
+                                              deepLinkCapable: deepLinkCapable,
+                                              youtubeServeable: youtubeServeable,
+                                              spotifySearchOpenerPresent: searchOpenerPresent)
+        await executeMusicTurn(outcome, query: query, locale: locale, startedAt: startedAt,
+                               token: token, transport: transport, searchStatus: searchStatus,
+                               entryRequired: entryRequired)
+    }
+
+    /// The Spotify search phase with the §13 row-1 concurrency: when the
+    /// YouTube path is keyed, both fetches are fired together and joined
+    /// (NFR-SP-001: bounded by the larger provider budget, never the
+    /// sum). Returns the search verdict plus the HTTP status the turn
+    /// should record (the matrix's `statusCode` conventions: 200 for a
+    /// 2xx search, the failure status when the provider answered one).
+    private func performMusicSearch(query: String, token: String,
+                                    transport: LocalToolTransport,
+                                    youtubePrefetch: (apiKey: String, transport: LocalToolTransport)?)
+        async -> (result: Result<SpotifyTool.TrackResult, SpotifyTool.FetchError>, statusCode: Int?) {
+        let fetched: Result<SpotifyTool.TrackResult, SpotifyTool.FetchError>
+        if let youtubePrefetch {
+            async let spotifyLeg = fetchSpotifyResult(query: query, token: token,
+                                                      transport: transport)
+            async let youtubeLeg: Void = prefetchYouTubeLeg(query: query,
+                                                            apiKey: youtubePrefetch.apiKey,
+                                                            transport: youtubePrefetch.transport)
+            let (spotifyResult, _) = await (spotifyLeg, youtubeLeg)
+            fetched = spotifyResult
+        } else {
+            fetched = await fetchSpotifyResult(query: query, token: token, transport: transport)
+        }
+        switch fetched {
+        case .success:
+            return (fetched, 200)
+        case .failure(.noResults):
+            // 2xx with zero tracks (row 6's status convention).
+            return (fetched, 200)
+        case .failure(.invalidResponse(let statusCode)):
+            return (fetched, statusCode)
+        case .failure:
+            return (fetched, nil)
+        }
+    }
+
+    /// One Spotify search attempt, classified into the tool's closed
+    /// error vocabulary — exactly one request (the tool owns that
+    /// discipline).
+    private func fetchSpotifyResult(query: String, token: String,
+                                    transport: LocalToolTransport) async
+        -> Result<SpotifyTool.TrackResult, SpotifyTool.FetchError> {
+        do {
+            let track = try await SpotifyTool.fetchTopTrack(query: query,
+                                                            accessToken: token,
+                                                            transport: transport)
+            return .success(track)
+        } catch let error as SpotifyTool.FetchError {
+            return .failure(error)
+        } catch {
+            // `fetchTopTrack` only throws `FetchError`; anything else is
+            // a transport anomaly (row 7).
+            return .failure(.transportUnavailable)
+        }
+    }
+
+    /// L2-R1: the concurrent YouTube leg runs only on the keyed fetch
+    /// path, and its result is never consumed — when Spotify cannot
+    /// serve, the turn falls back through `fireYouTubePlay` verbatim
+    /// (ADR-SP-06), so the pre-fetched page can never change what is
+    /// opened or spoken. Errors are swallowed; the fallback's own call
+    /// owns every failure line. The keyless path is NOT pre-opened.
+    private func prefetchYouTubeLeg(query: String, apiKey: String,
+                                    transport: LocalToolTransport) async {
+        _ = try? await YouTubeTool.fetchTopResult(query: query, apiKey: apiKey,
+                                                  transport: transport)
+    }
+
+    /// Executes the selection's outcome. Every branch reaches exactly
+    /// one spoken outcome line (plus the pre-ack) before returning.
+    @MainActor
+    private func executeMusicTurn(_ outcome: MusicOutcome, query: String, locale: Locale,
+                                  startedAt: Date, token: String?,
+                                  transport: LocalToolTransport?, searchStatus: Int?,
+                                  entryRequired: Bool) async {
+        switch outcome {
+        case .spotifyRemote(let track):
+            guard let token, let transport else {
+                // Defensive: the selection yields remote only with a
+                // token and transport in hand. The honest terminal beats
+                // a crash.
+                deliverMusicLine(locale: locale, key: "spotify.appMissing",
+                                 statusCode: searchStatus, outcome: "app_missing",
+                                 startedAt: startedAt)
+                return
+            }
+            await executeRemoteMusicPlay(track: track, query: query, token: token,
+                                         transport: transport, locale: locale,
+                                         startedAt: startedAt, searchStatus: searchStatus)
+        case .spotifyDeepLink(let track):
+            executeMusicDeepLink(track: track, locale: locale, startedAt: startedAt,
+                                 playStatus: nil, playFailed: false,
+                                 searchStatus: searchStatus)
+        case .spotifySearchHandoff:
+            executeMusicSearchHandoff(query: query, locale: locale, startedAt: startedAt)
+        case .youtube:
+            deliverYouTubeFallback(query: query, locale: locale, startedAt: startedAt,
+                                   statusCode: searchStatus, writeEntry: entryRequired)
+        case .honestLine(let key):
+            if entryRequired {
+                deliverMusicLine(locale: locale, key: key, statusCode: searchStatus,
+                                 outcome: Self.musicFallbackOutcome(forKey: key),
+                                 startedAt: startedAt)
+            } else {
+                // Rows 9/10/12: nothing was attempted — the fallback
+                // event and the honest line, no tool-log entry (the
+                // matrix rows' "none").
+                emitSpotify(eventType: "spotify_fallback",
+                            outcome: Self.musicFallbackOutcome(forKey: key),
+                            durationMs: nil, errorCode: nil)
+                speakWithVisibleOutcome(key: key)
+            }
+        }
+    }
+
+    /// The remote-play leg (rows 1/2, §10B): one attempt; a 401 triggers
+    /// exactly one forced token acquisition and one retry; a second 401
+    /// wipes through the session (`markRevoked` — §26 names this
+    /// "the router's second-401 path") and takes the unlinked treatment
+    /// (row 10). Every other failure falls to the deep link (row 2) —
+    /// never to a second play attempt.
+    @MainActor
+    private func executeRemoteMusicPlay(track: SpotifyTool.TrackResult, query: String,
+                                        token: String, transport: LocalToolTransport,
+                                        locale: Locale, startedAt: Date,
+                                        searchStatus: Int?) async {
+        guard let uri = SpotifyTool.trackURI(id: track.id) else {
+            // Defensive: a validated `TrackResult` always builds a URI;
+            // if it ever did not, the honest app-absent terminal is the
+            // answer.
+            deliverMusicLine(locale: locale, key: "spotify.appMissing",
+                             statusCode: searchStatus, outcome: "app_missing",
+                             startedAt: startedAt)
+            return
+        }
+
+        var failure: SpotifyTool.PlayError
+        do {
+            try await SpotifyTool.playTrack(uri: uri, accessToken: token, transport: transport)
+            deliverRemoteMusicSuccess(track: track, locale: locale, startedAt: startedAt)
+            return
+        } catch let error as SpotifyTool.PlayError {
+            failure = error
+        } catch {
+            // `playTrack` only throws `PlayError`; anything else is a
+            // transport anomaly (row 2's network leg).
+            failure = .transportUnavailable
+        }
+        emitSpotify(eventType: "spotify_play", outcome: Self.spotifyPlayOutcome(failure),
+                    durationMs: nil, errorCode: nil)
+
+        if case .unauthorized = failure {
+            guard let session = spotifyAccountSession else {
+                executeMusicDeepLink(track: track, locale: locale, startedAt: startedAt,
+                                     playStatus: Self.spotifyPlayStatus(failure),
+                                     playFailed: true, searchStatus: searchStatus)
+                return
+            }
+            switch await session.validAccessToken() {
+            case .success(let refreshedToken):
+                do {
+                    try await SpotifyTool.playTrack(uri: uri, accessToken: refreshedToken,
+                                                    transport: transport)
+                    deliverRemoteMusicSuccess(track: track, locale: locale,
+                                              startedAt: startedAt)
+                    return
+                } catch let retryError as SpotifyTool.PlayError {
+                    emitSpotify(eventType: "spotify_play",
+                                outcome: Self.spotifyPlayOutcome(retryError),
+                                durationMs: nil, errorCode: nil)
+                    if case .unauthorized = retryError {
+                        // §10B: the second 401 is the provider's
+                        // definitive rejection — wipe (the session emits
+                        // `spotify_unlink` revoked) and take the unlinked
+                        // treatment.
+                        _ = await session.markRevoked()
+                        await deliverUnlinkedMusicTreatment(query: query, locale: locale,
+                                                            startedAt: startedAt)
+                        return
+                    }
+                    executeMusicDeepLink(track: track, locale: locale, startedAt: startedAt,
+                                         playStatus: Self.spotifyPlayStatus(retryError),
+                                         playFailed: true, searchStatus: searchStatus)
+                    return
+                } catch {
+                    emitSpotify(eventType: "spotify_play", outcome: "network_failed",
+                                durationMs: nil, errorCode: nil)
+                    executeMusicDeepLink(track: track, locale: locale, startedAt: startedAt,
+                                         playStatus: nil, playFailed: true,
+                                         searchStatus: searchStatus)
+                    return
+                }
+            case .failure(.revoked):
+                // The refresh itself was rejected: the session already
+                // wiped (and emitted) — the turn is unlinked (row 10).
+                await deliverUnlinkedMusicTreatment(query: query, locale: locale,
+                                                    startedAt: startedAt)
+                return
+            case .failure:
+                // No new token could be obtained honestly (transport /
+                // refresh / store failure): no second play attempt is
+                // possible — the deep link replaces it (row 2's shape),
+                // never a futile retry with a rejected token.
+                executeMusicDeepLink(track: track, locale: locale, startedAt: startedAt,
+                                     playStatus: Self.spotifyPlayStatus(failure),
+                                     playFailed: true, searchStatus: searchStatus)
+                return
+            }
+        }
+
+        executeMusicDeepLink(track: track, locale: locale, startedAt: startedAt,
+                             playStatus: Self.spotifyPlayStatus(failure),
+                             playFailed: true, searchStatus: searchStatus)
+    }
+
+    /// Row 1's success delivery: the honest confirmation with the
+    /// provider's track name — SPOKEN ONLY (never carded, never logged,
+    /// never an event field; NFR-SP-002) — and the turn's `ok` entry
+    /// (204, empty query/response by the §21 contract).
+    private func deliverRemoteMusicSuccess(track: SpotifyTool.TrackResult, locale: Locale,
+                                           startedAt: Date) {
+        emitSpotify(eventType: "spotify_play", outcome: "ok", durationMs: nil, errorCode: nil)
+        speak(text: L10n.fmt("spotify.playing", locale: locale, track.title), locale: locale)
+        logToolRequest(kind: .spotify, query: "", response: "", outcome: "ok",
+                       statusCode: 204,
+                       durationMs: Self.elapsedMilliseconds(since: startedAt))
+    }
+
+    /// The deep-link leg (rows 2/3/4/5): probe and open `spotify:track:`
+    /// through the opener seam. `playFailed` marks a fallback that
+    /// followed a failed remote attempt — its verdict (row 2's `fail`)
+    /// and status survive into the entry; a clean free-tier hand-off is
+    /// row 3's `ok`/nil. A not-opened attempt is row 5's terminal: the
+    /// deeplink event is the turn's last observable, no chaining, and
+    /// the honest line is the entry's response.
+    @MainActor
+    private func executeMusicDeepLink(track: SpotifyTool.TrackResult, locale: Locale,
+                                      startedAt: Date, playStatus: Int?, playFailed: Bool,
+                                      searchStatus: Int?) {
+        guard let uri = SpotifyTool.trackURI(id: track.id) else {
+            deliverMusicLine(locale: locale, key: "spotify.appMissing",
+                             statusCode: playStatus ?? searchStatus,
+                             outcome: "app_missing", startedAt: startedAt)
+            return
+        }
+        guard let opener = spotifyLinkOpener else {
+            // No opener seam: nothing can be attempted (no deeplink
+            // event — the vocabulary counts attempts), the honest
+            // terminal is the entry's response.
+            emitSpotify(eventType: "spotify_fallback", outcome: "app_missing",
+                        durationMs: nil, errorCode: nil)
+            speakWithVisibleOutcome(key: "spotify.appMissing")
+            logToolRequest(kind: .spotify, query: "",
+                           response: L10n.str("spotify.appMissing", locale: locale),
+                           outcome: "fail",
+                           statusCode: playStatus ?? searchStatus,
+                           durationMs: Self.elapsedMilliseconds(since: startedAt))
+            return
+        }
+        switch SpotifyTool.open(uri, opener: opener) {
+        case .opened:
+            emitSpotify(eventType: "spotify_deeplink", outcome: "opened",
+                        durationMs: nil, errorCode: nil)
+            // Hand-off line: spoken only — the app itself shows what
+            // happens next (the `youtube.openingSearch` precedent).
+            speak(text: L10n.str("spotify.openApp", locale: locale), locale: locale)
+            logToolRequest(kind: .spotify, query: "", response: "",
+                           outcome: playFailed ? "fail" : "ok",
+                           statusCode: playFailed ? playStatus : nil,
+                           durationMs: Self.elapsedMilliseconds(since: startedAt))
+        case .notOpened:
+            emitSpotify(eventType: "spotify_deeplink", outcome: "not_opened",
+                        durationMs: nil, errorCode: nil)
+            speakWithVisibleOutcome(key: "spotify.appMissing")
+            logToolRequest(kind: .spotify, query: "",
+                           response: L10n.str("spotify.appMissing", locale: locale),
+                           outcome: "fail",
+                           statusCode: playFailed ? playStatus : searchStatus,
+                           durationMs: Self.elapsedMilliseconds(since: startedAt))
+        }
+    }
+
+    /// Row 8's search hand-off: unlinked, no YouTube leg, an opener
+    /// present — hand the query to the app's own search. An opened
+    /// hand-off is `ok` with no HTTP status (§21); a not-opened attempt
+    /// is the terminal not-linked line (its deeplink event marks it; no
+    /// fallback event — same no-chaining shape as row 5).
+    @MainActor
+    private func executeMusicSearchHandoff(query: String, locale: Locale, startedAt: Date) {
+        guard let opener = spotifyLinkOpener, let uri = SpotifyTool.searchURI(query: query) else {
+            // Defensive: the selection offers the hand-off only with the
+            // opener seam present; an unbuildable URI (empty/over-cap)
+            // degrades to the same honest line — no attempt, no entry.
+            emitSpotify(eventType: "spotify_fallback", outcome: "not_linked",
+                        durationMs: nil, errorCode: nil)
+            speakWithVisibleOutcome(key: "spotify.notLinked")
+            return
+        }
+        switch SpotifyTool.open(uri, opener: opener) {
+        case .opened:
+            emitSpotify(eventType: "spotify_deeplink", outcome: "opened",
+                        durationMs: nil, errorCode: nil)
+            speak(text: L10n.str("spotify.openSearch", locale: locale), locale: locale)
+            logToolRequest(kind: .spotify, query: "", response: "", outcome: "ok",
+                           statusCode: nil,
+                           durationMs: Self.elapsedMilliseconds(since: startedAt))
+        case .notOpened:
+            emitSpotify(eventType: "spotify_deeplink", outcome: "not_opened",
+                        durationMs: nil, errorCode: nil)
+            speakWithVisibleOutcome(key: "spotify.notLinked")
+            logToolRequest(kind: .spotify, query: "",
+                           response: L10n.str("spotify.notLinked", locale: locale),
+                           outcome: "fail", statusCode: nil,
+                           durationMs: Self.elapsedMilliseconds(since: startedAt))
+        }
+    }
+
+    /// The unlinked treatment rows 8/10/12 share: YouTube where it can
+    /// serve, else the search hand-off where an opener exists, else the
+    /// honest not-linked line. No `.spotify` entry of its own — only the
+    /// hand-off leg's attempt writes one (row 8's "only if a Spotify
+    /// attempt happened").
+    @MainActor
+    private func deliverUnlinkedMusicTreatment(query: String, locale: Locale,
+                                               startedAt: Date) async {
+        let outcome = Self.selectMusicOutcome(spotifyLinked: false,
+                                              spotifyTransportPresent: false,
+                                              search: nil,
+                                              product: .unknown,
+                                              deepLinkCapable: false,
+                                              youtubeServeable: musicYouTubeServeable,
+                                              spotifySearchOpenerPresent: spotifyLinkOpener != nil)
+        await executeMusicTurn(outcome, query: query, locale: locale, startedAt: startedAt,
+                               token: nil, transport: nil, searchStatus: nil,
+                               entryRequired: false)
+    }
+
+    /// §13's fallback contract: the `spotify_fallback` marker first, the
+    /// YouTube helper VERBATIM (ADR-SP-06 — the query-free projection
+    /// keeps the music query out of the tool log; [T-114][M-1]), then
+    /// the turn's own `.spotify` fail entry when a Spotify attempt
+    /// happened.
+    private func deliverYouTubeFallback(query: String, locale: Locale, startedAt: Date,
+                                        statusCode: Int?, writeEntry: Bool) {
+        emitSpotify(eventType: "spotify_fallback", outcome: "youtube",
+                    durationMs: nil, errorCode: nil)
+        fireYouTubePlay(query: query, logProjection: .queryFree)
+        guard writeEntry else { return }
+        logToolRequest(kind: .spotify, query: "", response: "", outcome: "fail",
+                       statusCode: statusCode,
+                       durationMs: Self.elapsedMilliseconds(since: startedAt))
+    }
+
+    /// The static-line delivery (§28's signature): the fallback event
+    /// with the key's closed outcome, the localized line made visible
+    /// (the honest lines are cards, the `deliverYouTubeFailure`
+    /// precedent), and the turn's `.spotify` fail entry carrying the
+    /// exact line the user heard — never a query, title, id or token.
+    private func deliverMusicLine(locale: Locale, key: String, statusCode: Int?,
+                                  outcome: String, startedAt: Date) {
+        emitSpotify(eventType: "spotify_fallback", outcome: outcome,
+                    durationMs: nil, errorCode: nil)
+        speakWithVisibleOutcome(key: key)
+        logToolRequest(kind: .spotify, query: "",
+                       response: L10n.str(key, locale: locale), outcome: "fail",
+                       statusCode: statusCode,
+                       durationMs: Self.elapsedMilliseconds(since: startedAt))
+    }
+
+    /// §28's closed event vocabulary, component `spotify`, `metadata: [:]`
+    /// on every event — no query, title, id or token can reach the bus.
+    private func emitSpotify(eventType: String, outcome: String,
+                             durationMs: Int?, errorCode: String?) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "spotify",
+            eventType: eventType,
+            durationMs: durationMs,
+            outcome: outcome,
+            errorCode: errorCode,
+            metadata: [:]
+        ))
+    }
+
+    /// `PlayError` → §28's closed `spotify_play` outcome set.
+    private static func spotifyPlayOutcome(_ error: SpotifyTool.PlayError) -> String {
+        switch error {
+        case .premiumRequired: return "premium_required"
+        case .restricted: return "restricted"
+        case .noActiveDevice: return "no_active_device"
+        case .unauthorized: return "unauthorized"
+        case .invalidResponse, .timedOut, .transportUnavailable, .invalidURI:
+            return "network_failed"
+        }
+    }
+
+    /// `PlayError` → the HTTP status the turn's entry records (the
+    /// matrix's 403/404/nil pair plus the general "from the last HTTP
+    /// response when one exists"); timeouts and transport failures carry
+    /// no status.
+    private static func spotifyPlayStatus(_ error: SpotifyTool.PlayError) -> Int? {
+        switch error {
+        case .premiumRequired, .restricted: return 403
+        case .noActiveDevice: return 404
+        case .unauthorized: return 401
+        case .invalidResponse(let statusCode): return statusCode
+        case .timedOut, .transportUnavailable, .invalidURI: return nil
+        }
+    }
+
+    /// Honest-line L10n key → §28's closed `spotify_fallback` outcome
+    /// set.
+    private static func musicFallbackOutcome(forKey key: String) -> String {
+        switch key {
+        case "spotify.notFound": return "not_found"
+        case "spotify.unavailable": return "unavailable"
+        case "spotify.notLinked": return "not_linked"
+        case "spotify.appMissing": return "app_missing"
+        default: return "unavailable"
+        }
     }
 
     // MARK: - [TOOL-DEBUG-LOG] Local-tool request log
@@ -2638,9 +3996,41 @@ final class CommandRouter {
             emit(eventType: "command_health_query_stub", outcome: "info")
             speakWithVisibleOutcome(key: "router.healthNotAvailable")
         case .music:
-            // First-class stub intent (spec §5.1).
-            emit(eventType: "command_music_stub", outcome: "info")
-            speakWithVisibleOutcome(key: "router.musicStub")
+            // [SPOTIFY] (2026-10-07) T-116: the model-resolved music
+            // intent routes to the same music path the ladder stage
+            // uses. The stub dies here — `command_music_stub` and
+            // `router.musicStub` have no reachable emission left
+            // (ADR-SP-11 keeps the catalog key, unreachable).
+            //
+            // The frozen 12-action grammar carries no query slot for
+            // this action, so the §13 order
+            // (`interpretedQuery ?? musicQuery ?? transcript`) reads
+            // against this repo's `InterpretedCommand` shape: the
+            // command's free-text `message` entity is the model's query
+            // when it set one, else the deterministic extractor, else
+            // the raw transcript.
+            let modelQuery = command.message?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let interpretedQuery = (modelQuery?.isEmpty == false) ? modelQuery : nil
+            if let interpretedQuery {
+                // The model set its own query — exactly today's request.
+                fireMusicRequest(query: interpretedQuery)
+            } else {
+                // [MTC-T134] interpreted-degenerate (design-l2 §12.4 edit
+                // 4; §23's interpreted intake): the model set no
+                // `message`, so the deterministic extractor reads the
+                // transcript — a degenerate reading opens the slot-fill
+                // probe instead of searching the fallback token, a
+                // content reading fires the identical blind request
+                // (byte-identity, NFR-MTC-012). The arrived command rides
+                // the frame as `activeCommand` (L2-D13) so an answer
+                // merges back into its own dispatch.
+                fireMusicRequestOrProbe(
+                    query: KeywordIntentRule.musicQueryOutcome(from: raw),
+                    raw: raw,
+                    intake: .interpreted,
+                    activeCommand: command)
+            }
         case .sendMessage:
             handleSendMessage(command)
         case .guide:

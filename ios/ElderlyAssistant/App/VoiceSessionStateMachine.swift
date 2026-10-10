@@ -13,6 +13,7 @@ enum VoiceSessionState: Equatable {
     case understanding
     case speaking
     case awaitingConfirmation
+    case awaitingSlotAnswer
     case error
     case stopped
 
@@ -26,17 +27,34 @@ enum VoiceSessionState: Equatable {
             // the pipeline has returned to idle, and push speech (morning
             // briefing, notification read-aloud) may start BEFORE the
             // pipeline has been primed, while the session is idle/stopped.
-            return [.listening, .speaking, .awaitingConfirmation, .error,
-                    .stopped].contains(newState)
+            // Both answer windows are reachable here too: the confirmation
+            // challenge (medication yes/no) and the slot answer window
+            // (FR-MTC-014) open on a question the assistant has just
+            // decided to ask.
+            return [.listening, .speaking, .awaitingConfirmation,
+                    .awaitingSlotAnswer, .error, .stopped].contains(newState)
         case .listening, .transcribing, .understanding, .speaking:
             // Busy states accept .stopped — the manual escape hatch:
             // tapping the Talk button mid-cycle cancels and recycles the
             // pipeline (same recovery as the watchdog). They also accept
             // .awaitingConfirmation: the medication challenge is issued
             // while the router is still "understanding" the utterance.
+            // .awaitingSlotAnswer joins for the same reason: a dialogue
+            // probe is decided and opened while the router is still
+            // understanding its trigger.
             return [.transcribing, .understanding, .speaking, .idle,
-                    .awaitingConfirmation, .error, .stopped].contains(newState)
+                    .awaitingConfirmation, .awaitingSlotAnswer, .error,
+                    .stopped].contains(newState)
         case .awaitingConfirmation:
+            return [.idle, .error, .stopped].contains(newState)
+        case .awaitingSlotAnswer:
+            // The slot answer window (FR-MTC-014) mirrors the confirmation
+            // challenge's exits: every resolution — answer merged, cancel,
+            // barge-in, escape, timeout — leaves to `.idle` (with `.error`
+            // and `.stopped` for the pipeline backstops), and the opener
+            // bridges in through `.idle` when a state cannot reach the
+            // window directly. No direct edge to the OTHER window: the two
+            // windows never coexist.
             return [.idle, .error, .stopped].contains(newState)
         case .error:
             return [.idle, .stopped].contains(newState)
@@ -64,7 +82,9 @@ enum VoiceSessionState: Equatable {
     /// (the assistant is replying — a long hold there would swallow the
     /// tap that today stops the reply and recycles; the button must keep
     /// its plain tap semantics) nor `.awaitingConfirmation` (the yes/no
-    /// challenge owns the dialog; the button is disabled there anyway).
+    /// challenge owns the dialog; the button is disabled there anyway)
+    /// nor `.awaitingSlotAnswer` (FR-MTC-014: the slot probe dialogue owns
+    /// the turn in exactly the same way).
     /// Pure state policy — no transition-table changes needed, because
     /// the reset itself travels existing legal transitions (busy → .stopped
     /// → .idle → [.speaking]).
@@ -72,7 +92,7 @@ enum VoiceSessionState: Equatable {
         switch self {
         case .idle, .listening, .transcribing, .understanding, .error, .stopped:
             return true
-        case .speaking, .awaitingConfirmation:
+        case .speaking, .awaitingConfirmation, .awaitingSlotAnswer:
             return false
         }
     }
@@ -87,11 +107,16 @@ enum VoiceSessionState: Equatable {
 /// The confirmation timeout (review C12, spec §3.3) lives here: entering
 /// `awaitingConfirmation` arms a timer that returns to `idle` and notifies
 /// the coordinator, which clears `pendingConfirmationEntryId` and speaks a
-/// localized notice.
+/// localized notice. The `awaitingSlotAnswer` answer window (FR-MTC-014)
+/// mirrors that machinery — same single config value, own timer and own
+/// SILENT callback — beside it, never through it.
 final class VoiceSessionStateMachine: ObservableObject {
 
     struct Config {
         /// Seconds before a pending confirmation challenge expires (C12).
+        /// The single source for BOTH windows (confirmation and the
+        /// dialogue slot answer window, FR-MTC-013/014) — the slot timer
+        /// reads this same field and introduces no second literal.
         var confirmationTimeoutSeconds: UInt64 = 45
     }
 
@@ -101,8 +126,16 @@ final class VoiceSessionStateMachine: ObservableObject {
     /// coordinator clears its pending entry and speaks the notice.
     var onConfirmationTimeout: (() -> Void)?
 
+    /// Fired when the `awaitingSlotAnswer` window times out (FR-MTC-013).
+    /// SILENT by contract (ADR-MTC-08): the coordinator resolves the
+    /// frame as timed-out and speaks nothing — deliberately unlike the
+    /// confirmation notice — and never calls the confirmation timeout
+    /// recorder. The confirmation callback above is untouched.
+    var onSlotAnswerTimeout: (() -> Void)?
+
     private let config: Config
     private var confirmationTimer: Task<Void, Never>?
+    private var slotAnswerTimer: Task<Void, Never>?
 
     init(config: Config = Config()) {
         self.config = config
@@ -117,12 +150,19 @@ final class VoiceSessionStateMachine: ObservableObject {
             return
         }
         let wasAwaitingConfirmation = state == .awaitingConfirmation
+        let wasAwaitingSlotAnswer = state == .awaitingSlotAnswer
         state = newState
         if wasAwaitingConfirmation {
             cancelConfirmationTimer()
         }
+        if wasAwaitingSlotAnswer {
+            cancelSlotAnswerTimer()
+        }
         if newState == .awaitingConfirmation {
             armConfirmationTimer()
+        }
+        if newState == .awaitingSlotAnswer {
+            armSlotAnswerTimer()
         }
     }
 
@@ -180,6 +220,54 @@ final class VoiceSessionStateMachine: ObservableObject {
         return state == .awaitingConfirmation
     }
 
+    /// Opens the slot answer window (`awaitingSlotAnswer`, FR-MTC-014)
+    /// unconditionally — the exact mirror of `openConfirmationWindow()`.
+    /// Only `.idle` and the busy set reach `.awaitingSlotAnswer`
+    /// directly; `.awaitingConfirmation`, `.error` and `.stopped` bridge
+    /// through `.idle` first (every state can reach `.idle`), so every
+    /// edge travelled is legal and "the window must EXIST, not merely be
+    /// attempted" (F14) holds for the dialogue probe exactly as it does
+    /// for the confirmation challenge. Opening is idempotent: while the
+    /// window is already open the original timer and budget stand.
+    ///
+    /// Bridging OUT of `.awaitingConfirmation` closes that challenge
+    /// (through `.idle`, which cancels its timer), which is what keeps
+    /// the two windows mutually exclusive by construction.
+    @discardableResult
+    func openSlotAnswerWindow() -> Bool {
+        if state != .awaitingSlotAnswer {
+            if !state.canTransition(to: .awaitingSlotAnswer) {
+                guard state.canTransition(to: .idle) else { return false }
+                transition(to: .idle)
+            }
+            transition(to: .awaitingSlotAnswer)
+        }
+        return state == .awaitingSlotAnswer
+    }
+
+    /// Restamps an OPEN slot answer window with a full fresh budget —
+    /// the re-probe path (L2-D6: a re-probe IS a probe speech). True only
+    /// when the session is already awaiting the slot answer; it never
+    /// opens or bridges a window (that is `openSlotAnswerWindow()`'s
+    /// job), so a stray call outside the window changes nothing.
+    @discardableResult
+    func refreshSlotAnswerWindow() -> Bool {
+        guard state == .awaitingSlotAnswer else { return false }
+        armSlotAnswerTimer()
+        return true
+    }
+
+    /// The answer-window length in seconds (review-l2 C-1): the ONE value
+    /// `config.confirmationTimeoutSeconds` (`:120`) owns, exposed as an
+    /// instance accessor so `AppCoordinator` can construct its
+    /// `DialogueManager` from this single source. `config` is a private
+    /// instance field, so no type-level access exists and no caller may
+    /// re-declare the 45; passing it at construction is C-1's other
+    /// sanctioned shape and this accessor is what feeds it.
+    var answerWindowSeconds: TimeInterval {
+        TimeInterval(config.confirmationTimeoutSeconds)
+    }
+
     private func armConfirmationTimer() {
         cancelConfirmationTimer()
         let seconds = config.confirmationTimeoutSeconds
@@ -205,5 +293,37 @@ final class VoiceSessionStateMachine: ObservableObject {
     private func cancelConfirmationTimer() {
         confirmationTimer?.cancel()
         confirmationTimer = nil
+    }
+
+    /// Arms the slot answer window timer — the exact mirror of
+    /// `armConfirmationTimer()`. The window value is read from the SAME
+    /// instance config field (`config.confirmationTimeoutSeconds`,
+    /// 45 s); this timer adds no literal of its own.
+    private func armSlotAnswerTimer() {
+        cancelSlotAnswerTimer()
+        let seconds = config.confirmationTimeoutSeconds
+        slotAnswerTimer = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: seconds * 1_000_000_000)
+            guard !Task.isCancelled, let self else { return }
+            // All mutations stay on the main queue (H1).
+            DispatchQueue.main.async {
+                // The F6 still-open guard, mirrored: report an expiry only
+                // for a window that is STILL open. Cancelling the timer is
+                // not enough — a callback already queued on main survives
+                // cancellation, so a frame resolved by another route (an
+                // answer, a cancel, a barge-in) must not have its old
+                // window close again. The arrival is silent either way
+                // (FR-MTC-013); the coordinator's callback resolves the
+                // frame and speaks nothing.
+                guard self.state == .awaitingSlotAnswer else { return }
+                self.transition(to: .idle)
+                self.onSlotAnswerTimeout?()
+            }
+        }
+    }
+
+    private func cancelSlotAnswerTimer() {
+        slotAnswerTimer?.cancel()
+        slotAnswerTimer = nil
     }
 }

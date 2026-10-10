@@ -1,216 +1,244 @@
-# Review — L2 Component Design (Profile Interview + Address-as)
+# Review — L2 Component Design (Multi-Turn Conversation)
 
-**Task:** `review-l2` (contract `review_report`) · **Agent:** `reviewer` (direct dispatch)
-**Artifact under review:** `specs/design-l2.md` (1,203 lines, contract `component_design_l2`)
-**Feature:** `profile-interview` · worktree branch `worktree-...-profile-interview` · 2026-10-05
-**Workflow exit condition:** `review.decision == GO`.
+**Task.** `review-l2` — the design-chain gate for the `multi-turn-conversation`
+workflow. Workflow exit condition: `review.decision == GO`.
 
-**Inputs.** The artifact; `specs/design-l1.md` (C01–C12, ADR-01…ADR-11, hand-off §16, hooks §17);
-`specs/profile-interview/constitution.md` (Field Contract, Address-as Behaviour Contract, Feature
-Constraints 1–8, OD-F1…OD-F3, OD-PI-4 / OD-PI-5); the project `constitution.md` (Standards,
-Architecture Constraints, release gates); `specs/define-requirements.lock.yaml` and all 16 FR-PI /
-11 NFR-PI requirement files; `specs/profile-interview/workflow.yaml`. This review is read-only —
-no artifact under review was modified.
+**Artifacts under review**
 
-**Verification method.** Beyond the documentary review, the design's claims about shipped code were
-checked by reading that code (25+ spots, listed below), and the central budget measurements were
-reproduced independently rather than taken on trust.
+| Artifact | Contract | Size | Status |
+|---|---|---|---|
+| `specs/design-l1.md` | `architecture_l1` | 680 lines | gate-cleared at `design-l1` |
+| `specs/design-l2.md` | `component_design_l2` | 1005 lines | this review |
 
-- Code claims verified: `OnboardingState.swift` (4-case `Step` enum; `status(of:)` ignoring unknown
-  raw values via `flatMap`; `pendingSteps` / `firstPendingStep`); `OnboardingWizardView.swift`
-  (`startingAt:` init at line 18; the four-case `stepContent`; `finishOnboarding()` calls
-  `coordinator.start()`); `ContentView.swift` (wizard/Home branch; the `XCTestConfigurationFilePath`
-  boot guard at line 27); `HomeView.swift` (`showWizard` fullScreenCover reading
-  `firstPendingStep` at 208–209; reminder-card `onResumeSetup` at 372); `IntentPrompt.swift` (the
-  three clause anchors at lines 99 / 185 / 249; `pluginSections` returning `""` when empty); the
-  two `InterpreterContext(` construction sites (`CommandRouter.swift:1412`,
-  `AppCoordinator.swift:3601`); `VoicePipeline.swift` (`handleWakeDetected` 714, guard +
-  `captureGeneration` epoch 723–729, `simulateWakeWordDetection()` routing through the same
-  handler 492–494); `Speaker.swift` (non-throwing `speak(_:locale:) async`; `PiperVoiceSpeaker`);
-  coordinator `noteSpeakingStarted` / `noteSpeakingEnded`; `suspendForSampleCapture()` returning
-  `true` with no live pipeline (10958–10959); `addFamilyContact` / `updateFamilyContact` carrying
-  `isEmergencyContact` (6029 / 6080); `preferredEmergencyContact` first-flagged rule (6249–6251);
-  the storage chain (`RawEncryptedStorage`; `EncryptedLocalStorage` typed write/read/delete;
-  `MigratingEncryptedStorage` read precedence snapshot → files → Keychain + migration;
-  `EncryptedFileStorage.url(for:)` nil root; Envelope {key, payload}; sha256 file naming;
-  `.atomic` + `.completeFileProtection` + excluded-from-backup; `StoragePlacementPolicy`);
-  `LogSanitiser` (`outcome` / `error_code` / `duration_ms` allow-listed; redaction applied before
-  the allow-list filter); `check-release-log-safety.py` `FEATURE_ROOTS` (line 141); `L10n.str` /
-  `L10n.fmt`; the planned `wakeAck` / `onboarding.aboutYou` / `profile.*` keys absent from the
-  catalog; `SettingsTabMappingTests` visible-row count 20 (line 56).
-- Budget proof independently reproduced: the `build()` literal was extracted from
-  `IntentPrompt.swift` with Swift multiline-literal semantics (dedent by the closing delimiter;
-  the blank line before the close yields one trailing `\n` — verified by compiling the shape),
-  the fixture values substituted (`ne`, `(none)`, the weather transcript) and counted by the Swift
-  compiler: **2,506 Characters / 2,718 UTF-8 bytes**, matching the design's measured table exactly.
-  Template with placeholder tokens: **2,698 bytes** (matches). The seed file under
-  `tools/train-intent` measures **2,699 bytes ending `request.\n\n`** (matches §13 item 3).
+`design-l2.md` sha256 verified at review time (chunked here for readability):
+`9c164658 5b137833 0129c007 8cc4ae0f 3a32ab3e 818e3a86 ac87fe8c 069c6f51`.
+
+**Feature / worktree.** `multi-turn-conversation` @
+`/Users/anjan/workspace/projects/elderly-ai-assistant-multi-turn-conversation`,
+branch `feat/multi-turn-conversation`.
+
+**Inputs consulted.** Feature supplement
+`specs/multi-turn-conversation/constitution.md`; root `constitution.md`
+(Archive / Standards / Agent Principles bind this review); the requirement
+set `specs/define-requirements.md` plus `FR/` (FR-MTC-001..020) and `NFR/`
+(NFR-MTC-001..012); the workflow `.ai-sdd/workflows/multi-turn-conversation.yaml`.
+
+**Verification method.** Read-only review; no artifact, workflow file or git
+state was modified. Every load-bearing code claim below was re-checked
+against the shipped source in this worktree rather than trusted from the
+documents: the interception insertion point, the music ladder arms, the
+interpreted-music dispatch, `routeKeywordRemainder`, the session state
+machine, the coordinator confirmation/timer wiring, `LocalBrainChain.turnInput`,
+`KeywordIntentRule.musicQuery`, `IntentPrompt.build`, the release-log gate
+and the test layout. Central measurements were reproduced independently
+(see Reproduced below).
 
 ## Summary
 
-**All seven checklist items pass; no blocking findings. The design is cleared to feed
-`security-design-review`.**
+**Decision: GO** — 0 BLOCKER, 1 MAJOR, 3 MINOR, 3 NOTE.
+
+- Checklist: **7 / 7 items pass** (item 3 passes with the F-1 caveat).
+- No finding blocks GO; all findings are mechanically resolvable with
+  in-repo patterns and are compile- or test-tripwired at first build.
+- The design is internally consistent with L1, resolves the L1 §31 items
+  R1-R5/R10-R12 against verified real call sites, traces all 32
+  requirements, and keeps scope discipline.
+
+### Reproduced measurements (independent)
+
+- Rendered `IntentPrompt.build` baseline = **exactly 2,506 Swift Characters**
+  (recompiled the literal verbatim via swiftc with the same interpolation
+  substitutions); matches `IntentPromptTests.swift:495` and
+  `PinnedSurfaceGuardTests.swift:66`. Worst case with the address clause =
+  2,586 (+80) and the ceiling 3,000 match pins at `:498-507` and `:67-69`.
+- `VoiceSessionStateMachine.Config.confirmationTimeoutSeconds` = **45**
+  (`UInt64` instance `var`, `App/VoiceSessionStateMachine.swift:95`); only
+  usages are `:185` and the test injections.
+- All pre-existing test files the L2 §18 table references exist, including
+  `CommandRouterMusicTests.swift` with its four doubles (`:75-87`) and
+  `PinnedSurfaceGuardTests.swift` with the digests it names.
+- No new-symbol name collides: `DialogueManager`, `DialogueFrame`,
+  `DialogueAnswerPath`, `DialogueOptionCatalog`, `DialogueProbeComposer`,
+  `MusicQueryExtraction`, `nearMatches`, `awaitingSlotAnswer` are all absent
+  from the worktree today.
+- `Localizable.xcstrings` has 1,364 keys and **zero** `dialogue.*` keys
+  pre-existing; `router.reprompt`, `router.rephrase.discard`,
+  `router.confirmationTimeout` and `router.sensitiveBlocked` all exist.
+
+## Checklist
 
 ### 1. Explicit error return types — PASS
 
-Every interface in §5 declares its failure surface explicitly; nothing returns `any Error` or an
-`unknown`-style placeholder (the design states this at §5, lines 372–374, and the claim holds).
+§8 defines `DialogueError` as a closed case vocabulary; the mutating entry
+points are `throws` (`DialogueManager.arm`), `DialogueOptionCatalog.load(bundle:)`
+throws, and no interface returns an erased error type. `InterpretedCommand
+.merging(message:)` (§9) is total: a memberwise-init copy of the 14 stored
+fields, verified 1:1 against the shipped `InterpretedCommand` at
+`LlamaCommandInterpreter.swift:122-229` — including the defaulted
+initialiser at `:209-213`.
 
-- `UserProfileStoring.load() -> ProfileLoadResult` (enum carries `ProfileStoreError`) and
-  `save(_:) -> Result<Void, ProfileStoreError>` — §5.1, lines 421–429.
-- `ProfilePayloadStorage.readRawData(key:) -> Data?` / `hasPayload(key:) -> Bool?` — the optionals
-  are explicitly documented tri-state semantics ("`nil` = unknowable… Never read as absent",
-  lines 413–418); the absent-vs-unreadable discrimination is completed by the exhaustive
-  load-state mapping table (§5.1, lines 472–484), which assigns every probe/read/decode outcome a
-  defined route. Argued explicitly, as the checklist permits.
-- `guarded(_:) -> String?` — nil semantics documented per case (§5.3, lines 617–633) with the
-  drop route argued in C07 Errors (line 210: quarantine event + un-personalized turn).
-- `WakeAcknowledging.begin/cancel` — no error return, argued: "No thrown errors; failures are the
-  synchronous fallback completion plus a content-free event" (line 175), with the full failure
-  mapping in the §7.1 state-machine table.
-- `coldStartInterviewRoute() -> OnboardingState.Step?` — argued: "No error return: every failure
-  mode has a defined route (C13's edge table) — the method never throws" (§5.8, lines 823–828).
-- `saveProfile(...) -> Result<Void, ProfileStoreError>`; `currentProfileSnapshot() ->
-  ProfileLoadResult` (§5.6, lines 779–788); `phrase(...) -> String?` nil-route documented (§5.4,
-  lines 690–694); pure helpers (`clamped`, `merged(into:)`, `isComplete`, `terms(for:)`) have no
-  failure mode.
+### 2. Async / external failure modes and recovery — PASS
 
-### 2. Async/external calls: failure modes and named timeouts — PASS
+- Session timer: the F6 guard (`guard self.state == .awaitingConfirmation
+  else { return }`, `:198`) is the verified model for the mirrored
+  `armSlotAnswerTimer`; an arm that fails resolves via the §15 edit-4
+  failure line and the frame stays resolvable.
+- Catalog load failure: §11's failure row opens the `dialogue.probe.musicAny`
+  free-text path — no frame is lost.
+- Degraded brain: Phase 1's core guarantee is the deterministic merge; the
+  shipped `turnInput` (`LocalBrainChain.swift:275-285`) shows the nil-seam
+  passthrough the design preserves, and the production seam is non-nil
+  (wired at `AppCoordinator.swift:1824`).
+- Main-queue confinement mirrors the existing `openConfirmationWindow()`
+  hop (`AppCoordinator.swift:7019-7027`); the 60 s watchdog region
+  (`:4823-4883`) is untouched.
 
-- The one added async call is `Speaker.speak` from the ack service; its bound is the named
-  configurable `wakeAckMaxHoldSeconds` (default 2.5, declared in the service init, wired in
-  `AppCoordinator.start()` — §8 table, lines 975–976). Silent synthesis death is explicitly mapped
-  to the timeout path (§7.1 note, lines 902–906). Recovery is documented: playback end, timer,
-  failure or cancel all reach the single `settle` exit (line 900); worst case is today's silent
-  start (E5/E6, §7.2).
-- The store adds no async call and no timeout — argued, not omitted: synchronous local-disk I/O
-  behind its lock, no network (§8, lines 983–986).
-- The enrollment session keeps the existing mechanism with no new timeout (§8, line 986) — absence
-  justified by the call-site-only contract (C12, NFR-PI-009).
-- C13 adds no async call and no timeout — a single synchronous cached read, argued at §5.8
-  (line 824) and §8 (lines 988–990).
+### 3. Timeouts and retry limits as configurable parameters — PASS (with F-1 caveat)
 
-### 3. Traceability — PASS (claims 16/16 FR + 11/11 NFR; spot-checks verified)
+All four knobs are parameters, not literals: `answerWindowSeconds` injected
+into `DialogueManager.init`, the attempts cap and `maxCandidates` as frame
+config (§27), the catalog location as a bundle resource. §14 edit 4 keeps
+the 45 s value owned by the state machine's `Config`. The caveat is F-1
+only — the default-argument *expression* §8/§15/§27 pin cannot compile as
+written; the parameter-by-injection design itself meets the standard.
 
-§11 (lines 1079–1104) claims coverage of 16/16 FR-PI and 11/11 NFR-PI. All 16 FR and 11 NFR ids
-are present in the table; no id in the lock file is missing. Spot-checks against the actual
-sections:
+### 4. Traceability — PASS
 
-- **FR-PI-016 → C13 / §5.8**: the route rule (lines 333–339), the seven-row edge table (341–351),
-  the shell wiring (353–367) and the §5.8 signature match the requirement: routing at the first
-  pending step via the existing `pendingSteps`/`firstPendingStep`, mandatory-missing hard route to
-  the earlier of the first pending step and About-you, optional-pending route with the soft-skip,
-  complete → nil, failure → defined route.
-- **FR-PI-002 / FR-PI-004 → §5.2**: `AboutYouDraft.isComplete` = trimmed non-empty name AND
-  address-as (line 519–520); Skip stays, every step skippable (lines 498–501). Matches FR-PI-002's
-  Next gate and FR-PI-004's skippable/pending pattern.
-- **FR-PI-003 / FR-PI-015 → §5.1**: the load-state mapping table (472–484) is exhaustive;
-  absent vs unreadable is real (the probe, 445–470); corrupt payload discarded, never retried in a
-  loop, never partially applied, no placeholder — matches FR-PI-015's three scenarios.
-- **FR-PI-008 / FR-PI-010 + NFR-PI-008 → §7.1 / §5.4**: phrase composition speaks the term
-  verbatim inside a localized template (lines 690–694); the state machine gives the bounded hold
-  and the fallback to today's silent start (886–906).
-- **NFR-PI-005 → §9.1 / §9.2**: the measured budget proof (2,506 + 80 = 2,586 ≤ 3,000, headroom
-  414; lines 996–1011) and the seed-mirror gate (1013–1030) — independently reproduced (above).
+The table maps every requirement: 20 FR-MTC rows and 12 NFR-MTC rows
+(verified all present, including FR-MTC-007 and the NFR-MTC-006 row at
+`:970`). FR-MTC-012 lands on the §6 B1-B7 predicate table; NFR-MTC-012's
+parity claim is structural via L2-D13 (both paths converge on
+`fireMusicRequest`, verified `:2667`).
 
-### 4. User/operator-visible behaviour — PASS
+### 5. User/operator-visible behaviour — PASS
 
-The overview carries an operator/user-visible summary (lines 74–81), and §7.5 (lines 955–965)
-tabulates success and failure for every flow: About-you Next, emergency step, fingerprint,
-Settings save, wake with term, store unreadable, and cold-start routing ("corrupt/unreadable
-state → wizard from the first pending step; still skippable; no crash or stall"). §7.2 gives the
-per-error user view and the content-free operator event. The route outcome itself is described
-where the user meets it.
+§16 inventories every spoken line (17 keys; count prose issue = F-4), all
+ne+en mandatory; §25 gives the events with a closed outcome vocabulary; the
+45 s expiry drops the frame silently and re-arms (§14), preserving the
+shipped timer semantics; the honest dead-end lines in
+`routeKeywordRemainder` (`:1968-2030`) are upgraded in place with their
+anchors preserved (`router.reprompt` at `:2021`, `router.sensitiveBlocked`
+block `:1973-1980`).
 
-### 5. FR-PI-016 coverage — PASS (all six sub-items)
+### 6. Design-chain consistency (L1 ↔ L2) — PASS
 
-- **Existing resume mechanism, no new state**: "No new persisted state"; the resume is
-  `OnboardingState.pendingSteps` / `firstPendingStep` + the wizard's `startingAt:` reopen
-  (lines 302–304, 333, 355); the only addition is a shell `@State` one-shot (line 364). Verified
-  against the shipped code: the mechanics and the `startingAt:` init exist as claimed.
-- **Mandatory-missing hard route**: "The mandatory-missing route is a hard route on start"
-  (line 338); edge row "Mandatory missing while About-you is marked completed" → `.aboutYou`
-  (line 349); test pinned in §12 (`ColdStartRoutingTests`, line 1124).
-- **Optional-pending route with the OD-F3 soft-skip preserved**: edge row at line 348 ("the
-  soft-skip preserved, never trapped"); the route rule keeps the ADR-04 soft gate (lines 337–339).
-- **Complete → no routing**: edge row "Interview complete" → none (line 347).
-- **Corrupt/unreadable → no crash, stall, loop or trap**: edge row "Status map corrupt" reads as
-  nothing recorded and routes without crash/stall/loop (line 350); E8 and §7.5 state the same;
-  the routing read is a single synchronous evaluation (line 323) with no polling (§9.4, line 1055).
-- **Background→foreground decision made and documented**: cold start only, no foreground re-check
-  in v1, with the interruption rationale and revisit conditions (C13 Decision, lines 324–330;
-  §8, line 990; §15, lines 1202–1203). This settles FR-PI-016's left-open question.
+- R1: the B1-B7 predicate call sites are all real — B1
+  `isExplicitMedicationAcknowledgement` `:1913`, B2 `sensitiveCallPhrases`
+  `:1869`, B3/B4 `VoiceContactSearchRoute` (`Decision` is the two-case enum
+  at `:52-58`, so L2's "returns `.openPhone`" is exactly L1's "!= .notSearch"
+  — reconciled, not contradictory), B5 `YouTubeRoute.decide` `:56`, B6
+  `KeywordIntentRule.match` `:164`.
+- R3 (the carried question): **confirmed**. FR-MTC-007's "execute with
+  defaults" presupposes a pending command to execute; FR-MTC-004 ("never
+  fabricate candidates") and FR-MTC-010 forbid executing an unasked
+  candidate. The honest `dialogue.exhausted` close is the admissible
+  reading; risk 11 can be closed by this review.
+- R2 resolved with the bounded reading (L2-D9): only a candidate's own
+  domain extractor can claim free text; no claim stays invalid. R4's
+  ordered algorithm (§22 S1-S6 with vectors) and R5's escape drop are
+  internally consistent with the constitution's capture contract.
+- R10-R12 consumed (L2-D13/D14/D15); L2-D12's drop of L1 §28's optional
+  catalog protocol member is a documented refinement with rationale — no
+  ADR contradiction; the cache-bypass constraint and emergency precedence
+  are preserved structurally (emergency block `:779-783` remains ahead of
+  the interception block at `:886-897`).
 
-### 6. Consistency with L1 and the resolved open decisions — PASS
+### 7. Scope discipline — PASS
 
-- **C13 is the single addition**, recorded under the 2026-10-05 owner amendment (FR-PI-016,
-  Feature Constraint 8): scope statement (lines 298–304) and §13 item 6 (1155–1159), which records
-  that the amendment supersedes the L1 §4.1 sentence for the app-start path while the
-  `pendingSteps` / `firstPendingStep` / `startingAt:` mechanism stands — exactly the owner-recorded
-  supersession this review is instructed to accept.
-- **OD-F1** carried as ADR-02: C11 and §5.2 use the existing `isEmergencyContact` designation,
-  no standalone next-of-kin field (lines 266–280); verified against the shipped coordinator APIs.
-- **OD-F2** carried as ADR-06: on-demand TTS through the existing `Speaker`, localized template +
-  term-as-data, not the pre-rendered AckFastLane cache (C05 / §5.4); the base-speaker wiring
-  avoids double bookkeeping (§6, lines 876–880).
-- **OD-F3** carried as ADR-04: Next gated, header Skip stays (soft gate) — §5.2, C13.
-- **OD-PI-4**: chips + custom field via `AddressAsPresets` + free text (C03, §5.2).
-- **OD-PI-5**: plain Settings editor, no new auth (C04, lines 144–158; §5.7).
-- L1 §16 hand-off items all have settlements (front table, lines 52–61); §13 corrections 1–5 are
-  evidenced (item 1's Swift semantics are accurate: a `let` property with a default is omitted
-  from the synthesized memberwise init, so L1's sketch could not be set). L1's interface sketches
-  are refined only within the announced hand-offs.
+"Not in this design" excludes chat, transcript history in prompts,
+model-generated probe text, cloud, persistence and Phase 3 — matching the
+constitution's out-of-scope list exactly; no out-of-scope element was
+found. OD-M1..M4 remain owner-facing with defaults recorded in §27 (2
+probes; curated catalog; Phase 1 first; Phase 3 separate) — owner-ratified
+as open-with-defaults; noted, not a finding.
 
-### 7. Scope — PASS
+## Findings
 
-No out-of-scope elements: zero new egress (only the guarded term enters existing prompt paths,
-§9.4 lines 1043–1055; NFR-PI-003 row); no new permissions and `Info.plist` untouched (line 1052);
-wake-word recognition untouched — the diff is a seam property and a body extraction in
-`VoicePipeline` (§5.4, lines 700–726); the fingerprint step is a call site only (C12); no forced
-address-as — the clause says "never every sentence" (§5.5, line 752) and R9 keeps the per-turn
-fallback non-punitive. No new components beyond C13; no persistence schema beyond the new store
-key and the step enum.
+**F-1 (MAJOR) — the pinned default-argument expression cannot compile as
+written.** §4 (`:54`), §8 (`:207`), §15 edit 1 (`:687`) and §27 (`:917`)
+all pin `TimeInterval(VoiceSessionStateMachine.Config.confirmationTimeoutSeconds)`,
+while §14 edit 4 (`:672`) rows `Config (:93-96)` as "unchanged". Shipped:
+the property is an instance `var` (`:95`), reached only via an instance
+(`:185`); no static accessor exists anywhere. A type-level access is a
+compile error, and a same-named `static` would collide with the instance
+property — so "Config unchanged" and the pinned expression cannot both
+hold. Mechanical; the intent (no new literal; 45 s stays single-source) is
+unambiguous. Blocks GO: No. Fix: C-1.
 
-### Independent corroboration of the measured facts
+**F-2 (MINOR) — the news-arm parity anchor points at comment text.** The
+header anchor list and §12.5 cite the relaxed news arm at `:1194-1198`;
+those lines are a comment block. The real sites are the relaxed `.news` arm
+`:1210-1217` (emit `:1211`, ack `:1214`, reader `:1215`, emit `:1216`,
+return `:1217`) and the strict stage `:1131-1138`. The structural claim
+(the new arm mirrors the news hand-off) is still correct against the real
+site. Blocks GO: No. Fix: C-2.
 
-The design's central NFR-PI-005 evidence was reproduced from the shipped source, not accepted on
-assertion: extracted `build()` literal + Swift compiler count → **2,506 Characters / 2,718 UTF-8
-bytes** (design: 2,506 / 2,718); placeholder template **2,698 bytes** (design: 2,698); seed file
-**2,699 bytes** ending `request.\n\n` (design §13 item 3: 2,699, `request.\n\n`). The clause
-arithmetic (56 static + 24 term = 80; 2,586 ≤ 3,000; headroom 414) is correct. The 18-byte
-`{address_as_clause}` placeholder and the net 2,716-byte seed figure are arithmetically
-consistent (2,699 − 1 + 18 = 2,716).
+**F-3 (MINOR) — §12.2 calls a three-argument `emit` that does not exist.**
+§12.2 pins `emit(eventType:outcome:metadata:)` for the
+`dialogue_answer`/`invalid` event; the only helper is the two-argument
+`emit(eventType:outcome:)` at `:3982` with `metadata: [:]` hardcoded, and
+§12.4's edit list adds no overload. Metadata-carrying events elsewhere
+construct `ObservabilityEvent` directly and call `observabilityBus.emit`
+(pattern at `:1406-1413`). Compile-enforced one-liner; the real risk is the
+`reason` metadata being silently dropped. Blocks GO: No. Fix: C-3.
 
-### Observations (non-blocking; no rework required)
+**F-4 (MINOR) — key-count prose is off by one against its own table.**
+§16 (`:719`) says "16 new `dialogue.*` keys" and the NFR-MTC-006 row
+(`:970`) repeats "(16 keys)", but the table lists 17 concrete keys
+(`:723-739`) plus the deliberately-absent `dialogue.timeout` row (`:740`).
+Verified zero `dialogue.*` keys pre-exist, so all 17 are new. The key
+inventory itself is complete; only the counts are wrong. Blocks GO: No.
+Fix: C-4.
 
-- **OB-1.** L1's `WakeAcknowledging` docstring says "always calls `completion` exactly once";
-  §5.4/§7.1 refine this for the `cancel()` path (completion dropped when stale by definition).
-  The refinement is documented in place and sits inside the L2 state-machine hand-off, but it is
-  not listed in §13's corrections table. A one-line §13 entry at the next touch would keep the
-  table exhaustive.
-- **OB-2.** The wizard merge base when the snapshot is `.absent` / `.unreadable` (the
-  `merged(into: base)` helpers take a non-optional `UserProfile`) is implied — an empty record —
-  but not spelled out; C13's edge table relies on the ordinary Next-and-save gate repairing the
-  record (line 349). Worth one clarifying clause at implementation time.
-- **OB-3.** FR-PI-013's requirement file still carries its "No force-migration" scenario text
-  unannotated; the supersession for the app-start path is recorded in FR-PI-016's file and in
-  design-l2 §11/§13. Accepted, owner-recorded; an annotation on FR-PI-013 when the set is next
-  touched would remove the residual text.
-- **OB-4.** §9.2's phrasing "byte-identical to the pre-feature rendered prompt" is loose (it
-  refers to the rendered/seed equivalence); the enforceable contract (gate byte equality between
-  the extracted template and the seed) and the arithmetic are correct.
-- **OB-5.** OD-A1 (device-measured ack latency vs the 1 s activation budget) and OD-A2 (English
-  ack copy, owner eyeball) are correctly carried as evidence/eyeball items to
-  `implement` / `security-test` and the owner (§15), not as design gaps.
+### Notes
+
+- **N-1.** Micro anchor drift: `emergencyPhrases` cited `:1854` vs actual
+  `:1855`; `containsPhrase` semantics cited `:1824` vs func `:1826`; the
+  header's `YouTubeRoute` "Decision `:41-56`" is loose for the real
+  `:41-46` enum. No semantic impact.
+- **N-2.** `Prepared.sanitised = raw` on a nil seam matches the shipped
+  `turnInput` nil-seam path (`:275-285`); production wires the seam non-nil
+  (`AppCoordinator.swift:1824`), so the sanitiser discipline holds. Worth a
+  comment in the new helper.
+- **N-3.** The rephrase-discard site currently drops the command it takes
+  (`_ = coordinator?.takePendingRephraseCommand()`, `CommandRouter.swift:806`);
+  R2's composition needs that value bound — already implied by edit 5, but
+  pin it in the tests.
 
 ## Decision
 
 decision: GO
 
-**Rationale.** The L2 component design is a faithful, buildable fold of the 16 FR / 11 NFR locked
-set (including the FR-PI-016 owner amendment), with candidate-error-free interfaces, complete
-failure/route documentation, verified traceability, an independently reproduced budget proof, and
-no scope growth beyond the owner-authorised C13. All seven checklist items pass; the observations
-above are refinements that can ride implementation or a later documentation touch — none blocks.
-The feature proceeds to `security-design-review` (where its STRIDE focus areas are already
-sharpened in §14) under the workflow exit condition `review.decision == GO`.
+**Rationale.** All seven checklist items pass and no BLOCKER exists. The
+single MAJOR and all three MINOR findings are mechanical, are tripwired by
+the compiler or the pinned tests at first build, and none alters the
+architecture, the safety properties (emergency precedence ahead of the
+interception; frame-trap resistance; transcript-cache skip during capture;
+deterministic merge under a degraded brain; unchanged log-safety gate) or
+the user-visible contract. The design chain is internally consistent, the
+L1 §31 items are resolved against verified real call sites, all 32
+requirements trace, scope is clean, and the central measurements reproduce
+exactly (2,506 / 2,586 / 3,000; 45 s).
+
+**Conditions (apply during implementation; none requires design rework).**
+
+- **C-1 (F-1).** Source the answer-window default without a type-level
+  access — an accessor on the session machine or a value passed at
+  construction; keep `:95` the owner of 45, never a new literal.
+- **C-2 (F-2).** Use `:1210-1217` (relaxed) / `:1131-1138` (strict) as the
+  news-parity anchors when implementing §12.5.
+- **C-3 (F-3).** Carry the invalid-answer `reason` via the direct
+  `ObservabilityEvent` construction pattern (`:1406-1413`) or add the
+  overload; never drop the metadata.
+- **C-4 (F-4).** Correct the counts to 17 in §16 and the NFR-MTC-006 row;
+  keep `dialogue.timeout` absent.
+- **C-5 (N-2, N-3).** Bind the taken rephrase command at `:806` for R2
+  composition; comment the nil-seam raw-passthrough parity in the new
+  helper.
+
+**Carry-forwards to `security-design-review`.** The workflow's six focus
+areas — emergency precedence mid-dialogue; free-text answer injection;
+frame-trap resistance; log sanitisation; no new egress; degraded-brain
+path — map 1:1 onto §28, the hostile-corpus suite (§18), the log-gate
+edits (§17) and the deterministic-merge tests. Risk 11 (R3 wording) is
+confirmed by this review and can be closed.

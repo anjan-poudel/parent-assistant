@@ -8,9 +8,10 @@ import SwiftUI
 // family, voices) a long scroll away from the technical ones. The spec
 // splits it into five tabs (pill bar + swipeable pages) and hands the
 // technical rows — Gemini/cloud AI, the voice engine stack, web search, the
-// YouTube key, the two review logs and the model screen — to a sheet
-// reached by long-pressing the Settings title (with an ellipsis affordance
-// for accessibility once the household has found it once).
+// YouTube key, the Spotify account link, the two review logs and the model
+// screen — to a sheet reached by long-pressing the Settings title (with an
+// ellipsis affordance for accessibility once the household has found it
+// once).
 //
 // Both halves are PURE TABLES (`SettingsSection.rows`,
 // `SettingsDestination.hiddenSheetRows`): the view layer only walks them.
@@ -80,10 +81,11 @@ extension SettingsView {
     }
 
     /// Every leaf screen the hub can push. The first 21 are the visible
-    /// rows across the five tabs; the last six are the technical settings
+    /// rows across the five tabs; the last seven are the technical settings
     /// the hidden sheet carries (spec §2 decision 2; YouTube joined them
-    /// in the menu-deepening pass, 2026-09-17; About me joined the
-    /// visible rows in the profile-interview pass, 2026-10-05).
+    /// in the menu-deepening pass, 2026-09-17; Spotify joined them with the
+    /// spotify-music-integration pass, 2026-10-07 — design-l2 §17; About me
+    /// joined the visible rows in the profile-interview pass, 2026-10-05).
     enum SettingsDestination: String, CaseIterable, Identifiable {
         // Voice
         case wakeWord, voicePersonalization, ttsVoices
@@ -97,7 +99,10 @@ extension SettingsView {
         case appearance, language, liveTranslate, privacy
         // Hidden sheet (spec §2 decision 2) — moved, not deleted. YouTube
         // rides with them: a provider-key screen, not a household control.
-        case geminiAI, voiceEngine, webSearch, intentLog, toolLog, youtube
+        // [SPOTIFY T-120] Spotify rides there too: the caregiver's account
+        // link is plumbing of the same class (design-l2 §17), never a
+        // household tab row.
+        case geminiAI, voiceEngine, webSearch, intentLog, toolLog, youtube, spotify
 
         var id: String { rawValue }
 
@@ -121,6 +126,9 @@ extension SettingsView {
             case .calendarSharing: return "settings.calendarSharing"
             case .quickApps: return "settings.quickApps.title"
             case .youtube: return "youtubeSettings.title"
+            // [SPOTIFY T-120] The T-117 catalog key (design-l2 §31), en+ne
+            // already shipped — the row renders the same title as its leaf.
+            case .spotify: return "spotifySettings.title"
             case .feeds: return "settings.feeds.title"
             case .manuals: return "settings.manuals.title"
             case .places: return "settings.places.title"
@@ -157,6 +165,8 @@ extension SettingsView {
             case .calendarSharing: return "calendar.badge.plus"
             case .quickApps: return "square.grid.2x2.fill"
             case .youtube: return "play.rectangle.fill"
+            // [SPOTIFY T-120] design-l2 §17's pinned row icon.
+            case .spotify: return "music.note"
             case .feeds: return "rectangle.stack.fill"
             case .manuals: return "book.closed.fill"
             case .places: return "mappin.and.ellipse"
@@ -172,22 +182,23 @@ extension SettingsView {
             }
         }
 
-        /// The tab this row lives on — `nil` for the hidden sheet's six
+        /// The tab this row lives on — `nil` for the hidden sheet's seven
         /// (spec §2 decision 2 keeps AI + dev tools off the tabs).
         var tab: SettingsSection? {
             SettingsSection.allCases.first { $0.rows.contains(self) }
         }
 
         /// The technical settings behind the long-press, in sheet order:
-        /// the three cloud-provider credential screens first — Gemini,
-        /// the YouTube Data API key and the web-search key, all three the
-        /// same screen shape — then the two review logs. The model screen
-        /// ("hidden AI models") is the row AFTER these and is NOT a
-        /// destination case — it has its own entry in
+        /// the cloud/AI plumbing (Gemini, the voice-engine stack, web
+        /// search), the two provider screens the caregiver configures (the
+        /// YouTube Data API key, the Spotify account link — [SPOTIFY T-120],
+        /// design-l2 §17: after `.youtube`), then the two review logs. The
+        /// model screen ("hidden AI models") is the row AFTER these and is
+        /// NOT a destination case — it has its own entry in
         /// `HiddenSettingsSheet` (it never was a `SettingsSection` case).
         static let hiddenSheetRows: [SettingsDestination] = [
-            .geminiAI, .voiceEngine, .webSearch, .youtube, .intentLog,
-            .toolLog,
+            .geminiAI, .voiceEngine, .webSearch, .youtube, .spotify,
+            .intentLog, .toolLog,
         ]
     }
 }
@@ -417,6 +428,11 @@ struct SettingsDestinationView: View {
         case .voicePersonalization: VoicePersonalizationSettingsView(coordinator: coordinator)
         case .webSearch: SearchSettingsView()
         case .youtube: YouTubeSettingsView()
+        // [SPOTIFY T-120] The caregiver's account link and disclosure
+        // (design-l2 §17): the leaf takes the coordinator's ONE session
+        // (T-119) — the same instance the plugin and the router hold — and
+        // constructs no second account (L2-R2).
+        case .spotify: SpotifySettingsView(session: coordinator.spotifyAccountSession)
         case .feeds: FeedsSettingsView()
         case .quickApps: QuickAccessAppsView()
         // [LIVE-TRANSLATE T-015] The leaf drives the coordinator's one
@@ -435,7 +451,8 @@ struct SettingsDestinationView: View {
 
 /// What the Settings title's long-press opens (spec §3): the technical
 /// settings that moved OFF the tabs — Gemini/cloud AI, the voice engine
-/// stack, web search, the intent and tool logs, and the model screen.
+/// stack, web search, the YouTube key, the Spotify account link
+/// ([SPOTIFY T-120]), the intent and tool logs, and the model screen.
 ///
 /// A `NavigationStack` of its own, so each row pushes inside the sheet and
 /// the household lands back on the sheet when it pops — not on a Settings
@@ -458,8 +475,9 @@ struct HiddenSettingsSheet: View {
                     ForEach(SettingsView.SettingsDestination.hiddenSheetRows) { destination in
                         SettingsSectionRow(destination: destination)
                     }
-                    // "Hidden AI models" — the sixth row, and the one the
-                    // sheet existed for before this reorg: the STT/brain
+                    // "Hidden AI models" — the row after the destination
+                    // list, and the one the sheet existed for before this
+                    // reorg: the STT/brain
                     // pickers, downloads and the encoder A/B card live
                     // behind it (`AIModelsSettingsView`). A closure link,
                     // not a `SettingsDestination`: the model screen was

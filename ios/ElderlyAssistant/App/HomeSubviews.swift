@@ -279,7 +279,11 @@ struct TalkStage: View {
                                        // tapping retries the pipeline start
                                        // instead of staying dead.
                                        onRecover()
-                                   case .awaitingConfirmation:
+                                   case .awaitingConfirmation, .awaitingSlotAnswer:
+                                       // The yes/no challenge and the slot
+                                       // answer window own the turn; the
+                                       // hero is inert there (T-135 keeps
+                                       // the confirmation semantics).
                                        break
                                    }
                                },

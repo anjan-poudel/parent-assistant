@@ -210,6 +210,27 @@ final class AppCoordinator: ObservableObject {
     /// through `DispatchQueue.main.async` — review H1).
     let voiceSession = VoiceSessionStateMachine()
 
+    /// [MTC] The dialogue frame's single owner (design-l2 §8/§15 edit 1,
+    /// FR-MTC-001): one bounded frame, one funnel, one answer window.
+    /// Constructed in `init` — before it existed there was no place a
+    /// `let` could be assigned once the router wiring moved into
+    /// `start()`. The answer window is injected from the session
+    /// machine's own instance config (review-l2 C-1): 45 s stays
+    /// single-sourced at
+    /// `VoiceSessionStateMachine.Config.confirmationTimeoutSeconds`, and
+    /// neither this file nor the manager re-declares it. `private` — the
+    /// router only ever reaches it through the six
+    /// `VoiceCommandCoordinating` members below.
+    private let dialogueManager: DialogueManager
+
+    /// [MTC] The session-exit observer's subscription (design-l2 §15,
+    /// FR-MTC-001): ANY legal exit out of `.awaitingSlotAnswer` with a
+    /// frame still held resolves it through the funnel, so a session
+    /// that left the window (error, stop, a reset) can never leave a
+    /// frame armed with no window behind it. Weakly held self; retained
+    /// for the coordinator's lifetime.
+    private var dialogueSessionExitCancellable: AnyCancellable?
+
     /// [STARTUP-PERF] Progressive startup progress — the Home spinner's
     /// honest stage labels and failure degradation. Injected into the
     /// environment by `ElderlyAssistantApp` next to `voiceSession`.
@@ -1368,6 +1389,58 @@ final class AppCoordinator: ObservableObject {
     /// read it.
     private(set) lazy var newsSourceStore = NewsSourceStore(storage: storage)
 
+    /// [SPOTIFY] (2026-10-07) T-119 — the one encrypted Spotify record
+    /// (`spotify.session`, C-SP-02): the Keychain-backed encrypted
+    /// channel's single item, the same one-key pattern as the search and
+    /// YouTube credential stores above.
+    ///
+    /// [BOOT-REVIEW P0-1] FIRST USE, not `init()`: the store's constructor
+    /// reads its record from the encrypted channel — pre-first-frame work
+    /// nothing on the first frame needs. The Settings leaf (T-120) and the
+    /// plugin/router composition are its first uses.
+    ///
+    /// The type is `@MainActor` (design-l2 §concurrency: all Spotify-path
+    /// mutable state is main-confined), so the lazy getter builds on the
+    /// main actor — which every first-use path already is by construction
+    /// (the registry build in `start()`'s main composition, the Settings
+    /// surface). `assumeIsolated`, not a hop: a future off-main first use
+    /// traps rather than racing the published record — the assume-where-it-
+    /// holds stance the live-translate settings-view seam below states; that
+    /// seam can run off-main and pre-checks `Thread.isMainThread`, while
+    /// these first-use paths are main by construction, so the assumption
+    /// here is unconditional by intent.
+    private(set) lazy var spotifyCredentialStore = MainActor.assumeIsolated {
+        SpotifyCredentialStore(storage: storage)
+    }
+
+    /// [SPOTIFY] (2026-10-07) T-119 — the account session (C-SP-03): the
+    /// link/unlink state machine, the single token path and the
+    /// `spotify_link` / `spotify_unlink` events. ONE instance serves every
+    /// consumer — the plugin registered in `makePluginRegistry()`, the
+    /// router's music seams and (T-120) the Settings surface — so the
+    /// surfaces and the routing can never observe two different accounts.
+    ///
+    /// Lazily beside the store above for the same reason: constructing it
+    /// reads the record and touches nothing remote ([BOOT-REVIEW P0-1]).
+    ///
+    /// The presenter closure is resolved at PRESENT time, never captured
+    /// (the `calendarShareSession` precedent): the composition root runs
+    /// before any window exists, and a controller captured then would be a
+    /// detached one.
+    ///
+    /// [W2-review D1, 2026-10-07] `observabilityBus: observabilityBus` is
+    /// mandatory, never decoration: the session's initializer defaults the
+    /// bus to a dropping sink, so omitting the argument silently loses
+    /// `spotify_link`/`spotify_unlink` (ADR-SP-14). Pinned with an
+    /// event-delivery test in `AppCoordinatorSpotifyWiringTests`.
+    private(set) lazy var spotifyAccountSession: SpotifyAccountSession = MainActor.assumeIsolated {
+        let session = SpotifyAccountSession(store: spotifyCredentialStore,
+                                            flow: ASWebSpotifyAuthSession(),
+                                            observabilityBus: observabilityBus)
+        session.presenter = { [weak self] in self?.topPresentingViewController() }
+        return session
+    }
+
     /// Persisted "listen for ये कान्छी" UI preference — UserDefaults
     /// (not a secret), same shape as `sttModelPreference` /
     /// `voiceEngineStack`. Defaults ON: with the sherpa model bundled,
@@ -2067,6 +2140,16 @@ final class AppCoordinator: ObservableObject {
         // router's deterministic YouTube stage — same `YouTubeTool`
         // behavior (shared config store + transport + opener seams).
         registry.register(YouTubePlugin(configStore: youtubeConfigStore))
+        // [SPOTIFY] (2026-10-07) T-119 — the interpreter-side Spotify
+        // plugin (T-118), registered beside the YouTube twin it mirrors.
+        // The coordinator's ONE credential store and account session are
+        // handed over, so the plugin's `spotify.play` path and the
+        // router's deterministic music path read the same account state —
+        // and cannot diverge (L2-R2). Registration is compile-time and
+        // exactly once; the plugin constructs nothing here beyond holding
+        // its seams.
+        registry.register(SpotifyPlugin(accountSession: spotifyAccountSession,
+                                        credentialStore: spotifyCredentialStore))
         // [LIVE-TRANSLATE T-027] The live-camera-translation plugin. It is
         // registered with a *factory* and nothing else: no camera session,
         // no detector, no client and no session model is built here, so
@@ -2454,6 +2537,20 @@ final class AppCoordinator: ObservableObject {
         // `@StateObject` initializer), so it can never include work that
         // only happens after the first frame.
         StartupSignposts.begin(.bootstrapInit)
+        // [MTC] The dialogue frame's one owner (design-l2 §15 edit 1): the
+        // answer window is READ from the session machine's instance config
+        // (C-1, review-l2) so the frame deadline and the slot timer share
+        // one source — no new literal, and no type-level access (the
+        // machine's `Config` is a private instance field; the additive
+        // `answerWindowSeconds` accessor is what carries the value here).
+        // Constructed at the TOP of the body on purpose: `dialogueManager`
+        // has no default, and the init below reaches properties with
+        // observers (`wakeWordEnabled`), whose assignments require every
+        // stored property already initialized — a later construction would
+        // compile the rest of the body against a half-initialized self and
+        // trips phase-1 rules (red gate 2026-10-10 17:41).
+        self.dialogueManager = DialogueManager(
+            answerWindowSeconds: voiceSession.answerWindowSeconds)
         // Core infrastructure. Storage is encrypted at rest at Data
         // Protection class Complete, per constitution §Security — the
         // Keychain for small secrets, encrypted files under Application
@@ -2974,6 +3071,35 @@ final class AppCoordinator: ObservableObject {
                                                       : "router.confirmationTimeout")
             }
         }
+
+        // [MTC] The slot answer window's arrival (FR-MTC-013, ADR-MTC-08):
+        // SILENT by contract. The resolve travels the ONE funnel — frame,
+        // timer and window all close there — and nothing here speaks: no
+        // `speak`, never `recordConfirmationTimeout()` (that recorder is
+        // the medication challenge's own window, and the machine has
+        // already returned the session to idle before this fires).
+        voiceSession.onSlotAnswerTimeout = { [weak self] in
+            self?.resolveDialogueFrame(.timedOut)
+        }
+
+        // [MTC] M-2's exit half (design-l2 §15, FR-MTC-001): a frame is
+        // only ever armed WITH a window, so any legal exit out of
+        // `.awaitingSlotAnswer` while a frame is still held resolves it —
+        // through the same funnel, emitting the closed-vocabulary
+        // `superseded` outcome. The hop defers the read until the
+        // publishing setter has settled and lets a resolve that runs in
+        // the SAME main block as the exit land first (the timer's own
+        // block transitions to idle and then resolves `.timedOut`), so a
+        // timeout is never mis-recorded as a supersession. Observer
+        // checks are cheap no-ops whenever no frame is live, which is
+        // almost every session transition.
+        dialogueSessionExitCancellable = voiceSession.$state
+            .removeDuplicates()
+            .sink { [weak self] _ in
+                DispatchQueue.main.async {
+                    self?.resolveDialogueFrameOnSessionExit()
+                }
+            }
 
         // [APP-LAUNCHER] (2026-09-16) The camera capture flow (T4): the
         // system picker + the add-only photo write, plus the channel
@@ -3726,6 +3852,16 @@ final class AppCoordinator: ObservableObject {
             youtubeConfigStore: youtubeConfigStore,
             youtubeTransport: URLSession.shared,
             youtubeLinkOpener: SystemCallLinkOpener(),
+            // [SPOTIFY] (2026-10-07) T-119 — the music-path seams (T-116,
+            // §13): the coordinator's ONE account session (the same object
+            // the plugin is registered with — never a rebuild), URLSession
+            // for the search/play requests (each request carries its own
+            // timeout; see SpotifyTool) and the same call-link opener seam
+            // the call/message/YouTube flows use for the canOpenURL probe
+            // + open (spotify: hand-offs).
+            spotifyAccountSession: spotifyAccountSession,
+            spotifyTransport: URLSession.shared,
+            spotifyLinkOpener: SystemCallLinkOpener(),
             // [LAT-M2] Ack fast lane: cached-WAV playback on the pre-ack
             // path (miss → synthesis fallback + `ack_cache_miss`).
             preAckPlayer: ackFastLanePlayer,
@@ -4675,13 +4811,24 @@ self.noteTalkContractChanged()
     /// Maps pipeline states onto the UI session machine. `speaking` is
     /// derived from the speaker lifecycle; `awaitingConfirmation` owns the
     /// UI until yes/no/timeout (pipeline events don't clobber it).
-    private func handlePipelineState(_ state: VoicePipeline.State) {
+    ///
+    /// [MTC] M-1 (security-design-review): BOTH answer windows own the UI
+    /// until they resolve — `.awaitingSlotAnswer` joins the early-return
+    /// guard, or a pipeline event arriving mid-frame would legally bridge
+    /// through `.idle` (the transition table allows it), silently
+    /// cancelling the 45 s slot timer and leaving a live frame with no
+    /// window: the half-open state the whole funnel exists to make
+    /// impossible. Internal (not `private`), like the router's
+    /// `executeDialogueCandidate`, so the M-1 mid-window guard is driven
+    /// directly by `DialogueCoordinatorWiringTests`.
+    func handlePipelineState(_ state: VoicePipeline.State) {
         lastPipelineState = state
         voiceState = state
         // Idle drives deferred KWS eligibility only; manual Talk readiness
         // is published directly by the pipeline start callback.
         updateVoiceReadiness()
-        guard voiceSession.state != .awaitingConfirmation else { return }
+        guard voiceSession.state != .awaitingConfirmation,
+              voiceSession.state != .awaitingSlotAnswer else { return }
         switch state {
         case .stopped:
             voiceSession.transition(to: .stopped)
@@ -6945,11 +7092,22 @@ self.noteTalkContractChanged()
     /// window opens synchronously, so there is no instant in which the
     /// caller has pended work but no timer exists for it.
     private func openConfirmationWindow() {
+        // [MTC] M-2 (ADR-MTC-03): arming a confirmation SUPERSEDES any
+        // live dialogue frame — every one of the four arming sites pends
+        // through here, so this single point is what keeps the two answer
+        // windows mutually exclusive in the frame direction. The funnel
+        // emits the `superseded` outcome itself; with no frame live
+        // (almost every call) it is a cheap no-op.
         if Thread.isMainThread {
+            resolveDialogueFrame(.superseded)
             voiceSession.openConfirmationWindow()
         } else {
             DispatchQueue.main.async { [weak self] in
-                self?.voiceSession.openConfirmationWindow()
+                guard let self else { return }
+                // On main now: supersede first, then open — strictly the
+                // same order as the main branch, inside the one hop.
+                self.resolveDialogueFrame(.superseded)
+                self.voiceSession.openConfirmationWindow()
             }
         }
     }
@@ -7152,9 +7310,11 @@ self.noteTalkContractChanged()
         guard canWriteCalendarEvents else { return nil }
         let event = PendingCalendarEvent(title: title, startDate: startDate)
         pendingCalendarEvent = event
-        DispatchQueue.main.async { [weak self] in
-            self?.voiceSession.transition(to: .awaitingConfirmation)
-        }
+        // [MTC] M-2 (ADR-MTC-03): the challenge pends through the ONE
+        // window opener — it supersedes any live dialogue frame before
+        // arming, so the two answer windows never coexist. (The direct
+        // transition this replaced is gone from every arming site.)
+        openConfirmationWindow()
         return L10n.fmt("router.calendarEventConfirm",
                         locale: activeLocale,
                         event.title,
@@ -7325,9 +7485,9 @@ self.noteTalkContractChanged()
 
     func startRephraseConfirmation(_ command: InterpretedCommand, sourceTranscript: String?) {
         pendingRephrase = (command, sourceTranscript)
-        DispatchQueue.main.async { [weak self] in
-            self?.voiceSession.transition(to: .awaitingConfirmation)
-        }
+        // [MTC] M-2 (ADR-MTC-03): pend through the ONE window opener —
+        // a live dialogue frame is superseded before the challenge arms.
+        openConfirmationWindow()
         speak(key: "router.rephrase.question")
     }
 
@@ -7385,9 +7545,9 @@ self.noteTalkContractChanged()
         // Dementia-loop guard (spec §7.2): same target called again
         // within the window → the confirmation prompt says so out loud.
         let isRepeat = repetitionGuard.isRepeat(actionKey: "call", targetId: contact.id.uuidString)
-        DispatchQueue.main.async { [weak self] in
-            self?.voiceSession.transition(to: .awaitingConfirmation)
-        }
+        // [MTC] M-2 (ADR-MTC-03): pend through the ONE window opener —
+        // a live dialogue frame is superseded before the challenge arms.
+        openConfirmationWindow()
         return confirmationPrompt(for: action, isRepeat: isRepeat)
     }
 
@@ -8472,9 +8632,10 @@ self.noteTalkContractChanged()
     func requestNavigationDisambiguation(targets: [DirectionsCandidate]) -> String? {
         guard let first = targets.first else { return nil }
         pendingNavigationWalk = targets
-        DispatchQueue.main.async { [weak self] in
-            self?.voiceSession.transition(to: .awaitingConfirmation)
-        }
+        // [MTC] M-2 (ADR-MTC-03): pend through the ONE window opener —
+        // a live dialogue frame is superseded before the walk's first
+        // question arms.
+        openConfirmationWindow()
         return navigationQuestion(for: first)
     }
 
@@ -10782,6 +10943,114 @@ extension AppCoordinator {
 }
 
 extension AppCoordinator: VoiceCommandCoordinating {
+    // MARK: - [MTC] Dialogue frame (design-l2 §12.1/§15, FR-MTC-001)
+
+    /// `VoiceCommandCoordinating.activeDialogueFrame` — the pre-ladder
+    /// interception's once-per-turn read (T-133). Delegates to the
+    /// manager's expiry-aware read: nil when absent OR expired (an
+    /// expired frame is dropped on the spot), which is what makes "the
+    /// same utterance before expiry an answer, after expiry a fresh
+    /// command" true with no clock logic in the router. Main-queue read;
+    /// a getter cannot hop.
+    var activeDialogueFrame: DialogueFrame? {
+        dialogueManager.liveFrame
+    }
+
+    /// `VoiceCommandCoordinating.startDialogueFrame` — the pinned order
+    /// (design-l2 §15 edit 3): a pending confirmation refuses outright
+    /// (the two windows are mutually exclusive — ADR-MTC-03); a live
+    /// frame refuses (one deep); the window opens; the manager arms. A
+    /// throw — a draft with neither candidates nor a default — closes
+    /// the just-opened window again through the legal `.idle` edge
+    /// (which cancels its timer) and refuses, so "any opened window is
+    /// closed again" holds for every refusal. Never speaks: the caller
+    /// speaks the probe exactly once, only on `true`.
+    ///
+    /// Off-main (defensive only — every caller is the main-thread
+    /// router): REFUSE without hopping. §12.6's "hop internally" cannot
+    /// be honoured for a synchronous `Bool`: a hopped start would open a
+    /// window after this caller had already taken its non-probe
+    /// fallback, leaving an unspoken probe frame that would swallow the
+    /// next utterance. Refusal keeps one action per utterance.
+    func startDialogueFrame(_ frame: DialogueFrame) -> Bool {
+        guard Thread.isMainThread else { return false }
+        guard !isAwaitingConfirmation else { return false }
+        guard dialogueManager.liveFrame == nil else { return false }
+        guard voiceSession.openSlotAnswerWindow() else { return false }
+        do {
+            try dialogueManager.arm(frame)
+        } catch {
+            voiceSession.transition(to: .idle)
+            return false
+        }
+        return true
+    }
+
+    /// `VoiceCommandCoordinating.noteDialogueAttempt` — invalid-answer
+    /// accounting (L2-D6): the attempt increments on the SAME frame, its
+    /// deadline restamps and the open window gets a full fresh timer.
+    /// Silent — the router owns the `dialogue_answer` event and the
+    /// re-probe speech. The mutation is main-confined (design-l2 §12.6).
+    @discardableResult
+    func noteDialogueAttempt() -> Int {
+        if Thread.isMainThread {
+            let attempts = dialogueManager.noteAttempt()
+            voiceSession.refreshSlotAnswerWindow()
+            return attempts
+        }
+        // Defensive (unreachable: the router's interception is on main):
+        // the mutation hops; the returned count is the pre-hop estimate
+        // of the count the hop will produce.
+        let attempts = (dialogueManager.frame?.attempts ?? 0) + 1
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            _ = self.dialogueManager.noteAttempt()
+            self.voiceSession.refreshSlotAnswerWindow()
+        }
+        return attempts
+    }
+
+    /// `VoiceCommandCoordinating.resolveDialogueFrame` — THE funnel
+    /// (design-l2 §15 edit 5): one manager resolve, one window close
+    /// through legal edges, one telemetry emit for the three outcomes
+    /// the coordinator owns. Idempotent: a second resolution — or any
+    /// resolution with no frame held — finds the manager empty and does
+    /// nothing at all.
+    func resolveDialogueFrame(_ resolution: DialogueFrameResolution) {
+        if Thread.isMainThread {
+            resolveDialogueFrameOnMain(resolution)
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.resolveDialogueFrameOnMain(resolution)
+            }
+        }
+    }
+
+    /// `VoiceCommandCoordinating.clearDialogueFrame(reason:)` — the
+    /// stated-reason clear (L2-D16): the router's §12.3 emergency
+    /// side-effect and the session-exit supersession both travel the
+    /// same funnel.
+    func clearDialogueFrame(reason: DialogueFrameResolution) {
+        resolveDialogueFrame(reason)
+    }
+
+    /// `VoiceCommandCoordinating.prepareDialogueAnswerText` — the answer
+    /// value through the exact order every turn runs (L2-D14, C-MTC-08c):
+    /// `InputSanitiser` (.quarantine) then the SHARED input seam, both
+    /// via the T-127 `IntentTranscriptPreparation` helper. The seam is
+    /// the production wiring's own — the local brain chain's seam from
+    /// `installLocalBrainSlot` (the `:1824`
+    /// `IntentEncoderWiring.localSlotInputSeam`) — and the accessor falls
+    /// back to that same production composition when the chain is not
+    /// installed yet, so the seam is non-nil on EVERY path and no caller
+    /// can ever receive an unsanitised answer value (M-3). Never the
+    /// model.
+    func prepareDialogueAnswerText(_ raw: String) -> String {
+        IntentTranscriptPreparation.prepare(
+            raw,
+            seam: productionDialogueAnswerSeam).prepared
+    }
+
     /// [MORNING-BRIEFING] (2026-09-07) Voice-OS shell v1 — the router's
     /// "read me my briefing" hook. `fire()` is idempotent per calendar
     /// day and shares its once-per-day budget with the activation
@@ -10807,6 +11076,89 @@ extension AppCoordinator: VoiceCommandCoordinating {
         Task {
             await newsReader.fire()
         }
+    }
+}
+
+// MARK: - [MTC] Dialogue frame internals (design-l2 §15; T-136)
+
+extension AppCoordinator {
+    /// The funnel's body, main-queue only: the manager clears the frame
+    /// first (idempotent — nil means a second resolution or no frame, so
+    /// nothing else may happen), then the window closes through the
+    /// legal `.awaitingSlotAnswer → .idle` edge (which cancels the slot
+    /// timer), then telemetry. Frame before window on purpose: the close
+    /// triggers the session-exit observer, which then finds no live
+    /// frame and no-ops — a resolution can never be re-entered as a
+    /// supersession.
+    private func resolveDialogueFrameOnMain(_ resolution: DialogueFrameResolution) {
+        guard dialogueManager.resolve(resolution) != nil else { return }
+        if voiceSession.state == .awaitingSlotAnswer {
+            voiceSession.transition(to: .idle)
+        }
+        switch resolution {
+        case .timedOut, .emergency, .superseded:
+            // The coordinator's three (design-l2 §26 component split):
+            // the seven turn-time outcomes are emitted by the router at
+            // its own resolution sites — emitting here too would
+            // double-emit.
+            emitDialogueFrameResolved(resolution)
+        case .answered, .defaultExecuted, .candidateSelected, .exhausted,
+             .cancelled, .escaped, .bargedIn:
+            break
+        }
+    }
+
+    /// The session-exit observer's named resolver (installed in `init`):
+    /// a frame is only ever armed WITH a window, so a session that
+    /// legally exited `.awaitingSlotAnswer` while a frame is still held
+    /// resolves it as `superseded` through the funnel. Runs on main (the
+    /// observer hops); a no-op on every ordinary transition.
+    private func resolveDialogueFrameOnSessionExit() {
+        guard voiceSession.state != .awaitingSlotAnswer else { return }
+        guard dialogueManager.liveFrame != nil else { return }
+        resolveDialogueFrame(.superseded)
+    }
+
+    /// The closed-vocabulary `dialogue_frame_resolved` emit — the exact
+    /// case map the router's own helper uses (T-133
+    /// `CommandRouter.emitDialogueFrameResolved`), with this component's
+    /// name (`app_coordinator`; the `emitCalendarEvent` `:7327`
+    /// precedent). Metadata is the outcome identifier only: no
+    /// transcript, no candidate labels (constitution C9 / NFR-MTC-012).
+    private func emitDialogueFrameResolved(_ resolution: DialogueFrameResolution) {
+        let outcome: String
+        switch resolution {
+        case .answered: outcome = "answered"
+        case .defaultExecuted: outcome = "defaultExecuted"
+        case .candidateSelected: outcome = "candidateSelected"
+        case .exhausted: outcome = "exhausted"
+        case .cancelled: outcome = "cancelled"
+        case .escaped: outcome = "escaped"
+        case .bargedIn: outcome = "bargedIn"
+        case .timedOut: outcome = "timedOut"
+        case .superseded: outcome = "superseded"
+        case .emergency: outcome = "emergency"
+        }
+        observabilityBus.emit(ObservabilityEvent(
+            component: "app_coordinator",
+            eventType: "dialogue_frame_resolved",
+            durationMs: nil,
+            outcome: outcome,
+            errorCode: nil,
+            metadata: ["outcome": outcome]
+        ))
+    }
+
+    /// The production answer seam (M-3): the installed local brain
+    /// chain's OWN seam when the chain exists — the `:1824` wiring, the
+    /// same seam the brain path runs — else the identical production
+    /// composition constructed directly, because `installLocalBrainSlot`
+    /// has not run yet (a construction that never started) and the
+    /// helper's nil-seam branch is a raw pass-through that exists for
+    /// parity tests only. Non-nil on every path by construction.
+    private var productionDialogueAnswerSeam: LocalBrainChain.InputSeam {
+        (intentRouter?.localBrain as? LocalBrainChain)?.transcriptPreparationSeam
+            ?? IntentEncoderWiring.localSlotInputSeam(traceRecorder: pipelineTraceRecorder)
     }
 }
 

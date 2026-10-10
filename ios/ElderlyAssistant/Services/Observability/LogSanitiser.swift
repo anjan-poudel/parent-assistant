@@ -301,7 +301,51 @@ struct LogSanitiser {
         // emitters cannot produce these keys at all.
         "recognized_text",
         "source_text",
-        "translated_text"
+        "translated_text",
+        // [MULTI-TURN-CONVERSATION T-137] (2026-10-10) The dialogue feature's
+        // four observability events carry metadata only from closed
+        // vocabularies and bounded counts (design-l2 §26). Their vocabulary
+        // keys are exactly SIX NEW additions — `intake`, `probe_kind`,
+        // `attempt`, `option_count`, `capture_form`, `merge_source`. The
+        // seventh dialogue key the design names is `reason`, and it is
+        // deliberately NOT re-declared in this block: it has been in this
+        // list since [LIVE-CAMERA-TRANSLATION] (line ~175), so the dialogue
+        // feature REUSES it — no allow-list change for it (M-4; a test pins
+        // the diff as exactly these six keys, with `reason` in the
+        // pre-change snapshot). Its dialogue values are the
+        // `InvalidAnswerReason` tokens, closed at the construction site
+        // because the key is generic and shipped non-dialogue emitters keep
+        // their own meanings under it.
+        //
+        //  - `intake` — `DialogueDegenerateIntake` raw values (ladder /
+        //    interpreted / candidate): which trigger site ran the degenerate
+        //    music query.
+        //  - `probe_kind` — `ProbeKind` raw values (slotFill /
+        //    candidateChoice): which probe shape was spoken.
+        //  - `attempt` — the probe ordinal, `1|2` (`DialogueConfig.maxProbes`
+        //    = 2): how many probes the frame has spoken.
+        //  - `option_count` — the probe's option/candidate count, `0..4`
+        //    (`DialogueConfig.maxSlotOptions` = 4; `0` is the degraded,
+        //    catalog-unavailable free-text-only probe).
+        //  - `capture_form` — `CaptureForm` raw values (indexWord /
+        //    optionName / repetition / freeText): how the answer was
+        //    captured.
+        //  - `merge_source` — `MergeSource` raw values (catalog / freeText /
+        //    candidate / defaultQuery): where the merged value came from.
+        //
+        // Every value is an enum raw value or a bounded count BY
+        // CONSTRUCTION; no key here may ever carry the utterance, an answer,
+        // a probe string, a candidate label or a transcript fragment
+        // (NFR-MTC-004). `closedVocabularyMetadataKeys` below re-checks that
+        // claim at the choke point: an out-of-vocabulary value is redacted
+        // rather than logged (the fail-closed direction). This task is the
+        // E5 producer; T-140 carries the end-to-end capture assertions.
+        "intake",
+        "probe_kind",
+        "attempt",
+        "option_count",
+        "capture_form",
+        "merge_source"
     ]
 
     /// Metadata keys that carry **content by declaration**: the value is
@@ -353,6 +397,61 @@ struct LogSanitiser {
     /// writes, so a reader cannot tell — and does not need to tell — which
     /// rule removed the text.
     static let redactionToken = "[redacted]"
+
+    /// [MULTI-TURN-CONVERSATION T-137] (2026-10-10, M-4/E5) The dialogue
+    /// metadata keys whose value is a **closed vocabulary** — each key's
+    /// exact token set is pinned here, and a value outside it is replaced by
+    /// `redactionToken` rather than logged.
+    ///
+    /// The vocabulary per key is the raw-value set of the emitting type
+    /// (design-l2 §26 over the §9/§12.5 enums):
+    ///
+    ///  - `intake`      — `DialogueDegenerateIntake` (ladder, interpreted,
+    ///                    candidate).
+    ///  - `probe_kind`  — `ProbeKind` (slotFill, candidateChoice).
+    ///  - `attempt`     — the probe ordinal, bounded at `1|2`
+    ///                    (`DialogueConfig.maxProbes` = 2).
+    ///  - `option_count`— the probe's option/candidate count, bounded at
+    ///                    `0..4` (`DialogueConfig.maxSlotOptions` = 4).
+    ///  - `capture_form`— `CaptureForm` (indexWord, optionName, repetition,
+    ///                    freeText).
+    ///  - `merge_source`— `MergeSource` (catalog, freeText, candidate,
+    ///                    defaultQuery).
+    ///
+    /// **Why bound the value at the bus, when values on allowed keys are
+    /// normally only PII-scrubbed.** These six keys are new in this feature,
+    /// and their contract is stronger than "not PII": the whole key may only
+    /// ever hold an enum token or a bounded count (NFR-MTC-004 — probe,
+    /// answer and candidate text must never reach a log, and R3's residual
+    /// "values are not value-constrained" is exactly the hole this closes
+    /// for the dialogue surface). An out-of-vocabulary value is by
+    /// definition not one the emitter API can produce — which is the shape
+    /// a content leak or an emitter bug arrives in — so it fails closed
+    /// (the scenario "out-of-vocabulary token values fail closed"). Bounding
+    /// keys that did not exist before the feature is additive; no shipped
+    /// emitter writes any of the six (the `codeShapedMetadataKeys`
+    /// precedent).
+    ///
+    /// **`reason` is deliberately absent.** It pre-exists this feature as a
+    /// generic key (shipped emitters: `ModelBudgetPolicy`'s denial/abandon
+    /// tokens, the live-translate cost reasons), so narrowing it here would
+    /// re-mean a shipped key. M-4's discipline is the other way: the
+    /// dialogue values under `reason` (`InvalidAnswerReason` raw values)
+    /// are closed at the construction site, the emission point the feature
+    /// owns. A test pins both halves — the dialogue tokens survive under
+    /// the reused key, and the bus does not constrain it.
+    ///
+    /// Declared internal (not private) so the tests pin the vocabularies
+    /// exactly — the same visibility rationale as the sibling `redactedKeys`
+    /// and `allowedKeys`; the table is read-only either way.
+    static let closedVocabularyMetadataKeys: [String: Set<String>] = [
+        "intake": ["ladder", "interpreted", "candidate"],
+        "probe_kind": ["slotFill", "candidateChoice"],
+        "attempt": ["1", "2"],
+        "option_count": ["0", "1", "2", "3", "4"],
+        "capture_form": ["indexWord", "optionName", "repetition", "freeText"],
+        "merge_source": ["catalog", "freeText", "candidate", "defaultQuery"]
+    ]
 
     /// Metadata keys whose value must satisfy the *code* bound rather than a
     /// PII scrub alone. Deliberately a separate set from `allowedKeys`: the
@@ -481,6 +580,22 @@ struct LogSanitiser {
                 continue
             }
             guard Self.allowedKeys.contains(key) else { continue }
+            // [MULTI-TURN-CONVERSATION T-137] A dialogue metadata key
+            // carries its documented token or nothing: a value outside its
+            // key's closed vocabulary/bound is replaced by the redaction
+            // token, never logged. The check sits before the shape branches
+            // below because these keys carry neither codes nor
+            // counts-with-units nor free text — their contract is the exact
+            // token set, not a shape. The pair is kept (as with a
+            // non-code-shaped `errorCode`) so the event skeleton survives
+            // and a broken emitter is visible as a redacted legal key
+            // rather than a silently vanished one.
+            if let vocabulary = Self.closedVocabularyMetadataKeys[key] {
+                cleanMetadata[key] = vocabulary.contains(value)
+                    ? value
+                    : Self.redactionToken
+                continue
+            }
             // A code-shaped key gets the same bound as the top-level field,
             // so allow-listing it cannot become a PII-scrubbed bypass of
             // that bound (T-050/B2). Every other allowed key is unchanged.

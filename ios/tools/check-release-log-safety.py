@@ -164,6 +164,27 @@ FEATURE_ROOTS = [
     "App/ProfileSettingsModel.swift",
     "App/OnboardingDrafts.swift",
     "App/ProfileInterviewSteps.swift",
+    # [SPOTIFY-MUSIC-INTEGRATION T-121 / §20] The music feature's own roots:
+    # the whole Services/Spotify group (tool, transport, credential store,
+    # auth flow, session) and the plugin. Household music queries are user
+    # content: a Release console write or a content-derived event field
+    # anywhere in these files fails the gate — no exemptions for the new
+    # surfaces (design §20's `Services/Voice/SpotifyTool.swift` entry is a
+    # stale path; the tool lives in the Services/Spotify group below).
+    "Services/Spotify",
+    "Services/Plugins/SpotifyPlugin.swift",
+    # [MULTI-TURN-CONVERSATION T-138 / design-l2 §17] The dialogue feature's
+    # own files: the probe and answer text, the option labels and the
+    # candidate hypotheses are the household's words, and the frame's events
+    # carry counts and closed tokens only. A console write that compiles into
+    # Release, a content-bearing console write or event field in any
+    # configuration, or an unlisted metadata key in these files fails the
+    # gate — listed per file like the Spotify and profile-interview entries,
+    # because the rest of Services/Voice/ is not this feature's code.
+    "Services/Voice/DialogueManager.swift",
+    "Services/Voice/DialogueAnswerPath.swift",
+    "Services/Voice/DialogueCandidateBuilder.swift",
+    "Services/Voice/DialogueOptionCatalog.swift",
 ]
 
 # The shipped allow-list the feature's metadata keys must be declared in.

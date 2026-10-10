@@ -1,33 +1,40 @@
-# Non-Functional Requirements — Profile Interview + Address-as (v1)
+# Non-Functional Requirements — Multi-Turn Conversation (v1)
 
-11 non-functional requirements. IDs are namespaced `NFR-PI-NNN` to avoid colliding with the
-project-level `NFR-NNN` set in the root stakeholder brief (`requirements.md`).
+12 non-functional requirements. IDs are namespaced `NFR-MTC-NNN` to avoid colliding with the
+project-level `NFR-NNN` set in the root stakeholder brief (`requirements.md`) — the same
+convention live-camera-translation used (`NFR-LCT-NNN`), profile-interview used (`NFR-PI-NNN`)
+and spotify-music-integration used (`NFR-SP-NNN`). This page covers the
+`multi-turn-conversation` set (`NFR-MTC-*`) only; the earlier feature files remain in this
+folder and are not part of this feature's requirements or lock.
 
 | ID | Title | Category | Priority |
 |----|-------|----------|----------|
-| [NFR-PI-001](NFR-PI-001-profile-encryption-at-rest.md) | Profile encryption at rest | Security | MUST |
-| [NFR-PI-002](NFR-PI-002-log-safety.md) | Log safety — no new PII in logs | Privacy / Security | MUST |
-| [NFR-PI-003](NFR-PI-003-no-new-egress.md) | No new network egress or cloud processing | Privacy | MUST |
-| [NFR-PI-004](NFR-PI-004-profile-string-injection-hardening.md) | Untrusted profile-string hardening (injection) | Security | MUST |
-| [NFR-PI-005](NFR-PI-005-prompt-budget-and-seed-mirror.md) | Prompt token budget and seed mirror preserved | Reliability / Maintainability | MUST |
-| [NFR-PI-006](NFR-PI-006-localisation.md) | Localisation of new UI strings | Localisation | MUST |
-| [NFR-PI-007](NFR-PI-007-accessibility.md) | Accessibility of the new interview UI | Accessibility | MUST |
-| [NFR-PI-008](NFR-PI-008-wake-ack-latency-and-fallback.md) | Wake-acknowledgment latency and failure fallback | Performance / Reliability | MUST |
-| [NFR-PI-009](NFR-PI-009-voice-biometric-unchanged.md) | Voice-biometric mechanism unchanged | Security / Compliance | MUST |
-| [NFR-PI-010](NFR-PI-010-no-regression-existing-flows.md) | No regression to existing behaviours | Reliability | MUST |
-| [NFR-PI-011](NFR-PI-011-compliance-and-release-gates.md) | Compliance and release gates | Compliance | MUST |
+| [NFR-MTC-001](NFR-MTC-001-probe-turn-latency.md) | Probe and answer turns stay within the existing turn envelope | Performance | MUST |
+| [NFR-MTC-002](NFR-MTC-002-prompt-budget-and-token-ceiling.md) | 1024-token ceiling and the pinned prompt budget are preserved | Reliability / Maintainability | MUST |
+| [NFR-MTC-003](NFR-MTC-003-no-new-network-egress.md) | No new network egress — probes and answers stay on-device | Privacy | MUST |
+| [NFR-MTC-004](NFR-MTC-004-log-safety.md) | Log safety — probe and answer text never reach logs | Privacy / Security | MUST |
+| [NFR-MTC-005](NFR-MTC-005-degraded-brain-deterministic-path.md) | The frame survives a degraded or absent brain — deterministic path | Reliability | MUST |
+| [NFR-MTC-006](NFR-MTC-006-localisation.md) | Localisation of every dialogue string (ne/en) | Localisation | MUST |
+| [NFR-MTC-007](NFR-MTC-007-sustained-multi-turn-stability.md) | Sustained multi-turn stability on 6 GB devices — no jetsam | Reliability / Performance | MUST |
+| [NFR-MTC-008](NFR-MTC-008-answer-sanitisation-and-injection-safety.md) | Answer-path sanitisation and injection safety | Security | MUST |
+| [NFR-MTC-009](NFR-MTC-009-voice-only-accessibility.md) | Voice-only accessibility of probes and answer capture | Accessibility | MUST |
+| [NFR-MTC-010](NFR-MTC-010-frame-trap-resistance.md) | Frame-trap resistance — zero stuck states | Reliability / Safety | MUST |
+| [NFR-MTC-011](NFR-MTC-011-kv-prefix-stability.md) | KV-prefix stability — the frame clause never mutates the template prefix | Performance / Reliability | MUST |
+| [NFR-MTC-012](NFR-MTC-012-compliance-and-release-gates.md) | Compliance, no-regression and release gates | Compliance | MUST |
 
-## Coverage of the security-relevant surfaces
-| Surface (workflow focus) | Covered by |
+## Coverage of the security-relevant surfaces (workflow focus areas)
+
+| Surface (workflow `security-design-review` / `security-test` focus) | Covered by |
 |---|---|
-| Profile-string prompt injection into IntentPrompt templates (cloud + on-device) | [NFR-PI-004](NFR-PI-004-profile-string-injection-hardening.md), [FR-PI-009](../FR/FR-PI-009-brain-reply-style-address-as.md) |
-| Profile PII at rest (name, address-as, DOB, GP, hospital, next of kin) | [NFR-PI-001](NFR-PI-001-profile-encryption-at-rest.md), [FR-PI-003](../FR/FR-PI-003-encrypted-profile-store.md) |
-| Log surface PII (no name/term/DOB/contact values) | [NFR-PI-002](NFR-PI-002-log-safety.md) |
-| Egress discipline (no new network egress; only name/term in prompts) | [NFR-PI-003](NFR-PI-003-no-new-egress.md) |
-| Voice fingerprint enrollment spoofing/replay (reuse existing threat model) | [NFR-PI-009](NFR-PI-009-voice-biometric-unchanged.md), [FR-PI-007](../FR/FR-PI-007-voice-fingerprint-step.md) |
-| Wake-acknowledgment path (no new egress; no sensitive data beyond the term) | [FR-PI-008](../FR/FR-PI-008-wake-acknowledgment-address-as.md), [NFR-PI-008](NFR-PI-008-wake-ack-latency-and-fallback.md) |
-| Un-personalized fallback integrity (no placeholder; no regression) | [FR-PI-011](../FR/FR-PI-011-unpersonalized-path-unchanged.md), [FR-PI-015](../FR/FR-PI-015-profile-read-failure-fallback.md) |
+| Emergency precedence mid-dialogue: emergency keywords win mid-frame; a hostile or corrupted answer cannot bypass the override | [FR-MTC-011](../FR/FR-MTC-011-emergency-precedence-mid-frame.md), [NFR-MTC-010](NFR-MTC-010-frame-trap-resistance.md) |
+| Free-text answer injection: answers enter routing mid-frame; interception must open no new injection surface | [NFR-MTC-008](NFR-MTC-008-answer-sanitisation-and-injection-safety.md), [FR-MTC-009](../FR/FR-MTC-009-pre-ladder-answer-interception.md), [FR-MTC-017](../FR/FR-MTC-017-transcript-cache-bypass.md) |
+| Frame-trap resistance: cancel, barge-in and the 45 s timeout must always recover | [FR-MTC-010](../FR/FR-MTC-010-cancel-drops-the-frame.md), [FR-MTC-012](../FR/FR-MTC-012-barge-in-strong-new-command.md), [FR-MTC-013](../FR/FR-MTC-013-timeout-silent-rearm.md), [NFR-MTC-010](NFR-MTC-010-frame-trap-resistance.md) |
+| Log sanitisation: probe texts and captured answers must not reach logs (B2/T-050 precedent) | [NFR-MTC-004](NFR-MTC-004-log-safety.md), [NFR-MTC-012](NFR-MTC-012-compliance-and-release-gates.md) |
+| No new egress: probes and answers stay on-device | [NFR-MTC-003](NFR-MTC-003-no-new-network-egress.md) |
+| Degraded-brain path: the deterministic merge must not weaken the emergency/safety gates | [NFR-MTC-005](NFR-MTC-005-degraded-brain-deterministic-path.md), [FR-MTC-011](../FR/FR-MTC-011-emergency-precedence-mid-frame.md) |
 
 ## Related
-- [FR index](../FR/index.md) — 15 functional requirements
+
+- [FR index](../FR/index.md) — 20 functional requirements
 - [Requirements index](../index.md)
+- [Consolidated copy](../../define-requirements.md)

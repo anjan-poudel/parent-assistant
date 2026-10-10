@@ -1,26 +1,43 @@
-# Implementation Tasks — Profile Interview (FR-PI v1)
+# Implementation Tasks
 
 | Group | Title | Tasks | Total Effort | Status |
 |-------|-------|-------|-------------|--------|
-| [TG-14](TG-14-profile-foundations/index.md) | Profile Foundations — store, guard, seams, strings | 4 | ~9.5–12 days | PENDING |
-| [TG-15](TG-15-personalization-paths/index.md) | Personalization Paths — prompt clause, seed mirror, wake ack | 3 | ~9.5–12 days | PENDING |
-| [TG-16](TG-16-interview-wizard-and-startup-routing/index.md) | Interview Wizard and Startup Routing | 6 | ~14.5–18 days | PENDING |
-| [TG-17](TG-17-settings-release-and-evidence/index.md) | Settings, Log Safety and Release Evidence | 3 | ~8–10 days | PENDING |
+| [TG-24](TG-24-dialogue-frame-foundations/index.md) | Dialogue Frame Foundations | 5 tasks | ~6.5 days | PENDING |
+| [TG-25](TG-25-answer-classification-and-merge/index.md) | Answer Classification and Merge | 3 tasks | ~7.5 days | PENDING |
+| [TG-26](TG-26-router-interception-and-window-state/index.md) | Router Interception and Window State | 4 tasks | ~14.5 days | PENDING |
+| [TG-27](TG-27-observability-release-gate-and-security-evidence/index.md) | Observability, Release Gate and Security Evidence | 4 tasks | ~7.5 days | PENDING |
+| [TG-28](TG-28-acceptance-evidence-and-device-protocol/index.md) | Acceptance, Evidence and Device Protocol | 3 tasks | ~5 days | PENDING |
 
-**Totals:** 16 tasks (T-090 … T-105), all leaf tasks, ~41–52 developer-days sequential.
+**Totals:** 5 groups, 19 tasks (0 subtasks), ~41 developer-days nominal.
+**Critical path:** T-130 → T-131 → T-133 → T-136 → T-139 → T-141 → T-142 (23 days).
+Full plan with the wave table and requirement map: [plan.md](../plan.md).
 
-**ID numbering convention.** This plan continues after the accumulated global maxima: the highest
-pre-existing task id is T-089 and the highest pre-existing group is TG-13 (computed before writing
-via the prescribed scan over `specs/plan-tasks` plus the ai-sdd outputs). Profile Interview
-therefore uses **T-090 … T-105** and **TG-14 … TG-17**; no existing T-NNN or TG-NN file or folder
-was reused, overwritten or deleted. `specs/plan-tasks/plan.md` and this file are the two files the
-established pattern replaces with the current feature's content.
+## Wave order (file-disjoint)
 
-Execution order is T-090 → T-105 in numeric order; every dependency points at a lower task ID, so a
-subagent executing top-to-bottom never assumes an unbuilt component. The recommended parallel
-packing is in the plan file (`## Summary` → recommended execution order).
+- W1: T-125, T-126, T-127, T-128, T-129, T-130, T-135, T-137
+- W2: T-131, T-132
+- W3: T-133, T-138
+- W4: T-134, T-136
+- W5: T-139, T-140, T-143
+- W6: T-141
+- W7: T-142
 
-Requirement IDs (FR-PI-NNN / NFR-PI-NNN) resolve under `specs/define-requirements/`; component IDs
-(C01 … C13) and parameter names are used verbatim from `specs/design-l2.md`; amendment IDs
-(AM-1 … AM-4) and finding IDs (SD-1 … SD-7) come from `specs/security-design-review.md`;
-observation IDs (OB-1 … OB-5) come from `specs/review-l2.md`.
+## ID numbering convention
+
+This tree accumulates across features: group folders and task files from earlier
+features remain on disk, and a new feature continues at the global maxima. Previously
+delivered groups visible in this directory: TG-01..TG-10 (T-001..T-030,
+live-camera-translation), TG-14..TG-17 (T-090..T-105, profile-interview) and
+TG-18..TG-23 (T-106..T-124, spotify-music-integration). This feature uses
+**TG-24..TG-28 and T-125..T-143**; the next feature continues at **TG-29 / T-144**.
+
+Dependencies point at lower task IDs only, so ascending ID order is a valid topological
+order for the `implement` workflow's wave sort.
+
+## Requirement ID resolution
+
+Requirement links in task files climb four directory levels to
+`define-requirements/FR/...` and `define-requirements/NFR/...`, which resolve to
+`specs/define-requirements/` in this worktree. All 20 FR-MTC and 12 NFR-MTC documents
+are linked from at least one task; the per-requirement map is in
+[plan.md](../plan.md).
