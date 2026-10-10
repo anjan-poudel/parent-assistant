@@ -1860,13 +1860,25 @@ final class CommandRouter {
     ]
 
     /// Call-ish vocabulary shared by the post-LLM block
-    /// (`routeKeywordRemainder`) and the [NO-GIBBERISH] pre-answer guard:
-    /// an utterance that both names a topic word AND reads call-ish
-    /// ("मौसम बताउने मान्छेलाई फोन गर") must stay on the interpreter/
-    /// block path — a deterministic topic answer would shadow the call
-    /// intent. Hoisted from `routeKeywordRemainder` (2026-09-07) so the
-    /// pre-answer stage checks the SAME list that blocks.
-    private static let sensitiveCallPhrases = [
+    /// (`routeKeywordRemainder` `:1973-1980`) and the [NO-GIBBERISH]
+    /// pre-answer guard (`:1360`): an utterance that both names a topic
+    /// word AND reads call-ish ("मौसम बताउने मान्छेलाई फोन गर") must stay
+    /// on the interpreter/block path — a deterministic topic answer
+    /// would shadow the call intent. Hoisted from `routeKeywordRemainder`
+    /// (2026-09-07) so the pre-answer stage checks the SAME list that
+    /// blocks.
+    ///
+    /// [MTC L2-D2] (2026-10-10) `sensitiveCallPhrases` `:1869`: widened
+    /// `private` → `internal` so the dialogue barge-in predicate
+    /// (design-l2 §6 B2) consumes this exact list instead of forking a
+    /// second vocabulary — the same extraction reason as
+    /// `isExplicitMedicationAcknowledgement` `:1913`. The answer path
+    /// evaluates it with `containsPhrase` semantics (`:1826` —
+    /// `text.contains(phrase)`) over lowercased text and falls through
+    /// to the ladder, where `:1973-1980` blocks with
+    /// `router.sensitiveBlocked` unchanged. Visibility only: no call
+    /// site moves and no predicate changes.
+    static let sensitiveCallPhrases = [
         "call", "phone", "facetime", "messenger", "whatsapp",
         "फोन", "कल", "भिडियो कल", "म्यासेन्जर", "व्हाट्सएप", "वाट्सएप"
     ]

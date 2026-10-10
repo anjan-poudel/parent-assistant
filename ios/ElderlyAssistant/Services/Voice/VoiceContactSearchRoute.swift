@@ -134,7 +134,17 @@ enum VoiceContactSearchRoute {
     ]
     private static let directCallTokens = ["call", "calls", "calling", "dial"]
 
-    private static func isDirectCallUtterance(_ text: String) -> Bool {
+    /// [MTC L2-D2] (2026-10-10) `isDirectCallUtterance` `:137-140`:
+    /// widened `private` → `internal` for the dialogue barge-in
+    /// predicate's second call site (design-l2 §6 B3). One table, never
+    /// duplicated.
+    ///
+    /// Lower-case input contract — unchanged by the widening: the caller
+    /// passes canonical text. The shipped call site
+    /// `decide(transcript:)` `:67` (the `.openPhone` search decision)
+    /// lowercases at `:68` before its veto `:74`; the answer path
+    /// lowercases before evaluating B3. This tester folds no case itself.
+    static func isDirectCallUtterance(_ text: String) -> Bool {
         directCallPhrases.contains { text.contains($0) }
             || directCallTokens.contains { token($0, in: text) }
     }

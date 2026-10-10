@@ -737,4 +737,226 @@ final class KeywordIntentRuleTests: XCTestCase {
                                                medicationNames: bloodPressureEntry)?.domain,
                        .youtube)
     }
+
+    // MARK: - [MTC] Extractor provenance and the wrapper (T-130, FR-MTC-002)
+
+    /// Gherkin — "A marker-only request is flagged degenerate with no
+    /// query". The music verb plus the generic bhajan marker survives
+    /// only as the never-empty marker fallback: the provenance is
+    /// `.markerFallback` and the outcome is degenerate. The fallback
+    /// query itself stays the bare marker byte-for-byte — FR-MTC-002
+    /// names exactly this case ("भजन बजाऊ" → query "भजन", the
+    /// degenerate marker fallback the probe trigger reads).
+    func testMarkerOnlyRequestIsFlaggedDegenerateWithNoContentQuery() {
+        for (utterance, marker) in [("भजन बजाऊ", "भजन"),
+                                    ("गीत चलाऊ", "गीत"),
+                                    ("गाना बजाऊ", "गाना"),
+                                    ("भजन गाउनुस्", "भजन"),
+                                    ("play a song", "song")] {
+            let outcome = KeywordIntentRule.musicQueryOutcome(from: utterance)
+            XCTAssertEqual(outcome.provenance, .markerFallback,
+                           "\(utterance): only the marker survives the drop sets")
+            XCTAssertNotEqual(outcome.provenance, .content,
+                              "\(utterance) carries no content query")
+            XCTAssertTrue(outcome.isDegenerate,
+                          "\(utterance) must probe — the bare marker is not a query")
+            XCTAssertEqual(outcome.query, marker,
+                           "\(utterance): the fallback queries the marker token itself (byte-parity)")
+        }
+    }
+
+    /// Gherkin — "A specific request keeps the content provenance": the
+    /// occasion/artist phrase before the music verb survives the drop
+    /// sets, so the provenance is `.content`, the degenerate flag is
+    /// clear and the query is the specific phrase.
+    func testSpecificRequestKeepsTheContentProvenance() {
+        let outcome = KeywordIntentRule.musicQueryOutcome(from: "दशैं दुर्गा भजन बजाऊ")
+        XCTAssertEqual(outcome.provenance, .content)
+        XCTAssertFalse(outcome.isDegenerate)
+        XCTAssertEqual(outcome.query, "दशैं दुर्गा")
+
+        let english = KeywordIntentRule.musicQueryOutcome(from: "play the old hindi song")
+        XCTAssertEqual(english.provenance, .content)
+        XCTAssertFalse(english.isDegenerate)
+        XCTAssertEqual(english.query, "old hindi")
+    }
+
+    /// Gherkin — "A canonical empty result falls back to the transcript
+    /// without a query". The transcript fallback's two shapes: an
+    /// utterance whose every token is scaffolding and carries no marker
+    /// reports the raw tokens as the stand-in query (the shipped L2-D10
+    /// step 3 — "चलाऊ" → "चलाऊ", degenerate); an input that
+    /// canonicalizes to nothing is the one shape that reports the
+    /// transcript fallback with NO query at all.
+    func testCanonicalEmptyResultFallsBackToTheTranscriptWithoutAQuery() {
+        let framingOnly = KeywordIntentRule.musicQueryOutcome(from: "चलाऊ")
+        XCTAssertEqual(framingOnly.provenance, .transcriptFallback)
+        XCTAssertTrue(framingOnly.isDegenerate)
+        XCTAssertEqual(framingOnly.query, "चलाऊ",
+                       "no marker — the raw transcript's tokens stand in (L2-D10 step 3)")
+
+        for empty in ["", "   ", "। ॥"] {
+            let outcome = KeywordIntentRule.musicQueryOutcome(from: empty)
+            XCTAssertEqual(outcome.provenance, .transcriptFallback,
+                           "\"\(empty)\" canonicalizes empty")
+            XCTAssertNil(outcome.query)
+            XCTAssertTrue(outcome.isDegenerate,
+                          "an absent query is degenerate by definition")
+        }
+    }
+
+    /// Gherkin — "The compatibility wrapper is byte-identical". The full
+    /// existing fixture corpus — the shipped extraction fixtures, the
+    /// provider drops, the fallbacks, the cap and the empty inputs —
+    /// returns exactly what it returned before the provenance landed:
+    /// `musicQuery` is a thin wrapper over `musicQueryOutcome(...).query`.
+    /// The historical literals are asserted beside the parity, so a
+    /// wrapper cannot satisfy the test by drifting consistently.
+    func testMusicQueryWrapperMatchesOutcome() {
+        let fixtures = [
+            "भजन बजाऊ", "पुरानो हिन्दी गीत बजाऊ", "देवीको भजन",
+            "युट्युबमा गीत चलाऊ", "play a song", "स्पोटिफाइमा गीत चलाऊ",
+            "गीत चलाऊ", "भजन बजाउनुस्", "रामायणको भजन लगाइदेऊ", "नयाँ गीत सुनाउनुस्",
+            "spotify गीत बजाऊ", "गीत चलाऊ युट्युबमा", "स्पोटिफाइमा भजन सुनाऊ",
+            "चलाऊ", "कृपया बजाऊ", "अलार्म बजाऊ",
+            "  भजन   बजाऊ  ",
+            "", "   ", "। ॥"
+        ]
+        let shippedValues: [String: String?] = [
+            "भजन बजाऊ": "भजन",
+            "पुरानो हिन्दी गीत बजाऊ": "पुरानो हिन्दी",
+            "देवीको भजन": "देवीको",
+            "युट्युबमा गीत चलाऊ": "गीत",
+            "play a song": "song",
+            "स्पोटिफाइमा गीत चलाऊ": "गीत",
+            "गीत चलाऊ": "गीत",
+            "भजन बजाउनुस्": "भजन",
+            "रामायणको भजन लगाइदेऊ": "रामायणको",
+            "नयाँ गीत सुनाउनुस्": "नयाँ",
+            "spotify गीत बजाऊ": "गीत",
+            "गीत चलाऊ युट्युबमा": "गीत",
+            "स्पोटिफाइमा भजन सुनाऊ": "भजन",
+            "चलाऊ": "चलाऊ",
+            "कृपया बजाऊ": "कृपया बजाऊ",
+            "  भजन   बजाऊ  ": "भजन",
+            "": nil, "   ": nil, "। ॥": nil
+        ]
+        for fixture in fixtures {
+            XCTAssertEqual(KeywordIntentRule.musicQuery(from: fixture),
+                           KeywordIntentRule.musicQueryOutcome(from: fixture).query,
+                           "\(fixture): the wrapper is the outcome's query, byte-identical")
+            if let shipped = shippedValues[fixture] {
+                XCTAssertEqual(KeywordIntentRule.musicQuery(from: fixture), shipped,
+                               "\(fixture): the shipped value is unchanged")
+            }
+        }
+
+        // The cap leg: the wrapper forwards `maxLength` unchanged.
+        let long = Array(repeating: "रामायण", count: 60).joined(separator: " ")
+        XCTAssertEqual(KeywordIntentRule.musicQuery(from: long, maxLength: 12),
+                       KeywordIntentRule.musicQueryOutcome(from: long, maxLength: 12).query)
+        XCTAssertEqual(KeywordIntentRule.musicQuery(from: long, maxLength: 12)?.count, 12)
+        XCTAssertEqual(KeywordIntentRule.musicQuery(from: long)?.count,
+                       KeywordIntentRule.maxMusicQueryLength)
+    }
+
+    // MARK: - [MTC] Near-match readings (T-130, design-l2 §13b)
+
+    /// Gherkin — "Near-match readings are bounded and deduplicated": at
+    /// most one entry per domain, only the four framable domains
+    /// {news, youtube, music, appLaunch} participate, and the
+    /// medication family is never returned.
+    func testNearMatchReadingsAreBoundedAndDeduplicated() {
+        // Several families partially match in one utterance: YouTube's
+        // word without a YouTube verb, and the camera's word without an
+        // open verb. Table order: youtube precedes appLaunch.
+        XCTAssertEqual(KeywordIntentRule.nearMatches(transcript: "युट्युब क्यामेरा"), [
+            KeywordIntentRule.NearMatch(domain: .youtube,
+                                        matchedKeys: ["युट्युब"], appID: nil),
+            KeywordIntentRule.NearMatch(domain: .appLaunch,
+                                        matchedKeys: ["क्यामेरा"], appID: "camera")
+        ])
+
+        // Two app-launch rules could partially match ("क्यामेरा" and
+        // "फोटो"); the domain still reports ONE entry — the first
+        // partial variant in table order wins.
+        XCTAssertEqual(KeywordIntentRule.nearMatches(transcript: "क्यामेरा फोटो"), [
+            KeywordIntentRule.NearMatch(domain: .appLaunch,
+                                        matchedKeys: ["क्यामेरा"], appID: "camera")
+        ])
+
+        // A news word and a music marker pair up: one entry each.
+        XCTAssertEqual(KeywordIntentRule.nearMatches(transcript: "समाचार गीत"), [
+            KeywordIntentRule.NearMatch(domain: .news, matchedKeys: ["समाचार"], appID: nil),
+            KeywordIntentRule.NearMatch(domain: .music, matchedKeys: ["गीत"], appID: nil)
+        ])
+
+        // The bound and the domain restriction hold over the corpus.
+        let framable: Set<KeywordIntentRule.Domain> = [.news, .youtube, .music, .appLaunch]
+        for utterance in ["युट्युब क्यामेरा", "समाचार गीत", "भजन", "क्यामेरा फोटो",
+                          "कहिले", "शिवरात्रि", "रक्तचापको औषधि कस्तो छ"] {
+            let matches = KeywordIntentRule.nearMatches(transcript: utterance)
+            XCTAssertEqual(Set(matches.map(\.domain)).count, matches.count,
+                           "\(utterance): one entry per domain")
+            XCTAssertLessThanOrEqual(matches.count, 4, "\(utterance): four domains, four entries")
+            for match in matches {
+                XCTAssertTrue(framable.contains(match.domain),
+                              "\(utterance): \(match.domain) is not a framable domain")
+            }
+        }
+
+        // Medication-family rules are never returned: `nearMatches`
+        // takes no medication vocabulary at all, so no probe can ever
+        // be framed around a medication command.
+        XCTAssertTrue(KeywordIntentRule.nearMatches(
+            transcript: "रक्तचापको औषधि कस्तो छ").isEmpty)
+        XCTAssertTrue(KeywordIntentRule.nearMatches(transcript: "").isEmpty)
+        XCTAssertTrue(KeywordIntentRule.nearMatches(transcript: "   ").isEmpty)
+    }
+
+    // MARK: - [MTC] Scaffold and marker accessors (T-130, design-l2 §13c)
+
+    /// Gherkin — "Scaffold and marker accessors split framing words from
+    /// content": the marker tokens are excluded from scaffold content
+    /// (they are kept in the free-text fallback and dropped only through
+    /// the marker-dropped variant), and the existing drop-word behaviour
+    /// is unchanged — both accessors read the same tables the extractor
+    /// has always read.
+    func testScaffoldAndMarkerAccessorsSplitFramingWordsFromContent() {
+        // Scaffold = a drop token that is NOT a marker.
+        for scaffold in ["बजाऊ", "चलाऊ", "सुनाऊ", "गाऊ", "play", "listen",
+                         "कृपया", "हजुर", "मा", "युट्युबमा", "स्पोटिफाइमा"] {
+            XCTAssertTrue(KeywordIntentRule.isMusicScaffoldToken(scaffold),
+                          "\(scaffold) is framing, not content")
+        }
+        for marker in ["भजन", "भजनको", "गीत", "गीतहरू", "गाना", "संगीत", "सङ्गीत",
+                       "music", "song", "bhajan"] {
+            XCTAssertTrue(KeywordIntentRule.isMusicMarkerToken(marker),
+                          "\(marker) is a marker token")
+            XCTAssertFalse(KeywordIntentRule.isMusicScaffoldToken(marker),
+                           "\(marker) is a MARKER — markers are never scaffold")
+        }
+        for content in ["रामायण", "देवीको", "दुर्गा", "songs", "songwriter", "गीता"] {
+            XCTAssertFalse(KeywordIntentRule.isMusicScaffoldToken(content),
+                           "\(content) is content — neither a drop nor a marker")
+            XCTAssertFalse(KeywordIntentRule.isMusicMarkerToken(content),
+                           "\(content) is outside the marker family")
+        }
+
+        // V3's shape from the predicates alone: "दुर्गा भजन बजाऊ" —
+        // the scaffold strip keeps the marker (content + marker), and
+        // the marker-dropped variant is exactly the catalog alias
+        // "दुर्गा" the repetition capture matches.
+        let tokens = "दुर्गा भजन बजाऊ".split(separator: " ").map(String.init)
+        let scaffoldStripped = tokens.filter { !KeywordIntentRule.isMusicScaffoldToken($0) }
+        XCTAssertEqual(scaffoldStripped, ["दुर्गा", "भजन"])
+        XCTAssertEqual(scaffoldStripped.filter { !KeywordIntentRule.isMusicMarkerToken($0) },
+                       ["दुर्गा"])
+
+        // V4/V6's shape: no scaffold token is present, so the strip is
+        // the identity and the markers stay in the value
+        // ("दशैं दुर्गा भजन" survives whole).
+        let freeText = "दशैं दुर्गा भजन".split(separator: " ").map(String.init)
+        XCTAssertEqual(freeText.filter { !KeywordIntentRule.isMusicScaffoldToken($0) }, freeText)
+    }
 }

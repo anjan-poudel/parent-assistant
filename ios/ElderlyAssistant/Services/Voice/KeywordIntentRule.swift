@@ -733,24 +733,71 @@ enum KeywordIntentRule {
         return musicMarkers.contains { $0.matches(text) }
     }
 
+    /// [MTC] (2026-10-10) The music query extractor's outcome with its
+    /// PROVENANCE — which of the never-empty fallback steps produced the
+    /// query, and whether that makes the request degenerate
+    /// (design-l2 §13; FR-MTC-002). The degenerate trigger reads
+    /// `isDegenerate`; the wrapper `musicQuery(from:)` reads `query`
+    /// alone and keeps every shipped return value byte-identical.
+    ///
+    /// Closed vocabulary, pure value data: no egress, no file reads, no
+    /// console writes — NFR-MTC-012 by construction.
+    struct MusicQueryExtraction: Equatable {
+        /// Which arm of the extractor produced the query.
+        enum Provenance: Equatable {
+            /// Tokens survived the drop sets — the utterance named its
+            /// own query ("रामायणको भजन लगाइदेऊ" → "रामायणको"). The
+            /// only non-degenerate provenance.
+            case content
+            /// Every token was scaffolding; the never-empty fallback
+            /// searched the FIRST music-marker token ("भजन बजाऊ" →
+            /// "भजन"). The query is the bare marker, not a request the
+            /// elder voiced — degenerate.
+            case markerFallback
+            /// Every token was scaffolding AND no marker token was
+            /// present: the raw transcript's tokens stand in the query
+            /// ("चलाऊ" → "चलाऊ"; design L2-D10 step 3). A
+            /// canonical-empty input reports this provenance with
+            /// `query == nil` (FR-MTC-002's "canonicalizes to
+            /// nothing"). Degenerate either way.
+            case transcriptFallback
+        }
+
+        /// The extracted query; nil only when the input canonicalizes
+        /// to nothing.
+        let query: String?
+        let provenance: Provenance
+
+        /// The degenerate-query trigger (design-l2 §23, FR-MTC-002):
+        /// only a content-derived query is a real search phrase. A
+        /// marker fallback, a transcript fallback and the
+        /// canonical-empty case must probe instead of searching the
+        /// literal result blindly.
+        var isDegenerate: Bool { provenance != .content || query == nil }
+    }
+
     /// Extracts the song query from a music request — the marker/verb
-    /// scaffolding removed, the remainder normalized. Mirrors
-    /// `YouTubeRoute.extractQuery`'s mechanics exactly (per-token
-    /// punctuation + danda trim, whole-token Latin/Devanagari drop
-    /// sets, Devanagari containment drops, `NepaliTextNormalizer`),
-    /// with the music vocabulary added to the drop sets, plus the
-    /// never-empty fallback of design L2-D10:
+    /// scaffolding removed, the remainder normalized — and reports
+    /// WHICH step produced it. Mirrors `YouTubeRoute.extractQuery`'s
+    /// mechanics exactly (per-token punctuation + danda trim,
+    /// whole-token Latin/Devanagari drop sets, Devanagari containment
+    /// drops, `NepaliTextNormalizer`), with the music vocabulary added
+    /// to the drop sets, plus the never-empty fallback of design
+    /// L2-D10:
     ///
-    ///   1. the tokens surviving the drop sets, joined;
-    ///   2. else the FIRST music-marker token ("भजन बजाऊ" → "भजन");
-    ///   3. else the raw transcript's tokens.
+    ///   1. the tokens surviving the drop sets, joined ⇒ `.content`;
+    ///   2. else the FIRST music-marker token ("भजन बजाऊ" → "भजन")
+    ///      ⇒ `.markerFallback`;
+    ///   3. else the raw transcript's tokens ⇒ `.transcriptFallback`.
     ///
-    /// Returns nil only when the input canonicalizes to nothing. The
-    /// canonicalization happens first (lowercase + whitespace
-    /// collapse), so a direct call with a raw transcript behaves like
-    /// one with the router's pre-canonicalized text.
-    static func musicQuery(from raw: String,
-                           maxLength: Int = KeywordIntentRule.maxMusicQueryLength) -> String? {
+    /// A canonical-empty input is step 3 with no tokens at all:
+    /// `.transcriptFallback` and `query == nil`. The canonicalization
+    /// happens first (lowercase + whitespace collapse), so a direct
+    /// call with a raw transcript behaves like one with the router's
+    /// pre-canonicalized text.
+    static func musicQueryOutcome(from raw: String,
+                                  maxLength: Int = KeywordIntentRule.maxMusicQueryLength)
+        -> MusicQueryExtraction {
         let text = canonical(raw)
         var tokens: [String] = []
         for piece in text.components(separatedBy: .whitespacesAndNewlines) {
@@ -759,23 +806,40 @@ enum KeywordIntentRule {
             guard !token.isEmpty else { continue }
             tokens.append(token)
         }
-        guard !tokens.isEmpty else { return nil }
+        guard !tokens.isEmpty else {
+            return MusicQueryExtraction(query: nil, provenance: .transcriptFallback)
+        }
 
         var kept = tokens.filter { !isMusicDropToken($0) }
-        if kept.isEmpty {
+        let provenance: MusicQueryExtraction.Provenance
+        if !kept.isEmpty {
+            provenance = .content
+        } else {
             // [SPOTIFY] L2-D10 — a query of marker + verb only ("भजन
             // बजाऊ") must never extract empty: search the marker word,
             // never the verb phrase, and only when there is no marker
             // at all fall back to the raw transcript's tokens.
             if let marker = tokens.first(where: { isMusicMarkerToken($0) }) {
                 kept = [marker]
+                provenance = .markerFallback
             } else {
                 kept = tokens
+                provenance = .transcriptFallback
             }
         }
         var query = NepaliTextNormalizer.normalize(kept.joined(separator: " "))
         query = String(query.prefix(maxLength))
-        return query.isEmpty ? nil : query
+        return MusicQueryExtraction(query: query.isEmpty ? nil : query,
+                                    provenance: provenance)
+    }
+
+    /// Thin wrapper — `musicQueryOutcome(from:maxLength:).query`. Every
+    /// return value (and every shipped test of it) is byte-identical to
+    /// the extractor's historical behaviour; new callers that need the
+    /// provenance read `musicQueryOutcome` instead.
+    static func musicQuery(from raw: String,
+                           maxLength: Int = KeywordIntentRule.maxMusicQueryLength) -> String? {
+        musicQueryOutcome(from: raw, maxLength: maxLength).query
     }
 
     /// The music extractor's drop sets: the YouTubeRoute sets, verbatim,
@@ -842,12 +906,96 @@ enum KeywordIntentRule {
     }
 
     /// True when the token is itself a music marker — the L2-D10
-    /// fallback's search key. Uses the same `musicMarkers` alternatives
-    /// the rule matches by (Devanagari substring, Latin whole-token),
-    /// so the fallback can never pick a token the rule would not have
-    /// recognised.
-    private static func isMusicMarkerToken(_ token: String) -> Bool {
+    /// fallback's search key and, since [MTC] (2026-10-10), the answer
+    /// path's marker-dropped-variant predicate (design-l2 §22 S6). Uses
+    /// the same `musicMarkers` alternatives the rule matches by
+    /// (Devanagari substring, Latin whole-token), so neither consumer
+    /// can ever pick or drop a token the rule would not have recognised.
+    static func isMusicMarkerToken(_ token: String) -> Bool {
         musicMarkers.contains { $0.matches(token) }
+    }
+
+    /// [MTC] (2026-10-10) True when the token is a NON-marker drop token
+    /// — the music verb family, the particles and the filter words —
+    /// the answer path's scaffold-strip predicate (design-l2 §13c/§22
+    /// S3). Markers deliberately return false: they are kept in the
+    /// free-text fallback and dropped only through the
+    /// marker-dropped variant, which reads `isMusicMarkerToken`. Both
+    /// accessors read the SAME tables the extractor reads — the drop
+    /// sets stay single-sourced (NFR-MTC-012).
+    static func isMusicScaffoldToken(_ token: String) -> Bool {
+        isMusicDropToken(token) && !isMusicMarkerToken(token)
+    }
+
+    // MARK: - Near-match reporting ([MTC] 2026-10-10)
+
+    /// [MTC] (2026-10-10) A domain whose relaxed rule PARTIALLY
+    /// co-occurred — the bounded near-match reading the did-you-mean
+    /// builder turns into candidates (design-l2 §10/§13b). Fixed
+    /// vocabulary only: `matchedKeys` are the rule's own alternatives,
+    /// never user text, so the value is safe to render as a candidate
+    /// label and to observe.
+    struct NearMatch: Equatable {
+        let domain: Domain
+        /// The variant's leading groups that co-occurred, in declared
+        /// order, as their first matching key — the rule's own
+        /// vocabulary. The FIRST key is the candidate's primary label
+        /// word (the one the elder actually said).
+        let matchedKeys: [String]
+        /// [APP-LAUNCHER] The catalog id an `.appLaunch` near-match
+        /// resolved to — the same field discipline as `Match.appID`:
+        /// nil for every other domain, and only for that reason.
+        let appID: String?
+    }
+
+    /// The four domains a candidate probe may be framed around
+    /// (design-l2 §6/§10). `.medicationPhoto` is excluded BY
+    /// CONSTRUCTION — no probe may ever be framed around a medication
+    /// command — and `.festivalDate` is not a candidate domain.
+    private static let nearMatchDomains: Set<Domain> = [.news, .youtube, .music, .appLaunch]
+
+    /// [MTC] (2026-10-10) The bounded near-match reading: for each rule
+    /// in table order, a variant counts when at least one — but not all
+    /// — of its declared groups co-occurs in the transcript. The reading
+    /// mirrors `match`'s traversal: the variant's groups are read in
+    /// their declared order (specific word first, action verb last) and
+    /// the match stops at the first absent group, so `matchedKeys` is
+    /// the co-occurred prefix, never a bare verb on its own — a lone
+    /// "बजाऊ" partially matches nothing, exactly as it fires nothing.
+    ///
+    /// One entry per domain (the first partial variant in table order
+    /// wins), restricted to the four framable domains. The rule-level
+    /// `excluded` groups apply exactly as they apply in `match`
+    /// (ADR-SP-06: a YouTube marker disqualifies the music rule even
+    /// for a near-match). Pure; no dynamic vocabulary is consulted, so
+    /// the medication rule can never appear here.
+    static func nearMatches(transcript raw: String) -> [NearMatch] {
+        let text = canonical(raw)
+        guard !text.isEmpty else { return [] }
+        var matches: [NearMatch] = []
+        var claimed: Set<Domain> = []
+        for rule in rules {
+            guard nearMatchDomains.contains(rule.domain),
+                  !claimed.contains(rule.domain) else { continue }
+            if rule.excluded.contains(where: { firstMatchingKey(in: $0, text: text) != nil }) {
+                continue
+            }
+            for variant in rule.variants {
+                var matched: [String] = []
+                for group in variant {
+                    guard let key = firstMatchingKey(in: group, text: text) else { break }
+                    matched.append(key)
+                }
+                if !matched.isEmpty && matched.count < variant.count {
+                    matches.append(NearMatch(domain: rule.domain,
+                                             matchedKeys: matched,
+                                             appID: rule.appID))
+                    claimed.insert(rule.domain)
+                    break
+                }
+            }
+        }
+        return matches
     }
 
     // MARK: - Helpers

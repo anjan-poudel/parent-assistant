@@ -162,6 +162,19 @@ final class LocalBrainChain: CommandInterpreter, InterpreterFailureReporting,
         self.traceRecorder = traceRecorder
     }
 
+    /// [MTC] The seam this chain owns, exposed to the ONE other caller that
+    /// must read the same prepared text: `AppCoordinator
+    /// .prepareDialogueAnswerText` (design-l2 §12.1 edit 8) prepares the
+    /// dialogue answer through exactly this seam via
+    /// `IntentTranscriptPreparation.prepare` — one order, two callers
+    /// (L2-D14).
+    ///
+    /// Nil means "this chain has no seam" (a pre-relocation or nested
+    /// construction) and is NOT a production shape: the shipped coordinator
+    /// wires a non-nil seam at `AppCoordinator.swift:1824` (M-3,
+    /// `security-design-review.md`).
+    var transcriptPreparationSeam: InputSeam? { inputSeam }
+
     var isAvailable: Bool {
         preferred.isAvailable || standIn.isAvailable
     }
@@ -272,14 +285,20 @@ final class LocalBrainChain: CommandInterpreter, InterpreterFailureReporting,
     }
 
     /// The seam, run ONCE — or not at all on a chain that does not own one.
+    ///
+    /// [MTC] The order itself (sanitise → seam → prepared text) lives in
+    /// `IntentTranscriptPreparation.prepare` (design-l2 L2-D14): the dialogue
+    /// answer path runs the same implementation, so there is one source and
+    /// two callers. The rewire is behaviour-preserving byte for byte — a nil
+    /// seam returns the transcript untouched, and the non-nil branch keeps
+    /// its own `plainText(for:raw:)` mapping below (raw-vs-picker equality),
+    /// which is deliberately NOT the helper's `prepared` value.
     private func turnInput(for transcript: String) -> TurnInput {
-        guard let inputSeam else {
-            return TurnInput(pair: nil, plainText: transcript)
+        let preparation = IntentTranscriptPreparation.prepare(transcript,
+                                                             seam: inputSeam)
+        guard let pair = preparation.pair else {
+            return TurnInput(pair: nil, plainText: preparation.prepared)
         }
-        // The sanitiser is the boundary and comes first (§4.6): the seam is
-        // handed sanitised text and nothing else.
-        let clean = InputSanitiser.sanitise(transcript, level: .quarantine)
-        let pair = inputSeam.prepare(clean)
         return TurnInput(pair: pair,
                          plainText: Self.plainText(for: pair, raw: transcript))
     }

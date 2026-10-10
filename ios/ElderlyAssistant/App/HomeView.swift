@@ -448,7 +448,10 @@ struct HomeView: View {
         switch session.state {
         case .idle, .speaking, .error, .stopped:
             return true
-        case .listening, .transcribing, .understanding, .awaitingConfirmation:
+        case .listening, .transcribing, .understanding, .awaitingConfirmation,
+             .awaitingSlotAnswer:
+            // Both answer windows own the stage: no history chip while a
+            // question is outstanding (T-135 follows the confirmation row).
             return false
         }
     }
@@ -597,12 +600,16 @@ struct TalkButton: View {
     /// Disabled unless the pipeline's own start callback succeeded AND
     /// the [LAT-M1] boot contract settled (ready OR degraded — a
     /// degraded hero is ENABLED with an honest cold-feature banner, never
-    /// silently), plus the chips' own case: while loading (or failed) the
-    /// hero is inert — the reset hold is not even attached, so a hold
-    /// cannot reach the reset path while the review's "cannot invoke
-    /// recovery merely because startup has not completed" rule applies.
+    /// silently), plus the answer windows' own case (the yes/no chips and
+    /// the slot answer window, FR-MTC-014 — each owns the turn): while
+    /// loading (or failed) the hero is inert — the reset hold is not even
+    /// attached, so a hold cannot reach the reset path while the review's
+    /// "cannot invoke recovery merely because startup has not completed"
+    /// rule applies.
     private var isDisabled: Bool {
-        !readiness.isTalkEnabled || session.state == .awaitingConfirmation
+        !readiness.isTalkEnabled
+            || session.state == .awaitingConfirmation
+            || session.state == .awaitingSlotAnswer
     }
 
     /// Idle and startup use the supplied glossy burgundy VoiceBridge face.
@@ -884,7 +891,7 @@ struct TalkButton: View {
         case .error, .stopped:
             return statusOverride ?? session.state.statusText(locale: locale)
         case .idle, .listening, .transcribing, .understanding,
-             .speaking, .awaitingConfirmation:
+             .speaking, .awaitingConfirmation, .awaitingSlotAnswer:
             return ""
         }
     }
@@ -1335,6 +1342,24 @@ extension VoiceSessionState {
                                     showsHalo: false,
                                     showsHintCarousel: false,
                                     isConfirmation: true,
+                                    isError: false)
+        case .awaitingSlotAnswer:
+            // T-135 (FR-MTC-014): the slot answer window. The probe has
+            // been (or is being) spoken and the machine waits for the
+            // elder's spoken answer, so the hero mirrors the LISTENING
+            // family — "go ahead, I'm listening" — with the ear, live
+            // motion and halo. Deliberately NOT the yes/no chips: this
+            // window has no confirm affordance and is answered by voice
+            // (NFR-MTC-009), and deliberately no new copy — the dialogue
+            // probe's own strings ride the TTS reply lane.
+            return TalkStageVisuals(icon: "ear.fill",
+                                    tint: DesignTokens.stateListening,
+                                    captionKey: "state.listening.button",
+                                    statusKey: "state.listening.status",
+                                    pulses: true,
+                                    showsHalo: true,
+                                    showsHintCarousel: false,
+                                    isConfirmation: false,
                                     isError: false)
         case .error:
             return TalkStageVisuals(icon: "exclamationmark",
