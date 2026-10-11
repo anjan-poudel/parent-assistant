@@ -188,6 +188,63 @@ final class CommandRouterTests: XCTestCase {
         XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "command_call_confirmation_requested" })
     }
 
+    /// [SLOT-VERIFY] (2026-10-11) Field report: the model filled a
+    /// WRONG contact name ("Seema" for a request to call "syanu"). When
+    /// the model's slot fails to resolve, the transcript's own extracted
+    /// name gets a second attempt through the SAME confirmation seam —
+    /// a hallucinated slot must not cost the elder the call.
+    func testWrongModelContactSlotFallsBackToTranscriptName() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.callConfirmationPromptProvider = { query in
+            query == "syanu" ? "स्यानुलाई फोन गर्ने हो?" : nil
+        }
+        let bus = MockObservabilityBus()
+        let interpreter = FakeCommandInterpreter()
+        interpreter.nextCommand = InterpretedCommand(
+            action: .call, entryId: nil, contact: "Seema", time: nil, medication: nil,
+            message: nil, callType: nil, requestedApp: nil, pluginAction: nil, pluginEntities: nil,
+            confidence: 0.95, reply: "ठिक छ"
+        )
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: bus,
+                                   speaker: MockSpeaker(), interpreter: interpreter)
+
+        _ = router.route(transcript: "syanu lai phone gara")
+
+        XCTAssertEqual(coordinator.callConfirmationRequests.map(\.contact),
+                       ["Seema", "syanu"],
+                       "the model's slot is tried first, then the transcript's name")
+        XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "command_call_deterministic_confirmation" })
+        XCTAssertFalse(bus.emittedEvents.contains { $0.eventType == "command_call_contact_not_found" })
+    }
+
+    /// [SLOT-VERIFY] When BOTH the model's slot and the transcript's
+    /// name fail to resolve, the failure line quotes the TRANSCRIPT's
+    /// reading (the least-wrong name), never the hallucinated slot —
+    /// the elder hears the name they actually said.
+    func testFailedCallQuotesTranscriptNameNotHallucinatedSlot() {
+        let coordinator = MockVoiceCommandCoordinator()
+        coordinator.callConfirmationPrompt = nil
+        let bus = MockObservabilityBus()
+        let interpreter = FakeCommandInterpreter()
+        interpreter.nextCommand = InterpretedCommand(
+            action: .call, entryId: nil, contact: "Anita", time: nil, medication: nil,
+            message: nil, callType: nil, requestedApp: nil, pluginAction: nil, pluginEntities: nil,
+            confidence: 0.95, reply: "ठिक छ"
+        )
+        let router = CommandRouter(coordinator: coordinator, observabilityBus: bus,
+                                   speaker: MockSpeaker(), interpreter: interpreter)
+
+        _ = router.route(transcript: "anjan lai phone gara")
+
+        XCTAssertEqual(coordinator.callConfirmationRequests.map(\.contact),
+                       ["Anita", "anjan"])
+        XCTAssertEqual(coordinator.genericReplies.count, 1)
+        let line = coordinator.genericReplies.first ?? ""
+        XCTAssertTrue(line.contains("anjan"), "the failure line must quote the transcript's name")
+        XCTAssertFalse(line.contains("Anita"), "the hallucinated slot must not be quoted")
+        XCTAssertTrue(bus.emittedEvents.contains { $0.eventType == "command_call_contact_not_found" })
+    }
+
     /// 2026-09-05: calling now asks for confirmation FIRST — the router's
     /// job is just to request it and speak the prompt. Nothing is dialed
     /// at this layer; `AppCoordinator.handleConfirmationResponse` does
@@ -1043,10 +1100,15 @@ private final class MockVoiceCommandCoordinator: VoiceCommandCoordinating {
 
     var isAwaitingCallConfirmation = false
     var callConfirmationPrompt: String? = "फोन गर्ने हो?"
+    /// [SLOT-VERIFY] Per-query override — lets a test fail one name and
+    /// resolve another, exactly the field scenario (hallucinated slot vs
+    /// transcript name).
+    var callConfirmationPromptProvider: ((String?) -> String?)?
     var callConfirmationRequests: [(contact: String?, callType: String?, requestedApp: String?)] = []
     func requestCallConfirmation(contactQuery: String?, callType: String?, requestedApp: String?,
                                  sourceTranscript: String?, sourceCommand: InterpretedCommand?) -> String? {
         callConfirmationRequests.append((contactQuery, callType, requestedApp))
+        if let provider = callConfirmationPromptProvider { return provider(contactQuery) }
         return callConfirmationPrompt
     }
 
