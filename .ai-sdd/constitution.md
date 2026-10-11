@@ -6,7 +6,7 @@
 |------|------|----------|--------|------|
 | define-requirements | `specs/define-requirements.lock.yaml` | `—` | COMPLETED | 2026-10-11 |
 | define-requirements | `specs/define-requirements.md` | `—` | COMPLETED | 2026-10-11 |
-| design-l1 | `specs/design-l1.md` | `architecture_l1` | COMPLETED | 2026-10-10 |
+| design-l1 | `specs/design-l1.md` | `architecture_l1` | COMPLETED | 2026-10-11 |
 | design-l2 | `specs/design-l2.md` | `component_design_l2` | COMPLETED | 2026-10-10 |
 | final-sign-off | `specs/final-sign-off.md` | `—` | COMPLETED | 2026-10-10 |
 | implement | `specs/implement-notes.md` | `—` | COMPLETED | 2026-10-10 |
