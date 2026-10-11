@@ -96,3 +96,27 @@ Flags recorded for the reviewer:
 2. The retired attempt-order wording appeared in four locations across the two records, not three; all four are corrected because the M-2 anchor covers the attempt-order comment plus the section 6 route documentation in design-l2 (the review condition's own scope).
 3. The catalogue total pin in the Spotify localisation test file is already red at the branch base (pin 1381 against 1389 actual, eight over before this unit); that file is outside this unit's ownership and is carried for the follow-up l10n evidence unit.
 4. This feature's section is appended rather than replacing the committed multi-turn-conversation record this file carried at HEAD; no other pre-existing content was modified.
+
+---
+
+# call-dialer-primary-secondary — Implement notes (Wave 2, unit T-145)
+
+Description: Wave 2 lands the pure-static channel-chain core (component C1) as a new file plus the never-dead-ends matrix and hop-statics tests in the resolution suite. The W1 record above is preserved; this section is this feature's W2 record, appended below it, not a replacement.
+
+## Per-unit status (Wave 2)
+
+| Unit | Title (short) | Wave | Status | Evidence summary |
+|---|---|---|---|---|
+| T-145 | CallChannelChain core and the never-dead-ends matrix | W2 | Done (review GO 0.95) | New file bytes-identical to the frozen design-l2 section 6 listing (212 lines; process-substitution diff exit 0), Foundation-only, no store/egress/logging/clock/timer/async, nothing throws, no extra API surface. Resolution suite extended additively (+483/-0; 69 to 552 lines; first 68 lines byte-intact; 12 new tests, 19 total). Scoped gate: ios/build.sh test:unit CallChannelResolutionTests — 19 executed, 19 passed, 0 failures, exit 0; privacy guard 24 cases over 12 rules green before the tests; prompt-mirror guard green; xcresult Test-ElderlyAssistant-2026.10.12_05-08-21 readback passedTests 19 / failedTests 0. The one pbxproj delta (+12 lines) is the mandated gate's xcodegen registration of the new file and Calls group (precedent commit 7ccff294); included in the W2 commit. |
+
+## Wave log — W2
+
+W2 implementation reviewed by the paired challenger to GO (confidence 0.95 against the 0.85 threshold; 0 BLOCKER, 0 MAJOR, 7 NOTE), all five implementer claims re-derived independently; report at specs/implement-review-w2.md. Findings carried forward:
+
+1. N-1: the matrix's vocabulary-legality assertion is any-channel-only, disclosed in its own doc comment; the load-bearing audio/video legality is proven by the substitution test (only two out-of-vocabulary pairs exist because the shipped gates are one-sided). Adequate for SA-3 core; per-surface substitution application remains T-146's seam obligation.
+2. N-2: three planned suite names from design-l2 section 28 were delivered under different names; the delivered names are authoritative; the only binding acceptance name, the V-6 rename testOrderContainsPhonePreferredFirst, is exact.
+3. N-3: L2-D1's "Case table 11.4" pointer is dangling (the vocabulary case table is section 10.4); the hop semantics agree on all eight rows; a one-line erratum is owed the next time design-l2 is touched.
+4. N-4: the T-145 note's "stubbed-absent whatsApp" phrasing is looser than the frozen L2-D6 semantics (the decision-time filter drops only messenger; a probe-absent whatsApp stays attemptable best-effort); L2-D6 is authoritative for the security-test reader.
+5. N-5: the retired order-test name survives only inside the two review records that had to name what they retire (security-design-review and review-l2); correct, no action.
+6. N-6: four new test identifiers exceed the 40-character run convention; records citing them must use the identifier-break convention (this file does).
+7. N-7: gate-log per-case lines can drop under parallel workers; the xcresult bundle is the authoritative pass list; the untracked workflow.yaml is engine state outside the artifact surface, per the W1 F-5 convention.
