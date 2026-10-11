@@ -29,3 +29,15 @@ Whole-module typecheck green (build-for-testing, exit 0). Scoped suite
 deferred to T-163 per speed mode. Open: T-144 merge must re-measure the
 absolute baseline; SpotifyLocalizationTests count pin pre-existing red at
 HEAD (untouched, flagged).
+
+## T-148a — ContactsAccess .limited + identifier plumbing — DONE
+
+Commit d162aa16. ContactsAccess gains .limited + allowsReading + from(_:) as
+the single iOS-18 gate; access() delegates; AddressBookEntry.identifier
+plumbing (make default, CNContactIdentifierKey, allEntries pass-through).
+Compile-forced fallout: MissedCallContactResolver resolve gains the .limited
+readable arm (own file); ONE mechanical shared-file fix — wizard searchSection
+:2117 case .allowed, .limited (T-148b debt marked in code). New suite
+ContactsAccessTests (9 tests incl. the module-wide single-gate scan).
+Whole-module typecheck green (build-for-testing, exit 0, 0 errors). Scoped run
+deferred to T-163 per speed mode.
