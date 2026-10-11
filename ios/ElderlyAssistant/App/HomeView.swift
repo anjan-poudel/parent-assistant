@@ -600,16 +600,17 @@ struct TalkButton: View {
     /// Disabled unless the pipeline's own start callback succeeded AND
     /// the [LAT-M1] boot contract settled (ready OR degraded — a
     /// degraded hero is ENABLED with an honest cold-feature banner, never
-    /// silently), plus the answer windows' own case (the yes/no chips and
-    /// the slot answer window, FR-MTC-014 — each owns the turn): while
-    /// loading (or failed) the hero is inert — the reset hold is not even
-    /// attached, so a hold cannot reach the reset path while the review's
-    /// "cannot invoke recovery merely because startup has not completed"
-    /// rule applies.
+    /// silently), plus the confirmation window's own case (the yes/no
+    /// chips own that turn): while loading (or failed) the hero is inert
+    /// — the reset hold is not even attached, so a hold cannot reach the
+    /// reset path while the review's "cannot invoke recovery merely
+    /// because startup has not completed" rule applies. The slot answer
+    /// window deliberately does NOT disable the hero: it is answered by
+    /// voice through the Talk control (device defect fix 2026-10-11 —
+    /// the window had no chips, no auto-listen and a dead Talk button).
     private var isDisabled: Bool {
         !readiness.isTalkEnabled
-            || session.state == .awaitingConfirmation
-            || session.state == .awaitingSlotAnswer
+            || !session.state.supportsTalkTap
     }
 
     /// Idle and startup use the supplied glossy burgundy VoiceBridge face.
