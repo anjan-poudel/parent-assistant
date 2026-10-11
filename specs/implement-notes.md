@@ -120,3 +120,36 @@ W2 implementation reviewed by the paired challenger to GO (confidence 0.95 again
 5. N-5: the retired order-test name survives only inside the two review records that had to name what they retire (security-design-review and review-l2); correct, no action.
 6. N-6: four new test identifiers exceed the 40-character run convention; records citing them must use the identifier-break convention (this file does).
 7. N-7: gate-log per-case lines can drop under parallel workers; the xcresult bundle is the authoritative pass list; the untracked workflow.yaml is engine state outside the artifact surface, per the W1 F-5 convention.
+
+---
+
+# call-dialer-primary-secondary — Implement notes (Wave 3, units T-146 + T-156)
+
+Description: Wave 3 wires the chain into the coordinator seams with the secondary settings storage (component C2 plus the storage half of C6) and registers the Calls service root in the release privacy guard (the gate-side half of SA-6). The W1 and W2 records above are preserved; this section is this feature's W3 record, appended below them, not a replacement.
+
+## Per-unit status (Wave 3)
+
+| Unit | Title (short) | Wave | Status | Evidence summary |
+|---|---|---|---|---|
+| T-146 | Resolution seams and secondary settings storage | W3 | Done (review GO 0.93) | Six-argument resolvedCallChannel and five-argument resolvedMissedCallChannel return the chain Result with provenance; shared private resolveChannel helper (vocabulary normalisation plus terminal substitution, design-verbatim, provenance untouched by substitution); probe whatsAppInstalledNow over the shipped canOpenURLOnMain (no new plist entry, permission or egress); private handle predicate per L2-D11; published secondaryCallApp, key "secondaryCallApp", primary-mirroring restore shape, phone default. Old three-argument forms deleted (replace-not-widen, no overloads). Scoped gates: CallChannelResolutionTests 26 executed / 26 passed / exit 0 (7 shipped + 12 T-145 + 7 new seam cells); MissedCallDialBackTests 12/12; ContactCallButtonsTests 16/16; both in-build guards green. Compile-forced deviations (behaviour-preserving, recorded in place in the artifacts): LeafViews row-site bridge (+8/-1), MissedCallDialBackTests 9 call sites (+34/-9), missedCallDialAction seam-call bridge. |
+| T-156 | Log-safety gate: Services/Calls feature root | W3 | Done (review GO 0.96) | "Services/Calls" appended to FEATURE_ROOTS in the shipped per-feature comment pattern (+10/-0); guard clean run exit 0; fixture self-suite 24 cases over 12 rules exit 0; shipped shell entry point exit 0 with build.sh:431 intact; role predicate grades the chain file feature-role; counterfactual (entry stripped) shows the registration is load-bearing; a scratch probe outside every root is reported with exit 1 then deleted. |
+
+## Wave log — W3
+
+Both units were implemented concurrently (file-disjoint) and each reviewed by its own paired challenger; both GO, zero BLOCKER and zero MAJOR across the wave; reports at specs/implement-review-w3-t146.md and specs/implement-review-w3-t156.md.
+
+T-146 carried findings:
+1. N-1: the three compile-forced deviations are minimal and behaviour-preserving; the .phone stand-in for the secondary is the only choice that reproduces the shipped literal floor (a defaultApp stand-in would flip the handle-less-messenger corner). Soft sequencing observation: the row-site bridge passes the live property, so when T-154 lands the picker the row begins honouring the secondary before T-151's disclosure lands; accepted because every unit lands on this branch before the feature's review and merge, so no external state ever exposes the intra-branch gap; T-151's row-announce work remains in its planned wave.
+2. N-2: the probe helper and the handle predicate are forward-declared surface with no in-unit consumers by design (later units wire them); one edge for T-153: a raw handle that normalises to empty is unusable for the predicate but usable for the dial-back site's raw isEmpty derivation (shipped behaviour, design-sanctioned; do not treat the two derivations as identical).
+3. N-3: the secondary restore's absent/unknown-raw to phone semantics are design-verbatim but not test-pinned in this unit; T-154 owes the pin (absent key, unknown raw, round trip), already in its definition of done.
+4. N-4: no console log was retained for the T-146 gate run; the xcresult bundles are the authoritative evidence (the mtime chain covers the reviewed revision) and both in-build guards were re-run green fresh by the reviewer.
+5. N-5: five new test identifiers exceed the 40-character run convention; records citing them use the identifier-break convention.
+6. N-6: bookkeeping as before (workflow.yaml is engine state; the concurrent T-156 guard edit was reviewed separately).
+
+T-156 carried findings:
+1. N-1: "last entry" in the root list is bookkeeping only; the load-bearing property is the prefix scope, empirically proven (the CallsExtra and Calls.swift probes stay role other).
+2. N-2: the guard has no unregistered-file rule; the failure-discipline scenario is satisfied by the universal transcript rule firing outside every root, and the swallow question is answered by the counterfactual (entry stripped goes green) and the in-root probe (three layers fire). The later security-test reader should read that scenario with this semantics.
+3. N-3: the comment block compresses one design clause (announcement labels are speech-only, not bus payloads); no behavioural consequence.
+4. N-4: the guard's success message names only the live-camera-translation sources (pre-existing at HEAD; every prior root addition left it unchanged); the calls root "listed" is the registry line, not console output.
+5. N-5: acceptance-scenario interpretation recorded (registry plus exit zero).
+6. N-6: bookkeeping; T-146's concurrent edits were outside the T-156 review's scope and did not move its diff.

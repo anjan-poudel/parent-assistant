@@ -1609,10 +1609,17 @@ struct CallView: View {
             ? nil
             : coordinator.storedChannelPreference(forNormalizedPhone: storeKey)
         let hasHandle = resolvedMessengerHandle(for: result) != nil
+        // T-146 compile bridge (call-dialer-primary-secondary): the row's
+        // own announce + probe wiring is T-151's; until then the row
+        // reads only the routed channel and the probe input stays at the
+        // shipped "no probe gate" value (the row never gated WhatsApp on
+        // installation), so today's row behaviour is preserved verbatim.
         let resolvedChannel = AppCoordinator.resolvedCallChannel(
             explicit: storedPreference,
             defaultApp: coordinator.defaultCallApp,
-            messengerHandleAvailable: hasHandle)
+            secondaryApp: coordinator.secondaryCallApp,
+            messengerHandleAvailable: hasHandle,
+            whatsAppInstalled: true).channel
         return RowChannelState(storedPreference: storedPreference,
                                resolvedChannel: resolvedChannel,
                                hasHandle: hasHandle,

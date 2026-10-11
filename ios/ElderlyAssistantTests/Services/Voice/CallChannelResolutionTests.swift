@@ -54,17 +54,38 @@ final class CallChannelResolutionTests: XCTestCase {
         assertResolved(explicit: nil, defaultApp: .phone, handleAvailable: false, expected: .phone)
     }
 
+    /// Drives the six-argument seam (T-146) and asserts the routed
+    /// channel plus, when given, its provenance. The defaults describe
+    /// the shipped row semantics the seven tests above pin: the phone
+    /// floor as the secondary, WhatsApp routable as before (the probe
+    /// input is a Bool here — no platform probe runs in the matrix) and
+    /// any-channel vocabulary. Returns the full `Result` so callers can
+    /// assert provenance themselves.
+    @discardableResult
     private func assertResolved(explicit: CallApp?, defaultApp: CallApp,
-                                handleAvailable: Bool, expected: CallApp,
-                                file: StaticString = #filePath, line: UInt = #line) {
-        XCTAssertEqual(
-            AppCoordinator.resolvedCallChannel(explicit: explicit,
-                                               defaultApp: defaultApp,
-                                               messengerHandleAvailable: handleAvailable),
-            expected,
-            "explicit: \(String(describing: explicit)), default: \(defaultApp), handle: \(handleAvailable)",
-            file: file, line: line
-        )
+                                secondaryApp: CallApp = .phone,
+                                handleAvailable: Bool,
+                                whatsAppInstalled: Bool = true,
+                                vocabulary: CallChannelVocabulary = .anyChannel,
+                                expected: CallApp,
+                                expectedFellBackFrom: [CallApp]? = nil,
+                                file: StaticString = #filePath, line: UInt = #line)
+                                -> CallChannelChain.Result {
+        let result = AppCoordinator.resolvedCallChannel(explicit: explicit,
+                                                        defaultApp: defaultApp,
+                                                        secondaryApp: secondaryApp,
+                                                        messengerHandleAvailable: handleAvailable,
+                                                        whatsAppInstalled: whatsAppInstalled,
+                                                        vocabulary: vocabulary)
+        let cell = "explicit: \(String(describing: explicit)), default: \(defaultApp), "
+            + "secondary: \(secondaryApp), handle: \(handleAvailable), "
+            + "whatsApp: \(whatsAppInstalled), vocabulary: \(vocabulary)"
+        XCTAssertEqual(result.channel, expected, cell, file: file, line: line)
+        if let expectedFellBackFrom {
+            XCTAssertEqual(result.fellBackFrom, expectedFellBackFrom,
+                           "provenance — " + cell, file: file, line: line)
+        }
+        return result
     }
 
     // MARK: - CallChannelChain core (T-145)
@@ -548,5 +569,257 @@ final class CallChannelResolutionTests: XCTestCase {
             XCTAssertFalse(ne.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             XCTAssertNotEqual(en, ne, "the label must honour the caller's locale: \(key)")
         }
+    }
+
+    // MARK: - Resolution seams (T-146)
+    //
+    // Security evidence for call-dialer-primary-secondary at the seam
+    // level: SA-2 (the probe and handle inputs route through the chain
+    // with attempt-order provenance — the announce/hop input is the
+    // seam's own truth) and SA-9 (equal primary and secondary picks
+    // resolve to ONE attempt, no duplicate work). Everything below
+    // drives `AppCoordinator.resolvedCallChannel` /
+    // `resolvedMissedCallChannel` directly — pure statics, no
+    // coordinator instance, no platform probe, no clock; the probe
+    // result arrives as the Bool the seam takes.
+
+    /// FR-CDP-009 / SA-2 — an explicit per-contact pick wins as the
+    /// chain's preferred: with a handle on file it routes outright
+    /// (empty provenance — nothing was skipped) even against a
+    /// conflicting global default, and a conflicting default never
+    /// displaces it.
+    func testExplicitPickWinsAsPreferred() {
+        assertResolved(explicit: .messenger, defaultApp: .whatsApp,
+                       handleAvailable: true, expected: .messenger,
+                       expectedFellBackFrom: [])
+        assertResolved(explicit: .whatsApp, defaultApp: .phone,
+                       handleAvailable: true, expected: .whatsApp,
+                       expectedFellBackFrom: [])
+        assertResolved(explicit: .phone, defaultApp: .messenger,
+                       handleAvailable: true, expected: .phone,
+                       expectedFellBackFrom: [])
+        assertResolved(explicit: .faceTime, defaultApp: .whatsApp,
+                       handleAvailable: true, expected: .faceTime,
+                       expectedFellBackFrom: [])
+    }
+
+    /// FR-CDP-005 / SA-2 — the installed-app probe stubbed false: a
+    /// WhatsApp-friendly preference (explicit, or via the global
+    /// default) is skipped at routing, the secondary (or the phone
+    /// terminal) is routed instead, and the provenance carries the
+    /// skipped channel in attempt order. The probe Bool itself comes
+    /// from the injected-closure static over the compile-time literal —
+    /// no platform probe runs in this matrix.
+    func testProbeFalseRoutesToSecondaryWithProvenance() {
+        let probeOff = CallChannelChain.whatsAppInstalled(canOpen: { _ in false })
+        XCTAssertFalse(probeOff)
+
+        // Secondary route: the WhatsApp preference is skipped, the
+        // WhatsApp-friendly messenger secondary opens.
+        let toSecondary = assertResolved(explicit: .whatsApp, defaultApp: .phone,
+                                         secondaryApp: .messenger,
+                                         handleAvailable: true,
+                                         whatsAppInstalled: probeOff,
+                                         expected: .messenger,
+                                         expectedFellBackFrom: [.whatsApp])
+        XCTAssertEqual(toSecondary.fellBackFrom.first, .whatsApp)
+
+        // Terminal route: no permitted secondary → the phone floor, with
+        // the same provenance.
+        let toTerminal = assertResolved(explicit: .whatsApp, defaultApp: .phone,
+                                        handleAvailable: true,
+                                        whatsAppInstalled: probeOff,
+                                        expected: .phone,
+                                        expectedFellBackFrom: [.whatsApp])
+        XCTAssertEqual(toTerminal.fellBackFrom.first, .whatsApp)
+
+        // A WhatsApp-friendly GLOBAL default falls back the same way...
+        assertResolved(explicit: nil, defaultApp: .whatsApp, handleAvailable: true,
+                       whatsAppInstalled: probeOff, expected: .phone,
+                       expectedFellBackFrom: [.whatsApp])
+        // ... and with the probe true the same preference routes outright.
+        assertResolved(explicit: .whatsApp, defaultApp: .phone, handleAvailable: true,
+                       whatsAppInstalled: true, expected: .whatsApp,
+                       expectedFellBackFrom: [])
+    }
+
+    /// FR-CDP-004 — a Messenger preference with no usable handle on file
+    /// is skipped like any other infeasible channel: the route falls to
+    /// the permitted secondary when one exists, else the phone floor,
+    /// and the provenance carries the skipped Messenger.
+    func testMessengerPreferenceWithoutHandleDropsToFloorOrSecondary() {
+        assertResolved(explicit: .messenger, defaultApp: .phone, handleAvailable: false,
+                       expected: .phone, expectedFellBackFrom: [.messenger])
+        assertResolved(explicit: nil, defaultApp: .messenger, handleAvailable: false,
+                       expected: .phone, expectedFellBackFrom: [.messenger])
+        assertResolved(explicit: .messenger, defaultApp: .phone, secondaryApp: .whatsApp,
+                       handleAvailable: false, whatsAppInstalled: true,
+                       expected: .whatsApp, expectedFellBackFrom: [.messenger])
+        // With a handle the same preference routes outright.
+        assertResolved(explicit: .messenger, defaultApp: .phone, handleAvailable: true,
+                       expected: .messenger, expectedFellBackFrom: [])
+    }
+
+    /// SA-2 / FR-CDP-007 — the seam NEVER returns a channel outside the
+    /// attempt order: across the whole (explicit, default, secondary,
+    /// handle, probe) sweep the routed channel is a member of the order
+    /// over (preferred, secondary), it is feasible under the supplied
+    /// facts, the provenance is exactly the skipped attempt-order prefix,
+    /// and a routed preferred reports no provenance. Any-channel
+    /// vocabulary throughout, so no substitution can occur here (the
+    /// substitution cells are tested separately below).
+    func testSeamNeverReturnsAChannelOutsideTheAttemptOrder() {
+        let explicits: [CallApp?] = [nil, .faceTime, .phone, .messenger, .whatsApp]
+        var cells = 0
+        for explicit in explicits {
+            for defaultApp in Self.chainChannels {
+                for secondaryApp in Self.chainChannels {
+                    for combo in chainFeasibilityCombos() {
+                        cells += 1
+                        let cell = "explicit: \(String(describing: explicit)), "
+                            + "default: \(defaultApp), secondary: \(secondaryApp), "
+                            + "handle: \(combo.handle), whatsApp: \(combo.whatsApp)"
+                        let preferred = explicit ?? defaultApp
+                        let order = CallChannelChain.attemptOrder(preferred: preferred,
+                                                                  secondary: secondaryApp)
+                        let result = AppCoordinator.resolvedCallChannel(
+                            explicit: explicit, defaultApp: defaultApp,
+                            secondaryApp: secondaryApp,
+                            messengerHandleAvailable: combo.handle,
+                            whatsAppInstalled: combo.whatsApp)
+                        XCTAssertTrue(order.contains(result.channel), cell)
+                        XCTAssertTrue(CallChannelChain.isFeasible(
+                            result.channel,
+                            feasibility: CallChannelChain.Feasibility(
+                                messengerHandleAvailable: combo.handle,
+                                whatsAppInstalled: combo.whatsApp)), cell)
+                        XCTAssertEqual(result.fellBackFrom,
+                                       Array(order.prefix(while: { $0 != result.channel })),
+                                       cell)
+                        if result.channel == preferred {
+                            XCTAssertTrue(result.fellBackFrom.isEmpty, cell)
+                        }
+                    }
+                }
+            }
+        }
+        XCTAssertEqual(cells, 320, "the full explicit/default/secondary/environment sweep must run")
+    }
+
+    /// FR-CDP-010 / SA-3 at the seam — an out-of-vocabulary routed
+    /// channel is substituted with the vocabulary terminal (phone for
+    /// any/audio, FaceTime for video) and remains feasible; the
+    /// substitution never fabricates provenance, and the preferred-input
+    /// normalization is silent too.
+    func testSeamVocabularySubstitutionRoutesToTerminal() {
+        // audio: a handle-less messenger preference falls to the FaceTime
+        // secondary — out of vocabulary for an audio button — and is
+        // substituted to the phone terminal; provenance is untouched.
+        let audio = AppCoordinator.resolvedCallChannel(
+            explicit: .messenger, defaultApp: .phone, secondaryApp: .faceTime,
+            messengerHandleAvailable: false, whatsAppInstalled: true,
+            vocabulary: .audio)
+        XCTAssertEqual(audio.channel, .phone)
+        XCTAssertEqual(audio.channel, CallChannelVocabulary.audio.terminal)
+        XCTAssertEqual(audio.fellBackFrom, [.messenger])
+        XCTAssertTrue(CallChannelVocabulary.audio.permits(audio.channel))
+
+        // video: the same preference falls to the GSM floor — out of
+        // vocabulary for a video button — substituted to FaceTime.
+        let video = AppCoordinator.resolvedCallChannel(
+            explicit: .messenger, defaultApp: .phone, secondaryApp: .phone,
+            messengerHandleAvailable: false, whatsAppInstalled: true,
+            vocabulary: .video)
+        XCTAssertEqual(video.channel, .faceTime)
+        XCTAssertEqual(video.channel, CallChannelVocabulary.video.terminal)
+        XCTAssertEqual(video.fellBackFrom, [.messenger])
+        XCTAssertTrue(CallChannelVocabulary.video.permits(video.channel))
+
+        // Step-1 normalization is SILENT: a FaceTime pick on an audio
+        // path routes to the phone terminal with empty provenance — the
+        // shipped `supportsAudio` gate also substituted without a word.
+        let audioFaceTime = assertResolved(explicit: .faceTime, defaultApp: .phone,
+                                           handleAvailable: true, vocabulary: .audio,
+                                           expected: .phone, expectedFellBackFrom: [])
+        XCTAssertTrue(audioFaceTime.fellBackFrom.isEmpty)
+
+        // And every substituted terminal is permitted AND feasible under
+        // every combination of environment facts — the substitution can
+        // never dead-end.
+        for vocabulary in [CallChannelVocabulary.anyChannel, .audio, .video] {
+            for combo in chainFeasibilityCombos() {
+                let cell = "vocabulary: \(vocabulary), handle: \(combo.handle), "
+                    + "whatsApp: \(combo.whatsApp)"
+                let terminal = vocabulary.terminal
+                XCTAssertTrue(vocabulary.permits(terminal), cell)
+                XCTAssertTrue(CallChannelChain.isFeasible(
+                    terminal,
+                    feasibility: CallChannelChain.Feasibility(
+                        messengerHandleAvailable: combo.handle,
+                        whatsAppInstalled: combo.whatsApp)), cell)
+            }
+        }
+    }
+
+    /// SA-9 — equal primary and secondary picks dedupe to a SINGLE
+    /// attempt: a feasible equal pick routes the preferred with empty
+    /// provenance and occupies one slot in the order; an infeasible
+    /// equal pick is skipped once and reports ONE provenance entry,
+    /// never two (no duplicate work, no doubled disclosure).
+    func testSecondaryEqualsPrimaryDedupes() {
+        for channel in Self.chainChannels {
+            let result = AppCoordinator.resolvedCallChannel(
+                explicit: channel, defaultApp: channel, secondaryApp: channel,
+                messengerHandleAvailable: true, whatsAppInstalled: true)
+            XCTAssertEqual(result.channel, channel,
+                           "equal feasible picks route the preferred")
+            XCTAssertTrue(result.fellBackFrom.isEmpty,
+                          "a routed preferred never reports provenance")
+            XCTAssertEqual(CallChannelChain.attemptOrder(preferred: channel,
+                                                         secondary: channel).count,
+                           channel == .phone ? 1 : 2,
+                           "the equal pick occupies one slot, the floor its own")
+        }
+        // Infeasible equal messenger picks: skipped once, one entry.
+        let messenger = AppCoordinator.resolvedCallChannel(
+            explicit: .messenger, defaultApp: .messenger, secondaryApp: .messenger,
+            messengerHandleAvailable: false, whatsAppInstalled: true)
+        XCTAssertEqual(messenger.channel, .phone)
+        XCTAssertEqual(messenger.fellBackFrom, [.messenger],
+                       "the equal pick is attempted once, never twice")
+        // The same dedupe over a probe-absent WhatsApp default.
+        let whatsApp = AppCoordinator.resolvedCallChannel(
+            explicit: .whatsApp, defaultApp: .phone, secondaryApp: .whatsApp,
+            messengerHandleAvailable: true, whatsAppInstalled: false)
+        XCTAssertEqual(whatsApp.channel, .phone)
+        XCTAssertEqual(whatsApp.fellBackFrom, [.whatsApp])
+    }
+
+    /// FR-CDP-011 / ADR-CDP-03 step 4 — the missed-call seam reads the
+    /// family contact's audio preference and routes through the SAME
+    /// shared helper with the `.audio` vocabulary: a FaceTime
+    /// preference still lands on the phone floor (silently, empty
+    /// provenance), a handle-less Messenger preference with a permitted
+    /// secondary routes there with its provenance, and the `Result`
+    /// carries the attempt-order provenance the dial-back announcement
+    /// composes from.
+    func testMissedCallSeamUsesAudioVocabularyWithProvenance() {
+        let faceTimeFan = FamilyContact(name: "बुबा", phone: "9841234567",
+                                        relationship: "father",
+                                        preferredCallApp: .faceTime)
+        let routed = AppCoordinator.resolvedMissedCallChannel(
+            familyContact: faceTimeFan, defaultApp: .phone, secondaryApp: .phone,
+            messengerHandleAvailable: false, whatsAppInstalled: true)
+        XCTAssertEqual(routed.channel, .phone)
+        XCTAssertTrue(routed.fellBackFrom.isEmpty)
+
+        let messenger = FamilyContact(name: "राम", phone: "9811111111",
+                                      relationship: "son",
+                                      preferredCallApp: .messenger)
+        let viaSecondary = AppCoordinator.resolvedMissedCallChannel(
+            familyContact: messenger, defaultApp: .phone, secondaryApp: .whatsApp,
+            messengerHandleAvailable: false, whatsAppInstalled: true)
+        XCTAssertEqual(viaSecondary.channel, .whatsApp)
+        XCTAssertEqual(viaSecondary.fellBackFrom, [.messenger])
     }
 }

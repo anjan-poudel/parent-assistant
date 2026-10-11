@@ -334,6 +334,23 @@ final class AppCoordinator: ObservableObject {
     }
     private static let defaultCallAppKey = "defaultCallApp"
 
+    /// The fallback dialer (call-dialer-primary-secondary, 2026-10-12):
+    /// the chain's second step, persisted under its own key with the
+    /// shipped `defaultCallApp` pattern. An absent or unknown stored
+    /// value restores `.phone` (GSM) — exactly the frozen default for
+    /// existing installs. `secondary == primary` is legal; the chain
+    /// dedupes at routing time, never at storage. A UI preference, not a
+    /// secret — persisted in UserDefaults the same way as `appTheme`.
+    /// didSet persists; the init-time restore assigns directly (house
+    /// pattern — didSet does not fire there).
+    @Published var secondaryCallApp: CallApp {
+        didSet {
+            UserDefaults.standard.set(secondaryCallApp.rawValue,
+                                      forKey: Self.secondaryCallAppKey)
+        }
+    }
+    private static let secondaryCallAppKey = "secondaryCallApp"
+
     /// Which map surface voice navigation opens (directions task,
     /// 2026-09-07) — Settings → Places. `.auto` (the default) opens
     /// Google Maps when installed, else Apple Maps, else the in-app map;
@@ -2087,21 +2104,59 @@ final class AppCoordinator: ObservableObject {
     }
 
     /// Resolves which channel an ADDRESS-BOOK row's call button opens
-    /// (Phone-tab redesign, 2026-09-07): the row's explicit per-contact
-    /// pick wins, else the global default (`defaultCallApp`). One hard
-    /// rule on top of the fallback chain — never resolve to a channel
-    /// the row cannot open: a `.messenger` result needs an on-file
-    /// handle (Messenger addresses people by username, not number), so
-    /// without one the result drops to `.phone` rather than dead-ending
-    /// the tap. Pure static so the whole matrix is unit-testable without
-    /// an AppCoordinator instance (same seam as
+    /// (Phone-tab redesign, 2026-09-07; chain seam: call-dialer-primary-
+    /// secondary, 2026-10-12). The row's explicit per-contact pick is the
+    /// chain's PREFERRED (explicit-pick-wins), else the global default
+    /// (`defaultCallApp`). The chain is preferred → secondary → phone,
+    /// deduped, each channel attempted at most once, with `.phone`
+    /// always IN the order — so the shipped one-hard-rule form is now
+    /// one case of the chain: a `.messenger` preference with no on-file
+    /// handle is skipped and the route falls to the secondary or the
+    /// phone floor instead of dead-ending the tap. The returned `Result`
+    /// carries `fellBackFrom` — the skipped channels in attempt order —
+    /// the single provenance source the announcements compose from.
+    /// Pure static so the whole matrix is unit-testable without an
+    /// AppCoordinator instance (same seam as
     /// `shouldAutoDownloadAssistantBrain`).
     static func resolvedCallChannel(explicit: CallApp?,
                                     defaultApp: CallApp,
-                                    messengerHandleAvailable: Bool) -> CallApp {
-        let resolved = explicit ?? defaultApp
-        if resolved == .messenger && !messengerHandleAvailable { return .phone }
-        return resolved
+                                    secondaryApp: CallApp,
+                                    messengerHandleAvailable: Bool,
+                                    whatsAppInstalled: Bool,
+                                    vocabulary: CallChannelVocabulary = .anyChannel)
+                                    -> CallChannelChain.Result {
+        resolveChannel(preferred: explicit ?? defaultApp,
+                       secondaryApp: secondaryApp,
+                       messengerHandleAvailable: messengerHandleAvailable,
+                       whatsAppInstalled: whatsAppInstalled,
+                       vocabulary: vocabulary)
+    }
+
+    /// The shared seam algorithm (ADR-CDP-03 steps 1–3), one
+    /// implementation for both public seams: normalize the preferred
+    /// input through the surface vocabulary — SILENT, exactly like the
+    /// shipped `guard resolved.supportsAudio else { return .phone }`,
+    /// which also substituted without a word — then run the pure chain
+    /// and substitute an out-of-vocabulary routed channel with the
+    /// vocabulary terminal. The substitution never fabricates
+    /// provenance: `fellBackFrom` keeps only the feasibility-skipped
+    /// channels and is unchanged by it. The terminal is always feasible,
+    /// so the seam is total and the route never dead-ends.
+    private static func resolveChannel(preferred: CallApp,
+                                       secondaryApp: CallApp,
+                                       messengerHandleAvailable: Bool,
+                                       whatsAppInstalled: Bool,
+                                       vocabulary: CallChannelVocabulary)
+                                       -> CallChannelChain.Result {
+        let routed = CallChannelChain.route(
+            preferred: vocabulary.normalized(preferred),
+            secondary: secondaryApp,
+            feasibility: CallChannelChain.Feasibility(
+                messengerHandleAvailable: messengerHandleAvailable,
+                whatsAppInstalled: whatsAppInstalled))
+        guard !vocabulary.permits(routed.channel) else { return routed }
+        return CallChannelChain.Result(channel: vocabulary.terminal,
+                                       fellBackFrom: routed.fellBackFrom)
     }
 
     /// Compile-time: is the vendored LLM.swift runtime linked into THIS
@@ -2850,6 +2905,16 @@ final class AppCoordinator: ObservableObject {
         // nothing needs to react to the restored value.
         self.defaultCallApp = UserDefaults.standard
             .string(forKey: Self.defaultCallAppKey)
+            .flatMap(CallApp.init(rawValue:)) ?? .phone
+
+        // Fallback dialer (call-dialer-primary-secondary, 2026-10-12) —
+        // restore the persisted secondary call app with the primary's
+        // exact shape; missing/unknown raw values fall back to `.phone`,
+        // the GSM floor every route contains. This is the property's
+        // ONLY initial assignment, so its didSet does not fire here
+        // (same rule as `defaultCallApp` above).
+        self.secondaryCallApp = UserDefaults.standard
+            .string(forKey: Self.secondaryCallAppKey)
             .flatMap(CallApp.init(rawValue:)) ?? .phone
 
         // Default map surface (directions task, 2026-09-07) — restore
@@ -7314,6 +7379,27 @@ self.noteTalkContractChanged()
         return DispatchQueue.main.sync { UIApplication.shared.canOpenURL(url) }
     }
 
+    /// The one WhatsApp probe (call-dialer-primary-secondary,
+    /// 2026-10-12; FR-CDP-005): the pure static over the shipped
+    /// main-thread `canOpenURL` hop above, probing only the compiled
+    /// `whatsapp://` literal. Computed at call time only — no caching,
+    /// no polling, no new plist entry, no new permission, no new egress
+    /// (NFR-CDP-002/004); a `false` for any reason (including a
+    /// platform refusal) is "not installed" and the chain hops on,
+    /// announced.
+    var whatsAppInstalledNow: Bool {
+        CallChannelChain.whatsAppInstalled(canOpen: canOpenURLOnMain)
+    }
+
+    /// A usable Messenger handle on file, by the shipped normalization
+    /// (call-dialer-primary-secondary, 2026-10-12; FR-CDP-004) — the
+    /// same `CallLinks.messengerHandle` normalization the shipped
+    /// confirmation gates derive through, so availability here can never
+    /// disagree with what the message opener will accept.
+    private func hasUsableMessengerHandle(_ raw: String?) -> Bool {
+        !CallLinks.messengerHandle(raw ?? "").isEmpty
+    }
+
     private func emitContactLeafLaunch(outcome: String) {
         observabilityBus.emit(ObservabilityEvent(
             component: "contact_leaf_launch",
@@ -8368,25 +8454,37 @@ self.noteTalkContractChanged()
         MissedCallContactResolver.familyMatch(phone: phone, in: familyContacts)
     }
 
-    /// The channel a missed-call row's dial-back opens (missed-calls fix,
-    /// 2026-09-18) — resolved the SAME way a family contact's AUDIO call
+    /// The route a missed-call row's dial-back opens (missed-calls fix,
+    /// 2026-09-18; chain seam: call-dialer-primary-secondary,
+    /// 2026-10-12) — resolved the SAME way a family contact's AUDIO call
     /// button resolves (`FamilyContact.resolvedAudioApp`), because a
     /// dial-back IS an audio call: the matched family contact's own
     /// preference wins (that contact's `preferredCallApp`, FaceTime
     /// excluded — it is video-only in the button vocabulary), else the
-    /// global `defaultCallApp` — with the one hard rule from
-    /// `resolvedCallChannel` on top: never resolve to a channel the row
-    /// cannot open (Messenger needs an on-file handle, else `.phone`).
-    /// The GSM `tel:` path is always in the chain, so dialing always
-    /// works. Pure static so the whole matrix is unit-testable.
+    /// global `defaultCallApp`, through the shared chain seam with the
+    /// audio vocabulary — a FaceTime preference still routes to the
+    /// phone floor, exactly as today, and a Messenger preference
+    /// without an on-file handle falls to the secondary or the floor
+    /// rather than dead-ending. The GSM `tel:` path is always in the
+    /// chain, so dialing always works. The `Result` carries the routed
+    /// channel plus the attempt-order provenance the dial-back
+    /// announcement and the launch-fail hop compose from. Pure static so
+    /// the whole matrix is unit-testable.
     static func resolvedMissedCallChannel(familyContact: FamilyContact?,
                                           defaultApp: CallApp,
-                                          messengerHandleAvailable: Bool) -> CallApp {
-        let resolved = familyContact?.resolvedAudioApp ?? defaultApp
-        guard resolved.supportsAudio else { return .phone }
-        return resolvedCallChannel(explicit: resolved,
-                                   defaultApp: defaultApp,
-                                   messengerHandleAvailable: messengerHandleAvailable)
+                                          secondaryApp: CallApp,
+                                          messengerHandleAvailable: Bool,
+                                          whatsAppInstalled: Bool)
+                                          -> CallChannelChain.Result {
+        // ADR-CDP-03 step 4: the shipped `supportsAudio` guard's own
+        // semantics ARE this seam's vocabulary (`.audio`): a FaceTime
+        // preference on an audio path still routes to `.phone`, exactly
+        // as today.
+        resolveChannel(preferred: familyContact?.resolvedAudioApp ?? defaultApp,
+                       secondaryApp: secondaryApp,
+                       messengerHandleAvailable: messengerHandleAvailable,
+                       whatsAppInstalled: whatsAppInstalled,
+                       vocabulary: .audio)
     }
 
     /// What a missed-call row's tap resolves to (missed-calls fix,
@@ -8429,10 +8527,19 @@ self.noteTalkContractChanged()
         guard !ContactNumberKey.normalized(phone).isEmpty else {
             return .unusableNumber(name: name)
         }
+        // T-146 bridge (call-dialer-primary-secondary): the seam now
+        // returns the chain `Result`. The dial-back's own secondary and
+        // probe inputs (and the route value T-153 asserts) land with the
+        // dial-back unit; until then the routed CHANNEL is read exactly
+        // as before — the phone floor stands in for the not-yet-wired
+        // secondary and the probe input stays ungated, which is today's
+        // behaviour verbatim (see `resolvedMissedCallChannel`).
         let channel = resolvedMissedCallChannel(
             familyContact: familyContact,
             defaultApp: defaultApp,
-            messengerHandleAvailable: messengerHandle?.isEmpty == false)
+            secondaryApp: .phone,
+            messengerHandleAvailable: messengerHandle?.isEmpty == false,
+            whatsAppInstalled: true).channel
         switch channel {
         case .phone: return .call(name: name, phone: phone)
         case .faceTime: return .faceTime(name: name, phone: phone)

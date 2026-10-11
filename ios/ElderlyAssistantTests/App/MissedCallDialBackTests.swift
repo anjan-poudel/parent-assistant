@@ -20,6 +20,13 @@ final class MissedCallDialBackTests: XCTestCase {
     }
 
     // MARK: - Channel resolution (the house call-resolution reuse)
+    //
+    // T-146 signature note (call-dialer-primary-secondary): the seam now
+    // takes the secondary + probe inputs and returns the chain `Result`;
+    // these cases read `.channel` with the phone secondary and the
+    // shipped ungated probe so their original semantics are preserved
+    // exactly. T-153 upgrades them to the full route value with
+    // provenance.
 
     /// A matched family contact's OWN audio preference wins — the tap
     /// resolves EXACTLY like that contact's audio call button.
@@ -29,7 +36,9 @@ final class MissedCallDialBackTests: XCTestCase {
         XCTAssertEqual(
             AppCoordinator.resolvedMissedCallChannel(familyContact: whatsApp,
                                                      defaultApp: .phone,
-                                                     messengerHandleAvailable: false),
+                                                     secondaryApp: .phone,
+                                                     messengerHandleAvailable: false,
+                                                     whatsAppInstalled: true).channel,
             .whatsApp)
     }
 
@@ -42,7 +51,9 @@ final class MissedCallDialBackTests: XCTestCase {
         XCTAssertEqual(
             AppCoordinator.resolvedMissedCallChannel(familyContact: messenger,
                                                      defaultApp: .phone,
-                                                     messengerHandleAvailable: true),
+                                                     secondaryApp: .phone,
+                                                     messengerHandleAvailable: true,
+                                                     whatsAppInstalled: true).channel,
             .messenger)
     }
 
@@ -54,12 +65,16 @@ final class MissedCallDialBackTests: XCTestCase {
         XCTAssertEqual(
             AppCoordinator.resolvedMissedCallChannel(familyContact: messenger,
                                                      defaultApp: .phone,
-                                                     messengerHandleAvailable: false),
+                                                     secondaryApp: .phone,
+                                                     messengerHandleAvailable: false,
+                                                     whatsAppInstalled: true).channel,
             .phone)
         XCTAssertEqual(
             AppCoordinator.resolvedMissedCallChannel(familyContact: messenger,
                                                      defaultApp: .messenger,
-                                                     messengerHandleAvailable: false),
+                                                     secondaryApp: .phone,
+                                                     messengerHandleAvailable: false,
+                                                     whatsAppInstalled: true).channel,
             .phone)
     }
 
@@ -72,12 +87,16 @@ final class MissedCallDialBackTests: XCTestCase {
         XCTAssertEqual(
             AppCoordinator.resolvedMissedCallChannel(familyContact: faceTimeFan,
                                                      defaultApp: .phone,
-                                                     messengerHandleAvailable: false),
+                                                     secondaryApp: .phone,
+                                                     messengerHandleAvailable: false,
+                                                     whatsAppInstalled: true).channel,
             .phone)
         XCTAssertEqual(
             AppCoordinator.resolvedMissedCallChannel(familyContact: nil,
                                                      defaultApp: .faceTime,
-                                                     messengerHandleAvailable: false),
+                                                     secondaryApp: .phone,
+                                                     messengerHandleAvailable: false,
+                                                     whatsAppInstalled: true).channel,
             .phone)
     }
 
@@ -87,17 +106,23 @@ final class MissedCallDialBackTests: XCTestCase {
         XCTAssertEqual(
             AppCoordinator.resolvedMissedCallChannel(familyContact: nil,
                                                      defaultApp: .whatsApp,
-                                                     messengerHandleAvailable: false),
+                                                     secondaryApp: .phone,
+                                                     messengerHandleAvailable: false,
+                                                     whatsAppInstalled: true).channel,
             .whatsApp)
         XCTAssertEqual(
             AppCoordinator.resolvedMissedCallChannel(familyContact: nil,
                                                      defaultApp: .phone,
-                                                     messengerHandleAvailable: false),
+                                                     secondaryApp: .phone,
+                                                     messengerHandleAvailable: false,
+                                                     whatsAppInstalled: true).channel,
             .phone)
         XCTAssertEqual(
             AppCoordinator.resolvedMissedCallChannel(familyContact: nil,
                                                      defaultApp: .messenger,
-                                                     messengerHandleAvailable: true),
+                                                     secondaryApp: .phone,
+                                                     messengerHandleAvailable: true,
+                                                     whatsAppInstalled: true).channel,
             .messenger)
     }
 
