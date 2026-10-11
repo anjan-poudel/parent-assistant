@@ -116,3 +116,16 @@ falsify green; registration-drift caught in an isolated copy. Whole-module
 typecheck green (attempt 1 red only on T-150's concurrent mid-wave state, per
 protocol waited and retried). Scoped run deferred. One documented limitation
 (rule-3 Debug framing) recorded in the notes.
+
+## T-150 — MissedCallContactResolver link-aware — DONE
+
+Commit 56605e1d. linkedFamilyMatch (roster order, snapshot-only, matches
+reused unchanged) + resolve(snapshot:) with the §1.8 precedence: family own
+phones -> verified links -> native half gated on allowsReading with verified
+link identifier remap; notDetermined -> needsPermission; denial -> unresolved.
+Default .empty keeps all 4-arg callers unchanged; AppCoordinator untouched
+(T-158 wires the real snapshot). Tests: 18 new (32 total) — linked resolution,
+precedence, remap, .limited, denial, unlinked parity matrix, roster-order
+determinism (5x), single-snapshot semantics, dial-back mirror. Whole-module
+build green on a forced recompile of both files (0 errors); release log-safety
+gate passes. Scoped run deferred.
