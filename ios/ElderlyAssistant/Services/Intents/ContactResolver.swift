@@ -138,4 +138,72 @@ final class ContactResolver {
         }
         return nil
     }
+
+    // MARK: - Near-miss proposal
+
+    /// Scalar edit budget for the near-miss band: a normalized form two
+    /// scalar edits or fewer from a contact's name (a matra variant
+    /// "सुनीता"/"सुनिता" is ONE edit; "स्यानु"/"सानु" — the virama-y
+    /// romanization artefact — is TWO). Deliberately small: anything
+    /// larger stops being a "mangled spelling" and becomes a guess.
+    private static let nearMissEditBudget = 2
+    /// A query longer than this carries no name signal worth proposing
+    /// against (STT noise around trigger words).
+    private static let nearMissMaxQueryScalars = 40
+
+    /// A single near-miss family contact for a query that `resolve`
+    /// REJECTED — the coordinator calls this only on `.none`, so the
+    /// accept bands always win. Same no-guess discipline as `resolve`:
+    /// a proposal requires EXACTLY ONE contact within the budget (two
+    /// rivals in the band is the same ambiguity `resolve` refuses to
+    /// call, and the caller then stays on its honest not-found line).
+    /// No proposal for a query with no signal at all — empty after
+    /// normalization, or so long it cannot be a name.
+    func nearMiss(_ query: String?) -> FamilyContact? {
+        guard let query else { return nil }
+        let normalized = NepaliTextNormalizer.normalize(query)
+        let scalarCount = normalized.unicodeScalars.count
+        guard !normalized.isEmpty,
+              scalarCount <= Self.nearMissMaxQueryScalars else { return nil }
+        let stripped = NepaliTextNormalizer.strippingHonorifics(normalized)
+        let variants = stripped == normalized ? [normalized] : [normalized, stripped]
+
+        var withinBudget: [FamilyContact] = []
+        for contact in contactsProvider() {
+            let name = NepaliTextNormalizer.normalize(contact.name)
+            guard !name.isEmpty else { continue }
+            let best = variants
+                .map { Self.editDistance($0, name) }
+                .min() ?? Int.max
+            if best <= Self.nearMissEditBudget { withinBudget.append(contact) }
+        }
+        return withinBudget.count == 1 ? withinBudget[0] : nil
+    }
+
+    /// Levenshtein distance over Unicode scalars with an early exit
+    /// once the near-miss budget is exceeded — the budget is tiny, so
+    /// most comparisons bail out in one row.
+    static func editDistance(_ a: String, _ b: String) -> Int {
+        let s1 = Array(a.unicodeScalars)
+        let s2 = Array(b.unicodeScalars)
+        if s1.isEmpty { return s2.count }
+        if s2.isEmpty { return s1.count }
+        if abs(s1.count - s2.count) > nearMissEditBudget { return nearMissEditBudget + 1 }
+
+        var previous = Array(0...s2.count)
+        var current = [Int](repeating: 0, count: s2.count + 1)
+        for i in 1...s1.count {
+            current[0] = i
+            var rowMin = current[0]
+            for j in 1...s2.count {
+                let cost = s1[i - 1] == s2[j - 1] ? 0 : 1
+                current[j] = min(previous[j] + 1,
+                                 min(current[j - 1] + 1, previous[j - 1] + cost))
+                rowMin = min(rowMin, current[j])
+            }
+            if rowMin > nearMissEditBudget { return nearMissEditBudget + 1 }
+            swap(&previous, &current)
+        }
+        return previous[s2.count]
+    }
 }
