@@ -2687,7 +2687,13 @@ private struct FamilyContactWizardSheet: View {
         name = contact.name
         phone = contact.phone
         messengerHandle = contact.messengerHandle ?? ""
-        nickname = contact.nickname ?? ""
+        // T-145 COMPILE-FORCED MINIMAL FIX: the stored value is now a
+        // list; this single-field draft shows the FIRST entry until
+        // T-160 replaces it with the §2.5 list editor. The other stored
+        // entries are untouched by a save only because the coordinator
+        // seam is still single-value (the list round-trips intact until
+        // T-156 widens it) — see the T-160 note in the task report.
+        nickname = contact.nicknames.first ?? ""
         address = contact.address ?? ""
         // The stored invitation address, so re-opening the editor shows
         // what the family will actually be invited at (calendar & family
@@ -2740,7 +2746,14 @@ private struct FamilyContactWizardSheet: View {
 
     private func save() {
         let messenger = trimmedOrNil(messengerHandle)
-        let nick = trimmedOrNil(nickname)
+        // T-145 (family-contacts-unify, 2026-10-12) COMPILE-FORCED
+        // MINIMAL FIX — the model field became `nicknames: [String]`;
+        // this wizard keeps its single free-text draft until T-160
+        // builds the list editor (§2.5). The draft now passes through
+        // the editor/submission seam's length bound (security advisory
+        // F5: 64 chars, blank becomes nil) so nothing over-long is
+        // stored even in this interim shape.
+        let nick = FamilyContact.cappedNickname(nickname)
         // Blank address saves as nil — no address = not a navigation
         // target (directions task, 2026-09-07).
         let homeAddress = trimmedOrNil(address)

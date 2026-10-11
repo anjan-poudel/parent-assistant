@@ -18,7 +18,7 @@ final class KinDesignationTests: XCTestCase {
 
     private func contact(_ name: String,
                          flagged: Bool = false,
-                         nickname: String? = nil,
+                         nicknames: [String] = [],
                          address: String? = nil,
                          email: String? = nil,
                          phone: String = "9800000000") -> FamilyContact {
@@ -26,7 +26,7 @@ final class KinDesignationTests: XCTestCase {
                       phone: phone,
                       relationship: "family",
                       messengerHandle: "same-handle",
-                      nickname: nickname,
+                      nicknames: nicknames,
                       address: address,
                       email: email,
                       isEmergencyContact: flagged)
@@ -72,10 +72,10 @@ final class KinDesignationTests: XCTestCase {
     // the optional fields the Settings editor owns.
     func testEveryPlannedEntryCarriesTheContactsCurrentValuesVerbatim() {
         let flagged = contact("Bimala", flagged: true,
-                              nickname: "Bim", address: "Lalitpur",
+                              nicknames: ["Bim"], address: "Lalitpur",
                               email: "b@example.com")
         let tapped = contact("Sita",
-                             nickname: "Sit", address: "Kathmandu",
+                             nicknames: ["Sit"], address: "Kathmandu",
                              email: "s@example.com")
 
         let plan = KinDesignation.plan(contacts: [flagged, tapped],
@@ -86,7 +86,7 @@ final class KinDesignationTests: XCTestCase {
                        "the clearing entry carries the stored contact verbatim")
         XCTAssertEqual(plan[1].contact, tapped,
                        "the setting entry carries the stored contact verbatim")
-        XCTAssertEqual(plan[1].contact.nickname, "Sit")
+        XCTAssertEqual(plan[1].contact.nicknames, ["Sit"])
         XCTAssertEqual(plan[1].contact.address, "Kathmandu")
         XCTAssertEqual(plan[1].contact.email, "s@example.com")
         XCTAssertEqual(plan[1].contact.messengerHandle, "same-handle")
@@ -97,8 +97,8 @@ final class KinDesignationTests: XCTestCase {
     // both a clear and a set.
     func testTheTappedContactIsPlannedOnceWithTheHandedValue() {
         let other = contact("B", flagged: true)
-        var tappedEdit = contact("A", flagged: true, nickname: "old")
-        tappedEdit.nickname = "new"
+        var tappedEdit = contact("A", flagged: true, nicknames: ["old"])
+        tappedEdit.nicknames = ["new"]
 
         let plan = KinDesignation.plan(contacts: [other, tappedEdit],
                                        tapped: tappedEdit)
@@ -107,7 +107,7 @@ final class KinDesignationTests: XCTestCase {
                        "one entry per id — the tap's own id is excluded "
                        + "from the clears")
         XCTAssertEqual(plan.map(\.isEmergencyContact), [false, true])
-        XCTAssertEqual(plan[1].contact.nickname, "new",
+        XCTAssertEqual(plan[1].contact.nicknames, ["new"],
                        "the tap writes the value it was handed")
     }
 }

@@ -6503,6 +6503,11 @@ self.noteTalkContractChanged()
     /// informal name from the wizard's last step; defaulted so the
     /// onboarding call site (which never collects one) is unchanged.
     ///
+    /// T-145 (family-contacts-unify, 2026-10-12) COMPILE-FORCED MINIMAL
+    /// FIX: the model field became `nicknames: [String]`. This seam
+    /// still takes the single value; T-156 owns the real signature
+    /// change (and the save-path normalisation applied there).
+    ///
     /// `address` (directions task, 2026-09-07) is the contact's optional
     /// home address for voice navigation — blank text is stored as nil.
     ///
@@ -6523,7 +6528,7 @@ self.noteTalkContractChanged()
         let contact = FamilyContact(name: name, phone: phone, relationship: relationship,
                                     messengerHandle: messengerHandle,
                                     photoFilename: filename,
-                                    nickname: nickname,
+                                    nicknames: nickname.map { [$0] } ?? [],
                                     address: Self.normalizedOptionalText(address),
                                     email: FamilyContactValidation.normalizedEmail(email),
                                     isEmergencyContact: isEmergencyContact)
@@ -6554,6 +6559,17 @@ self.noteTalkContractChanged()
     /// optional informal name; nil clears a stored one, defaulted so
     /// pre-wizard callers compile unchanged.
     ///
+    /// T-145 (family-contacts-unify, 2026-10-12) COMPILE-FORCED MINIMAL
+    /// FIX: the model field became `nicknames: [String]`, so this seam
+    /// now writes the single carried value as a one-entry list (and nil
+    /// as an empty list). KNOWN INTERIM LOSS (T-156 owns the fix): a
+    /// contact holding several nicknames loses the entries after the
+    /// first when this seam saves it — the wizard's draft carries only
+    /// one string until T-160, and the T-100 kin-designation pass
+    /// through carries `nicknames.first`. Widening this signature to
+    /// `nicknames: [String]` (plus the save-path normalisation) is the
+    /// first thing T-156 must land.
+    ///
     /// `isEmergencyContact` (family-emergency task, 2026-09-07): the
     /// editor's current "Emergency contact" toggle value — the save
     /// REPLACES the stored flag, so un-toggling an emergency contact is
@@ -6575,7 +6591,7 @@ self.noteTalkContractChanged()
         contact.phone = phone
         contact.relationship = relationship
         contact.messengerHandle = messengerHandle
-        contact.nickname = nickname
+        contact.nicknames = nickname.map { [$0] } ?? []
         contact.isEmergencyContact = isEmergencyContact
         // The editor passes the CURRENT text each save; blank clears the
         // stored address (nil), so "remove the address" is an edit, not a

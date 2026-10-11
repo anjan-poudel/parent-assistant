@@ -29,10 +29,14 @@ import Foundation
 /// missing key as nil — the unversioned store's one migration pattern
 /// (an optional field IS its migration).
 ///
-/// `nickname` (family-wizard task, 2026-09-07): the informal name the
-/// family calls the person — the wizard's optional final step. Same
-/// optional-field contract as the handle and the photo: the custom
-/// decoder reads a missing key as nil.
+/// `nicknames` (family-contacts-unify T-145, 2026-10-12 — REPLACES the
+/// single `nickname` from the family-wizard task, 2026-09-07): the
+/// informal names/variations the family calls the person. Stored
+/// explicitly and verbatim — "sanu" and "सानु" are distinct entries, no
+/// transliteration (feature constitution, Open Decision 2). An empty
+/// array is the "no nicknames" value; the custom decoder reads a
+/// missing key as `[]` and migrates the legacy single `nickname` key
+/// losslessly (design-l2 §3.4).
 ///
 /// `address` (directions task, 2026-09-07): the contact's home address,
 /// so voice navigation can drive to a relative ("मैयाको घर लैजाऊ").
@@ -67,8 +71,10 @@ struct FamilyContact: Codable, Identifiable, Equatable {
     /// ContactPhotoStore filename of the contact's thumbnail, nil when
     /// no photo is on file.
     var photoFilename: String?
-    /// The informal name the family uses, nil when none is set.
-    var nickname: String?
+    /// The informal names the family uses, in the order entered; empty
+    /// when none is set. Entries are stored as entered (trimmed, never
+    /// transliterated) — see `FamilyContact.normalizedNicknames`.
+    var nicknames: [String]
     /// Free-form home address for voice navigation, nil when the user
     /// never set one (the contact then cannot be a navigation target).
     var address: String?
@@ -94,12 +100,21 @@ struct FamilyContact: Codable, Identifiable, Equatable {
     /// assumptions.
     var preferredCallApp: CallApp
 
+    /// The system address-book record this family contact IS (the same
+    /// person on both surfaces), with the fingerprint needed to prove
+    /// it is still the same person. Local-only — never transmitted.
+    /// Optional with the usual migration rule: a payload written before
+    /// the link existed loads unlinked, and a corrupt/empty payload
+    /// degrades to nil rather than losing the contact (FR-FCU-002
+    /// scenario 3, design-l2 §3.4).
+    var systemContact: SystemContactLink?
+
     init(id: UUID = UUID(), name: String, phone: String, relationship: String,
          messengerHandle: String? = nil,
          preferredVideoApp: CallApp = .faceTime, preferredCallApp: CallApp = .phone,
-         photoFilename: String? = nil, nickname: String? = nil,
+         photoFilename: String? = nil, nicknames: [String] = [],
          address: String? = nil, email: String? = nil,
-         isEmergencyContact: Bool = false) {
+         isEmergencyContact: Bool = false, systemContact: SystemContactLink? = nil) {
         self.id = id
         self.name = name
         self.phone = phone
@@ -108,10 +123,11 @@ struct FamilyContact: Codable, Identifiable, Equatable {
         self.preferredVideoApp = preferredVideoApp
         self.preferredCallApp = preferredCallApp
         self.photoFilename = photoFilename
-        self.nickname = nickname
+        self.nicknames = nicknames
         self.address = address
         self.email = email
         self.isEmergencyContact = isEmergencyContact
+        self.systemContact = systemContact
     }
 
     /// Custom decode: contacts persisted BEFORE the preference fields
@@ -119,6 +135,12 @@ struct FamilyContact: Codable, Identifiable, Equatable {
     /// global defaults, not fail the whole store read. The store has no
     /// schema-versioning pattern — plain Codable — so defaulting lives
     /// here on the model.
+    ///
+    /// Encoder contract (design-l2 §3.3): the synthesized `Encodable` is
+    /// kept deliberately — a hand-written encoder risks silent field
+    /// loss. Nil optionals are omitted; `nicknames`/`systemContact`
+    /// encode as stored. No legacy `nickname` key is ever written (a
+    /// downgraded build simply reads no nickname — accepted).
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -133,8 +155,31 @@ struct FamilyContact: Codable, Identifiable, Equatable {
         // Same missing-key rule for the photo: a payload written before
         // the field existed loads photo-less instead of failing the read.
         photoFilename = (try? container.decodeIfPresent(String.self, forKey: .photoFilename)) ?? nil
-        // And for the nickname: a pre-field payload loads without one.
-        nickname = (try? container.decodeIfPresent(String.self, forKey: .nickname)) ?? nil
+        // Nicknames — L1 §5.2 order, lossless (design-l2 §3.4):
+        //   1. the multi-nickname key present WINS — even an empty
+        //      array ("the user removed every nickname" is real data);
+        //   2. else the legacy single `nickname` key (read through its
+        //      OWN container, never `CodingKeys` — the synthesized
+        //      encoder must not be able to emit a legacy key);
+        //   3. else no nicknames. A pre-field payload loads here.
+        if let list = (try? container.decodeIfPresent([String].self, forKey: .nicknames)) ?? nil {
+            nicknames = FamilyContact.normalizedNicknames(list)
+        } else if let legacy = try? decoder.container(keyedBy: LegacyNicknameKeys.self),
+                  let single = (try? legacy.decodeIfPresent(String.self, forKey: .nickname)) ?? nil,
+                  !single.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            nicknames = FamilyContact.normalizedNicknames([single])
+        } else {
+            nicknames = []
+        }
+        // The link (design-l2 §3.4): a corrupt, truncated or empty
+        // payload decodes to NO link — the contact is retained intact,
+        // never dropped for a bad fingerprint (FR-FCU-002 scenario 3).
+        let decodedLink = (try? container.decodeIfPresent(SystemContactLink.self, forKey: .systemContact)) ?? nil
+        if let link = decodedLink, !link.identifier.isEmpty, !link.numberKey.isEmpty {
+            systemContact = link
+        } else {
+            systemContact = nil
+        }
         // Same rule for the address (directions task, 2026-09-07): a
         // payload written before the field existed loads address-less.
         address = (try? container.decodeIfPresent(String.self, forKey: .address)) ?? nil
@@ -147,6 +192,43 @@ struct FamilyContact: Codable, Identifiable, Equatable {
         // "not flagged" — false, the same answer a pre-flag payload
         // would have given by construction.
         isEmergencyContact = (try? container.decodeIfPresent(Bool.self, forKey: .isEmergencyContact)) ?? false
+    }
+
+    /// The faithful nickname projection: each entry trimmed, whitespace-
+    /// only entries dropped, order and duplicates preserved (design-l2
+    /// §3.2). Deliberately NOT lossy beyond that — migration of the
+    /// legacy single `nickname` must never rewrite the value, so no
+    /// transliteration, no case folding, no length cap lives here.
+    ///
+    /// F5 decision (recorded, T-145): the 64-char bound is enforced at
+    /// the EDITOR/submission seam (`cappedNickname`, used by the wizard
+    /// save path) while this projection stays faithful; the worst-case
+    /// long-string performance assertion lives in T-151, not here.
+    ///
+    /// Applied here at the decoder (defensive for hand-edited/corrupt
+    /// payloads) and at the editor/submission seam (`cappedNickname`).
+    /// Design-l2 §3.2 places the third application — the coordinator's
+    /// add/update save path, the one point every caller passes through —
+    /// in T-156 together with the widened `nicknames: [String]`
+    /// signature; until then a caller that hands over a raw list is the
+    /// only way a whitespace-only entry could reach the store, and no
+    /// shipped caller does.
+    static func normalizedNicknames(_ raw: [String]) -> [String] {
+        raw.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+           .filter { !$0.isEmpty }
+    }
+
+    /// The editor/submission seam's length bound (security advisory F5):
+    /// a typed nickname is trimmed, blank becomes nil, and an over-long
+    /// value is capped at 64 CHARACTERS — a whole-grapheme prefix, so a
+    /// Devanagari cluster is never split. The stored entries stay exactly
+    /// what the family member entered within that bound.
+    static let maxNicknameLength = 64
+
+    static func cappedNickname(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return String(trimmed.prefix(maxNicknameLength))
     }
 
     /// The app a VIDEO button resolves to (task: contact preference →
@@ -162,6 +244,27 @@ struct FamilyContact: Codable, Identifiable, Equatable {
     var resolvedAudioApp: CallApp {
         preferredCallApp.supportsAudio ? preferredCallApp : .phone
     }
+}
+
+/// The legacy-only key of the pre-migration payload shape (design-l2
+/// §3.4): read through its own container so `FamilyContact.CodingKeys`
+/// (and therefore the synthesized `Encodable`) contains ONLY stored
+/// properties and can never re-emit the old key.
+private enum LegacyNicknameKeys: String, CodingKey {
+    case nickname
+}
+
+/// A pointer to one record in the system address book, with the
+/// fingerprint needed to prove it is still the same person. Local-only;
+/// never transmitted. Defined next to `FamilyContact` because it is part
+/// of the persisted payload shape the decoder above reads.
+struct SystemContactLink: Codable, Equatable {
+    /// `CNContact.identifier` at link time.
+    var identifier: String
+    /// `ContactNumberKey.normalized` of the FIRST dialable number of the
+    /// picked entry at link time — the fingerprint that lets a stale
+    /// identifier (re-sync, iCloud merge) be told apart from a live one.
+    var numberKey: String
 }
 
 /// Persists the curated "Family and friends" list (family-and-friends
