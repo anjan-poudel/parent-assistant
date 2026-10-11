@@ -13252,6 +13252,23 @@
         }
       }
     },
+    "router.call.nameUnclear": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I heard you want to call, but I didn't catch who — please say 'call' and the person's name."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोन गर्ने कुरा त बुझें, तर कोलाई भन्ने बुझिन — कृपया नामसँगै भन्नुहोस्, जस्तै 'छोरालाई फोन गर'।"
+          }
+        }
+      }
+    },
     "router.call.facetimeUnavailable": {
       "extractionState": "manual",
       "localizations": {

@@ -293,16 +293,18 @@ final class VoiceContactSearchRouteTests: XCTestCase {
         // `containsPhrase` semantics (`CommandRouter.swift:1826` —
         // `text.contains(phrase)`), over canonical lowercased text: the
         // exact expression the shipped call sites run at `:1360` (the
-        // topic pre-answer self-exclusion) and `:1973-1980` (the
-        // `router.sensitiveBlocked` block; that end-to-end outcome is
-        // pinned by `CommandRouterTests.testSensitiveCallCommandIsBlockedUntilAuthExists`).
+        // topic pre-answer self-exclusion) and the [MTC] dialogue
+        // barge-in predicate. (The end-to-end outcome for a call-shaped
+        // fixture — deterministic confirmation via
+        // `DeterministicCallRoute` — is pinned by
+        // `CommandRouterTests.testCallWithoutInterpreterResolvesDeterministicallyAndAsksConfirmation`.)
         // The fixture is the router's own doc example.
         let sensitiveCall = "मौसम बताउने मान्छेलाई फोन गर"
         XCTAssertTrue(CommandRouter.sensitiveCallPhrases.contains { sensitiveCall.contains($0) },
-                      "the sensitive-call fixture must keep hitting the SAME list that blocks")
+                      "the sensitive-call fixture must keep hitting the SAME list")
         let plainTopic = "आज मौसम कस्तो छ"
         XCTAssertFalse(CommandRouter.sensitiveCallPhrases.contains { plainTopic.contains($0) },
-                       "a plain topic question must stay clear of the block")
+                       "a plain topic question must stay clear of the call vocabulary")
 
         // B3 — the direct-call tester, consumed exactly as design-l2 §6
         // B3 does: canonical lowercased text (the lowercase-input

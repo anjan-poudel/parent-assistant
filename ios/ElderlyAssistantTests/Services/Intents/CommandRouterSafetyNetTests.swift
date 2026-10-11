@@ -86,7 +86,10 @@ final class CommandRouterSafetyNetTests: XCTestCase {
     func testInterpreterAbstainFallsToKeywordRemainder() {
         // Interpreter available but abstains → the REMAINDER of the
         // keyword layer (not the safety net — that already ran) handles
-        // it: a call-ish phrase with no entity extraction stays blocked.
+        // it: a call-shaped phrase with no usable name ("कसै" — someone,
+        // an indefinite pronoun, dropped by the deterministic extractor)
+        // gets the honest name-unclear line, never the old
+        // "secure authentication" refusal.
         let interpreter = StubCommandInterpreter(result: nil)
         let (router, _, bus) = makeRouter(interpreter: interpreter)
 
@@ -95,7 +98,8 @@ final class CommandRouterSafetyNetTests: XCTestCase {
         _ = router.route(transcript: "कसैलाई फोन गर")
         waitForExpectations(timeout: 2)
 
-        XCTAssertTrue(bus.contains("command_sensitive_blocked_auth_unavailable"))
+        XCTAssertTrue(bus.contains("command_call_name_unclear"))
+        XCTAssertFalse(bus.contains("command_sensitive_blocked_auth_unavailable"))
     }
 }
 
