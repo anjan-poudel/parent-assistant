@@ -1147,8 +1147,13 @@ struct CallView: View {
     /// this size (this screen, the family list, a tile) is a memory hit.
     private func resolveResultPhotos() -> [String: UIImage] {
         guard isSearching, let entries else { return [:] }
+        // Rebuilt inline from the published roster until the coordinator
+        // republishes its own index (T-156; design-l2 §3.6). Cheap by
+        // construction: one normalize per name/nickname (NFR-FCU-001).
+        let index = FamilyContactIndex(family: coordinator.familyContacts)
         let outcome = UnifiedContactSearch.search(query: trimmedQuery,
                                                   family: coordinator.familyContacts,
+                                                  index: index,
                                                   in: entries,
                                                   recency: recency)
         var resolved: [String: UIImage] = [:]
@@ -1521,8 +1526,13 @@ struct CallView: View {
               !loadFailed,
               trimmedQuery == voice.query else { return }
         announcedVoiceSearchID = voice.id
+        // Rebuilt inline from the published roster until the coordinator
+        // republishes its own index (T-156; design-l2 §3.6). Cheap by
+        // construction: one normalize per name/nickname (NFR-FCU-001).
+        let index = FamilyContactIndex(family: coordinator.familyContacts)
         let outcome = UnifiedContactSearch.search(query: trimmedQuery,
                                                   family: coordinator.familyContacts,
+                                                  index: index,
                                                   in: entries,
                                                   recency: recency)
         let locale = coordinator.activeLocale
@@ -1679,8 +1689,14 @@ struct CallView: View {
     @ViewBuilder
     private var resultsArea: some View {
         if let entries {
+            // Rebuilt inline from the published roster until the
+            // coordinator republishes its own index (T-156; design-l2
+            // §3.6). Cheap: one normalize per name/nickname
+            // (NFR-FCU-001).
+            let index = FamilyContactIndex(family: coordinator.familyContacts)
             let outcome = UnifiedContactSearch.search(query: trimmedQuery,
                                                       family: coordinator.familyContacts,
+                                                      index: index,
                                                       in: entries,
                                                       recency: recency)
             if outcome.moreAvailable {

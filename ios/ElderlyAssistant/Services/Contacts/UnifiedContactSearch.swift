@@ -134,47 +134,107 @@ enum UnifiedContactSearch {
         }
     }
 
-    /// What one search shows: the ranked union rows to render, and
-    /// whether more matches were cut off by `limit`. Same honesty
-    /// contract as `SystemContactSearch.Outcome`: the caller shows the
-    /// "keep typing" hint instead of silently hiding people — an
-    /// elderly user who searches "a" must never wonder where the rest
-    /// went.
+    /// What one search shows: the ranked union rows to render, whether
+    /// more matches were cut off by `limit`, and — for rows synthesized
+    /// by the link merge (Pass 3) — the phone-book name the person is
+    /// ALSO stored under. Same honesty contract as
+    /// `SystemContactSearch.Outcome`: the caller shows the "keep typing"
+    /// hint instead of silently hiding people — an elderly user who
+    /// searches "a" must never wonder where the rest went.
     struct Outcome: Equatable {
         let entries: [Result]
         let moreAvailable: Bool
+
+        /// Keyed by FAMILY result id ("family-<uuid>", see `Result.id`) →
+        /// the linked phone-book record's display name — the honest
+        /// explanation for why a name the user never typed into the
+        /// family record surfaces this row (design-l1 §7.2: the row
+        /// renders "Also in your phone book as …"). Only SYNTHESIZED
+        /// rows appear here: a row the family contact matched itself
+        /// needs no explanation, and dropping its linked book twin adds
+        /// no caption. Empty for every unlinked search — the default
+        /// keeps existing constructions compiling and is the parity
+        /// anchor.
+        let linkedBookNames: [String: String]
+
+        init(entries: [Result], moreAvailable: Bool,
+             linkedBookNames: [String: String] = [:]) {
+            self.entries = entries
+            self.moreAvailable = moreAvailable
+            self.linkedBookNames = linkedBookNames
+        }
     }
 
     static let defaultLimit = 15
 
     /// Why a family contact matched, best first. `.exactName` beats
-    /// `.relationship` beats `.containment`: an exact name says "this
-    /// person" louder than a relationship word does, and both are
-    /// stronger signals than a raw substring or digit hit. A contact
-    /// matching at several tiers keeps the best one.
+    /// `.relationship` beats `.nickname` beats `.containment`: an exact
+    /// name says "this person" louder than a relationship word does, a
+    /// stored nickname/variation is the person's OWN name (stronger
+    /// than a raw substring of a field, and it bridges what raw
+    /// containment would miss), and a raw substring or digit hit is the
+    /// weakest signal. A contact matching at several tiers keeps the
+    /// best one.
+    ///
+    /// `.nickname` was INSERTED at raw value 2 (family-contacts-unify
+    /// T-152, design-l1 §8.1) and `.containment` renumbered to 3: the
+    /// tier is transient — computed per search and never persisted — so
+    /// the renumbering is safe, and raw-value order stays the quality
+    /// order `<` compares.
     enum FamilyMatchTier: Int, Comparable {
-        case exactName
-        case relationship
-        case containment
+        case exactName = 0
+        case relationship = 1
+        /// Any stored nickname: exact (one O(1) map hit on the index) or
+        /// Character-safe substring of a precomputed normalized
+        /// nickname. Both land here — "exact > substring" is check
+        /// ORDER only, with no ranking consequence by construction
+        /// (design-l2 §1.6).
+        case nickname = 2
+        case containment = 3
 
-        /// Raw-value order (0/1/2) IS the quality order — best first —
+        /// Raw-value order (0/1/2/3) IS the quality order — best first —
         /// so `<` compares the raw values directly.
         static func < (lhs: FamilyMatchTier, rhs: FamilyMatchTier) -> Bool {
             lhs.rawValue < rhs.rawValue
         }
     }
 
-    /// One search over both sources. Family matches always lead — they
-    /// are the people the app is CONFIGURED to call and chat with by
-    /// its own buttons, and the address book is the long tail — then
-    /// the book rows follow in `SystemContactSearch`'s own order.
+    /// One search over both sources, in the five passes design-l1 §7.1
+    /// pins. Family matches always lead — they are the people the app
+    /// is CONFIGURED to call and chat with by its own buttons, and the
+    /// address book is the long tail — then the book rows follow in
+    /// `SystemContactSearch`'s own order.
+    ///
+    /// Passes:
+    ///  1. family matches (name / relationship / nickname /
+    ///     containment tiers — see `familyMatches`);
+    ///  2. book matches (`SystemContactSearch.matches`, unchanged);
+    ///  3. link merge — a matched book row whose RECORD is a verified
+    ///     link of a family contact is the same person twice: dropped,
+    ///     replaced by a synthesized family row when the family contact
+    ///     itself did not match;
+    ///  4. the number dedupe below, over the rows left after pass 3
+    ///     (byte-for-byte today's rule, unchanged);
+    ///  5. the truncation recount over the POST-pass union.
     ///
     /// Dedupe drops a book row only when the SAME PERSON already
-    /// matched as a family contact (identical dialable number), and
-    /// only when the FAMILY row matched: an unmatched family twin must
-    /// not hide the book twin — the book record may carry a fresher,
-    /// app-synced name, and the person stays findable by whatever they
-    /// matched.
+    /// matched as a family contact (identical dialable number) or when
+    /// an explicit VERIFIED link proves the two records are one person
+    /// (pass 3) — and only when the family side is reachable: an
+    /// unmatched family twin must not hide the book twin, the book
+    /// record may carry a fresher, app-synced name, and the person
+    /// stays findable by whatever they matched.
+    ///
+    /// `index` is REQUIRED (no convenience overload that could drift,
+    /// design-l2 §1.6): the caller publishes one index per roster
+    /// snapshot, so the nickname/name tiers read the same precomputed
+    /// strings and normalization runs once per build, not per contact
+    /// per keystroke (NFR-FCU-001).
+    ///
+    /// `verifiedLinks` defaults to `.empty` — the unlinked anchor: with
+    /// no verified link, every new branch below is inert and the
+    /// outcome is today's byte-for-byte (FR-FCU-003, the parity pin).
+    /// A snapshot is a value; a stale one simply fails its lookups.
     ///
     /// The rows' reachability badges (see `Result`) are honest by
     /// design: availability is not platform presence — iOS cannot say
@@ -184,50 +244,87 @@ enum UnifiedContactSearch {
     /// dedupe, not just the rows shown.
     static func search(query: String,
                        family: [FamilyContact],
+                       index: FamilyContactIndex,
                        in entries: [AddressBookEntry],
+                       verifiedLinks: VerifiedLinksSnapshot = .empty,
                        recency: [String: Date] = [:],
                        limit: Int = defaultLimit) -> Outcome {
-        let matchedFamily = familyMatches(query: query, in: family)
-        let bookMatches = dedupe(matchedFamily: matchedFamily.map { $0.contact },
-                                 in: addressBookMatches(query: query, in: entries))
-        let ranked = rank(family: matchedFamily, book: bookMatches, recency: recency)
+        // Pass 1 — family matches, nickname tiers included.
+        let matchedFamily = familyMatches(query: query, in: family, index: index)
+        // Pass 2 — book matches, unchanged.
+        let bookMatches = addressBookMatches(query: query, in: entries)
+        // Pass 3 — link merge: drop the linked twin, or synthesize the
+        // family row in its place. `.empty` snapshot → both lists back
+        // untouched (the early-out IS the parity guarantee).
+        let merged = linkMerge(matchedFamily: matchedFamily, bookMatches: bookMatches,
+                               family: family, index: index, verifiedLinks: verifiedLinks)
+        // Pass 4 — today's number rule, over the REMAINING book rows.
+        let remainingBook = dedupe(matchedFamily: matchedFamily.map { $0.contact },
+                                   in: merged.bookRows)
+        // Pass 5 — recount before the limit slice.
+        let ranked = rank(family: matchedFamily + merged.synthesized,
+                          book: remainingBook, recency: recency)
         return Outcome(entries: Array(ranked.prefix(limit)),
-                       moreAvailable: matchedFamily.count + bookMatches.count > limit)
+                       moreAvailable: matchedFamily.count + merged.synthesized.count
+                           + remainingBook.count > limit,
+                       linkedBookNames: merged.linkedBookNames)
     }
 
-    /// The family half of the union. Matching runs on the TRIMMED query
-    /// (empty or whitespace-only → no matches at all). Each contact
-    /// keeps its BEST tier:
+    /// The family half of the union — Pass 1. Matching runs on the
+    /// TRIMMED query (empty or whitespace-only → no matches at all).
+    /// Name and nickname tiers read the caller's `index` (the roster's
+    /// precomputed normalized strings, see `FamilyContactIndex`); each
+    /// contact keeps its BEST tier:
     ///
-    ///  - `.exactName` — normalized name equals the normalized query.
-    ///    `NepaliTextNormalizer` folds case, NFC forms and Devanagari
-    ///    digits, but deliberately does NOT transliterate — "sita" and
-    ///    "सीता" stay different names, same rule as the book search.
+    ///  - `.exactName` — the indexed normalized name equals the
+    ///    normalized query. `NepaliTextNormalizer` folds case, NFC
+    ///    forms and Devanagari digits, but deliberately does NOT
+    ///    transliterate — "sita" and "सीता" stay different names, same
+    ///    rule as the book search.
     ///  - `.relationship` — the query AND the stored relationship both
     ///    anchor on `ContactResolver.relationshipAnchors` and land on
     ///    the same anchor word. This is the cross-script bridge
     ///    ("daughter" ↔ "छोरी") and the synonym bridge ("बहिनी" ↔
     ///    "दिदी" — same "sister" anchor, no shared substring), which
     ///    raw containment would miss.
+    ///  - `.nickname` — the normalized query is one of the contact's
+    ///    stored nickname spellings, exact (the O(1) index map) or a
+    ///    Character-safe substring of a precomputed normalized one
+    ///    (`range(of:options:)`, the SAME call and options the
+    ///    containment tier uses — the Devanagari grapheme behaviour is
+    ///    reused and pinned, never "fixed", NFR-FCU-007). A
+    ///    punctuation-only query that normalizes to the empty string is
+    ///    no query at all here, mirroring the index's own decision
+    ///    never to key the empty string.
     ///  - `.containment` — the query is a case- and diacritic-
     ///    insensitive substring of the RAW name or relationship (same
     ///    options as `SystemContactSearch.matches`), or a non-empty
     ///    digit run of the query is contained in the contact's
     ///    normalized number.
+    ///
+    /// An index that does not know this contact (a caller error — the
+    /// shipped call sites build the index from the same roster they
+    /// search) contributes no name/nickname tiers; containment still
+    /// applies, so a person is never rendered un-findable.
     static func familyMatches(query: String,
-                              in family: [FamilyContact]) -> [(contact: FamilyContact, tier: FamilyMatchTier)] {
+                              in family: [FamilyContact],
+                              index: FamilyContactIndex) -> [(contact: FamilyContact, tier: FamilyMatchTier)] {
         let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !needle.isEmpty else { return [] }
         let normalizedQuery = NepaliTextNormalizer.normalize(needle)
         let queryDigits = ContactNumberKey.normalized(needle)
         let options: String.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
+        // One map hit per call, not per contact: the exact-nickname
+        // holders, resolved once.
+        let exactNicknameHolders = Set(index.exactNicknameHolders(normalizedQuery))
 
         return family.compactMap { contact in
             // Checking tiers best-first and returning the first hit IS
             // best-tier selection: exactName (checked first) is better
             // than relationship (checked second) is better than
-            // containment (checked last).
-            if NepaliTextNormalizer.normalize(contact.name) == normalizedQuery {
+            // nickname (third) is better than containment (last).
+            let entry = index.entry(for: contact.id)
+            if entry?.normalizedName == normalizedQuery {
                 return (contact: contact, tier: .exactName)
             }
             if let queryAnchor = ContactResolver.relationshipAnchor(in: normalizedQuery),
@@ -235,6 +332,18 @@ enum UnifiedContactSearch {
                    in: NepaliTextNormalizer.normalize(contact.relationship)),
                queryAnchor == contactAnchor {
                 return (contact: contact, tier: .relationship)
+            }
+            // Exact first (the map), then the Character-safe substring
+            // over the precomputed normalized spellings — same
+            // direction as the name tier (the stored value contains the
+            // query). Both are one tier: check order has no ranking
+            // consequence by construction.
+            if exactNicknameHolders.contains(contact.id)
+                || (!normalizedQuery.isEmpty
+                    && (entry?.normalizedNicknames.contains {
+                        $0.range(of: normalizedQuery, options: options) != nil
+                    } ?? false)) {
+                return (contact: contact, tier: .nickname)
             }
             if contact.name.range(of: needle, options: options) != nil
                 || contact.relationship.range(of: needle, options: options) != nil {
@@ -254,6 +363,79 @@ enum UnifiedContactSearch {
     static func addressBookMatches(query: String,
                                    in entries: [AddressBookEntry]) -> [AddressBookEntry] {
         SystemContactSearch.matches(query: query, in: entries)
+    }
+
+    /// Pass 3 — the link merge (design-l1 §7.1, FR-FCU-003). For each
+    /// matched book row whose RECORD carries a verified family link:
+    ///
+    ///  - the family contact MATCHED in pass 1 → the book row is the
+    ///    same person twice: DROP it (the family row is the person);
+    ///  - the family contact did NOT match (the query hit only the
+    ///    book-side name or number spelling) → SYNTHESIZE its family
+    ///    row at tier `.containment` and DROP the book row, recording
+    ///    the book's display name in `linkedBookNames` so the row can
+    ///    explain the name the user never typed — suppressed when the
+    ///    two names already normalize equal (nothing to explain).
+    ///
+    /// Guarded, never guessed:
+    ///  - a row with an EMPTY identifier is not a live record and can
+    ///    never be a link target (T-148a) — it is kept;
+    ///  - a link whose family contact is not in this roster (deleted
+    ///    between the snapshot publish and this search) is kept too:
+    ///    a row is never dropped without a replacement row carrying the
+    ///    person — no phantom drop;
+    ///  - a second matched row of the SAME record (one record, two
+    ///    numbers) synthesizes once — one row per person;
+    ///  - an `.empty` snapshot short-circuits: every new branch here is
+    ///    gated on a verified link, so unlinked pairs take the exact
+    ///    lists they always took (FR-FCU-003 "unlinked pairs keep
+    ///    today's behavior EXACTLY").
+    ///
+    /// Only the VERIFIED snapshot is consulted: a stored `systemContact`
+    /// claim that did not verify is stale and merges nothing (FR-FCU-006).
+    private static func linkMerge(matchedFamily: [(contact: FamilyContact, tier: FamilyMatchTier)],
+                                 bookMatches: [AddressBookEntry],
+                                 family: [FamilyContact],
+                                 index: FamilyContactIndex,
+                                 verifiedLinks: VerifiedLinksSnapshot)
+        -> (synthesized: [(contact: FamilyContact, tier: FamilyMatchTier)],
+            bookRows: [AddressBookEntry],
+            linkedBookNames: [String: String]) {
+        guard !verifiedLinks.links.isEmpty else {
+            return ([], bookMatches, [:])
+        }
+
+        let matchedIDs = Set(matchedFamily.map { $0.contact.id })
+        var synthesizedIDs: Set<UUID> = []
+        var synthesized: [(contact: FamilyContact, tier: FamilyMatchTier)] = []
+        var linkedBookNames: [String: String] = [:]
+        var remaining: [AddressBookEntry] = []
+        remaining.reserveCapacity(bookMatches.count)
+
+        for row in bookMatches {
+            guard !row.identifier.isEmpty,
+                  let familyID = verifiedLinks.familyID(forIdentifier: row.identifier),
+                  let contact = family.first(where: { $0.id == familyID }) else {
+                remaining.append(row)
+                continue
+            }
+            // Matched in pass 1, or already synthesized for a sibling
+            // row of the same record: either way this row is the
+            // duplicate, and dropping it always leaves one row for the
+            // person.
+            if matchedIDs.contains(familyID) || synthesizedIDs.contains(familyID) {
+                continue
+            }
+            synthesizedIDs.insert(familyID)
+            synthesized.append((contact: contact, tier: .containment))
+            // The caption key is the RESULT id, built through `Result`
+            // itself so the map can never drift from the row's id.
+            let rowID = Result.family(contact).id
+            if NepaliTextNormalizer.normalize(row.name) != index.entry(for: familyID)?.normalizedName {
+                linkedBookNames[rowID] = row.name
+            }
+        }
+        return (synthesized, remaining, linkedBookNames)
     }
 
     /// Drops book rows whose normalized number equals a MATCHED family
