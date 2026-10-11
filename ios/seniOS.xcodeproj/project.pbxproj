@@ -490,6 +490,7 @@
 		9AA91C2586F5791D51200A0C /* KinDesignationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF46FF3BB62902DB1FC16086 /* KinDesignationTests.swift */; };
 		9AB581C091C99FA677CA9C32 /* YouTubeRouteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B0D6D7DA7023467AC7A546E /* YouTubeRouteTests.swift */; };
 		9B32B470F4F4DA67BF74BA49 /* CalendarShareService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D49812CA1F554874D8110E5 /* CalendarShareService.swift */; };
+		9B9EB18F73FE04820460CAAC /* DeterministicCallGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23581CE561AD75139171159F /* DeterministicCallGuardTests.swift */; };
 		9BCED999CC8F507A4920156A /* LocalBrainChain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EF865070CB7823B1DC69074 /* LocalBrainChain.swift */; };
 		9C480346D3DDE307DCD80A73 /* PointAskTargetResolver.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E0B22EEE0865E9252E46642 /* PointAskTargetResolver.swift */; };
 		9C634584628238321B76D8BC /* SherpaKWSWakeWordEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66E60E32F2D26CD4CEC694E3 /* SherpaKWSWakeWordEngine.swift */; };
@@ -972,6 +973,7 @@
 		227923B3238044CF61D063F1 /* LlamaCommandInterpreter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LlamaCommandInterpreter.swift; sourceTree = "<group>"; };
 		22B0FEB34929B3FA13B1B50E /* SpotifyToolTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotifyToolTests.swift; sourceTree = "<group>"; };
 		23564CD4C6A81A44380352B5 /* MFCCSpeakerEmbedder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MFCCSpeakerEmbedder.swift; sourceTree = "<group>"; };
+		23581CE561AD75139171159F /* DeterministicCallGuardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeterministicCallGuardTests.swift; sourceTree = "<group>"; };
 		23736F8217BD5C29FAD41235 /* ProfilePersonalization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfilePersonalization.swift; sourceTree = "<group>"; };
 		25D960115E1EE4B691893FAB /* TranslateTestModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranslateTestModel.swift; sourceTree = "<group>"; };
 		25EB3058A3FF1A3ED599A472 /* ModelDownloadDebugSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloadDebugSettings.swift; sourceTree = "<group>"; };
@@ -2366,6 +2368,7 @@
 				E31C9E19B2000DB3C710A619 /* CommandRouterReplySafetyTests.swift */,
 				A01C837A02E4DAAE4A2423E0 /* CommandRouterTests.swift */,
 				0E9E90B47A12C2406E4569D5 /* CommandRouterYouTubeTests.swift */,
+				23581CE561AD75139171159F /* DeterministicCallGuardTests.swift */,
 				BAAF1B0C20D1DC9D7F5CB3D8 /* DeterministicCallRouteTests.swift */,
 				F3946EB8DB3D4F888B969D0E /* DialectBiasComposerTests.swift */,
 				04FA79D428D0A71D286F4701 /* DialectIdentifierTests.swift */,
@@ -3750,6 +3753,7 @@
 				A74E6CB98FB89DAA43FF1748 /* ContactPhotoStoreTests.swift in Sources */,
 				56CBBE77BA5CB8A55A6E098E /* ContactResolverTests.swift in Sources */,
 				76A8CE76DA09DBB7457AFDF7 /* DesignTokensTests.swift in Sources */,
+				9B9EB18F73FE04820460CAAC /* DeterministicCallGuardTests.swift in Sources */,
 				B8256D0E2FC0AA27E546CAC1 /* DeterministicCallRouteTests.swift in Sources */,
 				A81826A4DCA61C3A49DCA07E /* DevanagariNumeralsTests.swift in Sources */,
 				683820EF607F195C9ED70D5E /* DialectBiasComposerTests.swift in Sources */,

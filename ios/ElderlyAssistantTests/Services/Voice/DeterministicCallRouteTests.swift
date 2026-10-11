@@ -36,6 +36,46 @@ final class DeterministicCallRouteTests: XCTestCase {
                        .call(query: "बाबा"))
     }
 
+    /// Every WhatsApp spelling in the router's vocabulary is a drop —
+    /// "व्हाट्सएपमा कल गर" (golden-corpus spelling) must not leak the app
+    /// word into the name query.
+    func testAllWhatsAppSpellingsAreDropped() {
+        XCTAssertEqual(DeterministicCallRoute.decide(transcript: "व्हाट्सएपमा कल गर"),
+                       .callNoName)
+        XCTAssertEqual(DeterministicCallRoute.decide(transcript: "ह्वाट्सएपमा फोन गर मैयालाई"),
+                       .call(query: "मैया"))
+        XCTAssertEqual(DeterministicCallRoute.decide(transcript: "वाट्सएपमा कल गर मैयालाई"),
+                       .call(query: "मैया"))
+    }
+
+    /// The लगाऊ-family call verbs ("फोन लगाऊ", "नम्बर लगाऊ" — golden
+    /// corpus) are dropped whole, so a nameless request stays nameless
+    /// instead of resolving the verb as a contact.
+    func testLagauFamilyVerbsAreDropped() {
+        XCTAssertEqual(DeterministicCallRoute.decide(transcript: "फोन लगाऊ"),
+                       .callNoName)
+        XCTAssertEqual(DeterministicCallRoute.decide(transcript: "फोन नम्बर लगाऊ"),
+                       .callNoName)
+        XCTAssertEqual(DeterministicCallRoute.decide(transcript: "फोन लगाइदिनु"),
+                       .callNoName)
+        XCTAssertEqual(DeterministicCallRoute.decide(transcript: "मैयालाई फोन लगाइदेऊ"),
+                       .call(query: "मैया"))
+    }
+
+    /// Golden-corpus call shapes resolve to the corpus contact.
+    func testGoldenCorpusCallShapesExtract() {
+        XCTAssertEqual(DeterministicCallRoute.decide(transcript: "छोरीलाई फोन गरिदेऊ"),
+                       .call(query: "छोरी"))
+        XCTAssertEqual(DeterministicCallRoute.decide(transcript: "भाइलाई कल गर"),
+                       .call(query: "भाइ"))
+        XCTAssertEqual(DeterministicCallRoute.decide(transcript: "नातिलाई फोन गर"),
+                       .call(query: "नाति"))
+        XCTAssertEqual(DeterministicCallRoute.decide(transcript: "call my son"),
+                       .call(query: "son"))
+        XCTAssertEqual(DeterministicCallRoute.decide(transcript: "मेरो परिवारलाई कल गर"),
+                       .call(query: "परिवार"))
+    }
+
     func testPossessiveAndPoliteDropsStillExtract() {
         // "मेरो" is a drop word in the shared extractor; the dative
         // "छोरालाई" still yields the name.

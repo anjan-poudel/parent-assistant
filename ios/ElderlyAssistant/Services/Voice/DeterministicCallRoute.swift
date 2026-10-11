@@ -53,17 +53,26 @@ enum DeterministicCallRoute {
     ]
     /// Devanagari app words dropped by containment — no real name
     /// contains them ("ह्वाट्सएपमा", "भिडियोकल" are dropped whole).
+    /// All three WhatsApp spellings in the router's vocabulary are
+    /// covered (ह्वाट्सएप / वाट्सएप / व्हाट्सएप — see `sensitiveCallPhrases`).
     private static let devanagariContainmentDrops = [
-        "भिडियो", "ह्वाट्सएप", "वाट्सएप", "म्यासेन्जर", "मेसेन्जर",
+        "भिडियो", "ह्वाट्सएप", "वाट्सएप", "व्हाट्सएप", "म्यासेन्जर", "मेसेन्जर",
         "फेसटाइम", "भाइबर"
     ]
     /// Devanagari words dropped WHOLE-TOKEN only: "कल" containment would
     /// eat a real name ("कल" ⊂ "कल्याणी"). The indefinite/third-person
     /// pronouns are drops only as bare stems — their dative forms
     /// ("कसैलाई") are suffix-stripped first in `callQuery` and then hit
-    /// this same list.
+    /// this same list. The लगाऊ-family verbs are the call forms of
+    /// "फोन लगाऊ" / "नम्बर लगाऊ" — the shared extractor's drop table
+    /// covers only the गर-/खोज-families, so the call-specific verbs are
+    /// dropped here (whole-token, never containment: "लगाउ" could fuse
+    /// into nothing real, but containment would be a new trap class for
+    /// zero gain).
     private static let devanagariExactDrops = [
-        "कल", "कसै", "कोही", "कोहि", "कुनै", "उस", "उन", "उनी"
+        "कल", "कसै", "कोही", "कोहि", "कुनै", "उस", "उन", "उनी",
+        "लगाऊ", "लगाउ", "लगाउनुहोस्", "लगाउनुस्",
+        "लगाइदेऊ", "लगाइदेउ", "लगाइदिनु"
     ]
 
     // MARK: - Decision
