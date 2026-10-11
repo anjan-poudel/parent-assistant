@@ -8,11 +8,20 @@ L1 §16 / NFR-FCU-008 forbids parallel edits of the SHARED surfaces only:
 
 **Unblocked now (file-disjoint with call-dialer's W3-W8 work, which touches
 AppCoordinator/LeafViews/CallingSettingsView/MethodResolver + tests only):**
-T-145, T-147, T-148, T-149, T-150, T-151, T-152, T-153, T-154, T-155.
+T-145 (done 5914777e), T-147 (done 4ffc9389), T-151, T-153,
+T-148a (AddressBookDirectory half: `.limited` enum + `from(_:)` +
+`allowsReading` + identifier additions + reading-protocol conformance +
+`ContactsAccessTests` — no shared-file edits),
+T-149, T-150, T-152, T-154, T-155 (each file-disjoint by construction).
+
+CORRECTION (same day): T-148's unit spec itself marks it "Shared-surface unit:
+runs only after T-144" — its per-site gate fixes (LeafViews/SettingsView/
+AppCoordinator equality lines + `ContactsAccessGateTests`) are split out as
+**T-148b** and stay gated.
 
 **Still gated on T-144 (the call-dialer PR merge + master merge into this branch):**
-T-156, T-157, T-158 (AppCoordinator), T-159, T-160, T-162 (SettingsView),
-T-161 (LeafViews), T-163, T-164, T-165.
+T-148b (per-site gate lines), T-156, T-157, T-158 (AppCoordinator), T-159,
+T-160, T-162 (SettingsView), T-161 (LeafViews), T-163, T-164, T-165.
 
 Basis: design-l2 §16 union table — our edits to FamilyContactStore,
 AddressBookDirectory, ContactResolver, UnifiedContactSearch, MissedCallContactResolver,
