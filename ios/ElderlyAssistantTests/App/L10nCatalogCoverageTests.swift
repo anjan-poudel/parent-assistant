@@ -152,10 +152,13 @@ final class L10nCatalogCoverageTests: XCTestCase {
     ]
 
     /// The catalog at this feature's branch point: 1,364 keys, zero
-    /// `dialogue.*` entries. The feature adds exactly the 17 and removes
-    /// none, so the total is pinned (the Spotify-localisation suite's
-    /// count discipline).
-    private static let dialogueBaselineKeyCount = 1_364
+    /// `dialogue.*` entries — rebased to 1,366 at integration, when
+    /// af69135 ("owner override to download models the RAM tier refuses")
+    /// added the two `settings.hidden.ignoreRamTier` keys to master
+    /// between the branch point and the merge. The feature adds exactly
+    /// the 17 and removes none, so the total is pinned (the
+    /// Spotify-localisation suite's count discipline).
+    private static let dialogueBaselineKeyCount = 1_366
 
     /// The design-l2 §16 draft copy, verbatim, both languages. The owner
     /// copy review is a later step recorded in the plan; this pin makes
