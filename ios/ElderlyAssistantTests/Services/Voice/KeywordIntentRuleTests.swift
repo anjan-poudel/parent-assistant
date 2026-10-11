@@ -524,6 +524,20 @@ final class KeywordIntentRuleTests: XCTestCase {
         XCTAssertEqual(KeywordIntentRule.musicQuery(from: "स्पोटिफाइमा भजन सुनाऊ"), "भजन")
     }
 
+    /// Romanized Nepali particles and play verbs are query noise exactly
+    /// like their Devanagari twins: device evidence 2026-10-11 — the
+    /// v6-q6 on-device STT transcribed "युट्युबमा नेपाली गीत लगाऊ" as
+    /// "maa nepali geet la" and मा/लगाऊ leaked into the search box in
+    /// Latin script. Whole-token only: "ma" must not eat "mama".
+    func testMusicQueryDropsRomanizedNepaliTokens() {
+        XCTAssertEqual(KeywordIntentRule.musicQuery(from: "maa nepali geet la"), "nepali geet")
+        XCTAssertEqual(KeywordIntentRule.musicQuery(from: "youtube maa nepali geet lagauda"),
+                       "nepali geet")
+        XCTAssertEqual(KeywordIntentRule.musicQuery(from: "mero geet lagau"), "geet")
+        XCTAssertEqual(KeywordIntentRule.musicQuery(from: "mama"), "mama",
+                       "whole-token drops: a real query token containing \"ma\" survives")
+    }
+
     /// L2-D10: the extractor never leaves an empty query — when every
     /// token is scaffolding, the first music-marker token is searched;
     /// when there is none, the raw transcript's tokens stand in.

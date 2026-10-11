@@ -854,6 +854,18 @@ enum KeywordIntentRule {
         "youtube", "on", "in", "for", "the", "a", "an", "to", "of",
         "and", "or", "please", "me", "my", "some", "that", "this",
         "from", "with", "search", "searches", "searching", "searched",
+        // romanized Nepali particles and play-family verbs — device
+        // evidence 2026-10-11: the v6-q6 on-device STT sometimes
+        // transcribes ROMANIZED Nepali, and "maa nepali geet la"
+        // (meant as "युट्युबमा नेपाली गीत लगाऊ") leaked मा and लगाऊ
+        // into the search query. Whole-token only: "ma" must not eat
+        // "mama".
+        "ma", "maa", "la", "lagau", "lagaau", "lagauu", "lagaunu",
+        "lagaunus", "lagauda", "lagaudai", "lagai", "lagayera",
+        "bajau", "bajaaun", "bajaunu", "bajauda", "bajaai", "bajaunus",
+        "chalaau", "chalau", "chalaunu", "chalauda", "chalaai",
+        "kripa", "kripaya", "hajur", "euta", "eutai", "ani", "ra",
+        "mero", "hamro", "malai", "malaai",
         // Music markers, the provider name, and the listen/sing verbs.
         "music", "song", "bhajan", "spotify",
         "listen", "listens", "listening",

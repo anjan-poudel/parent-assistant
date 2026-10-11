@@ -75,6 +75,54 @@ final class YouTubePluginTests: XCTestCase {
         })
     }
 
+    func testModelFilledRomanizedQueryIsSanitizedBeforeSearch() async {
+        // Device evidence 2026-10-11: the model echoed the Romanized
+        // transcript verbatim into the query entity ("maa nepali geet
+        // la") and the particle मा plus the verb लगाऊ reached the search
+        // box. The plugin must run the entity through the deterministic
+        // route's extractor instead of searching it verbatim.
+        let opener = FakeLinkOpener(canOpen: true)
+        let (plugin, _) = makePlugin(opener: opener)
+        let (context, _) = makeContext()
+        let result = await plugin.handle(
+            PluginCommand(actionName: "youtube.play", transcript: "",
+                          entities: ["query": "maa nepali geet la"], confidence: 0.9),
+            context: context)
+        XCTAssertEqual(result, .spoken(L10n.fmt("youtube.openingSearch", locale: ne, "nepali geet")))
+        XCTAssertEqual(opener.opened, [YouTubeTool.appSearchURL(query: "nepali geet")])
+    }
+
+    func testModelFilledWholeTokenSurvivesSanitization() async {
+        // The sanitizer keeps the whole-token drop semantics: "ma" must
+        // not eat a real query token like "mama".
+        let opener = FakeLinkOpener(canOpen: true)
+        let (plugin, _) = makePlugin(opener: opener)
+        let (context, _) = makeContext()
+        _ = await plugin.handle(
+            PluginCommand(actionName: "youtube.play", transcript: "",
+                          entities: ["query": "mama"], confidence: 0.9),
+            context: context)
+        XCTAssertEqual(opener.opened, [YouTubeTool.appSearchURL(query: "mama")])
+    }
+
+    func testModelFilledScaffoldingOnlyQueryFailsHonestly() async {
+        // Nothing survives the drop lists ("la" alone is the romanized
+        // play verb): the existing honest `.failed` line, never a search
+        // of the scaffolding.
+        let opener = FakeLinkOpener(canOpen: true)
+        let (plugin, _) = makePlugin(opener: opener)
+        let (context, bus) = makeContext()
+        let result = await plugin.handle(
+            PluginCommand(actionName: "youtube.play", transcript: "",
+                          entities: ["query": "la"], confidence: 0.9),
+            context: context)
+        XCTAssertEqual(result, .failed(spokenApology: L10n.str("youtube.unavailable", locale: ne)))
+        XCTAssertTrue(opener.opened.isEmpty)
+        XCTAssertTrue(bus.emittedEvents.contains {
+            $0.component == "plugin_youtube" && $0.eventType == "youtube_plugin_no_query"
+        })
+    }
+
     func testKeylessHandleAppAbsentOpensWebSearchURL() async {
         let opener = FakeLinkOpener(canOpen: false)
         let (plugin, _) = makePlugin(opener: opener)

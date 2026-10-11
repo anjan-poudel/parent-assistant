@@ -113,6 +113,33 @@ final class YouTubeRouteTests: XCTestCase {
         }
     }
 
+    // MARK: - Romanized Nepali (device evidence 2026-10-11)
+
+    func testRomanizedTranscriptExtractsQueryDataDriven() {
+        // [YT-ROMAN] (2026-10-11) The v6-q6 on-device STT sometimes emits
+        // ROMANIZED Nepali: the utterance meant as "युट्युबमा नेपाली गीत
+        // लगाऊ" transcribed to "maa nepali geet la" and the particle मा
+        // plus the verb लगाऊ leaked into the search box in Latin script.
+        // Every romanized particle/verb form must drop as a whole token.
+        let utterances = [
+            "youtube maa nepali geet lagauda",
+            "youtube maa nepali geet la",
+            "youtube maa nepali geet lagau"
+        ]
+        for phrase in utterances {
+            XCTAssertEqual(YouTubeRoute.decide(transcript: phrase),
+                           .play("nepali geet"),
+                           "romanized particles/verbs must drop for: \(phrase)")
+        }
+    }
+
+    func testRomanizedDropsAreWholeTokenOnly() {
+        // The romanized drops keep the whole-token semantics the English
+        // set has: "ma" must not eat "mama", "ra" must not eat "raga".
+        XCTAssertEqual(YouTubeRoute.decide(transcript: "youtube mama"), .play("mama"))
+        XCTAssertEqual(YouTubeRoute.decide(transcript: "youtube raga"), .play("raga"))
+    }
+
     // MARK: - Vetoes (never hijack the ladder)
 
     func testBarePlayWithoutYouTubeWordNeverFires() {
