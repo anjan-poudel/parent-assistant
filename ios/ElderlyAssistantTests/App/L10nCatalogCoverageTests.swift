@@ -160,15 +160,15 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// The catalog at this feature's branch point: 1,364 keys, zero
     /// `dialogue.*` entries — rebased at integration: to 1,366 when
     /// af69135 (RAM-tier owner override) added its two settings keys,
-    /// and to 1,369 when the call-deterministic-fallback (PR #161) and
-    /// correction-revive merges added five further non-dialogue keys
-    /// before this rebase. The dialogue family is now 19 keys (the 18
-    /// design-l2 §16 entries plus `dialogue.correction.ask`, added by
-    /// correction-revive and moved into the family block at this
-    /// rebase); the family adds exactly its keys and removes none, so
-    /// the total is pinned (the Spotify-localisation suite's count
-    /// discipline).
-    private static let dialogueBaselineKeyCount = 1_369
+    /// to 1,369 when the call-deterministic-fallback (PR #161) and
+    /// correction-revive merges added five further non-dialogue keys,
+    /// and to 1,370 when the call-nearmiss merge (PR #166) added
+    /// `router.call.didYouMeanPrefix`. The dialogue family is 19 keys
+    /// (the 18 design-l2 §16 entries plus `dialogue.correction.ask`,
+    /// moved into the family block at this rebase); the family adds
+    /// exactly its keys and removes none, so the total is pinned (the
+    /// Spotify-localisation suite's count discipline).
+    private static let dialogueBaselineKeyCount = 1_370
 
     /// The design-l2 §16 draft copy, verbatim, both languages. The owner
     /// copy review is a later step recorded in the plan; this pin makes

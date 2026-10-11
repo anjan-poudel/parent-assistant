@@ -4528,39 +4528,61 @@ final class CommandRouter {
     /// `routeKeyword`'s `sensitiveCallPhrases`, unchanged). Only a
     /// specifically-resolved contact gets dialed for real.
     ///
-    /// [DETERMINISTIC-CALL] (2026-10-11) An empty `contact` slot now
-    /// retries deterministic extraction from the transcript before
-    /// answering "couldn't understand" — the same extraction the keyword
-    /// fallback uses, so a model that mislabels the entity no longer
-    /// costs the elder a dead-end refusal.
+    /// [DETERMINISTIC-CALL] (2026-10-11) An empty `contact` slot retries
+    /// deterministic extraction from the transcript before answering
+    /// "couldn't understand" — the same extraction the keyword fallback
+    /// uses, so a model that mislabels the entity no longer costs the
+    /// elder a dead-end refusal.
+    ///
+    /// [SLOT-VERIFY] (2026-10-11) A WRONG non-empty slot is worse than an
+    /// empty one: the model can hallucinate a common name ("syanu" →
+    /// "Seema" in the field) and the failure line then quotes a name the
+    /// elder never said. When the model's slot fails to resolve, the
+    /// transcript's own deterministic extraction gets a second attempt
+    /// through the SAME confirmation seam before the honest line — and
+    /// the failure line quotes the transcript's name when one survived
+    /// (the least-wrong reading), never the hallucinated slot.
     private func handleCall(_ command: InterpretedCommand, raw: String) {
-        let contactQuery: String? = {
-            if let contact = command.contact, !contact.isEmpty { return contact }
-            return DeterministicCallRoute.callQuery(fromTranscript: raw)
-        }()
-        guard let prompt = coordinator?.requestCallConfirmation(
-            contactQuery: contactQuery, callType: command.callType, requestedApp: command.requestedApp,
-            sourceTranscript: pendingTranscript, sourceCommand: command
-        ) else {
-            // Distinguish WHY it failed instead of one generic "blocked"
-            // message: a name was extracted but didn't match anyone in
-            // family contacts (fixable by the user — add the contact) is
-            // a different situation from no name being understood at all
-            // (fixable by re-phrasing), and neither should sound like a
-            // permissions/auth problem, since neither is one.
-            if let contact = contactQuery, !contact.isEmpty {
-                emit(eventType: "command_call_contact_not_found", outcome: "blocked")
-                speakWithVisibleOutcome(
-                    text: L10n.fmt("router.call.contactNotFound", locale: coordinator?.activeLocale ?? Locale(identifier: "ne-NP"), contact)
-                )
-            } else {
-                emit(eventType: "command_call_name_unclear", outcome: "blocked")
-                speakWithVisibleOutcome(key: "router.call.nameUnclear")
-            }
+        let llmContact = (command.contact?.isEmpty == false) ? command.contact : nil
+        let transcriptQuery = DeterministicCallRoute.callQuery(fromTranscript: raw)
+        let contactQuery = llmContact ?? transcriptQuery
+
+        func prompt(for query: String) -> String? {
+            coordinator?.requestCallConfirmation(
+                contactQuery: query, callType: command.callType, requestedApp: command.requestedApp,
+                sourceTranscript: pendingTranscript, sourceCommand: command
+            )
+        }
+
+        if let p = prompt(for: contactQuery ?? "") {
+            emit(eventType: "command_call_confirmation_requested", outcome: "success")
+            speak(text: p)
             return
         }
-        emit(eventType: "command_call_confirmation_requested", outcome: "success")
-        speak(text: prompt)
+        if let transcriptQuery, transcriptQuery != contactQuery, let p = prompt(for: transcriptQuery) {
+            // The transcript's own reading resolved a real family contact
+            // where the model's slot did not — same event vocabulary as
+            // the keyword fallback's deterministic win.
+            emit(eventType: "command_call_deterministic_confirmation", outcome: "success")
+            speak(text: p)
+            return
+        }
+
+        // Distinguish WHY it failed instead of one generic "blocked"
+        // message: a name was extracted but didn't match anyone in
+        // family contacts (fixable by the user — add the contact) is
+        // a different situation from no name being understood at all
+        // (fixable by re-phrasing), and neither should sound like a
+        // permissions/auth problem, since neither is one.
+        if let contact = transcriptQuery ?? contactQuery, !contact.isEmpty {
+            emit(eventType: "command_call_contact_not_found", outcome: "blocked")
+            speakWithVisibleOutcome(
+                text: L10n.fmt("router.call.contactNotFound", locale: coordinator?.activeLocale ?? Locale(identifier: "ne-NP"), contact)
+            )
+        } else {
+            emit(eventType: "command_call_name_unclear", outcome: "blocked")
+            speakWithVisibleOutcome(key: "router.call.nameUnclear")
+        }
     }
 
     /// `send_message`. Never claims the message was SENT — only that a

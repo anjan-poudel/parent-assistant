@@ -7588,6 +7588,13 @@ self.noteTalkContractChanged()
                                  sourceTranscript: String?, sourceCommand: InterpretedCommand?) -> String? {
         guard let contactQuery else { return nil }
         let contact: FamilyContact
+        // [NEAR-MISS] (2026-10-11) A rejected query gets ONE more chance:
+        // a single near-miss family contact (edit-distance band in
+        // `ContactResolver.nearMiss`) becomes the SAME spoken
+        // confirmation the exact path uses — the yes IS the call gate,
+        // and the prompt discloses both the heard name and the proposed
+        // one, so nothing is ever dialed on a silent substitution.
+        var isNearMiss = false
         switch contactResolver.resolve(contactQuery) {
         case .one(let match):
             contact = match
@@ -7595,7 +7602,9 @@ self.noteTalkContractChanged()
             let names = matches.prefix(2).map(\.name).joined(separator: ", ")
             return L10n.fmt("router.call.disambiguate", locale: activeLocale, names)
         case .none:
-            return nil
+            guard let near = contactResolver.nearMiss(contactQuery) else { return nil }
+            contact = near
+            isNearMiss = true
         }
         let resolved = methodResolver.resolve(contactId: contact.id,
                                               requestedApp: requestedApp,
@@ -7624,7 +7633,17 @@ self.noteTalkContractChanged()
         // [MTC] M-2 (ADR-MTC-03): pend through the ONE window opener —
         // a live dialogue frame is superseded before the challenge arms.
         openConfirmationWindow()
-        return confirmationPrompt(for: action, isRepeat: isRepeat)
+        let prompt = confirmationPrompt(for: action, isRepeat: isRepeat)
+        // [NEAR-MISS] Disclose the substitution in the SAME utterance as
+        // the confirmation: the elder hears the name that was heard, the
+        // name proposed, and the method — the yes that follows is a fully
+        // informed call gate, never a silent substitution.
+        if isNearMiss {
+            let prefix = L10n.fmt("router.call.didYouMeanPrefix", locale: activeLocale,
+                                  contactQuery, contact.name)
+            return prefix + " " + prompt
+        }
+        return prompt
     }
 
     /// Call-confirmation correction protocol (spec §7.2): the user
