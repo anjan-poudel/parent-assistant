@@ -2111,25 +2111,24 @@ final class CommandRouter {
         "लड्नुभयो", "सास फेर्न सकिन", "सास फेर्न गाह्रो", "छाती दुख्यो"
     ]
 
-    /// Call-ish vocabulary shared by the post-LLM block
-    /// (`routeKeywordRemainder` `:1973-1980`) and the [NO-GIBBERISH]
+    /// Call-ish vocabulary shared by the post-LLM fallback
+    /// (`routeKeywordRemainder`) and the [NO-GIBBERISH]
     /// pre-answer guard (`:1360`): an utterance that both names a topic
     /// word AND reads call-ish ("मौसम बताउने मान्छेलाई फोन गर") must stay
-    /// on the interpreter/block path — a deterministic topic answer
-    /// would shadow the call intent. Hoisted from `routeKeywordRemainder`
-    /// (2026-09-07) so the pre-answer stage checks the SAME list that
-    /// blocks.
+    /// on the interpreter/deterministic-call path — a deterministic topic
+    /// answer would shadow the call intent. Hoisted from
+    /// `routeKeywordRemainder` (2026-09-07) so the pre-answer stage
+    /// checks the SAME list the remainder's fallback once blocked on.
     ///
-    /// [MTC L2-D2] (2026-10-10) `sensitiveCallPhrases` `:1869`: widened
-    /// `private` → `internal` so the dialogue barge-in predicate
-    /// (design-l2 §6 B2) consumes this exact list instead of forking a
-    /// second vocabulary — the same extraction reason as
-    /// `isExplicitMedicationAcknowledgement` `:1913`. The answer path
-    /// evaluates it with `containsPhrase` semantics (`:1826` —
-    /// `text.contains(phrase)`) over lowercased text and falls through
-    /// to the ladder, where `:1973-1980` blocks with
-    /// `router.sensitiveBlocked` unchanged. Visibility only: no call
-    /// site moves and no predicate changes.
+    /// [DETERMINISTIC-CALL] (2026-10-11) The remainder no longer BLOCKS
+    /// on this vocabulary — direct-call utterances now route through the
+    /// deterministic fallback (`DeterministicCallRoute`), which reuses
+    /// `VoiceContactSearchRoute.isDirectCallUtterance` for the shape
+    /// test. This list survives for its two other consumers: the topic
+    /// pre-answer self-exclusion above and the [MTC L2-D2] dialogue
+    /// barge-in predicate (design-l2 §6 B2), both of which need the
+    /// BROADER vocabulary (a bare "whatsapp" mention is call-ish for a
+    /// topic answer even when it is not a direct call request).
     static let sensitiveCallPhrases = [
         "call", "phone", "facetime", "messenger", "whatsapp",
         "फोन", "कल", "भिडियो कल", "म्यासेन्जर", "व्हाट्सएप", "वाट्सएप"
@@ -2219,9 +2218,10 @@ final class CommandRouter {
     }
 
     /// Post-LLM keyword fallback — everything in the keyword layer that
-    /// is NOT safety-critical: the blunt sensitive-call block (no entity
-    /// extraction available, so any call-ish phrase is blocked rather
-    /// than acted on) and the unrecognised handling. The unrecognised
+    /// is NOT safety-critical: the deterministic call fallback
+    /// (direct-call utterances get name extraction + the same
+    /// confirmation seam the LLM path uses; see [DETERMINISTIC-CALL]
+    /// below) and the unrecognised handling. The unrecognised
     /// branch speaks honestly against `coordinator.brainReadiness`
     /// (2026-09-06): the generic "I didn't understand" re-prompt is only
     /// truthful while an interpreter actually listened — when the chain
@@ -2234,12 +2234,53 @@ final class CommandRouter {
             .lowercased()
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        if Self.sensitiveCallPhrases.contains(where: { Self.containsPhrase($0, in: text) }) {
-            emit(eventType: "command_sensitive_blocked_auth_unavailable", outcome: "blocked")
-            // Visible outcome, not just spoken — the live-caption pill is
-            // gone by now, so without a card the user's transcript and the
-            // refusal both vanish from the screen (field report 2026-09-05).
-            speakWithVisibleOutcome(key: "router.sensitiveBlocked")
+        // [DETERMINISTIC-CALL] (2026-10-11) The blunt sensitive-call block
+        // that lived here answered every call-shaped utterance the
+        // interpreter could not resolve with a fixed, misleading line
+        // (`router.sensitiveBlocked` — "calling stays off until secure
+        // authentication is ready"). No such auth gate exists: the
+        // speaker-biometric service's router gating was never wired, and
+        // the real gate is the spoken yes/no confirmation every call path
+        // already shares. A direct call request now gets deterministic
+        // name extraction (the contact-search stage's pattern) and routes
+        // through the EXISTING `requestCallConfirmation` seam —
+        // `ContactResolver` still refuses to guess a person, and nothing
+        // is dialed without the elder's yes.
+        if VoiceContactSearchRoute.isDirectCallUtterance(text) {
+            switch DeterministicCallRoute.decide(transcript: raw) {
+            case .call(let query):
+                if let prompt = coordinator?.requestCallConfirmation(
+                    contactQuery: query,
+                    callType: nil,
+                    requestedApp: nil,
+                    sourceTranscript: raw,
+                    sourceCommand: nil
+                ) {
+                    emit(eventType: "command_call_deterministic_confirmation", outcome: "success")
+                    speak(text: prompt)
+                } else {
+                    // A name survived extraction but matched no family
+                    // contact — the same honest line the LLM path speaks.
+                    emit(eventType: "command_call_contact_not_found", outcome: "blocked")
+                    speakWithVisibleOutcome(
+                        text: L10n.fmt("router.call.contactNotFound",
+                                       locale: coordinator?.activeLocale ?? Locale(identifier: "ne-NP"),
+                                       query)
+                    )
+                }
+            case .callNoName:
+                emit(eventType: "command_call_name_unclear", outcome: "blocked")
+                // Visible outcome, not just spoken — the live-caption pill
+                // is gone by now, so without a card the user's transcript
+                // and the reply both vanish from the screen (field report
+                // 2026-09-05).
+                speakWithVisibleOutcome(key: "router.call.nameUnclear")
+            case .notDirectCall:
+                // Call vocabulary without a clear call request ("मेरो फोन
+                // कहाँ छ?") — fall through to the honest unrecognised
+                // branch below instead of the old blanket refusal.
+                break
+            }
             return .blockedSensitiveAction
         }
 
@@ -3988,7 +4029,7 @@ final class CommandRouter {
             emit(eventType: "command_emergency", outcome: "success")
             handleEmergency()
         case .call:
-            handleCall(command)
+            handleCall(command, raw: raw)
         case .setReminder:
             handleSetReminder(command, raw: raw)
         case .healthQuery:
@@ -4242,9 +4283,19 @@ final class CommandRouter {
     /// since it has no entity extraction to identify a real target; see
     /// `routeKeyword`'s `sensitiveCallPhrases`, unchanged). Only a
     /// specifically-resolved contact gets dialed for real.
-    private func handleCall(_ command: InterpretedCommand) {
+    ///
+    /// [DETERMINISTIC-CALL] (2026-10-11) An empty `contact` slot now
+    /// retries deterministic extraction from the transcript before
+    /// answering "couldn't understand" — the same extraction the keyword
+    /// fallback uses, so a model that mislabels the entity no longer
+    /// costs the elder a dead-end refusal.
+    private func handleCall(_ command: InterpretedCommand, raw: String) {
+        let contactQuery: String? = {
+            if let contact = command.contact, !contact.isEmpty { return contact }
+            return DeterministicCallRoute.callQuery(fromTranscript: raw)
+        }()
         guard let prompt = coordinator?.requestCallConfirmation(
-            contactQuery: command.contact, callType: command.callType, requestedApp: command.requestedApp,
+            contactQuery: contactQuery, callType: command.callType, requestedApp: command.requestedApp,
             sourceTranscript: pendingTranscript, sourceCommand: command
         ) else {
             // Distinguish WHY it failed instead of one generic "blocked"
@@ -4253,12 +4304,14 @@ final class CommandRouter {
             // a different situation from no name being understood at all
             // (fixable by re-phrasing), and neither should sound like a
             // permissions/auth problem, since neither is one.
-            if let contact = command.contact, !contact.isEmpty {
+            if let contact = contactQuery, !contact.isEmpty {
                 emit(eventType: "command_call_contact_not_found", outcome: "blocked")
-                speak(text: L10n.fmt("router.call.contactNotFound", locale: coordinator?.activeLocale ?? Locale(identifier: "ne-NP"), contact))
+                speakWithVisibleOutcome(
+                    text: L10n.fmt("router.call.contactNotFound", locale: coordinator?.activeLocale ?? Locale(identifier: "ne-NP"), contact)
+                )
             } else {
-                emit(eventType: "command_sensitive_blocked_auth_unavailable", outcome: "blocked")
-                speakWithVisibleOutcome(key: "router.sensitiveBlocked")
+                emit(eventType: "command_call_name_unclear", outcome: "blocked")
+                speakWithVisibleOutcome(key: "router.call.nameUnclear")
             }
             return
         }
