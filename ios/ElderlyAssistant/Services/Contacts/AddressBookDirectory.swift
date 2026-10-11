@@ -468,3 +468,29 @@ final class AddressBookDirectory {
         }
     }
 }
+
+// MARK: - SystemContactReading conformance (family-contacts-unify T-149, design-l2 §1.3)
+
+/// The read seam `SystemContactLinkService` consumes. Both members are thin
+/// glue over the private `CNContactStore` — the store stays private to this
+/// file, and the identifier-predicate fetch is what keeps link verification to
+/// ONE batched read (the service decides the identifiers and the keys; this
+/// conformance decides nothing).
+///
+/// `currentAccess()` delegates to the SAME single iOS-18 mapping every other
+/// read path uses (`ContactsAccess.from`, T-148a) — re-mapping the status here
+/// would be exactly the version-gate drift `ContactsAccessTests` exists to
+/// catch.
+extension AddressBookDirectory: SystemContactReading {
+
+    func currentAccess() -> ContactsAccess { Self.access() }
+
+    /// Records matching `identifiers`, under the current access. A record the
+    /// user did not grant (iOS 18 "Select Contacts") is simply absent from the
+    /// result — never an error, never invented; a store-level failure throws
+    /// and the service degrades to its previous snapshot (design-l2 §1.3).
+    func contacts(identifiers: [String], keysToFetch: [CNKeyDescriptor]) throws -> [CNContact] {
+        let predicate = CNContact.predicateForContacts(withIdentifiers: identifiers)
+        return try store.unifiedContacts(matching: predicate, keysToFetch: keysToFetch)
+    }
+}
