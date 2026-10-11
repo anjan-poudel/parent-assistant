@@ -1224,8 +1224,13 @@ final class CallChannelResolutionTests: XCTestCase {
                            + "(no re-pending, no re-prompt — the elder's yes stands)")
         }
 
+        // T-150 (W6 review note N-8(a)): the machinery region now runs to
+        // the END of `hopFromCallAction` — the voice hop re-enters the
+        // executor synchronously too, so the sync scan below must cover
+        // it as well (`hopFromCallAction` was the only listing-owned body
+        // outside a scan).
         let machinery = try region(between: "struct LaunchHop: Equatable {",
-                                   and: "private func hopFromCallAction(", in: source)
+                                   and: "private func noteConfirmedCallExecution(", in: source)
         for forbidden in ["await", "async", "Task", "DispatchQueue", "Timer",
                           "Thread.sleep", "usleep", "sleep(", "schedule"] {
             XCTAssertFalse(machinery.contains(forbidden),
@@ -1237,11 +1242,19 @@ final class CallChannelResolutionTests: XCTestCase {
 
         // The mechanisms stay separate: the tap path attempts through the
         // shipped openers, the voice path only through performCallAction.
+        // The widened region holds exactly ONE `performCallAction(`
+        // occurrence — hopFromCallAction's re-entry; the negative pin for
+        // "the tap helper never re-enters the voice executor" therefore
+        // moves to the tap helper's own region, where it stays exact.
         XCTAssertEqual(occurrences(of: "case .phone:", in: machinery), 1,
                        "the floor dispatch exists once")
         XCTAssertTrue(machinery.contains("performSystemContactCall(name: name, phone: phone)"),
                       "the hopped floor attempt goes through the shipped floor opener")
-        XCTAssertFalse(machinery.contains("performCallAction("),
+        XCTAssertEqual(occurrences(of: "performCallAction(", in: machinery), 1,
+                       "the widened machinery holds exactly the voice hop's ONE re-entry")
+        let tapHelper = try region(between: "private func performLaunchFailHop(",
+                                   and: "private func noteLaunchFailHop(", in: source)
+        XCTAssertFalse(tapHelper.contains("performCallAction("),
                        "the tap helper never re-enters the voice executor")
     }
 
@@ -1327,6 +1340,244 @@ final class CallChannelResolutionTests: XCTestCase {
         drainMainQueue()
         XCTAssertEqual(coordinator.activityLog.entries().count, activitiesBefore,
                        "the terminal leg records nothing either")
+    }
+
+    // MARK: - Failure-honesty guards (T-150)
+    //
+    // Security evidence for call-dialer-primary-secondary at the TERMINALS
+    // (design-l2 §10.1, the phone listing at `:568-577` and the M-1
+    // disposition (i) prose at `:817`; FR-CDP-018, NFR-CDP-003): when the
+    // routed phone floor's `openPhone` returns false, or the
+    // `whatsappChat` opener's Boolean returns false, the branch speaks the
+    // ONE shipped honest line through the SHARED helper
+    // (`announceNoUsableNumber` — no new catalogue key; the five-key bound
+    // stays T-155's) and records nothing — no success card, no learning,
+    // no activity — and hops NOWHERE: the floor is terminal (RES-10) and
+    // the disposition closes the shipped silent-false site.
+    //
+    // `performCallAction` is `private` and the pending slot is
+    // `private(set)`, so no unit seam reaches the executor (this unit adds
+    // no access relaxation; T-149's §28 relaxation covers
+    // `launchFailHopStep` only). Both obligation sets are therefore pinned
+    // at the comment-stripped source, as the house pattern requires — a
+    // comment must never be able to stand in for the code. The shared
+    // helper's own behaviour is exercised end to end by
+    // testHopOpenerWiringEndToEnd Arm 0 (the shipped tap floor speaks the
+    // same `call.announce.noPhoneNumber` line and records nothing), so the
+    // two halves — the guard's placement here and the helper's behaviour
+    // there — are both covered.
+
+    /// FR-CDP-018 / design-l2 §10.1 row 1 — the phone FLOOR's false
+    /// result: the open MOVED into the guard (called once, result
+    /// consumed), the guard's false path speaks the shipped honest line
+    /// through `announceNoUsableNumber` and returns BEFORE every success,
+    /// learning and activity statement, and the branch consults no hop
+    /// machinery at all (the floor is terminal).
+    func testPhoneFalseSpeaksTheLineNoHop() throws {
+        let source = coordinatorSource()
+        let executor = try region(between: "private func performCallAction(",
+                                  and: "struct LaunchHop: Equatable {", in: source)
+        let phoneCase = try region(between: "case .phone:",
+                                   and: "case .facetimeVideo, .facetimeAudio:",
+                                   in: executor)
+        let collapsedCase = collapsed(phoneCase)
+
+        // The discard-shaped call is gone: the open exists ONCE, as the
+        // guard's condition — never called twice.
+        XCTAssertEqual(occurrences(of: "callLinks.openPhone(", in: phoneCase), 1,
+                       "the floor's open exists once — inside the guard")
+        XCTAssertTrue(collapsedCase.trimmingCharacters(in: .whitespaces)
+            .hasPrefix("case .phone: guard callLinks.openPhone(action.contact.phone) else {"),
+                      "the guard is the FIRST statement of the case — nothing can "
+                      + "succeed, learn or record before the open is known")
+        let guardNeedle = collapsed("""
+            guard callLinks.openPhone(action.contact.phone) else {
+                announceNoUsableNumber(contact: action.contact, locale: locale)
+                return
+            }
+            """).trimmingCharacters(in: .whitespaces)
+        let guardRange = try XCTUnwrap(collapsedCase.range(of: guardNeedle),
+                                       "the design's phone-floor guard is absent")
+
+        // The false path is EXACTLY the shared honest line and the return:
+        // the collapsed guard block above stops matching if any success,
+        // learning or activity statement (or anything else) enters the
+        // else body.
+        XCTAssertEqual(occurrences(of: "announceNoUsableNumber(", in: phoneCase), 1,
+                       "the false path speaks through the SHARED helper, once")
+        XCTAssertFalse(phoneCase.contains("call.announce.noPhoneNumber"),
+                       "no catalogue key is bound here — the helper owns it "
+                       + "(the five-key bound stays T-155's)")
+
+        // Guard first, then every shipped success statement — the return
+        // precedes them all, so the false path can reach none of them.
+        for success in ["contactNumberUsed(action.contact.phone)",
+                        "home.outcome.callPlaced",
+                        "router.call.calling",
+                        "noteConfirmedCallExecution(action)",
+                        "recordActivity(kind: .call, channel: .phone,"] {
+            let successRange = try XCTUnwrap(collapsedCase.range(of: success),
+                                             "the shipped success statement is missing: \(success)")
+            XCTAssertGreaterThan(successRange.lowerBound, guardRange.upperBound,
+                                 "\(success) must sit AFTER the guard's return")
+        }
+        XCTAssertEqual(occurrences(of: "contactNumberUsed(", in: phoneCase), 1,
+                       "the success bookkeeping stays exactly as shipped (one site)")
+        XCTAssertEqual(occurrences(of: "noteConfirmedCallExecution(", in: phoneCase), 1,
+                       "the learning write stays exactly as shipped (one site)")
+        XCTAssertEqual(occurrences(of: "recordActivity(", in: phoneCase), 1,
+                       "the activity write stays exactly as shipped (one site)")
+
+        // Nothing to hop to: the floor is terminal (RES-10), so no hop
+        // symbol — and no hop line — is consulted from this branch.
+        for forbidden in ["hopFromCallAction", "launchFailHopStep",
+                          "performLaunchFailHop", "LaunchHop",
+                          "hopCandidates", "call.announce.launchFailedFallback"] {
+            XCTAssertFalse(phoneCase.contains(forbidden),
+                           "the floor never hops: \(forbidden) must not appear in the "
+                           + ".phone case")
+        }
+
+        // The reused helper is the shipped tap-floor one: the key binds
+        // exactly twice inside it (outcome card + speech) and never
+        // elsewhere in this region — one honest line, one home.
+        let helper = try region(between: "private func announceNoUsableNumber(",
+                                and: "struct MessageDraft: Identifiable", in: source)
+        XCTAssertEqual(occurrences(of: "\"call.announce.noPhoneNumber\"", in: helper), 2,
+                       "the shared helper owns the shipped key: outcome card + speech")
+        XCTAssertTrue(helper.contains("setOutcome(icon: \"exclamationmark.triangle.fill\""),
+                      "the honest line reports the failure icon, never a success card")
+        for locale in [englishLocale, nepaliLocale] {
+            XCTAssertNotEqual(L10n.fmt("call.announce.noPhoneNumber", locale: locale,
+                                       Self.hopContactName),
+                              "call.announce.noPhoneNumber",
+                              "the honest line must resolve from the \(locale.identifier) catalog")
+        }
+    }
+
+    /// FR-CDP-018 / design-l2 §10.1 M-1 disposition (i) (recorded in
+    /// T-144) — the `whatsappChat` Boolean is CONSUMED: a bare discarding
+    /// call statement is impossible once the guard is present (the pin
+    /// below matches the guard as a collapsed unit, and exactly one open
+    /// site exists). On false the branch speaks the shipped honest line
+    /// and returns before every success statement; the shipped success set
+    /// stays byte-identical; and the call-chat opener's own recovery chain
+    /// (`needsNativeCompose` / `copiedNumber`, which belong to
+    /// `openWhatsAppCallChat` only) is untouched and never consulted here —
+    /// no hop (RES-10).
+    func testWhatsAppChatFalseSpeaksTheLine() throws {
+        let source = coordinatorSource()
+        let executor = try region(between: "private func performCallAction(",
+                                  and: "struct LaunchHop: Equatable {", in: source)
+        let chatCase = try region(between: "case .whatsappChat:",
+                                  and: "case .messengerAudio, .messengerVideo:",
+                                  in: executor)
+        let collapsedCase = collapsed(chatCase)
+
+        // The Boolean is consumed — once, as the guard's condition.
+        XCTAssertEqual(occurrences(of: "callLinks.openWhatsAppChat(", in: chatCase), 1,
+                       "the chat open exists once — inside the guard, Bool consumed")
+        XCTAssertTrue(collapsedCase.trimmingCharacters(in: .whitespaces)
+            .hasPrefix("case .whatsappChat: guard callLinks.openWhatsAppChat(action.contact.phone) else {"),
+                      "the guard is the FIRST statement of the case — the shipped "
+                      + "discarding call can no longer be reached")
+        let guardNeedle = collapsed("""
+            guard callLinks.openWhatsAppChat(action.contact.phone) else {
+                announceNoUsableNumber(contact: action.contact, locale: locale)
+                return
+            }
+            """).trimmingCharacters(in: .whitespaces)
+        let guardRange = try XCTUnwrap(collapsedCase.range(of: guardNeedle),
+                                       "the M-1 disposition guard is absent")
+
+        // The false path speaks the SHIPPED line through the SHARED helper
+        // and nothing else: no success, no learning, no activity.
+        XCTAssertEqual(occurrences(of: "announceNoUsableNumber(", in: chatCase), 1,
+                       "the false path speaks through the SHARED helper, once")
+        XCTAssertFalse(chatCase.contains("call.announce.noPhoneNumber"),
+                       "no catalogue key is bound here — the helper owns it "
+                       + "(the five-key bound stays T-155's)")
+        XCTAssertEqual(occurrences(of: "contactNumberUsed(", in: chatCase), 0,
+                       "the shipped whatsappChat success set records no contact-number use — "
+                       + "and the false path adds none")
+        XCTAssertEqual(occurrences(of: "home.outcome.whatsappOpened", in: chatCase), 1)
+        XCTAssertEqual(occurrences(of: "router.call.whatsappOpened", in: chatCase), 1)
+        XCTAssertEqual(occurrences(of: "noteConfirmedCallExecution(", in: chatCase), 1,
+                       "the learning write stays exactly as shipped (one site, true path only)")
+        XCTAssertEqual(occurrences(of: "recordActivity(", in: chatCase), 1,
+                       "the activity write stays exactly as shipped (one site, true path only)")
+        for success in ["home.outcome.whatsappOpened",
+                        "router.call.whatsappOpened",
+                        "noteConfirmedCallExecution(action)",
+                        "recordActivity(kind: .message, channel: .whatsapp,"] {
+            let successRange = try XCTUnwrap(collapsedCase.range(of: success),
+                                             "the shipped success statement is missing: \(success)")
+            XCTAssertGreaterThan(successRange.lowerBound, guardRange.upperBound,
+                                 "\(success) must sit AFTER the guard's return")
+        }
+
+        // The shipped success statements, byte-identical (collapsed) and in
+        // their shipped order — the true path is untouched by the guard.
+        let shippedSuccess = collapsed("""
+            setOutcome(icon: "message.fill",
+                       text: L10n.fmt("home.outcome.whatsappOpened", locale: locale, action.contact.name))
+            speak(text: L10n.fmt("router.call.whatsappOpened", locale: locale, action.contact.name))
+            noteConfirmedCallExecution(action)
+            recordActivity(kind: .message, channel: .whatsapp,
+                           contactName: action.contact.name,
+                           phone: action.contact.phone)
+            """).trimmingCharacters(in: .whitespaces)
+        XCTAssertTrue(collapsedCase.contains(shippedSuccess),
+                      "the shipped whatsappChat success path must stay byte-identical")
+
+        // No hop, and none of the call-chat opener's recovery symbols: the
+        // false-case guard never consults them (they belong to
+        // `openWhatsAppCallChat`, design-l2 `:613`).
+        for forbidden in ["hopFromCallAction", "launchFailHopStep",
+                          "performLaunchFailHop", "LaunchHop", "hopCandidates",
+                          "call.announce.launchFailedFallback",
+                          "needsNativeCompose", "copiedNumber",
+                          "openWhatsAppCallChat"] {
+            XCTAssertFalse(chatCase.contains(forbidden),
+                           "the whatsappChat branch must not consult \(forbidden)")
+        }
+
+        // ... and at the other end: the CHAT opener has no recovery chain
+        // of its own (its Bool is decision-complete), while the shipped
+        // recovery chain lives intact in `openWhatsAppCallChat` — read-only
+        // scans of CallLinks.swift, which this unit's diff never touches.
+        let callLinks = FeatureSourceScan.codeText(of: FeatureSourceScan
+            .iosDirectory(file: #filePath)
+            .appendingPathComponent("ElderlyAssistant/Services/Intents/CallLinks.swift"))
+        let chatOpener = try region(between: "func openWhatsAppChat(",
+                                    and: "func openWhatsAppText(", in: callLinks)
+        for recoverySymbol in ["needsNativeCompose", "copiedNumber",
+                               "canSendText", "copyText"] {
+            XCTAssertFalse(chatOpener.contains(recoverySymbol),
+                           "the chat opener's Bool is decision-complete: "
+                           + "\(recoverySymbol) belongs to the call-chat opener only")
+        }
+        let callChatStart = try XCTUnwrap(callLinks.range(of: "func openWhatsAppCallChat("),
+                                          "CallLinks.swift has no call-chat opener")
+        let callChatNeedle = collapsed("""
+            func openWhatsAppCallChat(_ rawPhone: String) -> WhatsAppCallOutcome {
+                guard let url = Self.whatsAppTextURL(phone: rawPhone, text: "") else {
+                    return .invalidPhone
+                }
+                if opener.canOpenURL(url) {
+                    opener.open(url)
+                    return .openedChat
+                }
+                if canSendText() {
+                    return .needsNativeCompose
+                }
+                copyText(Self.phoneHandle(rawPhone))
+                return .copiedNumber
+            }
+            """).trimmingCharacters(in: .whitespaces)
+        XCTAssertTrue(collapsed(String(callLinks[callChatStart.lowerBound...]))
+            .contains(callChatNeedle),
+                      "the call-chat opener's shipped recovery chain must stay intact")
     }
 
     // MARK: - Helpers (the house patterns the sibling suites ship)

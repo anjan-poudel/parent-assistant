@@ -7862,7 +7862,13 @@ self.noteTalkContractChanged()
         let locale = activeLocale
         switch action.method {
         case .phone:
-            callLinks.openPhone(action.contact.phone)
+            guard callLinks.openPhone(action.contact.phone) else {
+                // RES-8/RES-10: the floor is terminal but its open can
+                // still fail (an undialable number) — the shipped honest
+                // line, no hop exists from the floor.
+                announceNoUsableNumber(contact: action.contact, locale: locale)
+                return
+            }
             contactNumberUsed(action.contact.phone)
             setOutcome(icon: "phone.fill",
                        text: L10n.fmt("home.outcome.callPlaced", locale: locale, action.contact.name))
@@ -7899,7 +7905,13 @@ self.noteTalkContractChanged()
                                   isVideo: isVideo, locale: locale)
             }
         case .whatsappChat:
-            callLinks.openWhatsAppChat(action.contact.phone)
+            guard callLinks.openWhatsAppChat(action.contact.phone) else {
+                // M-1 disposition (i) (T-144, design-l2 §10.1): false means
+                // no dialable digits remain — the shipped honest line, no
+                // success, no learning, no activity, no hop (RES-10).
+                announceNoUsableNumber(contact: action.contact, locale: locale)
+                return
+            }
             setOutcome(icon: "message.fill",
                        text: L10n.fmt("home.outcome.whatsappOpened", locale: locale, action.contact.name))
             speak(text: L10n.fmt("router.call.whatsappOpened", locale: locale, action.contact.name))
