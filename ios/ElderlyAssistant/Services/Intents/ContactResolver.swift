@@ -106,6 +106,20 @@ final class ContactResolver {
             return 0.9
         }
 
+        // [PHONETIC-FOLD] (2026-10-11) Cross-script tier: a romanized
+        // query and a Devanagari name (or vice versa) fold onto ONE
+        // phonetic key — "syanu" ↔ "स्यानु". Field report: the STT
+        // transcribes the elder's code-switched "call syanu" as Latin
+        // while the family contact is stored in Devanagari, and the
+        // same-script tiers above all score 0. Same tier as a
+        // relationship match: a full-name phonetic equality is a strong
+        // signal, but the fold is lossy by construction (vowel length
+        // collapses), so it must never beat exact (1.0).
+        if !name.isEmpty,
+           Self.phoneticKey(normalizedQuery) == Self.phoneticKey(name) {
+            return 0.9
+        }
+
         if !name.isEmpty, name.contains(normalizedQuery) || normalizedQuery.contains(name) {
             return 0.8
         }
@@ -159,6 +173,10 @@ final class ContactResolver {
     /// call, and the caller then stays on its honest not-found line).
     /// No proposal for a query with no signal at all — empty after
     /// normalization, or so long it cannot be a name.
+    ///
+    /// The budget applies to the PHONETIC key as well as the raw
+    /// scalars: "syanu" ↔ "सानु" is one key edit apart even though the
+    /// raw-scalar distance across scripts is far beyond the budget.
     func nearMiss(_ query: String?) -> FamilyContact? {
         guard let query else { return nil }
         let normalized = NepaliTextNormalizer.normalize(query)
@@ -172,12 +190,61 @@ final class ContactResolver {
         for contact in contactsProvider() {
             let name = NepaliTextNormalizer.normalize(contact.name)
             guard !name.isEmpty else { continue }
-            let best = variants
+            let scalarBest = variants
                 .map { Self.editDistance($0, name) }
                 .min() ?? Int.max
-            if best <= Self.nearMissEditBudget { withinBudget.append(contact) }
+            let keyBest = variants
+                .map { Self.editDistance(Self.phoneticKey($0), Self.phoneticKey(name)) }
+                .min() ?? Int.max
+            if min(scalarBest, keyBest) <= Self.nearMissEditBudget {
+                withinBudget.append(contact)
+            }
         }
         return withinBudget.count == 1 ? withinBudget[0] : nil
+    }
+
+    /// The Devanagari → Latin phonetic fold used by `phoneticKey`.
+    /// Vowel length collapses (ा/अ → "a", ि/ी → "i", ु/ू → "u") — the
+    /// fold is deliberately lossy in exactly the ways a romanization is
+    /// ambiguous, and is used ONLY for name matching here, never as a
+    /// general normalizer (the intent cache's normalizer stays
+    /// transliteration-free by design).
+    private static let phoneticFold: [UnicodeScalar: String] = [
+        // Independent vowels
+        "अ": "a", "आ": "a", "इ": "i", "ई": "i", "उ": "u", "ऊ": "u",
+        "ऋ": "ri", "ए": "e", "ऐ": "ai", "ओ": "o", "औ": "au",
+        // Matras
+        "ा": "a", "ि": "i", "ी": "i", "ु": "u", "ू": "u", "ृ": "ri",
+        "े": "e", "ै": "ai", "ो": "o", "ौ": "au",
+        // Consonants
+        "क": "k", "ख": "kh", "ग": "g", "घ": "gh", "ङ": "ng",
+        "च": "ch", "छ": "chh", "ज": "j", "झ": "jh", "ञ": "ny",
+        "ट": "t", "ठ": "th", "ड": "d", "ढ": "dh", "ण": "n",
+        "त": "t", "थ": "th", "द": "d", "ध": "dh", "न": "n",
+        "प": "p", "फ": "ph", "ब": "b", "भ": "bh", "म": "m",
+        "य": "y", "र": "r", "ल": "l", "व": "w",
+        "श": "sh", "ष": "sh", "स": "s", "ह": "h"
+    ]
+
+    /// A script-neutral phonetic key for name comparison: Devanagari
+    /// scalars fold to their Latin romanization (matras and virama
+    /// collapse into the surrounding consonants' letters), Latin
+    /// passes through lowercased, everything else (spaces, punctuation,
+    /// the anusvara/chandrabindu) drops. "स्यानु" and "syanu" both
+    /// fold to "syanu"; "सुनिता" and "Sunita" both fold to "sunita".
+    static func phoneticKey(_ normalized: String) -> String {
+        var out = ""
+        out.reserveCapacity(normalized.count)
+        for scalar in normalized.lowercased().unicodeScalars {
+            if let latin = phoneticFold[scalar] {
+                out += latin
+            } else if scalar.value >= 0x41 && scalar.value <= 0x7A {  // a-z
+                out.unicodeScalars.append(scalar)
+            }
+            // Virama, anusvara, chandrabindu, visarga and everything
+            // else (spaces, punctuation) drop.
+        }
+        return out
     }
 
     /// Levenshtein distance over Unicode scalars with an early exit

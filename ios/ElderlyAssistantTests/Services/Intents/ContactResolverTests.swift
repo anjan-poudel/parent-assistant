@@ -69,10 +69,11 @@ final class ContactResolverTests: XCTestCase {
 extension ContactResolverTests {
 
     func testNearMissProposesSingleMatraVariant() {
-        // "सुनीता" differs from "सुनिता" by ONE matra scalar —
-        // resolve() rejects it, nearMiss proposes it.
+        // "सुनीता" differs from "सुनिता" by ONE matra scalar — the
+        // phonetic tier resolves it DIRECTLY (both keys fold to
+        // "sunita"), and nearMiss agrees for the same pair.
         let contact = FamilyContact(name: "सुनिता", phone: "7", relationship: "छोरी")
-        XCTAssertEqual(resolver([contact]).resolve("सुनीता"), .none)
+        XCTAssertEqual(resolver([contact]).resolve("सुनीता"), .one(contact))
         XCTAssertEqual(resolver([contact]).nearMiss("सुनीता"), contact)
     }
 
@@ -96,5 +97,37 @@ extension ContactResolverTests {
         XCTAssertNil(resolver([maiya, sunita]).nearMiss("Seema"))
         XCTAssertNil(resolver([maiya]).nearMiss(nil))
         XCTAssertNil(resolver([maiya]).nearMiss(""))
+    }
+}
+
+// MARK: - Phonetic cross-script fold ([PHONETIC-FOLD] 2026-10-11)
+
+extension ContactResolverTests {
+
+    func testPhoneticKeyFoldsCrossScript() {
+        XCTAssertEqual(ContactResolver.phoneticKey("स्यानु"), "syanu")
+        XCTAssertEqual(ContactResolver.phoneticKey("सानु"), "sanu")
+        XCTAssertEqual(ContactResolver.phoneticKey("Sunita"), "sunita")
+        XCTAssertEqual(ContactResolver.phoneticKey("सुनिता"), "sunita")
+        // Virama + vowel-length collapse: सुनीता and सुनिता fold alike.
+        XCTAssertEqual(ContactResolver.phoneticKey("सुनीता"), "sunita")
+    }
+
+    func testCrossScriptQueryResolvesDevanagariContact() {
+        // Field case: the STT's code-switched Latin "syanu" against a
+        // Devanagari-stored family contact.
+        let syanu = FamilyContact(name: "स्यानु", phone: "10", relationship: "दिदी")
+        XCTAssertEqual(resolver([syanu]).resolve("syanu"), .one(syanu))
+        let sunita = FamilyContact(name: "सुनिता", phone: "11", relationship: "छोरी")
+        XCTAssertEqual(resolver([sunita]).resolve("sunita"), .one(sunita))
+    }
+
+    func testCrossScriptNearMissSyanoToSanu() {
+        // "syanu" vs "सानु": raw scalars differ across scripts, but the
+        // phonetic keys are ONE edit apart — the near-miss band catches
+        // what the raw-scalar band cannot.
+        let sanu = FamilyContact(name: "सानु", phone: "12", relationship: "दिदी")
+        XCTAssertEqual(resolver([sanu]).resolve("syanu"), .none)
+        XCTAssertEqual(resolver([sanu]).nearMiss("syanu"), sanu)
     }
 }
