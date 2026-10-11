@@ -762,6 +762,9 @@ final class CommandRouterDialogueTests: XCTestCase {
                        "the rejected answer consumes one attempt")
         XCTAssertEqual(world.interpreter.interpretCount, 0,
                        "no med-ack, no model — the guard ends the turn")
+        XCTAssertEqual(world.speaker.speeds.last,
+                       DialogueConfig.dialogueProbeSpeechSpeed,
+                       "probes speak at the slower dialogue rate")
     }
 
     @MainActor
@@ -1029,11 +1032,17 @@ private final class DialogueMockCoordinator: VoiceCommandCoordinating {
     func requestContactSearch(query: String?) {}
 }
 
-private final class DialogueMockSpeaker: Speaker {
+private final class DialogueMockSpeaker: Speaker, SpeechRateAdjusting {
     private(set) var utterances: [(text: String, locale: Locale)] = []
+    private(set) var speeds: [Float] = []
 
     func speak(_ text: String, locale: Locale) async {
         utterances.append((text, locale))
+    }
+
+    func speak(_ text: String, locale: Locale, speed: Float) async {
+        utterances.append((text, locale))
+        speeds.append(speed)
     }
 
     func cancel() {}

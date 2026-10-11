@@ -12,6 +12,13 @@ protocol Speaker: AnyObject {
     func cancel()
 }
 
+/// Speakers that can honor a per-utterance rate (the Piper engine).
+/// Utterances that need a slower pace — the dialogue probes — cast to
+/// this seam; every other speaker keeps the standard `speak(_:locale:)`.
+protocol SpeechRateAdjusting: Speaker {
+    func speak(_ text: String, locale: Locale, speed: Float) async
+}
+
 /// [LOUD-TTS] Response-playback loudness seam: switches the shared audio
 /// session to `.voicePrompt` mode while the assistant speaks and restores
 /// the capture preset afterwards (see `AudioSessionManager`). A static
@@ -648,7 +655,7 @@ final class SherpaTTSEngine: TTSEngine {
 /// speaker id) and one-shot audition requests — see `resolveVoiceSpec`.
 /// Untouched until the user picks: no selection, or the default
 /// google-medium speaker 0, is byte-identical to the pre-picker path.
-final class PiperVoiceSpeaker: NSObject, Speaker {
+final class PiperVoiceSpeaker: NSObject, Speaker, SpeechRateAdjusting {
     private let fallback: SystemSpeechSpeaker
     private let silenceFallback: Speaker
     private let observabilityBus: ObservabilityBus
@@ -827,6 +834,10 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
     }
 
     func speak(_ text: String, locale: Locale) async {
+        await speak(text, locale: locale, speed: Self.defaultSpeed)
+    }
+
+    func speak(_ text: String, locale: Locale, speed: Float) async {
         cancel()
         cancelled = false
         // [TURN-TIMING-BREAKDOWN] `tts_start` opens when the utterance is
@@ -861,7 +872,7 @@ final class PiperVoiceSpeaker: NSObject, Speaker {
 
         let task = Task.detached(priority: .userInitiated) { [engine] () -> URL? in
             try? engine.synthesize(text, voiceDirectory: voiceDir,
-                                   speed: Self.defaultSpeed,
+                                   speed: speed,
                                    speakerID: spec.speakerID)
         }
         generationTask = task

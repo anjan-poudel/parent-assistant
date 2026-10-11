@@ -218,21 +218,27 @@ final class CommandRouterReplySafetyTests: XCTestCase {
     func testCallishUtteranceWithTopicWordIsBlockedNotPreAnswered() {
         // "मौसम बताउनेलाई फोन गर" (call the one who tells the weather):
         // call-ish → the sensitive-call guard excludes it from the topic
-        // table, the interpreter abstains, and the existing BLOCK runs —
-        // a pre-answer must never shadow the call intent.
+        // table, the interpreter abstains, and the deterministic call
+        // fallback extracts "मौसम बताउने" — which matches no family
+        // contact, so the honest contact-not-found line runs (carded).
+        // A pre-answer must never shadow the call intent, and the old
+        // "secure authentication" refusal must never return.
         let h = Harness(result: nil)
 
         // The interpreter path is asynchronous — the synchronous return
-        // is .unrecognised (as with every LLM dispatch); the BLOCK lands
-        // in the interpret completion.
+        // is .unrecognised (as with every LLM dispatch); the fallback
+        // lands in the interpret completion.
         let result = h.router.route(transcript: "मौसम बताउनेलाई फोन गर")
 
         waitUntil { h.coordinator.genericReplies.count == 1 }
         XCTAssertEqual(result, .unrecognised(transcript: "मौसम बताउनेलाई फोन गर"))
         XCTAssertEqual(h.interpreter.callCount, 1)
-        XCTAssertEqual(h.coordinator.genericReplies, [text("router.sensitiveBlocked")])
+        let expected = L10n.fmt("router.call.contactNotFound",
+                                locale: Locale(identifier: "ne-NP"), "मौसम बताउने")
+        XCTAssertEqual(h.coordinator.genericReplies, [expected])
         XCTAssertFalse(h.bus.contains("topic_pre_answer"))
-        XCTAssertTrue(h.bus.contains("command_sensitive_blocked_auth_unavailable"))
+        XCTAssertTrue(h.bus.contains("command_call_contact_not_found"))
+        XCTAssertFalse(h.bus.contains("command_sensitive_blocked_auth_unavailable"))
     }
 
     // MARK: - Reply sanity gate: garbage model text never reaches the ear

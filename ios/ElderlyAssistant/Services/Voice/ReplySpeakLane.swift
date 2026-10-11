@@ -31,12 +31,18 @@ actor ReplySpeakLane {
 
     /// Queues `text` behind every utterance already committed and
     /// suspends until this utterance's speech call has returned.
-    /// FIFO within the lane: call order == speak order.
-    func enqueue(_ text: String, locale: Locale) async {
+    /// FIFO within the lane: call order == speak order. `speed` is the
+    /// per-utterance TTS rate (the dialogue probes speak slower); nil
+    /// or a non-adjusting speaker keeps the standard rate.
+    func enqueue(_ text: String, locale: Locale, speed: Float? = nil) async {
         let prior = previous
         let current = Task { [speaker] in
             await prior?.value
-            await speaker.speak(text, locale: locale)
+            if let speed, let adjustable = speaker as? SpeechRateAdjusting {
+                await adjustable.speak(text, locale: locale, speed: speed)
+            } else {
+                await speaker.speak(text, locale: locale)
+            }
         }
         previous = current
         await current.value

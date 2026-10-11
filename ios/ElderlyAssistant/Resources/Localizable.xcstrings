@@ -4001,6 +4001,23 @@
         }
       }
     },
+    "dialogue.correction.ask": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I heard «%@». Did you mean %@?"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मैले «%@» सुनें। के तपाईंले %@ भन्न खोज्नुभएको थियो?"
+          }
+        }
+      }
+    },
     "dialogue.didYouMean": {
       "extractionState": "manual",
       "localizations": {
@@ -4133,6 +4150,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "शिव"
+          }
+        }
+      }
+    },
+    "dialogue.option.conjunction": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": " or "
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": " वा "
           }
         }
       }
@@ -13248,6 +13282,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "%@ भनेर धेरै जना भेटिए। कृपया पूरा नाम भन्नुहोस्।"
+          }
+        }
+      }
+    },
+    "router.call.nameUnclear": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I heard you want to call, but I didn't catch who — please say 'call' and the person's name."
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "फोन गर्ने कुरा त बुझें, तर कोलाई भन्ने बुझिन — कृपया नामसँगै भन्नुहोस्, जस्तै 'छोरालाई फोन गर'।"
           }
         }
       }
@@ -23499,23 +23550,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "पिपले गलत सुनिएका शब्द आफैं सच्याउँछ, र ढुक्क नभए सोध्छ। सबै कुरा यही फोनमा रहन्छ।"
-          }
-        }
-      }
-    },
-    "dialogue.correction.ask": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "I heard «%@». Did you mean %@?"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "मैले «%@» सुनें। के तपाईंले %@ भन्न खोज्नुभएको थियो?"
           }
         }
       }

@@ -54,3 +54,6 @@ ios/ElderlyAssistant/Resources/Models/kws
 *.mobileprovision
 __pycache__/
 .testflight.env
+
+# Worktree/checkout build artifacts (DerivedData, SPM caches) — never tracked.
+build/

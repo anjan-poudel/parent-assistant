@@ -372,9 +372,35 @@ final class DialogueFrameTests: XCTestCase {
                                                     retry: false, locale: ne)
 
         XCTAssertEqual(probe,
-                       "मैले बुझिन। के तपाईंको मतलब दुर्गा भजन बजाउने हो?, युट्युबमा bhajan हेर्ने हो?, समाचार सुनाउने हो? हो?")
-        // The fourth candidate is over `maxCandidates` — never spoken.
+                       "मैले बुझिन। के तपाईंको मतलब दुर्गा भजन बजाउने हो? वा युट्युबमा bhajan हेर्ने हो? हो?")
+        // The third and fourth candidates are over the SPOKEN cap
+        // (`maxSpokenCandidates` — narrowed and conversational, owner
+        // feedback 2026-10-11) — never spoken.
+        XCTAssertFalse(probe.contains("समाचार"))
         XCTAssertFalse(probe.contains("क्यामेरा"))
+        XCTAssertFalse(probe.contains(","), "a choice probe never reads as a comma list")
+    }
+
+    /// [OWNER-2026-10-11] The correction question reads conversationally:
+    /// readings joined with the conjunction, never a numbered "१) X, २)
+    /// Y" text-menu, capped at two spoken readings.
+    func testProbeTextCorrectionReadsConversationallyWithoutNumbers() {
+        let reading = CorrectionClarification.Reading(tokenRange: 0..<3,
+                                                      surface: "भजन",
+                                                      options: ["भजन", "बजन", "बज्ने"])
+        let frame = DialogueFrame.correctionChoice(readings: [reading],
+                                                   original: "भजन",
+                                                   sourceTranscript: "भजन")
+
+        let probe = DialogueProbeComposer.probeText(for: frame, catalog: nil,
+                                                    retry: false, locale: ne)
+
+        XCTAssertFalse(probe.contains(")"), "no numbered menu markers")
+        XCTAssertFalse(probe.contains(","), "no comma list")
+        XCTAssertTrue(probe.contains(" वा "), "readings join with the conjunction")
+        XCTAssertTrue(probe.contains("बजन"), "the second reading is offered")
+        XCTAssertFalse(probe.contains("बज्ने"),
+                       "the third reading is over the spoken cap")
     }
 
     /// Design-l2 §8: a candidate label without a query renders its

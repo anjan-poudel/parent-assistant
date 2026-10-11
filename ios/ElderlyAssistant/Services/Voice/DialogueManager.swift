@@ -361,6 +361,7 @@ enum DialogueProbeComposer {
         static let understoodNo = "dialogue.understood.no"
         static let didYouMean = "dialogue.didYouMean"
         static let correctionAsk = "dialogue.correction.ask"
+        static let conjunction = "dialogue.option.conjunction"
     }
 
     /// slotFill: the group's question key with `%@` = the capped option
@@ -412,30 +413,38 @@ enum DialogueProbeComposer {
 
     private static func candidateChoiceProbe(for frame: DialogueFrame,
                                              locale: Locale) -> String {
+        // Narrowed + conversational (owner feedback 2026-10-11): at most
+        // two candidates joined with the locale conjunction ("X वा Y?"),
+        // never a bare comma list that reads like an IVR menu.
         let labels = frame.candidates
-            .prefix(DialogueConfig.maxCandidates)
+            .prefix(DialogueConfig.maxSpokenCandidates)
             .map { candidateLabel(for: $0, locale: locale) }
-            .joined(separator: ", ")
+            .joined(separator: L10n.str(Key.conjunction, locale: locale))
         return L10n.str(Key.understoodNo, locale: locale) + " " +
             String(format: L10n.str(Key.didYouMean, locale: locale), labels)
     }
 
     /// [CORRECTION-REVIVE] The correction question: the honest lead, then
-    /// the heard surface and the numbered readings — "१) «X», २) «Y»" —
-    /// so the elder answers with the index words the answer path already
-    /// understands ("पहिलो" / "दोस्रो" / "तेस्रो"). The readings are the
-    /// user's own words; never model text.
+    /// the heard surface and the readings joined conversationally, the
+    /// same ", " list the other probes use — the numbered "१) «X», २)
+    /// «Y»" form read like a text-based menu on the phone (owner
+    /// feedback 2026-10-11: "use conversational language, not choose
+    /// 1,2,3,4"). The elder answers by repeating a reading or with the
+    /// index words the answer path already understands ("पहिलो" /
+    /// "दोस्रो" / "तेस्रो" — S2's indexWord capture works without any
+    /// printed number). The readings are the user's own words; never
+    /// model text.
     private static func correctionChoiceProbe(for frame: DialogueFrame,
                                               locale: Locale) -> String {
         guard let reading = frame.correctionReadings.first else {
             return L10n.str(Key.understoodNo, locale: locale)
         }
-        let numbered = reading.options.enumerated()
-            .map { index, option in "\(index + 1)) \(option)" }
-            .joined(separator: ", ")
+        let options = reading.options
+            .prefix(DialogueConfig.maxSpokenCandidates)
+            .joined(separator: L10n.str(Key.conjunction, locale: locale))
         return L10n.str(Key.understoodNo, locale: locale) + " " +
             String(format: L10n.str(Key.correctionAsk, locale: locale),
-                   reading.surface, numbered)
+                   reading.surface, options)
     }
 
     /// A candidate's spoken label: its template key resolved in the
@@ -458,6 +467,12 @@ enum DialogueConfig {
     static let maxProbes = 2
     /// FR-MTC-004 — <= 2-3 candidates per probe.
     static let maxCandidates = 3
+    /// The SPOKEN candidate cap (owner feedback 2026-10-11: choice
+    /// questions must narrow, not sound like a phone IVR). The frame may
+    /// hold up to `maxCandidates`; the spoken question offers at most
+    /// two, joined with the conjunction ("X वा Y?"). The answer path's
+    /// index words still address every held candidate.
+    static let maxSpokenCandidates = 2
     /// FR-MTC-003 — <= 3-4 named options per probe.
     static let maxSlotOptions = 4
     /// [CORRECTION-REVIVE] The correction question's turn-scoped budget:
@@ -465,6 +480,10 @@ enum DialogueConfig {
     /// arm a second correction frame), separate from the shared retry
     /// budget above.
     static let maxCorrectionProbes = 1
+    /// The dialogue probes' TTS rate — slower than the standard 0.95 so
+    /// the elder can follow a spoken question with options (owner
+    /// feedback 2026-10-11: "it speaks too fast for me to understand").
+    static let dialogueProbeSpeechSpeed: Float = 0.8
 }
 
 /// The complete error vocabulary of the new dialogue types (design-l2
