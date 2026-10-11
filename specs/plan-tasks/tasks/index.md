@@ -1,43 +1,29 @@
 # Implementation Tasks
 
+Feature: **family-contacts-unify** (Family Contacts Unification)
+Decomposition source: `specs/design-l2.md` rev 3. Total: 5 groups, 22 tasks, 0 subtasks, ~31 developer-days nominal.
+
 | Group | Title | Tasks | Total Effort | Status |
 |-------|-------|-------|-------------|--------|
-| [TG-24](TG-24-dialogue-frame-foundations/index.md) | Dialogue Frame Foundations | 5 tasks | ~6.5 days | PENDING |
-| [TG-25](TG-25-answer-classification-and-merge/index.md) | Answer Classification and Merge | 3 tasks | ~7.5 days | PENDING |
-| [TG-26](TG-26-router-interception-and-window-state/index.md) | Router Interception and Window State | 4 tasks | ~14.5 days | PENDING |
-| [TG-27](TG-27-observability-release-gate-and-security-evidence/index.md) | Observability, Release Gate and Security Evidence | 4 tasks | ~7.5 days | PENDING |
-| [TG-28](TG-28-acceptance-evidence-and-device-protocol/index.md) | Acceptance, Evidence and Device Protocol | 3 tasks | ~5 days | PENDING |
+| [TG-29](TG-29-sequencing-gate-and-identity-foundations/index.md) | Sequencing Gate and Identity Foundations | 4 tasks | ~4.5 days | PENDING |
+| [TG-30](TG-30-contacts-access-link-verification-and-matching/index.md) | Contacts Access, Link Verification and Matching | 6 tasks | ~10.5 days | PENDING |
+| [TG-31](TG-31-write-seam-and-coordinator-integration/index.md) | Write Seam and Coordinator Integration | 5 tasks | ~7.5 days | PENDING |
+| [TG-32](TG-32-editor-and-call-surface-ui/index.md) | Editor and Call-Surface UI | 4 tasks | ~5 days | PENDING |
+| [TG-33](TG-33-acceptance-evidence-and-device-validation/index.md) | Acceptance, Evidence and Device Validation | 3 tasks | ~3.5 days | PENDING |
 
-**Totals:** 5 groups, 19 tasks (0 subtasks), ~41 developer-days nominal.
-**Critical path:** T-130 → T-131 → T-133 → T-136 → T-139 → T-141 → T-142 (23 days).
-Full plan with the wave table and requirement map: [plan.md](../plan.md).
+## ID numbering
 
-## Wave order (file-disjoint)
+The task tree accumulates across features: the maximum before this plan was TG-28 / T-143, so this plan continues at **TG-29 / T-144**. Dependencies always point to strictly lower task IDs (ascending IDs form a valid topological order). This plan is leaf-task-only: no subtasks, because the ai-sdd unit planner dispatches every non-`index.md` file under `specs/plan-tasks/tasks/**` as a unit keyed by its leading `T-<digits>` token, and subtask files would collide with their parent task id.
 
-- W1: T-125, T-126, T-127, T-128, T-129, T-130, T-135, T-137
-- W2: T-131, T-132
-- W3: T-133, T-138
-- W4: T-134, T-136
-- W5: T-139, T-140, T-143
-- W6: T-141
-- W7: T-142
+## Dependency line format
 
-## ID numbering convention
+Task files declare dependencies as a bare id first (machine-readable for the unit planner's dependency parser), followed by a relative link (human-readable) — e.g. [T-144](TG-29-sequencing-gate-and-identity-foundations/T-144-sequencing-gate-call-dialer-merge.md) (inside a task file the same link is written relative to its group folder). `- **Depends on**: —` means no dependencies.
 
-This tree accumulates across features: group folders and task files from earlier
-features remain on disk, and a new feature continues at the global maxima. Previously
-delivered groups visible in this directory: TG-01..TG-10 (T-001..T-030,
-live-camera-translation), TG-14..TG-17 (T-090..T-105, profile-interview) and
-TG-18..TG-23 (T-106..T-124, spotify-music-integration). This feature uses
-**TG-24..TG-28 and T-125..T-143**; the next feature continues at **TG-29 / T-144**.
+## Preconditions
 
-Dependencies point at lower task IDs only, so ascending ID order is a valid topological
-order for the `implement` workflow's wave sort.
+- No shared-surface work starts before [T-144](TG-29-sequencing-gate-and-identity-foundations/T-144-sequencing-gate-call-dialer-merge.md) verifies the call-dialer merge commit is on master and merges master into `feat/family-contacts-unify` (NFR-FCU-008).
+- All work runs in the feature worktree `/Users/anjan/workspace/projects/elderly-ai-assistant-family-contacts-unify` (branch `feat/family-contacts-unify`).
 
-## Requirement ID resolution
+## Top-level plan
 
-Requirement links in task files climb four directory levels to
-`define-requirements/FR/...` and `define-requirements/NFR/...`, which resolve to
-`specs/define-requirements/` in this worktree. All 20 FR-MTC and 12 NFR-MTC documents
-are linked from at least one task; the per-requirement map is in
-[plan.md](../plan.md).
+- [plan.md](../plan.md) — summary, wave order, critical path, risks, security advisory mapping, requirement coverage
