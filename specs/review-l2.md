@@ -1,244 +1,88 @@
-# Review — L2 Component Design (Multi-Turn Conversation)
+# review-l2 — Component design review (L2)
 
-**Task.** `review-l2` — the design-chain gate for the `multi-turn-conversation`
-workflow. Workflow exit condition: `review.decision == GO`.
+- Task: `review-l2` (workflow `call-dialer-primary-secondary`), contract `review`.
+- Workflow exit condition for this task: `review.decision == GO` (specs/call-dialer-primary-secondary/workflow.yaml).
+- Feature: call-dialer-primary-secondary. Worktree: /Users/anjan/workspace/projects/elderly-ai-assistant-call-dialer-primary-secondary. Branch: feat/call-dialer-primary-secondary.
+- Disposition: read-only review — no files written, no git state touched; this report is returned to the orchestrating session for recording at specs/review-l2.md.
 
-**Artifacts under review**
+## Artifacts under review
 
-| Artifact | Contract | Size | Status |
+| Artifact | Contract | Size | sha256 (64 hex, grouped 8x8 for output hygiene) |
 |---|---|---|---|
-| `specs/design-l1.md` | `architecture_l1` | 680 lines | gate-cleared at `design-l1` |
-| `specs/design-l2.md` | `component_design_l2` | 1005 lines | this review |
+| specs/design-l2.md | component_design_l2 | 1245 lines | cd6dedcd d578735b 6e33606e 5e550875 8fe91caa 83eb48fb 74ad81d8 1c96e120 |
+| specs/design-l1.md (reference baseline) | architecture_l1 | 871 lines | 5446333b 27a6a20a 3cc3f658 7efcc757 da8ec1ba 9d00282c 56b1d09d 3c990c6d |
 
-`design-l2.md` sha256 verified at review time (chunked here for readability):
-`9c164658 5b137833 0129c007 8cc4ae0f 3a32ab3e 818e3a86 ac87fe8c 069c6f51`.
+Both hashes were re-verified with shasum this session and match the contracts exactly; both files were unchanged during the review.
 
-**Feature / worktree.** `multi-turn-conversation` @
-`/Users/anjan/workspace/projects/elderly-ai-assistant-multi-turn-conversation`,
-branch `feat/multi-turn-conversation`.
+## Inputs consulted
 
-**Inputs consulted.** Feature supplement
-`specs/multi-turn-conversation/constitution.md`; root `constitution.md`
-(Archive / Standards / Agent Principles bind this review); the requirement
-set `specs/define-requirements.md` plus `FR/` (FR-MTC-001..020) and `NFR/`
-(NFR-MTC-001..012); the workflow `.ai-sdd/workflows/multi-turn-conversation.yaml`.
+Root constitution.md (Standards, Agent Principles, release gates); feature constitution specs/call-dialer-primary-secondary/constitution.md (12 Feature Constraints; Open Decisions: None); frozen owner design docs/superpowers/specs/2026-10-12-call-dialer-primary-secondary-design.md (Decisions 1-5); specs/define-requirements.lock.yaml plus the FR-CDP and NFR-CDP files (read verbatim where binding); the workflow file above; and the worktree source baseline: AppCoordinator.swift, LeafViews.swift, CallingSettingsView.swift, VoiceSessionStateMachine.swift, L10n.swift, MethodResolver.swift, CallLinks.swift, FamilyContactStore.swift, Info.plist, Localizable.xcstrings, ios/tools/check-release-log-safety.py, ios/build.sh, and the test bundle (CallChannelResolutionTests, MethodResolverTests, MissedCallDialBackTests, L10nCatalogCoverageTests, IntentLogStoreTests, SpotifySettingsSurfaceTests).
 
-**Verification method.** Read-only review; no artifact, workflow file or git
-state was modified. Every load-bearing code claim below was re-checked
-against the shipped source in this worktree rather than trusted from the
-documents: the interception insertion point, the music ladder arms, the
-interpreted-music dispatch, `routeKeywordRemainder`, the session state
-machine, the coordinator confirmation/timer wiring, `LocalBrainChain.turnInput`,
-`KeywordIntentRule.musicQuery`, `IntentPrompt.build`, the release-log gate
-and the test layout. Central measurements were reproduced independently
-(see Reproduced below).
+## Verification method
+
+Adversarial, read-only re-verification: every load-bearing line anchor and behavioural claim in the L2 was re-read against the worktree source at this baseline rather than trusted from L1 prose (the anchor set listed at design-l2.md:14 was spot-checked; all anchors checked were found exact to the line). Independent checks: (a) sha256 and line counts of both artifacts; (b) the five new localization keys confirmed ABSENT and the reused keys (settings.calling.title, calling.defaultCaption, app.name.facetime, app.name.whatsapp, call.announce.noPhoneNumber) confirmed PRESENT in Localizable.xcstrings; (c) C1-C7 cross-mapped one-to-one to the L1 component map and to L1 integration rows 1-31, with the 28-row per-file edit list (design-l2.md section 13) as the implementation surface; (d) owner decisions 1-5 and the frozen type shapes checked for re-opening; (e) the 64-cell never-dead-ends argument, equal-pick dedupe, vocabulary case table and hop termination proof traced by hand; (f) resolvedCallChannel production call sites confirmed to be exactly two (LeafViews.swift:1612-1615, AppCoordinator.swift:8387) plus the test helper; (g) PendingCallAction constructions enumerated repo-wide (exactly four: AppCoordinator.swift:7624, :7670; IntentLogStoreTests.swift:206, :224).
 
 ## Summary
 
-**Decision: GO** — 0 BLOCKER, 1 MAJOR, 3 MINOR, 3 NOTE.
+decision: GO
 
-- Checklist: **7 / 7 items pass** (item 3 passes with the F-1 caveat).
-- No finding blocks GO; all findings are mechanically resolvable with
-  in-repo patterns and are compile- or test-tripwired at first build.
-- The design is internally consistent with L1, resolves the L1 §31 items
-  R1-R5/R10-R12 against verified real call sites, traces all 32
-  requirements, and keeps scope discipline.
-
-### Reproduced measurements (independent)
-
-- Rendered `IntentPrompt.build` baseline = **exactly 2,506 Swift Characters**
-  (recompiled the literal verbatim via swiftc with the same interpolation
-  substitutions); matches `IntentPromptTests.swift:495` and
-  `PinnedSurfaceGuardTests.swift:66`. Worst case with the address clause =
-  2,586 (+80) and the ceiling 3,000 match pins at `:498-507` and `:67-69`.
-- `VoiceSessionStateMachine.Config.confirmationTimeoutSeconds` = **45**
-  (`UInt64` instance `var`, `App/VoiceSessionStateMachine.swift:95`); only
-  usages are `:185` and the test injections.
-- All pre-existing test files the L2 §18 table references exist, including
-  `CommandRouterMusicTests.swift` with its four doubles (`:75-87`) and
-  `PinnedSurfaceGuardTests.swift` with the digests it names.
-- No new-symbol name collides: `DialogueManager`, `DialogueFrame`,
-  `DialogueAnswerPath`, `DialogueOptionCatalog`, `DialogueProbeComposer`,
-  `MusicQueryExtraction`, `nearMatches`, `awaitingSlotAnswer` are all absent
-  from the worktree today.
-- `Localizable.xcstrings` has 1,364 keys and **zero** `dialogue.*` keys
-  pre-existing; `router.reprompt`, `router.rephrase.discard`,
-  `router.confirmationTimeout` and `router.sensitiveBlocked` all exist.
+Result: 0 BLOCKER / 1 MAJOR / 4 MINOR / 2 NOTE. All five review-checklist items pass. All six binding gates pass: GSM hard floor configurable-away-proof; emergency-contact semantics and the override protocol unchanged; probes local-only; numbers and handles never logged (with check-release-log-safety coverage); ne/en keys bounded to exactly the five named keys. The L2 is a faithful, traceable decomposition of L1 inside ADR-CDP-01..11 and RES-1..10 — no element beyond them, no re-opened owner decision, no frozen-shape drift. The single MAJOR (F-1) is a source-fact error in the launch-failure classification table (openWhatsAppChat mischaracterised as returning Void, and its recovery chain mis-attributed) that must be corrected before the affected row is implemented; it does not break the no-dead-end guarantee or the announcement guarantees. Findings F-1..F-7 are required actions for plan-tasks/implement, not a design re-cycle.
 
 ## Checklist
 
-### 1. Explicit error return types — PASS
+1. Explicit error return types (no any/unknown) — PASS. design-l2.md section 22 (:1112-1114): "No new error type, no throw, no Result-with-Error"; the failure vocabulary is the shipped typed outcomes — CallApp (:66-84), FaceTimeOutcome (:114-123), MessengerOutcome (:145-157), MessengerChatOutcome (:163-171), WhatsAppCallOutcome (:177-190), and openPhone returning Bool (:340) — each bound to exactly one handling class by the classification table at :794-811. Every new interface returns a concrete value type (CallChannelChain.Result carrying channel plus fellBackFrom; the hop step returns an optional pair, exhaustion defined as nil after the already-spoken line). No untyped error channel appears anywhere. The one mislabeled member (openWhatsAppChat claimed Void at :799) is F-1 — a factual mislabel, not a missing type.
 
-§8 defines `DialogueError` as a closed case vocabulary; the mutating entry
-points are `throws` (`DialogueManager.arm`), `DialogueOptionCatalog.load(bundle:)`
-throws, and no interface returns an erased error type. `InterpretedCommand
-.merging(message:)` (§9) is total: a memberwise-init copy of the 14 stored
-fields, verified 1:1 against the shipped `InterpretedCommand` at
-`LlamaCommandInterpreter.swift:122-229` — including the defaulted
-initialiser at `:209-213`.
+2. Async or external calls have a documented failure mode and recovery — PASS (with F-1). Every external open site is enumerated with its outcome set and handling class (:794-811): recoveries (needsNativeCompose, copiedNumber, fellBackToWeb, openedWebChat) are pinned as non-hopping; failed-with-hop speaks the shipped line then the hop; failed-terminal speaks the shipped line only; exhaustion is defined. The hop termination proof (:896) bounds recursion depth by strictly shrinking candidates (depth at most 2). Concurrency: everything main-confined; no new Task, timer, queue, lock or actor (:1142-1146). The whatsappChat row (:799) is the one entry whose stated basis is wrong — see F-1.
 
-### 2. Async / external failure modes and recovery — PASS
+3. Timeouts and retry limits are configurable, not hardcoded — PASS. The design introduces no new timeout, timer, retry or backoff (:915, :1145, :1154-1155). The only timing parameter in play remains the shipped VoiceSessionStateMachine.confirmationTimeoutSeconds = 45 (VoiceSessionStateMachine.swift:135), reused untouched and not re-hardcoded (the prompt grows by at most one clause inside the unchanged window, :1154). Hop depth at most 2 is structural — a consequence of the three-step chain plus dedupe — not a magic retry constant.
 
-- Session timer: the F6 guard (`guard self.state == .awaitingConfirmation
-  else { return }`, `:198`) is the verified model for the mirrored
-  `armSlotAnswerTimer`; an arm that fails resolves via the §15 edit-4
-  failure line and the frame stays resolvable.
-- Catalog load failure: §11's failure row opens the `dialogue.probe.musicAny`
-  free-text path — no frame is lost.
-- Degraded brain: Phase 1's core guarantee is the deterministic merge; the
-  shipped `turnInput` (`LocalBrainChain.swift:275-285`) shows the nil-seam
-  passthrough the design preserves, and the production seam is non-nil
-  (wired at `AppCoordinator.swift:1824`).
-- Main-queue confinement mirrors the existing `openConfirmationWindow()`
-  hop (`AppCoordinator.swift:7019-7027`); the 60 s watchdog region
-  (`:4823-4883`) is untouched.
+4. Every element traces to an FR or NFR; L2 decomposes L1 only — PASS. The component map C1-C7 (:70) is identical to the L1 component set; section 29 (:1183+) carries per-component coverage to FR-CDP-* / NFR-CDP-*; section 13 (:995-1027) covers L1 integration rows 1-31 with no extra surfaces. L2-D1..D12 (:49-66) are recorded refinements inside ADR/RES scope (notably L2-D4 LaunchHop replacing L1 C5's bare defaulted parameter, and L2-D9 adding hopCandidates to MissedCallDialRoute) — both consistent with L1's 'hop candidates threaded' prose and recorded with rationale, not silent. Nothing beyond ADR-CDP-01..11 / RES-1..10 was found. Owner decisions 1-5 are not re-opened (automatic routing with announcement; all call paths; messenger feasibility = handle-on-file only, kept by L2-D6; secondary default .phone with dedupe; multi-turn confirmation reused exactly). Frozen type shapes are reproduced verbatim (Feasibility; Result; route(preferred:secondary:feasibility:); CallApp; supportsVideo/supportsAudio).
 
-### 3. Timeouts and retry limits as configurable parameters — PASS (with F-1 caveat)
+5. Operator-visible run and failure behaviour (announcement honesty) — PASS (with F-1). Section 23 (:1116-1125) is a complete spoken-line table: disclosure clause inside the prompt for voice; announce-then-open for tap and dial-back; one hop line spoken exactly once (the single call.announce.launchFailedFallback site, :826-828); floor and exhaustion speak the shipped line only. All copy composes from one source (fellBackFrom.first plus the routed channel), so speech cannot diverge from the executed action; empty fellBackFrom keeps the shipped prompt byte-identical (test pin :1173). Announcements are speech only and never routed through logging (:1136). The whatsappChat false case needs the explicit disposition recorded in F-1.
 
-All four knobs are parameters, not literals: `answerWindowSeconds` injected
-into `DialogueManager.init`, the attempts cap and `maxCandidates` as frame
-config (§27), the catalog location as a bundle resource. §14 edit 4 keeps
-the 45 s value owned by the state machine's `Config`. The caveat is F-1
-only — the default-argument *expression* §8/§15/§27 pin cannot compile as
-written; the parameter-by-injection design itself meets the standard.
+## Binding gates
 
-### 4. Traceability — PASS
-
-The table maps every requirement: 20 FR-MTC rows and 12 NFR-MTC rows
-(verified all present, including FR-MTC-007 and the NFR-MTC-006 row at
-`:970`). FR-MTC-012 lands on the §6 B1-B7 predicate table; NFR-MTC-012's
-parity claim is structural via L2-D13 (both paths converge on
-`fireMusicRequest`, verified `:2667`).
-
-### 5. User/operator-visible behaviour — PASS
-
-§16 inventories every spoken line (17 keys; count prose issue = F-4), all
-ne+en mandatory; §25 gives the events with a closed outcome vocabulary; the
-45 s expiry drops the frame silently and re-arms (§14), preserving the
-shipped timer semantics; the honest dead-end lines in
-`routeKeywordRemainder` (`:1968-2030`) are upgraded in place with their
-anchors preserved (`router.reprompt` at `:2021`, `router.sensitiveBlocked`
-block `:1973-1980`).
-
-### 6. Design-chain consistency (L1 ↔ L2) — PASS
-
-- R1: the B1-B7 predicate call sites are all real — B1
-  `isExplicitMedicationAcknowledgement` `:1913`, B2 `sensitiveCallPhrases`
-  `:1869`, B3/B4 `VoiceContactSearchRoute` (`Decision` is the two-case enum
-  at `:52-58`, so L2's "returns `.openPhone`" is exactly L1's "!= .notSearch"
-  — reconciled, not contradictory), B5 `YouTubeRoute.decide` `:56`, B6
-  `KeywordIntentRule.match` `:164`.
-- R3 (the carried question): **confirmed**. FR-MTC-007's "execute with
-  defaults" presupposes a pending command to execute; FR-MTC-004 ("never
-  fabricate candidates") and FR-MTC-010 forbid executing an unasked
-  candidate. The honest `dialogue.exhausted` close is the admissible
-  reading; risk 11 can be closed by this review.
-- R2 resolved with the bounded reading (L2-D9): only a candidate's own
-  domain extractor can claim free text; no claim stays invalid. R4's
-  ordered algorithm (§22 S1-S6 with vectors) and R5's escape drop are
-  internally consistent with the constitution's capture contract.
-- R10-R12 consumed (L2-D13/D14/D15); L2-D12's drop of L1 §28's optional
-  catalog protocol member is a documented refinement with rationale — no
-  ADR contradiction; the cache-bypass constraint and emergency precedence
-  are preserved structurally (emergency block `:779-783` remains ahead of
-  the interception block at `:886-897`).
-
-### 7. Scope discipline — PASS
-
-"Not in this design" excludes chat, transcript history in prompts,
-model-generated probe text, cloud, persistence and Phase 3 — matching the
-constitution's out-of-scope list exactly; no out-of-scope element was
-found. OD-M1..M4 remain owner-facing with defaults recorded in §27 (2
-probes; curated catalog; Phase 1 first; Phase 3 separate) — owner-ratified
-as open-with-defaults; noted, not a finding.
+- GSM hard floor, configurable-away-proof — PASS. route is total: phone is always feasible; equal picks dedupe; both-infeasible lands on or substitutes the floor (:903-909); the 64-cell matrix assertion pins isFeasible(result.channel) and vocabulary legality (:1171). Any settings combination, including duplicates, still reaches an attemptable channel.
+- Emergency-contact semantics and override unchanged — PASS. The override block :7656-7686 is listed unchanged (verify only) with the gate :7665-7669 intact and the amended action dropping provenance (:1015, matching :491-492); emergency paths untouched (:1163); dial-back runs the ordinary chain only.
+- Probes local-only (canOpenURL plus handle check) — PASS. WhatsApp feasibility is an injected canOpen closure; Messenger feasibility is the address-book handle check; the shipped canOpenURLOnMain hop (:7312-7315) is reused; no plist, permission or host change (Info.plist already lists the schemes, :59 and :94); no new egress or data store (:1159-1160).
+- Numbers and handles never in logs (B2/T-050; check-release-log-safety coverage) — PASS. No new console writes anywhere; every emitted event carries metadata with channel raw values only (:1127-1133); no LogSanitiser.allowedKeys change; FEATURE_ROOTS (check-release-log-safety.py:141+) gains Services/Calls so the new file sits inside the gate; ios/build.sh:431 must stay exit 0 (:1134-1135; NFR-CDP-010).
+- ne/en keys bounded to exactly five — PASS. Section 12 (:979-991) defines exactly settings.calling.primaryTitle, settings.calling.secondaryTitle, router.call.fallbackDisclosure, call.announce.fallbackRouted, call.announce.launchFailedFallback, with binding parameter contracts and named composition sites; all five verified ABSENT in Localizable.xcstrings today; all other user-visible labels reuse existing keys (CallingSettingsView.swift:70-77; CallChannelChain.nameKey). No sixth user-visible string is introduced.
+- Artifact integrity — PASS. design-l2.md matches component_design_l2 (grouped cd6dedcd d578735b 6e33606e 5e550875 8fe91caa 83eb48fb 74ad81d8 1c96e120); design-l1.md matches architecture_l1 (grouped 5446333b 27a6a20a 3cc3f658 7efcc757 da8ec1ba 9d00282c 56b1d09d 3c990c6d).
 
 ## Findings
 
-**F-1 (MAJOR) — the pinned default-argument expression cannot compile as
-written.** §4 (`:54`), §8 (`:207`), §15 edit 1 (`:687`) and §27 (`:917`)
-all pin `TimeInterval(VoiceSessionStateMachine.Config.confirmationTimeoutSeconds)`,
-while §14 edit 4 (`:672`) rows `Config (:93-96)` as "unchanged". Shipped:
-the property is an instance `var` (`:95`), reached only via an instance
-(`:185`); no static accessor exists anywhere. A type-level access is a
-compile error, and a same-named `static` would collide with the instance
-property — so "Config unchanged" and the pinned expression cannot both
-hold. Mechanical; the intent (no new literal; 45 s stays single-source) is
-unambiguous. Blocks GO: No. Fix: C-1.
+F-1 — MAJOR — openWhatsAppChat mischaracterised in the failure classification (two lines contradict source; one recovery chain mis-attributed).
+Evidence. design-l2.md:799 states the .whatsappChat row has "(no outcome — openWhatsAppChat returns Void)". Source: @discardableResult func openWhatsAppChat(_ rawPhone: String) -> Bool (CallLinks.swift:365-370), returning false when whatsAppChatURL is nil (:283-287 — no dialable digits). design-l2.md:609 states openWhatsAppChat's "absent-app path is the shipped needsNativeCompose / copiedNumber recovery" — source: openWhatsAppChat has no recovery chain and no absent-app path (its own doc at :360-364 says it is unconditional and cannot detect absence); the needsNativeCompose / copiedNumber chain belongs to openWhatsAppCallChat (CallLinks.swift:457-470, outcomes at :466-469).
+Impact. The document's own totality claim (:1114, 'Every class speaks; none is silent') is contradicted by this row: the shipped .whatsappChat site (AppCoordinator.swift:7755-7765) discards the Bool, so an unusable phone is silently dropped. An implementer following the table literally would reproduce that, and could implement the .whatsappChat branch against the wrong opener's semantics. The intended behaviour (no hop, per RES-10) is defensible and the silent case pre-exists the feature, so this is not BLOCKER-class; but the table's stated basis is wrong under the doc's own 'verified per outcome' heading.
+Required action. Correct :799 to state the signature Bool and the false-only-when-no-digits condition (CallLinks.swift:283-287), and record the explicit disposition: either speak the shipped announceNoUsableNumber line on false (recommended, holds the 'none is silent' claim) or document a shipped-identical exception in section 22. Correct :609 to attribute needsNativeCompose / copiedNumber to openWhatsAppCallChat only.
 
-**F-2 (MINOR) — the news-arm parity anchor points at comment text.** The
-header anchor list and §12.5 cite the relaxed news arm at `:1194-1198`;
-those lines are a comment block. The real sites are the relaxed `.news` arm
-`:1210-1217` (emit `:1211`, ack `:1214`, reader `:1215`, emit `:1216`,
-return `:1217`) and the strict stage `:1131-1138`. The structural claim
-(the new arm mirrors the news hand-off) is still correct against the real
-site. Blocks GO: No. Fix: C-2.
+F-2 — MINOR — Non-existent enum case .facebook in the vocabulary case table.
+Evidence. design-l2.md:903: the .anyChannel row's preferred-to-routed column reads '.facebook -> .faceTime'; CallApp has exactly four cases (faceTime, phone, messenger, whatsApp; CallLinks.swift:66-84). The same row's attempt-order and candidates columns show the intended preferred was .faceTime.
+Required action. Replace .facebook with .faceTime.
 
-**F-3 (MINOR) — §12.2 calls a three-argument `emit` that does not exist.**
-§12.2 pins `emit(eventType:outcome:metadata:)` for the
-`dialogue_answer`/`invalid` event; the only helper is the two-argument
-`emit(eventType:outcome:)` at `:3982` with `metadata: [:]` hardcoded, and
-§12.4's edit list adds no overload. Metadata-carrying events elsewhere
-construct `ObservabilityEvent` directly and call `observabilityBus.emit`
-(pattern at `:1406-1413`). Compile-enforced one-liner; the real risk is the
-`reason` metadata being silently dropped. Blocks GO: No. Fix: C-3.
+F-3 — MINOR — 'five shipped labelled constructions' disagrees with the verified enumeration.
+Evidence. design-l2.md:1106: 'the five shipped labelled constructions compile unchanged (verified: :7624, :7670, IntentLogStoreTests.swift:206, :224)' — four sites listed, and a repo-wide enumeration this session found exactly four PendingCallAction constructions (AppCoordinator.swift:7624, :7670; IntentLogStoreTests.swift:206, :224). If 'five' was meant as an arity descriptor (as the parallel 'five-arg' phrasing at :1177 suggests), the wording is ambiguous.
+Required action. State 'the four shipped labelled constructions' (or explicitly 'five-argument constructions') so count and sites match.
 
-**F-4 (MINOR) — key-count prose is off by one against its own table.**
-§16 (`:719`) says "16 new `dialogue.*` keys" and the NFR-MTC-006 row
-(`:970`) repeats "(16 keys)", but the table lists 17 concrete keys
-(`:723-739`) plus the deliberately-absent `dialogue.timeout` row (`:740`).
-Verified zero `dialogue.*` keys pre-exist, so all 17 are new. The key
-inventory itself is complete; only the counts are wrong. Blocks GO: No.
-Fix: C-4.
+F-4 — MINOR — replacing() doc comment claims routing provenance carries over; the code drops it.
+Evidence. design-l2.md:497-500 comment: 'routed method and remaining candidates replaced; provenance and the flywheel pair carry over, so the hop neither re-speaks the disclosure'. The listing (:501-509) forwards only sourceTranscript, sourceCommand and requestedAt (plus the new hopCandidates); fellBackFrom is not passed and resets to its default [] (:487). In this document's own vocabulary, fellBackFrom IS the provenance (:111).
+Impact. Comment accuracy only — the behaviour (the hop never re-speaks the disclosure) is the intended one and matches the one-line-per-outcome rule; the comment as written would mislead a reader into thinking a stale disclosure is carried.
+Required action. Reword, e.g. 'the flywheel pair carries over; fellBackFrom deliberately resets to [] so the hop never re-speaks the disclosure'.
 
-### Notes
+F-5 — MINOR — NFR-CDP-006's non-visual selected-state requirement is cited but not specified.
+Evidence. NFR-CDP-006 (MUST) requires each row to announce section, channel name and selected state, and that 'the checkmark is not the only indication of selection' (NFR-CDP-006 acceptance criteria). The shipped row conveys selection only by checkmark.circle.fill plus a stroke overlay (CallingSettingsView.swift:40-64), with no selected trait or accessibility value; a plain Text header in a VStack is not automatically a VoiceOver heading. design-l2.md:975 cites (NFR-CDP-006) coverage via 'the shipped row pattern ... is kept' and section headers, and the picker UI test list (:1174) carries no accessibility assertion.
+Required action. Specify the non-visual selected signal for both sections (for example a selected accessibility trait or an accessibility value on the selected row), and either add a heading trait for the section titles or soften the claim; add the assertion to the picker UI suite (:1174).
 
-- **N-1.** Micro anchor drift: `emergencyPhrases` cited `:1854` vs actual
-  `:1855`; `containsPhrase` semantics cited `:1824` vs func `:1826`; the
-  header's `YouTubeRoute` "Decision `:41-56`" is loose for the real
-  `:41-46` enum. No semantic impact.
-- **N-2.** `Prepared.sanitised = raw` on a nil seam matches the shipped
-  `turnInput` nil-seam path (`:275-285`); production wires the seam non-nil
-  (`AppCoordinator.swift:1824`), so the sanitiser discipline holds. Worth a
-  comment in the new helper.
-- **N-3.** The rephrase-discard site currently drops the command it takes
-  (`_ = coordinator?.takePendingRephraseCommand()`, `CommandRouter.swift:806`);
-  R2's composition needs that value bound — already implied by edit 5, but
-  pin it in the tests.
+F-6 — NOTE — Section 25's pending-action reader/writer enumeration is not exhaustive.
+Evidence. design-l2.md:1143 lists readers as 'confirmationPrompt, the override gate, the timeout recorder' and lists recordConfirmationTimeout under writers with a reads-it parenthetical. Source readers additionally include isAwaitingCallConfirmation (AppCoordinator.swift:7553) and its consumer at :10720 (pendingCallAction is not nil in the routing-busy check); the call block reads and nils the slot at :10611-10612.
+Required action. Add isAwaitingCallConfirmation (:7553, :10720) to readers and list recordConfirmationTimeout (:10562) as a reader — it matters here because removing the early return (:7620-7623) changes when the slot can be live.
+
+F-7 — NOTE — Test-name typo in the suite table.
+Evidence. design-l2.md:1171 lists testAssessmentOrderAlwaysEndsPhone; the property under test is attempt order and the floor (sections 10.3-10.4), so 'Assessment' is presumably 'Attempt'.
+Required action. Rename, for example testAttemptOrderAlwaysEndsPhone, so the name matches the property.
 
 ## Decision
 
 decision: GO
 
-**Rationale.** All seven checklist items pass and no BLOCKER exists. The
-single MAJOR and all three MINOR findings are mechanical, are tripwired by
-the compiler or the pinned tests at first build, and none alters the
-architecture, the safety properties (emergency precedence ahead of the
-interception; frame-trap resistance; transcript-cache skip during capture;
-deterministic merge under a degraded brain; unchanged log-safety gate) or
-the user-visible contract. The design chain is internally consistent, the
-L1 §31 items are resolved against verified real call sites, all 32
-requirements trace, scope is clean, and the central measurements reproduce
-exactly (2,506 / 2,586 / 3,000; 45 s).
-
-**Conditions (apply during implementation; none requires design rework).**
-
-- **C-1 (F-1).** Source the answer-window default without a type-level
-  access — an accessor on the session machine or a value passed at
-  construction; keep `:95` the owner of 45, never a new literal.
-- **C-2 (F-2).** Use `:1210-1217` (relaxed) / `:1131-1138` (strict) as the
-  news-parity anchors when implementing §12.5.
-- **C-3 (F-3).** Carry the invalid-answer `reason` via the direct
-  `ObservabilityEvent` construction pattern (`:1406-1413`) or add the
-  overload; never drop the metadata.
-- **C-4 (F-4).** Correct the counts to 17 in §16 and the NFR-MTC-006 row;
-  keep `dialogue.timeout` absent.
-- **C-5 (N-2, N-3).** Bind the taken rephrase command at `:806` for R2
-  composition; comment the nil-seam raw-passthrough parity in the new
-  helper.
-
-**Carry-forwards to `security-design-review`.** The workflow's six focus
-areas — emergency precedence mid-dialogue; free-text answer injection;
-frame-trap resistance; log sanitisation; no new egress; degraded-brain
-path — map 1:1 onto §28, the hostile-corpus suite (§18), the log-gate
-edits (§17) and the deterministic-merge tests. Risk 11 (R3 wording) is
-confirmed by this review and can be closed.
+0 BLOCKER / 1 MAJOR / 4 MINOR / 2 NOTE. No BLOCKER-class issue exists against the workflow exit condition (review.decision == GO) or the feature constitution constraints: the GSM hard floor, dedupe and at-most-once routing, override and emergency preservation, local-only probes, log safety and the five-key bound are all satisfied by the design as written. The MAJOR (F-1) and the MINOR items are required corrections to be applied at plan-tasks and implement time (F-1 before the .whatsappChat row is implemented); none requires a design re-cycle or re-opens the frozen owner design.
