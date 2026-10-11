@@ -1,40 +1,44 @@
-# Non-Functional Requirements — Multi-Turn Conversation (v1)
+# Non-Functional Requirements — Call Dialer Primary/Secondary
 
-12 non-functional requirements. IDs are namespaced `NFR-MTC-NNN` to avoid colliding with the
+10 non-functional requirements. IDs are namespaced `NFR-CDP-NNN` to avoid colliding with the
 project-level `NFR-NNN` set in the root stakeholder brief (`requirements.md`) — the same
-convention live-camera-translation used (`NFR-LCT-NNN`), profile-interview used (`NFR-PI-NNN`)
-and spotify-music-integration used (`NFR-SP-NNN`). This page covers the
-`multi-turn-conversation` set (`NFR-MTC-*`) only; the earlier feature files remain in this
-folder and are not part of this feature's requirements or lock.
+convention live-camera-translation used (`NFR-LCT-NNN`), profile-interview used (`NFR-PI-NNN`),
+spotify-music-integration used (`NFR-SP-NNN`) and multi-turn-conversation used (`NFR-MTC-NNN`).
+This page covers the `call-dialer-primary-secondary` set (`NFR-CDP-*`) only; the earlier feature
+files remain in this folder and are not part of this feature's requirements or lock.
+
+Every NFR carries a measurable target or threshold (the never-dead-end matrix, the ≤ 100 ms
+latency budget, the 100% persistence round-trip, the 100% ne/en key parity, the release log-gate
+exit 0).
 
 | ID | Title | Category | Priority |
 |----|-------|----------|----------|
-| [NFR-MTC-001](NFR-MTC-001-probe-turn-latency.md) | Probe and answer turns stay within the existing turn envelope | Performance | MUST |
-| [NFR-MTC-002](NFR-MTC-002-prompt-budget-and-token-ceiling.md) | 1024-token ceiling and the pinned prompt budget are preserved | Reliability / Maintainability | MUST |
-| [NFR-MTC-003](NFR-MTC-003-no-new-network-egress.md) | No new network egress — probes and answers stay on-device | Privacy | MUST |
-| [NFR-MTC-004](NFR-MTC-004-log-safety.md) | Log safety — probe and answer text never reach logs | Privacy / Security | MUST |
-| [NFR-MTC-005](NFR-MTC-005-degraded-brain-deterministic-path.md) | The frame survives a degraded or absent brain — deterministic path | Reliability | MUST |
-| [NFR-MTC-006](NFR-MTC-006-localisation.md) | Localisation of every dialogue string (ne/en) | Localisation | MUST |
-| [NFR-MTC-007](NFR-MTC-007-sustained-multi-turn-stability.md) | Sustained multi-turn stability on 6 GB devices — no jetsam | Reliability / Performance | MUST |
-| [NFR-MTC-008](NFR-MTC-008-answer-sanitisation-and-injection-safety.md) | Answer-path sanitisation and injection safety | Security | MUST |
-| [NFR-MTC-009](NFR-MTC-009-voice-only-accessibility.md) | Voice-only accessibility of probes and answer capture | Accessibility | MUST |
-| [NFR-MTC-010](NFR-MTC-010-frame-trap-resistance.md) | Frame-trap resistance — zero stuck states | Reliability / Safety | MUST |
-| [NFR-MTC-011](NFR-MTC-011-kv-prefix-stability.md) | KV-prefix stability — the frame clause never mutates the template prefix | Performance / Reliability | MUST |
-| [NFR-MTC-012](NFR-MTC-012-compliance-and-release-gates.md) | Compliance, no-regression and release gates | Compliance | MUST |
+| [NFR-CDP-001](NFR-CDP-001-chain-never-dead-ends.md) | The chain never dead-ends — zero dead ends across the exhaustive configuration matrix | Reliability / Safety | MUST |
+| [NFR-CDP-002](NFR-CDP-002-local-probes-no-new-egress.md) | Feasibility probes are local — no new network, data, identity or privacy surface | Privacy | MUST |
+| [NFR-CDP-003](NFR-CDP-003-log-safety.md) | Log safety — numbers, handles and announcement content never reach logs beyond the existing policy | Privacy / Security | MUST |
+| [NFR-CDP-004](NFR-CDP-004-fallback-resolution-latency.md) | Fallback-resolution latency budget — local probes at call time, user-paced | Performance | MUST |
+| [NFR-CDP-005](NFR-CDP-005-persistence-round-trip.md) | `secondaryCallApp` persistence round-trip reliability | Reliability (Persistence) | MUST |
+| [NFR-CDP-006](NFR-CDP-006-picker-accessibility.md) | Accessibility of the Primary and Fallback dialer pickers | Accessibility | MUST |
+| [NFR-CDP-007](NFR-CDP-007-localisation-completeness.md) | Localisation completeness — 100% ne/en parity for every new string | Localisation | MUST |
+| [NFR-CDP-008](NFR-CDP-008-deterministic-testability.md) | Deterministic testability under the scoped-suite gate | Reliability / Testability | MUST |
+| [NFR-CDP-009](NFR-CDP-009-no-regression-shipped-call-paths.md) | No regression to the shipped voice pipeline, emergency and dial-back paths | Reliability (Regression) | MUST |
+| [NFR-CDP-010](NFR-CDP-010-compliance-and-release-gates.md) | Compliance, review and release gates; DV-1..7 acceptance | Compliance | MUST |
 
 ## Coverage of the security-relevant surfaces (workflow focus areas)
 
-| Surface (workflow `security-design-review` / `security-test` focus) | Covered by |
+The workflow's `security-design-review` and `security-test` carry five named focus areas; each
+maps onto this set as follows:
+
+| Focus area (workflow) | Covered by |
 |---|---|
-| Emergency precedence mid-dialogue: emergency keywords win mid-frame; a hostile or corrupted answer cannot bypass the override | [FR-MTC-011](../FR/FR-MTC-011-emergency-precedence-mid-frame.md), [NFR-MTC-010](NFR-MTC-010-frame-trap-resistance.md) |
-| Free-text answer injection: answers enter routing mid-frame; interception must open no new injection surface | [NFR-MTC-008](NFR-MTC-008-answer-sanitisation-and-injection-safety.md), [FR-MTC-009](../FR/FR-MTC-009-pre-ladder-answer-interception.md), [FR-MTC-017](../FR/FR-MTC-017-transcript-cache-bypass.md) |
-| Frame-trap resistance: cancel, barge-in and the 45 s timeout must always recover | [FR-MTC-010](../FR/FR-MTC-010-cancel-drops-the-frame.md), [FR-MTC-012](../FR/FR-MTC-012-barge-in-strong-new-command.md), [FR-MTC-013](../FR/FR-MTC-013-timeout-silent-rearm.md), [NFR-MTC-010](NFR-MTC-010-frame-trap-resistance.md) |
-| Log sanitisation: probe texts and captured answers must not reach logs (B2/T-050 precedent) | [NFR-MTC-004](NFR-MTC-004-log-safety.md), [NFR-MTC-012](NFR-MTC-012-compliance-and-release-gates.md) |
-| No new egress: probes and answers stay on-device | [NFR-MTC-003](NFR-MTC-003-no-new-network-egress.md) |
-| Degraded-brain path: the deterministic merge must not weaken the emergency/safety gates | [NFR-MTC-005](NFR-MTC-005-degraded-brain-deterministic-path.md), [FR-MTC-011](../FR/FR-MTC-011-emergency-precedence-mid-frame.md) |
+| GSM hard floor: no configuration (including `secondary == primary`) may produce a dead-end chain | [NFR-CDP-001](NFR-CDP-001-chain-never-dead-ends.md), [FR-CDP-006](../FR/FR-CDP-006-facetime-and-phone-always-feasible.md), [FR-CDP-007](../FR/FR-CDP-007-chain-preferred-secondary-phone.md) |
+| Emergency precedence untouched: emergency semantics and the override protocol survive routing; dial-back never delays escalation | [FR-CDP-018](../FR/FR-CDP-018-preserved-behaviours.md), [FR-CDP-014](../FR/FR-CDP-014-override-protocol-preserved.md), [FR-CDP-011](../FR/FR-CDP-011-missed-call-dial-back-routes-the-chain.md), [NFR-CDP-009](NFR-CDP-009-no-regression-shipped-call-paths.md) |
+| Feasibility probes local-only: no new egress, no new data collection (handles/numbers are PII) | [NFR-CDP-002](NFR-CDP-002-local-probes-no-new-egress.md), [FR-CDP-004](../FR/FR-CDP-004-messenger-feasibility-handle-on-file.md), [FR-CDP-005](../FR/FR-CDP-005-whatsapp-feasibility-installed-probe.md) |
+| Announcement honesty: the spoken confirmation/announcements name the actually-routed channel (`fellBackFrom`); no silent route changes | [FR-CDP-008](../FR/FR-CDP-008-fellbackfrom-attempt-order.md), [FR-CDP-013](../FR/FR-CDP-013-fallback-before-spoken-confirmation.md), [FR-CDP-015](../FR/FR-CDP-015-launch-fail-fallback-announced.md), [FR-CDP-016](../FR/FR-CDP-016-automatic-routing-with-announcement.md) |
+| Log sanitisation: numbers/handles must not reach logs beyond the existing transcript policy (B2/T-050) | [NFR-CDP-003](NFR-CDP-003-log-safety.md), [NFR-CDP-010](NFR-CDP-010-compliance-and-release-gates.md) |
 
 ## Related
 
-- [FR index](../FR/index.md) — 20 functional requirements
+- [FR index](../FR/index.md) — 19 functional requirements
 - [Requirements index](../index.md)
 - [Consolidated copy](../../define-requirements.md)

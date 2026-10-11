@@ -1,177 +1,188 @@
-# Requirements — Multi-Turn Conversation
+# Requirements — Call Dialer Primary/Secondary
 
-Feature: `multi-turn-conversation` (worktree branch `feat/multi-turn-conversation`, worktree
-`elderly-ai-assistant-multi-turn-conversation`).
+Feature: `call-dialer-primary-secondary` (worktree branch `feat/call-dialer-primary-secondary`,
+worktree `elderly-ai-assistant-call-dialer-primary-secondary`).
 Status: **submitted for owner HIL approval** (risk tier T1, per the feature workflow's
-`define-requirements` task); no owner amendment is recorded at lock time — the locked snapshot in
-`define-requirements.lock.yaml` is the drift-detection baseline.
+`define-requirements` task); no owner amendment is recorded at requirements time — the locked
+snapshot in `define-requirements.lock.yaml` (produced after owner sign-off) is the
+drift-detection baseline.
 Task: `define-requirements`, agent `ba`, contract `requirements_doc` + `requirements_lock`.
-Date: 2026-10-10.
+Date: 2026-10-12.
+Frozen design (the feature brief, owner-approved 2026-10-12):
+`docs/superpowers/specs/2026-10-12-call-dialer-primary-secondary-design.md`.
 
 ## Summary
 
-- Functional requirements: **20** (`FR-MTC-001` … `FR-MTC-020`)
-- Non-functional requirements: **12** (`NFR-MTC-001` … `NFR-MTC-012`)
-- Areas covered: Dialogue Frame / Core, Music Path / Probe Trigger, Probes (slot-fill,
-  did-you-mean), Answer Capture (forms, escape), Answer Merge / Execution, Probe Policy,
-  Interception / Routing (pre-ladder, cancel, barge-in), Safety / Emergency, Timeout / Recovery,
-  Session State, Option Catalog, Probe Generation / Localisation, Cache Discipline, NLU Training
-  (Phase 2), Rollout (Phase 3), Validation / Completion Gate. NFR categories: Performance,
-  Reliability, Privacy, Security, Localisation, Accessibility, Compliance.
-- Phase structure (preserved from the study §7 and the workflow "PHASE STRUCTURE"):
-  **Phase 0** = PR #156 voice-OOM hardening merged (`437631e`, 2026-10-10) with its Anzaan device
-  smoke outstanding (the prerequisite gate, bound by FR-MTC-020); **Phase 1** = the deterministic
-  MVP, shippable alone (FR-MTC-001 … FR-MTC-017, all MUST) — the owner's bhajan example must work
-  end-to-end with no training run; **Phase 2** = the follow-up NLU fine-tune v17 with the frame
-  clause, shipping ONLY with the training iteration (FR-MTC-018, SHOULD pending OD-M3);
-  **Phase 3** = reminder/calendar rollover (FR-MTC-019, SHOULD pending OD-M4) plus the DV-*
-  device-validation closure (FR-MTC-020, MUST).
-- v1 scope: give the single-turn voice pipeline a one-deep dialogue frame (`DialogueManager` +
-  `DialogueFrame`, FR-MTC-001) with two first-class probe kinds — `.slotFill` for a missing slot
-  such as the bhajan deity (FR-MTC-002/003) and `.candidateChoice`/didYouMean for a
-  not-understood utterance (FR-MTC-004) — voice answer capture by name, index word, repetition or
-  free-form (FR-MTC-005), the deterministic merge that executes through the normal music path
-  (FR-MTC-006), the bounded probe budget with default execution (FR-MTC-007), the say-it-again
-  escape (FR-MTC-008), pre-ladder interception (FR-MTC-009) with cancel, emergency, barge-in and
-  45 s timeout rules (FR-MTC-010 … FR-MTC-013), the `awaitingSlotAnswer` state (FR-MTC-014), the
-  curated on-device catalog (FR-MTC-015), template-only probes (FR-MTC-016), the transcript-cache
-  bypass (FR-MTC-017), and the Phase 2/3 follow-ups (FR-MTC-018/019) closing with the DV-* gate
-  (FR-MTC-020).
-- Primary sources of truth: `specs/multi-turn-conversation/constitution.md` (feature constitution
-  — Purpose & Scope, Probe Kinds & Answer-Capture Contract, Safety-Relevant Constraints 1–4,
-  Feature Constraints 1–10, Integration Surfaces, Success Criteria, DV-* completion gate, Open
-  Decisions OD-M1..M4); `specs/multi-turn-conversation/workflow.yaml` (the `define-requirements`
-  scope comment and phase structure); `docs/multi-turn-conversation-feasibility.md` (the owner's
-  study — §5 measured constraints, §6 recommended design, §7 phasing, §8 risks, §9 open
-  decisions); project `constitution.md` (inherited constraints, release gates).
-- Read-only stakeholder briefs: `requirements.md` — a read-only input; it does not address
-  multi-turn dialogue. Its FR-008 "conversational response generation" clause is **not** delivered
-  or superseded by this feature (open-ended chat stays explicitly out of scope per the owner's
-  2026-10-10 study and the feature constitution); its §4 Post-MVP "Music and bhajan playback"
-  line (~675-676) was already superseded by the shipped spotify-music-integration feature, which
-  this feature extends rather than re-opens.
+- Functional requirements: **19** (`FR-CDP-001` … `FR-CDP-019`)
+- Non-functional requirements: **10** (`NFR-CDP-001` … `NFR-CDP-010`)
+- Acceptance scenarios: **83** (56 across the FRs, 27 across the NFRs)
+- Areas covered: Settings (Primary dialer, Fallback dialer, persistence), Channel Feasibility
+  (Messenger handle-on-file, WhatsApp local probe, FaceTime/phone always feasible), Chain
+  Resolution (chain rules, `fellBackFrom` provenance, preferred input), Call Paths (address-book
+  and family-contact buttons, missed-call dial-back, announcements), Voice Path (MethodResolver
+  global default, spoken confirmation, override protocol), Launch / Recovery (launch-fail hop),
+  Localisation, Safety Boundary / Regression, Validation / Completion Gate. NFR categories:
+  Reliability/Safety, Privacy, Privacy/Security, Performance, Reliability (Persistence),
+  Accessibility, Localisation, Reliability/Testability, Reliability (Regression), Compliance.
+- Feature scope: two Settings pickers — **Primary dialer** (`defaultCallApp`) and **Fallback
+  dialer** (new `secondaryCallApp`, default `.phone`) over the four channels (`faceTime`,
+  `phone`, `messenger`, `whatsApp`) — feeding a feasibility-aware chain **preferred → secondary →
+  phone (GSM hard floor), dedupe on equal picks, each channel attempted at most once, never
+  dead-ends**; the chain runs in every call path (address-book + family-contact buttons,
+  missed-call dial-back, voice-initiated calls through MethodResolver's global-default step,
+  which becomes the settings primary mapped `CallApp → CallMethod` by call type); feasibility is
+  local-only (Messenger ⇔ handle on file, never gated on app-installed; WhatsApp ⇔
+  `canOpenURL("whatsapp://")` via an injected closure; FaceTime/phone always feasible); the
+  existing multi-turn confirmation is reused exactly, with the fallback resolved **before** the
+  spoken confirmation, which names the actually-routed channel and discloses the skip; routing
+  is automatic with a spoken announcement (no ask-before-fallback), launch failures hop down the
+  chain and are announced via the existing spoken-outcome lane (never silent); new ne/en strings
+  in `Localizable.xcstrings`; completion is the DV-1..7 device-validation gate on Anzaan.
+- Primary sources of truth: the **frozen design**
+  (`docs/superpowers/specs/2026-10-12-call-dialer-primary-secondary-design.md` — §1–§9, owner
+  Decisions 1–5, non-goals, risks); the **feature constitution**
+  (`specs/call-dialer-primary-secondary/constitution.md` — Purpose & Scope, Channel Resolution &
+  Feasibility Contract, Safety & Compliance Delta, Feature Constraints 1–12, Integration
+  Surfaces, Success Criteria, DV-1..7 completion gate, "Open Decisions: **None**"); the **workflow
+  file** (`.ai-sdd/workflows/call-dialer-primary-secondary.yaml` — scope comment, security
+  focus); the **project constitution** (`constitution.md` — Architecture Constraints 1–6,
+  Standards, Release gates); the project **stakeholder brief** (`requirements.md`, read-only).
+- Read-only stakeholder brief: `requirements.md` — it does not address dialer preferences, so no
+  supersession is needed. Its §1.4 Messenger call-intent clauses (FR-016…FR-019) are the upstream
+  context this feature makes resilient (initiation gains a guaranteed attemptable channel), and
+  its §4 Post-MVP "WhatsApp integration" line was already overtaken by the shipped WhatsApp chat
+  surfaces in `CallLinks` that this feature's feasibility probe now gates — this feature extends
+  the shipped surfaces rather than re-opening the placement.
 
 ## Contents
 
-- [FR/index.md](FR/index.md) — functional requirements (20 files, `FR-MTC-001` … `FR-MTC-020`)
-- [NFR/index.md](NFR/index.md) — non-functional requirements (12 files, `NFR-MTC-001` …
-  `NFR-MTC-012`)
+- [FR/index.md](FR/index.md) — functional requirements (19 files, `FR-CDP-001` … `FR-CDP-019`)
+- [NFR/index.md](NFR/index.md) — non-functional requirements (10 files, `NFR-CDP-001` …
+  `NFR-CDP-010`)
 - [../define-requirements.md](../define-requirements.md) — consolidated, human-readable copy of
   this set (the `requirements_doc` contract artifact)
-- [../define-requirements.lock.yaml](../define-requirements.lock.yaml) — locked snapshot with
-  per-requirement content hashes (the `requirements_lock` contract artifact)
+- `../define-requirements.lock.yaml` — locked snapshot with per-requirement content hashes (the
+  `requirements_lock` contract artifact; produced after the T1 HIL owner sign-off)
 
 Note: the `FR/` and `NFR/` folders also still contain the previously shipped
-live-camera-translation (`FR-LCT-*`, `NFR-LCT-*`), profile-interview (`FR-PI-*`, `NFR-PI-*`) and
-spotify-music-integration (`FR-SP-*`, `NFR-SP-*`) requirement files, left in place untouched; the
-indexes on this page and the lock cover the `multi-turn-conversation` set only.
+live-camera-translation (`FR-LCT-*`, `NFR-LCT-*`), profile-interview (`FR-PI-*`, `NFR-PI-*`),
+spotify-music-integration (`FR-SP-*`, `NFR-SP-*`) and multi-turn-conversation (`FR-MTC-*`,
+`NFR-MTC-*`) requirement files, left in place untouched; the indexes on this page and the lock
+cover the `call-dialer-primary-secondary` set only.
 
 ### Functional requirements
 
-Frame and probes: [FR-MTC-001](FR/FR-MTC-001-dialogue-frame-lifecycle.md),
-[FR-MTC-002](FR/FR-MTC-002-degenerate-music-query-detection.md),
-[FR-MTC-003](FR/FR-MTC-003-slot-fill-probe.md),
-[FR-MTC-004](FR/FR-MTC-004-candidate-choice-did-you-mean-probe.md) ·
-Answer capture and merge: [FR-MTC-005](FR/FR-MTC-005-voice-answer-capture.md),
-[FR-MTC-006](FR/FR-MTC-006-deterministic-frame-merge-and-execution.md),
-[FR-MTC-007](FR/FR-MTC-007-probe-budget-two-then-defaults.md),
-[FR-MTC-008](FR/FR-MTC-008-say-it-again-escape.md) ·
-Interception and recovery: [FR-MTC-009](FR/FR-MTC-009-pre-ladder-answer-interception.md),
-[FR-MTC-010](FR/FR-MTC-010-cancel-drops-the-frame.md),
-[FR-MTC-011](FR/FR-MTC-011-emergency-precedence-mid-frame.md),
-[FR-MTC-012](FR/FR-MTC-012-barge-in-strong-new-command.md),
-[FR-MTC-013](FR/FR-MTC-013-timeout-silent-rearm.md) ·
-State, catalog and generation: [FR-MTC-014](FR/FR-MTC-014-awaiting-slot-answer-state.md),
-[FR-MTC-015](FR/FR-MTC-015-curated-on-device-catalog.md),
-[FR-MTC-016](FR/FR-MTC-016-template-generated-probes.md),
-[FR-MTC-017](FR/FR-MTC-017-transcript-cache-bypass.md) ·
-Later phases and gate: [FR-MTC-018](FR/FR-MTC-018-follow-up-nlu-fine-tune-v17.md),
-[FR-MTC-019](FR/FR-MTC-019-reminder-calendar-frame-rollover.md),
-[FR-MTC-020](FR/FR-MTC-020-device-validation-completion-gate.md)
+Settings and persistence: [FR-CDP-001](FR/FR-CDP-001-primary-dialer-setting.md),
+[FR-CDP-002](FR/FR-CDP-002-fallback-dialer-setting.md),
+[FR-CDP-003](FR/FR-CDP-003-secondary-call-app-persistence.md) ·
+Channel feasibility: [FR-CDP-004](FR/FR-CDP-004-messenger-feasibility-handle-on-file.md),
+[FR-CDP-005](FR/FR-CDP-005-whatsapp-feasibility-installed-probe.md),
+[FR-CDP-006](FR/FR-CDP-006-facetime-and-phone-always-feasible.md) ·
+Chain resolution: [FR-CDP-007](FR/FR-CDP-007-chain-preferred-secondary-phone.md),
+[FR-CDP-008](FR/FR-CDP-008-fellbackfrom-attempt-order.md),
+[FR-CDP-009](FR/FR-CDP-009-explicit-pick-wins-as-preferred.md) ·
+Tap paths: [FR-CDP-010](FR/FR-CDP-010-tap-buttons-route-the-chain.md),
+[FR-CDP-011](FR/FR-CDP-011-missed-call-dial-back-routes-the-chain.md) ·
+Voice path: [FR-CDP-012](FR/FR-CDP-012-voice-global-default-settings-primary.md),
+[FR-CDP-013](FR/FR-CDP-013-fallback-before-spoken-confirmation.md),
+[FR-CDP-014](FR/FR-CDP-014-override-protocol-preserved.md) ·
+Launch and announcements: [FR-CDP-015](FR/FR-CDP-015-launch-fail-fallback-announced.md),
+[FR-CDP-016](FR/FR-CDP-016-automatic-routing-with-announcement.md) ·
+Localisation and preserved behaviours: [FR-CDP-017](FR/FR-CDP-017-localisation-new-strings.md),
+[FR-CDP-018](FR/FR-CDP-018-preserved-behaviours.md) ·
+Completion gate: [FR-CDP-019](FR/FR-CDP-019-device-validation-completion-gate.md)
 
 ### Non-functional requirements
 
-[NFR-MTC-001](NFR/NFR-MTC-001-probe-turn-latency.md) latency envelope ·
-[NFR-MTC-002](NFR/NFR-MTC-002-prompt-budget-and-token-ceiling.md) prompt budget ·
-[NFR-MTC-003](NFR/NFR-MTC-003-no-new-network-egress.md) no new egress ·
-[NFR-MTC-004](NFR/NFR-MTC-004-log-safety.md) log safety ·
-[NFR-MTC-005](NFR/NFR-MTC-005-degraded-brain-deterministic-path.md) degraded-brain path ·
-[NFR-MTC-006](NFR/NFR-MTC-006-localisation.md) localisation ·
-[NFR-MTC-007](NFR/NFR-MTC-007-sustained-multi-turn-stability.md) sustained stability ·
-[NFR-MTC-008](NFR/NFR-MTC-008-answer-sanitisation-and-injection-safety.md) answer-path security ·
-[NFR-MTC-009](NFR/NFR-MTC-009-voice-only-accessibility.md) voice-only accessibility ·
-[NFR-MTC-010](NFR/NFR-MTC-010-frame-trap-resistance.md) trap resistance ·
-[NFR-MTC-011](NFR/NFR-MTC-011-kv-prefix-stability.md) KV-prefix stability ·
-[NFR-MTC-012](NFR/NFR-MTC-012-compliance-and-release-gates.md) compliance gates
+[NFR-CDP-001](NFR/NFR-CDP-001-chain-never-dead-ends.md) never-dead-end matrix ·
+[NFR-CDP-002](NFR/NFR-CDP-002-local-probes-no-new-egress.md) local-only probes ·
+[NFR-CDP-003](NFR/NFR-CDP-003-log-safety.md) log safety ·
+[NFR-CDP-004](NFR/NFR-CDP-004-fallback-resolution-latency.md) latency budget ·
+[NFR-CDP-005](NFR/NFR-CDP-005-persistence-round-trip.md) persistence round-trip ·
+[NFR-CDP-006](NFR/NFR-CDP-006-picker-accessibility.md) picker accessibility ·
+[NFR-CDP-007](NFR/NFR-CDP-007-localisation-completeness.md) localisation completeness ·
+[NFR-CDP-008](NFR/NFR-CDP-008-deterministic-testability.md) deterministic testability ·
+[NFR-CDP-009](NFR/NFR-CDP-009-no-regression-shipped-call-paths.md) no regression ·
+[NFR-CDP-010](NFR/NFR-CDP-010-compliance-and-release-gates.md) compliance and release gates
 
 ## Open decisions
 
-Carried from the feature constitution (feasibility study §9) verbatim in substance; **not
-resolved here**. None blocks the requirement set; each has an owner-visible resolution point.
-Full text in the consolidated doc's Open decisions section.
-
-| # | Decision | Status in this requirement set | Resolve at |
-|---|---|---|---|
-| OD-M1 | **Probe policy** — 1 probe vs up-to-2 before executing with defaults, and the default-play wording ('जे पनि बजाऊ'). Study recommendation: 2 probes max, default offered on the first probe | Open — owner. The requirements bind a bounded budget, the always-present default and default execution on exhaustion (FR-MTC-007, FR-MTC-003); the exact cap (1 vs 2) and copy stay open | owner (recorded in design-l1) |
-| OD-M2 | **Probe option source** — curated on-device catalog (recommended for MVP: zero latency, on-device stance) vs live Spotify playlist search (richer; needs a `SpotifyTool` extension + network per probe) | Open — owner. The requirements bind the curated on-device catalog for Phase 1 (FR-MTC-015) and no new egress (NFR-MTC-003); a later live-search enrichment resolves here | owner + design-l1 |
-| OD-M3 | **Sequencing** — ship Phase 1 deterministic-only first vs run Phase 2 + v17 in parallel. Study recommendation: Phase 1 first (it covers the bhajan example), v17 data authoring in parallel | Open — owner. The requirements mark Phase 2 as SHOULD pending this resolution (FR-MTC-018); Phase 1 is complete and shippable alone | owner |
-| OD-M4 | **Scope** — whether Phase 3's reminder/calendar answer-capture rides the same release as the music probe | Open — owner. The requirements keep reminder/calendar unchanged in Phase 1 (FR-MTC-019 Phase 1 guard; NFR-MTC-012) and carry the Phase 3 target as SHOULD | owner |
+**None.** The feature constitution records "Open Decisions: **None**" — the design is approved
+and frozen (owner sign-off 2026-10-12), including secondary defaulting to GSM, Messenger
+feasibility as "handle on file", and the reuse of the existing confirmation flow. This
+requirements pass found **no new owner-level ambiguity**: every behaviour it binds traces to the
+frozen design, the feature constitution or the project constitution. Items the design explicitly
+leaves to the design phase (exact user-facing copy beyond the named keys, the tap-path
+announcement's trigger point, the launch-fail observation point, the resolver's file placement)
+are recorded as **assumptions / design inputs** below — not as decisions re-opened, and not
+silently resolved.
 
 ### Assumptions recorded during this requirements pass
 
 Recorded so nothing is silently assumed; all are design-input notes, not scope changes. The full
-list is in the lock file (`assumptions`).
+list belongs in the lock file (`assumptions`) when the lock is produced.
 
-- The integration surfaces exist as named in the feature constitution; the cited anchors were
-  spot-verified against the worktree source at requirements time (`CommandRouter.route` at 740,
-  the confirmation hook at 785-886, the keyword-ladder music arm at 1223-1234,
-  `routeKeywordRemainder` at 1968-2030, `selectMusicOutcome`/`fireMusicRequest`/`runMusicTurn` at
-  2614/2667/2684, the interpreted `.music` path at 3336-3355, `musicQuery` at 752-779,
-  `VoiceSessionStateMachine` states/timer at 9-17/93-96/183-203, the 60 s voice watchdog, the
-  `IntentPromptTests` 3,000-character pin, `maxTokenCount: 1024`). Remaining study §10 line
-  references not cited above are study-derived.
-- Exact user-facing copy (probe wording, default-play phrase, cancel/escape lines, honest lines)
-  is OD-M1/OD-M2/design-dependent; the Nepali/English examples in this set are illustrative and
-  localization-bound (the keys must exist in both languages — NFR-MTC-006).
-- The curated catalog's exact contents (e.g. the bhajan deity list) are data refined at design
-  time; the requirement binds the catalog's existence, on-device sourcing, localisability and
-  canonicalisation behaviour (FR-MTC-015).
-- "v16"/"v17" are the study's and constitution's iteration labels for the existing slot-canonical
-  fine-tune and the Phase 2 follow-up fine-tune; the actual artifacts land via the Phase 2 training
-  iteration (FR-MTC-018) — nothing in Phase 1 depends on a training run.
-- The project's known pre-existing test failures (unrelated to this feature) remain the baseline
-  for NFR-MTC-012; the feature's own suites and touched suites must pass, with baseline failures
-  recorded rather than silently included or excluded.
-- The 45 s deadline is the existing confirmation timer value
-  (`VoiceSessionStateMachine.confirmationTimeoutSeconds = 45`); reuse mechanics are design's to
-  fix, the value is binding.
-- `DialogueManager`/`DialogueFrame`/`awaitingSlotAnswer`/the curated catalog were confirmed
-  absent from the worktree source at requirements time — they are genuinely new surfaces.
+- The frozen design doc is present and committed on the feature branch at requirements time
+  (precondition of the constitution satisfied).
+- Integration anchors were spot-verified against the worktree source at requirements time:
+  `defaultCallApp` property `AppCoordinator.swift:330-335` and its restore default
+  (`? .phone`) at `:2851-2853`; `resolvedCallChannel` `:2099-2105`; `resolvedMissedCallChannel`
+  `:8382-8390`; `missedCallDialAction` `:8423-8443`; `dialBackMissedCall` `:8457+`;
+  `requestCallConfirmation` `:7587-7647` (Messenger-no-handle gate at `:7620-7623`);
+  `handleCallConfirmationOverride` `:7656-7686` (override no-handle gate at `:7665-7669`);
+  `confirmationPrompt` `:7688-7707`; `MethodResolver` step 4 `MethodResolver.swift:74-78`;
+  `CallApp` enum `CallLinks.swift:66-84` with the open outcomes (`MessengerOutcome`
+  `openedThread`/`fellBackToWeb`/`invalidHandle` at `:145-157`, `FaceTimeOutcome.unavailable`
+  at `:114-123`); `FamilyContact.resolvedAudioApp` `FamilyContactStore.swift:162-164`;
+  `CallingSettingsView` four-channel rows `:22-77`; `LeafViews` row channel state ~`:1612`;
+  the emergency path via `NotifyChannel.resolve` at `AppCoordinator.swift:6464-6468`;
+  existing catalog keys (`settings.calling.title`, `router.call.*`, `call.announce.*`) —
+  the five new keys were confirmed absent from `Localizable.xcstrings` at requirements time.
+- Exact user-facing copy (section titles' wording, the fallback disclosure sentence, the two
+  announcements) is design/catalog-time copy: the design's example ("Messenger isn't available —
+  call Syanu via WhatsApp, okay?") is illustrative; the **keys** and the content they must carry
+  (routed channel, skipped channel, contact name) are binding (FR-CDP-013/016/017).
+- The tap-path `call.announce.fallbackRouted` announcement's exact trigger point (with the open)
+  is the design's to fix at design-l1; its existence, routed-channel content and ne/en key are
+  binding (FR-CDP-016).
+- The ≤ 100 ms p95 added-latency budget (NFR-CDP-004) is this requirement set's measurement
+  threshold elaborating the design's "probes run at call time, user-paced"; design-l1 may refine
+  the number but not weaken the never-dead-end / never-silent guarantees.
+- The `canOpenURL` probe's staleness is an accepted residual risk (design Risks); the launch-fail
+  hop covers it, and no caching requirement is implied.
+- The chain resolver's file placement/name (`CallChannelChain.route(preferred:secondary:feasibility:)`
+  with `Result.fellBackFrom`) is the design's frozen shape; requirements bind behaviour and the
+  pure-static, closure-injected properties — exact placement is design's.
+- The existing audio/video button vocabulary gates (`supportsAudio` / `supportsVideo`, FaceTime
+  excluded from audio buttons and dial-back) are preserved; the feature changes only the
+  global-default/secondary resolution inside them.
+- Emergency-contact resolution (`NotifyChannel.resolve`-based) is **not** rewired to the chain
+  (non-goal); FR-CDP-018/FR-CDP-011 pin its no-change.
+- The full-bundle unit baseline is pre-existing red (house practice); scoped `-only-testing`
+  suites are the honest gate (NFR-CDP-008), with baseline failures recorded rather than silently
+  included or excluded.
+- DV-1..7 are the constitution's completion gate on the reference device (Anzaan), executed at
+  `final-sign-off` (T2 + HIL) — FR-CDP-019.
 
 ## Out of scope
 
-Explicitly not in scope (feature constitution "Out of scope (must not change)" plus the workflow
-scope comment's explicit non-goals) — recorded so nothing is silently half-built:
+Explicitly not in scope (feature constitution "Out of scope (must not change)" plus the design's
+non-goals and the workflow scope comment's explicit non-goals) — recorded so nothing is silently
+half-built:
 
-- **Open-ended conversation/chat** — the fine-tunes have no conversational mode; stage-3 chat was
-  never done and shipped-brain chat is a known problem. Probes are the only new dialogue.
-- **Raw transcript history in prompts** — the 1024-token ceiling (study §5.1); dialogue state
-  lives in the app (NFR-MTC-002).
-- **Model-generated probe text** — probes are template-generated, ne/en (FR-MTC-016).
-- **Cloud / BYO-LLM anything** — no new egress, on-device stance unchanged (NFR-MTC-003).
-- **Persistent dialogue state across sessions** — in-memory frames only; cold start has no frame
-  (FR-MTC-001).
-- **Reminder/calendar changes in Phase 1** — those turns are unchanged until Phase 3 and OD-M4
-  (FR-MTC-019 Phase 1 guard).
-- **Android** — no platform scope beyond the existing iOS app.
-- **Emergency/medication behaviour changes** — none of any kind; emergency precedence is
-  preserved absolutely (FR-MTC-011).
-- **Any new compliance regime, permission, store or egress host** (NFR-MTC-012).
+| Non-goal | Why it is stated |
+|---|---|
+| A dedicated `CallRouter` service | The feature extends the existing resolution seams only (`resolvedCallChannel` / `resolvedMissedCallChannel`, MethodResolver's global-default step, `requestCallConfirmation`) — no new routing service (constitution Constraint 7; design non-goals). |
+| Per-contact primary/secondary storage | Per-contact and family picks keep winning as the **input** to the chain; the chain itself is settings-level (constitution Constraint 5; FR-CDP-009). |
+| Emergency-contact semantics changes | Emergency-contact resolution and escalation are untouched; the chain/probes/announcements never wrap or delay them (design non-goals; FR-CDP-018). |
+| A new dialogue flow | The existing multi-turn confirmation is reused exactly; no new question kind, state or prompt sequence (design Goal 4 / Decision 5; FR-CDP-013/018). |
+| Any new network, data, identity or privacy surface | Feasibility probes are local (`canOpenURL`, address-book handle check); no new egress, permission, store or collection (constitution Constraint 8; NFR-CDP-002). |
+| Changes to the just-shipped voice pipeline beyond the named MethodResolver seam | Regression context PRs #161–#168: the chain replaces only the single Messenger hard-rule and the hardcoded voice default; do not refactor beyond the named seams (constitution Constraint 7; NFR-CDP-009). |
+| The weak/empty edge of the brief's open items | No Android scope, no new compliance regime, no permission widenings, no analytics/telemetry additions (NFR-CDP-002/010). |
 
 ## Related
 
 - Consolidated copy: [`../define-requirements.md`](../define-requirements.md)
-- Locked snapshot: [`../define-requirements.lock.yaml`](../define-requirements.lock.yaml)
-- Feature constitution: [`../multi-turn-conversation/constitution.md`](../multi-turn-conversation/constitution.md)
-- Feature workflow (scope comment): [`../multi-turn-conversation/workflow.yaml`](../multi-turn-conversation/workflow.yaml)
-- Owner's feasibility study: [`../../docs/multi-turn-conversation-feasibility.md`](../../docs/multi-turn-conversation-feasibility.md)
+- Feature constitution: [`../call-dialer-primary-secondary/constitution.md`](../call-dialer-primary-secondary/constitution.md)
+- Feature workflow (scope comment + security focus): [`../../.ai-sdd/workflows/call-dialer-primary-secondary.yaml`](../../.ai-sdd/workflows/call-dialer-primary-secondary.yaml)
+- Frozen design (the feature brief): [`../../docs/superpowers/specs/2026-10-12-call-dialer-primary-secondary-design.md`](../../docs/superpowers/specs/2026-10-12-call-dialer-primary-secondary-design.md)
