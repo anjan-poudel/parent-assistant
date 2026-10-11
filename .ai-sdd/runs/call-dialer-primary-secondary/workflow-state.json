@@ -1,0 +1,100 @@
+{
+  "schema_version": "1",
+  "workflow": "call-dialer-primary-secondary",
+  "project": "/Users/anjan/workspace/projects/elderly-ai-assistant-call-dialer-primary-secondary",
+  "started_at": "2026-10-11T15:55:44.264Z",
+  "updated_at": "2026-10-11T15:55:45.261Z",
+  "tasks": {
+    "define-requirements": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-11T15:56:25.374Z",
+      "last_activity_at": "2026-10-11T15:56:25.374Z"
+    },
+    "design-l1": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-11T15:56:25.374Z",
+      "last_activity_at": "2026-10-11T15:56:25.374Z"
+    },
+    "design-l2": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-11T15:56:25.374Z",
+      "last_activity_at": "2026-10-11T15:56:25.374Z"
+    },
+    "review-l2": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-11T15:56:25.374Z",
+      "last_activity_at": "2026-10-11T15:56:25.374Z"
+    },
+    "security-design-review": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-11T15:56:25.374Z",
+      "last_activity_at": "2026-10-11T15:56:25.374Z"
+    },
+    "plan-tasks": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-11T15:56:25.374Z",
+      "last_activity_at": "2026-10-11T15:56:25.374Z"
+    },
+    "implement": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-11T15:56:25.374Z",
+      "last_activity_at": "2026-10-11T15:56:25.374Z"
+    },
+    "review-implementation": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-11T15:56:25.374Z",
+      "last_activity_at": "2026-10-11T15:56:25.374Z"
+    },
+    "security-test": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-11T15:56:25.374Z",
+      "last_activity_at": "2026-10-11T15:56:25.374Z"
+    },
+    "final-sign-off": {
+      "status": "PENDING",
+      "started_at": null,
+      "completed_at": null,
+      "outputs": [],
+      "iterations": 0,
+      "pending_at": "2026-10-11T15:56:25.374Z",
+      "last_activity_at": "2026-10-11T15:56:25.374Z"
+    }
+  },
+  "phase": "RUNNING"
+}
