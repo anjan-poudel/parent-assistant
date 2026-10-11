@@ -80,19 +80,53 @@ enum DeterministicCallRoute {
     /// Lowercases and decides, exactly like the sibling pre-route stages.
     /// The direct-call shape test reuses `VoiceContactSearchRoute`'s
     /// widened `isDirectCallUtterance` (one table, never duplicated —
-    /// same extraction reason as the MTC barge-in predicate).
+    /// same extraction reason as the MTC barge-in predicate), plus a
+    /// LOCAL bare-फोन branch (see below) that deliberately does NOT
+    /// enter the shared table (there, it would veto the contact-search
+    /// stage's own "फोन नम्बर खोज" marker).
     static func decide(transcript raw: String) -> Decision {
         let text = raw
             .lowercased()
             .split(whereSeparator: { $0.isWhitespace })
             .joined(separator: " ")
-        guard VoiceContactSearchRoute.isDirectCallUtterance(text) else {
-            return .notDirectCall
-        }
+        // [CALL-VOCAB] (2026-10-12) A location question is never a call
+        // request — the bare-फोन/कल markers must not capture "मेरो फोन
+        // कहाँ छ" (where is my phone).
+        guard !hasLocationQuestion(text) else { return .notDirectCall }
+        let callShaped = VoiceContactSearchRoute.isDirectCallUtterance(text)
+            || barePhoneRequest(text)
+        guard callShaped else { return .notDirectCall }
         guard let query = callQuery(fromTranscript: text) else {
             return .callNoName
         }
         return .call(query: query)
+    }
+
+    /// [CALL-VOCAB] (2026-10-12) Bare "फोन" as the whole request verb —
+    /// "स्यानुलाई फोन" (phone Syanu). Field case: the elder drops the
+    /// verb, and the shared table cannot carry a bare-फोन marker (it
+    /// would veto the contact-search stage's own phone-word markers),
+    /// so this branch lives HERE, in the call fallback only.
+    static func barePhoneRequest(_ text: String) -> Bool {
+        token("फोन", in: text)
+    }
+
+    /// Location-question vocabulary — "कहाँ" (where) and friends. A
+    /// question word in the utterance means the speaker is asking ABOUT
+    /// something, never requesting a call to a person. Devanagari
+    /// containment (fused forms like "कहाँछ"); Latin whole-token.
+    static func hasLocationQuestion(_ text: String) -> Bool {
+        ["कहाँ", "कता", "खोइ"].contains { text.contains($0) }
+            || token("where", in: text)
+    }
+
+    /// Whole-token match — identical semantics to
+    /// `CommandRouter.containsToken` (split on whitespace + punctuation,
+    /// exact equality), mirrored here so this type can never depend on
+    /// router internals.
+    private static func token(_ token: String, in text: String) -> Bool {
+        text.components(separatedBy: CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters))
+            .contains { $0 == token }
     }
 
     /// The extracted name candidate for a call-shaped transcript, or nil

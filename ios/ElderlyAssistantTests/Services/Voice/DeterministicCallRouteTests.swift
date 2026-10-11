@@ -123,3 +123,45 @@ final class DeterministicCallRouteTests: XCTestCase {
                        .call(query: "कल्याणी"))
     }
 }
+
+// MARK: - [CALL-VOCAB] (2026-10-12) STT garble + bare verb forms
+
+extension DeterministicCallRouteTests {
+
+    /// The field transcript: "स्यानुलाई फोन गरु" — Whisper garbles the
+    /// verb ("गरु" is not a word), and the fused cluster does not
+    /// contain the bare "गर" (grapheme rule). The shape table carries
+    /// the गरु/गरू forms verbatim and the drop table removes them, so
+    /// the request still resolves to the name.
+    func testGaruGarbledVerbFormIsStillCallShaped() {
+        XCTAssertTrue(VoiceContactSearchRoute.isDirectCallUtterance("स्यानुलाई फोन गरु"))
+        XCTAssertEqual(DeterministicCallRoute.decide(transcript: "स्यानुलाई फोन गरु"),
+                       .call(query: "स्यानु"))
+        XCTAssertEqual(DeterministicCallRoute.decide(transcript: "स्यानुलाई कल गरू"),
+                       .call(query: "स्यानु"))
+    }
+
+    /// Bare verb-less request forms — "स्यानुलाई कल" / "स्यानुलाई फोन" —
+    /// are call-shaped too (कल whole-token in the shared table; bare
+    /// फोन lives in this route's local branch so the contact-search
+    /// stage's phone markers stay unvetoed).
+    func testBareVerbLessRequestForms() {
+        XCTAssertEqual(DeterministicCallRoute.decide(transcript: "स्यानुलाई कल"),
+                       .call(query: "स्यानु"))
+        XCTAssertEqual(DeterministicCallRoute.decide(transcript: "स्यानुलाई फोन"),
+                       .call(query: "स्यानु"))
+        XCTAssertEqual(DeterministicCallRoute.decide(transcript: "कल स्यानु"),
+                       .call(query: "स्यानु"))
+    }
+
+    /// Location questions are never calls — the bare markers must not
+    /// capture "where is my phone".
+    func testLocationQuestionsAreNeverCalls() {
+        XCTAssertEqual(DeterministicCallRoute.decide(transcript: "मेरो फोन कहाँ छ"),
+                       .notDirectCall)
+        XCTAssertEqual(DeterministicCallRoute.decide(transcript: "कल कहाँ छ"),
+                       .notDirectCall)
+        XCTAssertEqual(DeterministicCallRoute.decide(transcript: "फोन खोइ"),
+                       .notDirectCall)
+    }
+}

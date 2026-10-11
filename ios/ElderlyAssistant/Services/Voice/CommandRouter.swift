@@ -2437,7 +2437,8 @@ final class CommandRouter {
         // through the EXISTING `requestCallConfirmation` seam —
         // `ContactResolver` still refuses to guess a person, and nothing
         // is dialed without the elder's yes.
-        if VoiceContactSearchRoute.isDirectCallUtterance(text) {
+        if VoiceContactSearchRoute.isDirectCallUtterance(text)
+            || DeterministicCallRoute.barePhoneRequest(text) {
             switch DeterministicCallRoute.decide(transcript: raw) {
             case .call(let query):
                 if let prompt = coordinator?.requestCallConfirmation(

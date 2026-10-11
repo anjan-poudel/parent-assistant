@@ -331,3 +331,20 @@ final class VoiceContactSearchRouteTests: XCTestCase {
                        "the shipped call site canonicalises first, so the same utterance is still vetoed")
     }
 }
+
+// MARK: - [CALL-VOCAB] (2026-10-12)
+
+extension VoiceContactSearchRouteTests {
+
+    func testGaruFormIsDirectCallShaped() {
+        XCTAssertTrue(VoiceContactSearchRoute.isDirectCallUtterance("स्यानुलाई फोन गरु"),
+                      "the गरु garble form must count as a direct call request")
+        XCTAssertTrue(VoiceContactSearchRoute.isDirectCallUtterance("फोन गरू"))
+    }
+
+    func testBareKalIsDirectCallShapedWholeTokenOnly() {
+        XCTAssertTrue(VoiceContactSearchRoute.isDirectCallUtterance("कल स्यानु"))
+        // Whole-token safety: "कल" ⊂ "कल्याणी" must NOT fire.
+        XCTAssertFalse(VoiceContactSearchRoute.isDirectCallUtterance("कल्याणी"))
+    }
+}
