@@ -4,6 +4,9 @@ Feature: `family-contacts-unify` (worktree branch `feat/family-contacts-unify`, 
 `elderly-ai-assistant-family-contacts-unify`; base master `8089c735`).
 Task: `design-l2`, agent `principal-engineer`, contract `component_design_l2`.
 Date: 2026-10-12.
+Revision: rev 2 (2026-10-12) — review-l2 NO_GO rework applied: R1 `.limited` gates
+(§2.2, §3.5, §8.2, §9 R2); R2 drain-loop coalescing (§4.2, §3.6); R3 contiguity pin
+(§7); minors (§1.7, §2.2, §8.2).
 Status: elaboration of the FROZEN `specs/design-l1.md` — nothing here redesigns L1; every
 section resolves an L1 §19 deferral or fixes a component-level detail L1 left to L2.
 
@@ -344,6 +347,10 @@ private constants at :61-62; ties ⇒ ambiguity, never order):
 | nickname containment | 0.75 | any normalized nickname contains the query (or query contains it — same both-direction shape as the name band) |
 | token overlap | 0.60 | unchanged (name tokens) |
 
+(Consequence-table note: the name-exact 1.00 vs nickname-exact 0.85 gap computes to
+0.15000000000000002 in IEEE-754, so the strict `<` margin check resolves to the name-exact
+contact — not ambiguous; pinned explicitly in §8.3.)
+
 `nearMiss(_:)`: candidate set = contacts whose normalized name OR any normalized nickname is
 within the edit budget (2) of a query variant; the existing exactly-one rule is preserved —
 name-near-miss + nickname-near-miss in one query = two candidates = abstain. The hot path
@@ -529,9 +536,13 @@ parent call site :1587 becomes `FamilyContactWizardSheet(target: target) { other
 (`showManualEntry ? manualEntryFields : addManuallyButton`). The link area renders INSIDE the
 find step (L1 §11.1) and is present in add AND edit.
 
-- `searchSection`: the access switch gains `.limited` — same search UI as `.allowed` plus a
-  caption line `call.search.accessLimited` under `searchField` (one line, caption token,
-  secondary color).
+- `searchSection` (:2114-2139; a `switch` over `ContactsAccess?` — the new case breaks the
+  build, so this site IS compile-forced): `.allowed` and `.limited` share one arm (field +
+  loading/loadFailed card + results); for `.limited` the `call.search.accessLimited` caption
+  renders directly under `searchField` (one line, caption token, secondary color). `.denied` /
+  `.notDetermined` / `nil` arms unchanged — `.denied` is the ONLY blocked path on both
+  surfaces. The load gate `refreshSearchAccess` (:2325) moves to `status.allowsReading`
+  (entries load for `.limited`; §3.5, §8.2).
 - `searchResults` — NOW `UnifiedContactSearch.search(query: trimmedSearch,
   family: coordinator.familyContacts, index: coordinator.familyIndex, in: entries,
   verifiedLinks: coordinator.verifiedLinks, recency: coordinator.contactCallRecency)` —
@@ -544,7 +555,8 @@ find step (L1 §11.1) and is present in add AND edit.
     link is shown in the link area).
   - `noResults` / `moreAvailable` unchanged.
 - `steeringResultRow(_ other: FamilyContact)`: a card containing
-  `Text(L10n.fmt("family.link.alreadyLinked", other.name))` and a ≥44 pt button (person
+  `Text(L10n.fmt("family.link.alreadyLinked", locale: coordinator.activeLocale, other.name))`
+  and a ≥44 pt button (person
   glyph + `other.name`, a11y label `settings.family.edit`) whose tap calls
   `onSteerTo(other)`. Tap target: whole card ≥44 pt (`DesignTokens.minTapTargetSize` floor);
   the button itself also ≥44 pt.
@@ -828,8 +840,45 @@ enum ContactsAccess: Equatable {
 // AddressBookDirectory.access() :348 becomes: ContactsAccess.from(CNContactStore.authorizationStatus(for: .contacts))
 ```
 
-Every `switch` over `ContactsAccess` (MissedCallContactResolver.resolve, the wizard's
-`searchSection`, CallView's access block) is compile-forced to handle `.limited`.
+`.limited` reaches consumers through `AddressBookDirectory.access()`. Handling is NOT
+uniformly compile-forced — equality checks compile cleanly with the new case and silently
+take the else path — so every site is enumerated and decided here (each listed line is a
+required change):
+
+- **Compile-forced switches**: `MissedCallContactResolver.resolve` (its `access:` switch) and
+  the wizard's `searchSection` (`SettingsView.swift:2117`, a switch over `ContactsAccess?`)
+  fail the build until `.limited` is handled. Resolver: `.limited` is readable (§1.8).
+  Wizard: `.allowed`/`.limited` share the search body; `.limited` adds the caption (§2.2).
+- **CallView (`LeafViews.swift`) — equality checks, NOT compile-forced; `.limited` takes
+  today's `.allowed` display path (field + entries + mic) and `.denied` stays the only
+  blocked path; every site below moves to `allowsReading`** (`access` is `ContactsAccess?`
+  there, hence the optional form):
+  - :1343 `if access == .allowed { searchField }` → `if access?.allowsReading == true`.
+  - :1347-1362 display branches → `if access?.allowsReading == true { <micCaption; loading /
+    loadFailed card / results> } else if access == .denied { blocked card } else if
+    access == .notDetermined { ask card }` (`nil` renders nothing, as today). `.limited` can
+    never render the empty dead area.
+  - :1370 `refreshDirectory` → `guard status.allowsReading else { return }`; `loadEntries()`
+    runs for `.limited` (the granted set loads).
+  - :1379-1388 `grantAccess` load condition `if granted` → `if access?.allowsReading == true`
+    (the system sheet may yield `.limited`).
+  - :1413 `micButtonVisible` → `guard !micHidden, access?.allowsReading == true`.
+  - :1519 `announceVoiceResultIfReady` → `access?.allowsReading == true`.
+- **Caption placement (decided)**: `call.search.accessLimited` renders on BOTH search
+  surfaces — CallView: the FIRST line of the readable block inside `searchArea`, directly
+  under the field row and above `micCaption` (caption token, secondary color, one line);
+  wizard: directly under `searchField` in the shared `.allowed`/`.limited` arm (§2.2). This
+  satisfies L1 §9.3's honesty requirement at the point of use on both surfaces.
+- **Wizard load gate + grant**: `refreshSearchAccess` (:2322-2329; called from `.onAppear`
+  :1977 and `scenePhase` :1983) → `guard status.allowsReading`; `loadEntries()` runs for
+  `.limited`. `grantAccess` (:2331-2339) load condition `if granted` →
+  `if access?.allowsReading == true`. Without these, relaunching with already-granted limited
+  access renders the §2.2 search UI over an unloaded book.
+- **Pins that can fail**: `ContactsAccessTests` (new) pins the pure mapping
+  (`.limited` ⇒ `.allowsReading`; `.denied`/`.notDetermined` ⇒ false; the `from(_:)` table);
+  `ContactsAccessGateTests` (new, source-scan) extracts each enumerated expression/function
+  body above and asserts `allowsReading` is present and a `== .allowed` gate is ABSENT — a
+  reverted gate fails the suite. (§6.4, §8.3, §9 R2.)
 
 ### 3.6 Snapshot / index lifecycle
 
@@ -841,7 +890,9 @@ Every `switch` over `ContactsAccess` (MissedCallContactResolver.resolve, the wiz
   spawns one Task that captures the roster by value, awaits the actor, and publishes on main:
   publish iff `snapshot.generation > verifiedLinks.generation`; bump `faceEpoch` when
   `snapshot.links != verifiedLinks.links` (verification-set change). Stale snapshots
-  (lower generation) are dropped. `.empty` ⇒ today's behavior exactly.
+  (lower generation) are dropped — the counter orders PUBLICATION only; input freshness is
+  guaranteed by the §4.2 drain loop, not by the generation guard. `.empty` ⇒ today's behavior
+  exactly.
 
 ## 4. Concurrency specification (explicit)
 
@@ -855,23 +906,68 @@ Every `switch` over `ContactsAccess` (MissedCallContactResolver.resolve, the wiz
 | `SystemContactPhotoWriter` | actor | — | the actor alone | actor isolation ⇒ writes strictly serial |
 | `DownsampledImageCache` | existing `NSCache` | any thread | any thread | NSCache thread safety (unchanged) |
 
-### 4.2 Single-flight verification with dirty-flag coalescing
+### 4.2 Single-flight verification — latest-roster capture, coalesced drain
 
 Inside `SystemContactLinkService`:
 
 ```swift
 private var refreshInFlight = false
-private var refreshDirty = false
+private var pendingContacts: [FamilyContact]? = nil   // the LATEST coalesced roster request
 private var lastSnapshot: VerifiedLinksSnapshot = .empty
 private var generation: UInt64 = 0
 ```
 
-`refresh(contacts:)`: if `refreshInFlight` → set `refreshDirty = true` and return
-`lastSnapshot`; else set in-flight, run the ONE batched fetch, increment `generation`, publish
-`lastSnapshot`, clear in-flight, and if `refreshDirty` → clear the flag and run exactly one
-follow-up pass (further triggers during that pass set the flag again). Coalescing is therefore
-bounded: any burst of triggers costs at most in-flight + 1 fetch; latest wins
-(generation-monotonic: the coordinator drops any snapshot with a generation ≤ the published one).
+`refresh(contacts:)` (actor-serialized):
+
+- **Fast path** (`refreshInFlight == false`): set in-flight, then drain:
+
+```swift
+var next: [FamilyContact]? = contacts
+while let batch = next {
+    next = nil
+    // ONE batched fetch over `batch`; on success: generation += 1; lastSnapshot = snapshot.
+    // Fetch throw / unreadable access: lastSnapshot unchanged (degraded, reason-coded).
+    next = pendingContacts    // a trigger that arrived during THIS pass is consumed here
+    pendingContacts = nil
+}
+refreshInFlight = false
+return lastSnapshot
+```
+
+- **Coalesced path** (`refreshInFlight == true`): `pendingContacts = contacts` — OVERWRITE
+  with the LATEST roster (never merged, never the first one seen) — then return `lastSnapshot`.
+
+Flag lifecycle when a dirty-set lands DURING the follow-up pass: `refreshInFlight` stays true
+for the whole drain, so every trigger arriving during ANY pass (first or follow-up) takes the
+coalesced path and overwrites `pendingContacts`; the loop's consume converts it into exactly
+one more pass running with THAT latest roster. The loop exits only after a pass completes with
+`pendingContacts == nil`, and the in-flight flag clears only then — so a trigger arriving
+after the flag clears takes the fast path instead (actor serialization makes the two cases —
+captured vs. fresh start — mutually exclusive; no trigger is lost in either ordering).
+
+What the mechanism actually guarantees (this replaces the earlier "latest wins" phrasing):
+
+- **No trigger is dropped**: every accepted call either runs a pass itself or leaves a pending
+  roster the drain consumes — a just-created link submitted during an in-flight refresh is
+  verified by the follow-up pass, NOT deferred to the next external trigger.
+- **Each pass runs with the latest roster captured before that pass started** — the follow-up
+  consumes `pendingContacts`, never the in-flight call's older roster.
+- **At quiescence** (no pass running, no pending roster) the published snapshot was computed
+  over the most recent roster submitted to `refresh(contacts:)`; a submission landing after
+  quiescence starts a new pass and becomes the new latest (convergence one pass later in the
+  worst case). Each completed pass updates `lastSnapshot`/`generation`; the drained result is
+  carried back by the fast-path caller, while coalesced callers' early `lastSnapshot` returns
+  are dropped by the coordinator's generation guard.
+- **Bounded work / coalescing**: ANY number of triggers arriving during one pass cost exactly
+  ONE additional pass (not N); the drain terminates when a pass completes with no pending
+  roster — each extension needs a new external trigger. The `generation` counter orders
+  PUBLICATION (the coordinator drops a snapshot whose generation ≤ the published one); it
+  detects stale snapshots, NOT stale inputs — input freshness is provided solely by the
+  `pendingContacts` capture above.
+- Testable via the fake reader (`SystemContactLinkServiceTests`, §8.3): trigger-during-pass
+  runs one follow-up with the new roster; N triggers during one pass cost one extra pass; a
+  trigger after the flag clears runs a fresh pass; coalesced returns are droppable by the
+  generation guard.
 
 ### 4.3 Photo cache constants (L1 §19 item — final)
 
@@ -1056,6 +1152,10 @@ write to a different person — the write is prevented before `execute`.
 - `FamilyContactWizardSheet` search uses `UnifiedContactSearch` (assert the call string exists
   in SettingsView.swift and the old `SystemContactSearch.search` call is gone from the wizard
   region) — a cheap drift pin for §2.2.
+- `ContactsAccess` gate pins (the R1 fix, made able to fail): `ContactsAccessTests` (mapping —
+  `.limited` ⇒ `.allowsReading`; `from(_:)` table) and `ContactsAccessGateTests` (per-site
+  source pins asserting `allowsReading` present / `== .allowed` absent in each §3.5-enumerated
+  expression of LeafViews.swift and SettingsView.swift).
 
 ## 7. Localization — FINAL frozen copy (21 keys)
 
@@ -1112,11 +1212,23 @@ L10n test extension (`L10nCatalogCoverageTests.swift`, the established pin patte
   placeholder-count equality (`%` counting); the verbatim `familyContactsCopy` table = the
   rows above; source-catalog coverage via the existing extraction-state checks (both values
   `translated`, ne non-empty + Devanagari, ne ASCII-forbidden with the #16 exemption).
-- Contiguity pin: scan the raw catalog between `family.emergencyToggleHint` (predecessor) and
-  `family.relationship.brother` (successor) and assert the raw key lines are EXACTLY the 19
-  `family.*` keys above in that order (every line in the span carries one of
-  family.link./family.nickname./family.photo.); plus two named-neighbor pins for the
-  `call.search.*` insertions (accessLimited → allowBody; familyChip → linkedBookName → loadFailed).
+- Contiguity pin (exact span, corrected): the raw catalog key lines between
+  `family.emergencyToggleHint` (:5874, predecessor) and `family.relationship.brother`
+  (:5942, successor) — both EXCLUDED — must be EXACTLY these 22 lines in order: the 12 new
+  family.link./family.nickname. keys, then the 10 family.photo.* keys, which include the 3
+  PRE-EXISTING keys at their alphabetical positions (19 new + 3 existing = 22):
+  1 family.link.alreadyLinked · 2 family.link.chip · 3 family.link.linkedTo ·
+  4 family.link.pickHint · 5 family.link.sectionTitle · 6 family.link.stale ·
+  7 family.link.unlink · 8 family.link.unlinkHint · 9 family.nickname.add ·
+  10 family.nickname.entryPlaceholder · 11 family.nickname.hint · 12 family.nickname.removeLabel ·
+  13 family.photo.accessBody · 14 family.photo.accessDeniedBody · 15 family.photo.accessTitle ·
+  16 family.photo.add (pre-existing, :5891) · 17 family.photo.change (pre-existing, :5908) ·
+  18 family.photo.remove (pre-existing, :5925) · 19 family.photo.sourceSystem ·
+  20 family.photo.state.keptOnPhone · 21 family.photo.state.systemPhotoRemains ·
+  22 family.photo.state.updatedInSystem.
+  (The rev-1 "19 lines" count omitted the 3 in-place existing keys; the pin now names them
+  explicitly so it can actually pass.) Plus two named-neighbor pins for the `call.search.*`
+  insertions (accessLimited → allowBody; familyChip → linkedBookName → loadFailed).
 - Baseline key-count pin updated DELIBERATELY, count recorded in the test comment: this branch
   measures 1,389 keys before and 1,410 after the 21 insertions (re-measure and record the
   post-call-dialer-merge number at implement time; the +21 delta is the constant, not the absolute).
@@ -1148,14 +1260,14 @@ sibling). Pinned by the source-scan test (§6.4).
 | `FamilyContactIndex` (+`Entry`, lookups) | NEW `Services/Contacts/FamilyContactIndex.swift` |
 | `VerifiedLinksSnapshot` (+ helpers), `SystemContactReading`, `SystemContactLinkReading`, `SystemContactLinkService` | NEW `Services/Contacts/SystemContactLinkService.swift` |
 | `SystemContactWriteAccess`, `SystemContactWriteFailure`, `SystemContactPhotoWriteOutcome`, `PhotoWriteField`, `SystemContactPhotoWriting`, `FamilyPhotoEditorState` (+total mapping), `SystemContactPhotoWriter` | NEW `Services/Contacts/SystemContactPhotoWriter.swift` |
-| `ContractsAccess.limited`/`allowsReading`/`from(_:)`; `AddressBookDirectory: SystemContactReading`; `fetchKeys` + identifier key; `allEntries` identifier pass-through; `AddressBookEntry.identifier`; `make(..., identifier:)` | `Services/Contacts/AddressBookDirectory.swift` |
-| Contentions e/`MissedCallContactResolver.linkedFamilyMatch`, `resolve(snapshot:)` | `Services/Contacts/MissedCallContactResolver.swift` |
+| `ContactsAccess.limited`/`allowsReading`/`from(_:)`; `AddressBookDirectory: SystemContactReading`; `fetchKeys` + identifier key; `allEntries` identifier pass-through; `AddressBookEntry.identifier`; `make(..., identifier:)` | `Services/Contacts/AddressBookDirectory.swift` |
+| `MissedCallContactResolver.linkedFamilyMatch`, `.limited`-readable `resolve(snapshot:)` | `Services/Contacts/MissedCallContactResolver.swift` |
 | `UnifiedContactSearch` signature/Outcome/tier changes (per §1.6) | `Services/Contacts/UnifiedContactSearch.swift` |
 | `ContactResolver` index provider + bands + near-miss | `Services/Intents/ContactResolver.swift` |
 | `ContactPhotoStore.processedJPEG(_:) -> Data?` (static extraction: `scaledForStorage` → `jpegData`; `save` refactored to call it — byte-identical output) + `loadData(named:)` | `Services/Storage/ContactPhotoStore.swift` |
 | Coordinator state, `faceIdentity/faceImage/faceThumbnail`, `SystemContactUnlinkMode`, `unlinkMode`, `setFamilyContactLink`, `syncSystemPhoto`, `refreshVerifiedLinks`, `refreshContactsIdentity`, add/update signatures, link-aware `familyContact(matchingPhone:)` | `App/AppCoordinator.swift` (`familyContact(matchingPhone:)` :8367 delegates to `familyMatch` then `linkedFamilyMatch`; missed-call family pass :8301 uses the same; `refreshNativeMissedCallNames` :8342 passes `verifiedLinks`) |
-| Wizard restructure (state, subviews, steering, save flow), list chip + face migration, `loadDraft` faces | `App/SettingsView.swift` |
-| `CallView` face migration + caption, `UnifiedContactResultRow.caption: String? = nil` + synthesized-row caption render, `ContactTile` face task | `App/LeafViews.swift` |
+| Wizard restructure (state, subviews, steering, save flow), list chip + face migration, `loadDraft` faces; search access gates → `allowsReading` (`searchSection` switch arm :2117, `refreshSearchAccess` :2325, `grantAccess` :2331) | `App/SettingsView.swift` |
+| `CallView` face migration, `UnifiedContactResultRow.caption: String? = nil` + synthesized-row caption render, `ContactTile` face task; CallView `.limited` gates → `allowsReading` (:1343, :1347-1362, :1370, :1379, :1413, :1519) + the `call.search.accessLimited` caption in `searchArea` | `App/LeafViews.swift` |
 | `DownsampledImageCache` doc note for the `sysphoto:` key family (no API change) | `App/ViewCaches.swift` |
 | 21 keys; `L10nCatalogCoverageTests` pins | `Resources/Localizable.xcstrings`; `ElderlyAssistantTests/App/L10nCatalogCoverageTests.swift` |
 | Write disclosure | `Info.plist` (`NSContactsUsageDescription`) |
@@ -1166,26 +1278,31 @@ sibling). Pinned by the source-scan test (§6.4).
 - Extended: `FamilyContactStoreTests` (link + nicknames round-trip, legacy lossless, corrupt
   degrade), `UnifiedContactSearchTests` (Passes 1-5, unlinked parity, `linkedBookNames`,
   recount, Devanagari nickname pins positive+negative), `ContactResolverTests` (bands,
-  ambiguity consequence table, near-miss), `MissedCallContactResolverTests` (linked-record
-  numbers, identifier remap, `.limited` read), `ContactPhotoStoreTests` (`processedJPEG` pins
+  ambiguity consequence table — including the name-exact 1.00 vs nickname-exact 0.85 pair
+  explicitly: the IEEE-754 gap is 0.15000000000000002, so the strict `<` margin check resolves
+  to name-exact, NOT ambiguous — near-miss), `MissedCallContactResolverTests` (linked-record
+  numbers, identifier remap, `.limited`-readable `access:`), `ContactPhotoStoreTests` (`processedJPEG` pins
   + `loadData`), `L10nCatalogCoverageTests`.
 - New: `Services/Contacts/FamilyContactIndexTests.swift`,
-  `Services/Contacts/SystemContactLinkServiceTests.swift` (fake `SystemContactReading`),
+  `Services/Contacts/SystemContactLinkServiceTests.swift` (fake `SystemContactReading`; the
+  §4.2 drain cases: follow-up runs with the latest roster, coalescing, no-trigger-drop),
   `Services/Contacts/SystemContactPhotoWriterTests.swift` (fake writer; intent confinement;
   no-attempt matrix; outcome mapping totality incl. `FamilyPhotoEditorState.from`;
-  source-scan pins).
+  source-scan pins), `Services/Contacts/ContactsAccessTests.swift` (`from(_:)` table +
+  `.limited` ⇒ `.allowsReading` mapping pins), `App/ContactsAccessGateTests.swift` (per-site
+  source pins on the §3.5 gate expressions).
 
 ## 9. Technical risks and mitigations
 
 | # | Risk | Mitigation | Pinning test |
 |---|---|---|---|
 | R1 | **Identifier instability** — iOS may delete/reissue `CNContact.identifier`s (iCloud merges, restores); a stale link must never call the wrong person | Fingerprint re-check at EVERY use: verification (§6.2 L1) at refresh, attempt-time check before any write; unverified links behave as absent; never auto-removed; `family.link.stale` surfaces the state; the number path (dial/routing) still resolves by NUMBER under the trailing-digit rule | `SystemContactLinkServiceTests` degrade matrix; `UnifiedContactSearchTests` unlinked-pair parity; `SystemContactPhotoWriterTests` no-write-on-mismatch |
-| R2 | **Limited access (iOS 18/26)** — granted-subset reads, writes refused for non-granted records, `.limited` currently collapsed into `.denied` by `@unknown default` | `.limited` added end-to-end: readable-everywhere, never re-prompting; distinct honest caption (`call.search.accessLimited`); write detection is attempt-based (`notInGrantedSelection` outcome); UI never claims success or failure it can't verify | `ContactsAccess.from`/`SystemContactWriteAccess.from` pure mapping tests; writer outcome matrix; wizard/call-surface access-switch compile exhaustiveness |
+| R2 | **Limited access (iOS 18/26)** — granted-subset reads, writes refused for non-granted records, `.limited` currently collapsed into `.denied` by `@unknown default`; equality-based access gates (CallView) compile cleanly and would silently take the else path | `.limited` added end-to-end: readable via `allowsReading` at every ENUMERATED gate (§3.5 — switch arms, equality sites, load gates, grant conditions), never re-prompting; distinct honest caption (`call.search.accessLimited`) on BOTH search surfaces; write detection is attempt-based (`notInGrantedSelection` outcome); UI never claims success or failure it can't verify | mapping pins (`ContactsAccessTests`: `.limited` ⇒ `.allowsReading`, `from(_:)` table; `SystemContactWriteAccess.from` table) + per-site source pins (`ContactsAccessGateTests`: every §3.5 gate asserts `allowsReading` present, `== .allowed` absent — a reverted gate FAILS) + writer outcome matrix |
 | R3 | **Unversioned-store migration** — a corrupt/partial payload could crash the boot read or silently drop fields | The optional-field decoder pattern; separate `LegacyNicknameKeys` container keeps the synthesized encoder authoritative; corrupt link fields → nil; decoder pinned by fixtures from every historical shape | `FamilyContactStoreTests` round-trip + legacy blank/whitespace/nil cases + corrupt-link fixture; DV-6 |
 | R4 | **Call-dialer union conflicts** — both features touch AppCoordinator/LeafViews/MethodResolver (in flight on master) | Sequence behind its merge (L1 §16); our resolution UPSTREAM (choose the person), their chain DOWNSTREAM (choose the channel) — never inverted; `MethodResolver` untouched; union-preserving edits in shared structs | call-dialer scoped suites + ours on the merged build; manual chain check at DV |
 | R5 | **Grapheme pin hazards** — nickname matching must not introduce new Character-cluster behavior (Devanagari partial-word semantics are regression-pinned) | All matching funnels through `NepaliTextNormalizer` + the SAME `range(of:options:)` semantics as today; no new grapheme logic; the new nickname tiers are additive branches gated on non-empty nicknames | `UnifiedContactSearchTests` + `ContactResolverTests` Devanagari pins (positive AND negative), including a Character-cluster partial-word case asserted to behave EXACTLY like the name tier |
 | R6 | **Performance budget regression** — index build/query could exceed ≤20 ms at max roster | Precomputed normalized strings, O(1) exact map, ≤108 substring checks; build in one pass; measured assertions with ceilings; the editor caps entries at 8 (tested envelope) | `FamilyContactIndexTests` build ceiling; search/resolve perf tests (measured values recorded) |
-| R7 | **Concurrency regressions** — off-main published-state mutation, stale snapshot/face publication, two saves racing one record | Main-confined published state; actor-isolated services; single-flight refresh with generation ordering; identity-guarded task assignment; strictly serial writes (actor) | `SystemContactLinkServiceTests` coalescing; face identity unit tests; writer serialization test via the fake (no interleaved intents) |
+| R7 | **Concurrency regressions** — off-main published-state mutation, stale snapshot/face publication, two saves racing one record | Main-confined published state; actor-isolated services; single-flight refresh with latest-roster capture and generation-ordered publication (§4.2); identity-guarded task assignment; strictly serial writes (actor) | `SystemContactLinkServiceTests` coalescing; face identity unit tests; writer serialization test via the fake (no interleaved intents) |
 | R8 | **False-success copy** — any path that shows "updated in your phone's contacts" without byte-verified proof | `.written` requires read-back byte equality; every other attempt outcome maps to kept-on-phone copy; the app-local copy is persisted first (never-lose) so the fallback sentence is always true | `SystemContactPhotoWriterTests` read-back mismatch → `.keptOnPhone`; `FamilyPhotoEditorState.from` totality test |
 
 ## 10. Traceability additions (beyond L1 §18)
