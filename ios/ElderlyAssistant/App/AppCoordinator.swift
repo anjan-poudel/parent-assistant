@@ -4900,9 +4900,25 @@ self.noteTalkContractChanged()
             voiceSession.transitionViaIdle(to: .listening)
             armVoiceWatchdog()
         case .processing:
-            voiceSession.transition(to: .transcribing)
+            // [AUTO-LISTEN LATE-EVENT FIX] (2026-10-11, device crash
+            // ElderlyAssistant-2026-10-11-223011.ips, 17 Pro Max) The
+            // mid-cycle events are legality-checked, not asserted: the
+            // answer interception resolves the dialogue frame back to
+            // `.idle` INSIDE the turn, while this same turn's
+            // `.processing`/`.routing` emissions still travel the
+            // main-queue sink behind it — an `.idle → .transcribing`
+            // edge is not in the transition table, and the debug
+            // assertion crash only surfaced on the 12 GB device (on the
+            // 6 GB devices the OOM kill masked the same bug). A late
+            // event whose edge is illegal is the tail of a turn whose
+            // session side already closed — skip it.
+            if voiceSession.state.canTransition(to: .transcribing) {
+                voiceSession.transition(to: .transcribing)
+            }
         case .routing:
-            voiceSession.transition(to: .understanding)
+            if voiceSession.state.canTransition(to: .understanding) {
+                voiceSession.transition(to: .understanding)
+            }
         case .error:
             voiceSession.transition(to: .error)
             cancelVoiceWatchdog()

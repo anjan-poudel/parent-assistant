@@ -800,6 +800,7 @@
 		F9733892B9057BFD343A0326 /* TimerAlarmSystemWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 035C53FE0D3B7A5E398E8009 /* TimerAlarmSystemWidget.swift */; };
 		F9A1B873CE4E1B83AAC4AE62 /* ApplianceGuidancePolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F269E7A40BD190077BD33723 /* ApplianceGuidancePolicyTests.swift */; };
 		F9F9B701EF9EE201C206BAFF /* FeedTranslator.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4C9E6972B31A317A9768601 /* FeedTranslator.swift */; };
+		FAE41336095EADFA131AAC3D /* VoicePipelineAnswerCaptureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56EFB3262D7C1274866FDEE5 /* VoicePipelineAnswerCaptureTests.swift */; };
 		FB08138BA9AC3832DC85F65A /* TimerAlarmWidgetExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = C8B55A5BB14FF231C646B663 /* TimerAlarmWidgetExtension.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		FB7C3A5765B46B788BE2A50E /* ReplySpeakLane.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF3D6AAD86A9608F1FBC7830 /* ReplySpeakLane.swift */; };
 		FBC88FA25857FE81D384DA30 /* LiveCallDetectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FF3C56B2C8890D5319BBC15 /* LiveCallDetectorTests.swift */; };
@@ -1132,6 +1133,7 @@
 		5651D47E7A43C3A9754E116B /* CommandRouterKeywordIntentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandRouterKeywordIntentTests.swift; sourceTree = "<group>"; };
 		566FA01A61825783A01FCDB5 /* LiveOverlayTextMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveOverlayTextMetrics.swift; sourceTree = "<group>"; };
 		5679B85F9396F2FC4638A4AA /* AppAppearance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAppearance.swift; sourceTree = "<group>"; };
+		56EFB3262D7C1274866FDEE5 /* VoicePipelineAnswerCaptureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoicePipelineAnswerCaptureTests.swift; sourceTree = "<group>"; };
 		570CD7DB19E31A5F28BEC4C1 /* LiveTranslateMemoryCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTranslateMemoryCacheTests.swift; sourceTree = "<group>"; };
 		573576FF9D08E597CC160495 /* FeedServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedServiceTests.swift; sourceTree = "<group>"; };
 		5752A2A6EEC2DE266A00DAC2 /* TithiCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TithiCalculator.swift; sourceTree = "<group>"; };
@@ -2436,6 +2438,7 @@
 				62E0366B5FF6055695A53C3D /* VADHangoverTrimTests.swift */,
 				9AD22F253FD8BA87501C3442 /* VoiceBiometricStoreTests.swift */,
 				940ADBAE2E5A811B03503971 /* VoiceContactSearchRouteTests.swift */,
+				56EFB3262D7C1274866FDEE5 /* VoicePipelineAnswerCaptureTests.swift */,
 				9AE54E6D163F8A4276A95D35 /* VoicePipelineNoiseFilterSeamTests.swift */,
 				448AE9ACC892843EBAB452D2 /* VoiceSettingsModelTests.swift */,
 				97E4FA9BFDEB205761D581C0 /* VoiceTurnLatencyTracerTests.swift */,
@@ -4060,6 +4063,7 @@
 				D04AF7E3BC73170DA9484CE6 /* VoiceBiometricStoreTests.swift in Sources */,
 				02BFFE02E439B8A91A77ED10 /* VoiceCalendarEventWriterTests.swift in Sources */,
 				CAEA1742AE7EB60E97468976 /* VoiceContactSearchRouteTests.swift in Sources */,
+				FAE41336095EADFA131AAC3D /* VoicePipelineAnswerCaptureTests.swift in Sources */,
 				AB953708B661CF95D065EB19 /* VoicePipelineNoiseFilterSeamTests.swift in Sources */,
 				482BC982DD49234B12D53434 /* VoiceSessionBindingTests.swift in Sources */,
 				31BBAB14511B2440F03E0FE1 /* VoiceSessionStateMachineTests.swift in Sources */,
