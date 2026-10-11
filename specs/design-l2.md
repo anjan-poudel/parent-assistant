@@ -4,6 +4,10 @@ Feature: `family-contacts-unify` (worktree branch `feat/family-contacts-unify`, 
 `elderly-ai-assistant-family-contacts-unify`; base master `8089c735`).
 Task: `design-l2`, agent `principal-engineer`, contract `component_design_l2`.
 Date: 2026-10-12.
+Revision: rev 3 (2026-10-12) — review iteration-2 residual R4 applied: the fifth access
+consumer `AppCoordinator.refreshNativeMissedCallNames` (:8327-8358) added to the §3.5
+enumeration with its fix spec (:8336 status re-read, :8338 `allowsReading` guard, :8346 real
+`access:` passthrough) and pinned (§8.2, §6.4, §8.3).
 Revision: rev 2 (2026-10-12) — review-l2 NO_GO rework applied: R1 `.limited` gates
 (§2.2, §3.5, §8.2, §9 R2); R2 drain-loop coalescing (§4.2, §3.6); R3 contiguity pin
 (§7); minors (§1.7, §2.2, §8.2).
@@ -874,6 +878,16 @@ required change):
   `.limited`. `grantAccess` (:2331-2339) load condition `if granted` →
   `if access?.allowsReading == true`. Without these, relaunching with already-granted limited
   access renders the §2.2 search UI over an unloaded book.
+- **AppCoordinator — `refreshNativeMissedCallNames` (:8327-8358), the FIFTH
+  `AddressBookDirectory.access()` consumer** (runs on a detached utility Task with a LOCAL
+  access snapshot — nothing in this call touches published state): after `requestAccess()`
+  (:8335) RE-READ the status — replace `access = granted ? .allowed : .denied` (:8336) with
+  `_ = await directory.requestAccess()` + `access = AddressBookDirectory.access()` (a
+  limited-selection sheet must not be collapsed to `.allowed`) — change the guard (:8338) to
+  `guard access.allowsReading, let entries = try? directory.allEntries()` (the granted set
+  enumerates under `.limited`), and pass the REAL value at :8346 (`access: access`) instead
+  of the hardcoded `access: .allowed` — the resolver's own `.limited`-readable arm then
+  makes the decision.
 - **Pins that can fail**: `ContactsAccessTests` (new) pins the pure mapping
   (`.limited` ⇒ `.allowsReading`; `.denied`/`.notDetermined` ⇒ false; the `from(_:)` table);
   `ContactsAccessGateTests` (new, source-scan) extracts each enumerated expression/function
@@ -1155,7 +1169,9 @@ write to a different person — the write is prevented before `execute`.
 - `ContactsAccess` gate pins (the R1 fix, made able to fail): `ContactsAccessTests` (mapping —
   `.limited` ⇒ `.allowsReading`; `from(_:)` table) and `ContactsAccessGateTests` (per-site
   source pins asserting `allowsReading` present / `== .allowed` absent in each §3.5-enumerated
-  expression of LeafViews.swift and SettingsView.swift).
+  expression of LeafViews.swift, SettingsView.swift AND AppCoordinator.swift
+  (`refreshNativeMissedCallNames`: :8336 re-read present, :8338 `allowsReading`, :8346
+  `access: access`, no hardcoded `.allowed`)).
 
 ## 7. Localization — FINAL frozen copy (21 keys)
 
@@ -1265,7 +1281,7 @@ sibling). Pinned by the source-scan test (§6.4).
 | `UnifiedContactSearch` signature/Outcome/tier changes (per §1.6) | `Services/Contacts/UnifiedContactSearch.swift` |
 | `ContactResolver` index provider + bands + near-miss | `Services/Intents/ContactResolver.swift` |
 | `ContactPhotoStore.processedJPEG(_:) -> Data?` (static extraction: `scaledForStorage` → `jpegData`; `save` refactored to call it — byte-identical output) + `loadData(named:)` | `Services/Storage/ContactPhotoStore.swift` |
-| Coordinator state, `faceIdentity/faceImage/faceThumbnail`, `SystemContactUnlinkMode`, `unlinkMode`, `setFamilyContactLink`, `syncSystemPhoto`, `refreshVerifiedLinks`, `refreshContactsIdentity`, add/update signatures, link-aware `familyContact(matchingPhone:)` | `App/AppCoordinator.swift` (`familyContact(matchingPhone:)` :8367 delegates to `familyMatch` then `linkedFamilyMatch`; missed-call family pass :8301 uses the same; `refreshNativeMissedCallNames` :8342 passes `verifiedLinks`) |
+| Coordinator state, `faceIdentity/faceImage/faceThumbnail`, `SystemContactUnlinkMode`, `unlinkMode`, `setFamilyContactLink`, `syncSystemPhoto`, `refreshVerifiedLinks`, `refreshContactsIdentity`, add/update signatures, link-aware `familyContact(matchingPhone:)` | `App/AppCoordinator.swift` (`familyContact(matchingPhone:)` :8367 delegates to `familyMatch` then `linkedFamilyMatch`; missed-call family pass :8301 uses the same; `refreshNativeMissedCallNames` :8342 passes `verifiedLinks` AND the real access — :8336 status re-read after the prompt, :8338 guard → `allowsReading`, :8346 `access: access`) |
 | Wizard restructure (state, subviews, steering, save flow), list chip + face migration, `loadDraft` faces; search access gates → `allowsReading` (`searchSection` switch arm :2117, `refreshSearchAccess` :2325, `grantAccess` :2331) | `App/SettingsView.swift` |
 | `CallView` face migration, `UnifiedContactResultRow.caption: String? = nil` + synthesized-row caption render, `ContactTile` face task; CallView `.limited` gates → `allowsReading` (:1343, :1347-1362, :1370, :1379, :1413, :1519) + the `call.search.accessLimited` caption in `searchArea` | `App/LeafViews.swift` |
 | `DownsampledImageCache` doc note for the `sysphoto:` key family (no API change) | `App/ViewCaches.swift` |
@@ -1290,7 +1306,9 @@ sibling). Pinned by the source-scan test (§6.4).
   no-attempt matrix; outcome mapping totality incl. `FamilyPhotoEditorState.from`;
   source-scan pins), `Services/Contacts/ContactsAccessTests.swift` (`from(_:)` table +
   `.limited` ⇒ `.allowsReading` mapping pins), `App/ContactsAccessGateTests.swift` (per-site
-  source pins on the §3.5 gate expressions).
+  source pins on the §3.5 gate expressions, including
+  `AppCoordinator.refreshNativeMissedCallNames`'s :8336 re-read / :8338 guard / :8346
+  passthrough).
 
 ## 9. Technical risks and mitigations
 
