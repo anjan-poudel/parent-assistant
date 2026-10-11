@@ -2115,7 +2115,12 @@ private struct FamilyContactWizardSheet: View {
     private var searchSection: some View {
         VStack(spacing: 10) {
             switch access {
-            case .allowed:
+            case .allowed, .limited:
+                // T-148a mechanical compile fix: `.limited` shares the
+                // `.allowed` body so the switch stays exhaustive. The
+                // honest `.limited` caption + affordances are T-148b
+                // (design-l2 §2.2) — this arm is that unit's starting
+                // point, not the finished treatment.
                 searchField
                 if entries == nil {
                     if loadFailed {

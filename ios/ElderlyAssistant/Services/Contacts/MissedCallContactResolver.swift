@@ -89,9 +89,12 @@ enum MissedCallContactResolver {
     /// family first, then the native book — under the CURRENT Contacts
     /// access state.
     ///
-    /// - `.allowed`: the native entries may be consulted; a match there
-    ///   resolves to its name, and no match anywhere resolves honestly
-    ///   (`.unresolved`, raw number shows).
+    /// - `.allowed`/`.limited`: the native entries may be consulted; a
+    ///   match there resolves to its name, and no match anywhere resolves
+    ///   honestly (`.unresolved`, raw number shows). `.limited` (iOS 18
+    ///   "Select Contacts") is a granted SUBSET — readable, so consulted
+    ///   the same way; a person outside the selection simply never
+    ///   matches (an honest "no match", never a denial claim).
     /// - `.notDetermined`: the native book has not been asked yet, so the
     ///   native half cannot be consulted — `.needsPermission` names that
     ///   gap instead of pretending the number matched nobody.
@@ -105,7 +108,7 @@ enum MissedCallContactResolver {
             return .name(contact.name)
         }
         switch access {
-        case .allowed:
+        case .allowed, .limited:
             if let entry = nativeMatch(phone: phone, in: native) {
                 return .name(entry.name)
             }
