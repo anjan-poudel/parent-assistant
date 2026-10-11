@@ -7978,9 +7978,18 @@ self.noteTalkContractChanged()
     /// (FR-CDP-015): the remaining candidates at THIS attempt, plus the
     /// contact's resolved Messenger handle (the feasibility filter).
     /// `nil` means "no hop" — the shipped behaviour, byte-identical.
+    ///
+    /// `phone` is the W6-review N-4 carry (adjudicated into T-151/T-152):
+    /// the messenger opener has no number of its own, so a hopped
+    /// `.phone` leg would otherwise land on the shipped no-number line
+    /// although the surface that hopped HAS a number. `var` with a
+    /// default (the L2-D3 lesson): the synthesized memberwise
+    /// initializer keeps a DEFAULTED parameter, so every shipped
+    /// `LaunchHop(candidates:handle:)` call site compiles unchanged.
     struct LaunchHop: Equatable {
         let candidates: [CallApp]
         let handle: String?
+        var phone: String? = nil
     }
 
     /// The shared hop decision + announcement (the ONLY
@@ -8030,7 +8039,12 @@ self.noteTalkContractChanged()
         case .phone:
             performSystemContactCall(name: name, phone: phone)   // floor: its own honest line
         case .faceTime:
-            performFaceTimeCall(name: name, phone: phone, video: isVideo)
+            // W6-review N-1 carry (T-151/T-152): the failed FaceTime
+            // attempt threads its remaining candidates on — the same form
+            // the `.whatsApp` and `.messenger` legs below already carry,
+            // so a hop never abandons its suffix.
+            performFaceTimeCall(name: name, phone: phone, video: isVideo,
+                                hop: LaunchHop(candidates: step.remaining, handle: handle))
         case .whatsApp:
             performSystemContactWhatsApp(name: name, phone: phone,
                                          hop: LaunchHop(candidates: step.remaining, handle: handle))
@@ -8089,31 +8103,63 @@ self.noteTalkContractChanged()
     }
 
     /// Tap-originated call from a ContactTile video/audio button
-    /// (contact-call-buttons task, 2026-09-06). The tap IS the
-    /// confirmation (redesign precedent: the user's own hand on their own
-    /// unlocked phone — the same trust model as any contacts app), so
-    /// unlike the voice flow there is no PendingCallAction: resolve the
-    /// contact's preferred app (contact preference → global default,
-    /// baked into the model) and open it immediately, announcing aloud
+    /// (contact-call-buttons task, 2026-09-06; chain-routed by T-152).
+    /// The tap IS the confirmation (redesign precedent: the user's own
+    /// hand on their own unlocked phone — the same trust model as any
+    /// contacts app), so unlike the voice flow there is no
+    /// PendingCallAction: the contact's preferred app (contact
+    /// preference → global default, baked into the model) goes through
+    /// the resolution chain with THIS button's vocabulary — a video tile
+    /// never resolves to the GSM dialer, an audio tile never to FaceTime
+    /// (the seam substitutes what the vocabulary forbids) — the routed
+    /// channel is announced at resolution when the chain skipped one
+    /// (FR-CDP-016; ADR-CDP-07: BEFORE the open, since a successful open
+    /// may background the app), and the branch opens it, announcing aloud
     /// which surface actually appeared — the same dual-channel honesty
-    /// `performCallAction` holds to. No method-history learning here:
-    /// the contact's stored preference IS this path's source of truth,
-    /// and `CallMethod` has no messenger case to record.
+    /// `performCallAction` holds to. A failed open hops through the
+    /// remaining candidates; the phone floor stays terminal (RES-10) and
+    /// the WhatsApp lane's terminal/recovery arms never hop. No
+    /// method-history learning here: the contact's stored preference IS
+    /// this path's source of truth, and `CallMethod` has no messenger
+    /// case to record.
     func performContactCall(_ contact: FamilyContact, kind: ContactCallKind) {
         let locale = activeLocale
-        let app = kind == .video ? contact.resolvedVideoApp : contact.resolvedAudioApp
+        let preferred = kind == .video ? contact.resolvedVideoApp : contact.resolvedAudioApp
+        let vocabulary: CallChannelVocabulary = kind == .video ? .video : .audio
+        let route = Self.resolvedCallChannel(
+            explicit: preferred,
+            defaultApp: defaultCallApp,
+            secondaryApp: secondaryCallApp,
+            messengerHandleAvailable: hasUsableMessengerHandle(contact.messengerHandle),
+            whatsAppInstalled: whatsAppInstalledNow,
+            vocabulary: vocabulary)
         observabilityBus.emit(ObservabilityEvent(
             component: "contact_call_buttons",
             eventType: "tap",
             durationMs: nil,
-            outcome: "\(kind == .video ? "video" : "audio"):\(app.rawValue)",
+            outcome: "\(kind == .video ? "video" : "audio"):\(route.channel.rawValue):"
+                + (route.fellBackFrom.isEmpty ? "direct" : "fellBack"),
             errorCode: nil,
             metadata: [:]  // no contact identifiers — C9 policy
         ))
-        switch app {
+        if let skipped = route.fellBackFrom.first {
+            // ADR-CDP-07: at resolution, BEFORE the open. Nothing is
+            // spoken when nothing fell back (FR-CDP-016 scenario 3).
+            speak(text: L10n.fmt("call.announce.fallbackRouted", locale: locale,
+                                 CallChannelChain.label(skipped, locale: locale),
+                                 contact.name,
+                                 CallChannelChain.label(route.channel, locale: locale)))
+        }
+        let candidates = CallChannelChain.hopCandidates(preferred: preferred,
+                                                        secondary: secondaryCallApp,
+                                                        routed: route.channel,
+                                                        vocabulary: vocabulary)
+        switch route.channel {
         case .faceTime:
-            // Video-only in the button vocabulary; `resolvedVideoApp`
-            // already guarantees an audio tap never lands here.
+            // Video-only in the button vocabulary: `resolvedVideoApp` is
+            // video-legal by construction and the seam substitutes any
+            // forbidden route with the vocabulary terminal, so an audio
+            // tap can never reach this branch.
             switch callLinks.openFaceTime(handle: contact.phone, video: true) {
             case .opened:
                 setOutcome(icon: "video.fill",
@@ -8126,6 +8172,13 @@ self.noteTalkContractChanged()
                 setOutcome(icon: "exclamationmark.triangle.fill",
                            text: L10n.str("router.call.facetimeUnavailable", locale: locale))
                 speak(text: L10n.str("router.call.facetimeUnavailable", locale: locale))
+                // Failed open (L2 §10.1): the shipped line above stands;
+                // the hop then attempts the remaining candidates through
+                // the same shipped openers.
+                performLaunchFailHop(after: .faceTime, candidates: candidates,
+                                     name: contact.name, phone: contact.phone,
+                                     handle: contact.messengerHandle,
+                                     isVideo: kind == .video, locale: locale)
             }
         case .phone:
             guard callLinks.openPhone(contact.phone) else {
@@ -8156,8 +8209,19 @@ self.noteTalkContractChanged()
                                messengerHandle: contact.messengerHandle)
             case .invalidHandle:
                 announceNoUsableNumber(contact: contact, locale: locale)
+                // Failed open (L2 §10.1): the shipped line above stands;
+                // the hop then attempts the remaining candidates.
+                performLaunchFailHop(after: .messenger, candidates: candidates,
+                                     name: contact.name, phone: contact.phone,
+                                     handle: contact.messengerHandle,
+                                     isVideo: kind == .video, locale: locale)
             }
         case .whatsApp:
+            // The WhatsApp lane never hops (L2 §10.1): `invalidPhone` is
+            // a data failure and `needsNativeCompose`/`copiedNumber` are
+            // recoveries — every arm below is the shipped terminal or
+            // recovery, byte-identical, and `candidates` is deliberately
+            // not consulted here.
             switch callLinks.openWhatsAppCallChat(contact.phone) {
             case .openedChat:
                 setOutcome(icon: "message.fill",
@@ -8347,11 +8411,13 @@ self.noteTalkContractChanged()
     /// and says so. No recency entry.
     /// `hop` (FR-CDP-015, design-l2 §10.1): `.invalidHandle` is a failed
     /// open — after the shipped honest line the remaining candidates are
-    /// attempted. This opener carries no phone number (design-l2 §14), so
-    /// a hopped `.phone` leg has nothing to dial and lands on the shipped
-    /// `call.announce.noPhoneNumber` line; the call-site surfaces that DO
-    /// hold the number keep it on their own floor path. `isVideo: false`
-    /// matches the search surfaces' audio-shaped FaceTime (L2 §9.1).
+    /// attempted. This opener carries no number of its own (design-l2
+    /// §14), so a hopped `.phone` leg dials `hop.phone` when the hopping
+    /// surface carried one (W6-review N-4 carry, T-151/T-152) and the
+    /// shipped `call.announce.noPhoneNumber` line when it did not — the
+    /// hop can no longer report "no number" for a row that has one.
+    /// `isVideo: false` matches the search surfaces' audio-shaped
+    /// FaceTime (L2 §9.1).
     func performSystemContactMessenger(name: String, handle: String,
                                        hop: LaunchHop? = nil) {
         let locale = activeLocale
@@ -8384,9 +8450,12 @@ self.noteTalkContractChanged()
             noteSearchChannelTap(outcome: "messenger:invalidHandle")
             // Failed open (L2 §10.1 row 14): the shipped line and the
             // shipped tap event above stand; the hop then attempts the
-            // remaining candidates through the same shipped openers.
+            // remaining candidates through the same shipped openers. The
+            // hopped floor leg dials the hop's own number (N-4 carry) —
+            // `?? ""` keeps the shipped no-number line for hop-less
+            // callers, byte-identical to before.
             performLaunchFailHop(after: .messenger, candidates: hop?.candidates ?? [],
-                                 name: name, phone: "", handle: hop?.handle,
+                                 name: name, phone: hop?.phone ?? "", handle: hop?.handle,
                                  isVideo: false, locale: locale)
         }
     }

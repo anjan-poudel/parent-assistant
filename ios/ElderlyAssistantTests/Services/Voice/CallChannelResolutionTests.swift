@@ -1580,6 +1580,468 @@ final class CallChannelResolutionTests: XCTestCase {
                       "the call-chat opener's shipped recovery chain must stay intact")
     }
 
+    // MARK: - Tap paths — address-book rows (T-151)
+    //
+    // Security evidence for call-dialer-primary-secondary at the ROW TAP
+    // (design-l2 §9.1; FR-CDP-010/016, NFR-CDP-002/004, the SA-3 row
+    // surface: the floor is reachable from every row state): the row state
+    // is the FIVE-argument call over ONE snapshot — routed channel,
+    // provenance and hop candidates together (L2-D10) — the row's probe is
+    // the ONE chain probe (no second probe, no new URL literal, no new
+    // egress), the tap announces the routed channel BEFORE the open
+    // (ADR-CDP-07) and threads the pre-built hop into every routed opener,
+    // and the `.phone` floor — where the numberless dead row lands — keeps
+    // the shipped honest line with no chain attempt.
+    //
+    // The row helpers are `private` inside `CallView` (a SwiftUI View), so
+    // no unit seam reaches them: the row's SOURCE is pinned comment-stripped
+    // (a comment can never stand in for code), and the row's DECISIONS run
+    // behaviourally through the very seams the row calls
+    // (`AppCoordinator.resolvedCallChannel` + `CallChannelChain.hopCandidates`
+    // with the row's argument shape). The two carried W6 fixes (N-1: the
+    // FaceTime leg threads the hop; N-4: the hop carries the row's number)
+    // are pinned at the source AND, where the shipped openers allow it,
+    // behaviourally — an empty handle and an empty number fail before any
+    // platform probe, so nothing opens and nothing is dialed.
+
+    /// FR-CDP-004/005/007 (scenario "The probe is stubbed false and the row
+    /// still routes") — a row preferring WhatsApp with the installed probe
+    /// stubbed false routes to the permitted secondary, or to the floor
+    /// when the secondary is infeasible too — never to a channel it cannot
+    /// open — and the row's hop list comes from the same snapshot.
+    func testRowProbeStubbedFalseRoutesToSecondaryOrFloor() {
+        // The row's exact argument shape: explicit = the stored preference,
+        // default/secondary = the settings pair, handle availability, the
+        // probed WhatsApp fact.
+        let routed = assertResolved(explicit: .whatsApp, defaultApp: .phone,
+                                    secondaryApp: .messenger, handleAvailable: true,
+                                    whatsAppInstalled: false, expected: .messenger,
+                                    expectedFellBackFrom: [.whatsApp])
+        XCTAssertEqual(CallChannelChain.hopCandidates(preferred: .whatsApp,
+                                                      secondary: .messenger,
+                                                      routed: routed.channel),
+                       [.phone],
+                       "the routed secondary's remaining candidate is the floor")
+
+        let floor = assertResolved(explicit: .whatsApp, defaultApp: .phone,
+                                   secondaryApp: .messenger, handleAvailable: false,
+                                   whatsAppInstalled: false, expected: .phone,
+                                   expectedFellBackFrom: [.whatsApp, .messenger])
+        XCTAssertEqual(CallChannelChain.hopCandidates(preferred: .whatsApp,
+                                                      secondary: .messenger,
+                                                      routed: floor.channel),
+                       [CallApp](),
+                       "the floor is the routed channel: the terminal is already open, "
+                       + "nothing remains to hop to")
+    }
+
+    /// SA-3 (the address-book row surface) — the floor is reachable from
+    /// EVERY row state: across the whole row matrix (stored preference ×
+    /// secondary × handle × probe), the routed channel is the floor or the
+    /// floor sits among the row's hop candidates. Every row state therefore
+    /// ends at the GSM dialer on its own channel or through one hop — never
+    /// a dead end.
+    func testRowFloorReachableFromEveryRowState() {
+        var cells = 0
+        for preferred in Self.chainChannels {
+            for secondary in Self.chainChannels {
+                for combo in chainFeasibilityCombos() {
+                    cells += 1
+                    let cell = "preferred: \(preferred), secondary: \(secondary), "
+                        + "handle: \(combo.handle), whatsApp: \(combo.whatsApp)"
+                    // The row's own argument shape, verbatim: explicit =
+                    // the stored preference, secondary = the settings pair
+                    // (the default here), handle availability, probe fact.
+                    let row = AppCoordinator.resolvedCallChannel(
+                        explicit: preferred,
+                        defaultApp: .phone,
+                        secondaryApp: secondary,
+                        messengerHandleAvailable: combo.handle,
+                        whatsAppInstalled: combo.whatsApp)
+                    let rowHop = CallChannelChain.hopCandidates(preferred: preferred,
+                                                                secondary: secondary,
+                                                                routed: row.channel)
+                    XCTAssertTrue(row.channel == .phone || rowHop.contains(.phone),
+                                  "the floor is routed or hoppable — " + cell)
+                }
+            }
+        }
+        XCTAssertEqual(cells, 64, "the floor invariant must hold over every row cell")
+    }
+
+    /// FR-CDP-016 / ADR-CDP-07 (scenario "The tap announces the routed
+    /// channel then opens it") — the tap announces the routed channel at
+    /// RESOLUTION and only when the chain skipped a channel (the shipped
+    /// `call.announce.fallbackRouted` line naming the skipped channel, the
+    /// contact and the channel that opens), BEFORE any opener call; and the
+    /// pre-built hop is threaded into EVERY routed opener — FaceTime,
+    /// WhatsApp and Messenger alike — and never into the `.phone` floor.
+    func testRowAnnouncesBeforeTheOpenAndThreadsTheHop() throws {
+        let source = leafSource()
+        let dialRegion = try region(between: "private func dialChannel(",
+                                    and: "private func chooseChannel(", in: source)
+        let collapsedRegion = collapsed(dialRegion)
+
+        // The announcement: the shipped key, the skipped channel's label,
+        // the contact's name, the routed channel's label — exactly once.
+        let announceNeedle = collapsed("""
+            if let skipped = state.fellBackFrom.first {
+                coordinator.speak(text: L10n.fmt("call.announce.fallbackRouted",
+                                                 locale: locale,
+                                                 CallChannelChain.label(skipped, locale: locale),
+                                                 result.name,
+                                                 CallChannelChain.label(state.resolvedChannel,
+                                                                        locale: locale)))
+            }
+            """).trimmingCharacters(in: .whitespaces)
+        XCTAssertEqual(occurrences(of: announceNeedle, in: collapsedRegion), 1,
+                       "the tap's ONE announcement — nothing extra is spoken when "
+                       + "nothing fell back")
+        let announceRange = try XCTUnwrap(collapsedRegion.range(of: announceNeedle),
+                                          "the row's announce block is absent")
+        let openRange = try XCTUnwrap(collapsedRegion.range(of: "switch state.resolvedChannel {"),
+                                      "the row's channel dispatch is absent")
+        XCTAssertLessThan(announceRange.lowerBound, openRange.lowerBound,
+                          "the announcement precedes the openers: a successful open may "
+                          + "background the app before post-open speech could be heard")
+
+        // The pre-built hop: ONE construction, from the row state's own
+        // snapshot — the candidates, the resolved handle, and the row's
+        // number (the N-4 carry, so a hopped floor leg dials for real).
+        let hopNeedle = collapsed("""
+            let hop = AppCoordinator.LaunchHop(candidates: state.hopCandidates,
+                                               handle: resolvedMessengerHandle(for: result),
+                                               phone: result.phone)
+            """).trimmingCharacters(in: .whitespaces)
+        XCTAssertEqual(occurrences(of: hopNeedle, in: collapsedRegion), 1,
+                       "the hop is built once from the row state (L2-D10)")
+
+        // Every routed opener receives `hop: hop` — three of them — and the
+        // floor case is exactly the shipped `dial(result)` with no hop.
+        XCTAssertEqual(occurrences(of: "hop: hop", in: dialRegion), 3,
+                       "the hop is threaded into every routed opener, no more and no less")
+        let phoneCase = try region(between: "case .phone:", and: "case .faceTime:",
+                                   in: dialRegion)
+        XCTAssertEqual(collapsed(phoneCase).trimmingCharacters(in: .whitespaces),
+                       "case .phone: dial(result)",
+                       "the floor keeps the shipped dial and hops nowhere (RES-10)")
+        let faceTimeCase = try region(between: "case .faceTime:", and: "case .whatsApp:",
+                                      in: dialRegion)
+        XCTAssertTrue(collapsed(faceTimeCase).contains(collapsed("""
+            coordinator.performFaceTimeCall(name: result.name, phone: result.phone,
+                                            video: false, hop: hop)
+            """).trimmingCharacters(in: .whitespaces)),
+                      "the FaceTime opener carries the hop")
+        let whatsAppCase = try region(between: "case .whatsApp:", and: "case .messenger:",
+                                      in: dialRegion)
+        XCTAssertEqual(collapsed(whatsAppCase).trimmingCharacters(in: .whitespaces),
+                       "case .whatsApp: whatsApp(result, hop: hop)",
+                       "the WhatsApp route forwards the hop into the search opener")
+        let messengerStart = try XCTUnwrap(dialRegion.range(of: "case .messenger:"))
+        let messengerTail = String(dialRegion[messengerStart.lowerBound...])
+        XCTAssertTrue(collapsed(messengerTail).contains(collapsed("""
+            guard let handle = resolvedMessengerHandle(for: result) else {
+                let locale = coordinator.activeLocale
+                coordinator.speak(text: L10n.fmt("router.call.messengerNoHandle",
+                                                 locale: locale, result.name))
+                return
+            }
+            """).trimmingCharacters(in: .whitespaces)),
+                      "the shipped stale-state guard is unchanged (only the hop rides along)")
+        XCTAssertTrue(collapsed(messengerTail).contains(collapsed("""
+            coordinator.performSystemContactMessenger(name: result.name, handle: handle,
+                                                      hop: hop)
+            """).trimmingCharacters(in: .whitespaces)),
+                      "the Messenger opener carries the hop")
+        XCTAssertEqual(occurrences(of: "coordinator.performFaceTimeCall(", in: dialRegion), 1)
+        XCTAssertEqual(occurrences(of: "coordinator.performSystemContactMessenger(", in: dialRegion), 1,
+                       "each row opener is called exactly once")
+
+        // The WhatsApp route goes through the leaf's own helper — pinned
+        // whole, so the forward (and the pill's hop-less default tap)
+        // cannot drift.
+        let whatsAppHelper = try region(between: "private func whatsApp(",
+                                        and: "private func dialChannel(", in: source)
+        XCTAssertEqual(collapsed(whatsAppHelper).trimmingCharacters(in: .whitespaces),
+                       collapsed("""
+                           private func whatsApp(_ result: UnifiedContactSearch.Result,
+                                                 hop: AppCoordinator.LaunchHop? = nil) {
+                               coordinator.performSystemContactWhatsApp(name: result.name,
+                                                                        phone: result.phone,
+                                                                        hop: hop)
+                           }
+                           """).trimmingCharacters(in: .whitespaces),
+                       "the row's WhatsApp route forwards the hop into the coordinator's "
+                       + "chat opener; the pill's own tap keeps the defaulted nil")
+    }
+
+    /// NFR-CDP-002 / FR-CDP-005 — ONE probe implementation: the row's
+    /// `whatsAppInstalled` and the coordinator's `whatsAppInstalledNow` both
+    /// delegate to the frozen chain's `whatsAppInstalled(canOpen:)`, the
+    /// chain file owns the only `whatsapp://` literal, and neither surface
+    /// probes the platform itself or builds a second probe URL.
+    func testRowProbeIsTheSingleChainProbe() throws {
+        let leaf = leafSource()
+        let rowProbe = try region(between: "private var whatsAppInstalled: Bool {",
+                                  and: "private var searchField:", in: leaf)
+        XCTAssertEqual(collapsed(rowProbe).trimmingCharacters(in: .whitespaces),
+                       collapsed("""
+                           private var whatsAppInstalled: Bool {
+                               CallChannelChain.whatsAppInstalled(canOpen: { UIApplication.shared.canOpenURL($0) })
+                           }
+                           """).trimmingCharacters(in: .whitespaces),
+                       "the row's probe IS the chain probe over the shipped canOpenURL")
+        XCTAssertEqual(occurrences(of: "CallChannelChain.whatsAppInstalled(canOpen:", in: leaf), 1,
+                       "one probe call site in the leaf")
+        XCTAssertEqual(occurrences(of: "canOpenURL", in: leaf), 1,
+                       "exactly one platform probe in the leaf")
+        XCTAssertEqual(occurrences(of: "whatsapp://", in: leaf), 0,
+                       "the row builds no probe URL of its own — the chain owns the literal")
+
+        let coordinator = coordinatorSource()
+        let nowRegion = try region(between: "var whatsAppInstalledNow: Bool {",
+                                   and: "private func hasUsableMessengerHandle(", in: coordinator)
+        XCTAssertEqual(collapsed(nowRegion).trimmingCharacters(in: .whitespaces),
+                       collapsed("""
+                           var whatsAppInstalledNow: Bool {
+                               CallChannelChain.whatsAppInstalled(canOpen: canOpenURLOnMain)
+                           }
+                           """).trimmingCharacters(in: .whitespaces),
+                       "the coordinator's probe is the same chain check over its "
+                       + "main-thread hop")
+
+        let chain = chainSource()
+        XCTAssertEqual(occurrences(of: "canOpenURL", in: chain), 0,
+                       "the chain never probes the platform itself — the closure is injected")
+        XCTAssertEqual(occurrences(of: "whatsapp://", in: chain), 1,
+                       "the ONE probe literal lives in the chain")
+        XCTAssertTrue(collapsed(chain).contains(collapsed("""
+            static func whatsAppInstalled(canOpen: (URL) -> Bool) -> Bool {
+                canOpen(whatsAppProbeURL)
+            }
+            """).trimmingCharacters(in: .whitespaces)),
+                      "the probe implementation is the chain's one-liner over the "
+                      + "compiled literal")
+    }
+
+    /// Design-l2 §9.1 (the L1 integration #19 call form) / L2-D3/D10 — the
+    /// row state derives from the FIVE-argument call over the six-argument
+    /// seam (vocabulary takes the row surface's default), the single
+    /// construction site passes BOTH provenance fields, and the fields are
+    /// the additively-defaulted pair. The `.phone` dead-row landing
+    /// (`dial(_:)`) is the shipped body, byte-identical — the numberless
+    /// dead row makes no chain attempt.
+    func testRowStateIsTheFiveArgumentCallAndTheDeadRowStaysShipped() throws {
+        let leaf = leafSource()
+        let stateRegion = try region(between: "private func rowChannelState(for result:",
+                                     and: "private func resolvedMessengerHandle(for result:",
+                                     in: leaf)
+        XCTAssertEqual(occurrences(of: "AppCoordinator.resolvedCallChannel(", in: stateRegion), 1)
+        XCTAssertTrue(collapsed(stateRegion).contains(collapsed("""
+            let route = AppCoordinator.resolvedCallChannel(
+                explicit: storedPreference,
+                defaultApp: coordinator.defaultCallApp,
+                secondaryApp: coordinator.secondaryCallApp,
+                messengerHandleAvailable: hasHandle,
+                whatsAppInstalled: coordinator.whatsAppInstalledNow)
+            """).trimmingCharacters(in: .whitespaces)),
+                      "the five-argument call form — the six-argument signature's "
+                      + "vocabulary parameter takes the row surface's default")
+        XCTAssertFalse(stateRegion.contains("vocabulary:"),
+                       "the row passes no vocabulary — `.anyChannel` is its surface")
+        XCTAssertTrue(collapsed(stateRegion).contains(
+            "let preferred = storedPreference ?? coordinator.defaultCallApp"))
+        XCTAssertEqual(occurrences(of: "RowChannelState(", in: stateRegion), 1,
+                       "ONE construction site for the row state")
+        XCTAssertTrue(collapsed(stateRegion).contains(collapsed("""
+            RowChannelState(storedPreference: storedPreference,
+                            resolvedChannel: route.channel,
+                            hasHandle: hasHandle,
+                            storeKey: storeKey,
+                            fellBackFrom: route.fellBackFrom,
+                            hopCandidates: CallChannelChain.hopCandidates(
+                                preferred: preferred,
+                                secondary: coordinator.secondaryCallApp,
+                                routed: route.channel))
+            """).trimmingCharacters(in: .whitespaces)),
+                      "the routed channel, the provenance and the hop candidates come "
+                      + "from the SAME snapshot (L2-D10)")
+        XCTAssertTrue(collapsed(stateRegion).contains("let hasHandle = resolvedMessengerHandle(for: result) != nil"))
+
+        let structRegion = try region(between: "private struct RowChannelState {",
+                                      and: "private struct UnifiedContactResultRow", in: leaf)
+        XCTAssertEqual(occurrences(of: "var fellBackFrom: [CallApp] = []", in: structRegion), 1,
+                       "the provenance field is var-with-default (L2-D3)")
+        XCTAssertEqual(occurrences(of: "var hopCandidates: [CallApp] = []", in: structRegion), 1,
+                       "the hop field is var-with-default (L2-D3)")
+
+        let dialRegion = try region(between: "private func dial(_ result:",
+                                    and: "private func whatsApp(", in: leaf)
+        XCTAssertEqual(collapsed(dialRegion).trimmingCharacters(in: .whitespaces),
+                       collapsed("""
+                           private func dial(_ result: UnifiedContactSearch.Result) {
+                               coordinator.performSystemContactCall(name: result.name, phone: result.phone)
+                               recency[ContactNumberKey.normalized(result.phone)] = Date()
+                           }
+                           """).trimmingCharacters(in: .whitespaces),
+                       "the GSM floor's dial is the shipped body: the open plus the "
+                       + "recency bump, no chain attempt and no hop")
+    }
+
+    /// The numberless dead row, behaviourally: the tap reaches the floor
+    /// with no hop on board and the floor keeps its shipped honest
+    /// behaviour — the no-number line, nothing opened, nothing recorded,
+    /// no chain attempt.
+    @MainActor
+    func testNumberlessDeadRowKeepsTheShippedFloorLine() {
+        let coordinator = makeCoordinator()
+        let activitiesBefore = coordinator.activityLog.entries().count
+        let console = captureConsole {
+            // `dial(_:)`'s own call, verbatim, for a row whose number
+            // normalized to nothing dialable.
+            coordinator.performSystemContactCall(name: Self.hopContactName, phone: "")
+        }
+        XCTAssertTrue(hopEventLines(in: console).isEmpty,
+                      "the dead row makes no chain attempt — no hop event")
+        drainMainQueue()
+        XCTAssertEqual(coordinator.lastOutcome?.text,
+                       L10n.fmt("call.announce.noPhoneNumber",
+                                locale: coordinator.activeLocale, Self.hopContactName),
+                       "the shipped honest line is the dead row's whole outcome")
+        XCTAssertEqual(coordinator.activityLog.entries().count, activitiesBefore,
+                       "nothing opened, nothing recorded")
+    }
+
+    /// W6-review N-1 (carried into this wave with the tap surfaces that make
+    /// it live) — the tap helper's `.faceTime` leg threads the hop's
+    /// remaining candidates into `performFaceTimeCall`, so a failed FaceTime
+    /// hop attempt no longer abandons its suffix. The reviewer-prescribed
+    /// one-line form is pinned verbatim; the step walk pins the two-step
+    /// consumption; the end-to-end arm proves the consequence through the
+    /// SHIPPED openers (empty handle and empty number fail before any
+    /// platform probe — nothing opens, nothing is dialed).
+    @MainActor
+    func testFaceTimeLegThreadsTheRemainingCandidates() throws {
+        let source = coordinatorSource()
+        let helper = try region(between: "private func performLaunchFailHop(",
+                                and: "private func noteLaunchFailHop(", in: source)
+        let faceTimeCase = try region(between: "case .faceTime:", and: "case .whatsApp:",
+                                      in: helper)
+        XCTAssertEqual(collapsed(faceTimeCase).trimmingCharacters(in: .whitespaces),
+                       collapsed("""
+                           case .faceTime:
+                               performFaceTimeCall(name: name, phone: phone, video: isVideo,
+                                                   hop: LaunchHop(candidates: step.remaining, handle: handle))
+                           """).trimmingCharacters(in: .whitespaces),
+                       "the reviewer-prescribed thread (W6 N-1), verbatim")
+
+        let coordinator = makeCoordinator()
+        var first: (next: CallApp, remaining: [CallApp])?
+        var second: (next: CallApp, remaining: [CallApp])?
+        let walkConsole = captureConsole {
+            first = coordinator.launchFailHopStep(after: .messenger,
+                                                  candidates: [.faceTime, .phone],
+                                                  handle: nil, name: Self.hopContactName,
+                                                  locale: englishLocale)
+            second = coordinator.launchFailHopStep(after: .faceTime,
+                                                   candidates: first?.remaining ?? [],
+                                                   handle: nil, name: Self.hopContactName,
+                                                   locale: englishLocale)
+        }
+        XCTAssertEqual(first?.next, .faceTime)
+        XCTAssertEqual(first?.remaining, [.phone])
+        XCTAssertEqual(second?.next, .phone)
+        XCTAssertEqual(second?.remaining, [CallApp]())
+        XCTAssertEqual(hopEventLines(in: walkConsole).count, 2,
+                       "two steps, two hop lines — the list is consumed, never looped")
+
+        let activitiesBefore = coordinator.activityLog.entries().count
+        let console = captureConsole {
+            coordinator.performSystemContactMessenger(
+                name: Self.hopContactName, handle: "",
+                hop: AppCoordinator.LaunchHop(candidates: [.faceTime, .phone], handle: nil))
+        }
+        let lines = hopEventLines(in: console)
+        XCTAssertEqual(lines.count, 2,
+                       "the FaceTime leg's own failure hops on — the suffix is not "
+                       + "abandoned (without the N-1 thread this is ONE line)")
+        XCTAssertTrue(lines.first?.contains("outcome=messenger:faceTime metadata=[:]") ?? false,
+                      lines.first ?? "")
+        XCTAssertTrue(lines.dropFirst().first?.contains("outcome=faceTime:phone metadata=[:]") ?? false,
+                      lines.dropFirst().first ?? "")
+        drainMainQueue()
+        XCTAssertEqual(coordinator.lastOutcome?.text,
+                       L10n.fmt("call.announce.noPhoneNumber",
+                                locale: coordinator.activeLocale, Self.hopContactName),
+                       "the walk ends on the floor's own shipped honest line")
+        XCTAssertEqual(coordinator.activityLog.entries().count, activitiesBefore,
+                       "failed opens record nothing — the whole chain included")
+    }
+
+    /// W6-review N-4 (carried) — `LaunchHop` gains `var phone: String? = nil`
+    /// so the memberwise initializer keeps a DEFAULTED parameter (the L2-D3
+    /// lesson): every shipped `LaunchHop(candidates:handle:)` call site
+    /// compiles unchanged, the row's hop carries its number, and the
+    /// messenger opener's failure branch feeds `hop?.phone` to the hopped
+    /// floor leg. The default arm runs behaviourally below.
+    func testLaunchHopCarriesThePhoneAdditively() throws {
+        let shipped = AppCoordinator.LaunchHop(candidates: [.phone], handle: nil)
+        XCTAssertNil(shipped.phone,
+                     "an unpassed phone defaults nil — every shipped call site is unchanged")
+        XCTAssertEqual(shipped,
+                       AppCoordinator.LaunchHop(candidates: [.phone], handle: nil, phone: nil),
+                       "the two-label form IS the three-label form with the default")
+        XCTAssertEqual(AppCoordinator.LaunchHop(candidates: [.phone], handle: "maya",
+                                                phone: "9841234567").phone,
+                       "9841234567",
+                       "the third parameter carries the number")
+
+        let source = coordinatorSource()
+        let structRegion = try region(between: "struct LaunchHop: Equatable {",
+                                      and: "func launchFailHopStep(", in: source)
+        XCTAssertEqual(occurrences(of: "var phone: String? = nil", in: structRegion), 1,
+                       "`var` with a default — a `let` with an initial value would drop "
+                       + "the parameter from the memberwise init (L2-D3)")
+
+        let messengerRegion = try region(
+            between: "func performSystemContactMessenger(name: String, handle: String,",
+            and: "private func noteSearchChannelTap(", in: source)
+        XCTAssertTrue(collapsed(messengerRegion).contains(collapsed("""
+            performLaunchFailHop(after: .messenger, candidates: hop?.candidates ?? [],
+                                 name: name, phone: hop?.phone ?? "", handle: hop?.handle,
+                                 isVideo: false, locale: locale)
+            """).trimmingCharacters(in: .whitespaces)),
+                      "the messenger opener consumes the hop's own number (N-4): the "
+                      + "hopped floor leg dials for real instead of speaking the "
+                      + "no-number line; `?? \"\"` keeps the shipped line for hop-less callers")
+    }
+
+    /// The N-4 default arm, behaviourally through the shipped openers: a
+    /// hopped floor leg whose hop carries no phone still lands on the
+    /// shipped no-number line (the `?? ""` default — the pre-fix behaviour
+    /// for hop-less callers, byte-identical). The POSITIVE direction (a hop
+    /// that carries a number) cannot run inert: `performSystemContactCall`
+    /// hands any dialable number straight to `UIApplication.shared.open`
+    /// (`PhoneDialer.url` builds a real `tel://` for any digits), so a unit
+    /// arm driving it would dial the simulator for real — the source pin
+    /// above is the honest ceiling there (see the T-151 notes).
+    @MainActor
+    func testHoppedFloorLegWithoutAPhoneKeepsTheShippedLine() {
+        let coordinator = makeCoordinator()
+        let activitiesBefore = coordinator.activityLog.entries().count
+        let console = captureConsole {
+            coordinator.performSystemContactMessenger(
+                name: Self.hopContactName, handle: "",
+                hop: AppCoordinator.LaunchHop(candidates: [.phone], handle: nil))
+        }
+        XCTAssertEqual(hopEventLines(in: console).count, 1)
+        drainMainQueue()
+        XCTAssertEqual(coordinator.lastOutcome?.text,
+                       L10n.fmt("call.announce.noPhoneNumber",
+                                locale: coordinator.activeLocale, Self.hopContactName))
+        XCTAssertEqual(coordinator.activityLog.entries().count, activitiesBefore)
+    }
+
     // MARK: - Helpers (the house patterns the sibling suites ship)
 
     private static let languageKey = "appLanguage"
@@ -1656,6 +2118,21 @@ final class CallChannelResolutionTests: XCTestCase {
     private func coordinatorSource() -> String {
         FeatureSourceScan.codeText(of: FeatureSourceScan.iosDirectory(file: #filePath)
             .appendingPathComponent("ElderlyAssistant/App/AppCoordinator.swift"))
+    }
+
+    /// The Phone leaf's source — the address-book row's home (T-151). The
+    /// row helpers are `private` inside the SwiftUI leaf, so their
+    /// obligations are pinned here at the comment-stripped source.
+    private func leafSource() -> String {
+        FeatureSourceScan.codeText(of: FeatureSourceScan.iosDirectory(file: #filePath)
+            .appendingPathComponent("ElderlyAssistant/App/LeafViews.swift"))
+    }
+
+    /// The frozen chain file (C1) — read-only scan input for the
+    /// single-probe pins.
+    private func chainSource() -> String {
+        FeatureSourceScan.codeText(of: FeatureSourceScan.iosDirectory(file: #filePath)
+            .appendingPathComponent("ElderlyAssistant/Services/Calls/CallChannelChain.swift"))
     }
 
     /// The sibling suite that owns the two shipped log-store
