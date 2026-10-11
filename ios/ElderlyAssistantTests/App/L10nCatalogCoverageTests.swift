@@ -163,12 +163,14 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// to 1,369 when the call-deterministic-fallback (PR #161) and
     /// correction-revive merges added five further non-dialogue keys,
     /// and to 1,370 when the call-nearmiss merge (PR #166) added
-    /// `router.call.didYouMeanPrefix`. The dialogue family is 19 keys
+    /// `router.call.didYouMeanPrefix`, and to 1,391 when the family-contacts
+    /// unit (T-147) landed its 21 frozen keys — measured at 1,389 before
+    /// that unit's insertions, 1,389 → 1,410. The dialogue family is 19 keys
     /// (the 18 design-l2 §16 entries plus `dialogue.correction.ask`,
     /// moved into the family block at this rebase); the family adds
     /// exactly its keys and removes none, so the total is pinned (the
     /// Spotify-localisation suite's count discipline).
-    private static let dialogueBaselineKeyCount = 1_370
+    private static let dialogueBaselineKeyCount = 1_391
 
     /// The design-l2 §16 draft copy, verbatim, both languages. The owner
     /// copy review is a later step recorded in the plan; this pin makes
@@ -549,4 +551,706 @@ final class L10nCatalogCoverageTests: XCTestCase {
             (0x41...0x5A).contains($0.value) || (0x61...0x7A).contains($0.value)
         }
     }
+
+    // MARK: T-147 — the family-contacts family (design-l2 §7, 21 frozen keys)
+
+    /// The pinned inventory: design-l2 §7's frozen 21-key table, in table
+    /// order — 8 `family.link.*`, 7 `family.photo.*`, 4 `family.nickname.*`,
+    /// then the 2 `call.search.*` insertions. The three pre-existing
+    /// `family.photo.add/change/remove` keys are deliberately NOT in this
+    /// inventory: the contiguity pin names them at their in-place
+    /// alphabetical positions instead (span entries 16-18).
+    private static let familyContactsKeys: [String] = [
+        "family.link.chip",
+        "family.link.linkedTo",
+        "family.link.unlink",
+        "family.link.unlinkHint",
+        "family.link.alreadyLinked",
+        "family.link.stale",
+        "family.link.pickHint",
+        "family.link.sectionTitle",
+        "family.photo.accessTitle",
+        "family.photo.accessBody",
+        "family.photo.accessDeniedBody",
+        "family.photo.state.updatedInSystem",
+        "family.photo.state.keptOnPhone",
+        "family.photo.state.systemPhotoRemains",
+        "family.photo.sourceSystem",
+        "family.nickname.entryPlaceholder",
+        "family.nickname.add",
+        "family.nickname.removeLabel",
+        "family.nickname.hint",
+        "call.search.linkedBookName",
+        "call.search.accessLimited",
+    ]
+
+    /// The design-l2 §7 frozen copy, verbatim, both languages. The rows
+    /// mirror the design table 1:1; the copy review is upstream of this
+    /// unit, so any wording change — including an "improvement" — must be a
+    /// deliberate one rather than a drift.
+    private static let familyContactsCopy: [(key: String, en: String, ne: String)] = [
+        ("family.link.chip", "Linked",
+         "जोडिएको"),
+        ("family.link.linkedTo", "Linked to %@",
+         "%@सँग जोडिएको"),
+        ("family.link.unlink", "Remove link",
+         "लिंक हटाउनुहोस्"),
+        ("family.link.unlinkHint", "This only separates the two records. Nothing is deleted, and your phone's contact is not changed.",
+         "यसले दुई रेकर्डलाई मात्र छुट्याउँछ। केही मेटिँदैन, र तपाईंको फोनको सम्पर्क परिवर्तन हुँदैन।"),
+        ("family.link.alreadyLinked", "%@ is already a family contact.",
+         "%@ पहिले नै परिवारको सम्पर्क हो।"),
+        ("family.link.stale", "This phone contact is no longer in your address book. The link is ignored.",
+         "यो फोन सम्पर्क अब तपाईंको फोनबुकमा छैन। लिंक बेवास्ता गरिएको छ।"),
+        ("family.link.pickHint", "Choose the phone contact this person is in.",
+         "यो व्यक्ति फोनमा कुन सम्पर्कको रूपमा छ, त्यो छान्नुहोस्।"),
+        ("family.link.sectionTitle", "Phone contact",
+         "फोन सम्पर्क"),
+        ("family.photo.accessTitle", "Update this person's photo in your phone's contacts?",
+         "यो व्यक्तिको फोटो फोनको सम्पर्कमा पनि अपडेट गर्ने हो?"),
+        ("family.photo.accessBody", "Allowing contacts access lets the app copy the photo you choose onto this person's contact card. Nothing else in your contacts is changed. The app works fully even if you say no.",
+         "सम्पर्क पहुँच अनुमति दिनुभयो भने, तपाईंले छान्नुभएको फोटो यो व्यक्तिको सम्पर्क कार्डमा प्रतिलिपि गर्न सकिन्छ। तपाईंको सम्पर्कमा अरू केही परिवर्तन हुँदैन। तपाईंले नभन्नुभए पनि एप पूरै चल्छ।"),
+        ("family.photo.accessDeniedBody", "Contacts access is off, so the photo will be kept in this app only. You can change this in iPhone Settings.",
+         "सम्पर्कको पहुँच बन्द छ, त्यसैले फोटो यही एपमा मात्र रहन्छ। तपाईं आईफोनको सेटिङमा यो बदल्न सक्नुहुन्छ।"),
+        ("family.photo.state.updatedInSystem", "Photo updated in your phone's contacts.",
+         "फोटो फोनको सम्पर्कमा अपडेट भयो।"),
+        ("family.photo.state.keptOnPhone", "Kept in this app only.",
+         "यही एपमा मात्र राखिएको।"),
+        ("family.photo.state.systemPhotoRemains", "Your phone's contact still has its own photo. Change it in the Contacts app to remove it.",
+         "तपाईंको फोनको सम्पर्कमा अझै आफ्नै फोटो छ। हटाउन कन्ट्याक्ट्स एपमा गएर बदल्नुहोस्।"),
+        ("family.photo.sourceSystem", "Shown from your phone's contacts.",
+         "फोनको सम्पर्कबाट देखाइएको।"),
+        ("family.nickname.entryPlaceholder", "Add a name or variation (e.g. sanu, सानु)",
+         "नाम वा अर्को रूप थप्नुहोस् (जस्तै sanu, सानु)"),
+        ("family.nickname.add", "Add",
+         "थप्नुहोस्"),
+        ("family.nickname.removeLabel", "Remove %@",
+         "%@ हटाउनुहोस्"),
+        ("family.nickname.hint", "Any of these names finds this person — typed or spoken. Names are kept exactly as you enter them.",
+         "यीमध्ये कुनै नामले यो व्यक्ति भेटिन्छ — टाइप गरेको वा बोलेको। नामहरू तपाईंले लेखेकै रूपमा राखिन्छ।"),
+        ("call.search.linkedBookName", "Also in your phone book as %@",
+         "फोनबुकमा %@ को रूपमा पनि छ"),
+        ("call.search.accessLimited", "Searching shows only the contacts you allowed.",
+         "खोज्दा तपाईंले अनुमति दिनुभएका सम्पर्कहरू मात्र देखिन्छन्।"),
+    ]
+
+    /// The exactly-four keys permitted to carry one `%@` (design-l2 §7). No
+    /// other key in the family carries any `%`.
+    private static let familyContactsPlaceholderKeys: [String] = [
+        "family.link.linkedTo",
+        "family.link.alreadyLinked",
+        "family.nickname.removeLabel",
+        "call.search.linkedBookName",
+    ]
+
+    /// design-l2 §7 wording note: the nicknames entry placeholder is the
+    /// ONLY `ne` value in the family permitted to carry ASCII letters — it
+    /// carries the romanized example "sanu" deliberately (the
+    /// store-as-entered showcase). The Devanagari-presence rule still
+    /// applies to it.
+    private static let familyContactsRomanizedExampleKey = "family.nickname.entryPlaceholder"
+    private static let familyContactsRomanizedExample = "sanu"
+
+    /// The exact raw-catalog key lines between `family.emergencyToggleHint`
+    /// and `family.relationship.brother` (both EXCLUDED), in file order —
+    /// design-l2 §7's corrected 22-line contiguity pin: the 12 new
+    /// `family.link.`/`family.nickname.` keys, then the 10 `family.photo.*`
+    /// keys including the 3 PRE-EXISTING ones at their alphabetical
+    /// positions 16-18 (19 new + 3 existing = 22).
+    private static let familyContactsSpan: [String] = [
+        "family.link.alreadyLinked",
+        "family.link.chip",
+        "family.link.linkedTo",
+        "family.link.pickHint",
+        "family.link.sectionTitle",
+        "family.link.stale",
+        "family.link.unlink",
+        "family.link.unlinkHint",
+        "family.nickname.add",
+        "family.nickname.entryPlaceholder",
+        "family.nickname.hint",
+        "family.nickname.removeLabel",
+        "family.photo.accessBody",
+        "family.photo.accessDeniedBody",
+        "family.photo.accessTitle",
+        "family.photo.add",
+        "family.photo.change",
+        "family.photo.remove",
+        "family.photo.sourceSystem",
+        "family.photo.state.keptOnPhone",
+        "family.photo.state.systemPhotoRemains",
+        "family.photo.state.updatedInSystem",
+    ]
+
+    /// Baseline measured on this branch immediately before this unit's
+    /// insertions: 1,389 keys (the dialogue pin above measures the same
+    /// tree). The feature adds exactly 21 keys and removes none — 1,389 →
+    /// 1,410 — so the +21 delta is the constant, not the absolute. The
+    /// T-144 call-dialer merge (still open when this was measured) adds its
+    /// own settings keys at its rebase; that rebase re-measures this
+    /// absolute deliberately rather than guessing it (TG-29 failure-path
+    /// scenario: no stale pin, no guessing).
+    private static let familyContactsBaselineKeyCount = 1_389
+
+    /// Scenario: All 21 keys exist in both languages — the behavioural
+    /// half. Every key resolves through the shipped lproj bundles in both
+    /// languages; the Nepali resolution is Devanagari copy and the two
+    /// values differ, so a forgotten or pasted translation fails here.
+    func testEveryFamilyContactsKeyResolvesInBothLanguages() {
+        for key in Self.familyContactsKeys {
+            let en = L10n.str(key, locale: english)
+            let ne = L10n.str(key, locale: nepali)
+            XCTAssertNotEqual(en, key,
+                              "\(key) does not resolve in en — the catalog "
+                              + "entry is missing")
+            XCTAssertNotEqual(ne, key,
+                              "\(key) does not resolve in ne — the catalog "
+                              + "entry is missing")
+            XCTAssertFalse(en.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                           "\(key) resolves to empty en copy")
+            XCTAssertFalse(ne.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                           "\(key) resolves to empty ne copy")
+            XCTAssertNotEqual(en, ne,
+                              "\(key) resolves to the SAME string in en and ne "
+                              + "— the Nepali copy is missing (or the key was "
+                              + "forgotten in one language)")
+            XCTAssertTrue(Self.containsDevanagari(ne),
+                          "\(key) resolves to non-Devanagari Nepali copy: \(ne)")
+        }
+    }
+
+    /// Scenario: All 21 keys exist in both languages — the source half.
+    /// The catalog total is pinned to the freshly measured pre-unit count
+    /// plus exactly the 21 insertions; the coverage check then runs its
+    /// rules over the parsed catalog, and the neighbours pin the
+    /// `call.search.*` insertion points against a clobbering textual edit.
+    func testTheFamilyContactsFamilyPassesTheCoverageCheck() {
+        let catalog = sourceCatalog()
+
+        XCTAssertEqual(catalog.count,
+                       Self.familyContactsBaselineKeyCount + Self.familyContactsKeys.count,
+                       "the feature adds exactly \(Self.familyContactsKeys.count) keys "
+                       + "and removes none (baseline \(Self.familyContactsBaselineKeyCount), "
+                       + "measured on this tree)")
+
+        let failures = Self.familyContactsCoverageFailures(in: catalog)
+        XCTAssertTrue(failures.isEmpty,
+                      "the family-contacts coverage check failed:\n"
+                      + failures.joined(separator: "\n"))
+
+        // The immediate alphabetical neighbours of the `call.search.*`
+        // insertion points: if a textual insertion had clobbered an entry,
+        // one of these would change. (The `family.*` block's own neighbours
+        // are pinned by the raw-line span check.)
+        assertCatalogValue("call.openWhatsAppContacts",
+                           en: "WhatsApp contacts",
+                           ne: "ह्वाट्सएप सम्पर्कहरू")
+        assertCatalogValue("call.search.allowBody",
+                           en: "Your phone book holds everyone — people you saved AND people added by WhatsApp, Messenger and other apps. Allow access, and the assistant can call any of them from this screen.",
+                           ne: "तपाईंको फोन बुकमा सबै हुन्छन् — आफूले राखेका र व्हाट्सएप, मेसेन्जर लगायतका एपले थपेका मान्छेहरू पनि। पहुँच दिनुभयो भने असिस्टेन्टले यही स्क्रिनबाट जोसुकैलाई फोन गर्न सक्छ।")
+        assertCatalogValue("call.search.familyChip",
+                           en: "Family",
+                           ne: "परिवार")
+        assertCatalogValue("call.search.loadFailed",
+                           en: "Couldn't read your contacts. Please try again.",
+                           ne: "तपाईंका सम्पर्कहरू पढ्न सकिएन। फेरि प्रयास गर्नुहोस्।")
+    }
+
+    /// Scenario: Coverage test fails on a missing or moved key — and the
+    /// failure-path scenario: Nepali key missing while English exists. Each
+    /// fixture is a copy of the parsed catalog mutated in one way; the
+    /// coverage check must fail naming the offending key.
+    func testTheCoverageCheckFailsNamingTheMissingFamilyContactValue() {
+        func setValue(_ value: String, key: String, language: String,
+                      into catalog: inout [String: Any],
+                      file: StaticString = #filePath, line: UInt = #line) {
+            guard var entry = catalog[key] as? [String: Any],
+                  var localizations = entry["localizations"] as? [String: Any],
+                  var languageEntry = localizations[language] as? [String: Any],
+                  var unit = languageEntry["stringUnit"] as? [String: Any] else {
+                XCTFail("fixture setup: \(key).\(language) is missing",
+                        file: file, line: line)
+                return
+            }
+            unit["value"] = value
+            languageEntry["stringUnit"] = unit
+            localizations[language] = languageEntry
+            entry["localizations"] = localizations
+            catalog[key] = entry
+        }
+        func removeLanguage(_ language: String, key: String,
+                            from catalog: inout [String: Any]) {
+            guard var entry = catalog[key] as? [String: Any],
+                  var localizations = entry["localizations"] as? [String: Any] else {
+                XCTFail("fixture setup: \(key) is missing")
+                return
+            }
+            localizations.removeValue(forKey: language)
+            entry["localizations"] = localizations
+            catalog[key] = entry
+        }
+
+        // Fixture 1: the Nepali value removed while English remains (the
+        // failure-path scenario's exact case).
+        var missingNE = sourceCatalog()
+        removeLanguage("ne", key: "family.link.linkedTo", from: &missingNE)
+        assertFamilyCoverageFails(missingNE, naming: "family.link.linkedTo")
+
+        // Fixture 2: one key removed from the English catalog.
+        var missingEN = sourceCatalog()
+        removeLanguage("en", key: "family.link.linkedTo", from: &missingEN)
+        assertFamilyCoverageFails(missingEN, naming: "family.link.linkedTo")
+
+        // Fixture 3: the whole entry removed.
+        var missingEntry = sourceCatalog()
+        missingEntry.removeValue(forKey: "family.nickname.hint")
+        assertFamilyCoverageFails(missingEntry, naming: "family.nickname.hint")
+
+        // Fixture 4: a blank Nepali value.
+        var blankNE = sourceCatalog()
+        setValue("   ", key: "family.photo.state.updatedInSystem",
+                 language: "ne", into: &blankNE)
+        assertFamilyCoverageFails(blankNE, naming: "family.photo.state.updatedInSystem")
+
+        // Fixture 5: the English value copied into the Nepali slot.
+        var untranslatedNE = sourceCatalog()
+        setValue("Linked", key: "family.link.chip", language: "ne", into: &untranslatedNE)
+        assertFamilyCoverageFails(untranslatedNE, naming: "family.link.chip")
+
+        // Fixture 6: the placeholder dropped from a format key's Nepali copy.
+        var noPlaceholder = sourceCatalog()
+        setValue("जोडिएको", key: "family.link.linkedTo", language: "ne",
+                 into: &noPlaceholder)
+        assertFamilyCoverageFails(noPlaceholder, naming: "family.link.linkedTo")
+
+        // Fixture 7: a stray `%` in a key that must carry none.
+        var strayPlaceholder = sourceCatalog()
+        setValue("This phone contact is 100% gone.",
+                 key: "family.link.stale", language: "en", into: &strayPlaceholder)
+        assertFamilyCoverageFails(strayPlaceholder, naming: "family.link.stale")
+
+        // Fixture 8: ASCII letters in a Nepali value outside the single
+        // documented exemption (Devanagari present, so only the ASCII rule
+        // can fire).
+        var asciiNE = sourceCatalog()
+        setValue("यही एपमा only", key: "family.photo.state.keptOnPhone",
+                 language: "ne", into: &asciiNE)
+        assertFamilyCoverageFails(asciiNE, naming: "family.photo.state.keptOnPhone")
+
+        // Fixture 9: a stray key in a family-contacts namespace — the
+        // "exactly the pinned inventory" rule.
+        var stray = sourceCatalog()
+        stray["family.link.stray"] = Self.sampleEntry(en: "Stray", ne: "थप")
+        assertFamilyCoverageFails(stray, naming: "family.link.stray")
+
+        // Fixture 10: an unpinned `family.photo.*` key (the pre-existing
+        // three are named, so an eleventh fails).
+        var strayPhoto = sourceCatalog()
+        strayPhoto["family.photo.stray"] = Self.sampleEntry(en: "Stray", ne: "थप")
+        assertFamilyCoverageFails(strayPhoto, naming: "family.photo.stray")
+
+        // Fixture 11: the count pin's delta semantics — any extra key
+        // breaks the baseline arithmetic, so a catalog that grew without a
+        // deliberate re-measure cannot pass.
+        var drifted = sourceCatalog()
+        drifted["t147.driftProbe"] = Self.sampleEntry(en: "Drift", ne: "थप")
+        XCTAssertNotEqual(drifted.count,
+                          Self.familyContactsBaselineKeyCount + Self.familyContactsKeys.count,
+                          "any added key must break the count pin until the "
+                          + "baseline is re-measured deliberately")
+    }
+
+    /// Scenario: Coverage test fails on a missing or moved key — the
+    /// placement half. The check itself rejects each mutant, so the
+    /// contiguity rule is enforced by the gate and not only by the
+    /// assertion on the real file.
+    func testTheSpanCheckFailsOnAMovedOrSmuggledFamilyContactsKey() {
+        let real = rawCatalogKeyLines()
+        XCTAssertTrue(Self.familyContactsSpanFailures(in: real).isEmpty,
+                      "the fixture must start from a passing scan")
+
+        // Fixture 1: one key moved out of the span — removed from its
+        // alphabetical position and appended at the end.
+        var moved = real
+        if let index = moved.firstIndex(of: "family.link.chip") {
+            moved.remove(at: index)
+        }
+        moved.append("family.link.chip")
+        XCTAssertTrue(Self.familyContactsSpanFailures(in: moved)
+                        .contains { $0.contains("family.link.chip") },
+                      "moving family.link.chip out of the span must fail "
+                      + "naming it")
+
+        // Fixture 2: the `call.search.linkedBookName` insertion moved past
+        // its pinned successor.
+        var swapped = real
+        if let index = swapped.firstIndex(of: "call.search.linkedBookName"),
+           index + 1 < swapped.count {
+            swapped.swapAt(index, index + 1)
+        }
+        XCTAssertTrue(Self.familyContactsSpanFailures(in: swapped)
+                        .contains { $0.contains("call.search.linkedBookName") },
+                      "swapping the pinned neighbours must fail naming "
+                      + "call.search.linkedBookName")
+
+        // Fixture 3: an unpinned key smuggled into the span.
+        var smuggled = real
+        if let index = smuggled.firstIndex(of: "family.link.chip") {
+            smuggled.insert("family.link.stray", at: index)
+        }
+        XCTAssertTrue(Self.familyContactsSpanFailures(in: smuggled)
+                        .contains { $0.contains("family.link.stray") },
+                      "an unpinned key inside the span must fail naming it")
+    }
+
+    /// Implementation note: the raw catalog key lines between
+    /// `family.emergencyToggleHint` and `family.relationship.brother` are
+    /// EXACTLY the pinned 22, in order (JSONSerialization loses key order,
+    /// so this pin reads the raw file), and the two `call.search.*`
+    /// insertions sit between their named neighbours.
+    func testTheFamilyContactsBlockSitsContiguouslyBetweenItsNeighbours() {
+        let keyLines = rawCatalogKeyLines()
+        XCTAssertGreaterThan(keyLines.count, 1_000,
+                             "the key-line scan found too few entries — the "
+                             + "catalog layout changed and this pin is blind")
+        let failures = Self.familyContactsSpanFailures(in: keyLines)
+        XCTAssertTrue(failures.isEmpty,
+                      "the family-contacts span check failed:\n"
+                      + failures.joined(separator: "\n"))
+    }
+
+    /// DoD evidence: every value is the design-l2 §7 frozen copy, verbatim,
+    /// in both languages — a dropped translation or an English copy pasted
+    /// into the `ne` slot fails here.
+    func testTheFamilyContactsCopyMatchesTheDesignFrozenTableVerbatim() {
+        XCTAssertEqual(Self.familyContactsCopy.map { $0.key }, Self.familyContactsKeys,
+                       "the copy table and the pinned inventory must agree")
+        for (key, expectedEN, expectedNE) in Self.familyContactsCopy {
+            assertCatalogValue(key, en: expectedEN, ne: expectedNE)
+        }
+    }
+
+    /// design-l2 §7 wording note: `family.nickname.entryPlaceholder` is the
+    /// ONLY key whose Nepali value may carry ASCII letters, and its
+    /// exemption covers exactly the pinned romanized example ("sanu") — no
+    /// other ASCII may hide there, and no other key may carry any.
+    func testOnlyTheNicknamesPlaceholderCarriesASCIIInNepali() {
+        for key in Self.familyContactsKeys {
+            guard let ne = catalogValue(key, language: "ne") else {
+                XCTFail("\(key) is missing a ne value")
+                continue
+            }
+            if key == Self.familyContactsRomanizedExampleKey {
+                XCTAssertTrue(ne.contains(Self.familyContactsRomanizedExample),
+                              "the exemption must actually carry the romanized "
+                              + "example — otherwise it is dead copy: \(ne)")
+                let withoutExample = ne.replacingOccurrences(
+                    of: Self.familyContactsRomanizedExample, with: "")
+                XCTAssertFalse(Self.containsASCIILetters(withoutExample),
+                               "the exemption permits exactly the pinned example, "
+                               + "no other ASCII: \(ne)")
+            } else {
+                XCTAssertFalse(Self.containsASCIILetters(ne),
+                               "\(key) ne carries ASCII letters (only "
+                               + "\(Self.familyContactsRomanizedExampleKey) may): \(ne)")
+            }
+        }
+    }
+
+    /// design-l2 §7: exactly four keys carry one `%@`; no key carries any
+    /// other `%`, and the en/ne counts agree or a composition site would
+    /// mis-place its argument.
+    func testTheFamilyContactsPlaceholderRuleHoldsInBothLanguages() {
+        XCTAssertEqual(Set(Self.familyContactsPlaceholderKeys),
+                       ["family.link.linkedTo", "family.link.alreadyLinked",
+                        "family.nickname.removeLabel", "call.search.linkedBookName"],
+                       "the placeholder-key pin must be the design's four")
+        for key in Self.familyContactsKeys {
+            guard let en = catalogValue(key, language: "en"),
+                  let ne = catalogValue(key, language: "ne") else {
+                XCTFail("\(key) is missing an en or ne value")
+                continue
+            }
+            let expected = Self.familyContactsPlaceholderKeys.contains(key) ? 1 : 0
+            XCTAssertEqual(Self.placeholderCount(in: en), expected,
+                           "\(key): en must carry \(expected) `%` placeholder(s)")
+            XCTAssertEqual(Self.placeholderCount(in: ne), expected,
+                           "\(key): ne must carry \(expected) `%` placeholder(s)")
+            if expected == 1 {
+                XCTAssertTrue(en.contains("%@") && ne.contains("%@"),
+                              "\(key): the single placeholder must be `%@` in both languages")
+            }
+        }
+    }
+
+    // MARK: T-147 — the contacts usage disclosure (design-l2 §7, frozen)
+
+    /// The frozen replacement string (design-l2 §7), verbatim.
+    private static let frozenContactsDisclosure = "Searching from the phone screen can call anyone in your phone book — including people added by WhatsApp, Messenger and other apps. When you set a photo for a family contact who is also in your phone book, the app can save that photo onto the person's contact card if you allow it; it changes nothing else. The app works fully even if you say no."
+
+    /// The usage-description keys as shipped before this unit (pinned so
+    /// "no new usage keys" is a checked claim).
+    private static let pinnedUsageDescriptionKeys: [String] = [
+        "NSAlarmKitUsageDescription",
+        "NSCalendarsFullAccessUsageDescription",
+        "NSCalendarsUsageDescription",
+        "NSCameraUsageDescription",
+        "NSContactsUsageDescription",
+        "NSLocalNetworkUsageDescription",
+        "NSLocationWhenInUseUsageDescription",
+        "NSMicrophoneUsageDescription",
+        "NSPhotoLibraryAddUsageDescription",
+        "NSRemindersFullAccessUsageDescription",
+        "NSRemindersUsageDescription",
+        "NSSpeechRecognitionUsageDescription",
+    ]
+
+    /// Scenario: Contacts disclosure matches actual usage. The app's first
+    /// write into the shared address book makes the old read/search-only
+    /// string false by omission; the frozen replacement names the write,
+    /// its one-contact limit and the honest no-permission state.
+    func testTheContactsDisclosureStatesReadingAndThePhotoWrite() {
+        let disclosure = sourceInfoPlist()["NSContactsUsageDescription"] as? String ?? ""
+
+        XCTAssertEqual(disclosure, Self.frozenContactsDisclosure,
+                       "the disclosure must be the design-l2 §7 frozen copy, "
+                       + "verbatim")
+        XCTAssertFalse(disclosure.contains("other apps. The app works fully"),
+                       "the old read/search-only string must be gone")
+        let lowered = disclosure.lowercased()
+        XCTAssertTrue(lowered.contains("call anyone in your phone book"),
+                      "the read/search use must stay disclosed")
+        XCTAssertTrue(lowered.contains("save that photo onto the person's contact card"),
+                      "the photo write into the linked system contact must be disclosed")
+        XCTAssertTrue(lowered.contains("if you allow it")
+                        && lowered.contains("it changes nothing else"),
+                      "the write permission gate and its one-contact limit must be stated")
+        XCTAssertTrue(lowered.contains("works fully even if you say no"),
+                      "the honest no-permission state must stay")
+        XCTAssertFalse(Self.containsDevanagari(disclosure),
+                       "usage-description strings are English-only by the "
+                       + "accepted security residual (design-l2 §7 note)")
+    }
+
+    /// design-l2 §7: the disclosure replacement is the ONLY plist change —
+    /// no new usage keys. In particular no separate write-only contacts
+    /// descriptor may appear: the designed write seam needs read-and-write
+    /// access, so a write-only key would license a different flow.
+    func testThePlistAddsNoNewUsageDescriptionKeys() {
+        let usage = sourceInfoPlist().keys.filter { $0.hasSuffix("UsageDescription") }.sorted()
+        XCTAssertEqual(usage, Self.pinnedUsageDescriptionKeys,
+                       "the usage-description key set must be unchanged by this unit")
+        XCTAssertFalse(usage.contains("NSContactsWriteOnlyAccessUsageDescription"),
+                       "no write-only contacts descriptor may appear")
+    }
+
+    // MARK: T-147 helpers
+
+    /// The family-contacts coverage check as a pure function over a parsed
+    /// catalog, so every rule can be exercised against fixtures. Each
+    /// failure names the offending key and the rule it broke.
+    static func familyContactsCoverageFailures(in catalog: [String: Any]) -> [String] {
+        var failures: [String] = []
+        let inventory = Set(familyContactsKeys)
+        let newNamespaces = ["family.link.", "family.nickname."]
+        let photoInventory = inventory.union(["family.photo.add",
+                                              "family.photo.change",
+                                              "family.photo.remove"])
+
+        // Keys in the namespaces this unit owns that are not pinned. The
+        // `family.photo.*` family is pinned as the 10 = 3 existing + 7 new.
+        for key in catalog.keys {
+            if newNamespaces.contains(where: { key.hasPrefix($0) })
+                && !inventory.contains(key) {
+                failures.append("\(key): unpinned key in a family-contacts "
+                                + "namespace (the inventory is exactly "
+                                + "\(familyContactsKeys.count) keys)")
+            }
+            if key.hasPrefix("family.photo.") && !photoInventory.contains(key) {
+                failures.append("\(key): unpinned family.photo.* key")
+            }
+        }
+
+        for key in familyContactsKeys {
+            guard let entry = catalog[key] as? [String: Any] else {
+                failures.append("\(key): missing from the catalog")
+                continue
+            }
+            if entry["extractionState"] as? String != "manual" {
+                failures.append("\(key): extractionState is not `manual`")
+            }
+            guard let localizations = entry["localizations"] as? [String: Any] else {
+                failures.append("\(key): no localizations")
+                continue
+            }
+            var values: [String: String] = [:]
+            for language in ["en", "ne"] {
+                guard let unit = (localizations[language] as? [String: Any])?["stringUnit"]
+                        as? [String: Any],
+                      let value = unit["value"] as? String,
+                      !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    failures.append("\(key): missing or empty \(language) value")
+                    continue
+                }
+                values[language] = value
+                if unit["state"] as? String != "translated" {
+                    failures.append("\(key): \(language) is not marked `translated`")
+                }
+                if language == "ne" {
+                    if key != familyContactsRomanizedExampleKey && containsASCIILetters(value) {
+                        failures.append("\(key): Nepali value carries ASCII "
+                                        + "letters — \(value)")
+                    }
+                    if !containsDevanagari(value) {
+                        failures.append("\(key): Nepali value is not Devanagari "
+                                        + "— \(value)")
+                    }
+                }
+            }
+            // The placeholder rule (design-l2 §7): exactly the four named
+            // keys carry one `%@`; no key carries any other `%`.
+            let mustCarryPlaceholder = familyContactsPlaceholderKeys.contains(key)
+            for (language, value) in values {
+                let count = placeholderCount(in: value)
+                if mustCarryPlaceholder {
+                    if count != 1 || !value.contains("%@") {
+                        failures.append("\(key): \(language) must carry exactly "
+                                        + "one %@ placeholder (found \(count) %)")
+                    }
+                } else if count != 0 {
+                    failures.append("\(key): \(language) carries a % but no key "
+                                    + "outside the four placeholder keys may")
+                }
+            }
+            if let en = values["en"], let ne = values["ne"], en == ne {
+                failures.append("\(key): en and ne resolve to the same value — "
+                                + "the Nepali copy is missing")
+            }
+        }
+        return failures
+    }
+
+    /// The exact-span placement check as a pure function over the raw
+    /// file's key lines, so the "moved key" scenario can run against a
+    /// fixture. Both named neighbour keys are EXCLUDED from the span; the
+    /// span comparison is order-sensitive (a reordered block fails), and
+    /// the two `call.search.*` insertions are pinned to their immediate
+    /// neighbours by name.
+    static func familyContactsSpanFailures(in keyLines: [String]) -> [String] {
+        var failures: [String] = []
+        guard let predecessor = keyLines.firstIndex(of: "family.emergencyToggleHint") else {
+            return ["family.emergencyToggleHint: the span's predecessor is "
+                    + "missing — the placement pin is blind"]
+        }
+        guard let successor = keyLines.firstIndex(of: "family.relationship.brother") else {
+            return ["family.relationship.brother: the span's successor is "
+                    + "missing — the placement pin is blind"]
+        }
+        if successor <= predecessor + 1 {
+            return ["no family-contacts span between "
+                    + "family.emergencyToggleHint and family.relationship.brother"]
+        }
+        let span = Array(keyLines[(predecessor + 1)..<successor])
+        if span != familyContactsSpan {
+            for key in familyContactsSpan where !span.contains(key) {
+                failures.append("\(key): not inside the pinned 22-line span "
+                                + "(moved or removed)")
+            }
+            for key in span where !familyContactsSpan.contains(key) {
+                failures.append("\(key): inside the family span but not in the "
+                                + "pinned 22 — unpinned or wrongly placed")
+            }
+            if Set(span) == Set(familyContactsSpan) {
+                failures.append("the family span carries the pinned keys but "
+                                + "not in the pinned order (or with a duplicate)")
+            }
+            if span.count != familyContactsSpan.count {
+                failures.append("the family span has \(span.count) key lines — "
+                                + "expected \(familyContactsSpan.count)")
+            }
+        }
+
+        let neighbours: [(predecessor: String, key: String, successor: String)] = [
+            ("call.openWhatsAppContacts", "call.search.accessLimited",
+             "call.search.allowBody"),
+            ("call.search.familyChip", "call.search.linkedBookName",
+             "call.search.loadFailed"),
+        ]
+        for (before, key, after) in neighbours {
+            guard let index = keyLines.firstIndex(of: key) else {
+                failures.append("\(key): missing from the catalog")
+                continue
+            }
+            if index == 0 || keyLines[index - 1] != before {
+                failures.append("\(key): predecessor is "
+                                + "\(index == 0 ? "none" : keyLines[index - 1]) "
+                                + "— expected \(before)")
+            }
+            if index + 1 >= keyLines.count || keyLines[index + 1] != after {
+                failures.append("\(key): successor is "
+                                + "\(index + 1 >= keyLines.count ? "none" : keyLines[index + 1]) "
+                                + "— expected \(after)")
+            }
+        }
+        return failures
+    }
+
+    /// Asserts the family-contacts check fails naming `key`, showing every
+    /// failure it produced.
+    private func assertFamilyCoverageFails(_ catalog: [String: Any],
+                                           naming key: String,
+                                           file: StaticString = #filePath,
+                                           line: UInt = #line) {
+        let failures = Self.familyContactsCoverageFailures(in: catalog)
+        XCTAssertTrue(failures.contains { $0.contains(key) },
+                      "the coverage check must fail naming \(key); it produced: "
+                      + "\(failures)", file: file, line: line)
+    }
+
+    /// The raw catalog's key lines, in file order (the dialogue pin's scan
+    /// convention: the catalog ships Xcode's unspaced `"key": {` form, the
+    /// spaced variant is tolerated so a formatter re-run cannot blind the
+    /// pin).
+    private func rawCatalogKeyLines() -> [String] {
+        let url = FeatureSourceScan.iosDirectory()
+            .appendingPathComponent("ElderlyAssistant/Resources/Localizable.xcstrings")
+        guard let raw = try? String(contentsOf: url, encoding: .utf8) else {
+            XCTFail("could not read the String Catalog at \(url.path)")
+            return []
+        }
+        return raw.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { String($0) }
+            .filter { ($0.hasSuffix(" : {") || $0.hasSuffix(": {"))
+                && $0.hasPrefix("    \"") }
+            .map { line in
+                let suffixWidth = line.hasSuffix(" : {") ? 5 : 4
+                return String(line.dropFirst(5).dropLast(suffixWidth))
+            }
+    }
+
+    /// The source `Info.plist`, parsed as the artifact under review.
+    private func sourceInfoPlist() -> [String: Any] {
+        let url = FeatureSourceScan.iosDirectory()
+            .appendingPathComponent("ElderlyAssistant/Info.plist")
+        guard let data = try? Data(contentsOf: url),
+              let plist = try? PropertyListSerialization.propertyList(
+                from: data, options: [], format: nil) as? [String: Any] else {
+            XCTFail("could not read the source Info.plist at \(url.path)")
+            return [:]
+        }
+        return plist
+    }
+
+    /// The parsed catalog's value for `key` in `language`, or nil.
+    private func catalogValue(_ key: String, language: String) -> String? {
+        let catalog = sourceCatalog()
+        guard let entry = catalog[key] as? [String: Any],
+              let localizations = entry["localizations"] as? [String: Any],
+              let unit = (localizations[language] as? [String: Any])?["stringUnit"]
+                        as? [String: Any],
+              let value = unit["value"] as? String else {
+            return nil
+        }
+        return value
+    }
+
 }
