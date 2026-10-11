@@ -96,6 +96,21 @@ enum VoiceSessionState: Equatable {
             return false
         }
     }
+
+    /// Whether a plain Talk tap starts a capture from this state. Only
+    /// `.awaitingConfirmation` is excluded — the yes/no chips own that
+    /// window's input. `.awaitingSlotAnswer` MUST stay true: the slot
+    /// probe is answered by voice (NFR-MTC-009) and the answer arrives
+    /// as a normal captured turn — the pre-ladder interception consumes
+    /// it, and `handlePipelineState`'s mid-window early-return keeps the
+    /// 45 s timer intact by design (its comment explicitly anticipates
+    /// pipeline events arriving mid-frame). Disabling Talk here — the
+    /// shipped behaviour until the device defect fix (2026-10-11: the
+    /// probe asked correctly but the spoken answer was never captured) —
+    /// made the window a dead end: no chips, no auto-listen, no Talk.
+    var supportsTalkTap: Bool {
+        self != .awaitingConfirmation
+    }
 }
 
 /// Owns the single `@Published` session state. Mutations are confined to

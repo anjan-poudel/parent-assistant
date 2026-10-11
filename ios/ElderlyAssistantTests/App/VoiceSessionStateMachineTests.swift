@@ -33,6 +33,24 @@ final class VoiceSessionStateMachineTests: XCTestCase {
         XCTAssertEqual(machine.state, .idle)
     }
 
+    func testTalkTapStaysLiveDuringTheSlotAnswerWindow() {
+        // Device defect 2026-10-11: the hero disabled Talk while
+        // awaitingSlotAnswer, so the spoken probe answer was never
+        // captured — the window had no chips, no auto-listen and a dead
+        // Talk button. Only the chip-owned confirmation window may
+        // disable the Talk tap; the slot window is answered by voice.
+        let liveStates: [VoiceSessionState] = [
+            .idle, .listening, .transcribing, .understanding,
+            .speaking, .awaitingSlotAnswer, .error, .stopped,
+        ]
+        for state in liveStates {
+            XCTAssertTrue(state.supportsTalkTap,
+                          "Talk tap must stay live in \(state)")
+        }
+        XCTAssertFalse(VoiceSessionState.awaitingConfirmation.supportsTalkTap,
+                       "the yes/no chips own the confirmation window")
+    }
+
     @MainActor
     func testIllegalTransitionsAreRejectedByTheTable() {
         // The canTransition table itself is the contract — assert the

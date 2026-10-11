@@ -43,3 +43,17 @@ Feature: The awaitingSlotAnswer session state
 ## Related
 - FR: FR-MTC-013 (timer expiry behaviour), FR-MTC-001 (frame), FR-MTC-009 (interception active window)
 - NFR: NFR-MTC-010 (zero stuck states), NFR-MTC-012 (confirmation flow unchanged)
+
+## Errata (2026-10-11 — device defect, fixed in worktree-multi-turn-answer-capture)
+
+The requirement demanded "manual Talk-button recovery keeps working" but the
+implementation also disabled the Talk button for the whole window (`HomeView`
+`isDisabled` included `.awaitingSlotAnswer`, copied from the chip-owned
+confirmation pattern), and no auto-listen existed. On the Anzaan device the
+probe asked correctly but the spoken answer was never captured — a silent dead
+end until the 45 s expiry. Fix: `VoiceSessionState.supportsTalkTap` (false only
+in `.awaitingConfirmation`) now gates the hero; the slot window is answered by
+voice through the Talk control, and the answer is consumed by the pre-ladder
+interception while `handlePipelineState`'s mid-window early-return preserves
+the timer. Pinned by `VoiceSessionStateMachineTests.testTalkTapStaysLiveDuringTheSlotAnswerWindow`.
+DV-1 retest required.
