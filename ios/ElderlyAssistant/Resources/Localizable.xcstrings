@@ -13252,6 +13252,23 @@
         }
       }
     },
+    "router.call.didYouMeanPrefix": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I couldn't find %1$@ in your contacts. Did you mean %2$@?"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मैले %@ लाई सम्पर्कमा भेटिनँ। के तपाईं %@ भन्न खोज्नुभएको हो?"
+          }
+        }
+      }
+    },
     "router.call.nameUnclear": {
       "extractionState": "manual",
       "localizations": {

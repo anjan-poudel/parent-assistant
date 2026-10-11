@@ -63,3 +63,38 @@ final class ContactResolverTests: XCTestCase {
         XCTAssertEqual(resolver([exact, longer]).resolve("माइया"), .one(exact))
     }
 }
+
+// MARK: - Near-miss proposals ([NEAR-MISS] 2026-10-11)
+
+extension ContactResolverTests {
+
+    func testNearMissProposesSingleMatraVariant() {
+        // "सुनीता" differs from "सुनिता" by ONE matra scalar —
+        // resolve() rejects it, nearMiss proposes it.
+        let contact = FamilyContact(name: "सुनिता", phone: "7", relationship: "छोरी")
+        XCTAssertEqual(resolver([contact]).resolve("सुनीता"), .none)
+        XCTAssertEqual(resolver([contact]).nearMiss("सुनीता"), contact)
+    }
+
+    func testNearMissSyanoToSanu() {
+        // The field case: "स्यानु" (virama-y artefact) is two scalar
+        // edits from "सानु".
+        let sanu = FamilyContact(name: "सानु", phone: "8", relationship: "दिदी")
+        XCTAssertEqual(resolver([sanu]).nearMiss("स्यानु"), sanu)
+    }
+
+    func testNearMissRefusesWhenTwoContactsAreWithinBudget() {
+        // Same no-guess discipline as resolve: two rivals in the band →
+        // no proposal, the caller keeps its honest not-found line.
+        let maya = FamilyContact(name: "माया", phone: "8", relationship: "दिदी")
+        let maiya = FamilyContact(name: "मइया", phone: "9", relationship: "बहिनी")
+        XCTAssertNil(resolver([maya, maiya]).nearMiss("माइया"))
+    }
+
+    func testNearMissNoSignalReturnsNil() {
+        // Cross-script invented names carry no signal — no proposal.
+        XCTAssertNil(resolver([maiya, sunita]).nearMiss("Seema"))
+        XCTAssertNil(resolver([maiya]).nearMiss(nil))
+        XCTAssertNil(resolver([maiya]).nearMiss(""))
+    }
+}
