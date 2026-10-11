@@ -1,40 +1,32 @@
-# Non-Functional Requirements — Multi-Turn Conversation (v1)
+# Non-Functional Requirements — Family Contacts Unify (v1)
 
-12 non-functional requirements. IDs are namespaced `NFR-MTC-NNN` to avoid colliding with the
+9 non-functional requirements. IDs are namespaced `NFR-FCU-NNN` to avoid colliding with the
 project-level `NFR-NNN` set in the root stakeholder brief (`requirements.md`) — the same
-convention live-camera-translation used (`NFR-LCT-NNN`), profile-interview used (`NFR-PI-NNN`)
-and spotify-music-integration used (`NFR-SP-NNN`). This page covers the
-`multi-turn-conversation` set (`NFR-MTC-*`) only; the earlier feature files remain in this
-folder and are not part of this feature's requirements or lock.
+convention live-camera-translation used (`NFR-LCT-NNN`), profile-interview used (`NFR-PI-NNN`),
+spotify-music-integration used (`NFR-SP-NNN`) and multi-turn-conversation used (`NFR-MTC-NNN`).
+This page covers the `family-contacts-unify` set (`NFR-FCU-*`) only; the earlier feature files
+remain in this folder and are not part of this feature's requirements or lock.
 
 | ID | Title | Category | Priority |
 |----|-------|----------|----------|
-| [NFR-MTC-001](NFR-MTC-001-probe-turn-latency.md) | Probe and answer turns stay within the existing turn envelope | Performance | MUST |
-| [NFR-MTC-002](NFR-MTC-002-prompt-budget-and-token-ceiling.md) | 1024-token ceiling and the pinned prompt budget are preserved | Reliability / Maintainability | MUST |
-| [NFR-MTC-003](NFR-MTC-003-no-new-network-egress.md) | No new network egress — probes and answers stay on-device | Privacy | MUST |
-| [NFR-MTC-004](NFR-MTC-004-log-safety.md) | Log safety — probe and answer text never reach logs | Privacy / Security | MUST |
-| [NFR-MTC-005](NFR-MTC-005-degraded-brain-deterministic-path.md) | The frame survives a degraded or absent brain — deterministic path | Reliability | MUST |
-| [NFR-MTC-006](NFR-MTC-006-localisation.md) | Localisation of every dialogue string (ne/en) | Localisation | MUST |
-| [NFR-MTC-007](NFR-MTC-007-sustained-multi-turn-stability.md) | Sustained multi-turn stability on 6 GB devices — no jetsam | Reliability / Performance | MUST |
-| [NFR-MTC-008](NFR-MTC-008-answer-sanitisation-and-injection-safety.md) | Answer-path sanitisation and injection safety | Security | MUST |
-| [NFR-MTC-009](NFR-MTC-009-voice-only-accessibility.md) | Voice-only accessibility of probes and answer capture | Accessibility | MUST |
-| [NFR-MTC-010](NFR-MTC-010-frame-trap-resistance.md) | Frame-trap resistance — zero stuck states | Reliability / Safety | MUST |
-| [NFR-MTC-011](NFR-MTC-011-kv-prefix-stability.md) | KV-prefix stability — the frame clause never mutates the template prefix | Performance / Reliability | MUST |
-| [NFR-MTC-012](NFR-MTC-012-compliance-and-release-gates.md) | Compliance, no-regression and release gates | Compliance | MUST |
+| [NFR-FCU-001](NFR-FCU-001-nickname-index-and-match-performance.md) | Nickname index and matching performance stay within the interaction envelope | Performance | MUST |
+| [NFR-FCU-002](NFR-FCU-002-pii-log-safety.md) | PII / log safety — names, nicknames, numbers, links and photos never reach logs | Privacy / Security | MUST |
+| [NFR-FCU-003](NFR-FCU-003-no-new-network-egress.md) | No new network egress — contacts, links, nicknames and photos stay on-device | Privacy | MUST |
+| [NFR-FCU-004](NFR-FCU-004-localisation-ne-en.md) | Localisation — every new user-visible string exists in ne and en | Localisation | MUST |
+| [NFR-FCU-005](NFR-FCU-005-accessibility-voice-first.md) | Accessibility — voice-first capability, house touch standards, no authorization reasoning for the elderly user | Accessibility | MUST |
+| [NFR-FCU-006](NFR-FCU-006-migration-compatibility.md) | Migration compatibility — legacy payloads load, nothing is lost | Reliability | MUST |
+| [NFR-FCU-007](NFR-FCU-007-grapheme-regression-pin.md) | Devanagari substring / grapheme-cluster behavior regression-pinned | Reliability | MUST |
+| [NFR-FCU-008](NFR-FCU-008-delivery-sequencing-call-dialer.md) | Delivery sequencing and scope separation vs call-dialer-primary-secondary | Compliance | MUST |
+| [NFR-FCU-009](NFR-FCU-009-test-and-release-gates.md) | Test gate, release gates and baseline honesty | Compliance | MUST |
 
 ## Coverage of the security-relevant surfaces (workflow focus areas)
 
 | Surface (workflow `security-design-review` / `security-test` focus) | Covered by |
 |---|---|
-| Emergency precedence mid-dialogue: emergency keywords win mid-frame; a hostile or corrupted answer cannot bypass the override | [FR-MTC-011](../FR/FR-MTC-011-emergency-precedence-mid-frame.md), [NFR-MTC-010](NFR-MTC-010-frame-trap-resistance.md) |
-| Free-text answer injection: answers enter routing mid-frame; interception must open no new injection surface | [NFR-MTC-008](NFR-MTC-008-answer-sanitisation-and-injection-safety.md), [FR-MTC-009](../FR/FR-MTC-009-pre-ladder-answer-interception.md), [FR-MTC-017](../FR/FR-MTC-017-transcript-cache-bypass.md) |
-| Frame-trap resistance: cancel, barge-in and the 45 s timeout must always recover | [FR-MTC-010](../FR/FR-MTC-010-cancel-drops-the-frame.md), [FR-MTC-012](../FR/FR-MTC-012-barge-in-strong-new-command.md), [FR-MTC-013](../FR/FR-MTC-013-timeout-silent-rearm.md), [NFR-MTC-010](NFR-MTC-010-frame-trap-resistance.md) |
-| Log sanitisation: probe texts and captured answers must not reach logs (B2/T-050 precedent) | [NFR-MTC-004](NFR-MTC-004-log-safety.md), [NFR-MTC-012](NFR-MTC-012-compliance-and-release-gates.md) |
-| No new egress: probes and answers stay on-device | [NFR-MTC-003](NFR-MTC-003-no-new-network-egress.md) |
-| Degraded-brain path: the deterministic merge must not weaken the emergency/safety gates | [NFR-MTC-005](NFR-MTC-005-degraded-brain-deterministic-path.md), [FR-MTC-011](../FR/FR-MTC-011-emergency-precedence-mid-frame.md) |
-
-## Related
-
-- [FR index](../FR/index.md) — 20 functional requirements
-- [Requirements index](../index.md)
-- [Consolidated copy](../../define-requirements.md)
+| Write authority — the app's first write into the shared system address book; blast radius confined to the edited contact's photo; no bulk mutation; wrong-contact write prevented by construction | [FR-FCU-008](../FR/FR-FCU-008-photo-write-confined-to-edited-contact.md), [FR-FCU-009](../FR/FR-FCU-009-write-authorization-honest-states.md), [NFR-FCU-009](NFR-FCU-009-test-and-release-gates.md) |
+| Identity integrity — a wrong link merges two people; a nickname matching several contacts must never silently dial the wrong person; unlink semantics; stale-link degradation | [FR-FCU-005](../FR/FR-FCU-005-unlink-both-records-intact.md), [FR-FCU-006](../FR/FR-FCU-006-stale-link-degradation.md), [FR-FCU-014](../FR/FR-FCU-014-ambiguous-nickname-never-wrong-person.md), [FR-FCU-003](../FR/FR-FCU-003-link-aware-dedupe-unified-search.md) |
+| Degradation safety — permission denied/limited/read-only or a failed save falls back to the app-local photo with honest UI; no data loss, no false success, no crash | [FR-FCU-009](../FR/FR-FCU-009-write-authorization-honest-states.md), [FR-FCU-010](../FR/FR-FCU-010-non-writable-photo-fallback.md), [FR-FCU-007](../FR/FR-FCU-007-photo-display-precedence.md) |
+| PII discipline — names/numbers/photos off the logs beyond B2/T-050; `check-release-log-safety.sh` covers the new write/fallback/resolution paths | [NFR-FCU-002](NFR-FCU-002-pii-log-safety.md), [FR-FCU-006](../FR/FR-FCU-006-stale-link-degradation.md) |
+| No new egress — nothing leaves the device; no new network surface or data collection | [NFR-FCU-003](NFR-FCU-003-no-new-network-egress.md) |
+| Matching-semantics integrity — reuse not fork; grapheme behavior regression-pinned (no "fixes") | [NFR-FCU-007](NFR-FCU-007-grapheme-regression-pin.md), [FR-FCU-012](../FR/FR-FCU-012-nickname-matching-in-search.md), [FR-FCU-013](../FR/FR-FCU-013-nickname-matching-in-voice-resolution.md) |
+| Migration integrity — pre-change payloads load; the pre-change single nickname still matches; no loss | [NFR-FCU-006](NFR-FCU-006-migration-compatibility.md), [FR-FCU-002](../FR/FR-FCU-002-link-reference-storage-and-migration.md), [FR-FCU-011](../FR/FR-FCU-011-multi-nickname-storage-and-migration.md) |
