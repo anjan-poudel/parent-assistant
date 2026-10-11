@@ -7892,6 +7892,11 @@ self.noteTalkContractChanged()
                 setOutcome(icon: "exclamationmark.triangle.fill",
                            text: L10n.str("router.call.facetimeUnavailable", locale: locale))
                 speak(text: L10n.str("router.call.facetimeUnavailable", locale: locale))
+                // FR-CDP-015 (L2 §10.1): the shipped honest line just
+                // spoke; a remaining candidate hops — announced by the
+                // shared step, then re-entered through THIS executor.
+                hopFromCallAction(after: .faceTime, action: action,
+                                  isVideo: isVideo, locale: locale)
             }
         case .whatsappChat:
             callLinks.openWhatsAppChat(action.contact.phone)
@@ -7939,8 +7944,121 @@ self.noteTalkContractChanged()
                 setOutcome(icon: "exclamationmark.triangle.fill",
                            text: L10n.fmt("router.call.messengerNoHandle", locale: locale, action.contact.name))
                 speak(text: L10n.fmt("router.call.messengerNoHandle", locale: locale, action.contact.name))
+                // Same rule as the FaceTime arm (L2 §10.1): the honest
+                // line has spoken, then a remaining candidate hops.
+                hopFromCallAction(after: .messenger, action: action,
+                                  isVideo: action.method == .messengerVideo, locale: locale)
             }
         }
+    }
+
+    // MARK: - Launch-fail hop (call-dialer-primary-secondary, 2026-10-12)
+    //
+    // FR-CDP-015/016, design-l2 §10: a failed open walks the remaining
+    // candidates at most once each, announcing the swap through the ONE
+    // shipped catalogue key before attempting the next channel. Failure
+    // semantics stay exactly as shipped: a failed open records no
+    // learning, no activity and no history — the hop only decides, says
+    // and re-attempts. Synchronous throughout (NFR-CDP-004): no await,
+    // no timer, no queue, no detached task.
+
+    /// The launch-fail hop input a per-channel opener may carry
+    /// (FR-CDP-015): the remaining candidates at THIS attempt, plus the
+    /// contact's resolved Messenger handle (the feasibility filter).
+    /// `nil` means "no hop" — the shipped behaviour, byte-identical.
+    struct LaunchHop: Equatable {
+        let candidates: [CallApp]
+        let handle: String?
+    }
+
+    /// The shared hop decision + announcement (the ONLY
+    /// `call.announce.launchFailedFallback` site, FR-CDP-015). Returns
+    /// the next channel and the remaining candidates (the input list
+    /// minus everything up to and including `next`), or nil at
+    /// exhaustion — the caller's shipped failure line already spoke.
+    ///
+    /// Internal (not private) so this unit's pins can drive the decision
+    /// step against the real catalogue — the same §28 relaxation
+    /// `confirmationPrompt` carries (T-148); behaviour and signature are
+    /// otherwise the design-l2 §10.2 listing verbatim.
+    func launchFailHopStep(after failed: CallApp, candidates: [CallApp],
+                           handle: String?, name: String,
+                           locale: Locale) -> (next: CallApp, remaining: [CallApp])? {
+        guard let next = CallChannelChain.nextLaunchFailCandidate(
+                after: failed,
+                attemptOrder: candidates,
+                messengerHandleAvailable: hasUsableMessengerHandle(handle)) else {
+            return nil
+        }
+        noteLaunchFailHop(after: failed, next: next)
+        speak(text: L10n.fmt("call.announce.launchFailedFallback", locale: locale,
+                             CallChannelChain.label(failed, locale: locale),
+                             name,
+                             CallChannelChain.label(next, locale: locale)))
+        let remaining = Array(candidates.drop(while: { $0 != next }).dropFirst())
+        return (next, remaining)
+    }
+
+    /// The TAP-path hop (FR-CDP-015, ADR-08; L1 C5 signature, verbatim):
+    /// on a failed open, speak the hop announcement and attempt the next
+    /// channel through the shipped per-channel opener for its type.
+    /// Returns true when a hop was attempted. The candidate list is
+    /// consumed one item per hop and the recursion is synchronous, so at
+    /// most one hop is in flight per tap and no channel is attempted
+    /// twice.
+    @discardableResult
+    private func performLaunchFailHop(after failed: CallApp,
+                                      candidates: [CallApp],
+                                      name: String, phone: String, handle: String?,
+                                      isVideo: Bool, locale: Locale) -> Bool {
+        guard let step = launchFailHopStep(after: failed, candidates: candidates,
+                                           handle: handle, name: name,
+                                           locale: locale) else { return false }
+        switch step.next {
+        case .phone:
+            performSystemContactCall(name: name, phone: phone)   // floor: its own honest line
+        case .faceTime:
+            performFaceTimeCall(name: name, phone: phone, video: isVideo)
+        case .whatsApp:
+            performSystemContactWhatsApp(name: name, phone: phone,
+                                         hop: LaunchHop(candidates: step.remaining, handle: handle))
+        case .messenger:
+            guard let handle, !handle.isEmpty else { return true }  // filtered above; defensive
+            performSystemContactMessenger(name: name, handle: handle,
+                                          hop: LaunchHop(candidates: step.remaining, handle: handle))
+        }
+        return true
+    }
+
+    /// The hop's classification event (L2-D12): category strings only, no
+    /// names, no numbers, `metadata: [:]`. The failed attempt's own
+    /// event (where the context emits one) already recorded the attempt.
+    private func noteLaunchFailHop(after failed: CallApp, next: CallApp) {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "call_launch_fallback",
+            eventType: "hop",
+            durationMs: nil,
+            outcome: "\(failed.rawValue):\(next.rawValue)",
+            errorCode: nil,
+            metadata: [:]
+        ))
+    }
+
+    /// FR-CDP-015 for the voice path (ADR-08): decide + announce through
+    /// `launchFailHopStep`, then re-enter `performCallAction` with the
+    /// copied action — the same executor a fresh confirmation reaches,
+    /// and the routed (hopped) method is what the success branch records
+    /// and teaches (L2-D7).
+    private func hopFromCallAction(after failed: CallApp, action: PendingCallAction,
+                                   isVideo: Bool, locale: Locale) {
+        guard let step = launchFailHopStep(after: failed,
+                                           candidates: action.hopCandidates,
+                                           handle: action.contact.messengerHandle,
+                                           name: action.contact.name,
+                                           locale: locale) else { return }
+        performCallAction(action.replacing(
+            method: CallChannelChain.method(for: step.next, isVideo: isVideo),
+            hopCandidates: step.remaining))
     }
 
     /// Post-execution learning (spec §4.2 + §6.2): a CONFIRMED call is
@@ -8061,7 +8179,15 @@ self.noteTalkContractChanged()
     /// really fail, but if it somehow does, say so aloud instead of
     /// going silent. The number enters the recency ranking only after
     /// the dial actually opened.
-    func performSystemContactCall(name: String, phone: String) {
+    /// The `hop` parameter is accepted for call-site uniformity with the
+    /// three search-shaped openers but deliberately never consulted: the
+    /// GSM floor is TERMINAL (design-l2 §10.1, "the floor is the last
+    /// resort") — an undialable number speaks the shipped honest line
+    /// below and nothing further is attempted. (The task spec lists this
+    /// opener among the four that gain the parameter; the design's three
+    /// are the hopping ones — see the T-149 notes.)
+    func performSystemContactCall(name: String, phone: String,
+                                  hop: LaunchHop? = nil) {
         guard let url = PhoneDialer.url(for: phone) else {
             setOutcome(icon: "exclamationmark.triangle.fill",
                        text: L10n.fmt("call.announce.noPhoneNumber", locale: activeLocale, name))
@@ -8082,7 +8208,12 @@ self.noteTalkContractChanged()
     /// opened before, and tapping it opens FaceTime again — the same
     /// genuine-open path performContactCall's faceTime case uses, with
     /// the same "record only a real open" rule.
-    func performFaceTimeCall(name: String, phone: String, video: Bool) {
+    /// `hop` (FR-CDP-015, design-l2 §10.1): `.unavailable`/`.invalidHandle`
+    /// is a failed open — after the shipped honest line the remaining
+    /// candidates are attempted through `performLaunchFailHop`. `nil` (the
+    /// non-chain callers) preserves the shipped behaviour byte-identically.
+    func performFaceTimeCall(name: String, phone: String, video: Bool,
+                             hop: LaunchHop? = nil) {
         let locale = activeLocale
         switch callLinks.openFaceTime(handle: phone, video: video) {
         case .opened:
@@ -8098,6 +8229,11 @@ self.noteTalkContractChanged()
             setOutcome(icon: "exclamationmark.triangle.fill",
                        text: L10n.str("router.call.facetimeUnavailable", locale: locale))
             speak(text: L10n.str("router.call.facetimeUnavailable", locale: locale))
+            // Failed open (L2 §10.1 row 11): hop, when the caller carried
+            // one. Nothing is recorded from the failure itself.
+            performLaunchFailHop(after: .faceTime, candidates: hop?.candidates ?? [],
+                                 name: name, phone: phone, handle: hop?.handle,
+                                 isVideo: video, locale: locale)
         }
     }
 
@@ -8109,7 +8245,13 @@ self.noteTalkContractChanged()
     /// native Messages sheet, else the number on the pasteboard — each
     /// swap disclosed out loud. No recency entry: opening a chat is not
     /// a call (consistent with the family whatsApp button).
-    func performSystemContactWhatsApp(name: String, phone: String) {
+    /// `hop` is accepted for call-site uniformity with its sibling
+    /// openers but never consulted: every outcome of this opener is
+    /// TERMINAL (`invalidPhone` — nothing dialable anywhere) or a
+    /// RECOVERY (`needsNativeCompose`, `copiedNumber`) per design-l2
+    /// §10.1, and only a failure-with-hop row may hop (RES-10).
+    func performSystemContactWhatsApp(name: String, phone: String,
+                                      hop: LaunchHop? = nil) {
         let locale = activeLocale
         switch callLinks.openWhatsAppCallChat(phone) {
         case .openedChat:
@@ -8191,7 +8333,15 @@ self.noteTalkContractChanged()
     /// thread opens in-app when Messenger is installed, as the m.me web
     /// chat in Safari when it is not, and a missing handle opens nothing
     /// and says so. No recency entry.
-    func performSystemContactMessenger(name: String, handle: String) {
+    /// `hop` (FR-CDP-015, design-l2 §10.1): `.invalidHandle` is a failed
+    /// open — after the shipped honest line the remaining candidates are
+    /// attempted. This opener carries no phone number (design-l2 §14), so
+    /// a hopped `.phone` leg has nothing to dial and lands on the shipped
+    /// `call.announce.noPhoneNumber` line; the call-site surfaces that DO
+    /// hold the number keep it on their own floor path. `isVideo: false`
+    /// matches the search surfaces' audio-shaped FaceTime (L2 §9.1).
+    func performSystemContactMessenger(name: String, handle: String,
+                                       hop: LaunchHop? = nil) {
         let locale = activeLocale
         switch callLinks.openMessengerThread(handle: handle) {
         case .openedThread:
@@ -8220,6 +8370,12 @@ self.noteTalkContractChanged()
                        text: L10n.fmt("call.announce.noPhoneNumber", locale: locale, name))
             speak(text: L10n.fmt("call.announce.noPhoneNumber", locale: locale, name))
             noteSearchChannelTap(outcome: "messenger:invalidHandle")
+            // Failed open (L2 §10.1 row 14): the shipped line and the
+            // shipped tap event above stand; the hop then attempts the
+            // remaining candidates through the same shipped openers.
+            performLaunchFailHop(after: .messenger, candidates: hop?.candidates ?? [],
+                                 name: name, phone: "", handle: hop?.handle,
+                                 isVideo: false, locale: locale)
         }
     }
 

@@ -822,4 +822,689 @@ final class CallChannelResolutionTests: XCTestCase {
         XCTAssertEqual(viaSecondary.channel, .whatsApp)
         XCTAssertEqual(viaSecondary.fellBackFrom, [.messenger])
     }
+
+    // MARK: - Launch-fail hop (T-149)
+    //
+    // Security evidence for call-dialer-primary-secondary at the HOP level
+    // (design-l2 §10): SA-2 (the hop consumes its candidates strictly — at
+    // most two steps, no channel repeated, exhaustion is `nil` and speaks
+    // nothing beyond the already-spoken failure line), SA-5(b)/SA-6 (the
+    // hop's one spoken line and its closed-token event: component,
+    // eventType and the `failed:next` channel raw values, `metadata: [:]`,
+    // never a name or a number) and NFR-CDP-004 (the chain is synchronous:
+    // no await, no timer, no queue, no detached task).
+    //
+    // The decision step is driven directly — the design-l2 §28 seam names
+    // `launchFailHopStep`'s boundaries — so every assertion below runs the
+    // shipped code rather than a re-implementation of it (the same §28
+    // access relaxation T-148 recorded for `confirmationPrompt`). The one
+    // integration leg the unit bundle can honestly drive end to end is the
+    // search-shaped messenger opener: an unusable handle fails WITHOUT
+    // touching the platform (no URL is built, so nothing is probed and
+    // nothing is opened), and every candidate these tests hand it is
+    // terminal — no dial, no app switch, no probe can occur.
+    //
+    // The audio itself is DV territory: a unit test drives the coordinator
+    // before `start()`, where `speak` is a documented no-op. What IS
+    // pinned here is the single spoken-line SITE, the catalogue slots it
+    // binds and the event that accompanies every hop.
+
+    /// The fixture identity the hop announcements name — deliberately
+    /// digit-free, so a digit in a captured event payload is the event's
+    /// own fault (the SA-6 no-numbers pin).
+    private static let hopContactName = "Maya Gurung"
+
+    /// The usable handle the control legs pass (the shipped normalization
+    /// accepts it: no `@`, allowed charset).
+    private static let hopContactHandle = "maya.gurung"
+
+    /// FR-CDP-015 / SA-2 — the hop step consumes its candidates strictly.
+    /// The voice-path worked example first (design-l2 §10.4 row 1: routed
+    /// messenger with the WhatsApp secondary), then the identical walk
+    /// through the REAL step across the whole 64-cell matrix: every step
+    /// returns a member of the remaining list and never one already
+    /// attempted, the list shrinks by at least one channel per hop (the
+    /// listing's suffix consumption), the walk is bounded at two hops, and
+    /// exhaustion returns `nil` while emitting nothing.
+    @MainActor
+    func testHopStepConsumesCandidatesNeverRepeats() {
+        let coordinator = makeCoordinator()
+        let locale = englishLocale
+        let name = Self.hopContactName
+
+        let voiceCandidates = CallChannelChain.hopCandidates(preferred: .messenger,
+                                                             secondary: .whatsApp,
+                                                             routed: .messenger)
+        XCTAssertEqual(voiceCandidates, [.whatsApp, .phone])
+        var attempted: [CallApp] = [.messenger]
+        var sizes: [Int] = [voiceCandidates.count]
+        var remaining = voiceCandidates
+        var failed: CallApp = .messenger
+        var steps = 0
+        let exampleConsole = captureConsole {
+            while let step = coordinator.launchFailHopStep(after: failed,
+                                                           candidates: remaining,
+                                                           handle: Self.hopContactHandle,
+                                                           name: name, locale: locale) {
+                steps += 1
+                XCTAssertFalse(attempted.contains(step.next),
+                               "a channel is attempted at most once")
+                XCTAssertTrue(remaining.contains(step.next),
+                              "the step selects from its own remaining list")
+                attempted.append(step.next)
+                sizes.append(step.remaining.count)
+                remaining = step.remaining
+                failed = step.next
+            }
+        }
+        XCTAssertEqual(attempted, [.messenger, .whatsApp, .phone])
+        XCTAssertEqual(steps, 2, "depth is structurally at most two (design-l2 §10.3)")
+        XCTAssertTrue(remaining.isEmpty)
+        XCTAssertEqual(sizes, [2, 1, 0], "the candidate list strictly shrinks per hop")
+        XCTAssertEqual(hopEventLines(in: exampleConsole).count, steps,
+                       "one hop line per step, none at exhaustion")
+
+        // The same walk over the whole matrix, through the real step.
+        var cells = 0
+        var sweepSteps = 0
+        let sweepConsole = captureConsole {
+            for preferred in Self.chainChannels {
+                for secondary in Self.chainChannels {
+                    for combo in chainFeasibilityCombos() {
+                        cells += 1
+                        let cell = "preferred: \(preferred), secondary: \(secondary), "
+                            + "handle: \(combo.handle), whatsApp: \(combo.whatsApp)"
+                        let feasibility = CallChannelChain.Feasibility(
+                            messengerHandleAvailable: combo.handle,
+                            whatsAppInstalled: combo.whatsApp)
+                        let routed = CallChannelChain.route(preferred: preferred,
+                                                            secondary: secondary,
+                                                            feasibility: feasibility).channel
+                        var hopList = CallChannelChain.hopCandidates(preferred: preferred,
+                                                                     secondary: secondary,
+                                                                     routed: routed)
+                        var walkFailed = routed
+                        var walkAttempted: [CallApp] = [routed]
+                        while let step = coordinator.launchFailHopStep(
+                            after: walkFailed,
+                            candidates: hopList,
+                            handle: combo.handle ? Self.hopContactHandle : nil,
+                            name: name, locale: locale) {
+                            sweepSteps += 1
+                            XCTAssertFalse(walkAttempted.contains(step.next), cell)
+                            XCTAssertTrue(hopList.contains(step.next), cell)
+                            XCTAssertLessThan(step.remaining.count, hopList.count,
+                                              "strictly shrinking per hop — " + cell)
+                            walkAttempted.append(step.next)
+                            hopList = step.remaining
+                            walkFailed = step.next
+                        }
+                        XCTAssertLessThanOrEqual(walkAttempted.count - 1, 2, cell)
+                        XCTAssertTrue(hopList.allSatisfy { $0 == .messenger && !combo.handle },
+                                      cell)
+                    }
+                }
+            }
+        }
+        XCTAssertEqual(cells, 64, "the depth bound must hold over every matrix cell")
+        XCTAssertEqual(hopEventLines(in: sweepConsole).count, sweepSteps,
+                       "one hop line per hop over the whole matrix")
+
+        // Exhaustion — and the vocabulary-substituted case, whose candidate
+        // list is empty by construction — returns nil and says NOTHING
+        // beyond the caller's already-spoken failure line. The second leg
+        // is the messenger filter at its extreme: a messenger-only list
+        // with no handle on file is exhaustion, never a step.
+        XCTAssertEqual(CallChannelChain.hopCandidates(preferred: .messenger, secondary: .phone,
+                                                      routed: .faceTime, vocabulary: .video),
+                       [])
+        var stepsFromEmpty: Int = 0
+        let emptyConsole = captureConsole {
+            if coordinator.launchFailHopStep(after: .faceTime, candidates: [],
+                                             handle: nil, name: name,
+                                             locale: locale) != nil {
+                stepsFromEmpty += 1
+            }
+            if coordinator.launchFailHopStep(after: .faceTime, candidates: [.messenger],
+                                             handle: nil, name: name,
+                                             locale: locale) != nil {
+                stepsFromEmpty += 1
+            }
+        }
+        XCTAssertEqual(stepsFromEmpty, 0)
+        XCTAssertTrue(hopEventLines(in: emptyConsole).isEmpty,
+                      "exhaustion speaks nothing beyond the already-spoken failure line")
+    }
+
+    /// FR-CDP-015 / SA-5(b) / SA-6 — the hop announces exactly once per hop
+    /// through the ONE `call.announce.launchFailedFallback` site, and its
+    /// classification event is closed tokens only: component
+    /// `call_launch_fallback`, event type `hop`, outcome `<failed>:<next>`
+    /// in channel raw values, `metadata: [:]` — the printed payload is
+    /// pinned byte-exactly, with no name and no number. A second call over
+    /// the consumed list exhausts and adds no line.
+    @MainActor
+    func testLaunchFailedFallbackSpokenOnce() throws {
+        let coordinator = makeCoordinator()
+        let locale = englishLocale
+        let name = Self.hopContactName
+
+        var first: (next: CallApp, remaining: [CallApp])?
+        var second: (next: CallApp, remaining: [CallApp])?
+        let console = captureConsole {
+            first = coordinator.launchFailHopStep(after: .faceTime, candidates: [.phone],
+                                                  handle: nil, name: name, locale: locale)
+            second = coordinator.launchFailHopStep(after: .phone,
+                                                   candidates: first?.remaining ?? [],
+                                                   handle: nil, name: name, locale: locale)
+        }
+        XCTAssertEqual(first?.next, .phone)
+        XCTAssertEqual(first?.remaining, [CallApp]())
+        XCTAssertNil(second, "the consumed list is exhaustion: nil, nothing further said")
+
+        let lines = hopEventLines(in: console)
+        XCTAssertEqual(lines.count, 1, "exactly one hop line per hop")
+        guard let line = lines.first else { return XCTFail("no hop event was captured") }
+        let start = try XCTUnwrap(line.range(of: "[call_launch_fallback]"))
+        let payload = String(line[start.lowerBound...])
+        XCTAssertEqual(payload, "[call_launch_fallback] hop outcome=faceTime:phone metadata=[:]",
+                       "the hop event is closed tokens only: component, event type and the "
+                       + "failed:next channel raw values, empty metadata, nothing beyond")
+        XCTAssertFalse(payload.contains(name), "no contact name rides on the event (SA-6)")
+        XCTAssertFalse(payload.unicodeScalars.contains { CharacterSet.decimalDigits.contains($0) },
+                       "no number rides on the event (SA-6)")
+
+        // The single spoken-line site, pinned at the source: one key, one
+        // speak call, and the catalogue's slot order (failed label, name,
+        // next label).
+        let source = coordinatorSource()
+        XCTAssertEqual(occurrences(of: "\"call.announce.launchFailedFallback\"", in: source), 1,
+                       "the hop line lives at exactly ONE site in the coordinator")
+        let stepRegion = try region(between: "func launchFailHopStep(",
+                                    and: "private func performLaunchFailHop(",
+                                    in: source)
+        XCTAssertEqual(occurrences(of: "speak(text:", in: stepRegion), 1,
+                       "the hop step speaks exactly once per hop")
+        XCTAssertEqual(occurrences(of: collapsed("""
+            speak(text: L10n.fmt("call.announce.launchFailedFallback", locale: locale,
+                                 CallChannelChain.label(failed, locale: locale),
+                                 name,
+                                 CallChannelChain.label(next, locale: locale)))
+            """).trimmingCharacters(in: .whitespaces), in: collapsed(stepRegion)), 1,
+            "the hop line names the failed channel, the contact and the next channel — "
+            + "in the catalogue's slot order (FR-CDP-015)")
+        for language in [AppLanguage.english, .nepali] {
+            XCTAssertNotEqual(L10n.str("call.announce.launchFailedFallback", locale: language.locale),
+                              "call.announce.launchFailedFallback",
+                              "the hop line must resolve from the \(language.rawValue) catalog")
+        }
+    }
+
+    /// FR-CDP-004 / FR-CDP-015 — a messenger candidate with no usable
+    /// handle on file is dropped INSIDE the hop step (the same
+    /// `nextLaunchFailCandidate` filter the chain statics use), and the
+    /// next feasible candidate proceeds. The control leg proves it is a
+    /// feasibility filter, not a blanket messenger ban: with a handle the
+    /// same list selects messenger. A messenger-only list without a handle
+    /// is exhaustion, and nothing is said.
+    @MainActor
+    func testMessengerWithoutHandleSkippedInHop() {
+        let coordinator = makeCoordinator()
+        let locale = englishLocale
+        let name = Self.hopContactName
+
+        var withoutHandle: (next: CallApp, remaining: [CallApp])?
+        var withHandle: (next: CallApp, remaining: [CallApp])?
+        let console = captureConsole {
+            withoutHandle = coordinator.launchFailHopStep(after: .faceTime,
+                                                          candidates: [.messenger, .phone],
+                                                          handle: nil,
+                                                          name: name, locale: locale)
+            withHandle = coordinator.launchFailHopStep(after: .faceTime,
+                                                       candidates: [.messenger, .phone],
+                                                       handle: Self.hopContactHandle,
+                                                       name: name, locale: locale)
+        }
+        XCTAssertEqual(withoutHandle?.next, .phone,
+                       "the handle-less messenger candidate is dropped, the floor proceeds")
+        XCTAssertEqual(withoutHandle?.remaining, [CallApp]())
+        XCTAssertEqual(withHandle?.next, .messenger,
+                       "with a handle on file the SAME list selects messenger — a filter, "
+                       + "not a ban")
+        XCTAssertEqual(withHandle?.remaining, [.phone], "suffix consumption past the pick")
+
+        let lines = hopEventLines(in: console)
+        XCTAssertEqual(lines.count, 2)
+        XCTAssertTrue(lines[0].contains("outcome=faceTime:phone metadata=[:]"), lines[0])
+        XCTAssertTrue(lines[1].contains("outcome=faceTime:messenger metadata=[:]"), lines[1])
+        XCTAssertEqual(occurrences(of: "[call_launch_fallback]", in: console), 2,
+                       "the dropped candidate is never announced — exactly one line per hop")
+
+        var messengerOnly: (next: CallApp, remaining: [CallApp])?
+        let exhausted = captureConsole {
+            messengerOnly = coordinator.launchFailHopStep(after: .faceTime,
+                                                          candidates: [.messenger],
+                                                          handle: nil,
+                                                          name: name, locale: locale)
+        }
+        XCTAssertNil(messengerOnly, "a filtered-out candidate leaves exhaustion")
+        XCTAssertTrue(hopEventLines(in: exhausted).isEmpty)
+    }
+
+    /// FR-CDP-015 / L2-D3, design-l2 §21 — the additive fields keep the
+    /// shipped call sites compiling, pinned in their POST-T-148 state. The
+    /// override's amended action and BOTH log-store constructions name the
+    /// five shipped labels and none of the three new fields; the voice
+    /// step's construction names `fellBackFrom`/`hopCandidates` (T-148's
+    /// design edit — the routed method and its provenance are built there)
+    /// and none of the clock; the hop's re-entry copy (`replacing`) names
+    /// `requestedAt`/`hopCandidates` and deliberately NOT `fellBackFrom`
+    /// (the disclosure provenance dies with the first attempt).
+    @MainActor
+    func testAdditiveFieldsKeepOldCallSites() throws {
+        let newFields = ["requestedAt", "fellBackFrom", "hopCandidates"]
+        let shippedLabels = ["contact:", "method:", "unsupportedRequestedApp:",
+                             "sourceTranscript:", "sourceCommand:"]
+        let source = coordinatorSource()
+
+        // 1. The override's amended action — the shipped five-label
+        //    construction, byte-verbatim (whitespace-collapsed) and with
+        //    nothing added: a stale disclosure can never be re-spoken and
+        //    no hop candidate survives an override.
+        let overrideRegion = try region(between: "func handleCallConfirmationOverride(",
+                                        and: "func confirmationPrompt(", in: source)
+        XCTAssertEqual(occurrences(of: "PendingCallAction(", in: overrideRegion), 1,
+                       "the override amends through exactly one construction")
+        let amended = collapsed(try region(between: "let amended = PendingCallAction(",
+                                           and: "pendingCallAction = amended",
+                                           in: overrideRegion))
+            .trimmingCharacters(in: .whitespaces)
+        XCTAssertEqual(amended, collapsed("""
+            let amended = PendingCallAction(contact: action.contact,
+                                            method: override,
+                                            unsupportedRequestedApp: nil,
+                                            sourceTranscript: action.sourceTranscript,
+                                            sourceCommand: action.sourceCommand)
+            """).trimmingCharacters(in: .whitespaces),
+            "the amended construction must stay byte-identical (provenance dropped)")
+        for field in newFields {
+            XCTAssertFalse(amended.contains(field),
+                           "the amended action must not name \(field) (L2 §8 override path)")
+        }
+
+        // 2. The two log-store constructions (IntentLogStoreTests) — the
+        //    compile-time proof that the new fields are additive, pinned
+        //    at the source because that file is outside this unit's
+        //    ownership and must not be edited.
+        let logStoreSource = logStoreTestSource()
+        let logBlocks = callBlocks(in: logStoreSource,
+                                  marker: "AppCoordinator.PendingCallAction(")
+        XCTAssertEqual(logBlocks.count, 2, "the two shipped log-store constructions")
+        for block in logBlocks {
+            for label in shippedLabels {
+                XCTAssertTrue(collapsed(block).contains(label),
+                              "the log-store construction names \(label)")
+            }
+            for field in newFields {
+                XCTAssertFalse(block.contains(field),
+                               "the log-store construction must not name \(field) — the "
+                               + "new fields are defaulted (L2-D3)")
+            }
+        }
+
+        // 3. The voice step's construction — T-148's design edit: the
+        //    routed method plus its provenance are built here, and the
+        //    clock stays defaulted.
+        let stepRegion = try region(between: "let action = PendingCallAction(contact: contact,",
+                                    and: "pendingCallAction = action", in: source)
+        XCTAssertTrue(stepRegion.contains("fellBackFrom: route.fellBackFrom"))
+        XCTAssertTrue(stepRegion.contains("hopCandidates: CallChannelChain.hopCandidates("),
+                      "the voice action carries the hop list this unit consumes")
+        XCTAssertFalse(stepRegion.contains("requestedAt:"),
+                       "the voice action takes the defaulted clock")
+
+        // 4. The hop's re-entry copy — the one construction that moves the
+        //    new fields, by design (L2-D3/D7).
+        let replacingRegion = try region(
+            between: "func replacing(method: CallMethod, hopCandidates: [CallApp]) -> PendingCallAction {",
+            and: "@Published private(set) var pendingCallAction",
+            in: source)
+        XCTAssertTrue(replacingRegion.contains("requestedAt: requestedAt"),
+                      "the hop preserves the ORIGINAL question's clock")
+        XCTAssertTrue(replacingRegion.contains("hopCandidates: hopCandidates"),
+                      "the hop replaces the remaining candidates")
+        XCTAssertFalse(replacingRegion.contains("fellBackFrom:"),
+                       "the hop copy deliberately drops the disclosure provenance")
+
+        // 5. Additive at RUNTIME too: a five-label construction takes the
+        //    defaults, and the re-entry copy carries the flywheel pair.
+        let contact = FamilyContact(name: Self.hopContactName, phone: "9841234567",
+                                    relationship: "daughter")
+        let bare = AppCoordinator.PendingCallAction(contact: contact,
+                                                    method: .phone,
+                                                    unsupportedRequestedApp: nil,
+                                                    sourceTranscript: "मायालाई फोन गर",
+                                                    sourceCommand: nil)
+        XCTAssertTrue(bare.fellBackFrom.isEmpty, "an unpassed provenance defaults empty")
+        XCTAssertTrue(bare.hopCandidates.isEmpty, "an unpassed hop list defaults empty")
+        let copied = bare.replacing(method: .messengerAudio, hopCandidates: [.phone])
+        XCTAssertEqual(copied.requestedAt, bare.requestedAt)
+        XCTAssertEqual(copied.method, .messengerAudio)
+        XCTAssertEqual(copied.hopCandidates, [.phone])
+        XCTAssertTrue(copied.fellBackFrom.isEmpty,
+                      "the hop copy resets the provenance (no re-spoken disclosure)")
+        XCTAssertEqual(copied.capture.slots?["method"], "messengerAudio",
+                       "the flywheel slot follows the hopped method")
+    }
+
+    /// SA-2 / NFR-CDP-004 — no hop step re-enters the confirmation flow,
+    /// and the whole hop chain is synchronous: the voice path re-enters
+    /// `performCallAction` (the executor a fresh confirmation reaches) with
+    /// the copied action, and nothing in the machinery awaits, schedules or
+    /// queues. The one structural loop in the listing is the suffix
+    /// consumption inside the step; the recursion itself is bounded by the
+    /// shrinking list (pinned behaviourally above).
+    func testHopNeverReEntersConfirmationOrAwaits() throws {
+        let source = coordinatorSource()
+
+        let hopRegion = try region(between: "private func hopFromCallAction(",
+                                   and: "private func noteConfirmedCallExecution(", in: source)
+        XCTAssertEqual(occurrences(of: "performCallAction(action.replacing(", in: hopRegion), 1,
+                       "the voice hop re-enters the executor, never the confirmation flow")
+        XCTAssertEqual(occurrences(of: "CallChannelChain.method(for: step.next, isVideo: isVideo)",
+                                   in: hopRegion), 1)
+        XCTAssertEqual(occurrences(of: "hopCandidates: step.remaining", in: hopRegion), 1,
+                       "the re-entry receives the strictly shorter list")
+        for forbidden in ["pendingCallAction", "requestCallConfirmation",
+                          "openConfirmationWindow", "confirmationPrompt",
+                          "handleConfirmationResponse", "handleCallConfirmationOverride",
+                          "isAwaitingCallConfirmation"] {
+            XCTAssertFalse(hopRegion.contains(forbidden),
+                           "a hop never re-enters the confirmation flow: \(forbidden) "
+                           + "(no re-pending, no re-prompt — the elder's yes stands)")
+        }
+
+        let machinery = try region(between: "struct LaunchHop: Equatable {",
+                                   and: "private func hopFromCallAction(", in: source)
+        for forbidden in ["await", "async", "Task", "DispatchQueue", "Timer",
+                          "Thread.sleep", "usleep", "sleep(", "schedule"] {
+            XCTAssertFalse(machinery.contains(forbidden),
+                           "the hop chain is synchronous (NFR-CDP-004): \(forbidden)")
+        }
+        XCTAssertNil(firstMatch(of: #"\n\s*(while|for|repeat)\b"#, in: machinery),
+                     "the hop machinery holds no loop statement — the recursion is bounded "
+                     + "by the strictly shrinking candidate list")
+
+        // The mechanisms stay separate: the tap path attempts through the
+        // shipped openers, the voice path only through performCallAction.
+        XCTAssertEqual(occurrences(of: "case .phone:", in: machinery), 1,
+                       "the floor dispatch exists once")
+        XCTAssertTrue(machinery.contains("performSystemContactCall(name: name, phone: phone)"),
+                      "the hopped floor attempt goes through the shipped floor opener")
+        XCTAssertFalse(machinery.contains("performCallAction("),
+                       "the tap helper never re-enters the voice executor")
+    }
+
+    /// FR-CDP-015 / design-l2 §10.1 — the integration leg: what a hop does
+    /// when it runs, driven through the SHIPPED openers. An unusable
+    /// messenger handle fails without touching the platform, so the whole
+    /// chain is hermetic: every candidate below is terminal (the floor's
+    /// own honest line, or WhatsApp's invalid-phone data failure), and a
+    /// failed open records no learning, no activity and no history —
+    /// exactly as shipped.
+    @MainActor
+    func testHopOpenerWiringEndToEnd() throws {
+        let coordinator = makeCoordinator()
+        let name = Self.hopContactName
+
+        // Arm 0 — the GSM floor opener accepts the additive parameter for
+        // call-site uniformity and NEVER hops: the shipped honest line is
+        // the end of that path (design-l2 §10.1, "the floor is the last
+        // resort").
+        let activitiesBefore = coordinator.activityLog.entries().count
+        let floorConsole = captureConsole {
+            coordinator.performSystemContactCall(
+                name: name, phone: "",
+                hop: AppCoordinator.LaunchHop(candidates: [.phone], handle: nil))
+        }
+        XCTAssertTrue(hopEventLines(in: floorConsole).isEmpty,
+                      "the floor is terminal — a hop on board must not produce a hop")
+        drainMainQueue()
+        XCTAssertEqual(coordinator.lastOutcome?.icon, "exclamationmark.triangle.fill",
+                       "the floor reports honestly, never a success card")
+        XCTAssertEqual(coordinator.lastOutcome?.text,
+                       L10n.fmt("call.announce.noPhoneNumber",
+                                locale: coordinator.activeLocale, name))
+
+        // Arm A — a failed messenger open (empty handle: no thread URL can
+        // build, so nothing is probed and nothing is opened) hops to the
+        // floor: the shipped failure line and its shipped tap event come
+        // FIRST, then the hop line, then the floor's own terminal honest
+        // line. The floor leg carries phone "" — no tel: URL builds — so
+        // nothing is dialed, and nothing is recorded.
+        let hopConsole = captureConsole {
+            coordinator.performSystemContactMessenger(
+                name: name, handle: "",
+                hop: AppCoordinator.LaunchHop(candidates: [.phone], handle: nil))
+        }
+        let hopLines = hopEventLines(in: hopConsole)
+        XCTAssertEqual(hopLines.count, 1, "one failed open, one hop")
+        XCTAssertTrue(hopLines.first?.contains("outcome=messenger:phone metadata=[:]") ?? false,
+                      hopLines.first ?? "no hop line captured")
+        let tapEvent = "[contact_search_channels] tap outcome=messenger:invalidHandle"
+        XCTAssertEqual(occurrences(of: tapEvent, in: hopConsole), 1,
+                       "the shipped tap event still fires exactly once")
+        let tapRange = try XCTUnwrap(hopConsole.range(of: tapEvent))
+        let hopRange = try XCTUnwrap(hopConsole.range(of: "[call_launch_fallback] "))
+        XCTAssertLessThan(tapRange.lowerBound, hopRange.lowerBound,
+                          "the failure's own event precedes the hop — the hop is what "
+                          + "happens AFTER the honest line")
+        drainMainQueue()
+        XCTAssertEqual(coordinator.lastOutcome?.text,
+                       L10n.fmt("call.announce.noPhoneNumber",
+                                locale: coordinator.activeLocale, name),
+                       "the hopped floor leg ends on its own shipped honest line")
+        XCTAssertEqual(coordinator.activityLog.entries().count, activitiesBefore,
+                       "a failed open records nothing — the hop included")
+
+        // Arm B — a failed messenger open hopping to WhatsApp: the hopped
+        // leg's empty phone makes it `.invalidPhone`, which §10.1 defines
+        // as TERMINAL. The chain stops there and exactly one hop ever
+        // spoke — the WhatsApp opener never consults its `hop`, pinned
+        // here behaviourally.
+        let terminalConsole = captureConsole {
+            coordinator.performSystemContactMessenger(
+                name: name, handle: "",
+                hop: AppCoordinator.LaunchHop(candidates: [.whatsApp], handle: nil))
+        }
+        let terminalLines = hopEventLines(in: terminalConsole)
+        XCTAssertEqual(terminalLines.count, 1, "one failed open, one hop — then terminal")
+        XCTAssertTrue(terminalLines.first?.contains("outcome=messenger:whatsApp metadata=[:]")
+                      ?? false, terminalLines.first ?? "no hop line captured")
+        XCTAssertEqual(occurrences(of: "[contact_search_channels] tap outcome=whatsapp:invalidPhone",
+                                   in: terminalConsole), 1,
+                       "the hopped WhatsApp leg reports its own invalid-phone outcome")
+        drainMainQueue()
+        XCTAssertEqual(coordinator.activityLog.entries().count, activitiesBefore,
+                       "the terminal leg records nothing either")
+    }
+
+    // MARK: - Helpers (the house patterns the sibling suites ship)
+
+    private static let languageKey = "appLanguage"
+
+    private var languageBackup: Any?
+
+    override func setUp() {
+        super.setUp()
+        languageBackup = UserDefaults.standard.object(forKey: Self.languageKey)
+    }
+
+    override func tearDown() {
+        if let languageBackup {
+            UserDefaults.standard.set(languageBackup, forKey: Self.languageKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: Self.languageKey)
+        }
+        super.tearDown()
+    }
+
+    /// Seeds English BEFORE construction (the init restores through the
+    /// real `AppLanguage.persisted()` seam) so the spoken-line pins are
+    /// deterministic; `tearDown` restores the prior value.
+    @MainActor
+    private func makeCoordinator() -> AppCoordinator {
+        UserDefaults.standard.set(AppLanguage.english.rawValue, forKey: Self.languageKey)
+        return AppCoordinator(profileStorage: InMemoryProfilePayloadStorage())
+    }
+
+    /// Waits out the main-queue hops (`setOutcome` dispatches async — the
+    /// sentinel enqueued LAST runs after everything before it).
+    private func drainMainQueue() {
+        let done = expectation(description: "main drain")
+        DispatchQueue.main.async { done.fulfill() }
+        wait(for: [done], timeout: 5)
+    }
+
+    /// Runs `body` with process stdout redirected to a temp file and
+    /// returns what the console bus printed (the LiveTranslate pattern,
+    /// via `DialogueCoordinatorWiringTests`). Assertions are scoped to
+    /// this unit's events only.
+    private func captureConsole(_ body: () -> Void) -> String {
+        let original = dup(STDOUT_FILENO)
+        let path = NSTemporaryDirectory() + "/call-resolution-sink-\(UUID().uuidString).log"
+        let descriptor = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0o600)
+        guard original >= 0, descriptor >= 0 else {
+            if descriptor >= 0 { close(descriptor) }
+            if original >= 0 { close(original) }
+            XCTFail("could not open the console-capture file")
+            return ""
+        }
+        dup2(descriptor, STDOUT_FILENO)
+        close(descriptor)
+
+        body()
+        fflush(stdout)
+
+        dup2(original, STDOUT_FILENO)
+        close(original)
+
+        let captured = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
+        try? FileManager.default.removeItem(atPath: path)
+        return captured
+    }
+
+    /// The hop classification lines in a captured console — component
+    /// `call_launch_fallback`, event type `hop` (nothing else this unit
+    /// prints matches).
+    private func hopEventLines(in console: String) -> [String] {
+        console.components(separatedBy: .newlines)
+            .filter { $0.contains("[call_launch_fallback] hop ") }
+    }
+
+    private func coordinatorSource() -> String {
+        FeatureSourceScan.codeText(of: FeatureSourceScan.iosDirectory(file: #filePath)
+            .appendingPathComponent("ElderlyAssistant/App/AppCoordinator.swift"))
+    }
+
+    /// The sibling suite that owns the two shipped log-store
+    /// constructions — read, never edited (outside this unit's ownership).
+    private func logStoreTestSource() -> String {
+        FeatureSourceScan.codeText(of: FeatureSourceScan.iosDirectory(file: #filePath)
+            .appendingPathComponent("ElderlyAssistantTests/Services/Intents/IntentLogStoreTests.swift"))
+    }
+
+    /// The text between two code markers — comment-stripped, so the
+    /// markers and the pins are code, never prose (the
+    /// `CallConfirmationWordingTests.region` convention, verbatim).
+    private func region(between start: String, and end: String, in text: String) throws -> String {
+        let startRange = try XCTUnwrap(text.range(of: start),
+                                       "AppCoordinator.swift has no `\(start)`")
+        let endRange = try XCTUnwrap(text.range(of: end, range: startRange.upperBound..<text.endIndex),
+                                     "no `\(end)` after `\(start)`")
+        return String(text[startRange.lowerBound..<endRange.lowerBound])
+    }
+
+    /// Whitespace-collapsed form: exact token sequences and counts survive
+    /// while indentation and line breaks do not (a source pin must fail
+    /// on a weakened gate, not on a reformat).
+    private func collapsed(_ text: String) -> String {
+        text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+    }
+
+    private func occurrences(of needle: String, in haystack: String) -> Int {
+        haystack.components(separatedBy: needle).count - 1
+    }
+
+    private func firstMatch(of pattern: String, in text: String) -> String? {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            XCTFail("bad scan pattern: \(pattern)")
+            return nil
+        }
+        let search = text as NSString
+        guard let match = regex.firstMatch(in: text,
+                                           range: NSRange(location: 0, length: search.length)) else {
+            return nil
+        }
+        return search.substring(with: match.range)
+    }
+
+    /// Every call whose text starts at `marker` (which ends with its
+    /// opening parenthesis), up to and including the parenthesis that
+    /// closes it — the plural of `DialogueCoordinatorWiringTests.callBlock`,
+    /// so N constructions can each be pinned independently.
+    private func callBlocks(in text: String, marker: String) -> [String] {
+        var blocks: [String] = []
+        var searchStart = text.startIndex
+        while let start = text.range(of: marker, range: searchStart..<text.endIndex) {
+            var depth = 1
+            var index = start.upperBound
+            var end: String.Index?
+            while index < text.endIndex {
+                let character = text[index]
+                if character == "(" {
+                    depth += 1
+                } else if character == ")" {
+                    depth -= 1
+                    if depth == 0 { end = index; break }
+                }
+                index = text.index(after: index)
+            }
+            guard let end else { break }
+            blocks.append(String(text[start.lowerBound...end]))
+            searchStart = text.index(after: end)
+        }
+        return blocks
+    }
+
+    // MARK: - In-memory stand-in for the encrypted channel
+    // (the house helper its sibling suites ship — `ColdStartRoutingTests`,
+    // `CallingSettingsSurfaceTests`, `CallConfirmationWordingTests`: the
+    // coordinator's payload store only; the seam under test is the real
+    // hop machinery + the real catalog.)
+
+    private final class InMemoryProfilePayloadStorage: ProfilePayloadStorage {
+        var payloads: [String: Data] = [:]
+        private let encoder = JSONEncoder()
+
+        func write<T: Encodable>(key: String, value: T) -> Result<Void, StorageError> {
+            guard let data = try? encoder.encode(value) else {
+                return .failure(.encryptedWriteFailed)
+            }
+            payloads[key] = data
+            return .success(())
+        }
+
+        func read<T: Decodable>(key: String, type: T.Type) -> Result<T, StorageError> {
+            .failure(.encryptedReadFailed)
+        }
+
+        func delete(key: String) -> Result<Void, StorageError> {
+            payloads[key] = nil
+            return .success(())
+        }
+
+        func readRawData(key: String) -> Data? { payloads[key] }
+        func hasPayload(key: String) -> Bool? { payloads[key] != nil }
+    }
 }
