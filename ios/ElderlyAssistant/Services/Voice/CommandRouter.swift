@@ -3346,7 +3346,8 @@ final class CommandRouter {
         ))
         speak(text: DialogueProbeComposer.probeText(for: frame, catalog: dialogueCatalog,
                                                     retry: retry, locale: locale),
-              locale: locale)
+              locale: locale,
+              speed: DialogueConfig.dialogueProbeSpeechSpeed)
     }
 
     /// The probe event's `option_count` (§26: 0…4): the capped
@@ -4842,7 +4843,8 @@ final class CommandRouter {
     /// prompts) — no catalog lookup, already in the right language.
     /// [VOICE-ACK] Commits through the serial `ReplySpeakLane`, so a
     /// pre-acknowledgment and a later result reply drain in commit order.
-    private func speak(text: String, locale: Locale? = nil) {
+    private func speak(text: String, locale: Locale? = nil,
+                       speed: Float? = nil) {
         #if DEBUG
         print("[command_router][DEBUG] speak() called, speaker=\(speaker != nil), text=\"\(text)\"")
         #endif
@@ -4867,7 +4869,7 @@ final class CommandRouter {
             // speak-finished marks below keep their exact per-utterance
             // semantics (they fire when this speech ends, not when a
             // later queued utterance does).
-            await lane.enqueue(text, locale: locale)
+            await lane.enqueue(text, locale: locale, speed: speed)
             #if DEBUG
             print("[command_router][DEBUG] speaker.speak() returned (finished or cancelled)")
             #endif

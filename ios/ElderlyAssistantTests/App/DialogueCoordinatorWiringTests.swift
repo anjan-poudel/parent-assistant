@@ -820,6 +820,26 @@ final class DialogueCoordinatorWiringTests: XCTestCase {
             "the yes/no chips own the confirmation window — never auto-listen")
     }
 
+    func testLateMidCyclePipelineEventsAfterResolutionAreTolerated() {
+        // Device crash 2026-10-11 (ElderlyAssistant-2026-10-11-223011.ips,
+        // iPhone 17 Pro Max): the answer interception resolves the frame
+        // to `.idle` inside the turn while the same turn's
+        // `.processing`/`.routing` emissions still travel the sink
+        // behind it — `.idle → .transcribing` is not a legal edge and
+        // the debug assertion crashed the app. Pre-fix, calling these
+        // handlers from `.idle` traps in the debug host; post-fix they
+        // are skipped as the tail of a closed turn.
+        let coordinator = makeCoordinator()
+        coordinator.voiceSession.transition(to: .idle)
+
+        coordinator.handlePipelineState(.processing)
+        XCTAssertEqual(coordinator.voiceSession.state, .idle,
+                       "a late .processing after resolution is skipped, never asserted")
+        coordinator.handlePipelineState(.routing)
+        XCTAssertEqual(coordinator.voiceSession.state, .idle,
+                       "a late .routing after resolution is skipped, never asserted")
+    }
+
     // MARK: - Fixtures and helpers
 
     /// In-memory stand-in for the encrypted channel (the

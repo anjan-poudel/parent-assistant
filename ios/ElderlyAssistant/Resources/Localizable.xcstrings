@@ -4001,6 +4001,23 @@
         }
       }
     },
+    "dialogue.correction.ask": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "I heard «%@». Did you mean %@?"
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "मैले «%@» सुनें। के तपाईंले %@ भन्न खोज्नुभएको थियो?"
+          }
+        }
+      }
+    },
     "dialogue.didYouMean": {
       "extractionState": "manual",
       "localizations": {
@@ -4133,6 +4150,23 @@
           "stringUnit": {
             "state": "translated",
             "value": "शिव"
+          }
+        }
+      }
+    },
+    "dialogue.option.conjunction": {
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": " or "
+          }
+        },
+        "ne": {
+          "stringUnit": {
+            "state": "translated",
+            "value": " वा "
           }
         }
       }
@@ -23533,23 +23567,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "पिपले गलत सुनिएका शब्द आफैं सच्याउँछ, र ढुक्क नभए सोध्छ। सबै कुरा यही फोनमा रहन्छ।"
-          }
-        }
-      }
-    },
-    "dialogue.correction.ask": {
-      "extractionState": "manual",
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "I heard «%@». Did you mean %@?"
-          }
-        },
-        "ne": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "मैले «%@» सुनें। के तपाईंले %@ भन्न खोज्नुभएको थियो?"
           }
         }
       }

@@ -130,13 +130,18 @@ final class L10nCatalogCoverageTests: XCTestCase {
     /// The pinned inventory: design-l2 §16 minus the `dialogue.timeout` row,
     /// which the design lists only to declare it missing — the silent
     /// expiry path speaks nothing by construction (C-4, review-l2: the
-    /// counts are 17 keys, not the 16 the §16 prose still says).
+    /// counts are 17 keys, not the 16 the §16 prose still says). Two keys
+    /// post-date §16: `dialogue.option.conjunction` (the "or" joiner the
+    /// narrowed choice probes speak with, owner feedback 2026-10-11) and
+    /// `dialogue.correction.ask` (correction-revive, PR #162), making the
+    /// family 19.
     private static let dialogueKeys: [String] = [
         "dialogue.cancelled",
         "dialogue.candidate.appLaunch",
         "dialogue.candidate.music",
         "dialogue.candidate.news",
         "dialogue.candidate.youtube",
+        "dialogue.correction.ask",
         "dialogue.didYouMean",
         "dialogue.escape",
         "dialogue.exhausted",
@@ -145,6 +150,7 @@ final class L10nCatalogCoverageTests: XCTestCase {
         "dialogue.option.bhajan.devi",
         "dialogue.option.bhajan.durga",
         "dialogue.option.bhajan.shiva",
+        "dialogue.option.conjunction",
         "dialogue.probe.bhajanKind",
         "dialogue.probe.musicAny",
         "dialogue.retry",
@@ -152,13 +158,17 @@ final class L10nCatalogCoverageTests: XCTestCase {
     ]
 
     /// The catalog at this feature's branch point: 1,364 keys, zero
-    /// `dialogue.*` entries — rebased to 1,366 at integration, when
-    /// af69135 ("owner override to download models the RAM tier refuses")
-    /// added the two `settings.hidden.ignoreRamTier` keys to master
-    /// between the branch point and the merge. The feature adds exactly
-    /// the 17 and removes none, so the total is pinned (the
+    /// `dialogue.*` entries — rebased at integration: to 1,366 when
+    /// af69135 (RAM-tier owner override) added its two settings keys,
+    /// to 1,369 when the call-deterministic-fallback (PR #161) and
+    /// correction-revive merges added five further non-dialogue keys,
+    /// and to 1,370 when the call-nearmiss merge (PR #166) added
+    /// `router.call.didYouMeanPrefix`. The dialogue family is 19 keys
+    /// (the 18 design-l2 §16 entries plus `dialogue.correction.ask`,
+    /// moved into the family block at this rebase); the family adds
+    /// exactly its keys and removes none, so the total is pinned (the
     /// Spotify-localisation suite's count discipline).
-    private static let dialogueBaselineKeyCount = 1_366
+    private static let dialogueBaselineKeyCount = 1_370
 
     /// The design-l2 §16 draft copy, verbatim, both languages. The owner
     /// copy review is a later step recorded in the plan; this pin makes
@@ -170,6 +180,8 @@ final class L10nCatalogCoverageTests: XCTestCase {
         ("dialogue.candidate.music", "Play %@?", "%@ बजाउने हो?"),
         ("dialogue.candidate.news", "The news?", "समाचार सुनाउने हो?"),
         ("dialogue.candidate.youtube", "Watch %@ on YouTube?", "युट्युबमा %@ हेर्ने हो?"),
+        ("dialogue.correction.ask", "I heard «%@». Did you mean %@?",
+         "मैले «%@» सुनें। के तपाईंले %@ भन्न खोज्नुभएको थियो?"),
         ("dialogue.didYouMean", "Did you mean %@?", "के तपाईंको मतलब %@ हो?"),
         ("dialogue.escape", "OK, tell me again.", "ठीक छ, फेरि भन्नुहोस्।"),
         ("dialogue.exhausted", "I didn't understand. Try again later.",
@@ -179,6 +191,7 @@ final class L10nCatalogCoverageTests: XCTestCase {
         ("dialogue.option.bhajan.devi", "devi", "देवी"),
         ("dialogue.option.bhajan.durga", "durga", "दुर्गा"),
         ("dialogue.option.bhajan.shiva", "shiva", "शिव"),
+        ("dialogue.option.conjunction", " or ", " वा "),
         ("dialogue.probe.bhajanKind", "What kind of bhajan? %@ … or say it yourself",
          "कस्तो भजन? %@ … वा आफैँ भन्नुहोस्"),
         ("dialogue.probe.musicAny", "What kind of music? Say the name.",
@@ -348,15 +361,28 @@ final class L10nCatalogCoverageTests: XCTestCase {
         }
         let keyLines = raw.split(separator: "\n", omittingEmptySubsequences: false)
             .map { String($0) }
-            .filter { $0.hasSuffix(" : {") && $0.hasPrefix("    \"") }
-            .map { String($0.dropFirst(5).dropLast(5)) }
+            // The catalog ships Xcode's unspaced `"key": {` form; the
+            // spaced `"key" : {` variant is tolerated so a formatter
+            // re-run cannot blind the pin (the dropLast width follows
+            // whichever suffix matched).
+            .filter { ($0.hasSuffix(" : {") || $0.hasSuffix(": {"))
+                && $0.hasPrefix("    \"") }
+            .map { line in
+                let suffixWidth = line.hasSuffix(" : {") ? 5 : 4
+                return String(line.dropFirst(5).dropLast(suffixWidth))
+            }
 
         XCTAssertGreaterThan(keyLines.count, 1_000,
                              "the key-line scan found too few entries — the "
                              + "catalog layout changed and this pin is blind")
 
+        // Family membership, not a prefix sweep: the family is the
+        // pinned inventory (19 keys incl. `dialogue.correction.ask`,
+        // moved into the block at the rebase), so a bare prefix filter
+        // would let an unpinned `dialogue.*` key pass silently.
+        let family = Set(Self.dialogueKeys)
         let indices = keyLines.enumerated()
-            .filter { $0.element.hasPrefix("dialogue.") }
+            .filter { family.contains($0.element) }
             .map(\.offset)
         XCTAssertEqual(indices.count, Self.dialogueKeys.count,
                        "exactly \(Self.dialogueKeys.count) dialogue keys must "
