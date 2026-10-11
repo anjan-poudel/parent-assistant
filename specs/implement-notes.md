@@ -91,3 +91,17 @@ no console writes. AddressBookDirectory gains the SystemContactReading
 conformance. Suite: 27 tests incl. deterministic gate-forced drain cases.
 Whole-module build green + release log-safety gate passes. Scoped run deferred.
 Handoff: T-156 must pass the FULL roster to refresh.
+
+## T-152 — UnifiedContactSearch tiers and dedupe — DONE
+
+Commit b0e8dc7f. FamilyMatchTier.nickname at raw 2 (containment renumbered 3);
+Outcome.linkedBookNames defaulted; search requires index:, five passes per
+design (nickname exact via O(1) map + Character-safe substring; Pass 3
+drop/synthesize with name-equal suppression; Pass 4 unchanged; Pass 5 recount;
+.empty short-circuit = structural parity). Guards: no phantom drop, one-row-per
+person, stale stored claims never merge. Shared-file fixes: 3 call sites in
+LeafViews (inline index hoists, T-156 interim). Wizard does not call the unified
+search yet (T-159 scope, verified). Tests: 22 existing + 17 new (tier order,
+Devanagari pins positive+negative, Pass 3-5, parity anchors, ambiguity, failure
+paths, <=20 ms ceiling); the one uncertain Foundation behavior probed standalone.
+Whole-module build green, 0 errors. Scoped run deferred.
