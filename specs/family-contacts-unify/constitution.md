@@ -139,12 +139,12 @@ Completion gate — DV-* device validation on the reference device (Anzaan), rec
 
 The project release gates apply to the new paths: the release-build log-surface gate must cover the write/fallback/resolution paths (evidence in `final-sign-off`).
 
-## Open Decisions
+## Open Decisions — RESOLVED (parent session, 2026-10-12, before first run)
 
-Only genuine owner-level items; the design phases elaborate this supplement, they do not re-open it. None beyond these two:
+Both resolved as loggable defaults under the standing workstream-autonomy grant; recorded for the audit trail. The design phases elaborate this supplement, they do not re-open it:
 
-1. **Design path.** No frozen design doc exists for this feature (the owner request is the source; `design-l1`/`design-l2` are the first design pass). If the owner wants a brainstorming session producing a frozen design first (the `call-dialer-primary-secondary` pattern), that is a parent-level decision. Assumed: proceed straight to design-l1 (the workflow's design chain matches the project baseline: design-l1 → design-l2 → review-l2). Confirm or correct before running /sdd-run.
-2. **No automatic transliteration.** Romanized and Devanagari forms must each be stored explicitly to match ("sanu" ≠ "सानु" unless both are recorded); the feature does not transliterate, romanize, or fuzzy-bridge scripts. Assumed: store-as-entered is the desired behavior (matching the brief's constraint); a future request for cross-script matching would be a new feature, not a silent behavior change. Confirm or correct before running /sdd-run.
+1. **Design path — RESOLVED: proceed straight to design-l1.** No brainstorming/frozen-design phase. Rationale: the owner request is concrete with pre-authorized feasibility fallbacks, and the T1 owner-story HIL gives the owner the review point a brainstorming phase would otherwise provide. (The `call-dialer-primary-secondary` frozen-design pattern applied there because it reshaped a shipped call-routing flow; this feature is additive.)
+2. **No automatic transliteration — RESOLVED: store-as-entered.** Romanized and Devanagari forms each match only when recorded explicitly ("sanu" ≠ "सानु" unless both are stored); the feature does not transliterate, romanize, or fuzzy-bridge scripts. Rationale: matches the brief ("in devnagari"); multiple nicknames let the owner record both scripts as two entries; Nepali romanization is ambiguous (sanu/saanu/syanu/shyanu) and auto-bridging scripts risks a wrong-person call, which is worse than a missed match. Cross-script fuzzy matching remains a future feature request, not a silent behavior change.
 
 Nothing else is left open. The three feasibility fallbacks are pre-authorized by the owner in the request itself; photo display precedence (system when present, else app-local), the app-local fallback path, migration-without-loss, and the frozen grapheme behavior are settled inputs. The remaining choices — link storage shape, write-seam shape, index structure, unlink semantics, and which representation a linked row renders — are design-level, resolved by design-l1/design-l2 and the security-design-review, not owner decisions.
 
