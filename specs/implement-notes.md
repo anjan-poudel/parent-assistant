@@ -79,3 +79,15 @@ pre-commit dry-run caught and fixed two defects in the scan tests themselves.
 Whole-module build green, 0 errors. Scoped run deferred. Handoffs: T-155
 FEATURE_ROOTS registration; T-158 injection + preAttemptOutcome use; T-160 label
 rendering.
+
+## T-149 — SystemContactLinkService — DONE
+
+Commit 64727330. VerifiedLinksSnapshot + the two reading seams + actor service:
+one batched verification fetch (identifier+phoneNumbers keys only), fingerprint
+rule reused unchanged, duplicate claims first-in-roster-order, single-flight
+drain with latest-roster capture (one documented Task.yield window), photo cache
+(24/16 MiB/16-hex sha256 keys, no negative caching), closed-vocabulary events,
+no console writes. AddressBookDirectory gains the SystemContactReading
+conformance. Suite: 27 tests incl. deterministic gate-forced drain cases.
+Whole-module build green + release log-safety gate passes. Scoped run deferred.
+Handoff: T-156 must pass the FULL roster to refresh.
