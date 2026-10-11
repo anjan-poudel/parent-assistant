@@ -3,7 +3,7 @@
   "workflow": "call-dialer-primary-secondary",
   "project": "/Users/anjan/workspace/projects/elderly-ai-assistant-call-dialer-primary-secondary",
   "started_at": "2026-10-11T16:06:15.080Z",
-  "updated_at": "2026-10-11T16:48:44.936Z",
+  "updated_at": "2026-10-11T16:59:25.303Z",
   "tasks": {
     "define-requirements": {
       "status": "COMPLETED",
@@ -64,10 +64,15 @@
       "last_activity_at": "2026-10-11T15:56:25.374Z"
     },
     "security-design-review": {
-      "status": "PENDING",
+      "status": "COMPLETED",
       "started_at": null,
-      "completed_at": null,
-      "outputs": [],
+      "completed_at": "2026-10-11T16:59:25.303Z",
+      "outputs": [
+        {
+          "path": "specs/security-design-review.md",
+          "contract": "review_report"
+        }
+      ],
       "iterations": 0,
       "pending_at": "2026-10-11T15:56:25.374Z",
       "last_activity_at": "2026-10-11T15:56:25.374Z"

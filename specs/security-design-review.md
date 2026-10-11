@@ -1,138 +1,217 @@
-# Security design review — Multi-Turn Conversation (STRIDE)
+# security-design-review — Security design gate (STRIDE)
 
-**Task.** `security-design-review` — the security gate of the `multi-turn-conversation` workflow. Workflow exit condition: `review.decision == "SECURITY-GO"`.
+- Task: security-design-review (ai-sdd workflow call-dialer-primary-secondary); contract: security review of the component design.
+- Workflow exit condition for this task: review.decision == "SECURITY-GO" (specs/call-dialer-primary-secondary/workflow.yaml).
+- Agent: sdd-reviewer (Reviewer). Feature: call-dialer-primary-secondary.
+- Worktree: /Users/anjan/workspace/projects/elderly-ai-assistant-call-dialer-primary-secondary (read-only). Branch: feat/call-dialer-primary-secondary.
+- Disposition: read-only security review — no files written, no git state touched; this report is returned to the orchestrating session for recording at specs/security-design-review.md.
 
-**Agent.** sdd-reviewer (ai-sdd), read-only.
+## Artifacts under review
 
-**Artifacts under review**
-
-| Artifact | Contract | Size | Status |
+| Artifact | Contract | Size | sha256 (grouped 8x8 for output hygiene) |
 |---|---|---|---|
-| `specs/design-l1.md` | `architecture_l1` | 680 lines | gate-cleared at `design-l1` |
-| `specs/design-l2.md` | `component_design_l2` | 1005 lines | `review-l2` GO (F-1..F-4, C-1..C-5) |
-| `specs/review-l2.md` | review record | 245 lines | security-relevant findings carried |
+| specs/design-l1.md | architecture_l1 | 871 lines | 5446333b 27a6a20a 3cc3f658 7efcc757 da8ec1ba 9d00282c 56b1d09d 3c990c6d |
+| specs/design-l2.md | component_design_l2 | 1245 lines | cd6dedcd d578735b 6e33606e 5e550875 8fe91caa 83eb48fb 74ad81d8 1c96e120 |
+| specs/review-l2.md | review (design-gate record) | 87 lines | 4526d427 9bd31f84 9988f867 b6a9deaa cda75ab4 eeebe7a3 33c8c201 83ef7a33 |
 
-`design-l2.md` sha256 re-verified at review time (chunked here for readability): `9c164658 5b137833 0129c007 8cc4ae0f 3a32ab3e 818e3a86 ac87fe8c 069c6f51`.
+The two design hashes match their declared contracts exactly; all three artifacts were re-hashed at the end of this review and were unchanged during it. review-l2.md has no declared contract hash — its content (decision GO; 0 BLOCKER / 1 MAJOR / 4 MINOR / 2 NOTE; findings F-1..F-7) was read verbatim this session and is the disposition baseline this review carries forward.
 
-**Feature / worktree.** `multi-turn-conversation` @ `/Users/anjan/workspace/projects/elderly-ai-assistant-multi-turn-conversation`, branch `feat/multi-turn-conversation`. **Date.** 2026-10-10.
+Basis documents consulted (hashes grouped 8x8): specs/define-requirements.lock.yaml — 242 lines, cea80dcd 3f793b0a bcc752f5 8b84af25 23248f80 85629890 c6497648 07758f8 (19 FR / 10 NFR; six security_surfaces; the security-design-review and security-test traceability gates are the basis for the five focus areas); frozen owner design docs/superpowers/specs/2026-10-12-call-dialer-primary-secondary-design.md — 183 lines, 16a5a9c3 822d3ad6 4a460a71 7bd6a219 a78626c0 bbfaa201 47f42672 82941fd8; feature constitution specs/call-dialer-primary-secondary/constitution.md — 101 lines, e5f816c3 a9d56743 26136204 ca657fe7 a739e8f6 671f9dfd d838e243 3a1f43e5; root constitution.md — 159 lines, 7feae062 30b7e58e a2256a4e 332d0b80 7029642c e7a0646f 6ac3ddcd 460c9ef8; workflow specs/call-dialer-primary-secondary/workflow.yaml and its mirror .ai-sdd/workflows/call-dialer-primary-secondary.yaml — 190 lines each, c0ec077b b738e6ad b55eafba 7c30cb97 46fffc78 fabf702f b80df79e 4f8f4ec5 in both copies; byte-identical (diff exit 0).
 
-**Basis.** Feature supplement `specs/multi-turn-conversation/constitution.md` (Safety-Relevant Constraints 1-4; Feature Constraints 1-10); root `constitution.md` (Standards: encrypted storage, quarantine-level injection discipline, logs must not contain PII; Release gates: the release log-surface gate wired into `ios/build.sh`); the requirement set FR-MTC-001..020 / NFR-MTC-001..012 (security-relevant: FR-MTC-005/006/009/011/012/013/017, NFR-MTC-004/008/012); the workflow's six security focus areas; `specs/review-l2.md`.
+## Verification method
 
-**Verification method.** Read-only; no artifact, workflow file or git state was modified. Every load-bearing security claim was re-checked against shipped source in this worktree — routing order in `route()`, the emergency block, the confirmation hook, the contact/YouTube/keyword predicates, the session state machine and timers, the coordinator window seams, the input seam, `InputSanitiser`, `LogSanitiser`, and the release-log gate (script, shell entry point, `build.sh` wiring). The ledger below states claim, source read and verdict.
+Adversarial, read-only re-verification against the worktree source at this baseline — every load-bearing security claim of the design was re-read from source rather than trusted from the documents. Specifically: the chain algebra (the CallChannelChain listing and its never-dead-end argument) was traced by hand over all 4 x 4 pick pairs x 4 feasibility states (64 cells); the AppCoordinator seams (resolve, request/confirmation, override, perform, launch-fail hop, dial-back, observability) were re-read at the line anchors the L2 cites; the probe path (the canOpenURLOnMain hop, the LeafViews installed probe, Info.plist declared schemes, the address-book handle check) was re-read; the log-safety coverage mechanics (check-release-log-safety.py FEATURE_ROOTS and role matching) were re-read and the release gate was run to a baseline exit 0; the catalog state (five new keys absent; reused keys present) was re-checked; the call-site enumerations (resolvedCallChannel, resolvedMissedCallChannel, PendingCallAction constructions) were re-grepped repo-wide. review-l2 findings F-1..F-7 were re-verified against source, not accepted on their internal evidence alone. Output hygiene: hashes are grouped 8x8 and long paths are broken across spans.
 
 ## Summary
 
-**Decision: SECURITY-GO** — 8 surfaces threat-modelled, 0 BLOCKERs, 5 must-fix conditions (M-1..M-5), 4 verify-and-record items (V-1..V-4), 8 evidence obligations for `security-test`, 5 accepted residuals.
+Decision: SECURITY-GO
 
-The load-bearing safety properties hold against the shipped code: the emergency check runs on the raw transcript before every other content handler; the interception block sits between the confirmation hook and the safety net, so an answer turn returns before the interpreter, the cache and the ladder; every recovery word, barge-in, timeout and expiry path resolves the frame; the new sources join the release log gate with per-root fixtures; the feature adds no network surface; and the deterministic merge is the degraded-brain contract. The must-fix items are edit-list and implementation pins found by reading the code — wiring and bookkeeping, not design rework.
+0 BLOCKERs. 2 must-fix conditions (M-1, M-2). 6 verify-and-record items (V-1..V-6). 9 evidence obligations for security-test (SA-1..SA-9). 7 accepted residuals (R-1..R-7). 7 STRIDE surfaces modelled (settings persistence, feasibility probes, chain resolution, announcement/confirmation copy, launch-fail hop, observability, localisation strings).
 
-- **M-1** — the pipeline-state guard is not extended to the new window state, so pipeline events can close the window and cancel its timer.
-- **M-2** — four confirmation arming sites transition the session directly, not through the window opener the design names as the funnel.
-- **M-3** — the answer sanitiser source must be pinned in production (the shared helper's nil-seam path returns the raw transcript).
-- **M-4** — log-gate bookkeeping: six new metadata keys, not seven, and the pre-existing `reason` key must hold closed tokens only.
-- **M-5** — candidate-index bounds: the classifier's index must never address outside the frame's candidate list.
+All five workflow focus areas pass as designed: (1) the GSM hard floor cannot be configured away — traced inspection of the chain shows attemptOrder always contains .phone, .phone and .faceTime are unconditionally feasible, equal picks dedupe, route returns only inside the feasible loop, and the vocabulary substitution terminals (.phone for anyChannel/audio, .faceTime for video) are themselves always feasible and permitted; (2) emergency precedence and the override protocol are untouched — the emergency dial is UIKit-direct outside every touched seam and the override gate at AppCoordinator.swift:7665-7669 is marked verify-only/unchanged, with the amended action intentionally dropping provenance; (3) probes are local-only — the shipped canOpenURL hop plus the address-book handle check; no new plist entry, permission, store or egress; (4) announcement honesty — confirmation and announcements compose from fellBackFrom.first plus the routed channel at single sites, with one must-fix (M-1) pinning the disposition of a known pre-existing counterexample the feature makes more reachable; (5) log sanitisation — no new console writes; metadata is [:] and events carry closed-vocabulary raw-value tokens only; Services/Calls joins FEATURE_ROOTS in check-release-log-safety.py so the new file sits inside the release gate.
+
+The two must-fix conditions are corrections, not guarantee breaks. M-1 pins the disposition review-l2 already required for the .whatsappChat launch-failure row (a source-fact error plus an unpinned disposition for a pre-existing shipped site). M-2 corrects the attempt-order wording ("always ending .phone" is literally false when preferred == .phone) and the planned test name that would encode the false property, so neither documents nor a shipped test can be 'fixed' into reordering the chain away from preferred-first.
 
 ## Verification ledger
 
-| # | Claim | Source read (worktree) | Verdict |
+| # | Claim verified | Evidence (source re-read this session) | Verdict |
 |---|---|---|---|
-| 1 | Emergency check precedes all answer handling; reads the raw transcript | `CommandRouter.swift:775` (`preText = raw`), `:779-783` | HOLDS |
-| 2 | The planned emergency frame-clear is side-effect-only after dispatch; it gates nothing | design-l2 `:542-548`; shipped branch `:779-783` | HOLDS |
-| 3 | Interception insertion point between the confirmation hook and the safety net | `:789-886` (hook), `:897-899` (safety net); design-l2 `:486-538` | HOLDS |
-| 4 | Handler order: sanity `:747-758` → emergency `:779-783` → hook `:789-886` → interception `:886-897` → safety net `:897-899` | direct read | HOLDS |
-| 5 | B1-B7 predicate sites exist and compile as planned | `CommandRouter.swift:1913`, `:1869`; `VoiceContactSearchRoute.swift:52-58,67,101,137-140`; `YouTubeRoute.swift:41-46,56`; `KeywordIntentRule.swift:164` | HOLDS |
-| 6 | Access widenings (L2-D2) match the declarations | `:1869` `private static let`; `:137-140` `private static func`; `:1913` already internal | HOLDS |
-| 7 | Medication-ack exclusion is scoped to app-launch confirmations | `CommandRouter.swift:858-862` | HOLDS |
-| 8 | Music parity: ladder arm and interpreted dispatch converge on one executor | `:1223-1234` (`:1233`), `:3336-3355`, `:2667-2678`, `:2614-2647` | HOLDS |
-| 9 | State machine mirrors (enum, edges, Talk reset, Config, transition, opener, arm guard, cancel) | `VoiceSessionStateMachine.swift:9-17,21-57,71-78,93-96,111-127,153-181,183-208` | HOLDS |
-| 10 | The pinned window-seconds expression cannot type-level address the instance `Config` property (carried F-1/C-1) | `:93-96`; design-l2 `:54,:207,:687,:917` | CONFIRMED, mechanical |
-| 11 | Confirmation timeout speaks; the frame timeout must not, and must not call `recordConfirmationTimeout` | `AppCoordinator.swift:2996-3038` (`:3035-3036`); ADR-MTC-08 | HOLDS |
-| 12 | The window opener is the main-hop funnel with two callers | `:7019-7027`; callers `:7008`, `:10337` | HOLDS |
-| 13 | Four confirmation arming sites transition the session directly, not via the opener | `:7228`, `:7401`, `:7461`, `:8548` | CONTRADICTS edit 9 → M-2 |
-| 14 | `handlePipelineState` early-return guard is single-state and absent from the edit lists | `:4750-4766` (guard `:4756`); design-l2 §14/§15 edit lists | GAP → M-1 |
-| 15 | Watchdog fires only in `.listening`; Talk reset suppressed in the window states | `:4865`, `:4871`; `VoiceSessionStateMachine.swift:71-78` | HOLDS (M-2's observer owed) |
-| 16 | `isAwaitingConfirmation` is pending-field based, not state based | `:10535-10540` | HOLDS |
-| 17 | Sanitiser discipline: quarantine level, 200-char clamp behind a raw-length gate (L2-D5) | `InputSanitiser.swift:22,37-50,52-85`; design-l2 `:760` | HOLDS |
-| 18 | Shared seam: sanitise then `seam.prepare`; nil seam returns raw as `prepared` (byte-parity) | `LocalBrainChain.swift:275-285,296-307`; design-l2 `:715` | HOLDS; M-3 pins production |
-| 19 | Production input seam wired non-nil | `AppCoordinator.swift:1812-1825` | HOLDS |
-| 20 | Transcript recording at route entry (existing policy); cache untouched because `pendingTranscript` is dispatch-only | `CommandRouter.swift:741`, `:3307`, `:1516-1518`; `AppCoordinator.swift:5986-5999` | HOLDS (V-3, R4) |
-| 21 | Log choke point: unknown keys dropped; `reason` pre-allow-listed; other allowed values shape-scrubbed only | `LogSanitiser.swift:466-511` (drop `:483`), `:175` | CONFIRMED → M-4 |
-| 22 | Release gate: feature-root rules, four new roots, per-root fixtures, shell wiring | `check-release-log-safety.py:141-176,664-701`; `check-release-log-safety.sh`; `ios/build.sh:431` | HOLDS |
-| 23 | The `emit` helper is two-argument; §12.2's three-argument call does not exist (carried F-3/C-3) | `:3982-3991`; direct-construction pattern `:1406-1413` | CONFIRMED → M-4 |
-| 24 | Debug-only text print in `speak()` (pre-existing) | `:3850-3851` | RESIDUAL R1 |
-| 25 | Gibberish guard precedes the emergency check | `:747-758` vs `:779` | HOLDS (V-1, R5) |
-| 26 | Candidate execution shape `executeDialogueCandidate(index - 1, ...)` needs a bounds pin | design-l2 `:517-524`, `:862` | GAP → M-5 |
-
-Assets: the frame's slot value and candidate set; probe and answer text; the window/session state; the intent cache and chat history; log and telemetry sinks; the emergency dispatch path. Boundaries: microphone/STT → `route()`; router → coordinator hooks (main-queue confined); coordinator → state machine and dialogue manager; events → `LogSanitiser` → observability bus; the release gate over the four new source files; network egress (unchanged by this feature).
+| 1 | Chain never dead-ends; floor containment; dedupe; vocabulary terminals | CallChannelChain listing (design-l2 section 6) traced over 16 pick pairs x 4 feasibility states; FR-CDP-006/007, NFR-CDP-001 | PASS |
+| 2 | .phone and .faceTime unconditionally feasible; messenger feasible iff handle; whatsApp feasible iff probe | isFeasible semantics in the C1 listing; FR-CDP-004/005/006; CallLinks.swift supportsVideo :80, supportsAudio :83 | PASS |
+| 3 | Override gate byte-identical | AppCoordinator.swift:7656-7686; gate :7665-7669 speaks router.call.messengerNoHandle, original stays pending, returns true; design edit #17 marks verify-only | PASS |
+| 4 | Amended action :7670-7674 compiles with the new defaulted var fields and drops provenance (no stale disclosure re-spoken) | Source :7670-7674 (5-arg construction); design-l2 :491-492 | PASS |
+| 5 | Emergency dial bypasses every touched seam | RedesignComponents.swift:229-237 (trigger calls coordinator.emergencyNotify(), then PhoneDialer.url, then UIApplication.shared.open); emergency notify :6745-6758 is notification + ack and does not place a call | PASS |
+| 6 | Emergency-contact resolution not rewired | AppCoordinator.swift:6463-6480 is NotifyChannel.resolve-based; non-goal in design and requirements index | PASS |
+| 7 | Dial-back routes the ordinary chain only; never delays escalation | :8382-8390 (supportsAudio guard :8386); dial-back call chain :8423-8483 contains no emergencyNotify or NotifyChannel call | PASS |
+| 8 | Probes local-only; no plist delta planned | canOpenURLOnMain :7312-7315; whatsapp:// literal :7270; LeafViews installed probe :1171-1174; Info.plist :59 with whatsapp :94, fb-messenger :69, facetime :66, facetime-audio :67, tel :90 | PASS |
+| 9 | No new console writes; PII out of logs | Design sections 24-25; metadata [:] C9 policy at :7840; LogSanitiser.allowedKeys :56 unchanged; NFR-CDP-003 | PASS (SA-6) |
+| 10 | Release-gate coverage mechanics | check-release-log-safety.py FEATURE_ROOTS :141+ (tail :184-187), role match :821-834 makes the new Services/Calls file feature-role (rules 3-6); coordinator-side files receive rules 1-2 only — source-audit obligation | PASS (SA-6) |
+| 11 | Release gate baseline green | ios/tools/check-release-log-safety.sh run this session: exit 0 (fixture suite proves each rule positive and negative); build.sh :431-434 wiring intact | PASS |
+| 12 | F-1 confirmed and security-reframed | CallLinks.swift:366-370 openWhatsAppChat returns Bool (false when whatsAppChatURL nil, :283-287); doc :360-364 claims unconditional; needsNativeCompose/copiedNumber belong to openWhatsAppCallChat :457-470 (:465-469); AppCoordinator :7755-7765 discards the Bool, speaks router.call.whatsappOpened and calls noteConfirmedCallExecution — a false success claim plus false learning on the voice path | M-1 |
+| 13 | New .phone guard fixes the false-claim class at the voice floor | Source :7723-7732 discards openPhone Bool today (:340-344, false only when no digits); design adds guard + announceNoUsableNumber + no recency on failure | PASS (SA-5) |
+| 14 | PendingCallAction constructions repo-wide: exactly 4 | :7624 and :7670; IntentLogStoreTests.swift :206 and :224 (re-grepped this session) | PASS (V-2 wording) |
+| 15 | resolvedCallChannel production call sites: exactly 2 plus one test helper | LeafViews.swift:1612-1615; AppCoordinator.swift:8387; CallChannelResolutionTests.swift:61 | PASS |
+| 16 | resolvedMissedCallChannel: exactly 1 production site plus tests | AppCoordinator.swift:8432; MissedCallDialBackTests | PASS |
+| 17 | MethodResolver global-default step becomes the settings primary via injected closure | MethodResolver.swift :74-78 (step 4 .phone / .globalDefault); init :22-26; FR-CDP-012 | PASS |
+| 18 | secondaryCallApp persistence mirrors the defaultCallApp pattern; absent/garbage decodes to .phone | :329-335; :2850-2853 (.flatMap(CallApp.init(rawValue:)) ?? .phone); NFR-CDP-005 | PASS |
+| 19 | Confirmation timeout untouched | VoiceSessionStateMachine.swift:135 = 45 seconds | PASS |
+| 20 | Settings UI selection conveyed only by checkmark plus stroke overlay (F-5 evidence) | CallingSettingsView.swift:40-64; no selected trait or accessibility value | CONFIRMED (V-4) |
+| 21 | Five new keys absent; reused keys present | Localizable.xcstrings: the five new keys count 0; settings.calling.title, calling.defaultCaption, app.name.facetime, app.name.whatsapp, call.announce.noPhoneNumber, router.call.messengerNoHandle, router.call.confirmQuestion count 1 each | PASS |
+| 22 | Speech is catalog-bound (no hardcoded user-visible literals on new paths) | Design sections 9 and 12 composition sites; L10nCatalogCoverageTests exists | PASS (SA-8) |
+| 23 | Hop dispatch reuses the shipped openers | LeafViews tile/row funnel :1536-1597; performContactCall :7831-7910; performSystemContactWhatsApp :7971-8000; performSystemContactMessenger :8053-8083 | PASS |
+| 24 | Address-book handle checks unchanged in mechanism | storedMessengerHandle :8009-8011; LeafViews stale-state guard :1573-1580 | PASS |
+| 25 | Observability events stay closed-vocabulary with metadata [:] | :7834-7841 (outcome video:<rawValue>, C9 comment :7840); hop event tokens are raw values | PASS |
+| 26 | Design-l2 section 25 reader/writer list is not exhaustive (F-6) | isAwaitingCallConfirmation :7553, consumer :10717-10723; slot nil'd :10611-10612; recordConfirmationTimeout :10561-10569 reads the slot | V-5 |
+| 27 | New file graded feature-role by directory-prefix match | role assignment code :821-834 (path == feature or startswith feature + os.sep) | CONFIRMED (SA-6) |
+| 28 | No store beyond secondaryCallApp; no per-contact primary/secondary storage | Design edit list; FR-CDP-018 boundary | PASS |
+| 29 | Workflow mirror byte-identical; exit condition string confirmed | diff exit 0; workflow.yaml read | PASS |
+| 30 | review-l2 findings mapped forward | F-1 → M-1; F-2..F-7 → V-1..V-6 (F-7 linked to M-2) | PASS |
 
 ## STRIDE threat model
 
-### S1 Emergency precedence mid-dialogue (Spoofing, Elevation)
-Threat: a hostile or corrupted answer reaching the merge or an executor ahead of, or in place of, the emergency dispatch. Verified: the check (`:779-783`) runs on the raw transcript (`:775`) before the hook and the interception; the planned clear is post-dispatch and gates nothing; no answer handling runs before it. Residual: the sanity guard (`:747-758`) sits above it — shipped ordering (V-4/R5). Evidence: E1.
+The lock's six security_surfaces expand to the seven implementation surfaces below (the chain floor and feasibility split across chain resolution and probes; PII exposure across observability and localisation). Every control named was verified against the worktree source at the anchors in the ledger. Residuals are labelled R-n and defined in full below.
 
-### S2 Free-text answer into routing and execution (Tampering, Elevation)
-An answer carrying command vocabulary, structured text or tool-shaped payloads must not steer execution beyond the frame's two admissible effects — fill one slot value, or pick one enumerated candidate — and must not reach the interpreter or cache. Verified: interception before the ladder and interpreter; classification is a pure function over the prepared text plus the frame; execution stays inside the frame's own domain seam. Barge-in predicates (B1-B7) only decide whether an utterance executes as itself under normal tiers — the not-trapped requirement, not an injection. Sanitisation rides the shared helper; M-3 pins the production seam. Evidence: E2, E8.
+### S1 — Settings persistence (secondaryCallApp, UserDefaults)
 
-### S3 Frame-trap resistance (Denial of service)
-No state the user cannot leave: cancel and escape words resolve and ack; barge-in resolves and falls through to execute once; the 45 s timer mirrors the confirmation machinery including the still-open guard; frame reads are expiry-checked; resolve is idempotent; Talk reset is suppressed inside the window, with the watchdog and Talk recovery as outer backstops. Gaps: M-1 (the timer can be cancelled by pipeline events) and M-2 (the transition-out observer is under-anchored). Evidence: E3.
+| Threat | Scenario | Control (verified) | Verdict |
+|---|---|---|---|
+| Spoofing | A second process faking the stored pick | iOS app-container UserDefaults is single-writer by sandbox; value consumed only via CallApp.init(rawValue:) | PASS |
+| Tampering | User or device-access attacker sets secondary == primary, garbage, or a hostile pick | Equal picks are legal by design and deduped; garbage/absent decodes to .phone (:2850-2853 pattern); no configuration can remove the floor (S3) | PASS |
+| Repudiation | Dispute over what was selected | No security-audit obligation in FR-CDP-003; the picker is visible UI state | PASS |
+| Information disclosure | The stored value is a channel name only (non-PII) | Mirrors defaultCallApp's 'a UI preference, not a secret' (:329-335); cannot exfiltrate numbers | PASS |
+| Denial of service | Corrupt value disabling calling | Decode failure falls back to .phone; dialability never depends on the setting | PASS |
+| Elevation of privilege | Setting bypassing feasibility or emergency | Feasibility re-evaluated per call; the setting cannot force execution on an infeasible channel (openers re-guard); emergency chain untouched | PASS |
 
-### S4 Answer authority claims and candidate poisoning (Spoofing, Tampering)
-An answer claiming to be a confirmation, naming an unlisted candidate, or engineered to match another domain must not change what executes. Verified: picks address the frame's candidate list only; the merge value is data; tiers do not read the answer (hostile-corpus row `testAnswerClaimingATierChangesNothing`); B6 keeps a same-domain music match from bouncing mid-music answers to the ladder. M-5 pins index bounds. Evidence: E2.
+### S2 — Feasibility probes (canOpenURL hop; address-book handle check)
 
-### S5 Log and observability disclosure (Information disclosure)
-Probe, answer and candidate text must not reach logs or telemetry beyond the existing transcript policy. Verified: closed-vocabulary events with count/enum metadata; the four new source files join `FEATURE_ROOTS` (any non-Debug console write fails; content-worded writes fail in any configuration; unlisted metadata keys fail); the unknown-key drop at `LogSanitiser.swift:483` is the runtime choke point. Gaps: M-4. Note: the router/coordinator edits live outside the feature roots — the gate's transcript/error rules are the only static cover there; E4/E5 carry the burden. Evidence: E4, E5.
+| Threat | Scenario | Control (verified) | Verdict |
+|---|---|---|---|
+| Spoofing | An app registering the whatsapp scheme answers canOpenURL | Bounded by iOS declare-scheme mechanics; mechanism pre-exists (row pill probe :1171-1174) and is unchanged; worst case is an announced attempt + hop | PASS (R-6) |
+| Tampering | Stale or negatively cached probe result | A negative probe routes to the next feasible channel (never blocks a call); a stale positive yields attempt + disclosed hop; staleness accepted at requirements time | PASS (R-1) |
+| Repudiation | n/a — no security decision rests on the probe | — | PASS |
+| Information disclosure | Probe leaking device state | On-device query only; declared schemes (:59, :94) bound what is askable; handle check reads the local address-book store; no egress | PASS |
+| Denial of service | Probe false dead-ending the chain | .phone floor is structural; no new timers, queues or locks; the canOpenURLOnMain hop is reused | PASS |
+| Elevation of privilege | Probe ordering attempts | Probe only orders attempts; no privileged action reachable | PASS |
 
-### S6 Egress (Information disclosure)
-Probes and answers must stay on-device. Verified by source shape: no new network calls; the merged music command reuses `fireMusicRequest` (`:2667`) through the same seam a directly spoken request uses; probes and acks ride the on-device reply lane (`speak` → `noteAssistantSpoke`, `CommandRouter.swift:3864`). Evidence: E6.
+### S3 — Chain resolution (CallChannelChain, pure static)
 
-### S7 Degraded-brain path integrity (Tampering)
-With the brain abstaining or unavailable, the merge must not weaken safety. Verified structurally: the answer turn returns from the interception block before the interpreter, so the deterministic merge cannot depend on brain output; the Phase 2 clause is defaulted off; the emergency path and confirmation tiers are untouched by the merge. Evidence: E7.
+| Threat | Scenario | Control (verified) | Verdict |
+|---|---|---|---|
+| Spoofing | A forged Feasibility closure | Openers re-guard at execution time (digits, handle, URL), so a forged claim can only cause an announced attempt + hop, never execution on a truly infeasible channel | PASS |
+| Tampering | Configuration or state removing the floor | Traced 64-cell argument: .phone always in attemptOrder; .phone/.faceTime always feasible; dedupe; route returns inside the feasible loop; vocabulary substitution terminals always feasible and permitted; no dead end for any pair including equals and both-infeasible | PASS (core focus-area-1 assurance; M-2 wording correction) |
+| Repudiation | n/a | — | PASS |
+| Information disclosure | Inputs are channel enums plus a handle-presence Boolean; outputs are enums only | No PII represented or emitted | PASS |
+| Denial of service | Unbounded behaviour | Total function; loop-free; at most three candidates | PASS |
+| Elevation of privilege | Privilege surface | None; the chain appears in no emergency path | PASS |
 
-### S8 Window lifecycle and co-existence (Tampering, Denial of service)
-A live frame and a confirmation window must not coexist, and no session transition may strand a frame. Verified: arming a frame refuses while any pending confirmation exists (edit 3's guard over the pending-field `isAwaitingConfirmation`, `:10535-10540`); the opener is a main-hop funnel; turn serialisation keeps one utterance in flight. Gaps: M-1 and M-2 — the four direct arming sites and the pipeline-state guard sit outside the funnel the design names, and "any transition out resolves" is not anchored to an edit. Evidence: E3.
+### S4 — Announcement and confirmation copy
 
-## BLOCKERs
+| Threat | Scenario | Control (verified) | Verdict |
+|---|---|---|---|
+| Spoofing | An announcement naming a channel that is not what executes | Copy composes at one site from fellBackFrom.first plus the routed channel the executor switches on; label() maps the same value 1:1 | PASS with M-1 (the known pre-existing counterexample site; disposition must be pinned before that row is implemented) |
+| Tampering | Edited catalog text changing behaviour | Text is speech-only; routing is independent of strings; ne/en parity enforced | PASS |
+| Repudiation | A silent route change | Every fallback announced before execution (FR-CDP-016); the prompt names the routed channel (FR-CDP-013); empty fellBackFrom keeps the shipped prompt (pinned test) | PASS with M-1 |
+| Information disclosure | Spoken copy leaking into logs | Announcements never routed through logging (design; FR-CDP-015 rule); contact name is speech-only | PASS |
+| Denial of service | Longer prompt breaking the confirmation window | At most one clause added inside the unchanged 45-second window (:135) | PASS |
+| Elevation of privilege | n/a | — | PASS |
 
-None. Every gap above is bounded by shipped invariants — turn serialisation, expiry-checked frame reads, the pending-field window check, the unknown-key drop — and none yields a reachable path that dispatches emergency late, executes an unasked action, opens an egress, or leaves a user without a recovery word. They are must-fix conditions on the implementation (M-1..M-5), not design defects that block this gate.
+### S5 — Launch-fail hop
+
+| Threat | Scenario | Control (verified) | Verdict |
+|---|---|---|---|
+| Spoofing | Hop line claiming a channel it does not attempt | Single hop-line site names the next candidate from the same list the dispatcher consumes | PASS |
+| Tampering | Stale candidates or infinite hop | Candidates computed at resolution; dispatch filters messenger-no-handle at consumption; strictly shrinking suffix gives depth at most 2; no re-prompt and no re-pending; only the executed method is taught | PASS |
+| Repudiation | Silent exhaustion | The opening failure line is spoken before the hop decision; exhaustion speaks only the already-spoken shipped line — never silent | PASS |
+| Information disclosure | Hop line content | Channel names plus contact name, speech only; events carry raw-value tokens | PASS |
+| Denial of service | Recursion or repetition | Bounded recursion; finite candidates; single execution per request | PASS |
+| Elevation of privilege | Hop targets | Ordinary channel set only; cannot touch escalation | PASS |
+
+### S6 — Observability (events, outcomes, metadata)
+
+| Threat | Scenario | Control (verified) | Verdict |
+|---|---|---|---|
+| Spoofing | Outcome tokens claiming what executed | Tap outcomes now record the routed channel with a direct/fellBack suffix (an improvement over the legacy preferred-app claim); captures record the executed method | PASS |
+| Tampering | Free text injected into events | Closed vocabularies only (raw values plus fixed suffix strings) | PASS |
+| Repudiation | Missing post-hoc evidence | Per-execution emit unchanged in shape (:7834-7841) | PASS |
+| Information disclosure | Numbers/handles/names in event fields | metadata [:] (C9, :7840); no number, handle or name in any new field; LogSanitiser.allowedKeys unchanged | PASS (SA-6) |
+| Denial of service | Event volume | One additional event per hop | PASS |
+| Elevation of privilege | n/a | — | PASS |
+
+### S7 — Localisation strings (five new ne/en keys)
+
+| Threat | Scenario | Control (verified) | Verdict |
+|---|---|---|---|
+| Spoofing | Copy misdescribing the mechanism | Parameter contracts bind channel labels to app.name.* and routed-channel values; copy cannot alter routing | PASS |
+| Tampering | Catalog edits | Static text; L10nCatalogCoverageTests enforces parity | PASS |
+| Repudiation | n/a | — | PASS |
+| Information disclosure | Placeholders | Filled at speech time only; never logged | PASS |
+| Denial of service | Missing key degrading one line | Coverage test prevents; routing unaffected | PASS |
+| Elevation of privilege | n/a | — | PASS |
+
+## BLOCKER-class findings
+
+None. No finding breaks a security focus area or a constitution constraint as designed: the floor, dedupe and at-most-once, override and emergency preservation, local-only probes, log safety and the five-key bound all hold as written. M-1 and M-2 are corrections required downstream; failing to apply M-1 before the affected row is implemented becomes a release-blocking condition at implement/security-test time (see conditions).
 
 ## Conditions carried to plan-tasks / implement
 
-- **M-1 (window state can be closed by pipeline events).** Shipped `handlePipelineState` returns early only for `.awaitingConfirmation` (`AppCoordinator.swift:4756`), and the comment above it states why — pipeline events must not close a window that owns the turn. The C-MTC-07/C-MTC-08 edit lists do not extend the guard to `.awaitingSlotAnswer`, so the probe's own speaking/listening events can transition the session out of the window and cancel the slot timer; the 45 s silent close and its `.timedOut` event would then never fire. Add the guard extension to the edit list; pin with a pipeline-events-mid-window test (E3).
-- **M-2 (mutual-exclusion wiring under-anchored).** Edit 7 funnels `openConfirmationWindow()` only; edit 9 asserts the pending-rephrase seams "pend through the window opener" — false in code: `startRephraseConfirmation` (`:7401`), calendar (`:7228`), call (`:7461`) and navigation (`:8548`) transition the session directly. The claimed "any transition out resolves through the coordinator funnel" (L2 risk 12) is likewise not anchored to a concrete hook. Route the four sites through the funnel or add resolve-at-site, and name the observer that resolves the frame on any legal session exit; pin with Talk-mid-window, watchdog-mid-window and pipeline-event tests (E3).
-- **M-3 (answer sanitiser source pinned).** `IntentTranscriptPreparation` returns the raw transcript as its answer value when the seam is nil (deliberate byte-parity with `turnInput`). Production wires a non-nil seam (`AppCoordinator.swift:1824`) and the router fallback sanitises when the coordinator is absent, but no test pins either fact. Pin the production wiring (seam non-nil; or sanitise in the helper's nil-seam path for the answer value) and keep the parity path test-only. No production path may consume an unsanitised answer (NFR-MTC-008).
-- **M-4 (log-gate facts corrected).** `reason` is already in `LogSanitiser.allowedKeys` (`LogSanitiser.swift:175`); of the seven proposed keys, six are new. The design text and the §26 justification must read six-new-plus-one-reused; because `reason` is generic and pre-existing, dialogue values under it must be closed enum tokens enforced at the construction site. The carried F-3/C-3 three-argument `emit` must be implemented by direct event construction (`:1406-1413` pattern) — the `reason` metadata must never be dropped to make it compile.
-- **M-5 (candidate index bounds).** `executeDialogueCandidate(index - 1, ...)` trusts the classifier's index. `DialogueAnswerPath.classify` / `matchCandidate` must be total over the frame's candidate list and the executor must bounds-check; a hostile answer must not be able to address outside the frame's candidates or induce a crash (local denial of service).
+M-1 (must-fix; carried from review-l2 F-1, security-framed — announcement honesty, focus area 4). Before the .whatsappChat row is implemented: (a) correct design-l2.md:799 to state openWhatsAppChat's real signature (returns Bool; false only when whatsAppChatURL is nil — CallLinks.swift:283-287, :366-370) and correct :609 to attribute needsNativeCompose/copiedNumber to openWhatsAppCallChat only (:457-470); (b) record the explicit disposition, one of: (i, recommended) the voice .whatsappChat branch speaks the shipped honest line (call.announce.noPhoneNumber) when the Bool is false and records no success, no learning and no activity, matching the new .phone guard; or (ii) document a shipped-identical exception in design-l2 section 22 with the reachability analysis (new settings configurations and hop targets route more voice calls into this branch). Either disposition is acceptable for SECURITY-GO; silence is not.
 
-Carried mechanical conditions from `review-l2` (no security content beyond being done): C-1 (the pinned default-argument expression cannot type-level address the instance `Config` property `:93-96`; keep 45 s single-source with no new literal), C-2 (news-arm anchor), C-5 (bind the taken rephrase command at `:806`).
+M-2 (must-fix; new — attempt-order wording and test contract). design-l1.md:147 and the attemptOrder comment in design-l2 section 6 say 'always ends .phone'; that is literally false when preferred == .phone and secondary differs (the order is [.phone, secondary]). The invariant that actually holds and is load-bearing is containment: .phone is always IN the order, and route therefore never dead-ends. At plan-tasks/implement: correct both wordings to the containment form; write the planned order test (testAssessmentOrderAlwaysEndsPhone, design-l2.md:1171; see V-6) to assert containment plus isFeasible(routed) plus preferred-first — NEVER last-element; and do not reorder attemptOrder to satisfy the old wording — attempting the secondary before the preferred channel would be a behaviour and safety deviation from FR-CDP-007.
+
+Carried without change: review-l2's requirement that F-1 be applied before the affected row is implemented, and its F-2..F-7 required actions, tracked below as V-1..V-6.
 
 ## Verify-and-record items
 
-- **V-1.** Gibberish mid-frame: the sanity guard (`:747-758`) precedes the emergency check and the interception; such an utterance is dropped with the router's reprompt, increments no attempt, and the frame lives to its deadline (§18's gibberish row). Record the ordering so later edits keep it.
-- **V-2.** Debug lanes: the touched legacy files (router, coordinator) carry Debug-only prints and are outside the feature roots; record that the diff adds no console write there — the gate's transcript/error rules are the only static cover for those files.
-- **V-3.** Answer flow vs persistence: `recordTranscript` runs for every utterance (existing policy) while `pendingTranscript` stays dispatch-only, so the intent cache is not taught by answers; re-verify after implementation (E8).
-- **V-4.** Sanity-guard-above-emergency ordering (R5): record as pre-existing and unchanged.
+V-1: F-2 — .facebook in the vocabulary case table (design-l2.md:903) is not a CallApp case; replace with .faceTime.
+
+V-2: F-3 — 'five shipped labelled constructions' (design-l2.md:1106) versus four verified PendingCallAction constructions (:7624, :7670; IntentLogStoreTests.swift:206, :224; re-grepped this session); state four (or explicitly 'five-argument').
+
+V-3: F-4 — the replacing() comment (design-l2.md:497-500) claims provenance carries over while fellBackFrom resets to [] by design; reword so the comment matches the deliberate reset.
+
+V-4: F-5 — NFR-CDP-006 (MUST): specify the non-visual selected signal (selected trait or value) for both picker sections and a heading trait (or soften the claim); add the picker-suite assertion (design-l2.md:975, :1174). Verified source reality: selection is checkmark plus stroke overlay only (CallingSettingsView.swift:40-64).
+
+V-5: F-6 — design-l2 section 25 readers/writers: add isAwaitingCallConfirmation (:7553, consumer :10717-10723) to readers and list recordConfirmationTimeout (:10561-10569) as a reader; note the call block nils the slot (:10611-10612) — this matters because removing the early return changes when the slot can be live.
+
+V-6: F-7 — rename testAssessmentOrderAlwaysEndsPhone (design-l2.md:1171) so the name matches the property; the rename rides M-2's containment form.
 
 ## Evidence obligations for security-test
 
-- **E1 — emergency answer mid-frame.** With a frame live, an utterance embedding emergency vocabulary dispatches emergency; the frame is cleared with `.emergency`; dispatch is proven independent of the clear by forcing the clear to a no-op (§18 `E2` row).
-- **E2 — hostile answer corpus through the production-shaped seam.** Injection-marker text, control characters, structured/tool-shaped payloads, candidate-poisoning utterances and authority claims all resolve to the frame's admissible effects or a re-probe/close; no interpreter, no cache, no crash; run through a non-nil seam so the sanitiser is exercised (M-3).
-- **E3 — trap matrix.** Cancel, escape, barge-in, timeout, expiry, Talk-mid-window, watchdog-mid-window and pipeline-events-mid-window all recover; after 45 s no window is half-open; resolve stays idempotent (covers M-1, M-2).
-- **E4 — log capture over a full dialogue.** Probe, answer, merge, cancel, timeout, escape, exhaustion and the did-you-mean path, in Debug and Release: zero raw transcript/answer/probe/candidate text in console and log sinks (NFR-MTC-004 scenarios 1-3); `ios/tools/check-release-log-safety.sh` exits 0 including its fixtures suite, with the four new roots and their fixture entries present.
-- **E5 — log allow-list diff and value vocabularies.** Exactly the six new keys are added; `reason` is reused with closed tokens; every dialogue event field is a non-content token; the unlisted-key drop remains in force at the runtime choke point.
-- **E6 — egress.** Source-level grep (design §29) shows zero new network calls in the feature's files; the merged music path calls only the existing helper (`fireMusicRequest`, `:2667`).
-- **E7 — degraded brain.** With the brain abstaining or unavailable, the merge remains deterministic; emergency precedence and confirmation tiers are unchanged; the Phase 2 clause is off in Phase 1 builds (prompt-digest pins).
-- **E8 — cache/history boundary.** No answer text reaches `pendingTranscript` or the intent cache on the frame execution path; chat history follows the existing transcript policy unchanged.
+SA-1 (focus 1) Chain matrix: exhaustive (preferred, secondary) x (messenger-handle present/absent, whatsApp probe true/false) = 64 cells; per cell assert isFeasible(routed) under the injected closure, .phone in the order, no duplicates, preferred-first, routed vocabulary legality, messenger-without-handle never routed; separately, floor reachability with every other channel infeasible (probe false, no handle) for anyChannel/audio (routed .phone) and video (documented .faceTime terminal per FR-CDP-010).
+
+SA-2 At-most-once and termination: exactly one prompt per request; the hop executes without re-asking; a forced-failure recursion terminates (depth at most 2) with the selection never re-pending; exactly one committed attempt per request.
+
+SA-3 GSM floor per surface: voice anyChannel; voice video-word (video floor == .faceTime); address-book circle rows; family audio tile; family video tile; missed-call dial-back — for each, with preferred infeasible, routed equals the surface floor and the announcement names it.
+
+SA-4 (focus 2) Emergency and override preservation: (a) the change set contains no emergency file; the emergency trigger (RedesignComponents.swift:229-237) is byte-unchanged; (b) override block AppCoordinator.swift:7656-7686 — gate :7665-7669 diff-clean, amended action :7670-7674 still constructs; (c) grep of the whole change set shows zero emergencyNotify / NotifyChannel / preferredEmergencyContact additions; (d) the dial-back call chain contains no escalation-delaying awaits; (e) VoiceSessionStateMachine.confirmationTimeoutSeconds untouched (:135).
+
+SA-5 (focus 4) Announcement honesty: composed prompt/announcement for all matrix cells names the routed channel (and skipped channels in attempt order); one hop line per hop, spoken before the opener's outcome line; fellBackFrom == [] keeps the shipped prompt byte-identical (pinned test); the M-1 disposition's chosen variant is exercised (honest false-case line, or the documented shipped-identical exception with its reachability analysis); the new .phone false-case guard speaks call.announce.noPhoneNumber and records nothing.
+
+SA-6 (focus 5) Log safety: check-release-log-safety.sh exits 0 with Services/Calls present in FEATURE_ROOTS (python :141+ — verify the exact added string matches the directory prefix so role-match :821-834 grades the new file feature-role); source audit of the coordinator-side hunks (AppCoordinator.swift, LeafViews.swift, CallingSettingsView.swift, MethodResolver.swift — rules 1-2 only): no new console writes, metadata [:] or closed-vocabulary tokens only, no phone number, handle or contact name reaching any log call, LogSanitiser.allowedKeys (:56) unchanged, build.sh:431-434 intact.
+
+SA-7 (focus 3) No new surface: Info.plist byte-diff empty (no new scheme or permission); no new network symbol in the change set; secondaryCallApp is the only new store key and stores a channel raw value (non-PII); no per-contact primary/secondary storage (FR-CDP-018).
+
+SA-8 Localisation: exactly five new keys, ne/en parity, no user-visible literals in code, coverage test green.
+
+SA-9 Settings persistence: round-trip; absent/garbage decodes to .phone; equal picks legal and deduped.
 
 ## Accepted residuals (explicit)
 
-- **R1.** Debug-configuration prints in touched legacy files (e.g. the `#if DEBUG` text print in `speak()`, `CommandRouter.swift:3850-3851`) remain possible in Debug builds; they cannot compile into Release (`SWIFT_ACTIVE_COMPILATION_CONDITIONS` is Debug-only) and the design adds none.
-- **R2.** The release gate is a static source check with documented blind spots (indirection, runtime-assembled metadata — its own header states them); the runtime choke point, typed construction and E4/E5 are the primary arms.
-- **R3.** Values of allow-listed string keys are scrubbed for PII shapes but not value-constrained; closed vocabularies at construction sites are the discipline (M-4, E5).
-- **R4.** Answer utterances are recorded into the on-device chat history by the existing transcript policy (V-3); no new persistence or egress is introduced.
-- **R5.** The sanity guard precedes the emergency check (`:747-758` vs `:779`); an utterance it rejects is dropped with the router's reprompt before any handler — shipped ordering, unaltered by this feature (V-4).
+R-1 Probe staleness (canOpenURL caching) — accepted at requirements time (specs/define-requirements/index.md assumptions); bounded by the hop plus honest failure lines.
+
+R-2 The hop may best-effort attempt WhatsApp even when the probe said not installed — disclosed by the hop line; tap-context attempts land on the shipped honest recoveries; voice-context attempts land on the M-1 disposition.
+
+R-3 performSystemContactWhatsApp treats .invalidPhone as terminal (no hop even when a messenger-handle candidate exists) — conservative and never silent; consistent with FR-CDP-015's recoveries-as-terminal rule.
+
+R-4 Family tiles always pass a non-nil per-contact app as preferred, so the settings primary does not enter those tiles' step-1 when a pick exists — intended (FR-CDP-009 explicit-pick-wins; frozen design); recorded so it is not misfiled as a defect.
+
+R-5 The pre-existing voice .whatsappChat false-claim site (AppCoordinator.swift:7755-7765) remains until M-1's disposition is applied; the feature increases its reachability but does not create the class.
+
+R-6 canOpenURL scheme-registration spoofing is bounded by iOS declare-scheme mechanics and pre-exists the feature (the row pill probe ships today); the mechanism is unchanged.
+
+R-7 Non-load-bearing document imprecisions beyond M-2 (F-2, F-3, F-4, F-7-class) — display-level corrections tracked as V-items; none carries a guarantee.
 
 ## Decision
 
-decision: SECURITY-GO
+decision: "SECURITY-GO"
 
-**Rationale.** The safety constraints with security content are carried by verified structure: emergency precedence is absolute (check on the raw transcript at `:779-783`, ahead of every content handler; the planned clear is post-dispatch and cannot gate); the answer path opens no new injection surface (pre-ladder interception, pure-function classification, execution confined to the frame's own domain seam, quarantine sanitisation through the shared helper with M-3 pinning the production wiring); and log safety keeps its shipped framing (closed-vocabulary events, four new gate roots with fixtures, the unknown-key drop). Frame-trap resistance is genuinely backed by the confirmation-machinery mirror, expiry-checked reads, idempotent resolve and the suppressed Talk reset. The five must-fix conditions are wiring and bookkeeping gaps found by reading the shipped code — specific, real, and fixable inside `plan-tasks`/`implement` without design rework; none is a reachable path that dispatches emergency late, executes an unasked action, opens an egress, or leaves a user without a recovery word. No BLOCKER exists; the gate passes with the conditions above binding implementation and the evidence obligations binding `security-test`.
+0 BLOCKERs. The design satisfies all five workflow security focus areas as written; the two must-fix conditions (M-1, M-2) are required downstream corrections to be applied at plan-tasks/implement time and evidenced at security-test — M-1 before the .whatsappChat row is implemented, M-2 before the order test is written. No design re-cycle is required; no frozen owner decision is re-opened.
