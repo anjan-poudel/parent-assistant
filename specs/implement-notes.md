@@ -72,3 +72,27 @@ W7 findings disposition (F-1..F-3): F-1 (minor) — the M-4 row cited T-133 :120
 - Full unit gate at the end of the implement stage: done (T-141, W6) — see the W6 full-gate evidence bullet.
 - Release log-gate feature roots (T-138, W3) and egress/log-capture suites (T-140, W5): done — see the W3 and W5 gate bullets.
 - Known pre-existing red at the branch base: master's unit gate carries ~21 pre-existing failures in unrelated suites (recorded baseline; not regressions of this feature). Confirmed at W1: no W1 suite is among them (270/270 green scoped). Superseded at W6 by the measured base inventory (36 records / 34 unique across 18 suites, classified; see the W6 full-gate bullet).
+
+---
+
+# call-dialer-primary-secondary — Implement notes (Wave 1, units T-144 + T-155)
+
+Description: Wave 1 corrections to the frozen call-dialer design records and the calling-family localisation keys with their scoped catalogue gate. The multi-turn-conversation record above was carried by this file at the branch base and is preserved byte-identical; this section is this feature's W1 record, appended below it, not a replacement.
+
+## Per-unit status (Wave 1)
+
+| Unit | Title (short) | Wave | Status | Evidence summary |
+|---|---|---|---|---|
+| T-144 | Design-record corrections (design-l1 + design-l2) | W1 | Done | Diff limited to the enumerated correction anchors: design-l1 one hunk (1 insertion / 1 deletion), design-l2 13 hunks / 15 changed regions (21 insertions / 15 deletions; 14 regions were the reviewed revision, the 15th is the reviewer-sanctioned deregistration-bullet correction), all enumerated; 0 deletions outside the replaced lines. Retired wordings absent at every anchor and repo-wide (grep of both files exits non-zero). No code, no build. |
+| T-155 | Calling keys + catalogue coverage gate | W1 | Done | Five keys added to Localizable.xcstrings (ne and en, equal placeholder counts, alphabetical placement), catalogue parses at 1389 to 1394 keys; test file extended in the house family pattern. Scoped gate: ios/build.sh test:unit L10nCatalogCoverageTests — 16 executed, 16 passed, 0 failures, exit 0; privacy-guard fixtures and the prompt mirror green inside the same run. |
+
+## Wave log — W1
+
+W1 implementation completed awaiting review. Nothing committed; the changes sit in the worktree.
+
+Flags recorded for the reviewer:
+
+1. No frozen ne/en strings exist anywhere in the design records; the five values were authored at catalog time to the frozen parameter contracts (design-l1 ADR-CDP-10 and design-l2 section 31 both defer copy to catalog time) and pinned verbatim in the test file.
+2. The retired attempt-order wording appeared in four locations across the two records, not three; all four are corrected because the M-2 anchor covers the attempt-order comment plus the section 6 route documentation in design-l2 (the review condition's own scope).
+3. The catalogue total pin in the Spotify localisation test file is already red at the branch base (pin 1381 against 1389 actual, eight over before this unit); that file is outside this unit's ownership and is carried for the follow-up l10n evidence unit.
+4. This feature's section is appended rather than replacing the committed multi-turn-conversation record this file carried at HEAD; no other pre-existing content was modified.

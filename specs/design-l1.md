@@ -144,7 +144,7 @@ enum CallChannelChain {
     }
     static func route(preferred: CallApp, secondary: CallApp,
                       feasibility: Feasibility) -> Result
-    static func attemptOrder(preferred: CallApp, secondary: CallApp) -> [CallApp]  // deduped, always ends .phone
+    static func attemptOrder(preferred: CallApp, secondary: CallApp) -> [CallApp]  // deduped; .phone always IN the order — never dead-ends
     static let whatsAppProbeURL: URL                                   // URL(string: "whatsapp://")!
     static func whatsAppInstalled(canOpen: (URL) -> Bool) -> Bool      // injected closure (FR-CDP-005)
     static func method(for channel: CallApp, isVideo: Bool) -> CallMethod   // frozen §5 mapping

@@ -130,7 +130,8 @@ enum CallChannelChain {
 
     /// The deduped attempt order (FR-CDP-007): preferred; secondary when
     /// different; `.phone` appended when absent. Always 1–3 DISTINCT
-    /// channels, always ending `.phone`.
+    /// channels; `.phone` is always IN the order — the route never
+    /// dead-ends.
     static func attemptOrder(preferred: CallApp, secondary: CallApp) -> [CallApp] {
         var order: [CallApp] = [preferred]
         if secondary != preferred { order.append(secondary) }
@@ -141,7 +142,7 @@ enum CallChannelChain {
     // MARK: routing
 
     /// The chain (frozen §3 shape, implemented verbatim). Never
-    /// dead-ends: the attempt order always ends `.phone`, and `.phone`
+    /// dead-ends: `.phone` is always IN the attempt order, and `.phone`
     /// is always feasible — the loop always returns from inside. The
     /// trailing return keeps the function total without a trap.
     static func route(preferred: CallApp,
@@ -300,6 +301,8 @@ enum CallChannelVocabulary: Equatable {
     }
 }
 ```
+
+**Attempt-order invariant and its test (M-2).** `.phone` is always IN the attempt order (containment) — the containment form is the binding wording, because a last-element property would be literally false when `preferred == .phone` (the order is then `[.phone, secondary]`). The order is never reordered to satisfy the superseded wording: attempting the secondary ahead of the preferred channel would deviate from FR-CDP-007. The planned order test is `testOrderContainsPhonePreferredFirst` (V-6; executed in T-145) and asserts containment of `.phone`, `isFeasible(routed)` and preferred-first — NEVER last-element.
 
 **Error paths (C1).** None by construction: every function is total over enum/struct inputs; `route` has no failure case and no input can produce an empty `fellBackFrom` with a non-attemptable `channel` (the floor is unconditional); `nextLaunchFailCandidate` returns `nil` exactly at exhaustion (a defined state); `method(for:isVideo:)`/`channel(for:)` are total on the documented pairs.
 
@@ -495,9 +498,10 @@ Steps 1–3 of `resolve` are byte-for-byte unchanged; step 4 (`:74-78`) calls `g
         var capture: IntentLogStore.Capture { /* unchanged (:7543-7549) */ }
 
         /// The hop's re-entry copy (FR-CDP-015; L2-D3/D7): routed method
-        /// and remaining candidates replaced; provenance and the
-        /// flywheel pair carry over, so the hop neither re-speaks the
-        /// disclosure nor loses the training context.
+        /// and remaining candidates replaced; the flywheel pair carries
+        /// over; `fellBackFrom` deliberately resets to `[]` (not passed
+        /// below) so the hop never re-speaks the disclosure while the
+        /// training context survives.
         func replacing(method: CallMethod, hopCandidates: [CallApp]) -> PendingCallAction {
             PendingCallAction(contact: contact,
                               method: method,
@@ -606,7 +610,7 @@ The routed-channel label derives from the ROUTED method (`action.method` is alre
     }
 ```
 
-The `.whatsappChat` branch is untouched: `openWhatsAppChat` has no hard failure case — its absent-app path is the shipped `needsNativeCompose` / `copiedNumber` recovery, which speaks its own disclosures and never hops (RES-10).
+The `.whatsappChat` branch keeps the shipped opener and gains the M-1 disposition (i): `openWhatsAppChat` is `@discardableResult func openWhatsAppChat(_ rawPhone: String) -> Bool`, returning `false` only when `whatsAppChatURL` is nil because no dialable digits remain (`CallLinks.swift:283-287`, `:366-370`); on a `false` result the branch speaks the shipped `call.announce.noPhoneNumber` line and records no success, no learning and no activity — no hop (RES-10). It has no absent-app path and no recovery chain of its own: `needsNativeCompose` / `copiedNumber` belong to `openWhatsAppCallChat` only (`CallLinks.swift:457-470`).
 
 **Error paths (C3).** `resolve` keeps its no-throw contract; `requestCallConfirmation` keeps its `String?` return contract (the nil no-contact path unchanged); every failure branch keeps its shipped line and then optionally hops. Unsupported-requested-app and fallback disclosures compose (both, neither replaces — FR-CDP-014 scenario 3).
 
@@ -796,7 +800,7 @@ The `.whatsappChat` branch is untouched: `openWhatsAppChat` has no hard failure 
 | `performCallAction` `.phone` | `openPhone == false` | **failed, terminal** | shipped honest line (`announceNoUsableNumber`); NO hop — the floor is the last resort |
 | `performCallAction` `.faceTime` | `.unavailable`, `.invalidHandle` | failed | shipped line, then hop |
 | `performCallAction` `.messenger*` | `.invalidHandle` | failed | shipped line, then hop |
-| `performCallAction` `.whatsappChat` | (no outcome — `openWhatsAppChat` returns Void) | n/a | no hop (RES-10) |
+| `performCallAction` `.whatsappChat` | `openWhatsAppChat` returns `Bool` — `@discardableResult func openWhatsAppChat(_ rawPhone: String) -> Bool`; `false` only when `whatsAppChatURL` is nil because no dialable digits remain (`CallLinks.swift:283-287`, `:366-370`) | **failed, data** (M-1 disposition (i)) | shipped honest line (`call.announce.noPhoneNumber`); NO hop (RES-10) — no success, no learning, no activity |
 | `performContactCall` `.faceTime` | `.unavailable`, `.invalidHandle` | failed | shipped line, then hop |
 | `performContactCall` `.messenger` | `.invalidHandle` | failed | shipped line, then hop |
 | `performContactCall` `.messenger` | `.openedWebChat` | recovery | shipped web-fallback disclosure; no hop |
@@ -809,6 +813,8 @@ The `.whatsappChat` branch is untouched: `openWhatsAppChat` has no hard failure 
 | `performSystemContactMessenger` | `.invalidHandle` | failed | shipped line, then hop |
 | `performSystemContactMessenger` | `.fellBackToWeb` | recovery | shipped disclosure; no hop |
 | `performSystemContactCall` | `PhoneDialer.url == nil` | **failed, terminal** | shipped line; no hop (floor or last hop target) |
+
+**M-1 disposition (i) — the `.whatsappChat` false case (recorded; implemented in T-150).** A `false` result is a data failure — nothing dialable anywhere — and is handled exactly like the `.phone` floor's `openPhone == false`: the voice `.whatsappChat` branch speaks the shipped `call.announce.noPhoneNumber` line and records no success, no learning and no activity. Silence is not an acceptable disposition; the pre-existing silent drop (`AppCoordinator.swift:7755-7765`) is the counterexample this row exists to close. The chat opener's recovery chain is not consulted here: `needsNativeCompose` / `copiedNumber` belong to `openWhatsAppCallChat` only (`CallLinks.swift:457-470`), never to `openWhatsAppChat`.
 
 **10.2 The shared decision step + the tap attempt helper (L2-D5).**
 
@@ -900,7 +906,7 @@ The three search-shaped openers gain `hop: LaunchHop? = nil` and call `performLa
 | Surface | preferred → routed | attempt order | candidates | Why |
 |---|---|---|---|---|
 | `.anyChannel` (row/voice) | `.messenger` → `.messenger` | `[.messenger, .phone]` | `[.phone]` | raw suffix, all permitted |
-| `.anyChannel` | `.facebook` → `.faceTime` | `[.faceTime, .phone]` | `[.phone]` | secondary skipped when equal; floor |
+| `.anyChannel` | `.faceTime` → `.faceTime` | `[.faceTime, .phone]` | `[.phone]` | secondary skipped when equal; floor |
 | `.audio` (family audio/dial-back) | `.messenger` → `.messenger`, secondary `.faceTime` | `[.messenger, .faceTime, .phone]` | `[.phone]` | `.faceTime` filtered (audio never FaceTime) |
 | `.video` (family video) | `.messenger` → `.messenger`, secondary `.phone` (default) | `[.messenger, .phone]` | `[.faceTime]` | `.phone` filtered; terminal appended (video never GSM) |
 | `.video` | `.whatsApp` → `.whatsApp` | `[.whatsApp, .phone]` | `[.faceTime]` | same rule |
@@ -972,7 +978,7 @@ Init restore at the `defaultCallApp` site (`:2851-2853`), same shape:
 
 **Error paths (C6).** None: binding writes are total; a corrupted/absent stored raw value restores to `.phone` (fail-safe GSM default).
 
-**Concurrency (C6).** Main-actor SwiftUI state identical to `defaultCallApp`'s shipped pattern; the two properties are independent (no cross-talk). Accessibility: the shipped row pattern (Button, checkmark, ≥44 pt) is kept; each section title is a `Text` header, so VoiceOver reads the two groups distinctly (NFR-CDP-006); no token sizes change.
+**Concurrency (C6).** Main-actor SwiftUI state identical to `defaultCallApp`'s shipped pattern; the two properties are independent (no cross-talk). Accessibility (NFR-CDP-006; V-4): the shipped row pattern (Button, checkmark, ≥44 pt) is kept, and selection is conveyed non-visually — the selected row of BOTH picker sections carries a selected accessibility trait (or a selected accessibility value), so the checkmark is not the only indication of selection; the two section titles carry a heading accessibility trait (a plain `Text` header alone is not a VoiceOver heading, so the trait is added rather than claimed); no token sizes change.
 
 **Timeouts (C6).** None.
 
@@ -1080,7 +1086,7 @@ All five are ne/en entries; labels resolve through `CallChannelChain.label(_:loc
 
 1. **Inputs**: `explicit` (per-contact/family pick, or the voice path's resolved-method channel) ?? `defaultApp`; `secondaryApp`; `messengerHandleAvailable`; `whatsAppInstalled`; `vocabulary`.
 2. **Step 1 normalization**: `vocabulary.normalized(preferred)` (audio never FaceTime; video never GSM; `.anyChannel` permits all). Silent by design (shipped button gate).
-3. **Chain**: `route(preferred:secondary:feasibility:)` over `attemptOrder` — first feasible; `fellBackFrom` = the skipped channels in attempt order; dedupe on equal picks; at most three distinct channels; always ending `.phone`.
+3. **Chain**: `route(preferred:secondary:feasibility:)` over `attemptOrder` — first feasible; `fellBackFrom` = the skipped channels in attempt order; dedupe on equal picks; at most three distinct channels; `.phone` is always IN the order (containment), so the route never dead-ends.
 4. **Post-check**: if the routed channel is vocabulary-illegal, substitute the vocabulary terminal; `fellBackFrom` unchanged.
 5. **Provenance → speech**: `fellBackFrom.first` + routed channel feed the disclosure (prompt) and the announcement (taps/dial-back). Empty ⇒ silent.
 6. **Hop**: `hopCandidates(preferred:secondary:routed:vocabulary:)` stored on the action/state; on a failed open, `nextLaunchFailCandidate` (messenger filtered) decides; announce + attempt; strictly shrinking lists bound the recursion; exhaustion speaks nothing beyond the shipped failure line.
@@ -1103,7 +1109,7 @@ All five are ne/en entries; labels resolve through `CallChannelChain.label(_:loc
 
 ### 21. Struct pins (memberwise-initializer discipline)
 
-- `PendingCallAction`: `var requestedAt: Date = Date()`, `var fellBackFrom: [CallApp] = []`, `var hopCandidates: [CallApp] = []` — `var` + default ⇒ defaulted memberwise parameters; the five shipped labelled constructions compile unchanged (verified: `:7624`, `:7670`, `IntentLogStoreTests.swift:206`, `:224`).
+- `PendingCallAction`: `var requestedAt: Date = Date()`, `var fellBackFrom: [CallApp] = []`, `var hopCandidates: [CallApp] = []` — `var` + default ⇒ defaulted memberwise parameters; the four shipped labelled constructions compile unchanged (verified: `:7624`, `:7670`, `IntentLogStoreTests.swift:206`, `:224`).
 - `RowChannelState` (`private struct`, `LeafViews.swift:2249-2266`): `var fellBackFrom: [CallApp] = []`, `var hopCandidates: [CallApp] = []` — same reason; the single construction site (`:1616-1619`) passes both explicitly.
 - `MissedCallDialRoute`, `LaunchHop`: internal nested types on `AppCoordinator` (the `MissedCallDialAction` precedent) — `LaunchHop` must be visible to `LeafViews`.
 
@@ -1140,10 +1146,10 @@ All copy composes from the same `Result` (`fellBackFrom.first` + `.channel`) —
 ### 25. Isolation model
 
 - **Main actor / main queue**: every changed production call site (`AppCoordinator` methods, `LeafViews` view code, `CallingSettingsView` bindings) is main-confined. The probe helper runs on main via the shipped `canOpenURLOnMain` hop (`:7312-7315`).
-- **Shared resource — the pending action slot** (`:7552`): writers = `requestCallConfirmation` (before the window opens) and `handleCallConfirmationOverride` (amended action) and the two resolution points (`handleConfirmationResponse` → `nil` before execution; `recordConfirmationTimeout` reads it). Readers = `confirmationPrompt`, the override gate, the timeout recorder. The chain computation completes before the slot is written; the hop never touches the slot (it operates on local copies after the slot is `nil`). Isolation mechanism: main-queue confinement only — no locks, no actors, no atomics.
+- **Shared resource — the pending action slot** (`:7552`): writers = `requestCallConfirmation` (before the window opens), `handleCallConfirmationOverride` (amended action), and `handleConfirmationResponse` (→ `nil` before execution); on expiry the timeout path records the capture — `recordConfirmationTimeout` reads the slot (`:10562`), and the timeout closure clears the other pending slots (`:3054-3066`), not the call slot. Readers = `confirmationPrompt`, the override gate, `isAwaitingCallConfirmation` (`:7553`; its consumers are `CommandRouter.swift:1003` and `:1017` via its coordinator protocol member `CommandRouter.swift:60`, plus the home pill `HomeView.swift:1207`; the routing-busy check `:10717-10723` reads the slot directly at `:10720`), and `recordConfirmationTimeout` (`:10561-10569`, which reads the slot); the call block reads and nils the slot (`:10611-10612`). This reader set matters because removing the shipped early return (`:7620-7623`) changes when the slot can be live. The chain computation completes before the slot is written; the hop never touches the slot (it operates on local copies after the slot is `nil`). Isolation mechanism: main-queue confinement only — no locks, no actors, no atomics.
 - **Value-only statics**: C1 and the C2 seam statics are pure; concurrent reads are safe by construction (no state).
 - **No new asynchronous work**: no `Task`, no `DispatchQueue` addition, no timer, no retry. The hop is synchronous recursion on the main thread.
-- **Deregistration paths**: the window's existing teardown (`handleConfirmationResponse` on yes/no; `recordConfirmationTimeout` on expiry) is unchanged and remains the only lifecycle of a pending action; the hop's copies are stack-local and die with the call; the settings properties have no observers beyond `didSet` persistence.
+- **Deregistration paths**: the window's existing teardown (`handleConfirmationResponse` on yes/no — the only nil write of the call slot; on expiry the timeout path records the capture and clears the other pending slots at `:3054-3066`, leaving the call slot pended) is unchanged and remains the only lifecycle of a pending action; the hop's copies are stack-local and die with the call; the settings properties have no observers beyond `didSet` persistence.
 
 ## Performance & security implementation patterns
 
@@ -1168,10 +1174,10 @@ All copy composes from the same `Result` (`fellBackFrom.first` + `.channel`) —
 
 | Suite | Seam | Assertions (test names ≤ the sanitiser limit) |
 |---|---|---|
-| `Services/Voice/` + `CallChannelResolutionTests.swift` | pure statics; `assertResolved` extended to `.channel` + provenance | `testChainNeverDeadEndsAcrossAllCells` (all 64 (preferred, secondary, handle, probe) cells: `isFeasible(result.channel)` is true, `result.channel` vocabulary-legal per vocabulary, `fellBackFrom` disjoint from the channel and in attempt order); `testSecondaryEqualsPrimaryDedupes`; `testExplicitPickWinsAsPreferred`; `testAssessmentOrderAlwaysEndsPhone`; `testHopCandidatesRespectVocabulary`; `testSubstitutedTerminalHasNoCandidates`; `testProbeFalseRoutesToSecondary`; `testProbeStubbedFalseHops` |
+| `Services/Voice/` + `CallChannelResolutionTests.swift` | pure statics; `assertResolved` extended to `.channel` + provenance | `testChainNeverDeadEndsAcrossAllCells` (all 64 (preferred, secondary, handle, probe) cells: `isFeasible(result.channel)` is true, `result.channel` vocabulary-legal per vocabulary, `fellBackFrom` disjoint from the channel and in attempt order); `testSecondaryEqualsPrimaryDedupes`; `testExplicitPickWinsAsPreferred`; `testOrderContainsPhonePreferredFirst` (V-6 rename — asserts containment of `.phone` + `isFeasible(routed)` + preferred-first, NEVER last-element; the prior name is retired; the rename executes in T-145); `testHopCandidatesRespectVocabulary`; `testSubstitutedTerminalHasNoCandidates`; `testProbeFalseRoutesToSecondary`; `testProbeStubbedFalseHops` |
 | `Services/Intents/MethodResolverTests.swift` | injected `globalDefault`; `StubEncryptedStorage` stores | `testGlobalDefaultClosureMapsCallType` (Messenger primary → `.messengerAudio`/`.messengerVideo`; WhatsApp → `.whatsappChat`); `testDefaultConstructionStillPhone` |
 | Confirmation-wording tests (in the resolution suite or the confirmation suite) | `confirmationPrompt` via the real catalog | `testDisclosureNamesSkippedAndRouted`; `testNoFallbackKeepsPromptByteIdentical` |
-| Picker UI / settings persistence tests | real UserDefaults seam (house `SpotifySettingsSurfaceTests` pattern); value-level assertions + source scan for the two sections | `testSecondaryAbsentRestoresPhone`; `testSecondaryRoundTrip`; `testPickerTwoSectionsPersist` |
+| Picker UI / settings persistence tests | real UserDefaults seam (house `SpotifySettingsSurfaceTests` pattern); value-level assertions + source scan for the two sections | `testSecondaryAbsentRestoresPhone`; `testSecondaryRoundTrip`; `testPickerTwoSectionsPersist`; `testPickerRowExposesSelectedState` (the selected row's non-visual signal in both sections); `testPickerTitlesExposeHeadingTrait` |
 | `App/MissedCallDialBackTests.swift` | pure `missedCallDialAction` | route struct fields incl. `fellBackFrom`/`hopCandidates`; the two numberless actions carry `channel == nil` |
 | `App/L10nCatalogCoverageTests.swift` | catalog resolution | the five keys resolve in both locales and differ |
 | Hop behaviour (unit-level, coordinator seams) | `nextLaunchFailCandidate` + `launchFailHopStep` boundaries via the pure step | `testHopConsumesCandidatesNeverLoops` (strictly shrinking, ≤ 2 hops); `testLaunchFailedFallbackSpokenOnce`; `testMessengerWithoutHandleSkippedInHop`; `testAdditiveFieldsKeepOldCallSites` (the five-arg constructions still build) |
