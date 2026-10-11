@@ -7622,11 +7622,23 @@ self.noteTalkContractChanged()
         let sourceTranscript: String?
         let sourceCommand: InterpretedCommand?
         /// [INTENTLOG-CAPTURE] When the confirmation question was asked —
-        /// the flywheel's latency start (question → verdict). Reset when
-        /// a correction re-pends an amended action: the elder is being
-        /// asked a NEW question, so the new question's clock is the one
-        /// the answer belongs to.
-        let requestedAt: Date = Date()
+        /// the flywheel's latency start. `var` (L2-D3) so the hop's copy
+        /// can preserve the ORIGINAL question's clock.
+        ///
+        /// Still reset when a correction re-pends an amended action: a
+        /// construction that omits the field takes the default — the new
+        /// question's clock is the one the answer belongs to.
+        var requestedAt: Date = Date()
+        /// Channels the chain attempted and skipped, in attempt order —
+        /// empty when nothing fell back (FR-CDP-008). Drives the prompt
+        /// disclosure (FR-CDP-013); never mutated after construction.
+        var fellBackFrom: [CallApp] = []
+        /// The launch-fail candidates: the attempt order's
+        /// vocabulary-filtered suffix after the routed channel
+        /// (FR-CDP-015, L2-D1). Empty for touch-shaped constructions and
+        /// after an override (the amended action deliberately drops
+        /// provenance so a stale disclosure is never re-spoken).
+        var hopCandidates: [CallApp] = []
 
         /// This action's flywheel identity, for whichever verdict lands
         /// (confirmed / denied / corrected / timeout). The slots are the
@@ -7639,6 +7651,21 @@ self.noteTalkContractChanged()
                 slots: ["contact": contact.name, "method": method.rawValue],
                 confidence: sourceCommand?.confidence,
                 requestedAt: requestedAt)
+        }
+
+        /// The hop's re-entry copy (FR-CDP-015; L2-D3/D7): routed method
+        /// and remaining candidates replaced; the flywheel pair carries
+        /// over; `fellBackFrom` deliberately resets to `[]` (not passed
+        /// below) so the hop never re-speaks the disclosure while the
+        /// training context survives.
+        func replacing(method: CallMethod, hopCandidates: [CallApp]) -> PendingCallAction {
+            PendingCallAction(contact: contact,
+                              method: method,
+                              unsupportedRequestedApp: nil,
+                              sourceTranscript: sourceTranscript,
+                              sourceCommand: sourceCommand,
+                              requestedAt: requestedAt,
+                              hopCandidates: hopCandidates)
         }
     }
 
@@ -7702,23 +7729,30 @@ self.noteTalkContractChanged()
         let resolved = methodResolver.resolve(contactId: contact.id,
                                               requestedApp: requestedApp,
                                               callType: callType)
-        // Messenger needs a per-contact handle (username/user-id), not a
-        // phone number — and most contacts won't have one yet. Caught
-        // HERE, before the confirmation question, so the elder is never
-        // asked to yes/no an action that can only fail (mirrors the
-        // .ambiguous path above: nothing pended, and the returned line
-        // tells them what actually unblocks it). The same normalization
-        // the opener uses decides "usable", so the two checks can't
-        // disagree.
-        if resolved.method == .messengerAudio || resolved.method == .messengerVideo,
-           CallLinks.messengerHandle(contact.messengerHandle ?? "").isEmpty {
-            return L10n.fmt("router.call.messengerNoHandle", locale: activeLocale, contact.name)
-        }
+        // ADR-CDP-05 step 3: the chain runs BEFORE the action is pended —
+        // the feasibility fallback replaces the shipped Messenger-no-
+        // handle refusal, so the elder is never asked to yes/no an action
+        // that can only fail.
+        let intentIsVideo = resolved.method == .facetimeVideo
+            || resolved.method == .messengerVideo
+        let preferred = CallChannelChain.channel(for: resolved.method)
+        let route = Self.resolvedCallChannel(
+            explicit: preferred,
+            defaultApp: defaultCallApp,
+            secondaryApp: secondaryCallApp,
+            messengerHandleAvailable: hasUsableMessengerHandle(contact.messengerHandle),
+            whatsAppInstalled: whatsAppInstalledNow)
         let action = PendingCallAction(contact: contact,
-                                       method: resolved.method,
+                                       method: CallChannelChain.method(for: route.channel,
+                                                                       isVideo: intentIsVideo),
                                        unsupportedRequestedApp: resolved.unsupportedRequestedApp,
                                        sourceTranscript: sourceTranscript,
-                                       sourceCommand: sourceCommand)
+                                       sourceCommand: sourceCommand,
+                                       fellBackFrom: route.fellBackFrom,
+                                       hopCandidates: CallChannelChain.hopCandidates(
+                                           preferred: preferred,
+                                           secondary: secondaryCallApp,
+                                           routed: route.channel))
         pendingCallAction = action
         // Dementia-loop guard (spec §7.2): same target called again
         // within the window → the confirmation prompt says so out loud.
@@ -7778,7 +7812,13 @@ self.noteTalkContractChanged()
         return true
     }
 
-    private func confirmationPrompt(for action: PendingCallAction, isRepeat: Bool) -> String {
+    /// Composes the confirmation utterance (design-l2 §8): the parts, in
+    /// order, are [repeat notice][unsupported-app notice][fallback
+    /// disclosure][method sentence + confirm question]; the near-miss
+    /// prefix is prepended by the caller. Internal (not private) so the
+    /// wording pins can drive it with a constructed action against the
+    /// real catalog (design-l2 §28).
+    func confirmationPrompt(for action: PendingCallAction, isRepeat: Bool) -> String {
         let locale = activeLocale
         var parts: [String] = []
         if isRepeat {
@@ -7786,6 +7826,14 @@ self.noteTalkContractChanged()
         }
         if let unsupported = action.unsupportedRequestedApp {
             parts.append(L10n.fmt("router.call.appUnsupportedNotice", locale: locale, unsupported))
+        }
+        if let skipped = action.fellBackFrom.first {
+            parts.append(L10n.fmt("router.call.fallbackDisclosure", locale: locale,
+                                  CallChannelChain.label(skipped, locale: locale),
+                                  action.contact.name,
+                                  CallChannelChain.label(
+                                      CallChannelChain.channel(for: action.method),
+                                      locale: locale)))
         }
         let methodKey: String
         switch action.method {

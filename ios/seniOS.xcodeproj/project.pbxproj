@@ -608,6 +608,7 @@
 		BFF0B1F776C5529621BEFD1D /* UserManualView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6AA7959C860805DD367923A /* UserManualView.swift */; };
 		C05BFEAF2AB755B34404208C /* DoubleDoseDetector.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB4B3020E65E88B5A24AD26B /* DoubleDoseDetector.swift */; };
 		C09050C9D0947283B687D0C7 /* FeedSettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4AEABA56F42095D43D67A0E1 /* FeedSettingsStore.swift */; };
+		C11BBC69B846050CB439CE40 /* CallConfirmationWordingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64242684D0789B99D07F3AD7 /* CallConfirmationWordingTests.swift */; };
 		C13A44A3EC2B2D0E5B9BCCD1 /* SettingsTabMappingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57ECC13455DB43643BFD27EE /* SettingsTabMappingTests.swift */; };
 		C18738C0CC23E84334D9622E /* MedicationSchedulerProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6FB15DA4540CB88CE3138BB /* MedicationSchedulerProtocol.swift */; };
 		C1912DF2007AFED77E12202E /* LiveTranslateCipherStorageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A77C0A64E96B988300C7B0A /* LiveTranslateCipherStorageTests.swift */; };
@@ -1191,6 +1192,7 @@
 		62EA0CEB0C274BAB847A8AB5 /* GeminiCommandInterpreterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiCommandInterpreterTests.swift; sourceTree = "<group>"; };
 		634F4CB3294C0340AC9C67B9 /* YouTubePluginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = YouTubePluginTests.swift; sourceTree = "<group>"; };
 		636B334A372B2CAD46BF8BD3 /* VoiceSettingsModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceSettingsModel.swift; sourceTree = "<group>"; };
+		64242684D0789B99D07F3AD7 /* CallConfirmationWordingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallConfirmationWordingTests.swift; sourceTree = "<group>"; };
 		6427E04AFBC9C2E083254424 /* SystemContactSearchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemContactSearchTests.swift; sourceTree = "<group>"; };
 		6432797603C7EE2EDEAEAFEB /* LocalGoogleEventMappingStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalGoogleEventMappingStore.swift; sourceTree = "<group>"; };
 		644CF8F1EBA36091AA24E2B9 /* LiveTranslateSettingsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTranslateSettingsTests.swift; sourceTree = "<group>"; };
@@ -2282,6 +2284,7 @@
 				3D21DEDF38B698608E241656 /* AddressAsFieldTests.swift */,
 				8BE88FA004F604AA268A598F /* AppCoordinatorSpotifyWiringTests.swift */,
 				2627CAEAB86588DE8701C8A4 /* CalendarShareSettingsSeamTests.swift */,
+				64242684D0789B99D07F3AD7 /* CallConfirmationWordingTests.swift */,
 				70FB60B1CCD5E769019C96E9 /* CallingSettingsSurfaceTests.swift */,
 				5F77AAE8D39CC0556C033AF7 /* ChatHistoryStoreTests.swift */,
 				435643E21CD475A8DBF118B7 /* ColdStartRoutingTests.swift */,
@@ -3754,6 +3757,7 @@
 				10346E2DD308CC740232B5F8 /* CalendarShareSettingsSeamTests.swift in Sources */,
 				C2E96A87DFF35557D8E4E41A /* CalendarSyncServiceTests.swift in Sources */,
 				99A22F7C4DAE5CDF9E66063A /* CallChannelResolutionTests.swift in Sources */,
+				C11BBC69B846050CB439CE40 /* CallConfirmationWordingTests.swift in Sources */,
 				A3F93701994B8D36E72EB24B /* CallLinksTests.swift in Sources */,
 				2A45E70C7594AF54C85ADEA6 /* CallOverrideParserTests.swift in Sources */,
 				D83129DE20524FDCDA7AE8BE /* CallingSettingsSurfaceTests.swift in Sources */,
