@@ -1939,8 +1939,15 @@ final class AppCoordinator: ObservableObject {
     private lazy var contactResolver = ContactResolver { [weak self] in self?.familyContacts ?? [] }
     private lazy var callMethodPreferences = CallMethodPreferenceStore(storage: storage)
     private lazy var confirmedMethodHistory = ConfirmedMethodHistoryStore(storage: storage)
-    private lazy var methodResolver = MethodResolver(preferenceStore: callMethodPreferences,
-                                                     historyStore: confirmedMethodHistory)
+    private lazy var methodResolver = MethodResolver(
+        preferenceStore: callMethodPreferences,
+        historyStore: confirmedMethodHistory,
+        // FR-CDP-012: the settings primary, mapped by call type — a
+        // video-word call versus a plain call (design-l2 §8). Read per
+        // resolution, so a settings change applies from the next call.
+        globalDefault: { [weak self] isVideo in
+            CallChannelChain.method(for: self?.defaultCallApp ?? .phone, isVideo: isVideo)
+        })
     private lazy var intentCache = IntentCommandCache(storage: storage)
     private lazy var repetitionGuard = RepetitionGuard(storage: storage)
     /// Numbers this app has genuinely dialed, newest first — the ranking

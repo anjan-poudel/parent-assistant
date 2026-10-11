@@ -687,6 +687,7 @@
 		D73C35FDF9D6E68345BD6A0E /* LiveTranslateSpeech.swift in Sources */ = {isa = PBXBuildFile; fileRef = F76796766605ED152AAF8E57 /* LiveTranslateSpeech.swift */; };
 		D760D7B42F53BABEFBA47BD8 /* CalendarShareMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4DC975B84C402D6FEC87F2D /* CalendarShareMapper.swift */; };
 		D82D6015BA64CD44BDB5AB7C /* SpeakerBiometricServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DB994909EEA3C869ABDBE57 /* SpeakerBiometricServiceTests.swift */; };
+		D83129DE20524FDCDA7AE8BE /* CallingSettingsSurfaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70FB60B1CCD5E769019C96E9 /* CallingSettingsSurfaceTests.swift */; };
 		D863E2BCBAC6BB0420905E45 /* DependencyProtocols.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2AD7ABE631C1C62F6AF745E /* DependencyProtocols.swift */; };
 		D89B09EADAED534ED9BBAB51 /* VoiceEnrollmentRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = F6C6DC7636D26D44A73A7D71 /* VoiceEnrollmentRecorder.swift */; };
 		D8FA717DE7FFBBB66310949A /* IntentSchemaV2Tests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85ED77D882328D44E3F08B23 /* IntentSchemaV2Tests.swift */; };
@@ -1225,6 +1226,7 @@
 		700F321B7A2299C0464EDDA8 /* FreeFormEventFormTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FreeFormEventFormTests.swift; sourceTree = "<group>"; };
 		70342FA0BF5B70F9F7D7FAE8 /* LiveTranslateEvents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveTranslateEvents.swift; sourceTree = "<group>"; };
 		70A6673A1C7AE11C0E288035 /* AlarmTimerCommandParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AlarmTimerCommandParser.swift; sourceTree = "<group>"; };
+		70FB60B1CCD5E769019C96E9 /* CallingSettingsSurfaceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallingSettingsSurfaceTests.swift; sourceTree = "<group>"; };
 		71087481932AB5E88C9FF39D /* WakeWordUserRecordingProbeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WakeWordUserRecordingProbeTests.swift; sourceTree = "<group>"; };
 		7121AA437DFFD02002A14D72 /* SnapshotModeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SnapshotModeTests.swift; sourceTree = "<group>"; };
 		7161E9FF6CEEE7A0EE0C5FA3 /* RoutinePluginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RoutinePluginTests.swift; sourceTree = "<group>"; };
@@ -2280,6 +2282,7 @@
 				3D21DEDF38B698608E241656 /* AddressAsFieldTests.swift */,
 				8BE88FA004F604AA268A598F /* AppCoordinatorSpotifyWiringTests.swift */,
 				2627CAEAB86588DE8701C8A4 /* CalendarShareSettingsSeamTests.swift */,
+				70FB60B1CCD5E769019C96E9 /* CallingSettingsSurfaceTests.swift */,
 				5F77AAE8D39CC0556C033AF7 /* ChatHistoryStoreTests.swift */,
 				435643E21CD475A8DBF118B7 /* ColdStartRoutingTests.swift */,
 				00ABD1B5F8C75588285FC5EC /* DesignTokensTests.swift */,
@@ -3753,6 +3756,7 @@
 				99A22F7C4DAE5CDF9E66063A /* CallChannelResolutionTests.swift in Sources */,
 				A3F93701994B8D36E72EB24B /* CallLinksTests.swift in Sources */,
 				2A45E70C7594AF54C85ADEA6 /* CallOverrideParserTests.swift in Sources */,
+				D83129DE20524FDCDA7AE8BE /* CallingSettingsSurfaceTests.swift in Sources */,
 				28F1BCD24C7385482A94AEDA /* CameraCaptureFlowTests.swift in Sources */,
 				D0EBEA1921AF00B1269B0B85 /* CameraPermissionSurfaceTests.swift in Sources */,
 				2823AC7807DF8363EB891DC5 /* CappedGeminiRouterTests.swift in Sources */,

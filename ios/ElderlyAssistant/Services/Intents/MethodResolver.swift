@@ -8,7 +8,8 @@ import Foundation
 ///   1. explicit mention ("वाट्सएपमा", "video call")  → honored
 ///   2. family-set per-contact preference             → used
 ///   3. confirmed-method history for this contact     → reused
-///   4. global default `.phone` (tel:)                → universal fallback
+///   4. global default (settings primary, mapped by
+///      call type; injected, default `.phone`)         → used
 ///
 /// Consistency beats cleverness for this user population: the household's
 /// learned habit outranks any heuristic, and the confirmation prompt
@@ -18,11 +19,18 @@ final class MethodResolver {
 
     private let preferenceStore: CallMethodPreferenceStore
     private let historyStore: ConfirmedMethodHistoryStore
+    /// The household's global default, mapped by call type — the
+    /// settings primary via `CallChannelChain.method(for:isVideo:)`
+    /// (FR-CDP-012; design-l2 §8). Defaulted to the phone floor so every
+    /// existing construction is behaviour-identical.
+    private let globalDefault: (Bool) -> CallMethod
 
     init(preferenceStore: CallMethodPreferenceStore,
-         historyStore: ConfirmedMethodHistoryStore) {
+         historyStore: ConfirmedMethodHistoryStore,
+         globalDefault: @escaping (_ isVideo: Bool) -> CallMethod = { _ in .phone }) {
         self.preferenceStore = preferenceStore
         self.historyStore = historyStore
+        self.globalDefault = globalDefault
     }
 
     /// Which step of the chain produced the method — carried through so
@@ -71,9 +79,18 @@ final class MethodResolver {
                                   source: .confirmedHistory)
         }
 
-        // 4. Global default — tel:, the only method that works for every
-        //    contact with zero app assumptions.
-        return ResolvedMethod(method: .phone,
+        // 4. Global default — the household's settings primary, mapped by
+        //    call type (FR-CDP-012; design-l2 §8). The call-type sense is
+        //    the same video-word test step 1 uses — and because a bare
+        //    video word already returns there, today's reachable flag
+        //    value through this entry point is false; the parameter
+        //    carries the general mapping the settings primary needs. The
+        //    defaulted closure returns `.phone` (tel:), the only method
+        //    that works for every contact with zero app assumptions.
+        let isVideo = callType.map {
+            $0.lowercased().contains("video") || $0.contains("भिडियो")
+        } ?? false
+        return ResolvedMethod(method: globalDefault(isVideo),
                               unsupportedRequestedApp: nil,
                               source: .globalDefault)
     }
