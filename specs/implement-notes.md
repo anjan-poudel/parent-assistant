@@ -105,3 +105,14 @@ search yet (T-159 scope, verified). Tests: 22 existing + 17 new (tier order,
 Devanagari pins positive+negative, Pass 3-5, parity anchors, ambiguity, failure
 paths, <=20 ms ceiling); the one uncertain Foundation behavior probed standalone.
 Whole-module build green, 0 errors. Scoped run deferred.
+
+## T-155 — FEATURE_ROOTS + release-gate coverage — DONE
+
+Commit 432584b8. The three Contacts seam files registered as feature-role
+roots in check-release-log-safety.py (design §5.3 block); 3 positive + 3
+negative fixtures + 3 expect pins. Evidence: full shell gate exit 0 (24
+fixtures/12 rules); injected-PII fixture names each planted file+line;
+falsify green; registration-drift caught in an isolated copy. Whole-module
+typecheck green (attempt 1 red only on T-150's concurrent mid-wave state, per
+protocol waited and retried). Scoped run deferred. One documented limitation
+(rule-3 Debug framing) recorded in the notes.
