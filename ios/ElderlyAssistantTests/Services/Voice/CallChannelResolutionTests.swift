@@ -2042,6 +2042,121 @@ final class CallChannelResolutionTests: XCTestCase {
         XCTAssertEqual(coordinator.activityLog.entries().count, activitiesBefore)
     }
 
+    // MARK: - Hermeticity floor + helper-body pins (T-157 sweep)
+
+    /// W6-review N-8(b) (owed pin, discharged at the T-157 sweep): the
+    /// behavioural arms in this suite (and its siblings) drive the
+    /// SHIPPED openers with EMPTY inputs — an empty phone, an empty
+    /// handle — and claim hermeticity: nothing probes, nothing opens,
+    /// nothing dials. That claim rests on two shipped floors this pin
+    /// freezes in place: every opener refuses empty input BEFORE any
+    /// platform call, and every URL builder returns nil for input that
+    /// normalises to nothing. A future edit that probes first and
+    /// refuses after (or that lets an empty input reach the platform)
+    /// fails HERE, in a source pin, instead of silently turning a
+    /// hermetic arm into a real probe or dial on the simulator.
+    /// `CallLinks.swift` and `RedesignComponents.swift` are outside this
+    /// unit's ownership — read, never edited.
+    func testEmptyInputGuardsPrecedeEveryProbe() throws {
+        let links = FeatureSourceScan.codeText(of: FeatureSourceScan.iosDirectory(file: #filePath)
+            .appendingPathComponent("ElderlyAssistant/Services/Intents/CallLinks.swift"))
+        let screens = FeatureSourceScan.codeText(of: FeatureSourceScan.iosDirectory(file: #filePath)
+            .appendingPathComponent("ElderlyAssistant/App/RedesignComponents.swift"))
+
+        // openPhone: the nil-URL guard returns false BEFORE the open —
+        // the empty-input case every hermetic arm's `.phone` leg rides.
+        let openPhone = try region(between: "func openPhone(_ rawPhone: String) -> Bool {",
+                                   and: "func openFaceTime(handle", in: links)
+        XCTAssertEqual(collapsed(openPhone).trimmingCharacters(in: .whitespacesAndNewlines),
+                       "func openPhone(_ rawPhone: String) -> Bool { "
+                       + "guard let url = Self.phoneURL(rawPhone) else { return false } "
+                       + "opener.open(url) return true }",
+                       "openPhone must refuse an unusable handle before opening anything")
+
+        // openFaceTime: `.invalidHandle` before the canOpenURL probe.
+        let openFaceTime = try region(between: "func openFaceTime(handle rawHandle: String, video: Bool) -> FaceTimeOutcome {",
+                                      and: "@discardableResult", in: links)
+        XCTAssertEqual(collapsed(openFaceTime).trimmingCharacters(in: .whitespacesAndNewlines),
+                       "func openFaceTime(handle rawHandle: String, video: Bool) -> FaceTimeOutcome { "
+                       + "guard let url = Self.faceTimeURL(handle: rawHandle, video: video) else { return .invalidHandle } "
+                       + "guard opener.canOpenURL(url) else { return .unavailable } "
+                       + "opener.open(url) return .opened }",
+                       "openFaceTime must refuse an empty handle before probing FaceTime")
+
+        // openMessengerThread: `.invalidHandle` before the canOpenURL probe.
+        let openMessengerThread = try region(between: "func openMessengerThread(handle rawHandle: String) -> MessengerOutcome {",
+                                             and: "func openMessengerChat(phone", in: links)
+        XCTAssertEqual(collapsed(openMessengerThread).trimmingCharacters(in: .whitespacesAndNewlines),
+                       "func openMessengerThread(handle rawHandle: String) -> MessengerOutcome { "
+                       + "guard let threadURL = Self.messengerThreadURL(handle: rawHandle) else { return .invalidHandle } "
+                       + "if opener.canOpenURL(threadURL) { opener.open(threadURL) return .openedThread } "
+                       + "if let webURL = Self.messengerWebURL(handle: rawHandle) { opener.open(webURL) } "
+                       + "return .fellBackToWeb }",
+                       "openMessengerThread must refuse an empty handle before probing Messenger")
+
+        // openMessengerChat: the digit guard first, the probe second.
+        let openMessengerChat = try region(between: "func openMessengerChat(phone rawPhone: String) -> MessengerChatOutcome {",
+                                           and: "func openWhatsAppCallChat(", in: links)
+        XCTAssertEqual(collapsed(openMessengerChat).trimmingCharacters(in: .whitespacesAndNewlines),
+                       "func openMessengerChat(phone rawPhone: String) -> MessengerChatOutcome { "
+                       + "let digits = Self.whatsAppDigits(rawPhone) "
+                       + "guard !digits.isEmpty else { return .invalidHandle } "
+                       + "if let appURL = URL(string: \"fb-messenger://user-thread/\\(digits)\"), "
+                       + "opener.canOpenURL(appURL) { opener.open(appURL) return .openedApp } "
+                       + "guard let webURL = URL(string: \"https://m.me/\\(digits)\") else { return .invalidHandle } "
+                       + "opener.open(webURL) return .openedWebChat }",
+                       "openMessengerChat must refuse a digit-less phone before probing Messenger")
+
+        // openWhatsAppCallChat: the invalid-phone return precedes the probe.
+        let openWhatsAppCallChat = try region(between: "func openWhatsAppCallChat(_ rawPhone: String) -> WhatsAppCallOutcome {",
+                                              and: "copyText(Self.phoneHandle(rawPhone))", in: links)
+        XCTAssertEqual(collapsed(openWhatsAppCallChat).trimmingCharacters(in: .whitespacesAndNewlines),
+                       "func openWhatsAppCallChat(_ rawPhone: String) -> WhatsAppCallOutcome { "
+                       + "guard let url = Self.whatsAppTextURL(phone: rawPhone, text: \"\") else { return .invalidPhone } "
+                       + "if opener.canOpenURL(url) { opener.open(url) return .openedChat } "
+                       + "if canSendText() { return .needsNativeCompose }",
+                       "openWhatsAppCallChat must refuse an empty phone before probing WhatsApp")
+
+        // The two refusal families, counted: the nil URL builders behind
+        // the openers' guards (4 handle-based, 2 digit-based).
+        XCTAssertEqual(occurrences(of: "guard !handle.isEmpty else { return nil }", in: links), 4,
+                       "phoneURL/faceTimeURL/messengerThreadURL/messengerWebURL all refuse empty handles")
+        XCTAssertEqual(occurrences(of: "guard !digits.isEmpty else { return nil }", in: links), 2,
+                       "whatsAppChatURL/whatsAppTextURL both refuse digit-less phones")
+
+        // PhoneDialer.url (RedesignComponents): the shared `tel://`
+        // builder — nil for a number that filters to no digits, so an
+        // empty-input leg can never hand a URL to the platform.
+        let dialer = try region(between: "static func url(for phone: String) -> URL? {",
+                                and: "enum PhoneAppOpener {", in: screens)
+        XCTAssertEqual(collapsed(dialer).trimmingCharacters(in: .whitespacesAndNewlines),
+                       "static func url(for phone: String) -> URL? { "
+                       + "let digits = phone.filter { $0.isNumber || $0 == \"+\" } "
+                       + "guard !digits.isEmpty else { return nil } "
+                       + "return URL(string: \"tel://\\(digits)\") } }",
+                       "PhoneDialer.url must refuse a number that filters to no digits")
+    }
+
+    /// W7-review N-4 residual (owed pin, discharged at the T-157 sweep):
+    /// the shipped no-usable-number helper pinned WHOLE — its body is
+    /// exactly `setOutcome` + `speak`, nothing else. The T-150 guards'
+    /// "records nothing" claim rests on this helper being unmodified
+    /// (the guards' own pins cannot see inside it), so a future edit
+    /// that makes the helper record something — a capture, an execution
+    /// note, an activity entry — fails here, as it should.
+    func testAnnounceNoUsableNumberBodyStaysRecordless() throws {
+        let body = try region(
+            between: "private func announceNoUsableNumber(contact: FamilyContact, locale: Locale) {",
+            and: "struct MessageDraft: Identifiable {", in: coordinatorSource())
+        XCTAssertEqual(collapsed(body).trimmingCharacters(in: .whitespacesAndNewlines),
+                       "private func announceNoUsableNumber(contact: FamilyContact, locale: Locale) { "
+                       + "setOutcome(icon: \"exclamationmark.triangle.fill\", "
+                       + "text: L10n.fmt(\"call.announce.noPhoneNumber\", locale: locale, contact.name)) "
+                       + "speak(text: L10n.fmt(\"call.announce.noPhoneNumber\", locale: locale, contact.name)) }",
+                       "the helper speaks the shipped line and records nothing — "
+                       + "any recording added here must fail the T-150 pins' foundation")
+    }
+
     // MARK: - Helpers (the house patterns the sibling suites ship)
 
     private static let languageKey = "appLanguage"

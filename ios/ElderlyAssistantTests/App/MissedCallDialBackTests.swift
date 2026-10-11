@@ -413,6 +413,35 @@ final class MissedCallDialBackTests: XCTestCase {
         XCTAssertEqual(floorRoute.channel, .phone)
         XCTAssertEqual(floorRoute.hopCandidates, [],
                        "the audio terminal is the routed channel — no candidate remains")
+
+        // T-157 sweep (the T-153 coverage note, discharged): the §10.4
+        // `.audio` cell that DISCRIMINATES the vocabulary argument —
+        // messenger preferred (handle on file) with a FaceTime secondary:
+        // the raw attempt-order suffix [.faceTime, .phone] is filtered to
+        // [.phone] because audio never FaceTime. A `.audio` →
+        // `.anyChannel` swap at the decision's final return yields
+        // [.faceTime, .phone] here, so this leg fails on that swap
+        // BEHAVIOURALLY (the source pin alone left the discriminating
+        // cell uncovered in this suite). The control assertion below
+        // pins the discriminating difference at the chain level.
+        let faceTimeSecondaryRoute = AppCoordinator.missedCallDialAction(
+            phone: "9811111111",
+            familyContact: familyContact(name: "राम", phone: "9811111111",
+                                         preferredCallApp: .messenger,
+                                         messengerHandle: "ram.sharma"),
+            defaultApp: .phone, secondaryApp: .faceTime, messengerHandle: "ram.sharma",
+            whatsAppInstalled: true, name: "राम")
+        XCTAssertEqual(faceTimeSecondaryRoute.channel, .messenger)
+        let expectedFaceTimeSecondary =
+            CallChannelChain.hopCandidates(preferred: .messenger, secondary: .faceTime,
+                                           routed: .messenger, vocabulary: .audio)
+        XCTAssertEqual(faceTimeSecondaryRoute.hopCandidates, expectedFaceTimeSecondary)
+        XCTAssertEqual(expectedFaceTimeSecondary, [.phone],
+                       "design-l2.md §10.4: `.faceTime` filtered (audio never FaceTime)")
+        XCTAssertEqual(CallChannelChain.hopCandidates(preferred: .messenger, secondary: .faceTime,
+                                                      routed: .messenger, vocabulary: .anyChannel),
+                       [.faceTime, .phone],
+                       "the swap this leg catches: anyChannel keeps the FaceTime suffix")
     }
 
     // MARK: - Source pins (the delivered dial-back wiring)

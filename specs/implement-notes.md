@@ -328,3 +328,44 @@ Items owed to the end-stage review/sweep:
 1. The T-153 coverage note: the vocabulary argument is source-pinned; a behavioural discriminator (the section 10.4 FaceTime-secondary cell) may be added to the hop-candidate test during the sweep if the reviewer wants it — flagged in the notes, deliberately not chased with an edit that would have invalidated the single compile-check evidence.
 2. The five-candidate T-153 negative-control plan (in the notes) — to be run at the sweep alongside the W8 control.
 3. This suite's 22 tests are unaudited-against-run; the family sweep is their first execution.
+
+---
+
+# call-dialer-primary-secondary — Implement notes (Wave 10, unit T-157)
+
+Description: Wave 10 is the final barrier (TG-32, final: true) — the consolidated end-of-feature test pass that absorbs the deferred W8/W9 scoped runs and negative controls, the preservation and new-surface audits, the owed test-only pins, and the release-evidence pack. Base 4f17049a (the W9 commit). The full unit report and evidence pack is specs/T-157-notes.md (37457 bytes, sha256 66f48535 ... b3c8dc); the pack sections below cite it. The W1 through W9 records above are preserved; this section is this feature's W10 record, appended below them, not a replacement.
+
+## Per-unit status (Wave 10)
+
+| Unit | Title (short) | Wave | Status | Evidence summary |
+|---|---|---|---|---|
+| T-157 | Final integration and release-evidence sweep | W10 | Done — sweep of record green; four negative controls expected==observed; preservation audit zero drift; evidence pack complete | Test-only change: CallChannelResolutionTests.swift +115 (the two owed pins — the W6 N-8(b) empty-input hermeticity guards in CallLinks and PhoneDialer and the W7-log point 4 announceNoUsableNumber helper-body containment pin), MissedCallDialBackTests.swift +29 (the T-153 section 10.4 audio-vocabulary behavioural leg inside the existing hop-candidate test). Production diff vs HEAD is EMPTY: AppCoordinator.swift restored byte-exact (md5 7f50894d800b276dbf470c176a444d13, the W9-delivered bytes), CallChannelChain.swift untouched, no plist/pbxproj/catalogue diff by this unit. Family sweep of record (seven suites) exit 0, Passed 136/136/0/0, both in-build guards green; direct privacy-guard re-run exit 0 (24 fixtures over 12 rules, Services/Calls registered at check-release-log-safety.py:197); the four negative controls (one W8, three W9 — all five T-153 candidates) each failed exactly the pins they were designed to fail, every restore byte-identical; SA-4/SA-7 audits zero drift; five-key catalogue parity proven (exactly the five keys added, en and ne, 1394 total); DV-1..7 checklist prepared, not executed. Pack: specs/T-157-notes.md. |
+
+## Wave log — W10
+
+The sweep of record is the POST-CONTROL final family run: `ios/build.sh test:unit` with the seven-suite scope (CallChannelResolutionTests MethodResolverTests MissedCallDialBackTests ContactCallButtonsTests CallingSettingsSurfaceTests CallConfirmationWordingTests L10nCatalogCoverageTests) from the worktree root, exit 0, bundle Test-ElderlyAssistant-2026.10.12_08-10-43-+1100.xcresult, Passed 136/136 with zero failures and zero skips: CallChannelResolutionTests 45, MethodResolverTests 17, MissedCallDialBackTests 22, ContactCallButtonsTests 25, CallingSettingsSurfaceTests 7, CallConfirmationWordingTests 4, L10nCatalogCoverageTests 16. Both in-build guards green (log-safety; prompt mirror: the seed mirrors IntentPrompt.build byte-for-byte, 2717 bytes, 4 placeholders, all 7 self-test drift classes rejected).
+
+First-execution declaration discharged: the pre-pin sweep (bundle 2026.10.12_07-46-17) passed 134/134 — the first execution of every W8/W9-authored test, green with zero production repairs, so the "unaudited-against-run" status of the W8 and W9 suites is now closed by execution. The only red of the whole wave was in the two NEW pins' first run: the dev's own expectation strings omitted the region marker that region() includes; the pin was corrected test-side (disclosed; the scan semantics were pre-validated by exact emulation), and the rerun was 67/67 green (CallChannelResolutionTests 45 = 43 + 2 pins; MissedCallDialBackTests 22 with the new leg inside the existing hop-candidate test). No production repair was ever needed in this wave.
+
+Direct privacy-guard re-run (the SA-6 gate half): the guard script run from the worktree root, exit 0; summary: log-safety fixtures 24 cases over 12 rules, every fixture behaves; the feature-root registration for Services/Calls re-verified at check-release-log-safety.py:197.
+
+Negative controls — all deferred obligations discharged; every control restored byte-identically (md5-verified), expected == observed for all four:
+
+1. W8 control — the two carried-fix lines reverted (the faceTime leg back to the old performFaceTimeCall call; the messenger hopped consume back to phone: "" with handle: hop?.handle): exactly the two named Voice-suite reds observed (the faceTime-leg threading pin and the LaunchHop-phone additive pin); ContactCallButtonsTests stayed green as predicted; restore md5-verified; 70 of 70 green after.
+2. W9-A (announce-delete + two-label hop + one-arm hop drop combined): the announce-before-dispatch source pin red (count 1 to 0), then the scan aborts at the missing block — later needles unreached by assertion order, recorded honestly in the pack.
+3. W9-B (raw derivation swapped for the normalised predicate): the decision source pin AND the whitespace-handle behavioural pin red (route resolves .call instead of .messenger).
+4. W9-C (vocabulary argument swapped): the decision source pin AND the new audio-vocabulary leg red (candidates [.faceTime, .phone] instead of [.phone]).
+
+Preservation audit (SA-4) — zero drift: no emergency component file in the change set; the emergency components region RedesignComponents.swift:229-237 byte-unchanged; the override block located by content at actual AppCoordinator.swift:7783-7813 (gate :7792-7796, amended action :7797-7801; the design-era anchors :7656-7686 shifted with the waves — located by content per the brief), diff-clean, provenance dropped; zero additions of emergency notify identifiers, notify-channel types or preferred-emergency-contact storage anywhere in the diff; the confirmation timeout constant at VoiceSessionStateMachine.swift:135 intact; the T-153 no-await inspection re-verified (no await/sleep/retry/timer in the dial-back chain).
+
+New-surface audit (SA-7) — zero drift: Info.plist byte-diff empty; zero network symbols in the diff; secondaryCallApp is the ONLY new store key; no per-contact primary/secondary storage added; FR-CDP-018 traceability of record stated (no router service exists). Five-key catalogue parity proven (SA-8): the catalogue diff adds exactly the five keys — settings.calling.primaryTitle, settings.calling.secondaryTitle, router.call.fallbackDisclosure, call.announce.fallbackRouted, call.announce.launchFailedFallback — each present en and ne, 1394 keys total.
+
+Items owed to the end-stage review (recorded, not defects):
+
+1. T-152 emit-suffix DoD arbitration and the T-151 real-probe supersession acknowledgement — for the review-implementation reader.
+2. Disclosed residuals for the reviewer: no behavioural WhatsApp tile arm and no tile-faceTime hop test.
+3. DV-1..7 prepared as a checklist with pass criteria in the pack, NOT executed — the owner's device run is the downstream gate.
+4. Errata roll-up carried (records, never design edits): W2 N-3 (the case-table pointer section 11.4 should read 10.4), W4 N-6 (the stale CallingSettingsView pointer comment inside CallChannelChain.swift around :157-158), W6 N-1 and W6 N-4 (the hop-thread listing omission; the two-label LaunchHop form landed at W8).
+5. Reviewer orientation: specs/implement-review-w8.md in this worktree is a Spotify-feature artifact (dated 2026-10-07), NOT this feature's W8 review; waves 8-10 have no per-unit review files by the owner's suspended-review directive.
+
+Wave-closure verification (coordinator, on the delivered bytes): numstat matches the dev report exactly (+115, +29, tests only); AppCoordinator md5 matches the W9-delivered value (restoration byte-exact); the authoritative bundle is the post-control sweep; the untracked workflow.yaml remains engine state and stays out of the integration commit.
