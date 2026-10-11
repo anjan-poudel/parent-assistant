@@ -136,6 +136,17 @@ final class IntentEncoderPreferences {
     /// the internal card still rewrites nothing.
     var isCorrectorEnabled: Bool { flag(Self.correctorKey) }
 
+    /// [CORRECTION-DEFAULT-ON] True only when the corrector key has been
+    /// WRITTEN AT ALL — the "absent" vs "false" distinction the new
+    /// shipped default turns on. Under the default-ON policy (owner
+    /// decision 2026-10-11) an absent key means "never touched", which
+    /// `STTCorrector.Policy.runtime` reads as the apply arm; a stored
+    /// `false` is a deliberate pin-off by the user. The two states must
+    /// not collapse into one bool.
+    var isCorrectorToggleSet: Bool {
+        defaults.object(forKey: Self.correctorKey) != nil
+    }
+
     func setCorrectorEnabled(_ enabled: Bool) {
         defaults.set(enabled, forKey: Self.correctorKey)
     }

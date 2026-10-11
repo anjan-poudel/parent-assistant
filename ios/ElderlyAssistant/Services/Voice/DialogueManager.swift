@@ -34,6 +34,13 @@ import Foundation
 enum ProbeKind: String, Equatable {
     case slotFill
     case candidateChoice
+    /// [CORRECTION-REVIVE] The correction question — about what was SAID,
+    /// not what was meant: Pip heard «X» and asks which of the top
+    /// readings the elder said. Armed only on the unrecognised path, at
+    /// most once per turn. The readings are the user's own words (never
+    /// model text); the answer re-routes the turn with the chosen
+    /// reading spliced in, safety net reading the original transcript.
+    case correctionChoice
 }
 
 /// The missing-slot vocabulary. Phase 1 has exactly one slot — the
@@ -88,6 +95,24 @@ struct DialogueFrame {
     /// Probe-spoken + the injected answer window. `arm` is the only
     /// writer of the live value (L2-D7).
     var deadline: Date
+    /// [CORRECTION-REVIVE] correctionChoice only (empty otherwise): the
+    /// readings to ask about — one in this wave — each carrying the heard
+    /// surface, its top option readings and the scalar range to splice
+    /// into. The user's own words; on-device only.
+    ///
+    /// `var` with a default, not `let`: the memberwise initializer
+    /// EXCLUDES defaulted `let` properties from its parameter list
+    /// (positions #11/#12 rejected the correctionChoice factory), and a
+    /// defaulted `var` is included WITH its default — the existing
+    /// slotFill/candidateChoice factories then compile unchanged.
+    var correctionReadings: [CorrectionClarification.Reading] = []
+    /// [CORRECTION-REVIVE] correctionChoice only (empty otherwise): the
+    /// SANITISED transcript the readings' ranges address — the
+    /// coordinate space the splice is computed in, and the text the
+    /// re-route interprets. The safety net reads `sourceTranscript`
+    /// (the RAW original) instead, never this. (Same `var`-with-default
+    /// rule as `correctionReadings`.)
+    var correctionOriginal: String = ""
 
     /// Half-open window: exactly at the deadline the frame is expired
     /// (design-l2 §8; L1 §14).
@@ -130,6 +155,31 @@ struct DialogueFrame {
                       sourceTranscript: sourceTranscript,
                       attempts: 1,
                       deadline: .distantPast)
+    }
+
+    /// [CORRECTION-REVIVE] The correction-question factory: the readings
+    /// Pip is unsure about, the sanitised transcript their ranges address
+    /// (`original` — the splice's coordinate space) and the RAW transcript
+    /// that opened the turn (`sourceTranscript` — what the re-route's
+    /// safety net reads). No domain and no pending command — nothing
+    /// executes unasked; the answer re-routes through
+    /// `executeCorrectionPick`.
+    static func correctionChoice(
+        readings: [CorrectionClarification.Reading],
+        original: String,
+        sourceTranscript: String) -> DialogueFrame {
+        DialogueFrame(id: UUID(),
+                      probeKind: .correctionChoice,
+                      slot: .musicQuery,
+                      domain: nil,
+                      activeCommand: nil,
+                      candidates: [],
+                      defaultQuery: nil,
+                      sourceTranscript: sourceTranscript,
+                      attempts: 1,
+                      deadline: .distantPast,
+                      correctionReadings: readings,
+                      correctionOriginal: original)
     }
 }
 
@@ -193,6 +243,10 @@ enum DialogueFrameResolution: Equatable {
     case answered(DialogueMerge)
     case defaultExecuted
     case candidateSelected(index: Int)
+    /// [CORRECTION-REVIVE] A correctionChoice frame resolved by a picked
+    /// reading — distinct from a candidate pick in telemetry, same
+    /// funnel.
+    case correctionSelected(index: Int)
     case exhausted
     case cancelled
     case escaped
@@ -253,7 +307,11 @@ final class DialogueManager {
         // disturbed by draft inspection, and the expiry-aware read
         // drops stale state before the check (design-l2 §8).
         guard liveFrame == nil else { throw DialogueError.windowBusy }
-        guard !draft.candidates.isEmpty || draft.defaultQuery != nil else {
+        // [CORRECTION-REVIVE] A correctionChoice frame resolves through
+        // its READINGS, not through candidates or a default — the same
+        // no-resolution guard, widened by the third answerable surface.
+        guard !draft.candidates.isEmpty || draft.defaultQuery != nil
+            || !draft.correctionReadings.isEmpty else {
             throw DialogueError.noResolution
         }
         var armed = draft
@@ -302,6 +360,7 @@ enum DialogueProbeComposer {
         static let anyPlay = "dialogue.option.anyPlay"
         static let understoodNo = "dialogue.understood.no"
         static let didYouMean = "dialogue.didYouMean"
+        static let correctionAsk = "dialogue.correction.ask"
     }
 
     /// slotFill: the group's question key with `%@` = the capped option
@@ -309,8 +368,11 @@ enum DialogueProbeComposer {
     /// `dialogue.probe.musicAny` when no group claims the pending query
     /// (design-l2 §8; L2-D12 — a free-text-only probe). candidateChoice:
     /// the honest `dialogue.understood.no` line plus `dialogue.didYouMean`
-    /// with `%@` = the capped candidate labels joined `", "`. A retry
-    /// prefixes `dialogue.retry` and exactly one space.
+    /// with `%@` = the capped candidate labels joined `", "`.
+    /// [CORRECTION-REVIVE] correctionChoice: the honest lead plus
+    /// `dialogue.correction.ask` — the heard surface and the numbered
+    /// readings (the user's own words, the same never-model-text
+    /// property). A retry prefixes `dialogue.retry` and exactly one space.
     static func probeText(for frame: DialogueFrame,
                           catalog: DialogueOptionCatalog?,
                           retry: Bool,
@@ -321,6 +383,8 @@ enum DialogueProbeComposer {
             body = slotFillProbe(for: frame, catalog: catalog, locale: locale)
         case .candidateChoice:
             body = candidateChoiceProbe(for: frame, locale: locale)
+        case .correctionChoice:
+            body = correctionChoiceProbe(for: frame, locale: locale)
         }
         guard retry else { return body }
         return L10n.str(Key.retry, locale: locale) + " " + body
@@ -356,6 +420,24 @@ enum DialogueProbeComposer {
             String(format: L10n.str(Key.didYouMean, locale: locale), labels)
     }
 
+    /// [CORRECTION-REVIVE] The correction question: the honest lead, then
+    /// the heard surface and the numbered readings — "१) «X», २) «Y»" —
+    /// so the elder answers with the index words the answer path already
+    /// understands ("पहिलो" / "दोस्रो" / "तेस्रो"). The readings are the
+    /// user's own words; never model text.
+    private static func correctionChoiceProbe(for frame: DialogueFrame,
+                                              locale: Locale) -> String {
+        guard let reading = frame.correctionReadings.first else {
+            return L10n.str(Key.understoodNo, locale: locale)
+        }
+        let numbered = reading.options.enumerated()
+            .map { index, option in "\(index + 1)) \(option)" }
+            .joined(separator: ", ")
+        return L10n.str(Key.understoodNo, locale: locale) + " " +
+            String(format: L10n.str(Key.correctionAsk, locale: locale),
+                   reading.surface, numbered)
+    }
+
     /// A candidate's spoken label: its template key resolved in the
     /// locale, with a `%@` filled from the candidate's own query — or,
     /// without one, the primary match key (the user's own partial
@@ -378,6 +460,11 @@ enum DialogueConfig {
     static let maxCandidates = 3
     /// FR-MTC-003 — <= 3-4 named options per probe.
     static let maxSlotOptions = 4
+    /// [CORRECTION-REVIVE] The correction question's turn-scoped budget:
+    /// at most ONE per turn (the recursion bound — a re-route can never
+    /// arm a second correction frame), separate from the shared retry
+    /// budget above.
+    static let maxCorrectionProbes = 1
 }
 
 /// The complete error vocabulary of the new dialogue types (design-l2

@@ -1,0 +1,5 @@
+{"utterance": "भोलि बिहान समाचार सुनाउनुहोस्", "action": "news"}
+{"utterance": "भोलि बिहान औषधि खानुहोस्", "action": "medication_reminder"}
+{"utterance": "आज बिहान समाचार सुनाउनुहोस्", "action": "news"}
+{"utterance": "भोलि औषधि खानुहोस्", "action": "medication_reminder"}
+{"utterance": "आज साँझ भजन बजाउनुहोस्", "action": "music"}

@@ -75,6 +75,10 @@ enum AnswerClassification: Equatable {
     /// `index` is the 1-based spoken position (the executor decrements,
     /// §12.2 `executeDialogueCandidate(index - 1, …)`).
     case candidatePick(index: Int, capture: CaptureForm)
+    /// [CORRECTION-REVIVE] A correctionChoice answer: the 1-based index
+    /// into the frame's correction reading options, consumed by
+    /// `CommandRouter.executeCorrectionPick` (splice + re-route).
+    case correctionPick(index: Int, capture: CaptureForm)
     /// A resolved slot value with its capture form and merge source.
     case answer(DialogueMerge)
     /// `index` is 0-based (the executor consumes it directly, §12.2).
@@ -373,6 +377,12 @@ enum DialogueAnswerPath {
                 throw DialogueError.emptyMerge
             }
             return DialogueMerge(value: claim.value, capture: .freeText, source: .candidate)
+        case .correctionChoice:
+            // [CORRECTION-REVIVE] A correction answer never merges — it
+            // picks a reading and re-routes. Total: unreachable through
+            // the answer path (classify never emits `.answer` for this
+            // kind), refused loudly if a caller ever asks.
+            throw DialogueError.emptyMerge
         }
     }
 
@@ -411,6 +421,12 @@ enum DialogueAnswerPath {
                         return .invalid(.emptyAfterStrip)
                     }
                     return .candidatePick(index: position, capture: .indexWord)
+                case .correctionChoice:
+                    guard let reading = frame.correctionReadings.first,
+                          position <= reading.options.count else {
+                        return .invalid(.emptyAfterStrip)
+                    }
+                    return .correctionPick(index: position, capture: .indexWord)
                 }
             }
             // With content after it, the index token is scaffold and the
@@ -468,6 +484,11 @@ enum DialogueAnswerPath {
                 return .freeFormForCandidate(index: claim.index, value: claim.value)
             }
             return .invalid(.noCandidateClaimed)
+        case .correctionChoice:
+            // [CORRECTION-REVIVE] Only the offered readings are
+            // answerable — anything else the user says is not a pick
+            // (never fabricate; the router's re-probe owns the retry).
+            return .invalid(.noCandidateClaimed)
         }
     }
 
@@ -490,6 +511,16 @@ enum DialogueAnswerPath {
             guard let index = matchCandidate(value, frame: frame) else { return nil }
             // The spoken position is 1-based; the executor decrements.
             return .candidatePick(index: index + 1, capture: capture)
+        case .correctionChoice:
+            // [CORRECTION-REVIVE] S4 for a correction frame: repeating
+            // one of the offered readings by its whole value is the pick
+            // (the elder may echo the word instead of its number).
+            guard let reading = frame.correctionReadings.first,
+                  let index = reading.options.firstIndex(where: {
+                      wholeValueEquals(value, $0) || markerDroppedVariant(
+                        canonical(value)) == markerDroppedVariant(canonical($0))
+                  }) else { return nil }
+            return .correctionPick(index: index + 1, capture: capture)
         }
     }
 
@@ -659,6 +690,11 @@ enum DialogueAnswerPath {
         case .slotFill:
             return KeywordIntentRule.isMusicScaffoldToken(token)
         case .candidateChoice:
+            return false
+        case .correctionChoice:
+            // [CORRECTION-REVIVE] The answer vocabulary is the readings'
+            // own words plus the index words — no scaffold family strips
+            // them (the same reading as candidateChoice).
             return false
         }
     }

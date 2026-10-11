@@ -112,6 +112,10 @@ struct CorrectionEvidence: Equatable, Sendable {
     let phoneticKey: Double
     let frameFit: Double
     let pairedKeyword: Double
+    /// [CORRECTION-REVIVE] The corpus n-gram prior signal — the statistical
+    /// semantic tier (bigram/trigram fit of the candidate in its neighbours).
+    /// Zero when the additive bank is absent.
+    let ngramPrior: Double
     /// Where this application's `errorClass` came from (see `STTClassOrigin`).
     /// `var` because it is attached after scoring, which is what produces the
     /// numbers above — the classification is evidence ABOUT the repair, not a
@@ -136,7 +140,14 @@ struct CorrectionEvidence: Equatable, Sendable {
             + STTCorrector.weights.pairedKeyword * pairedKeyword
     }
 
-    var total: Double { surface + context }
+    /// [CORRECTION-REVIVE] The n-gram prior's weighted contribution. Like the
+    /// context terms it never moves a candidate across the silent-apply gate
+    /// on its own — the gate compares `surface` against the band floor.
+    var semantic: Double {
+        STTCorrector.weights.ngramPrior * ngramPrior
+    }
+
+    var total: Double { surface + context + semantic }
 
     /// The enum-case names of the signals that fired — for the log line and
     /// the internal card. Names only, never values.
@@ -193,6 +204,19 @@ enum CorrectionDecision: Equatable, Sendable {
     /// The best candidate is not separated from the runner-up by
     /// `marginThreshold`.
     case ambiguous(margin: Double)
+    /// [CORRECTION-REVIVE] The banded gate marked this token judge-eligible:
+    /// the best candidate's surface score clears `judgeMin` but the
+    /// silent-apply band was not reached (or the margin rule refused it).
+    /// The text passes through untouched; the token and its top readings
+    /// are carried in `CorrectionResult.judgeItems` for the semantic judge
+    /// and, failing that, the spoken clarification. A pass-through decision
+    /// that says WHY it passed through, and what could still be asked.
+    case judgeEligible(best: Double, top: [String])
+    /// [CORRECTION-REVIVE] The semantic judge picked a reading for a
+    /// judge-eligible token, and it was applied. The confidence is the
+    /// judge's own; the text was rewritten only after the vetoes ran
+    /// again (see `STTCorrector.reRank`).
+    case judged(pick: Int, confidence: Double)
     /// §5.8 — a veto refused the candidate.
     case safetyVeto(rule: SafetyVetoRule)
     /// §5.7 — a token inside a required span may only be a strict prefix
@@ -211,6 +235,8 @@ enum CorrectionDecision: Equatable, Sendable {
         case .noCandidate:    return "no_candidate"
         case .belowThreshold: return "below_threshold"
         case .ambiguous:      return "ambiguous"
+        case .judgeEligible:  return "judge_eligible"
+        case .judged:         return "judged"
         case .safetyVeto:     return "safety_veto"
         case .requiredSpan:   return "required_span"
         case .degraded:       return "degraded"
@@ -282,6 +308,15 @@ struct CorrectionResult: Equatable, Sendable {
     let mode: STTCorrector.Mode
     /// The input, so the result can state its own identity claim.
     let original: String
+    /// [CORRECTION-REVIVE] The tokens the banded gate marked judge-eligible,
+    /// with their top candidate readings — the conversational bands' input.
+    /// Empty in every arm but `.apply` with an active additive bank. The
+    /// readings are the user's own words; on-device only, never egressed.
+    var judgeItems: [JudgeItem] = []
+    /// [CORRECTION-REVIVE] Whether the banded operating point was in force
+    /// for this turn (the additive bank present with sane bands) — the
+    /// count-only `correction_band` event key's source.
+    var bandsActive: Bool = false
 
     var isIdentity: Bool { corrected == original }
 
@@ -300,6 +335,11 @@ struct CorrectionResult: Equatable, Sendable {
             "correction_tokens_considered": String(decisions.count),
             "correction_applied_count": String(applications.count),
             "correction_threshold_bucket": Self.bucket(thresholdUsed),
+            // [CORRECTION-REVIVE] Count-only band keys: never a surface,
+            // never a score — a count of judge-eligible tokens and the band
+            // state of the turn.
+            "correction_judge_eligible": String(judgeItems.count),
+            "correction_band": bandsActive ? "active" : "legacy",
             "correction_state": {
                 if degraded { return "degraded" }
                 if mode == .off { return "disabled" }
@@ -377,6 +417,13 @@ struct CorrectionResult: Equatable, Sendable {
                 return "[STT-CORRECT] no correction (ambiguous, margin "
                     + "\(Self.score(margin)) < "
                     + "\(Self.score(STTCorrector.defaultMarginThreshold))) — \(token)"
+            case .judgeEligible(let best, let top):
+                return "[STT-CORRECT] judge-eligible \(token) "
+                    + "(surface \(Self.score(best)), readings \(top.joined(separator: "/")))"
+            case .judged(let pick, let confidence):
+                let to = decision.best?.surface ?? "?"
+                return "[STT-CORRECT] judged \(token)→\(to) "
+                    + "(pick \(pick), conf \(Self.score(confidence)))"
             case .requiredSpan(let spanClass):
                 return "[STT-CORRECT] no correction (required span "
                     + "\(spanClass.rawValue), not a prefix completion) — \(token)"
@@ -480,6 +527,14 @@ struct CorrectionReadout: Equatable, Sendable {
                             value: CorrectionResult.score(margin) + " < "
                                 + CorrectionResult.score(
                                     STTCorrector.defaultMarginThreshold)))
+        case .judgeEligible(let best, let top):
+            rows.append(Row(label: "no correction", value: "judge-eligible"))
+            rows.append(Row(label: "best",
+                            value: "\(top.first ?? "?")  "
+                                + CorrectionResult.score(best)))
+        case .judged(let pick, let confidence):
+            rows.append(Row(label: "judged", value: "pick \(pick)"))
+            rows.append(Row(label: "conf", value: CorrectionResult.score(confidence)))
         case .safetyVeto(let rule):
             rows.append(Row(label: "no correction", value: "safety veto"))
             rows.append(Row(label: "rule", value: rule.rawValue))
@@ -493,6 +548,57 @@ struct CorrectionReadout: Equatable, Sendable {
         }
         rows.append(Row(label: "tokens", value: "\(result.decisions.count) seen"))
         self.rows = rows
+    }
+}
+
+// MARK: - Clarification ([CORRECTION-REVIVE])
+
+/// Why Pip is ASKING about a word rather than acting: the banded gate
+/// could not settle it (margin), the judge could not run, or the judge
+/// ran and did not resolve it. Closed vocabulary — the observability
+/// key `correction_clarify_reason` carries these raw values.
+enum ClarifyReason: String, Equatable, Sendable {
+    /// The banded gate found near-miss candidates but could not separate
+    /// them (or no judge was consulted).
+    case marginTooSmall = "margin_too_small"
+    /// The semantic judge was not ready (brain not resident) — the
+    /// spoken question stands in its place.
+    case judgeUnavailable = "judge_unavailable"
+    /// The judge ran and abstained (low confidence, out-of-range pick,
+    /// or its pick was vetoed).
+    case judgeRejected = "judge_rejected"
+}
+
+/// The clarification the conversational band produces: what was heard,
+/// what it might have been, and where it sits in the sanitised
+/// transcript. Built from `CorrectionResult.judgeItems`; the surfaces
+/// are the user's own words — on-device only, never logged, never
+/// persisted, never placed in an event.
+struct CorrectionClarification: Equatable, Sendable {
+    struct Reading: Equatable, Sendable {
+        /// Unicode-scalar range in the sanitised transcript (the
+        /// coordinate space `DialogueFrame.correctionOriginal` carries).
+        let tokenRange: Range<Int>
+        /// The heard surface.
+        let surface: String
+        /// The top readings to offer, best first.
+        let options: [String]
+    }
+
+    /// One reading per turn in this wave (the first qualifying token).
+    let readings: [Reading]
+    let reason: ClarifyReason
+
+    static func build(from result: CorrectionResult,
+                      reason: ClarifyReason = .marginTooSmall)
+        -> CorrectionClarification? {
+        guard result.mode == .apply,
+              let item = result.judgeItems.first else { return nil }
+        return CorrectionClarification(
+            readings: [Reading(tokenRange: item.tokenRange,
+                               surface: item.surface,
+                               options: item.top)],
+            reason: reason)
     }
 }
 
@@ -611,6 +717,10 @@ struct CorrectionLexicon: Sendable {
     let weights: STTCorrector.Weights
     let scoring: Scoring
     let phonetic: PhoneticKey
+    /// [CORRECTION-REVIVE] The additive n-gram/symspell bank, or nil when
+    /// absent or structurally unusable. Nil is NOT degradation — the
+    /// legacy single-threshold gate applies byte-identically.
+    let ngramPrior: NgramPrior?
     /// The landing table's `generation.status` and the bank's run id, so a log
     /// line names exactly which data produced a decision (A-12).
     let tableRevision: String
@@ -687,12 +797,31 @@ struct CorrectionLexicon: Sendable {
 
     /// The landing table plus its bank, decoded and validated. Nil when a
     /// resource is absent or undecodable — the caller degrades.
+    ///
+    /// [CORRECTION-REVIVE] The n-gram prior rides ALONGSIDE: its own
+    /// `bundled` load, never a precondition. A pair bank without an n-gram
+    /// bank is the pre-revive corrector, fully functional.
     static func load(bundle: Bundle = .main) -> CorrectionLexicon? {
         guard let tableURL = resourceURL(name: tableID, bundle: bundle),
               let phoneticURL = resourceURL(name: phoneticTableID, bundle: bundle),
               let tableData = try? Data(contentsOf: tableURL),
               let phoneticData = try? Data(contentsOf: phoneticURL) else { return nil }
-        return decode(tableData: tableData, phoneticData: phoneticData)
+        return decode(tableData: tableData, phoneticData: phoneticData,
+                      ngramPrior: NgramPrior.load(bundle: bundle))
+    }
+
+    /// The decode entry point, extended with the additive bank. Tests that
+    /// build a lexicon from fixtures pass nil explicitly; the shipped load
+    /// resolves the bundled n-gram bank once.
+    static func decode(tableData: Data, phoneticData: Data,
+                       ngramPrior: NgramPrior? = nil) -> CorrectionLexicon? {
+        let decoder = JSONDecoder()
+        guard let raw = try? decoder.decode(RawTable.self, from: tableData),
+              let rawPhonetic = try? decoder.decode(RawPhoneticTable.self,
+                                                    from: phoneticData) else {
+            return nil
+        }
+        return build(raw: raw, rawPhonetic: rawPhonetic, ngramPrior: ngramPrior)
     }
 
     /// Process-wide cache for the interpreter hot path (a `static let` is
@@ -706,20 +835,12 @@ struct CorrectionLexicon: Sendable {
             ?? bundle.url(forResource: name, withExtension: "json")
     }
 
-    static func decode(tableData: Data, phoneticData: Data) -> CorrectionLexicon? {
-        let decoder = JSONDecoder()
-        guard let raw = try? decoder.decode(RawTable.self, from: tableData),
-              let rawPhonetic = try? decoder.decode(RawPhoneticTable.self,
-                                                    from: phoneticData) else {
-            return nil
-        }
-        return build(raw: raw, rawPhonetic: rawPhonetic)
-    }
 
     // MARK: Build + validate
 
     private static func build(raw: RawTable,
-                              rawPhonetic: RawPhoneticTable) -> CorrectionLexicon {
+                              rawPhonetic: RawPhoneticTable,
+                              ngramPrior: NgramPrior? = nil) -> CorrectionLexicon {
         var issues: [Issue] = []
         let bank = raw.correctionBank
 
@@ -960,7 +1081,8 @@ struct CorrectionLexicon: Sendable {
                     ?? STTCorrector.weights.phoneticKey,
                 frameFit: bank.weights.frameFit ?? STTCorrector.weights.frameFit,
                 pairedKeyword: bank.weights.pairedKeyword
-                    ?? STTCorrector.weights.pairedKeyword),
+                    ?? STTCorrector.weights.pairedKeyword,
+                ngramPrior: bank.weights.ngramPrior ?? STTCorrector.weights.ngramPrior),
             scoring: Scoring(levenshteinBound: bank.scoring.levenshteinBound,
                              lengthWindow: bank.scoring.lengthWindow,
                              maxPrefixSlack: bank.scoring.maxPrefixSlack,
@@ -968,6 +1090,7 @@ struct CorrectionLexicon: Sendable {
                              maxCandidates: bank.scoring.maxCandidates,
                              marginThreshold: bank.scoring.marginThreshold),
             phonetic: phonetic,
+            ngramPrior: ngramPrior,
             tableRevision: raw.generation?.status ?? "unknown",
             revision: bank.runRevision,
             issues: issues,
@@ -1022,14 +1145,28 @@ struct CorrectionLexicon: Sendable {
                                classOrigin: .measured,
                                occurrences: row.occurrences)
         }
-        let occurrences = candidateOccurrences[candidate] ?? 0
-        return Attribution(
+        let derived = Attribution(
             entryID: "lex-\(candidateOrdinal[candidate] ?? 0)",
             errorClass: Self.derivedClass(variant: token, canonical: candidate,
                                           keysEqual: phonetic.key(of: token)
                                               == phonetic.key(of: candidate)),
             classOrigin: .derivedFromShape,
-            occurrences: occurrences)
+            occurrences: candidateOccurrences[candidate] ?? 0)
+        // [CORRECTION-REVIVE] A candidate the pair bank's lexicon does not
+        // carry but the EXPANDED corpus vocabulary does is attributed to the
+        // n-gram bank's own ordinal space — `ngram-lex-<n>`, opaque by the
+        // same C-6 construction — with the corpus occurrence count. Without
+        // this arm every symspell-generated candidate would read as `lex-0`,
+        // i.e. as a pair-bank row that does not exist.
+        if derived.entryID == "lex-0",
+           let ngramPrior, let ordinal = ngramPrior.ordinal(of: candidate) {
+            return Attribution(
+                entryID: "ngram-lex-\(ordinal)",
+                errorClass: derived.errorClass,
+                classOrigin: derived.classOrigin,
+                occurrences: ngramPrior.occurrences(of: candidate))
+        }
+        return derived
     }
 
     /// The repair's SHAPE as an error class — §4.3's own taxonomy, which is
@@ -1181,6 +1318,26 @@ struct CorrectionLexicon: Sendable {
             pool.append(candidate)
         }
 
+        // [CORRECTION-REVIVE] The SymSpell tier: hash hits over the expanded
+        // corpus vocabulary's symmetric-delete index — no scan — verified by
+        // the same bounded edit filter as the edit tier. With the additive
+        // bank absent this tier is empty and the pool is byte-identical to
+        // the pre-revive generator.
+        if let ngramPrior {
+            let verified = ngramPrior.symSpellCandidates(for: token).filter {
+                candidate in
+                guard candidate != token, !seen.contains(candidate),
+                      abs(candidate.unicodeScalars.count - tokenLength) <= window,
+                      allowed > 0 else { return false }
+                return STTCorrector.withinBound(
+                    scalars, Array(candidate.unicodeScalars), allowed)
+            }
+            for candidate in verified {
+                seen.insert(candidate)
+                pool.append(candidate)
+            }
+        }
+
         return Array(pool.prefix(cap))
     }
 
@@ -1224,6 +1381,234 @@ struct CorrectionLexicon: Sendable {
                 if l.value != r.value { return l.value < r.value }
             }
         }
+    }
+}
+
+// MARK: - N-gram prior bank ([CORRECTION-REVIVE])
+
+/// The ADDITIVE statistical bank (`stt-ngram-prior.json`): the corpus
+/// n-gram priors, the SymSpell symmetric-delete index over the EXPANDED
+/// lexicon, and the banded operating point. Built by
+/// `tools/train-intent/src/stt_ngram_prior.py` from the training corpus.
+///
+/// ADDITIVE, never fail-closed: the pair bank's evidence contract is
+/// unchanged, and an absent or undecodable n-gram bank zeroes the n-gram
+/// weight and the bands collapse to the legacy single-threshold gate —
+/// byte-identical behavior to the pre-revive corrector. That is a
+/// deliberate direction: the only thing the bank adds is statistical
+/// signal for the conversational bands (judge ranking, clarification
+/// ordering), never a silent rewrite.
+struct NgramPrior: Sendable {
+
+    static let tableID = "stt-ngram-prior"
+    static let resourceSubdirectory = VariantTableSet.resourceSubdirectory
+
+    /// The banded operating point, read from the bank's manifest.
+    ///
+    /// MEASUREMENT DISCIPLINE (A-9/A-12): `surfaceFloor` and `applyTotal`
+    /// are pinned to the shipped v3 measured operating point
+    /// (`correction-banks/v3#e133253b`, correctThreshold 0.8125), so the
+    /// silent-apply set under the bands is EXACTLY the set the v3
+    /// calibration counted. `judgeMin` is authored and labeled: it feeds
+    /// only the conversational bands (judge, then a spoken clarification),
+    /// never a silent rewrite — a wrong judge floor can only ask an
+    /// unnecessary question, never act wrongly.
+    struct CorrectionBands: Equatable, Sendable {
+        let surfaceFloor: Double
+        let applyTotal: Double
+        let judgeMin: Double
+
+        /// The inert end: `isActive == false` means the legacy
+        /// single-threshold gate applies (the v3-calibrated behavior).
+        static let none = CorrectionBands(surfaceFloor: 0, applyTotal: 0,
+                                          judgeMin: 0)
+
+        var isActive: Bool {
+            surfaceFloor > 0 && applyTotal >= surfaceFloor
+                && judgeMin > 0 && judgeMin <= surfaceFloor
+        }
+    }
+
+    let revision: String
+    let corpusRevision: String
+    let bands: CorrectionBands
+    /// The expanded corpus vocabulary, in the bank's deterministic order —
+    /// the index space `symSpellCandidates` and the `ngram-lex-<n>` ids
+    /// name positions in.
+    private let lexicon: [String]
+    /// delete-1 form → lexicon ordinals (the SymSpell symmetric-delete
+    /// index, built over Unicode scalars by the pipeline).
+    private let deletes: [String: [Int]]
+    /// `prev\u{1}cur` → count (floor-kept pairs only).
+    private let bigrams: [String: Double]
+    /// `p2\u{1}p1\u{1}cur` → count.
+    private let trigrams: [String: Double]
+    private let bigramTotal: Double
+    private let trigramTotal: Double
+    private let occurrencesByToken: [String: Int]
+    private let ordinalByToken: [String: Int]
+
+    var lexiconCount: Int { lexicon.count }
+
+    // MARK: Loading
+
+    /// Absent or undecodable ⇒ nil — the ADDITIVE contract: the caller
+    /// keeps the legacy gate, it does not degrade.
+    static func load(bundle: Bundle = .main) -> NgramPrior? {
+        guard let url = resourceURL(name: tableID, bundle: bundle),
+              let data = try? Data(contentsOf: url) else { return nil }
+        return decode(data)
+    }
+
+    /// The decode entry point, exposed for fixture tests.
+    static func decode(_ data: Data) -> NgramPrior? {
+        guard let raw = try? JSONDecoder().decode(RawNgramPrior.self,
+                                                  from: data) else { return nil }
+        return build(raw: raw)
+    }
+
+    /// Process-wide cache for the interpreter hot path (same pattern as
+    /// `CorrectionLexicon.bundled`).
+    static let bundled: NgramPrior? = load()
+
+    private static func resourceURL(name: String, bundle: Bundle) -> URL? {
+        bundle.url(forResource: name, withExtension: "json",
+                   subdirectory: resourceSubdirectory)
+            ?? bundle.url(forResource: name, withExtension: "json")
+    }
+
+    // MARK: Build + validate
+
+    private static func build(raw: RawNgramPrior) -> NgramPrior? {
+        guard raw.formatVersion == 1, !raw.lexicon.isEmpty,
+              !raw.symSpell.deletes.isEmpty else { return nil }
+        let bands = CorrectionBands(
+            surfaceFloor: raw.bands.surfaceFloor,
+            applyTotal: raw.bands.applyTotal,
+            judgeMin: raw.bands.judgeMin)
+        // A bank whose bands are not in order is refused whole — a
+        // half-sane operating point must never silently apply.
+        guard bands.isActive else { return nil }
+        var occurrencesByToken: [String: Int] = [:]
+        var ordinalByToken: [String: Int] = [:]
+        for (offset, row) in raw.lexicon.enumerated() {
+            occurrencesByToken[row.token] = row.occurrences
+            ordinalByToken[row.token] = offset
+        }
+        return NgramPrior(
+            revision: raw.generation.runRevision,
+            corpusRevision: raw.generation.corpusRevision,
+            bands: bands,
+            lexicon: raw.lexicon.map(\.token),
+            deletes: raw.symSpell.deletes,
+            bigrams: raw.bigrams.mapValues(Double.init),
+            trigrams: raw.trigrams.mapValues(Double.init),
+            bigramTotal: Double(raw.totals.bigrams),
+            trigramTotal: Double(raw.totals.trigrams),
+            occurrencesByToken: occurrencesByToken,
+            ordinalByToken: ordinalByToken)
+    }
+
+    // MARK: Queries
+
+    /// The SymSpell tier: the token's delete-1 forms looked up directly in
+    /// the index — hash hits, no scan — so generation scales to a
+    /// keyboard-sized vocabulary. Candidates are verified against the
+    /// token by the caller's bounded edit filter, exactly like the three
+    /// classic tiers.
+    ///
+    /// TWO lookups, both load-bearing (the SymSpell deletion-only lemma):
+    /// `deletes[token]` finds the lexicon word the query is a TRUNCATION of
+    /// (the query itself is the word's delete-form — the common Nepali STT
+    /// case, a cut-off word), and the query's own delete-forms find words
+    /// one substitution/insertion away. Either alone misses the other's
+    /// entire error class.
+    func symSpellCandidates(for token: String) -> [String] {
+        var hits: Set<Int> = []
+        if let direct = deletes[token] { hits.formUnion(direct) }
+        for form in STTCorrector.deleteOneForms(of: token) {
+            if let ordinals = deletes[form] { hits.formUnion(ordinals) }
+        }
+        var out: [String] = []
+        out.reserveCapacity(hits.count)
+        for ordinal in hits { out.append(lexicon[ordinal]) }
+        out.sort(by: CorrectionLexicon.scalarLess)
+        return out
+    }
+
+    /// The statistical semantic tier: how well the candidate fits its
+    /// neighbours under the corpus counts — the strongest bigram fit in
+    /// either direction, the trigram fit when the pair shares both
+    /// neighbours, normalised by the corpus totals to 0.0-1.0.
+    func priorScore(forCandidate candidate: String,
+                    neighbours: [String]) -> Double {
+        var best = 0.0
+        for neighbour in neighbours {
+            let forward = bigrams["\(neighbour)\u{1}\(candidate)"] ?? 0
+            let backward = bigrams["\(candidate)\u{1}\(neighbour)"] ?? 0
+            best = max(best, max(forward, backward))
+        }
+        if neighbours.count == 2 {
+            let key = "\(neighbours[0])\u{1}\(neighbours[1])\u{1}\(candidate)"
+            best = max(best, trigrams[key] ?? 0)
+        }
+        let total = max(bigramTotal, trigramTotal)
+        guard total > 0 else { return 0 }
+        return min(1.0, best / total)
+    }
+
+    func contains(_ token: String) -> Bool {
+        occurrencesByToken[token] != nil
+    }
+
+    func occurrences(of token: String) -> Int {
+        occurrencesByToken[token] ?? 0
+    }
+
+    /// The lexicon ordinal a `ngram-lex-<n>` id names, or nil when the
+    /// token is not in the expanded vocabulary.
+    func ordinal(of token: String) -> Int? {
+        ordinalByToken[token]
+    }
+}
+
+private struct RawNgramPrior: Decodable {
+    let formatVersion: Int
+    let tableID: String
+    let generation: RawGeneration
+    let lexicon: [CorrectionLexicon.Candidate]
+    let bigrams: [String: Int]
+    let trigrams: [String: Int]
+    let totals: RawTotals
+    let symSpell: RawSymSpell
+    let bands: RawBands
+
+    /// The pipeline's key for the index block is ALL-LOWERCASE
+    /// (`"symspell"`) while the Swift field is camelCase — pinned here so
+    /// the shipped bank and the fixtures decode through the same mapping
+    /// (a missed mapping is a silently-absent additive bank: the legacy
+    /// gate would serve with zero n-gram signal and no complaint).
+    private enum CodingKeys: String, CodingKey {
+        case formatVersion, tableID, generation, lexicon, bigrams, trigrams
+        case totals, bands
+        case symSpell = "symspell"
+    }
+
+    struct RawGeneration: Decodable {
+        let runRevision: String
+        let corpusRevision: String
+    }
+    struct RawTotals: Decodable {
+        let bigrams: Int
+        let trigrams: Int
+    }
+    struct RawSymSpell: Decodable {
+        let deletes: [String: [Int]]
+    }
+    struct RawBands: Decodable {
+        let surfaceFloor: Double
+        let applyTotal: Double
+        let judgeMin: Double
     }
 }
 
@@ -1301,6 +1686,7 @@ private struct RawWeights: Decodable {
     let phoneticKey: Double?
     let frameFit: Double?
     let pairedKeyword: Double?
+    let ngramPrior: Double?
 }
 
 private struct RawScoring: Decodable {
@@ -1381,10 +1767,17 @@ enum STTCorrector {
         var phoneticKey: Double
         var frameFit: Double
         var pairedKeyword: Double
+        /// [CORRECTION-REVIVE] The corpus n-gram prior's share (authored,
+        /// labeled A-9). NOT fitted by any calibration run yet: the
+        /// silent-apply gate is surface-only by construction (see
+        /// `CorrectionBands`), so this term influences only judge-ranking
+        /// and clarification ordering — the conversational bands — until a
+        /// v4 re-fit measures it.
+        var ngramPrior: Double
 
         static let authored = Weights(similarity: 0.35, prefixCompletion: 0.40,
                                       phoneticKey: 0.15, frameFit: 0.05,
-                                      pairedKeyword: 0.05)
+                                      pairedKeyword: 0.05, ngramPrior: 0.10)
 
         /// The context terms are a deliberately small share of the total: they
         /// are measured over the corpus's co-occurrence statistics, which is
@@ -1425,35 +1818,44 @@ enum STTCorrector {
         /// §5.7 — inside a required span, only a strict prefix completion.
         var prefixOnlyInRequiredSpans: Bool = true
 
-        /// The shipped runtime policy. INERT UNLESS BOTH GATES ARE ON: the
-        /// compile-time `INTENT_ENCODER` condition (read through the SHIPPED
-        /// gate function `IntentEncoderWiring.isServingEnabled`, so "both gates
-        /// are required" cannot drift between the encoder's switch, the
-        /// canonicalizer's and this one) and the persisted arm, which reads an
-        /// ABSENT key as OFF (house pattern: `CanonicalizerPreferences`,
-        /// `IntentEncoderPreferences`, `DialectBiasSettings`). A release build
-        /// therefore cannot rewrite model input by accident, and a gated build
-        /// still ships the control arm until someone opts in — including the
-        /// `.shadow` arm, which is why the mode is a three-way setting rather
-        /// than a boolean.
+        /// The shipped runtime policy.
         ///
-        /// [CORRECTION-TOGGLES] The persisted UI switch
-        /// (`intentEncoder.corrector`, default OFF) is the second source of
-        /// "which arm", and the two compose in a fixed precedence:
+        /// [CORRECTION-DEFAULT-ON] The shipped default is the APPLY arm
+        /// (owner decision 2026-10-11: the correction chain must work out
+        /// of the box, not sit behind an internal-testing switch). The
+        /// compile-time `INTENT_ENCODER` condition still gates the layer
+        /// (read through the SHIPPED gate function
+        /// `IntentEncoderWiring.isServingEnabled`, so the two gates cannot
+        /// drift between the encoder's switch, the canonicalizer's and this
+        /// one), and a build without the condition stays inert whatever a
+        /// stored key says. The safety case for default-ON is the shipped
+        /// calibration itself: precisionAtDefault 0.9524 means the layer
+        /// applies only what the corpus evidenced, the frozen-set veto
+        /// (`CanonicalSafetyFreeze.touches`) refuses unsafe rewrites
+        /// regardless of mode, and the keyword safety net, emergency path
+        /// and med-ack path keep reading the ORIGINAL transcript
+        /// (`IntentTranscriptPair.safetyNetInput`) — none of which this
+        /// default touches.
+        ///
+        /// The arms compose in a fixed precedence:
         ///
         ///   1. an explicit `isModeOn` argument (tests, a future settings
         ///      surface) — always wins;
-        ///   2. else a persisted `sttCorrection.mode` — the debugger's arm,
-        ///      which is what turns this layer on today and must keep
-        ///      working;
-        ///   3. else the UI switch — ON is `.apply` (what a switch labelled
-        ///      "STT error corrector" means), OFF is the control arm.
+        ///   2. else a persisted `sttCorrection.mode` — the debugger's arm
+        ///      (shadow / off / apply), which keeps working unchanged;
+        ///   3. else the UI switch, but ONLY when it has been WRITTEN
+        ///      (`isCorrectorToggleSet`): ON is `.apply`, OFF is a
+        ///      deliberate user pin-off;
+        ///   4. else `.apply` — a never-touched device gets the shipped
+        ///      default.
         ///
-        /// So the internal-testing card can run the whole four-way matrix
-        /// (corrector only / canonicalizer only / both / neither) with no
-        /// debugger and no relaunch, while a stored arm still outranks it.
-        /// A stored `.off` is a deliberate control-arm pin, not an absence:
-        /// `reset()` is what clears it.
+        /// So the internal-testing card can still run the whole four-way
+        /// matrix (corrector only / canonicalizer only / both / neither)
+        /// with no debugger and no relaunch, a stored arm outranks the
+        /// switch, and a user who switches the layer off is never
+        /// second-guessed by the absent-key default. A stored `.off` is a
+        /// deliberate control-arm pin, not an absence: `reset()` is what
+        /// clears it.
         ///
         /// When the bank is missing or unusable the threshold is the inert end
         /// and the range collapses to it, so the card cannot offer a setting
@@ -1465,11 +1867,15 @@ enum STTCorrector {
                             lexicon: CorrectionLexicon? = CorrectionLexicon.bundled)
             -> Policy {
             let settings = STTCorrectionSettings(defaults: defaults, lexicon: lexicon)
-            let toggle = isToggleOn
-                ?? IntentEncoderPreferences(defaults: defaults).isCorrectorEnabled
+            let preferences = IntentEncoderPreferences(defaults: defaults)
+            let toggle = isToggleOn ?? preferences.isCorrectorEnabled
+            // The switch participates only when it has been WRITTEN — either
+            // the key is set or a caller passed the parameter explicitly
+            // (tests). An untouched key is the shipped apply default.
+            let toggleIsSet = isToggleOn != nil || preferences.isCorrectorToggleSet
             let mode = isModeOn
                 ?? settings.storedMode
-                ?? (toggle ? .apply : .off)
+                ?? (toggleIsSet ? (toggle ? .apply : .off) : .apply)
             let serving = IntentEncoderWiring.isServingEnabled(
                 isCompiledIn: isCompiledIn, isToggleOn: mode != .off)
             var policy = Policy()
@@ -1515,32 +1921,36 @@ enum STTCorrector {
         func result(_ corrected: String,
                     _ applications: [STTCorrectionApplication],
                     _ decisions: [TokenDecision],
+                    _ judgeItems: [JudgeItem],
                     degraded: Bool) -> CorrectionResult {
             CorrectionResult(corrected: corrected, applications: applications,
                              decisions: decisions,
                              lexiconRevision: lexicon?.revision ?? "absent",
                              thresholdUsed: policy.correctThreshold,
                              degraded: degraded, mode: policy.mode,
-                             original: transcript)
+                             original: transcript, judgeItems: judgeItems,
+                             bandsActive: lexicon?.ngramPrior?.bands.isActive
+                                 ?? false)
         }
 
         guard policy.mode != .off else {
             return result(transcript, [], tokens.map {
                 TokenDecision(originalRange: $0.range, surface: $0.text,
                               decision: .disabled, best: nil, margin: 0)
-            }, degraded: false)
+            }, [], degraded: false)
         }
         guard let lexicon, lexicon.isUsable else {
             return result(transcript, [], tokens.map {
                 TokenDecision(originalRange: $0.range, surface: $0.text,
                               decision: .degraded, best: nil, margin: 0)
-            }, degraded: true)
+            }, [], degraded: true)
         }
 
         var decisions: [TokenDecision] = []
         decisions.reserveCapacity(tokens.count)
         var applications: [STTCorrectionApplication] = []
         var replacements: [String] = []
+        var judgeItems: [JudgeItem] = []
         replacements.reserveCapacity(tokens.count)
         for token in tokens {
             let decision = decide(token: token, in: transcript, lexicon: lexicon,
@@ -1550,6 +1960,18 @@ enum STTCorrector {
             case .corrected(let application):
                 applications.append(application)
                 replacements.append(decision.best?.surface ?? token.text)
+            case .judgeEligible(_, let top):
+                // The conversational bands' input: the token's position in
+                // the sanitised transcript and its top readings. Capped at
+                // ONE item per turn — the judge and the probe ask about
+                // the first qualifying token; a multi-question turn is a
+                // conversation the elderly user never asked for.
+                if judgeItems.isEmpty {
+                    judgeItems.append(JudgeItem(tokenRange: decision.originalRange,
+                                                surface: decision.surface,
+                                                top: top))
+                }
+                replacements.append(token.text)
             default:
                 replacements.append(token.text)
             }
@@ -1559,11 +1981,117 @@ enum STTCorrector {
         // are the counterfactual and the text is untouched, so a turn can be
         // compared against what it would have been.
         guard policy.mode == .apply else {
-            return result(transcript, [], decisions, degraded: false)
+            return result(transcript, [], decisions, judgeItems, degraded: false)
         }
         let corrected = splice(transcript, tokens: tokens,
                                replacements: replacements)
-        return result(corrected, applications, decisions, degraded: false)
+        return result(corrected, applications, decisions, judgeItems,
+                      degraded: false)
+    }
+
+    /// [CORRECTION-REVIVE] The semantic-judge re-score: pure, synchronous,
+    /// vetoes LAST. For each judge-eligible item whose verdict carries a
+    /// pick at or above the confidence floor, the picked reading is
+    /// applied — after the SAME veto pass every silent application faces
+    /// — so no judge output can bypass the frozen-set refusal
+    /// structurally. A missing verdict, an out-of-range pick or a
+    /// low-confidence verdict leaves the token untouched (its decision
+    /// stays `.judgeEligible`, which is what the caller's clarification
+    /// path reads).
+    ///
+    /// The confidence floor is AUTHORED and labeled (A-9): it gates a
+    /// silent rewrite, so it leans on the model's own number plus the
+    /// vetoes — a wrong floor can only ask the spoken clarification that
+    /// follows, never act wrongly.
+    static let judgeConfidenceFloor = 0.70
+
+    static func reRank(_ result: CorrectionResult,
+                       judge: [JudgeVerdict],
+                       lexicon: CorrectionLexicon?) -> CorrectionResult {
+        guard !result.judgeItems.isEmpty, !judge.isEmpty else { return result }
+        var byRange: [Range<Int>: JudgeVerdict] = [:]
+        for verdict in judge { byRange[verdict.tokenRange] = verdict }
+
+        let tokens = tokenize(result.original)
+        var applications = result.applications
+        var replacements: [String] = []
+        replacements.reserveCapacity(tokens.count)
+        var decisions = result.decisions
+
+        for token in tokens {
+            guard let verdict = byRange[token.range],
+                  let pick = verdict.pick,
+                  verdict.confidence >= judgeConfidenceFloor else {
+                // The token's original decision stands — including
+                // `.judgeEligible`, which the clarification path reads.
+                replacements.append(token.text)
+                continue
+            }
+            guard let item = result.judgeItems.first(
+                where: { $0.tokenRange == token.range }),
+                  item.top.indices.contains(pick) else {
+                // An out-of-range pick is a judge bug; treat as abstention.
+                replacements.append(token.text)
+                continue
+            }
+            let candidate = item.top[pick]
+            let core = lexiconKey(of: token.text)
+            // The veto pass — LAST, on the judge-accepted candidate, with
+            // the item's own readings as the pool the entity veto reads.
+            if let lexicon, let rule = veto(token: core, candidate: candidate,
+                                            lexicon: lexicon,
+                                            pool: item.top) {
+                if let index = decisions.firstIndex(
+                    where: { $0.originalRange == token.range }) {
+                    decisions[index] = TokenDecision(
+                        originalRange: token.range, surface: token.text,
+                        decision: .safetyVeto(rule: rule), best: nil, margin: 0)
+                }
+                replacements.append(token.text)
+                continue
+            }
+            let attribution = lexicon?.attribution(forToken: core,
+                                                   candidate: candidate)
+            let application = STTCorrectionApplication(
+                entryID: attribution?.entryID ?? "judged-lex",
+                lexiconID: CorrectionLexicon.tableID,
+                lexiconRevision: result.lexiconRevision,
+                errorClass: attribution?.errorClass ?? .substitutionOther,
+                originalRange: token.range,
+                correctedRange: token.range,
+                score: verdict.confidence,
+                margin: verdict.confidence,
+                evidence: CorrectionEvidence(
+                    similarity: 0, prefixCompletion: 0, phoneticKey: 0,
+                    frameFit: 0, pairedKeyword: 0, ngramPrior: 0))
+            applications.append(application)
+            replacements.append(candidate)
+            if let index = decisions.firstIndex(
+                where: { $0.originalRange == token.range }) {
+                decisions[index] = TokenDecision(
+                    originalRange: token.range, surface: token.text,
+                    decision: .judged(pick: pick,
+                                      confidence: verdict.confidence),
+                    best: TokenDecision.BestCandidate(
+                        surface: candidate, entryID: application.entryID,
+                        errorClass: application.errorClass,
+                        score: verdict.confidence),
+                    margin: verdict.confidence)
+            }
+        }
+
+        let corrected = splice(result.original, tokens: tokens,
+                               replacements: replacements)
+        return CorrectionResult(corrected: corrected,
+                                applications: applications,
+                                decisions: decisions,
+                                lexiconRevision: result.lexiconRevision,
+                                thresholdUsed: result.thresholdUsed,
+                                degraded: result.degraded,
+                                mode: result.mode,
+                                original: result.original,
+                                judgeItems: result.judgeItems,
+                                bandsActive: result.bandsActive)
     }
 
     // MARK: One token
@@ -1604,9 +2132,13 @@ enum STTCorrector {
             let attribution = lexicon.attribution(forToken: core, candidate: candidate)
             let prior = lexicon.priorScore(forCandidate: candidate,
                                            neighbours: neighbours, cue: cue)
+            // [CORRECTION-REVIVE] The statistical semantic tier, zero when
+            // the additive bank is absent.
+            let ngram = lexicon.ngramPrior?
+                .priorScore(forCandidate: candidate, neighbours: neighbours) ?? 0
             var evidence = score(token: core, candidate: candidate,
                                  lexicon: lexicon, frameFit: prior.frameFit,
-                                 paired: prior.paired)
+                                 paired: prior.paired, ngramPrior: ngram)
             evidence.classOrigin = attribution.classOrigin
             ranked.append((attribution, evidence, candidate))
         }
@@ -1635,11 +2167,35 @@ enum STTCorrector {
         // its context says — and when no context fires (the shipped state, and
         // the only state the calibrator could score) the total order IS the
         // surface order and the applied set is exactly the calibrated set.
-        guard best.evidence.surface >= policy.correctThreshold else {
+        //
+        // [CORRECTION-REVIVE] The BANDED gate: with the additive bank active
+        // the silent-apply condition is `surface ≥ surfaceFloor AND total ≥
+        // applyTotal` (the bands are pinned so this is exactly the calibrated
+        // set today); a token between `judgeMin` and the apply band is
+        // judge-eligible — a pass-through whose candidates travel to the
+        // conversational bands. Without the bank the legacy single-threshold
+        // clause applies byte-identically (`applyTotal` 0).
+        let bands = lexicon.ngramPrior?.bands ?? .none
+        let surfaceFloor = bands.isActive ? bands.surfaceFloor
+            : policy.correctThreshold
+        let applyTotal = bands.isActive ? bands.applyTotal : 0
+        let topSurfaces = ranked.prefix(3).map(\.candidate)
+        guard best.evidence.surface >= surfaceFloor,
+              best.evidence.total >= applyTotal else {
+            if bands.isActive, policy.mode == .apply,
+               best.evidence.surface >= bands.judgeMin {
+                return pass(.judgeEligible(best: best.evidence.surface,
+                                           top: topSurfaces), bestRef, margin)
+            }
             return pass(.belowThreshold(best: best.evidence.surface), bestRef, margin)
         }
         // §5.5 clause 2 — the margin over the runner-up for the SAME token.
         guard margin >= policy.marginThreshold else {
+            if bands.isActive, policy.mode == .apply,
+               best.evidence.surface >= bands.judgeMin {
+                return pass(.judgeEligible(best: best.evidence.surface,
+                                           top: topSurfaces), bestRef, margin)
+            }
             return pass(.ambiguous(margin: margin), bestRef, margin)
         }
         // §5.7 — a required span takes a strict prefix completion or nothing.
@@ -1676,7 +2232,8 @@ enum STTCorrector {
 
     static func score(token: String, candidate: String,
                       lexicon: CorrectionLexicon,
-                      frameFit: Double, paired: Double) -> CorrectionEvidence {
+                      frameFit: Double, paired: Double,
+                      ngramPrior: Double = 0) -> CorrectionEvidence {
         let a = Array(token.unicodeScalars)
         let b = Array(candidate.unicodeScalars)
         let span = max(a.count, b.count)
@@ -1696,7 +2253,7 @@ enum STTCorrector {
         return CorrectionEvidence(similarity: similarity,
                                   prefixCompletion: prefixEvidence,
                                   phoneticKey: keyHit, frameFit: frameFit,
-                                  pairedKeyword: paired)
+                                  pairedKeyword: paired, ngramPrior: ngramPrior)
     }
 
     // MARK: Vetoes (§5.8)
@@ -1767,6 +2324,24 @@ enum STTCorrector {
     private static func makeToken(_ scalars: [Unicode.Scalar],
                                   _ range: Range<Int>) -> Token {
         Token(text: String(String.UnicodeScalarView(scalars[range])), range: range)
+    }
+
+    /// [CORRECTION-REVIVE] The token's delete-1 forms over Unicode SCALARS —
+    /// the exact lookup keys the pipeline's SymSpell index was built with.
+    /// A grapheme-cluster notion of "delete" would query keys no index
+    /// entry carries: the pipeline deletes code points (`token[:i] +
+    /// token[i+1:]` in Python), and the runtime must be the same operation.
+    static func deleteOneForms(of token: String) -> [String] {
+        let scalars = Array(token.unicodeScalars)
+        guard scalars.count > 1 else { return [] }
+        var forms: [String] = []
+        forms.reserveCapacity(scalars.count)
+        for index in scalars.indices {
+            var form = scalars
+            form.remove(at: index)
+            forms.append(String(String.UnicodeScalarView(form)))
+        }
+        return forms
     }
 
     /// The lexicon key for a surface token: punctuation stripped from both
@@ -1843,6 +2418,21 @@ enum STTCorrector {
             output.append(contentsOf: original[cursor...])
         }
         return String(String.UnicodeScalarView(output))
+    }
+
+    /// [CORRECTION-REVIVE] One chosen reading spliced into the sanitised
+    /// transcript at the token's scalar range — the correction re-route's
+    /// text builder. Reuses the SAME tokenize/splice machinery as the
+    /// silent path, so the chosen reading lands exactly where the
+    /// corrector's own rewrite would have landed (one implementation of
+    /// "replace this token", no drift).
+    static func spliceReplacement(_ replacement: String,
+                                  into text: String,
+                                  at range: Range<Int>) -> String {
+        let tokens = tokenize(text)
+        guard tokens.contains(where: { $0.range == range }) else { return text }
+        let replacements = tokens.map { $0.range == range ? replacement : $0.text }
+        return splice(text, tokens: tokens, replacements: replacements)
     }
 
     /// Only the stripped core is replaced, so `'खाना` stays `'`-prefixed and a

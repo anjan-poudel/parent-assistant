@@ -1096,7 +1096,7 @@ final class IntentEncoderInterpreterTests: XCTestCase {
                                      corrected: String) -> CorrectionResult {
         let evidence = CorrectionEvidence(similarity: 0.9, prefixCompletion: 0.9,
                                           phoneticKey: 0.9, frameFit: 0.0,
-                                          pairedKeyword: 0.0)
+                                          pairedKeyword: 0.0, ngramPrior: 0.0)
         let application = STTCorrectionApplication(
             entryID: "fixture-hos",
             lexiconID: "fixture-bank",

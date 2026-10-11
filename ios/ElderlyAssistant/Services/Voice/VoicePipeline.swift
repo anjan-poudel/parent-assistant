@@ -737,6 +737,28 @@ final class VoicePipeline {
     // MARK: - Wake handling
 
     private func handleWakeDetected() {
+        startCaptureEpoch(acknowledging: true)
+    }
+
+    /// [MULTI-TURN AUTO-LISTEN] (2026-10-11, owner-confirmed design) Opens
+    /// a capture epoch for the slot answer window: the coordinator calls
+    /// this when a probe's speech ends while the frame is live, so the
+    /// elder answers the question WITHOUT tapping Talk or saying the wake
+    /// word. Same epoch machinery as a wake detection (generation guard,
+    /// VAD resets, turn tracer) with two deliberate differences: no wake
+    /// acknowledgment (it is not a wake — the "Yes, Mum" greeting would
+    /// interrupt the conversation), and the `answer_capture_opened` event
+    /// instead of `wake_word_detected`. Idempotence is the same
+    /// generation guard: a racing Talk press or wake word opens its own
+    /// epoch and this one is dropped whole — exactly one capture starts.
+    func beginAnswerCapture() {
+        startCaptureEpoch(acknowledging: false)
+    }
+
+    /// The shared capture-epoch opener for wake detections, the Talk
+    /// button and the auto-listen answer window. `acknowledging` selects
+    /// the wake-ack path and the event name.
+    private func startCaptureEpoch(acknowledging: Bool) {
         // Second gate at the DETECTION end, not just the audio-feed end: a
         // keyword event already in flight when the reply started (the
         // engine fires on its own queue; the handler hops to main) must
@@ -765,7 +787,8 @@ final class VoicePipeline {
         vadFrameLatencyReported = false
         silenceCounter = 0
         vadHeardSpeech = false
-        emit("wake_word_detected", outcome: "success")
+        emit(acknowledging ? "wake_word_detected" : "answer_capture_opened",
+             outcome: "success")
         // [TURN-TIMING] One voice turn starts here.
         turnTracer?.beginTurn()
 
@@ -778,8 +801,9 @@ final class VoicePipeline {
         // exact synchronous path this method has always had. The
         // completion carries the generation captured above, so a stale
         // one — a stop(), or a superseded capture — is inert in
-        // `beginCapture`'s guard.
-        if let ack = wakeAcknowledger {
+        // `beginCapture`'s guard. The auto-listen window skips the ack
+        // branch entirely (`acknowledging == false`).
+        if acknowledging, let ack = wakeAcknowledger {
             ack.begin { [weak self] in
                 self?.beginCapture(generation: generation)
             }

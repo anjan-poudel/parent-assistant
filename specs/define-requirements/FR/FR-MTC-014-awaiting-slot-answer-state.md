@@ -43,3 +43,30 @@ Feature: The awaitingSlotAnswer session state
 ## Related
 - FR: FR-MTC-013 (timer expiry behaviour), FR-MTC-001 (frame), FR-MTC-009 (interception active window)
 - NFR: NFR-MTC-010 (zero stuck states), NFR-MTC-012 (confirmation flow unchanged)
+
+## Errata (2026-10-11 — device defect, fixed in worktree-multi-turn-answer-capture)
+
+The requirement demanded "manual Talk-button recovery keeps working" but the
+implementation also disabled the Talk button for the whole window (`HomeView`
+`isDisabled` included `.awaitingSlotAnswer`, copied from the chip-owned
+confirmation pattern), and no auto-listen existed. On the Anzaan device the
+probe asked correctly but the spoken answer was never captured — a silent dead
+end until the 45 s expiry. Fix: `VoiceSessionState.supportsTalkTap` (false only
+in `.awaitingConfirmation`) now gates the hero; the slot window is answered by
+voice through the Talk control, and the answer is consumed by the pre-ladder
+interception while `handlePipelineState`'s mid-window early-return preserves
+the timer. Pinned by `VoiceSessionStateMachineTests.testTalkTapStaysLiveDuringTheSlotAnswerWindow`.
+DV-1 retest required.
+
+## Errata 2 (2026-10-11 — auto-listen answer capture, owner-confirmed)
+
+The window is answered by voice, so it now opens the mic itself: when the
+probe's speech ends (`noteSpeakingEnded`), the coordinator opens a capture
+epoch via `VoicePipeline.beginAnswerCapture()` — no wake acknowledgment, the
+`answer_capture_opened` event, one auto-open per probe (a re-probe re-arms
+it). The session stays in `awaitingSlotAnswer` throughout (the
+`handlePipelineState` early-return protects the 45 s timer); the Talk button
+remains the manual fallback; a rejected transcript while the frame is live
+re-probes instead of the generic reprompt. Known limitation (accepted):
+an answer spoken while the probe TTS is still playing may lose its start
+(no echo cancellation). See docs/architecture/multi-turn-answer-capture.md.
