@@ -295,3 +295,36 @@ Items owed to the end-stage review/sweep:
 3. W6 N-8(b) still open: the integration arm's hermeticity rests on the CallLinks and PhoneDialer empty-input guards; a source pin is owed at the wave that next touches those files, or at the W10 sweep.
 4. W7-log point 4 residual: the helper-body containment pin for announceNoUsableNumber at its next touch.
 5. The deferred scoped runs and the W8 negative control (Gate disposition item 3).
+
+---
+
+# call-dialer-primary-secondary — Implement notes (Wave 9, unit T-153)
+
+Description: Wave 9 lands the missed-call dial-back routing and announcement (TG-31 tail): the dial-route value, the announce at resolution, and the hop dispatch through the shipped hop machinery, with the W3 N-2 raw-handle edge pinned as shipped behaviour. Base 81bad0f7 (the W8 commit). The W1 through W8 records above are preserved; this section is this feature's W9 record, appended below them, not a replacement.
+
+## Per-unit status (Wave 9)
+
+| Unit | Title (short) | Wave | Status | Evidence summary |
+|---|---|---|---|---|
+| T-153 | Missed-call dial-back routing and announcement | W9 | Done (compile-verified; suite run deferred to the end sweep) | AppCoordinator.swift +108/-44, 15 hunks all bounded to the old dial-back regions (:8808-8880). The route value MissedCallDialRoute (action, channel as an optional CallApp, fellBackFrom, hopCandidates) lands per design-l2:393-402; missedCallDialAction (:8835-8878) returns it: the two shipped numberless guards verbatim wrapped in empty routes (channel nil, provenance and candidates empty) returning BEFORE the chain; preferred = familyContact?.resolvedAudioApp ?? defaultApp; the seam call now takes the real secondaryApp and whatsAppInstalled inputs; the RAW shipped derivation messengerHandle?.isEmpty == false is KEPT (not hasUsableMessengerHandle; L2-D9 + W3 N-2 — pinned, not fixed); one snapshot return computing hopCandidates via CallChannelChain.hopCandidates(..., vocabulary: .audio). dialBackMissedCall (:8899-8946): identity and family lookup unchanged; the announce (call.announce.fallbackRouted with skipped-label, identity, channel-label) at resolution BEFORE the switch, gated on fellBackFrom.first plus a non-nil channel (nothing spoken when nothing fell back); the hop LaunchHop(candidates: route.hopCandidates, handle: family?.messengerHandle, phone: entry.phone) — the phone label is the W6 N-4 carry (design :772 shows the two-label form; the defaulted field landed in W8); switch route.action — openPhoneApp unchanged, unusableNumber speaks the shipped line unchanged, the .call floor stays no-hop, and the faceTime, whatsApp and messenger arms each thread hop: hop. Tests: MissedCallDialBackTests.swift +477/-32 (18 hunks; the eight seam-resolution cases and the three row-identity/caption tests byte-frozen; 4 dial-action call sites upgraded to the new signature; 10 new pins: the empty route for both numberless guards; the tel floor with empty provenance; the floor reachable with every other channel infeasible (full route: .call, provenance [.messenger, .whatsApp], candidates empty); the FaceTime-substitution route; the direct-route no-announce condition; the whitespace-handle N-2 divergence pinned at both route and source level; chain-derived hop-candidate cells; the announce-before-dispatch source pin — exactly ONE fallbackRouted site positioned before the switch, hop: hop exactly 3 in the switch with zero before it and in the .call arm, zero observabilityBus/emit in the region, plus the SA-4(d) no-await token scan; and the route-shape and decision source pins — raw derivation needle present, hasUsableMessengerHandle absent, vocabulary .audio on the single return). Suite 12 pre-existing + 10 = 22 tests (unaudited-against-run). |
+
+## Wave log — W9
+
+T-153 implemented alone (HIGH risk, TG-31 tail) under the owner's suspended-gates regime: no test suite was executed, no negative control; exactly ONE compile check (build-for-testing) is the delivered-bytes evidence.
+
+Gate disposition (Wave 9):
+
+1. Scoped unit run (test:unit MissedCallDialBackTests) — NOT RUN; deferred to the consolidated end sweep (the T-157 family run). No green suite claim anywhere.
+2. Compile check — GREEN on the delivered bytes: xcodebuild build-for-testing, TEST BUILD SUCCEEDED (log line 1436), exit 0, zero error lines, both edited files recompiled in-log (ios/build/t153-compilecheck.log). The log's 31 warnings are all pre-existing and none cite the delivered regions (production :8812-8946) or the test file.
+3. Static pin verification — run (not a test suite): a one-off Python emulation of the comment-stripped scan re-derived every region marker, needle and count of the source pins against the delivered bytes; all pass (the check script at /tmp/t153-static-check.py). Recorded as real verification and explicitly not a substitute for the deferred XCTest run.
+4. Negative control — NOT RUN; the five-candidate plan with expected reds per revert is recorded in specs/T-153-notes.md (delete the announce block; revert the hop to the two-label form; drop hop: hop from one arm; swap the raw derivation for the normalised predicate; swap the vocabulary argument), with restore md5s AppCoordinator 7f50894d800b276dbf470c176a444d13 and MissedCallDialBackTests ef6028c9b76d7fc65ca3b6a830aad7ad.
+
+SA-4(d) no-await inspection (recorded per the task file): the dial-back chain region (MissedCallDialRoute + missedCallDialAction + dialBackMissedCall, :8812-8949) and the hop path (launchFailHopStep + performLaunchFailHop, :8005-8057) contain ZERO occurrences of await, sleep, Timer, retry, asyncAfter, DispatchQueue and Task (per-token counts printed; raw and comment-stripped scans both zero). The four dispatch openers are synchronous funcs; the only concurrency shape is the shipped pre-existing one-way GSM handoff (DispatchQueue.main.async at :8273, predating the feature; nothing awaits it). Emergency/escalation preservation: the wave diff greps zero production hits for emergency/escalat; the 15 production hunks are bounded to the dial-back regions; CallChannelChain.swift, the catalogue, Info.plist and the pbxproj carry no diff entry.
+
+Wave-closure verification (coordinator, on the delivered bytes): hashes re-computed at closure match the compile-checked delivered bytes (AppCoordinator 7f50894d800b276dbf470c176a444d13, MissedCallDialBackTests ef6028c9b76d7fc65ca3b6a830aad7ad); numstat matches the dev report exactly (+108/-44, +477/-32); CallChannelChain.swift carries no diff entry (byte-frozen); the untracked workflow.yaml remains engine state and stays out of the integration commit.
+
+Items owed to the end-stage review/sweep:
+
+1. The T-153 coverage note: the vocabulary argument is source-pinned; a behavioural discriminator (the section 10.4 FaceTime-secondary cell) may be added to the hop-candidate test during the sweep if the reviewer wants it — flagged in the notes, deliberately not chased with an edit that would have invalidated the single compile-check evidence.
+2. The five-candidate T-153 negative-control plan (in the notes) — to be run at the sweep alongside the W8 control.
+3. This suite's 22 tests are unaudited-against-run; the family sweep is their first execution.

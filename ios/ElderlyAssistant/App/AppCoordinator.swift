@@ -8805,79 +8805,143 @@ self.noteTalkContractChanged()
         case messenger(name: String, phone: String, handle: String)
     }
 
-    /// The pure dial-back decision (missed-calls fix, 2026-09-18): the
-    /// channel `resolvedMissedCallChannel` picks, mapped onto the row's
-    /// action. A numberless row keeps the honest Phone-app open; a number
-    /// that normalizes to nothing speaks the honest dead-row line instead
-    /// of a silent dead tap.
+    /// The dial-back decision plus its routing provenance (FR-CDP-011):
+    /// the action to dispatch and everything the announcement and the
+    /// launch-fail hop need, so `dialBackMissedCall` never re-derives a
+    /// routing fact (single source — the pure seam).
+    struct MissedCallDialRoute: Equatable {
+        let action: MissedCallDialAction
+        /// The routed channel — nil for the two numberless actions,
+        /// which return before the chain (nothing to route).
+        let channel: CallApp?
+        /// Skipped channels in attempt order (empty = no fallback).
+        let fellBackFrom: [CallApp]
+        /// The launch-fail candidates for `channel` ([] when nil).
+        let hopCandidates: [CallApp]
+    }
+
+    /// The pure dial-back decision (missed-calls fix, 2026-09-18; route
+    /// value: call-dialer-primary-secondary, 2026-10-12) — the shipped
+    /// `MissedCallDialAction` decision extended into the
+    /// `MissedCallDialRoute` (design-l2.md:404-438, L2-D9): the routed
+    /// CHANNEL, the attempt-order PROVENANCE the announcement composes
+    /// from, and the launch-fail CANDIDATES the hop consumes — one
+    /// snapshot, so the dispatch re-derives no routing fact (design-
+    /// l2.md:753-786). The two shipped guards are preserved verbatim: a
+    /// numberless row keeps the honest Phone-app open; a number that
+    /// normalizes to nothing speaks the honest dead-row line instead of
+    /// a silent dead tap — both return BEFORE the chain, so their route
+    /// carries `channel: nil`, `fellBackFrom: []` and `hopCandidates: []`.
     static func missedCallDialAction(phone: String,
                                      familyContact: FamilyContact?,
                                      defaultApp: CallApp,
+                                     secondaryApp: CallApp,
                                      messengerHandle: String?,
-                                     name: String) -> MissedCallDialAction {
-        guard !phone.isEmpty else { return .openPhoneApp }
+                                     whatsAppInstalled: Bool,
+                                     name: String) -> MissedCallDialRoute {
+        guard !phone.isEmpty else {
+            return MissedCallDialRoute(action: .openPhoneApp, channel: nil,
+                                       fellBackFrom: [], hopCandidates: [])
+        }
         guard !ContactNumberKey.normalized(phone).isEmpty else {
-            return .unusableNumber(name: name)
+            return MissedCallDialRoute(action: .unusableNumber(name: name), channel: nil,
+                                       fellBackFrom: [], hopCandidates: [])
         }
-        // T-146 bridge (call-dialer-primary-secondary): the seam now
-        // returns the chain `Result`. The dial-back's own secondary and
-        // probe inputs (and the route value T-153 asserts) land with the
-        // dial-back unit; until then the routed CHANNEL is read exactly
-        // as before — the phone floor stands in for the not-yet-wired
-        // secondary and the probe input stays ungated, which is today's
-        // behaviour verbatim (see `resolvedMissedCallChannel`).
-        let channel = resolvedMissedCallChannel(
-            familyContact: familyContact,
-            defaultApp: defaultApp,
-            secondaryApp: .phone,
+        // L2-D9 (design-l2.md:404-438) + W3-review N-2: the messenger
+        // availability input stays the RAW shipped derivation
+        // (`messengerHandle?.isEmpty == false`), verbatim — NOT
+        // `hasUsableMessengerHandle`. A handle non-empty raw but
+        // normalising to empty (whitespace-only, "@"-only) is unusable
+        // for the row/voice predicate yet usable here; the divergence is
+        // shipped behaviour, design-sanctioned ("derived exactly as
+        // shipped") and pinned by `MissedCallDialBackTests` — do not
+        // "fix" it into the normalised predicate.
+        let preferred = familyContact?.resolvedAudioApp ?? defaultApp
+        let route = resolvedMissedCallChannel(
+            familyContact: familyContact, defaultApp: defaultApp,
+            secondaryApp: secondaryApp,
             messengerHandleAvailable: messengerHandle?.isEmpty == false,
-            whatsAppInstalled: true).channel
-        switch channel {
-        case .phone: return .call(name: name, phone: phone)
-        case .faceTime: return .faceTime(name: name, phone: phone)
-        case .whatsApp: return .whatsApp(name: name, phone: phone)
-        case .messenger: return .messenger(name: name, phone: phone,
-                                           handle: messengerHandle ?? "")
+            whatsAppInstalled: whatsAppInstalled)
+        let action: MissedCallDialAction
+        switch route.channel {
+        case .phone: action = .call(name: name, phone: phone)
+        case .faceTime: action = .faceTime(name: name, phone: phone)
+        case .whatsApp: action = .whatsApp(name: name, phone: phone)
+        case .messenger: action = .messenger(name: name, phone: phone,
+                                             handle: messengerHandle ?? "")
         }
+        return MissedCallDialRoute(
+            action: action, channel: route.channel, fellBackFrom: route.fellBackFrom,
+            hopCandidates: CallChannelChain.hopCandidates(
+                preferred: preferred, secondary: secondaryApp,
+                routed: route.channel, vocabulary: .audio))
     }
 
     /// Tap-to-dial-back of a missed-call row (missed-calls fix,
-    /// 2026-09-18) — the row's action in HistoryView and CallView's
-    /// recent-activity section. A row WITH a number dials it back through
-    /// the same deep-link resolution a family contact's audio call button
-    /// uses (matched family contact's preference, else the global
-    /// default, Messenger gated on a handle, `tel:` always in the chain —
-    /// `performSystemContactCall` opens `tel://` unconditionally), so the
-    /// tap always opens the resolved app or the dialer. A numberless row
-    /// (an old anonymous entry, or a caller iOS masked) keeps the honest
-    /// Phone-app open — there is no number to dial and the app never
-    /// fakes one. Main queue (every dispatch below is a coordinator
-    /// method confined to it).
+    /// 2026-09-18; chain routing + announcement: call-dialer-primary-
+    /// secondary, 2026-10-12) — the row's action in HistoryView and
+    /// CallView's recent-activity section. A row WITH a number dials it
+    /// back through the same deep-link resolution a family contact's
+    /// audio call button uses (matched family contact's preference, else
+    /// the global default, then the secondary, Messenger gated on a
+    /// handle, `tel:` always in the chain — `performSystemContactCall`
+    /// opens `tel://` unconditionally), so the tap always opens the
+    /// resolved app or the dialer. The routed channel is ANNOUNCED at
+    /// resolution, before the dispatch, only when the chain skipped a
+    /// channel (ADR-CDP-07; design-l2.md:753-786): a successful open may
+    /// background the app before post-open speech could be heard. The
+    /// route's hop candidates feed the LaunchHop the hopping openers
+    /// consume on a failed launch (FR-CDP-015); the GSM floor never hops
+    /// (RES-10). A numberless row (an old anonymous entry, or a caller
+    /// iOS masked) keeps the honest Phone-app open — there is no number
+    /// to dial and the app never fakes one. Main queue (every dispatch
+    /// below is a coordinator method confined to it).
     func dialBackMissedCall(_ entry: AppActivityEntry) {
         let identity = ActivityRowText.unansweredIdentity(
             for: entry,
             correlatedName: missedCallDisplayNames[entry.id]) ?? ""
         let family = familyContact(matchingPhone: entry.phone)
-        let action = Self.missedCallDialAction(
+        let route = Self.missedCallDialAction(
             phone: entry.phone,
             familyContact: family,
             defaultApp: defaultCallApp,
+            secondaryApp: secondaryCallApp,
             messengerHandle: family?.messengerHandle,
+            whatsAppInstalled: whatsAppInstalledNow,
             name: identity)
-        switch action {
+        if let skipped = route.fellBackFrom.first, let channel = route.channel {
+            // ADR-CDP-07: at resolution, BEFORE the dispatch — the
+            // spoken line names the skipped channel and the one that
+            // actually opens. Nothing is spoken when nothing fell back
+            // (FR-CDP-016 scenario 3).
+            speak(text: L10n.fmt("call.announce.fallbackRouted", locale: activeLocale,
+                                 CallChannelChain.label(skipped, locale: activeLocale),
+                                 identity,
+                                 CallChannelChain.label(channel, locale: activeLocale)))
+        }
+        // W6-review N-4 carry (T-151/T-152): the hop carries the row's
+        // own number — the additive defaulted `phone` field landed at
+        // `LaunchHop` (AppCoordinator.swift:7992) so a hopped `.phone`
+        // leg dials it instead of speaking the shipped no-number line;
+        // the design listing at design-l2.md:772 shows the two-label
+        // form.
+        let hop = LaunchHop(candidates: route.hopCandidates,
+                            handle: family?.messengerHandle,
+                            phone: entry.phone)
+        switch route.action {
         case .openPhoneApp:
             PhoneAppOpener.openDialer()
         case .unusableNumber:
             speak(text: L10n.fmt("call.announce.noPhoneNumber",
                                  locale: activeLocale, identity))
         case .call(let name, let phone):
-            performSystemContactCall(name: name, phone: phone)
+            performSystemContactCall(name: name, phone: phone)          // floor: no hop
         case .faceTime(let name, let phone):
-            performFaceTimeCall(name: name, phone: phone, video: true)
+            performFaceTimeCall(name: name, phone: phone, video: true, hop: hop)
         case .whatsApp(let name, let phone):
-            performSystemContactWhatsApp(name: name, phone: phone)
+            performSystemContactWhatsApp(name: name, phone: phone, hop: hop)
         case .messenger(let name, _, let handle):
-            performSystemContactMessenger(name: name, handle: handle)
+            performSystemContactMessenger(name: name, handle: handle, hop: hop)
         }
     }
 
