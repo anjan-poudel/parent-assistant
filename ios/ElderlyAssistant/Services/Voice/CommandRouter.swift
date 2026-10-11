@@ -862,6 +862,15 @@ final class CommandRouter {
                 errorCode: reason.rawValue,
                 metadata: [:]
             ))
+            // [MULTI-TURN AUTO-LISTEN] A live frame makes a rejected
+            // transcript an invalid ANSWER, not a fresh turn: re-probe
+            // (whose speech end re-opens the mic) instead of the generic
+            // re-prompt, so a mumbled answer never strands the window.
+            // (`liveFrame`, not `frame`: the position-scan test anchors
+            // the interception block on the latter spelling.)
+            if let liveFrame = coordinator?.activeDialogueFrame {
+                return reprobeDialogueOrExhaust(frame: liveFrame, raw: raw)
+            }
             speak(key: "router.reprompt")
             return .unrecognised(transcript: raw)
         }
@@ -1139,8 +1148,6 @@ final class CommandRouter {
                                                 queryOverride: value,
                                                 frame: frame, raw: raw)
             case .invalid(let reason):
-                let attempts = coordinator?.noteDialogueAttempt()
-                    ?? DialogueConfig.maxProbes
                 // C-3 (review-l2 F-3): the `reason` metadata is built by
                 // direct `ObservabilityEvent` construction — the
                 // two-argument `emit` helper hardcodes empty metadata and
@@ -1153,29 +1160,7 @@ final class CommandRouter {
                     errorCode: nil,
                     metadata: ["reason": reason.rawValue]
                 ))
-                // Attempt budget (FR-MTC-007/§24): one re-probe after the
-                // first invalid answer, then the honest close. The
-                // manager's count has already taken this attempt
-                // (`noteAttempt` restamps the deadline, L2-D6); a count
-                // within the budget speaks the retry probe — the frame
-                // copy carries the fresh ordinal so the probe event's
-                // `attempt` metadata is the probe's own number.
-                //
-                // §12.2's pinned comparison (`attempts < maxProbes`) is
-                // an erratum: `noteAttempt` returns the post-increment
-                // count (>= 2 on the first invalid answer), so `<` makes
-                // the retry branch unreachable and contradicts the
-                // task-file Gherkin ("attempt one … re-probes with the
-                // retry variant") and §24's "one honest re-probe, then
-                // the honest exhausted line".
-                if attempts <= DialogueConfig.maxProbes {
-                    var reprobe = frame
-                    reprobe.attempts = attempts
-                    speakDialogueProbe(frame: reprobe, retry: true)
-                } else {
-                    return resolveDialogueExhaustion(frame: frame, raw: raw)
-                }
-                return .unrecognised(transcript: raw)
+                return reprobeDialogueOrExhaust(frame: frame, raw: raw)
             }
         }
 
@@ -3241,6 +3226,29 @@ final class CommandRouter {
     /// open a window (defensive — a live frame is intercepted before any
     /// trigger can run; also the no-coordinator case) falls back to
     /// today's exact blind request.
+    /// The shared invalid-answer tail (the sanity guard's rejection and
+    /// `DialogueAnswerPath.classify`'s `.invalid`): one honest re-probe
+    /// within the attempt budget — its speech end re-opens the mic via
+    /// the coordinator's auto-listen hook — then the exhausted close.
+    /// The frame stays live until resolution; the caller owns the event.
+    /// Attempt budget (FR-MTC-007/§24): `noteAttempt` returns the
+    /// post-increment count (>= 2 on the first invalid answer), so the
+    /// comparison is `<=` — §12.2's pinned `<` is an erratum that made
+    /// the retry branch unreachable (C-3, review-l2 F-3).
+    private func reprobeDialogueOrExhaust(frame: DialogueFrame,
+                                          raw: String) -> RoutingResult {
+        let attempts = coordinator?.noteDialogueAttempt()
+            ?? DialogueConfig.maxProbes
+        if attempts <= DialogueConfig.maxProbes {
+            var reprobe = frame
+            reprobe.attempts = attempts
+            speakDialogueProbe(frame: reprobe, retry: true)
+        } else {
+            return resolveDialogueExhaustion(frame: frame, raw: raw)
+        }
+        return .unrecognised(transcript: raw)
+    }
+
     private func fireMusicRequestOrProbe(query: KeywordIntentRule.MusicQueryExtraction,
                                          raw: String,
                                          intake: DialogueDegenerateIntake,

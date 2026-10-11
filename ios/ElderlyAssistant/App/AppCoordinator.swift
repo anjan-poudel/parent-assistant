@@ -5292,7 +5292,52 @@ self.noteTalkContractChanged()
             self.speakingCount = max(0, self.speakingCount - 1)
             self.wakeWordActivityGate.setSpeaking(self.speakingCount > 0)
             self.handlePipelineState(self.lastPipelineState)
+            self.openAnswerCaptureIfProbeJustSpoken()
         }
+    }
+
+    /// [MULTI-TURN AUTO-LISTEN] (2026-10-11, owner-confirmed) When the
+    /// probe's speech ends — and only then — the answer window opens the
+    /// mic itself, so the elder answers the question without tapping Talk
+    /// or saying the wake word. The conditions are the window contract:
+    /// nothing still speaking, the session inside `.awaitingSlotAnswer`
+    /// (the early-return guard in `handlePipelineState` keeps the 45 s
+    /// timer intact while the pipeline captures), a live frame, and an
+    /// idle pipeline (a racing Talk press that already opened a capture
+    /// owns the epoch — `beginAnswerCapture`'s generation guard drops the
+    /// loser). One auto-open per probe: an invalid answer re-speaks the
+    /// retry probe, whose speech end re-arms this path the same way; the
+    /// answer turn's own execution speech cannot re-trigger it because
+    /// the frame is resolved before that speech starts.
+    /// The pure auto-listen predicate (testable without `start()`, which
+    /// the witness strategy never calls): the window contract's four
+    /// conditions — nothing still speaking, the session inside the slot
+    /// answer window, a live frame, and an idle pipeline.
+    static func shouldAutoOpenAnswerCapture(speakingCount: Int,
+                                            sessionState: VoiceSessionState,
+                                            frameLive: Bool,
+                                            pipelineState: VoicePipeline.State?) -> Bool {
+        speakingCount == 0
+            && sessionState == .awaitingSlotAnswer
+            && frameLive
+            && pipelineState == .idle
+    }
+
+    private func openAnswerCaptureIfProbeJustSpoken() {
+        guard Self.shouldAutoOpenAnswerCapture(
+            speakingCount: speakingCount,
+            sessionState: voiceSession.state,
+            frameLive: dialogueManager.liveFrame != nil,
+            pipelineState: voicePipeline?.state) else { return }
+        voicePipeline?.beginAnswerCapture()
+        observabilityBus.emit(ObservabilityEvent(
+            component: "app_coordinator",
+            eventType: "dialogue_answer_capture",
+            durationMs: nil,
+            outcome: "info",
+            errorCode: nil,
+            metadata: [:]
+        ))
     }
 
     /// Called by `CommandRouter` with the text being spoken so the Home

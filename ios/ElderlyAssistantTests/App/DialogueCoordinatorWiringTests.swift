@@ -781,6 +781,45 @@ final class DialogueCoordinatorWiringTests: XCTestCase {
         XCTAssertFalse(emit.contains("transcript"), "no transcript may reach the event metadata")
     }
 
+    // MARK: - Auto-listen answer capture (2026-10-11): the predicate
+
+    func testAutoListenPredicateTruthTable() {
+        let allTrue = AppCoordinator.shouldAutoOpenAnswerCapture(
+            speakingCount: 0, sessionState: .awaitingSlotAnswer,
+            frameLive: true, pipelineState: .idle)
+        XCTAssertTrue(allTrue)
+
+        XCTAssertFalse(AppCoordinator.shouldAutoOpenAnswerCapture(
+            speakingCount: 1, sessionState: .awaitingSlotAnswer,
+            frameLive: true, pipelineState: .idle),
+            "a reply still speaking must not open the mic")
+
+        XCTAssertFalse(AppCoordinator.shouldAutoOpenAnswerCapture(
+            speakingCount: 0, sessionState: .idle,
+            frameLive: true, pipelineState: .idle),
+            "no slot window open — nothing to answer")
+
+        XCTAssertFalse(AppCoordinator.shouldAutoOpenAnswerCapture(
+            speakingCount: 0, sessionState: .awaitingSlotAnswer,
+            frameLive: false, pipelineState: .idle),
+            "an expired or resolved frame must not re-open the mic")
+
+        XCTAssertFalse(AppCoordinator.shouldAutoOpenAnswerCapture(
+            speakingCount: 0, sessionState: .awaitingSlotAnswer,
+            frameLive: true, pipelineState: nil),
+            "no pipeline — nothing to open")
+
+        XCTAssertFalse(AppCoordinator.shouldAutoOpenAnswerCapture(
+            speakingCount: 0, sessionState: .awaitingSlotAnswer,
+            frameLive: true, pipelineState: .capturingCommand),
+            "a racing Talk press already owns the capture epoch")
+
+        XCTAssertFalse(AppCoordinator.shouldAutoOpenAnswerCapture(
+            speakingCount: 0, sessionState: .awaitingConfirmation,
+            frameLive: true, pipelineState: .idle),
+            "the yes/no chips own the confirmation window — never auto-listen")
+    }
+
     // MARK: - Fixtures and helpers
 
     /// In-memory stand-in for the encrypted channel (the
