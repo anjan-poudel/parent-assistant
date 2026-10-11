@@ -1,1005 +1,1212 @@
-# L2 Component Design — Multi-Turn Conversation (v1)
+# Design L2 — Family Contacts Unify
 
-**Feature:** `multi-turn-conversation` · **Branch:** `feat/multi-turn-conversation` (worktree `elderly-ai-assistant-multi-turn-conversation`; requirements baseline `437d4dc`)
-**Task:** `design-l2` (agent `sdd-principal-engineer`) · **Contract:** `component_design_l2` → `specs/design-l2.md`
-**Date:** 2026-10-10 · **Status:** for `review-l2` (GO gate), `security-design-review` (SECURITY-GO gate), `plan-tasks` and `implement`
-**Refines:** `specs/design-l1.md` (binding architecture) to implementation-grade component interfaces. Every ADR-MTC-01…ADR-MTC-16 decision is preserved; the refinements this document adds are itemised in §5, and the reconciliations it fixes in §6. It resolves the L1 §31 items R1–R12.
+Feature: `family-contacts-unify` (worktree branch `feat/family-contacts-unify`, worktree
+`elderly-ai-assistant-family-contacts-unify`; base master `8089c735`).
+Task: `design-l2`, agent `principal-engineer`, contract `component_design_l2`.
+Date: 2026-10-12.
+Status: elaboration of the FROZEN `specs/design-l1.md` — nothing here redesigns L1; every
+section resolves an L1 §19 deferral or fixes a component-level detail L1 left to L2.
 
-**Path convention (inherited from L1 §Path convention).** Paths are repo-relative. Where one path would exceed the release-log sanitiser's token limit (40 consecutive characters from the class `[A-Za-z0-9/+=]`), it is split across adjacent code spans; `` `ios/ElderlyAssistant/Services/` + `Voice/DialogueManager.swift` `` denotes the single path obtained by joining the spans with `/`. The split is a sanitiser convention only — do not read the `+` as concatenation in code.
+Inputs read: `specs/design-l1.md` (frozen architecture — the source of truth),
+`specs/define-requirements.md` + `FR/`/`NFR/` (locked set), `specs/family-contacts-unify/constitution.md`,
+project `constitution.md`, and verified code anchors at base master `8089c735` (file:line
+references below were re-read in this worktree).
 
-**Identifier-break convention.** The same 40-character limit applies to any single identifier (including test names): where its text would form one run of 40 or more characters from the class above, it is broken across adjacent code spans at a point that keeps every span under the limit, and the spans join with no separator. Example: `` `testAnswerTurnNeverReachesThe` + `InterpreterOrCache` `` denotes the single test name formed by joining the spans directly. Every break of this kind in this document follows this convention.
+## 0. L1 §19 deferral checklist (this document's binding scope)
 
-**Sanitizer discipline.** This document contains no credential-shaped values, no token samples and no secret material of any kind. Every quoted utterance is a benign fixture from the requirements corpus (the owner's bhajan example and its variants). No auth surface is touched by this feature.
-
-**Sources verified for this document.** Every interface below was written against the worktree source at this baseline, not against L1 prose alone: `CommandRouter.swift` (`route` open with `recordTranscript`; gibberish guard `:747-758`; emergency block `:779-783`; confirmation hook `:787-886` incl. rephrase follow-up `:794-809` and the call-override predicate `:816-820`; keyword stage `:1169-1266` with the news arm `:1194-1198`, the YouTube arm `:1218-1221`, the music arm `:1223-1234` and the appLaunch arm `:1256-1264`; rephrase band `:1504-1519`; interpreted `.music` `:3336-3355`; `routeKeywordRemainder` `:1968-2030`; speech lanes `:3819-3882`; `isYesResponse`/`isNoResponse` `:3801-3814`; phrase helpers `:1824-1840`; `emergencyPhrases` `:1854`; `sensitiveCallPhrases` `:1869`; `isExplicitMedicationAcknowledgement` `:1913`; `routeSafetyNet` `:1931`); `KeywordIntentRule.swift` (Domain/Match/match `:69-206`; Alternative/Group/Variant/Rule `:289-345`; rules table `:349`; `musicQuery` `:752-779`; drop sets and marker helpers `:787-851`); `VoiceContactSearchRoute.swift` (`decide` `:67`; `directCallPhrases`/`isDirectCallUtterance` `:117-140`); `YouTubeRoute.swift` (`Decision` `:41-56`); `VoiceSessionStateMachine.swift`; `AppCoordinator.swift` (watchdog `:4823-4883`; coordinator event component `:7327`; pending-rephrase seams `:7395-7406`); `LocalBrainChain.swift` (`InputSeam` `:109-115`; `turnInput` `:275-285`; `plainText` `:296-307`); `InputSanitiser.swift`; `IntentPrompt.swift`; `LlamaCommandInterpreter.swift` (`InterpreterContext` `:95-118`; `InterpretedCommand` `:122-229`); `ios/tools/` + `check-release-log-safety.py` (`FEATURE_ROOTS` `:141`, `RULES` `:187`); `check-prompt-mirror.py` (`INTERPOLATIONS` `:56-61`); and the test bundle under `ios/ElderlyAssistantTests/` (incl. `Services/Voice/` suites and `App/VoiceSessionStateMachineTests.swift`).
-
----
-
-## Overview
-
-### 1. Purpose
-
-Today the voice pipeline is strictly single-turn; this feature adds a one-deep dialogue frame (L1 §1). This document fixes what `plan-tasks` turns into coding tasks and what `implement` builds: the exact Swift surfaces (types, initialisers, method signatures with access levels), the data shapes (the frame, the candidate, the extraction provenance, the catalog JSON), the capture ladder and merge as testable pure-function tables with input/output vectors, the exact edits each existing file receives (which function gains what, at which verified anchor), the interception block's concrete integration into `route()`, the `VoiceCommandCoordinating` additions with threading, the state-machine deltas with full signatures, the observability and release-gate deltas, the Phase 2 clause plumbing (defaulted so Phase 1 compiles and behaves byte-identically), the test seams per L1 §29 suite (file-private doubles, the `CommandRouterMusicTests` pattern), and a traceability matrix over all 32 requirements.
-
-### 2. Inputs
-
-- `specs/define-requirements.md` + `specs/multi-turn-conversation/` — FR-MTC-001…FR-MTC-020, NFR-MTC-001…NFR-MTC-012, 97 Gherkin scenarios (locked).
-- `specs/design-l1.md` — binding architecture (ADR-MTC-01…16; §9 frame model; §10 interception; §11 capture/merge; §12 degenerate detection; §13 did-you-mean; §14 the window; §15 catalog; §16 degradation; §17 Phase 2; §20 config; §21 error taxonomy; §22 events/log-gate/localisation; §29 test suites; §31 open items).
-- `specs/multi-turn-conversation/constitution.md` — Safety-Relevant Constraints 1–4, Feature Constraints 1–10, the DV gate, OD-M1..M4.
-- `.ai-sdd/workflows/multi-turn-conversation.yaml` — the `review-l2` / `security-design-review` / `security-test` focus areas and exit conditions.
-- `constitution.md` (root) — architecture constraints, standards, release gates, agent principles (explicit error types, configurable timeouts, explicit concurrency, no silent stubs).
-- `docs/multi-turn-conversation-feasibility.md` — the owner's study (grounding; not a binding source where it disagrees with L1).
-
-### 3. What this document resolves (the L1 §31 list)
-
-| L1 item | Resolution |
+| L1 §19 deferral | Resolved in |
 |---|---|
-| R1 barge-in predicate stage list — pin the exact call sites, add a test per stage | §6 R1 (the `B1`–`B7` table, rows at §6 lines 93-99); §12.1 protocol/access widenings; tests §18 rows `CommandRouterDialogueTests.` `B*` |
-| R2 discard-path candidate composition | §6 R2; §5 L2-D9; §24 |
-| R3 `candidateChoice` exhaustion reading | §6 R3; §5 L2-D17; §24 exhaustion table |
-| R4 strip/marker rules as an ordered algorithm | §6 R4; §22 ordered algorithm with vectors |
-| R5 escape / re-probe interaction | §6 R5; §5 L2-D4; §22 escape step |
-| R10 `InterpretedCommand` reuse for `activeCommand` | §5 L2-D13; §9 listing of `merging(message:)`; §12.5 execution |
-| R11 shared seam helper shape (`IntentTranscriptPreparation`) | §5 L2-D14; §12.5; §15 listing; parity tests §18 |
-| R12 Phase 2 `frameClause` plumbing | §5 L2-D15; §19 C-MTC-12 (defaulted field + fifth interpolation + mirror/pin update list) |
-| The L1 §29 test suites, made cuttable as units | §18 (per-suite file, doubles, test names) |
-| Exact per-file edit list | §8–§19 (one section per component; the edit table §12.4 for the router) |
-| Log-gate deltas (event names, metadata keys, allowedKeys, FEATURE_ROOTS) | §26 |
-| The catalog JSON schema + loader API | §11 |
+| Wizard sheet restructure (state flow, subviews), coordinator's new methods, exact placement of `normalizedNicknames` | §1.9, §2, §3.4, §8.2 |
+| Final en/ne wording for the §12 keys | §7 |
+| `SystemContactLinkService.photoImageData` cache constants; worker's retry-free sequencing around refresh epochs | §4.3, §4.4 |
+| Already-linked steering micro-flow (tap targets, back-navigation) | §2.3 |
+| `contactPhoto(for:)` delete vs retain | §8.1 |
+| Verification scheduling (launch/foreground hook ordering); a11y labels per control | §4.4, §2.5, §7 |
+| Unit/task decomposition and wave ordering | out of scope — `plan-tasks` follows approval |
 
-### 4. Cross-cutting conventions
+Deviations from L1 sketches (interface-shape only, intent identical; flagged for the reviewer):
 
-**Error typing.** No new API returns an untyped error. `DialogueError` (§8) is the complete error vocabulary of the new types; the two throwing surfaces are `DialogueManager.arm(_:)` and `DialogueOptionCatalog.init(data:)` / `.load(bundle:)`. No `Error` existential crosses a component boundary. Errors are all `Equatable` so tests compare them directly.
+1. `SystemContactLinkReading.invalidate(identifier:)` is `async` in L2. An actor method cannot
+   satisfy a synchronous protocol requirement while touching actor state; the marker is
+   technically required for `SystemContactLinkService: SystemContactLinkReading`.
+2. L1 §9.3's second pure mapping is expressed as
+   `SystemContactWriteAccess.from(_ access: ContactsAccess)` over the ALREADY-mapped
+   `ContactsAccess` (which owns the single `#available(iOS 18)` gate) instead of a second
+   availability-gated switch over `CNAuthorizationStatus`. Same behavior table, one gate.
+3. L1 §9.2's `mutableCopy() as! CNMutableContact` becomes a checked `as?` cast that maps to
+   `.failed(.saveRejected)` with a DEBUG `assertionFailure` — the write seam may not crash
+   (§10.1 no-crash rule) even on a platform change.
+4. L1 §10.2's "primary button to Done" uses the EXISTING key `common.close` (en "Close", ne
+   "बन्द गर्नुहोस्") — verified present in the catalog; zero new keys beyond the frozen 21.
 
-**Timeouts are configuration.** The answer window is never a new literal: both the frame's deadline and the session timer derive from `VoiceSessionStateMachine.Config.confirmationTimeoutSeconds` (45 s; single source, L1 §20). `DialogueManager` receives the value by injection at construction; tests inject small values and a fake clock (`now` closure) to exercise boundaries without wall-clock waits.
+## 1. Component interfaces and contracts
 
-**Concurrency (explicit).** The frame and the dialogue manager are main-queue-confined — the same contract as `VoiceSessionStateMachine` (all mutations on the main queue; router reads and writes travel the coordinator hooks; the coordinator hops to main exactly as `AppCoordinator.openConfirmationWindow()` does). Who reads: the router's `route()` on every utterance (one synchronous main-thread read), the coordinator's timeout task and confirmation funnels. Who writes: `startDialogueFrame` (arm), `noteDialogueAttempt` (attempt + deadline), `resolveDialogueFrame` / `clearDialogueFrame` (clear) — all coordinator-confined. Isolation mechanism: main-queue confinement only — no locks, no actors, no atomics. Conversations are serialised (the pipeline runs one utterance turn at a time), so the interception never races a second turn. Deregistration paths are first-class: every resolution clears the frame, cancels the timer, and closes the window through legal state edges; resolution is idempotent (a second resolution is a no-op on a cleared frame). The `DialogueOptionCatalog` is immutable after load and safe from any thread.
+All signatures are final unless a line is marked `(internal)`. Every interface declares its
+normal return AND its error/outcome type; none returns `any`/`unknown` error shapes, none
+throws across a seam that a UI path consumes.
 
-**Deterministic-first.** The Phase 1 answer turn consults no model, no network and no cache: classification, merge, candidate assembly and probe composition are pure functions over the frame, the prepared text and the catalog. This is the degradation guarantee of L1 §16 restated as an interface rule — nothing on the dialogue path can load a model or gate a safety stage.
+### 1.1 `SystemContactLink` — FamilyContactStore.swift
 
-**Template-only speech.** Every probe string is a `dialogue.*` xcstrings key composed by `DialogueProbeComposer` (§8); matching vocabularies (index words, escape, cancel, default-answer aliases, probe-echo words) are Swift input tables, never spoken and never model-generated. This restates Feature Constraint 2 at the interface level.
+```swift
+/// A pointer to one record in the system address book, with the fingerprint
+/// needed to prove it is still the same person. Local-only; never transmitted.
+/// Defined next to `FamilyContact` because it is part of the persisted payload
+/// shape the decoder reads in the same file.
+struct SystemContactLink: Codable, Equatable {
+    var identifier: String   // CNContact.identifier at link time
+    var numberKey: String    // ContactNumberKey.normalized of the FIRST dialable
+                             // number of the picked entry at link time
+}
+```
 
-**No silent paths.** Every outcome of the interception block speaks exactly one line per turn through the existing lanes, or falls through to the ladder which speaks its own line. The one deliberate silence is the timeout (L1 ADR-MTC-08: the window expires silently).
+Error contract: none (pure value). Corrupt persistence is handled at decode (§3.4): an empty
+`identifier` or `numberKey` decodes to `nil` — "unlinked", never a crash (FR-FCU-002 scenario 3).
 
-### 5. L2 decision log (refinements of L1; each is implemented, tested and reviewable)
+### 1.2 `FamilyContactIndex` — new file `Services/Contacts/FamilyContactIndex.swift`
 
-| ID | Decision | Rationale / pin |
+```swift
+/// Derived, value-type index over the family roster (L1 §5.4). Rebuilt wholesale on
+/// every roster publish; never persisted; never mutated in place.
+struct FamilyContactIndex: Equatable {
+    struct Entry: Equatable {
+        let id: UUID
+        let normalizedName: String         // NepaliTextNormalizer.normalize(name)
+        let normalizedNicknames: [String]  // per entry, order preserved (normalizedNicknames applied)
+        let rawNicknames: [String]         // stored spellings, order preserved (containment parity)
+    }
+
+    private(set) var entries: [Entry]                  // roster order preserved
+    private(set) var idsByNickname: [String: [UUID]]   // normalized exact key → ids, roster order
+
+    init(family: [FamilyContact])
+    static let empty = FamilyContactIndex(family: [])   // == today's behavior anchor
+
+    func nicknameEntries(for id: UUID) -> [String]     // normalized nicknames of one contact
+    func exactNicknameHolders(_ normalizedQuery: String) -> [UUID]  // O(1) map hit
+    func entry(for id: UUID) -> Entry?                 // hot-path lookup for ContactResolver
+}
+```
+
+Isolation: pure value, no shared mutable state, safe on any thread (L1 §13.1). Empty index
+reproduces today's name-only behavior byte-for-byte (L1 §5.4, compatibility anchor).
+
+### 1.3 Link verification — new file `Services/Contacts/SystemContactLinkService.swift`
+
+```swift
+/// Published snapshot of VERIFIED links (L1 §6.2). `.empty` ⇒ unlinked semantics.
+struct VerifiedLinksSnapshot: Equatable {
+    var links: [UUID: SystemContactLink]           // verified only
+    var linkedRecordNumbers: [String: [String]]    // identifier → current normalized numbers
+    var generation: UInt64                         // bumps once per COMPLETED fetch
+
+    static let empty = VerifiedLinksSnapshot(links: [:], linkedRecordNumbers: [:], generation: 0)
+
+    /// The family contact id whose verified link points at `identifier`, or nil
+    /// (unique by L1 §6.2; duplicate stored claims were dropped at verification).
+    func familyID(forIdentifier identifier: String) -> UUID?
+    /// The family contact id whose linked record carries a number matching `phone`
+    /// (MissedCallContactResolver.matches trailing-digit rule, reused unchanged).
+    func familyID(matchingRecordNumber phone: String) -> UUID?
+}
+
+/// The narrow platform seam both new services share — fakeable in tests
+/// (CNContactStore is not constructible or fakeable in unit tests).
+protocol SystemContactReading: AnyObject {
+    func currentAccess() -> ContactsAccess
+    /// Records matching `identifiers`, under the CURRENT access. A withheld
+    /// record is simply absent (limited access). Throws on store-level failure.
+    func contacts(identifiers: [String], keysToFetch: [CNKeyDescriptor]) throws -> [CNContact]
+}
+
+protocol SystemContactLinkReading: AnyObject {
+    func refresh(contacts: [FamilyContact]) async -> VerifiedLinksSnapshot
+    func photoImageData(forIdentifier identifier: String) async -> Data?   // nil: absent/unreadable
+    func invalidate(identifier: String?)                                    // one record, or all
+}
+
+/// actor: all state below is actor-isolated (L1 §13.1).
+actor SystemContactLinkService: SystemContactLinkReading {
+    init(reader: SystemContactReading = AddressBookDirectory(),
+         observabilityBus: ObservabilityBus? = nil)
+
+    /// ONE batched fetch (≤12 identifiers; keys [identifier, phoneNumbers]).
+    /// - fetch throws            → previous snapshot returned unchanged (degraded, reason-coded)
+    /// - per-link: verified iff the record exists AND any current normalized number
+    ///   satisfies MissedCallContactResolver.matches(storedNumberKey, current)
+    /// - duplicate identifier claims: first in ROSTER order wins; later ones unverified
+    /// - access not readable (.denied/.notDetermined) → NO store call, snapshot unchanged
+    func refresh(contacts: [FamilyContact]) async -> VerifiedLinksSnapshot
+
+    /// System photo bytes keyed by identifier; nil when absent/unreadable/not readable.
+    func photoImageData(forIdentifier identifier: String) async -> Data?
+
+    /// One identifier or the whole photo cache (nil = all).
+    func invalidate(identifier: String?)
+}
+```
+
+Isolation and cache: the photo-byte cache is `NSCache<NSString, NSData>` INSIDE the actor
+(constants in §4.3), so the actor is the only mutator; concurrent callers await serialized
+access. `AddressBookDirectory` conforms:
+
+```swift
+extension AddressBookDirectory: SystemContactReading {
+    func currentAccess() -> ContactsAccess { Self.access() }
+    func contacts(identifiers: [String], keysToFetch: [CNKeyDescriptor]) throws -> [CNContact] {
+        let predicate = CNContact.predicateForContacts(withIdentifiers: identifiers)
+        return try store.unifiedContacts(matching: predicate, keysToFetch: keysToFetch)
+    }
+}
+```
+
+(Placed in AddressBookDirectory.swift; the store stays private.)
+
+### 1.4 Write seam — new file `Services/Contacts/SystemContactPhotoWriter.swift`
+
+```swift
+enum SystemContactWriteAccess: Equatable {
+    case notDetermined, denied, limited, full
+
+    /// Pure mapping from the already-mapped read access (single iOS-18 gate lives
+    /// in `ContactsAccess.from`). `.allowed → .full`, `.limited → .limited`.
+    static func from(_ access: ContactsAccess) -> SystemContactWriteAccess
+}
+
+enum SystemContactWriteFailure: String, Equatable {   // raw values ARE the log reason codes
+    case fetchFailed = "fetch_failed"
+    case notInGrantedSelection = "not_in_granted_selection"
+    case saveRejected = "save_rejected"
+    case readBackMismatch = "read_back_mismatch"
+}
+
+enum SystemContactPhotoWriteOutcome: Equatable {
+    case written                                   // saved AND verified by read-back
+    case skippedNoLink                             // unlinked/unverified → no attempt (today's behavior)
+    case skippedNoAuthorization(SystemContactWriteAccess)
+    case recordGone                                // identifier no longer resolves
+    case identityMismatch                          // fingerprint failed at attempt time
+    case failed(SystemContactWriteFailure)
+
+    /// Closed log vocabulary (observability only — never user-visible).
+    var logToken: String
+}
+
+protocol SystemContactPhotoWriting: AnyObject {
+    func writeAccess() async -> SystemContactWriteAccess                // detected, never assumed
+    func writePhoto(_ jpeg: Data, to link: SystemContactLink) async -> SystemContactPhotoWriteOutcome
+    func clearPhoto(from link: SystemContactLink) async -> SystemContactPhotoWriteOutcome
+}
+
+/// The confined real glue (L1 §9.2). The ONLY file in the tree permitted to
+/// construct CNSaveRequest / CNMutableContact (pinned by a source-scan test, §6.4).
+actor SystemContactPhotoWriter: SystemContactPhotoWriting {
+    init(store: CNContactStore = CNContactStore(), observabilityBus: ObservabilityBus? = nil)
+}
+```
+
+Attempt sequence inside `writePhoto`/`clearPhoto` (exact):
+1. Fetch by identifier, keys `[CNContactIdentifierKey, CNContactPhoneNumbersKey,
+   CNContactImageDataKey, CNContactImageDataAvailableKey]` via
+   `unifiedContacts(matching: CNContact.predicateForContacts(withIdentifiers:))`.
+   - throw + access `.limited` → `.failed(.notInGrantedSelection)`; throw otherwise → `.failed(.fetchFailed)`
+   - empty + `.limited` → `.failed(.notInGrantedSelection)`; empty otherwise → `.recordGone`
+2. Fingerprint re-check AT ATTEMPT TIME: the record's current numbers must contain one
+   matching `link.numberKey` (`MissedCallContactResolver.matches`). No match, or no numbers at
+   all → `.identityMismatch` — the wrong-contact write is PREVENTED, not detected.
+3. Build `PhotoWriteIntent { identifier, numberKey, fields: Set<PhotoWriteField> }` where
+   `enum PhotoWriteField { case photo }` — the invariant is `fields == [.photo]`; DEBUG
+   `assert(intent.fields == [.photo])`. `mutable = contact.mutableCopy()` checked-cast (see
+   deviation 3); assign ONLY `imageData` (`clearPhoto`: `imageData = nil`); `CNSaveRequest().update(mutable)`;
+   `try request.execute(store)` in do/catch → `.failed(.saveRejected)`.
+4. Read-back: re-fetch `CNContactImageDataKey`; byte equality with the written JPEG →
+   `.written`; anything else → `.failed(.readBackMismatch)` (never a false success).
+5. Serialization: actor isolation makes saves strictly serial (L1 §13.2). No retries, no
+   backoff, no timeouts (§4.5).
+
+### 1.5 Outcome→UI mapping — total by construction
+
+```swift
+/// The editor's photo outcome states (consumed by the wizard, §2.4).
+enum FamilyPhotoEditorState: Equatable {
+    case updatedInSystem                          // family.photo.state.updatedInSystem
+    case keptOnPhone                              // family.photo.state.keptOnPhone
+    case keptOnPhoneAccessDenied                  // keptOnPhone + family.photo.accessDeniedBody
+    case systemPhotoRemains                       // family.photo.state.systemPhotoRemains
+
+    /// TOTAL mapping from every write outcome; nil = "no label, today's UX".
+    /// Exhaustive switch, no default — a new outcome case must decide its UI
+    /// consequence at compile time (L1 §10.3 totality).
+    static func from(_ outcome: SystemContactPhotoWriteOutcome) -> FamilyPhotoEditorState?
+}
+```
+
+| Outcome | State | Label keys |
 |---|---|---|
-| L2-D1 | **Barge-in is evaluated before the cancel/amendment split** (after the escape check). The ordered classifier is: deadline → length → escape → barge-in → cancel/amendment → answer. | L1 ADR-MTC-04 places cancel/amendment before barge-in. The counterexample: "होइन, मेरो छोरालाई फोन गर" (no, call my son) would reach the amendment branch first and merge call words as a music answer, silently defeating the direct-call and sensitive-call shields. The escape check still runs first (L1 is explicit that the escape phrase embeds a negation). Pinned by test `testNegationPlusStrongCommandBart` + `gesInNotMerges`. |
-| L2-D2 | **Two barge-in vocabularies are widened `private` → `internal`** with extraction comments mirroring the `isExplicitMedicationAcknowledgement` precedent: `CommandRouter.sensitiveCallPhrases` and `VoiceContactSearchRoute.isDirectCallUtterance` (which keeps its lowercase-input contract; the caller passes canonical text). | A second call site now needs the exact same vocabulary — the same reason the F3 extraction exists. One table, never duplicated. |
-| L2-D3 | **Cancel detection is LEADING-position** over a mirrored token table ({no, nope, wrong, छैन, होइन, होइनन्} from `isNoResponse` `:3809-3814`, plus the constitution's {रद्द, never mind, cancel}); the bare-whole-utterance case additionally accepts today's `isNoResponse` semantics. | `isNoResponse` matches anywhere in the utterance; under that reading "दुर्गा होइन" (not durga — a correction) would cancel the frame. Leading position keeps textured corrections as answers while "होइन" alone stays a cancel. Vector `V11` in §22. |
-| L2-D4 | **The escape vocabulary is a Swift input table; probes do not advertise it.** `dialogue.escape` is the acknowledgement spoken after the user escapes, not an instruction in the probe. | L1 §22 defines only the ack key; the constitution's escape phrase is what the user says. R5 resolved: escape fully drops the frame, so no attempts reset exists or is needed. |
-| L2-D5 | **The over-length check runs on the RAW answer** (`raw.count > InputSanitiser.maxLength` ⇒ invalid) before the sanitise + seam call. | `InputSanitiser.sanitise` CLAMPS at 200 Characters (verified: it truncates via `prefix`), and a truncated merge is forbidden (L1 §11). Checking raw length is the only way to distinguish "invalid over-length" from "valid short". |
-| L2-D6 | **A re-probe refreshes the deadline** (one full window per probe; `attempts` persists on the same frame). The state machine gains `refreshSlotAnswerWindow()`; `DialogueManager.noteAttempt()` restamps the deadline. | L1 §9 "deadline: 45 s from probe speech" — a re-probe IS a probe speech. Total dialogue is bounded at 2 windows, well under any watchdog envelope (§27 backstops). Window rows in §27. |
-| L2-D7 | **`DialogueFrame.attempts` and `deadline` are `var`; `arm` is the only deadline writer.** | The frame keeps one identity through a re-probe (§L2-D6); arm stamps `now + answerWindowSeconds`, resolution clears everything. |
-| L2-D8 | **Capture-form taxonomy**: leading index token ⇒ `.indexWord`; whole-value alias match ⇒ `.optionName`; marker-dropped-variant alias match ⇒ `.repetition`; anything else non-empty ⇒ `.freeText`. | Makes all four FR-MTC-005 forms distinguishable from the value alone — no `sourceTranscript` comparison needed for classification (repetition means "repeated with its marker context", e.g. "दुर्गा भजन" vs bare "दुर्गा"). Vectors `V1`–`V8` in §22. |
-| L2-D9 | **Free-form on a `candidateChoice` frame must be claimed by a candidate's own domain extractor** (music → `musicQuery`; YouTube → `YouTubeRoute.extractQuery`); the first claiming candidate in list order executes with the extracted value; no claim ⇒ invalid. | R2's bounded reading of "free-form always accepted": free text can only drive a domain that accepts free text; news/appLaunch candidates cannot be claimed, so nothing is fabricated and nothing executes unasked. |
-| L2-D10 | **`DialogueCandidate.matchKeys` = the near-match's `matchedKeys`** (the user's own partial words, fixed rule vocabulary). Matching mirrors the repo's script-split idiom (`isMusicDropToken`): Devanagari keys match by containment ("युट्युबमा" ⊃ "युट्युब"), Latin keys whole-token only. | One vocabulary source (the rule's own keys); the pick by name is the user repeating their own words. |
-| L2-D11 | **`DialogueCandidate` gains `appID: String?` and `matchKeys: [String]`** on top of L1 §9's fields. | `appID` is the launcher seam's payload (mirrors `KeywordIntentRule.Match.appID`); `matchKeys` is L2-D10. Defaults keep construction sites explicit. |
-| L2-D12 | **The catalog's `groups` is an ordered ARRAY, not a dictionary**; group selection is `groupForMusicQuery` over each group's `matchKeys`, first match in file order; no group or an unloadable catalog ⇒ a free-text-only probe using `dialogue.probe.musicAny`, default still offered. Additionally the L1 §28 optional `dialogueOptionCatalog` protocol member is DROPPED. | Dictionary iteration order is not stable across lookups — first-match semantics need the array. The catalog is a static bundle resource with no coordinator state; the router owns one cached load (`private lazy`), so no protocol member is needed. |
-| L2-D13 | **R10 — merged music command**: `activeCommand` is reused exactly as L1 §11 says (the query travels the free-text `message` entity). Execution of a slotFill answer with a non-nil `activeCommand` goes through `dispatchInterpreted(command.merging(message: value), raw: raw)` — byte-for-byte the interpreted route's own executor; with a nil `activeCommand` (the ladder-arm intake) it calls `fireMusicRequest(query: value)` directly — the ladder arm's own seam. Both converge on `fireMusicRequest`. | §9 lists `merging(message:)` on `InterpretedCommand` (memberwise-init copy; every other field preserved verbatim). This keeps NFR-MTC-012's parity claim structural: a merged answer executes through the same executor a fresh interpreted utterance uses. |
-| L2-D14 | **R11 — the shared seam helper** is `IntentTranscriptPreparation.prepare(_:seam:)` in a new `Services/Intents/` file, returning `Prepared { raw, sanitised, prepared, pair }`; internal order sanitise → seam, identical to `LocalBrainChain.turnInput`; `LocalBrainChain` is rewired to call it. `LocalBrainChain.plainText(for:raw:)` is untouched. | One implementation, two callers. The dialogue path consumes `prepared` (= the seam's `pickerBrainInput` when a seam exists, else the sanitised text); the brain path keeps its raw-vs-picker equality mapping verbatim. Parity suite §18 rows `T*`. |
-| L2-D15 | **R12 — the Phase 2 clause arrives as a defaulted `InterpreterContext.frameClause: String? = nil`**, rendered by `IntentPrompt.frameClause(_:)` into a fifth interpolation `{frame_clause}` inserted between the `User said:` line and the closing imperative. | The `addressAs` precedent (an explicit initialiser carrying a defaulted field, `LlamaCommandInterpreter.swift:110-117`) is the closest in-repo shape; every pre-feature construction site compiles unchanged and the Phase 1 prompt is byte-identical (the renderer returns the empty string for nil). §19 carries the atomic update list (seed, mirror anchors, digests, baseline). |
-| L2-D16 | **`DialogueFrameResolution` gains `.emergency`** alongside L1 §9's nine outcomes; the emergency-clear emits `dialogue_frame_resolved {outcome: "emergency"}`. | Distinguishes the emergency side-effect clear from a barge-in and from a supersession in telemetry; the outcome vocabulary stays closed (§26). |
-| L2-D17 | **Exhaustion (R3 confirmed)**: slotFill exhaustion executes the pending command with its default query through the same executor as an explicit default pick; `candidateChoice` exhaustion closes honestly with `dialogue.exhausted`. A bare cancel at any attempt count resolves as cancelled — the default never fires on a cancel. | L1 ADR-MTC-07 table, verbatim. Exhaustion table §24. |
-| L2-D18 | **The safety shields act on the answer turn**: an answer classified as barge-in (med-ack, sensitive-call, direct-call, contact-search, YouTube-play, non-frame-domain keyword match) leaves the frame and falls through to the unaltered ladder, so an answer can never carry med-ack or sensitive vocabulary into the merge or into provider egress. | This is the security-relevant reading of L1 ADR-MTC-05 for the mid-frame answer path; the hostile corpus (§18) pins it. |
+| `.written` | `.updatedInSystem` | `family.photo.state.updatedInSystem` |
+| `.skippedNoLink` | `nil` | none (today's behavior) |
+| `.skippedNoAuthorization(.notDetermined)` | `.keptOnPhone` | `family.photo.state.keptOnPhone` |
+| `.skippedNoAuthorization(.denied)` | `.keptOnPhoneAccessDenied` | `keptOnPhone` + `accessDeniedBody` |
+| `.skippedNoAuthorization(.limited)` | `.keptOnPhone` | `family.photo.state.keptOnPhone` |
+| `.failed(.notInGrantedSelection)` | `.keptOnPhone` | `family.photo.state.keptOnPhone` |
+| `.recordGone` | `.keptOnPhone` | `family.photo.state.keptOnPhone` (+ stale-link line on next refresh) |
+| `.identityMismatch` | `.keptOnPhone` | `family.photo.state.keptOnPhone` + wizard stale line |
+| `.failed(.saveRejected)` | `.keptOnPhone` | `family.photo.state.keptOnPhone` |
+| `.failed(.readBackMismatch)` | `.keptOnPhone` | `family.photo.state.keptOnPhone` (never false success) |
+| remove-flow, clear succeeded but the record keeps its own photo | `.systemPhotoRemains` | `family.photo.state.systemPhotoRemains` |
 
-### 6. Reconciled readings and marked gaps
+Placement: the enum + mapping live in `SystemContactPhotoWriter.swift` next to the outcome
+enum (totality is a seam property; tested in `SystemContactPhotoWriterTests`). The label KEYS
+are resolved only in the view (`SettingsView.swift`), never in the seam.
 
-**R1 — barge-in stage list (pinned).** The predicate set, in order, with the exact call sites (each is the same pure decision its ladder stage uses; single source, no vocabulary duplication):
-
-| # | Predicate (exact) | Call site / source | Interaction after barge-in |
-|---|---|---|---|
-| B1 | `CommandRouter.isExplicitMedicationAcknowledgement(text)` | `CommandRouter.swift:1913` (internal `static`; denials excluded inside) | falls through; the safety net `:897` acknowledges exactly as today |
-| B2 | `CommandRouter.sensitiveCallPhrases` containment (widened internal, L2-D2) | `CommandRouter.swift:1869` + `containsPhrase` semantics `:1824` | falls through; `routeKeywordRemainder` `:1973-1980` blocks with `router.sensitiveBlocked` unchanged |
-| B3 | `VoiceContactSearchRoute.isDirectCallUtterance(text)` (widened internal, L2-D2; lowercase-input contract) | `VoiceContactSearchRoute.swift:137-140` | falls through; the interpreter/direct-call path handles it (its normal confirmation runs — FR-MTC-012 scenario 1) |
-| B4 | `VoiceContactSearchRoute.decide(transcript:)` returns `.openPhone` | `VoiceContactSearchRoute.swift:67` | falls through; the contact-search stage `:916` opens the Phone screen |
-| B5 | `YouTubeRoute.decide(transcript:)` returns `.play` | `YouTubeRoute.swift:56` | falls through; the YouTube stage `:1164` plays |
-| B6 | `KeywordIntentRule.match(transcript:medicationNames:)` resolves a domain ≠ `frame.domain` | `KeywordIntentRule.swift:164` | falls through; the keyword stage or interpreter executes it |
-| B7 | (negative pin) a music-domain match mid-**music** frame is NOT a barge-in | FR-MTC-005 scenario 3 ("दुर्गा भजन बजाऊ" is an answer) | the classifier continues to the answer path |
-
-The negative examples R1 named are covered: "मेरो छोरालाई फोन गर" hits B3 (and its normal confirmation runs afterwards); "औषधि खाएँ" hits B1; a repetition of the probe's own option hits nothing (B4's vetoes keep music-marked text out of the contact route, B6 excludes the frame's domain). Test rows in §18.
-
-**R2 — discard-path candidate composition (final).** At the rephrase-discard branch (`CommandRouter.swift:806-809`): the denied hypothesis is re-offered **only when at least one near-match exists**, appended last; when it is the only possible candidate, no candidate frame opens and today's `router.rephrase.discard` line stands alone. This is the L1 ADR-MTC-07 reading, confirmed; the alternative "never re-offer" stays recorded for review-l2 (§31 R2 of L1).
-
-**R3 — candidateChoice exhaustion (final).** Closes honestly with `dialogue.exhausted`; no execution. Confirmed per L1 ADR-MTC-07's table — executing an unasked candidate is the trap FR-MTC-004/FR-MTC-010 forbid. Reconfirmed at review-l2 against FR-MTC-007's literal wording (carried as risk 11 in the risks table for the reviewer).
-
-**R4 — strip/marker rules (final, ordered).** §22 defines the ordered algorithm `S1`–`S6` with the vectors the requirements imply ("दुर्गा भजन" matches the दुर्गा option; "दशैं दुर्गा भजन" survives as free text; "गीत चलाऊ" is invalid, not a search).
-
-**R5 — escape/re-probe (final).** The escape drops the frame entirely (`.escaped`), speaks the ack, and the turn ends; the next utterance is a fresh command or a fresh trigger. No attempts bookkeeping is involved.
-
-**Marked gaps (not guessed).** (1) OD-M1..M4 stay owner-facing; this document implements the L1 defaults (2 probes; curated catalog; Phase 1 first; Phase 3 separate) as config/scope. (2) The exact ne/en copy in §16 is draft for the copy review; the keys, structure and join rules are the binding part. (3) The catalog's bhajan alias lists are draft match vocabulary — extendable without code by the data file alone. (4) The `DialogueOptionCatalog.json` resource name is pinned; its bundle placement matches the existing `Resources/` JSON precedent (`DialectLexicon.json`).
-
----
-
-## Components
-
-### 7. Component map
-
-C-MTC-01…C-MTC-13 per L1 §27, at the file granularity this document pins. `NEW` = new file in the change set; `CHANGED` = existing file edited. State ownership and concurrency are stated per component.
-
-| ID | Component | File(s) | State ownership | Concurrency |
-|---|---|---|---|---|
-| C-MTC-01 | `DialogueManager`, `DialogueFrame`, `DialogueCandidate`, `ProbeKind`, `DialogueSlot`, `DialogueFrameResolution`, `DialogueProbeComposer`, `DialogueConfig`, `DialogueError` | NEW `` `ios/ElderlyAssistant/Services/` + `Voice/DialogueManager.swift` `` | the one live frame | main-queue-confined; reads = router turn + coordinator; writes = coordinator only |
-| C-MTC-02 | `DialogueAnswerPath`, `AnswerClassification`, `DialogueMerge`, `CaptureForm`, `MergeSource`, `InvalidAnswerReason`, vocab tables, `InterpretedCommand.merging(message:)` | NEW `` `ios/ElderlyAssistant/Services/` + `Voice/DialogueAnswerPath.swift` `` | none (pure statics) | stateless; callable from any thread |
-| C-MTC-03 | `DialogueCandidateBuilder` | NEW `` `ios/ElderlyAssistant/Services/` + `Voice/DialogueCandidateBuilder.swift` `` | none (pure statics) | stateless |
-| C-MTC-04 | `DialogueOptionCatalog`, `DialogueOptionGroup`, `DialogueOption` + the bundled resource | NEW `` `ios/ElderlyAssistant/Services/` + `Voice/DialogueOptionCatalog.swift` ``; NEW `` `ios/ElderlyAssistant/Resources/` + `DialogueOptionCatalog.json` `` | the loaded catalog (immutable) | immutable after load; safe from any thread |
-| C-MTC-05 | Interception block, two didYouMean trigger edits, the degenerate trigger helper, the execution helpers, protocol members + extension defaults, the emergency clear | CHANGED `` `ios/ElderlyAssistant/Services/` + `Voice/CommandRouter.swift` `` | per-turn locals only | main-thread turn (existing contract) |
-| C-MTC-06 | `MusicQueryExtraction` + `musicQueryOutcome`, `nearMatches` + `NearMatch`, scaffold/marker accessors | CHANGED `` `ios/ElderlyAssistant/Services/` + `KeywordIntentRule.swift` `` | none (pure statics) | stateless |
-| C-MTC-07 | `awaitingSlotAnswer`, `openSlotAnswerWindow`, `refreshSlotAnswerWindow`, `onSlotAnswerTimeout`, mirrored timer | CHANGED `` `ios/ElderlyAssistant/App/` + `VoiceSessionStateMachine.swift` `` | the session state + `slotAnswerTimer` | main-queue-confined (existing contract) |
-| C-MTC-08 | `DialogueManager` ownership, conformance, timeout handler, confirmation coexistence funnel, `prepareDialogueAnswerText` | CHANGED `` `ios/ElderlyAssistant/App/` + `AppCoordinator.swift` `` | owns the manager + the timeout task | main-queue-confined; hops mirror `openConfirmationWindow()` |
-| C-MTC-08b | `isDirectCallUtterance` widened private → internal | CHANGED `` `ios/ElderlyAssistant/Services/` + `Voice/VoiceContactSearchRoute.swift` `` | none | stateless |
-| C-MTC-08c | `turnInput` rewired to the shared helper; seam accessor | CHANGED `` `ios/ElderlyAssistant/Services/` + `Intents/LocalBrainChain.swift` ``; NEW `` `ios/ElderlyAssistant/Services/Intents/` + `IntentTranscriptPreparation.swift` `` | none | stateless (existing seam) |
-| C-MTC-09 | `dialogue.*` keys (16) | CHANGED `` `ios/ElderlyAssistant/Resources/` + `Localizable.xcstrings` `` | none | n/a |
-| C-MTC-10 | Log-gate coverage + fixtures | CHANGED `` `ios/tools/` + `check-release-log-safety.py` `` and its fixtures module | none | n/a |
-| C-MTC-11 | Test suites + hostile corpus | NEW/CHANGED under `` `ios/ElderlyAssistantTests/` `` | n/a | n/a |
-| C-MTC-12 | Frame clause + seed mirror + pin updates (Phase 2) | CHANGED `` `ios/ElderlyAssistant/Services/` + `Voice/IntentPrompt.swift` ``, `` `ios/ElderlyAssistant/Services/` + `Voice/LlamaCommandInterpreter.swift` ``; CHANGED `` `tools/train-intent/seeds/` + `prompt_template.txt` ``; tests | none | stateless |
-| C-MTC-13 | Reminder/calendar rollover (Phase 3, deferred) | CHANGED `CommandRouter.swift` slot vocabulary | none now | deferred |
-
-### 8. C-MTC-01 — `DialogueManager.swift` (the frame, the manager, the composer, config, errors)
-
-**Responsibility.** Own the single live frame; stamp its deadline; count attempts; resolve it through one funnel; compose probe text from template keys. Responsibility fence: it never speaks, never executes, never loads the catalog, never touches the session state machine, never logs.
-
-Complete interface listing (internal access throughout; the file is new):
+### 1.6 Unified search — UnifiedContactSearch.swift changes
 
 ```swift
-import Foundation
+struct Outcome: Equatable {
+    let entries: [Result]
+    let moreAvailable: Bool
+    /// Keyed by FAMILY result id ("family-<uuid>") → the linked phone-book record's
+    /// display name, per L1 §7.1 Pass 3. Only synthesized rows appear here; the map
+    /// is EMPTY for unlinked searches. Default [:] keeps existing constructions compiling.
+    let linkedBookNames: [String: String]
 
-enum ProbeKind: String, Equatable {
-    case slotFill
-    case candidateChoice
+    init(entries: [Result], moreAvailable: Bool, linkedBookNames: [String: String] = [:])
 }
 
-enum DialogueSlot: Equatable {
-    case musicQuery          // Phase 3 adds .reminderTime, .calendarTitle, .calendarTime
+enum FamilyMatchTier: Int, Comparable {
+    case exactName = 0
+    case relationship = 1
+    case nickname = 2        // NEW — any stored nickname: exact OR normalized substring
+    case containment = 3     // renumbered (was 2); rawValue order IS quality order
 }
 
-struct DialogueCandidate: Equatable {
-    let id: String                        // stable within one frame; never logged with content
-    let labelKey: String                  // xcstrings key for the spoken label template
-    let domain: KeywordIntentRule.Domain
-    let query: String?                    // the user's own extracted words; nil when the domain needs none
-    let appID: String?                    // .appLaunch only (L2-D11); mirrors Match.appID
-    let matchKeys: [String]               // pick-by-name vocabulary (L2-D10)
-}
+static func search(query: String,
+                   family: [FamilyContact],
+                   index: FamilyContactIndex,
+                   in entries: [AddressBookEntry],
+                   verifiedLinks: VerifiedLinksSnapshot = .empty,
+                   recency: [String: Date] = [:],
+                   limit: Int = defaultLimit) -> Outcome
 
-struct DialogueFrame {
-    let id: UUID                          // process-local identity; telemetry/debugging only
-    let probeKind: ProbeKind
-    let slot: DialogueSlot
-    let domain: KeywordIntentRule.Domain? // the frame's own domain (barge-in exclusion, B6/B7)
-    let activeCommand: InterpretedCommand? // non-nil only when action == .music (L2-D13)
-    let candidates: [DialogueCandidate]   // <= DialogueConfig.maxCandidates
-    let defaultQuery: String?             // slotFill: the pending degenerate query
-    let sourceTranscript: String          // the utterance that opened the frame (near-match context)
-    var attempts: Int                     // probes spoken so far; arm sets 1
-    var deadline: Date                    // arm is the only initial writer (L2-D7)
-    func isExpired(at now: Date) -> Bool { now >= deadline }
+static func familyMatches(query: String,
+                          in family: [FamilyContact],
+                          index: FamilyContactIndex) -> [(contact: FamilyContact, tier: FamilyMatchTier)]
 
-    static func slotFill(candidates: [DialogueCandidate],
-                         defaultQuery: String?,
-                         domain: KeywordIntentRule.Domain,
-                         activeCommand: InterpretedCommand?,
-                         sourceTranscript: String) -> DialogueFrame
-    static func candidateChoice(candidates: [DialogueCandidate],
-                                sourceTranscript: String) -> DialogueFrame
-}
+static func addressBookMatches(query: String, in entries: [AddressBookEntry]) -> [AddressBookEntry]  // unchanged
 
-enum DialogueFrameResolution: Equatable {
-    case answered(DialogueMerge)
-    case defaultExecuted
-    case candidateSelected(index: Int)    // 0-based position in frame.candidates
-    case exhausted
-    case cancelled
-    case escaped
-    case bargedIn
-    case timedOut
-    case superseded
-    case emergency                       // L2-D16
-}
+static func dedupe(matchedFamily: [FamilyContact],
+                   in bookMatches: [AddressBookEntry]) -> [AddressBookEntry]   // unchanged (Pass 4)
 
-final class DialogueManager {
-    private(set) var frame: DialogueFrame?
-    private let answerWindowSeconds: TimeInterval
-    private let now: () -> Date
-
-    init(answerWindowSeconds: TimeInterval =
-             TimeInterval(VoiceSessionStateMachine.Config.confirmationTimeoutSeconds),
-         now: @escaping () -> Date = { Date() })
-
-    /// nil when absent OR expired; an expired frame is dropped on read
-    /// (the half-open-window guarantee, L1 §14).
-    var liveFrame: DialogueFrame? { get }
-
-    /// Validates, stamps deadline = now() + answerWindowSeconds, stores.
-    /// The window itself is the coordinator's; this call never speaks.
-    func arm(_ draft: DialogueFrame) throws        // .windowBusy | .noResolution
-    @discardableResult func noteAttempt() -> Int   // attempts += 1; deadline restamped (L2-D6); returns attempts
-    @discardableResult func resolve(_ resolution: DialogueFrameResolution) -> DialogueFrame?  // clears + returns
-}
-
-enum DialogueProbeComposer {
-    /// slotFill: question key (group) or dialogue.probe.musicAny (no group),
-    /// with %@ = option labels + the anyPlay label joined ", "; retry prefixes
-    /// dialogue.retry + " ". candidateChoice: dialogue.understood.no + " " +
-    /// dialogue.didYouMean with %@ = candidate labels joined ", ".
-    static func probeText(for frame: DialogueFrame,
-                          catalog: DialogueOptionCatalog?,
-                          retry: Bool,
-                          locale: Locale) -> String
-}
-
-enum DialogueConfig {
-    static let maxProbes = 2          // OD-M1; counts probes spoken
-    static let maxCandidates = 3      // FR-MTC-004 <= 2-3
-    static let maxSlotOptions = 4     // FR-MTC-003 <= 3-4
-}
-
-enum DialogueError: Error, Equatable {
-    case windowBusy          // arm while a window is live (defensive)
-    case noResolution        // arm with neither candidates nor a default
-    case catalogUnavailable  // resource missing/malformed
-    case emptyMerge          // merge produced no value (callers treat as invalid)
-}
+static func rank(family: [(contact: FamilyContact, tier: FamilyMatchTier)],
+                 book: [AddressBookEntry],
+                 recency: [String: Date]) -> [Result]                          // unchanged
 ```
 
-**Arm-time validation.** `arm` throws `.noResolution` when `draft.candidates.isEmpty && draft.defaultQuery == nil`; it throws `.windowBusy` when `liveFrame != nil` (expiry-aware, so a stale frame never blocks). `liveFrame` drops an expired frame silently. `noteAttempt` on an absent frame is a no-op returning 0.
+Algorithm (L1 §7.1 Passes 1-5, exact):
+- Pass 1 `familyMatches`: tiers checked best-first. `.exactName` = index `normalizedName ==
+  NepaliTextNormalizer.normalize(needle)`. `.relationship` unchanged. `.nickname` = the
+  normalized query equals one of `entry.normalizedNicknames` (exact checked first via the O(1)
+  map) OR the normalized query is a Character-safe substring of any normalized nickname —
+  `range(of:options:[.caseInsensitive, .diacriticInsensitive])`, same direction as the name
+  tier (nickname contains the query). Both land in tier `.nickname`; "exact > substring" is
+  check ORDER only, with no ranking consequence by construction. `.containment` = today's name
+  containment / digit rule, unchanged.
+- Pass 2 `addressBookMatches` unchanged.
+- Pass 3 link merge (new pure step): for each matched book row `b` whose `b.identifier` has
+  `verifiedLinks.familyID(forIdentifier:)` = `f`:
+  - `f ∈ matchedFamily` → DROP `b`.
+  - else → SYNTHESIZE `(contact: f, tier: .containment)` and DROP `b`; set
+    `linkedBookNames["family-\(f.id)"] = b.name`, suppressed when `NepaliTextNormalizer.normalize(b.name)
+    == index.entry(for: f.id)?.normalizedName`.
+- Pass 4 today's number `dedupe` over the REMAINING book rows (byte-for-byte today for
+  unlinked pairs; every linked row is already gone).
+- Pass 5 recount before the limit slice: `moreAvailable = familyCount + bookCount > limit`.
 
-**Probe composition rules (template-only, testable by string equality).** Labels resolve via `L10n.str(labelKey, locale:)`; the composed strings use exactly one space after the `dialogue.retry` prefix and `", "` between labels. Anchor example (ne, first probe, bhajan group): "कस्तो भजन? शिव, दुर्गा, विष्णु, देवी, जे पनि बजाऊ … वा आफैँ भन्नुहोस्". A candidate label with a query renders its `%@` from `DialogueCandidate.query`; without one (news, or a degenerate music near-match) the primary `matchKey` renders instead — the user's own word, never generated text.
+Single code path: the `index:` parameter is REQUIRED (no convenience overload that could
+drift); all call sites (3 in LeafViews, the wizard, tests) pass an explicit index. Tests build
+`FamilyContactIndex(family: family)` inline.
 
-### 9. C-MTC-02 — `DialogueAnswerPath.swift` (classification, merge, vocabularies)
-
-**Responsibility.** The pure brain of the answer turn: classifier, barge-in predicates, the strip/canonicalise/merge pipeline, and the input vocabularies. No state, no side effects, no router dependency beyond internal statics (B1-B6).
+### 1.7 Voice resolution — ContactResolver.swift changes
 
 ```swift
-import Foundation
-
-enum CaptureForm: String, Equatable { case indexWord, optionName, repetition, freeText }
-
-enum MergeSource: String, Equatable {
-    case catalog, freeText, candidate, defaultQuery
-}
-
-struct DialogueMerge: Equatable {
-    let value: String            // the merged slot value / execution payload
-    let capture: CaptureForm
-    let source: MergeSource
-}
-
-enum InvalidAnswerReason: String, Equatable {
-    case overLength              // raw > InputSanitiser.maxLength (L2-D5)
-    case emptyAfterStrip         // scaffold strip left nothing
-    case degenerateAnswer        // only markers/scaffold survived (e.g. "गीत चलाऊ")
-    case noCandidateClaimed      // candidateChoice free-form no extractor claimed (L2-D9)
-}
-
-enum AnswerClassification: Equatable {
-    case expired
-    case escape
-    case cancel
-    case bargeIn
-    case candidatePick(index: Int, capture: CaptureForm)   // 1-based spoken position
-    case answer(DialogueMerge)
-    case freeFormForCandidate(index: Int, value: String)   // 0-based candidate position
-    case invalid(InvalidAnswerReason)
-}
-
-/// Input vocabularies — matched, never spoken (L2-D3/L2-D4).
-enum DialogueAnswerVocabulary {
-    static let indexWords: [(token: String, position: Int)] = [
-        ("पहिलो", 1), ("first", 1),
-        ("दोस्रो", 2), ("second", 2),
-        ("तेस्रो", 3), ("third", 3)
-    ]
-    static let escapePhrases: [String] = [
-        "फेरि भन्छु", "फेरि भन्न दिनु", "फेरि भन्नुहोस्", "म फेरि भन्छु",
-        "let me say it again", "let me repeat", "i'll say it again"
-    ]
-    static let cancelTokens: [String] = [               // leading-position table (L2-D3)
-        "no", "nope", "wrong", "छैन", "होइन", "होइनन्",
-        "रद्द", "never mind", "cancel"
-    ]
-    static let anyPlayAliases: [String] = [             // the default-answer pick
-        "जे पनि", "जे पनि बजाऊ", "जे भए पनि", "anything", "anything works"
-    ]
-    static let probeEchoWords: [String] = [             // probe question words, stripped as scaffold
-        "कस्तो", "कुन", "के", "what", "which", "kind"
-    ]
-}
-
-enum DialogueAnswerPath {
-    static func classify(raw: String,
-                         prepared: String,
-                         frame: DialogueFrame,
-                         catalog: DialogueOptionCatalog?,
-                         locale: Locale,
-                         now: Date) -> AnswerClassification
-    static func isBargeIn(_ prepared: String,
-                          frame: DialogueFrame,
-                          medicationNames: [String]) -> Bool
-    static func stripScaffold(_ text: String) -> String
-    static func markerDroppedVariant(_ text: String) -> String
-    static func matchCandidate(_ value: String, frame: DialogueFrame) -> Int?   // 0-based
-    static func merge(_ value: String,
-                      into frame: DialogueFrame,
-                      catalog: DialogueOptionCatalog?) throws -> DialogueMerge
-}
+init(contactsProvider: @escaping () -> [FamilyContact],
+     indexProvider: (() -> FamilyContactIndex)? = nil)   // nil ⇒ build per call (test-parity path)
 ```
 
-**Classifier order (pinned; L2-D1).** `C0` deadline (`frame.isExpired(at: now)` ⇒ `.expired`); `C1` raw length (`raw.count > InputSanitiser.maxLength` ⇒ `.invalid(.overLength)`); `C2` escape (any `escapePhrases` containment on the lowercased prepared text ⇒ `.escape`); `C3` barge-in (`isBargeIn` ⇒ `.bargeIn`); `C4` cancel/amendment (leading token in `cancelTokens`; scaffold-only remainder ⇒ `.cancel`; otherwise the remainder continues through `C5` — the no-with-amendment precedent); `C5` resolve (index word ⇒ `.candidatePick`; candidate `matchKeys` match ⇒ `.candidatePick`; anyPlay alias or the localized anyPlay label ⇒ `.answer(defaultQuery pick)`; catalog alias whole value / marker-dropped variant ⇒ `.answer(catalog)`; candidateChoice free-form extractor claim ⇒ `.freeFormForCandidate`; slotFill non-empty stripped value ⇒ `.answer(freeText)`; else `.invalid`); `C6` empty-frame guard (a nil/cleared frame can never enter — the router reads `liveFrame`).
+Scoring in `score(_:against:)` (bands per L1 §8.3; accept 0.6 and margin 0.15 remain the
+private constants at :61-62; ties ⇒ ambiguity, never order):
 
-**Barge-in (pinned, L2-D18; R1 rows B1-B7).** `isBargeIn` lowercases the prepared text once and evaluates, in order: B1 `CommandRouter.isExplicitMedicationAcknowledgement(text)`; B2 `CommandRouter.sensitiveCallPhrases.contains { text.contains($0) }`; B3 `VoiceContactSearchRoute.isDirectCallUtterance(text)`; B4 `if case .openPhone = VoiceContactSearchRoute.decide(transcript: text)`; B5 `if case .play = YouTubeRoute.decide(transcript: text)`; B6 `if let m = KeywordIntentRule.match(transcript: text, medicationNames: medicationNames), m.domain != frame.domain`; B7 return false otherwise (a music-domain match mid-music-frame is an answer). The function is total, pure and synchronous.
+| Band | Score | Source |
+|---|---|---|
+| exact name | 1.00 | index `normalizedName` |
+| relationship | 0.90 | unchanged |
+| exact nickname | 0.85 | index `normalizedNicknames` exact |
+| name containment | 0.80 | unchanged |
+| nickname containment | 0.75 | any normalized nickname contains the query (or query contains it — same both-direction shape as the name band) |
+| token overlap | 0.60 | unchanged (name tokens) |
 
-**`InterpretedCommand` extension (same file; L2-D13).**
+`nearMiss(_:)`: candidate set = contacts whose normalized name OR any normalized nickname is
+within the edit budget (2) of a query variant; the existing exactly-one rule is preserved —
+name-near-miss + nickname-near-miss in one query = two candidates = abstain. The hot path
+consumes the index (no per-call renormalization of names/nicknames); relationship is
+normalized per call exactly as today. Error type: none (pure); `.none` IS the honest failure.
+
+### 1.8 Link-aware number reach — MissedCallContactResolver.swift changes
 
 ```swift
-extension InterpretedCommand {
-    /// Copy with the free-text `message` entity replaced — every other field
-    /// verbatim (memberwise init; all fields are `let`). Used only by the
-    /// frame execution path; the merged command then travels the same
-    /// executor a fresh interpreted `.music` command uses.
-    func merging(message: String) -> InterpretedCommand {
-        InterpretedCommand(action: action, entryId: entryId, contact: contact,
-                           time: time, medication: medication, message: message,
-                           callType: callType, requestedApp: requestedApp,
-                           topic: topic, steps: steps, pluginAction: pluginAction,
-                           pluginEntities: pluginEntities,
-                           confidence: confidence, reply: reply)
+static func familyMatch(phone: String, in contacts: [FamilyContact]) -> FamilyContact?   // UNCHANGED
+
+/// NEW: the family contact whose VERIFIED linked record carries this number —
+/// roster order; each contact's own phone was already checked first by callers.
+static func linkedFamilyMatch(phone: String,
+                              in contacts: [FamilyContact],
+                              snapshot: VerifiedLinksSnapshot) -> FamilyContact?
+
+static func resolve(phone: String,
+                    family: [FamilyContact],
+                    native: [AddressBookEntry],
+                    access: ContactsAccess,                       // now includes .limited
+                    snapshot: VerifiedLinksSnapshot = .empty) -> NameResolution
+```
+
+`resolve` order (L1 §6.3, §7.3): (1) `familyMatch` on the family's own phones → family name;
+(2) `linkedFamilyMatch` — a call from the linked record's number resolves to the FAMILY
+person; (3) native half (gated on `access.allowsReading`): a matched entry whose
+`identifier` is a verified link remaps to that family contact's name, else the book name;
+(4) `.notDetermined` → `.needsPermission`; denial → `.unresolved`. Unverified/stale links are
+absent from the snapshot, so they fall through to today's behavior exactly.
+
+### 1.9 Coordinator API — AppCoordinator.swift additions
+
+Published/derived state (all main-confined, L1 §13.1):
+
+```swift
+@Published private(set) var familyContacts: [FamilyContact] = [] {
+    didSet {
+        familyIndex = FamilyContactIndex(family: familyContacts)   // wholesale rebuild — drift-impossible
+        refreshVerifiedLinks()                                     // no-op unless a stored link exists
     }
 }
+@Published private(set) var familyIndex: FamilyContactIndex = .empty
+@Published private(set) var verifiedLinks: VerifiedLinksSnapshot = .empty
+@Published private(set) var faceEpoch: UInt64 = 0        // identity/cache bump (§4.4)
+private var systemPhotoTokens: [UUID: String] = [:]      // last-resolved system photo hash prefix
 ```
 
-### 10. C-MTC-03 — `DialogueCandidateBuilder.swift`
-
-**Responsibility.** Assemble the didYouMean candidate list, deterministically, from the sources L1 ADR-MTC-07 pins. Pure; no state; no execution knowledge beyond the domain tag.
+Faces (L1 §10.1):
 
 ```swift
-enum DialogueCandidateBuilder {
-    /// Sources in priority order: relaxed near-matches (L2-D10), then the
-    /// denied rephrase hypothesis appended LAST and ONLY when >= 1 near-match
-    /// exists (R2). Returns [] when nothing is eligible ("never fabricate").
-    static func build(for utterance: String,
-                      excludingDomain: KeywordIntentRule.Domain?,
-                      rephraseHypothesis: InterpretedCommand?) -> [DialogueCandidate]
+/// ".task(id:)" identity: "<id>:<sysphoto-hash-token or link-nil>:<filename>:<faceEpoch>".
+/// Token = sha256 prefix (16 hex chars) of the last-resolved system bytes for this
+/// contact's verified link ("-" = linked, not yet resolved; "link-nil" = no verified link).
+@MainActor func faceIdentity(for contact: FamilyContact) -> String
 
-    /// slotFill options from the catalog group (>= maxSlotOptions sliced to
-    /// the first maxSlotOptions), ids from the catalog, queries = canonical
-    /// queries, matchKeys = the option's aliases.
-    static func slotFillCandidates(from group: DialogueOptionGroup,
-                                   catalog: DialogueOptionCatalog) -> [DialogueCandidate]
+/// Precedence: (1) verified link + readable access + photoImageData → system image;
+/// (2) app-local photoFilename; (3) nil (initials). System images are downsampled to
+/// ContactPhotoStore.maxDimension before returning (memory bound). Never throws.
+@MainActor func faceImage(for contact: FamilyContact) async -> UIImage?
+@MainActor func faceThumbnail(for contact: FamilyContact, diameter: CGFloat,
+                              displayScale: CGFloat) async -> UIImage?
+```
+
+`faceThumbnail` cache keys (L1 §10.1; the two sources can never collide):
+`"sysphoto:<identifier>:<sha256-prefix(16)>"` via `DownsampledImageCache.shared.thumbnail(...)`,
+or `"contact:<filename>"` via the existing `contactFace(...)` path. `faceIdentity` and both
+face methods are `@MainActor` — the token map and published state are only ever touched on main.
+
+Links:
+
+```swift
+enum SystemContactUnlinkMode: Equatable {
+    case unlinkKeepingLocalAsIs                 // default: app-local file untouched
+    case unlinkKeepingDisplayedPhotoLocally     // copy displayed system bytes app-local, then clear
+    case unlinkAndClearAppLocalPhoto            // explicit "remove everything" choice
+}
+
+/// Pure mode rule the wizard applies before calling:
+/// app-local file exists → .unlinkKeepingLocalAsIs; else displayed photo is the
+/// system one → .unlinkKeepingDisplayedPhotoLocally; else → .unlinkKeepingLocalAsIs.
+static func unlinkMode(appLocalFileExists: Bool, displayedPhotoIsSystem: Bool) -> SystemContactUnlinkMode
+
+/// The ONLY unlink path (L1 §6.4). Clears the stored link, books the photo
+/// consequence per `mode`, bumps the epoch, triggers a refresh. Never writes to
+/// the system record. `true` = cleared (or already absent); `false` = no such contact
+/// or the local copy failed (mode .unlinkKeepingDisplayedPhotoLocally without a
+/// successful copy does NOT clear — the never-lose rule wins over the unlink).
+@discardableResult @MainActor
+func setFamilyContactLink(id: UUID, mode: SystemContactUnlinkMode) async -> Bool
+
+/// The wizard's post-save system-photo step (L1 §10.2 step 2-3).
+/// nil = the contact no longer exists; `.skippedNoLink` = no verified link;
+/// `.skippedNoAuthorization(access)` = no attempt, honest fallback.
+@MainActor
+func syncSystemPhoto(forContactID id: UUID, clearing: Bool) async -> SystemContactPhotoWriteOutcome?
+
+/// Refresh entry point: single-flight via the actor; early-returns (no fetch, no
+/// generation bump) when NO roster contact carries a stored link. Never blocks main.
+func refreshVerifiedLinks()
+```
+
+Add/update (L1 §11.1 signatures; `nickname:` is REPLACED — no shim):
+
+```swift
+@discardableResult
+func addFamilyContact(id: UUID = UUID(),            // NEW defaulted id: the wizard knows the contact
+                      name: String, phone: String, relationship: String,
+                      messengerHandle: String? = nil,
+                      photo: UIImage? = nil,
+                      nicknames: [String] = [],
+                      address: String? = nil, email: String? = nil,
+                      isEmergencyContact: Bool = false,
+                      link: SystemContactLink? = nil) -> Bool
+
+@discardableResult
+func updateFamilyContact(id: UUID, name: String, phone: String, relationship: String,
+                         messengerHandle: String?,
+                         photo: UIImage? = nil, removingPhoto: Bool = false,
+                         nicknames: [String] = [],          // REQUIRED at the wizard call site (no default there)
+                         address: String? = nil, email: String? = nil,
+                         isEmergencyContact: Bool = false,
+                         link: SystemContactLink? = nil) -> Bool
+```
+
+Semantics:
+- `nicknames` normalized via `FamilyContact.normalizedNicknames` before persisting.
+- `link` non-nil → set/replace; `link` nil on UPDATE → keep the stored link UNCHANGED (unlink
+  is only `setFamilyContactLink`); nil on ADD → unlinked.
+- Duplicate-claim guard (defense in depth, L1 §6.1): a non-nil `link.identifier` already
+  claimed by ANOTHER contact's stored link → the write is REFUSED (return `false`, nothing
+  persisted, reason-coded event `duplicate_claim`). The wizard's steering prevents this path.
+- Return type stays `Bool`; callers at `SettingsView.swift:2761/2768`, `ProfileInterviewSteps.swift:530/562`,
+  `OnboardingWizardView.swift:405` compile with the parameter changes only.
+- After a successful persist: `familyContacts` republish (→ index rebuild + link refresh).
+- Unchanged: photo save-first/delete-on-failure sequencing; `removeFamilyContact` unchanged
+  except it rides the same republish choke point (a removed contact's link simply leaves the roster).
+
+`contactPhotoStore` gains one reader used by `syncSystemPhoto` and nothing else:
+
+```swift
+/// Raw bytes of a stored thumbnail (the exact processed JPEG on disk), nil when
+/// absent/unsafe. Avoids a decode+re-encode round trip for the system write —
+/// the bytes written are byte-identical to the bytes the app holds.
+func loadData(named filename: String?) -> Data?
+```
+
+## 2. Wizard sheet restructure (`FamilyContactWizardSheet`, SettingsView.swift:1779ff)
+
+Steps stay five; the indicator is untouched. `Step` enum unchanged.
+
+### 2.1 Draft state (final)
+
+Removed: `@State private var nickname = ""`.
+Added/changed:
+
+```swift
+@State private var nicknames: [String] = []          // committed entries (draft)
+@State private var nicknameDraft = ""                // the add-field text
+
+@State private var draftLink: SystemContactLink?     // picked-but-uncommitted link
+@State private var draftLinkBookName: String?        // the picked record's display name at pick time
+@State private var steerTarget: FamilyContact?       // the other contact shown in a steering card
+@State private var photoSaveState: FamilyPhotoEditorState?   // post-save outcome label (§1.5)
+```
+
+Unchanged: `name/phone/relationshipOption/messengerHandle/address/email/isEmergencyContact`,
+the photo trio (`pickedPhoto/removingStoredPhoto/storedPhoto`), the search block
+(`searchText/access/entries/loadFailed/showManualEntry`), `directory`.
+
+`init` gains the steering callback:
+
+```swift
+init(target: FamilyContactsSettingsView.FamilyContactEditorTarget,
+     onSteerTo: @escaping (FamilyContact) -> Void)
+```
+
+parent call site :1587 becomes `FamilyContactWizardSheet(target: target) { other in editorTarget = .edit(other) }`.
+
+### 2.2 Find step — subview breakdown
+
+`findStep` = `stepTitle("family.step.find")` + `searchSection` + `linkSection` +
+(`showManualEntry ? manualEntryFields : addManuallyButton`). The link area renders INSIDE the
+find step (L1 §11.1) and is present in add AND edit.
+
+- `searchSection`: the access switch gains `.limited` — same search UI as `.allowed` plus a
+  caption line `call.search.accessLimited` under `searchField` (one line, caption token,
+  secondary color).
+- `searchResults` — NOW `UnifiedContactSearch.search(query: trimmedSearch,
+  family: coordinator.familyContacts, index: coordinator.familyIndex, in: entries,
+  verifiedLinks: coordinator.verifiedLinks, recency: coordinator.contactCallRecency)` —
+  renders per row kind:
+  - `.addressBook(entry)`: if `storedClaimant(entry.identifier)` is a DIFFERENT roster
+    contact (stored link, verified or stale — the superset) → `steeringResultRow(claimant)`;
+    else today's selectable row (tap = `prefill`), which additionally records the draft link.
+  - `.family(contact)`: `steeringResultRow(contact)`, EXCEPT when `contact.id ==
+    editingContact?.id` — skipped entirely (it is the contact already being edited; its own
+    link is shown in the link area).
+  - `noResults` / `moreAvailable` unchanged.
+- `steeringResultRow(_ other: FamilyContact)`: a card containing
+  `Text(L10n.fmt("family.link.alreadyLinked", other.name))` and a ≥44 pt button (person
+  glyph + `other.name`, a11y label `settings.family.edit`) whose tap calls
+  `onSteerTo(other)`. Tap target: whole card ≥44 pt (`DesignTokens.minTapTargetSize` floor);
+  the button itself also ≥44 pt.
+- `prefill(_ entry: AddressBookEntry)` gains the link record (L1 §11.1 "selects it as today
+  AND records the link in the draft"):
+
+```swift
+private func prefill(_ entry: AddressBookEntry) {
+    name = entry.name
+    phone = entry.phone
+    showManualEntry = true
+    searchText = ""
+    guard !entry.identifier.isEmpty else { return }        // defensive canLink guard (L1 §5.3)
+    draftLink = SystemContactLink(identifier: entry.identifier, numberKey: entry.normalized)
+    draftLinkBookName = entry.name
 }
 ```
 
-**Near-match mapping (pinned).** For each `KeywordIntentRule.NearMatch` in table order, subject to `excludingDomain` and the four-domain eligibility {news, youtube, music, appLaunch}:
+- `storedClaimant(_ identifier: String) -> FamilyContact?` (private): first roster contact
+  `c != editingContact` with `c.systemContact?.identifier == identifier` (roster order).
+- `linkSection` states (top of the find step, under the search):
+  1. `draftLink != nil` → `linkedToLine(draftLinkBookName ?? "-")` + `unlinkButton` (clears
+     `draftLink`/`draftLinkBookName` only — nothing was stored).
+  2. else an EDITING contact with a stored link, verified (`coordinator.verifiedLinks.links[contact.id]`
+     present) → `linkedToLine(resolvedBookName)` + `unlinkButton` (commits immediately via
+     `setFamilyContactLink`, §2.6).
+  3. else an EDITING contact with a stale (stored, unverified) link → `staleLine`
+     (`family.link.stale`) + `unlinkButton`.
+  4. else → `Text("family.link.pickHint")` caption only (with `family.link.sectionTitle`
+     heading at the top of the section in all four states).
+- `resolvedBookName` = `entries?.first { $0.identifier == link.identifier }?.name`; when the
+  record is not in the sweep while the snapshot still verifies it (narrow window), the
+  linkedTo line renders without a name — the stale line is the snapshot's decision, not the
+  sweep's. `family.link.linkedTo` is rendered with `L10n.fmt`.
+- a11y for `unlinkButton`: label `family.link.unlink`, hint `family.link.unlinkHint` (the
+  hint text is also visible as a caption under the button).
 
-| Domain | Candidate label | `query` | `matchKeys` | `appID` |
-|---|---|---|---|---|
-| news | `dialogue.candidate.news` | nil | the near-match's `matchedKeys` | nil |
-| youtube | `dialogue.candidate.youtube` (`%@` = extracted query) | `YouTubeRoute.extractQuery(from: utterance)` — candidate omitted when nil | `matchedKeys` | nil |
-| music | `dialogue.candidate.music` (`%@` = `musicQuery` or primary key) | `KeywordIntentRule.musicQuery(from: utterance)` | `matchedKeys` | nil |
-| appLaunch | `dialogue.candidate.appLaunch` (`%@` = primary key) | nil | `matchedKeys` | the near-match's `appID` |
+### 2.3 Steering micro-flow (final, L1 §19 item)
 
-**Hypothesis mapping (pinned).** Action → domain: `.music` → `.music` (query = `command.message`); `.suggestVideo` → `.youtube` (query = `command.topic`); any other action → omitted (silent). `matchKeys` = `[]` (index-word pickable only). Appended last, capped by `maxCandidates` with the near-matches keeping priority.
+1. Tap on an already-linked result (or a synthesized family row) → `steerTarget = other`;
+   nothing is selected, no field changes, no store write.
+2. The steering card renders inline under the results (a `family.link.alreadyLinked` text +
+   the edit button). Tap targets ≥44 pt; VoiceOver reads the sentence, then the button.
+3. Tapping the edit button calls `onSteerTo(other)`; the PARENT sets `editorTarget = .edit(other)`
+   and `.sheet(item:)` swaps the sheet's content to the other contact's editor in place (the
+   item id changes → SwiftUI replaces the content; the old draft is discarded, which is
+   correct — nothing was saved). No dismiss/re-present race.
+4. Back-navigation INTO the other contact's editor: the swapped sheet opens at its
+   `.relationship` step (the edit rule); its Back reaches ITS find step; closing returns to
+   the family list. There is no in-sheet stack back to the first contact (documented; the
+   first contact's draft was never committed and re-opening it is one row away).
+5. `steerTarget` is cleared by any new search keystroke or a successful pick.
 
-### 11. C-MTC-04 — `DialogueOptionCatalog.swift` + `DialogueOptionCatalog.json`
+### 2.4 Photo step — subview breakdown
 
-**Responsibility.** Load and serve the curated on-device option catalog (OD-M2's default). Immutable after load.
+`photoStep` = `stepTitle("family.step.photo")` + `photoPreview` + `sourceCaption` +
+`photoControls` + `writeAccessCards` + `photoStateLine`.
 
-**JSON schema (v1; the reviewable data artifact).** `groups` is an ordered array (L2-D12); every spoken label is a key (ADR-MTC-09); `aliases` and `matchKeys` are match vocabulary, never spoken.
+- `sourceCaption`: renders `family.photo.sourceSystem` when the displayed photo is the
+  resolved SYSTEM one (verified link + readable access + bytes present). Derived, not stored.
+- `writeAccessCards` (linked + editing only):
+  - access `.notDetermined` → `askCard(title: family.photo.accessTitle, body: family.photo.accessBody,
+    allow: call.search.allowButton)` reusing the wizard's existing ask-card pattern; Allow
+    calls the existing `grantAccess()`; declining (just not tapping) continues with fallback.
+  - access `.denied` → `deniedLine(family.photo.accessDeniedBody)` + Open Settings
+    (`call.search.openSettings`, existing system-settings link pattern).
+  - access `.limited` → NO card (readable; honest caption already lives in the find step).
+- `photoStateLine`: renders `photoSaveState` (§1.5 mapping) under the preview — caption token,
+  secondary color, plus `family.photo.accessDeniedBody` when the state is
+  `.keptOnPhoneAccessDenied`.
+- `photoControls` unchanged (`family.photo.add/change`, `family.photo.remove` for stored photos).
 
-```json
-{
-  "version": 1,
-  "groups": [
-    {
-      "id": "bhajan.deity",
-      "questionKey": "dialogue.probe.bhajanKind",
-      "matchKeys": ["भजन", "bhajan"],
-      "options": [
-        { "id": "shiva",  "labelKey": "dialogue.option.bhajan.shiva",
-          "query": "shiva bhajan",  "aliases": ["शिव", "shiv", "shiva"] },
-        { "id": "durga",  "labelKey": "dialogue.option.bhajan.durga",
-          "query": "durga bhajan",  "aliases": ["दुर्गा", "durga"] },
-        { "id": "bishnu", "labelKey": "dialogue.option.bhajan.bishnu",
-          "query": "bishnu bhajan", "aliases": ["विष्णु", "bishnu"] },
-        { "id": "devi",   "labelKey": "dialogue.option.bhajan.devi",
-          "query": "devi bhajan",   "aliases": ["देवी", "devi"] }
-      ]
+### 2.5 Nickname step — subview breakdown
+
+`nicknameStep` = `stepTitle("family.step.nickname")` + `nicknameList` + `nicknameAddRow` +
+`nicknameHint` + the unchanged address/email fields below.
+
+For each entry (`ForEach(Array(nicknames.enumerated()), id: \.offset)` — one row per
+OCCURRENCE; duplicates are preserved per §3.4):
+
+```
+HStack(spacing: 12) {
+    Text(entry)                                   // the stored spelling verbatim
+        .font(bodyPointSize), textPrimary, lineLimit(2)
+    Spacer()
+    Button(remove) { nicknames.remove(at: index) }
+        .frame(minWidth: minTapTargetSize, minHeight: minTapTargetSize)   // ≥44pt
+        .accessibilityLabel(Text(L10n.fmt("family.nickname.removeLabel", locale, entry)))
+}
+.frame(minHeight: minTapTargetSize).appSurface(role: .control, cornerRadius: bubbleCornerRadius)
+```
+
+`nicknameAddRow` (hidden at 8 entries — the L1 §8.4 budget envelope; nothing is ever dropped,
+the control simply stops offering more):
+
+```
+TextField("", text: $nicknameDraft, prompt: family.nickname.entryPlaceholder)   // placeholder key
+Button(family.nickname.add) {
+    let trimmed = nicknameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return }        // whitespace-only never stored (FR-FCU-011)
+    nicknames.append(trimmed)                     // stored AS ENTERED — no transliteration (OD-2)
+    nicknameDraft = ""
+}
+.frame(minHeight: minTapTargetSize)               // Add button ≥44pt; accessibilityLabel family.nickname.add
+```
+
+`nicknameHint` = `family.nickname.hint` caption. Validation summary: trim at the Add control;
+whitespace-only rejected at entry; `normalizedNicknames` re-applies the rule at save and at
+decode (defense in depth). Duplicates allowed by design (decode preserves them; the editor is a
+faithful editor of the stored list); "sanu" and "सानु" are always distinct entries.
+Removal is a save-time edit like every other field; saved changes take effect immediately
+after Save (index rebuild on the roster republish — FR-FCU-015).
+
+`loadDraft()`: `nicknames = contact.nicknames` (replaces `nickname = contact.nickname ?? ""`).
+
+### 2.6 Save flow (final, L1 §10.2 sequencing)
+
+```swift
+private func save() {
+    let savedID = editingContact?.id ?? newDraftID      // @State let for the add case (see below)
+    let succeeded: Bool
+    if let contact = editingContact {
+        succeeded = coordinator.updateFamilyContact(id: contact.id, ..., nicknames: nicknames, link: draftLink)
+    } else {
+        succeeded = coordinator.addFamilyContact(id: savedID, ..., nicknames: nicknames, link: draftLink)
     }
-  ]
-}
-```
-
-```swift
-struct DialogueOption: Equatable {
-    let id: String
-    let labelKey: String
-    let query: String            // the canonical search string the merge substitutes
-    let aliases: [String]        // match vocabulary; whole-token (Devanagari containment per idiom)
-}
-
-struct DialogueOptionGroup: Equatable {
-    let id: String
-    let questionKey: String
-    let matchKeys: [String]      // group selection vocabulary (L2-D12)
-    let options: [DialogueOption]
-}
-
-struct DialogueOptionCatalog: Equatable {
-    let version: Int
-    let groups: [DialogueOptionGroup]
-
-    init(data: Data) throws                       // .catalogUnavailable on malformed JSON/schema
-    static func load(bundle: Bundle = .main,
-                     resource: String = "DialogueOptionCatalog") throws -> DialogueOptionCatalog
-
-    func group(_ id: String) -> DialogueOptionGroup?
-    /// First group (file order) whose matchKeys hit the canonicalized query.
-    func groupForMusicQuery(_ query: String) -> DialogueOptionGroup?
-    /// Whole-value alias match (the caller passes the value and the
-    /// marker-dropped variant separately); nil when nothing matches.
-    func option(matchingWholeValue value: String, in group: DialogueOptionGroup) -> DialogueOption?
-}
-```
-
-**Matching discipline.** Whole-value / whole-token matching after canonicalisation (lowercase + whitespace collapse), with the repo's script-split idiom (Devanagari keys containment, Latin keys whole-token) — never Devanagari substring for short forms ("गीता" must not match "गीत"). The default option ("जे पनि बजाऊ" / "just play anything") is NOT a catalog entry: it is rendered from `dialogue.option.anyPlay` and resolved by the frame's `defaultQuery` (L1 §15).
-
-**Failure behaviour.** `load` throws `.catalogUnavailable`; the router's cached load stores `nil` and the trigger degrades honestly (free-text-only probe + default, §22 `E3`). A gate test asserts the resource ships and parses.
-
-### 12. C-MTC-05 — `CommandRouter.swift` edits (exact)
-
-**12.1 New protocol members + extension defaults.** `VoiceCommandCoordinating` gains six requirements after the confirmation cluster (`pendingRephraseCommand`/`takePendingRephraseCommand` region, `:105-108`), each with an inert extension default in the `extension VoiceCommandCoordinating` block, following the established "requirement-with-extension-default" pattern (the router holds the coordinator as a protocol reference, so an extension-only member would bind statically):
-
-```swift
-// In `protocol VoiceCommandCoordinating: AnyObject`, after :108:
-/// The live dialogue frame, nil when absent OR expired (the coordinator
-/// drops an expired frame on read — the interception's half-open-window
-/// guarantee). Main-queue read; the router calls it once per turn.
-var activeDialogueFrame: DialogueFrame? { get }
-/// Arms the frame AND opens the answer window (state machine hop), in that
-/// order (L2 §21 step 3). false = a window is already open (confirmation or
-/// frame); the caller then takes its non-probe fallback path.
-func startDialogueFrame(_ frame: DialogueFrame) -> Bool
-/// Invalid-answer accounting: attempts += 1, deadline restamped, window
-/// timer refreshed (L2-D6). Returns the updated attempt count. Silent.
-@discardableResult func noteDialogueAttempt() -> Int
-/// The single resolution funnel: clear the frame, cancel the timer, close
-/// the window through legal edges, emit dialogue_frame_resolved. Idempotent.
-func resolveDialogueFrame(_ resolution: DialogueFrameResolution)
-/// Emergency/supersession clear — resolveDialogueFrame with a reason (L2-D16).
-func clearDialogueFrame(reason: DialogueFrameResolution)
-/// The answer text through the exact seam every turn uses: sanitise
-/// (.quarantine) then the shared input seam (L2-D14). Never the model.
-func prepareDialogueAnswerText(_ raw: String) -> String
-
-// In `extension VoiceCommandCoordinating` (inert defaults):
-var activeDialogueFrame: DialogueFrame? { nil }
-func startDialogueFrame(_ frame: DialogueFrame) -> Bool { false }
-@discardableResult func noteDialogueAttempt() -> Int { 0 }
-func resolveDialogueFrame(_ resolution: DialogueFrameResolution) {}
-func clearDialogueFrame(reason: DialogueFrameResolution) {}
-func prepareDialogueAnswerText(_ raw: String) -> String {
-    InputSanitiser.sanitise(raw, level: .quarantine)
-}
-```
-
-**12.2 The interception block (NEW; exact position).** Inserted between the confirmation hook's closing brace (`CommandRouter.swift:886`) and the safety-net comment (`:888`), inside `route(transcript:)`. It consumes or falls through; the emergency check above (`:779-783`) is untouched and absolute. The block's body, concretely:
-
-```swift
-// [MTC] Dialogue-frame interception (design-l2 §12.2). Runs after the
-// confirmation hook and before the safety net; consumes an answer,
-// re-probes, or falls through to the ladder unchanged. Every state
-// mutation goes through the coordinator hooks; this block never speaks
-// a model-generated line.
-if let frame = coordinator?.activeDialogueFrame {
-    let prepared = coordinator?.prepareDialogueAnswerText(raw)
-        ?? InputSanitiser.sanitise(raw, level: .quarantine)
-    let medicationNames = (coordinator?.medicationVoiceEntries ?? []).flatMap {
-        MedicationVoiceVocabulary.voiceKeys(for: $0)
-    }
-    let classification = DialogueAnswerPath.classify(
-        raw: raw, prepared: prepared, frame: frame,
-        catalog: dialogueCatalog, locale: coordinator?.activeLocale ?? neLocale,
-        now: Date())
-    switch classification {
-    case .expired:
-        break                                             // fresh command, fall through
-    case .escape:
-        coordinator?.resolveDialogueFrame(.escaped)
-        speak(key: "dialogue.escape")
-        return .unrecognised(transcript: raw)
-    case .cancel:
-        coordinator?.resolveDialogueFrame(.cancelled)
-        speak(key: "dialogue.cancelled")
-        return .unrecognised(transcript: raw)
-    case .bargeIn:
-        coordinator?.resolveDialogueFrame(.bargedIn)      // fall through; ladder executes it
-    case .candidatePick(let index, let capture):
-        return executeDialogueCandidate(index - 1, capture: capture,
-                                        queryOverride: nil, frame: frame, raw: raw)
-    case .answer(let merge):
-        return executeDialogueAnswer(merge, frame: frame, raw: raw)
-    case .freeFormForCandidate(let index, let value):
-        return executeDialogueCandidate(index, capture: .freeText,
-                                        queryOverride: value, frame: frame, raw: raw)
-    case .invalid(let reason):
-        let attempts = coordinator?.noteDialogueAttempt() ?? DialogueConfig.maxProbes
-        emit(eventType: "dialogue_answer",
-             outcome: "invalid",
-             metadata: ["reason": reason.rawValue])
-        if attempts < DialogueConfig.maxProbes {
-            speakDialogueProbe(frame: frame, retry: true)   // re-probe; deadline refreshed
+    guard succeeded else { return }                     // failure keeps the draft (today)
+    let photoIntent = pickedPhoto != nil || removingStoredPhoto
+    guard photoIntent else { dismiss(); return }        // no photo changed → today's UX
+    Task { @MainActor in
+        let outcome = await coordinator.syncSystemPhoto(forContactID: savedID, clearing: removingStoredPhoto)
+        if let state = outcome.flatMap(FamilyPhotoEditorState.from) {
+            photoSaveState = state
+            step = .photo                              // show the honest label where it lives
         } else {
-            return resolveDialogueExhaustion(frame: frame, raw: raw)
+            dismiss()                                  // .written or .skippedNoLink → today's UX
         }
-        return .unrecognised(transcript: raw)
     }
 }
 ```
 
-Note on `.answer` vs `.bargeIn`: the `case .bargeIn` arm deliberately does NOT return — control continues into the safety net and the ladder below, where the utterance executes exactly once with its normal tiers (L1 ADR-MTC-05; the `.bargedIn` resolution has already cleared the frame).
+- `newDraftID`: `@State private var newDraftID = UUID()` created in `init` for the add case
+  (stable across re-saves) — the wizard knows the contact's id before the store write.
+- Footer: when `photoSaveState != nil` the primary button becomes `common.close` (dismiss) —
+  the sheet stays open exactly so the owner sees what happened (L1 §10.2 step 3).
+- The unlink control in the link area calls, in a Task,
+  `coordinator.setFamilyContactLink(id:mode:)` with the mode from `unlinkMode(...)` using the
+  CURRENT state (verified snapshot + `photoFilename`); on `false` nothing changes (draft kept,
+  the stale line stays).
+- `.systemPhotoRemains` is set in the REMOVE path (removingPhoto + linked): the clear attempt
+  returns `.written`; the wizard then checks the display precedence — a system photo still
+  present (its bytes were not ours / access lost between attempts) maps to the label via the
+  `systemPhotoRemains` row of §1.5. Any other outcome maps through the same table.
 
-**12.3 The emergency clear (edit to `:779-783`).** After `handleEmergency()` and before `return .emergencyTriggered`, add the single side-effect-only statement:
+### 2.7 Family list (SettingsView, `FamilyContactsSettingsView`)
 
-```swift
-coordinator?.clearDialogueFrame(reason: .emergency)     // post-dispatch, side-effect only
-```
+- Row gains the link chip: `family.link.chip` capsule appended to the role-chip row when
+  `coordinator.verifiedLinks.links[contact.id] != nil` (verified links only; a stale link
+  shows nothing here — the editor owns that line).
+- Row faces migrate: `.task(id: contactPhotoKey)` where `contactPhotoKey` becomes the array of
+  `coordinator.faceIdentity(for:)` for every roster contact (identity includes filename, link
+  token and epoch). The pass resolves each face via
+  `await coordinator.faceThumbnail(for: diameter: DesignTokens.iconBadgeDiameter, displayScale:)`
+  and assigns per-row only after re-checking the identity is unchanged (stale-pass drop).
+- `loadDraft`'s stored-photo preview: `storedPhoto = await coordinator.faceImage(for: contact)`
+  (the editor shows the DISPLAY photo — system when present, with the source caption).
 
-It contributes no condition, delay or gate to the emergency path (L1 ADR-MTC-02; a test pins dispatch with the clear forced to a no-op, §18 `E2`).
+## 3. Data model and persistence contract
 
-**12.4 Full edit list for `CommandRouter.swift`.**
-
-| # | Function / region | Edit |
-|---|---|---|
-| 1 | `route(transcript:)` after `:886` | insert the interception block (§12.2) + doc comment |
-| 2 | `route()` emergency branch `:779-783` | one `clearDialogueFrame(reason: .emergency)` line (§12.3) |
-| 3 | keyword stage music arm `:1223-1234` | replace `fireMusicRequest(query: KeywordIntentRule.musicQuery(from: preText) ?? preText)` with `fireMusicRequestOrProbe(query: KeywordIntentRule.musicQueryOutcome(from: preText), raw: raw, intake: .ladder)` (emit + return lines unchanged) |
-| 4 | `dispatchInterpreted` interpreted `.music` `:3336-3355` | keep the `interpretedQuery` computation byte-identical; non-nil ⇒ `fireMusicRequest(query:)` exactly as today; nil ⇒ `fireMusicRequestOrProbe(query: KeywordIntentRule.musicQueryOutcome(from: raw), raw: raw, intake: .interpreted)` |
-| 5 | rephrase-discard branch `:806-809` | after `takePendingRephraseCommand()` and `emit(rephrase_discarded)`: build candidates via `DialogueCandidateBuilder.build(for: taken?.sourceTranscript ?? raw, excludingDomain: nil, rephraseHypothesis: taken?.command)`; with ≥1 candidate ⇒ `speak(key: "dialogue.understood.no")` + `speakDialogueDidYouMean(...)` + arm; with 0 ⇒ `speak(key: "router.rephrase.discard")` (today, unchanged) |
-| 6 | `routeKeywordRemainder` reprompt fallback `:2019-2021` | replace the `speak(key: "router.reprompt")` fallback with `speakDialogueDidYouMeanOrReprompt(raw)` — candidates built via `DialogueCandidateBuilder.build(for: raw, excludingDomain: nil, rephraseHypothesis: nil)`; ≥1 ⇒ honest line + probe + arm; 0 ⇒ `speak(key: "router.reprompt")`. The cloud-failure-class branch (`:2013-2018`) and both no-brain branches (`:2024-2027`) are untouched |
-| 7 | protocol + extension (§12.1) | six members + inert defaults |
-| 8 | `sensitiveCallPhrases` `:1869` | `private static let` → `static let` (L2-D2) with an extraction comment |
-| 9 | new private helpers (below) | one contiguous `// MARK: - [MTC] Dialogue frame` region near the music helpers |
-
-**12.5 New private router helpers (signatures pinned).**
-
-```swift
-private enum DialogueDegenerateIntake: String { case ladder, interpreted, candidate }
-
-private lazy var dialogueCatalog: DialogueOptionCatalog?   // one cached load; nil on failure
-
-private func fireMusicRequestOrProbe(query: KeywordIntentRule.MusicQueryExtraction,
-                                     raw: String,
-                                     intake: DialogueDegenerateIntake)
-private func speakDialogueProbe(frame: DialogueFrame, retry: Bool)              // composes + speak(text:)
-private func speakDialogueDidYouMean(_ candidates: [DialogueCandidate], locale: Locale)
-private func speakDialogueDidYouMeanOrReprompt(_ raw: String)                   // edit 6's helper
-private func executeDialogueAnswer(_ merge: DialogueMerge, frame: DialogueFrame, raw: String) -> RoutingResult
-private func executeDialogueCandidate(_ index: Int, capture: CaptureForm,
-                                      queryOverride: String?, frame: DialogueFrame, raw: String) -> RoutingResult
-private func resolveDialogueExhaustion(frame: DialogueFrame, raw: String) -> RoutingResult
-private func executeDialogueDefault(_ frame: DialogueFrame, raw: String) -> RoutingResult
-```
-
-`fireMusicRequestOrProbe` (the one degenerate trigger helper, shared by both intakes and by candidate execution): when `query.isDegenerate`, emit `dialogue_degenerate_query {intake}`, build the fold via `DialogueFrame.slotFill(candidates: defaultQuery: domain: .music, activeCommand: intake == .interpreted ? interpretedCommand : nil, sourceTranscript: raw)`, arm through `coordinator?.startDialogueFrame`; on `true` speak the probe (`retry: false`) and return; on `false` (window busy — defensive, unreachable on the current ladder) fall back to `fireMusicRequest(query: query.query ?? raw)` (today's exact behaviour). When NOT degenerate: `fireMusicRequest(query: query.query ?? raw)` — for the ladder intake this reproduces the previous line byte-for-byte (`musicQuery(from:)` is a thin wrapper over `musicQueryOutcome`, §13). The interpreted intake passes the arrived `command` as `activeCommand` (L2-D13).
-
-`executeDialogueAnswer` (music slot): `coordinator?.resolveDialogueFrame(.answered(merge))`; emit `dialogue_answer` and `dialogue_frame_resolved`; then, when `frame.activeCommand` is non-nil and `action == .music`, `dispatchInterpreted(frame.activeCommand!.merging(message: merge.value), raw: raw)`; else `fireMusicRequest(query: merge.value)`. Returns `.unrecognised(transcript: raw)`.
-
-`executeDialogueCandidate` (news/youtube/music/appLaunch, executed through the ladder's own seams — ADR-MTC-07 "as if it had been understood"):
-
-| Domain | Execution (mirrors the ladder arm exactly) |
-|---|---|
-| news | `speakPreAck()` then `coordinator?.fireNewsReader()` then `emit(eventType: "news_reader_command", outcome: "success")` (`:1194-1198` parity) |
-| youtube | `guard let q = queryOverride ?? candidate.query`; `fireYouTubePlay(query: q)` (`:1218-1221` parity, default `logProjection`) |
-| music | `fireMusicRequestOrProbe(query: KeywordIntentRule.musicQueryOutcome(from: queryOverride ?? candidate.query ?? raw), raw: raw, intake: .candidate)` — a degenerate pick chains a fresh slotFill frame sequentially |
-| appLaunch | `if let line = coordinator?.requestAppLaunch(appID: appID, confidence: nil) { coordinator?.noteGenericReply(line); speak(text: line) }` (`:1256-1264` parity) |
-
-Resolution first (`.candidateSelected(index:)` or `.answered(capture: source: .candidate)` for the free-form claim), events after, then the seam above.
-
-`resolveDialogueExhaustion`: `candidateChoice` ⇒ `resolveDialogueFrame(.exhausted)` + `speak(key: "dialogue.exhausted")`; `slotFill` ⇒ `executeDialogueDefault(frame, raw:)` (`.defaultExecuted`). `executeDialogueDefault`: resolve, emit, then the same dispatch as `executeDialogueAnswer` with `merge.value = frame.defaultQuery ?? frame.sourceTranscript`.
-
-**12.6 Threading/state notes.** All helper code runs on the main thread inside `route()`; `startDialogueFrame` and `resolveDialogueFrame` hop to main internally only when already off it (mirroring `openConfirmationWindow()` `:7019-7027`); `dialogueCatalog` is loaded lazily on first use (main thread) and then immutable.
-
-### 13. C-MTC-06 — `KeywordIntentRule.swift` edits
-
-**(a) `MusicQueryExtraction` + provenance (R-side of ADR-MTC-06).**
+### 3.1 Final `FamilyContact` (FamilyContactStore.swift:61)
 
 ```swift
-struct MusicQueryExtraction: Equatable {
-    enum Provenance: Equatable { case content, markerFallback, transcriptFallback }
-    let query: String?           // nil only when the input canonicalizes empty
-    let provenance: Provenance
-    var isDegenerate: Bool { provenance != .content || query == nil }
+struct FamilyContact: Codable, Identifiable, Equatable {
+    let id: UUID
+    var name: String
+    var phone: String
+    var relationship: String
+    var messengerHandle: String?
+    var photoFilename: String?
+    var nicknames: [String]              // REPLACES nickname: String? (no shim — L1 §5.2)
+    var address: String?
+    var email: String?
+    var isEmergencyContact: Bool
+    var preferredVideoApp: CallApp
+    var preferredCallApp: CallApp
+    var systemContact: SystemContactLink?   // NEW
+
+    init(id: UUID = UUID(), name: String, phone: String, relationship: String,
+         messengerHandle: String? = nil,
+         preferredVideoApp: CallApp = .faceTime, preferredCallApp: CallApp = .phone,
+         photoFilename: String? = nil, nicknames: [String] = [],
+         address: String? = nil, email: String? = nil,
+         isEmergencyContact: Bool = false, systemContact: SystemContactLink? = nil)
 }
-
-/// The existing three-step fallback (:764-775), restructured to report
-/// WHICH step produced the query. Byte-identical outputs to `musicQuery`.
-static func musicQueryOutcome(from raw: String,
-                              maxLength: Int = KeywordIntentRule.maxMusicQueryLength) -> MusicQueryExtraction
-
-/// Thin wrapper — `musicQueryOutcome(from:maxLength:).query`; return values
-/// (and every existing test) are byte-identical.
-static func musicQuery(from raw: String,
-                       maxLength: Int = KeywordIntentRule.maxMusicQueryLength) -> String?
 ```
 
-Step mapping: tokens survive the drop sets ⇒ `.content`; `kept.isEmpty` and a marker token chosen ⇒ `.markerFallback`; `kept.isEmpty` and no marker ⇒ `.transcriptFallback`; canonical-empty input ⇒ `.transcriptFallback` with `query = nil`.
+### 3.2 `normalizedNicknames` — exact placement and semantics (L1 §19 item)
 
-**(b) Near-match reporting (`nearMatches`).**
+`static func normalizedNicknames(_ raw: [String]) -> [String]` on `FamilyContact` in
+`FamilyContactStore.swift` (same file as the decode contract it serves): trim each entry with
+`.whitespacesAndNewlines`, drop entries that become empty, preserve order and duplicates.
+Applied at exactly three places: the decoder (defensive for hand-edited/corrupt payloads), the
+wizard's Add control (single-entry trim), and the coordinator's add/update save path (the
+enforcement point every caller passes through). The store never sees a whitespace-only entry.
 
-```swift
-struct NearMatch: Equatable {
-    let domain: Domain
-    let matchedKeys: [String]    // the groups that DID co-occur (fixed vocabulary)
-    let appID: String?           // .appLaunch near-matches only
-}
+### 3.3 Encoder contract
 
-/// Domains whose rule PARTIALLY co-occurs: for each rule (table order),
-/// each variant with 1 <= matchedGroups < groupCount, the rule's `excluded`
-/// groups absent. One entry per domain (first partial variant wins),
-/// restricted to {news, youtube, music, appLaunch}.
-static func nearMatches(transcript raw: String) -> [NearMatch]
-```
+Synthesized `Encodable` is kept (L1 §5.2 — a hand-written encoder risks silent field loss).
+Nil optionals are omitted (`encodeIfPresent`); `nicknames`/`systemContact` are always encoded
+as stored (`[]` keeps encoding an empty array — same shape as any empty array today). No
+legacy `nickname` key is ever written (downgrade reads simply show no nickname — accepted).
 
-Eligibility is enforced here (the four-domain set); executability (a usable query) is enforced by `DialogueCandidateBuilder` (§10). Pure; no dynamic vocabulary (the medication rule is excluded by the four-domain set, never consulted).
-
-**(c) Scaffold/marker accessors (the answer strip's one vocabulary source).**
+### 3.4 Decoder contract (FamilyContactStore.swift:122-150 pattern)
 
 ```swift
-/// A NON-marker drop token — the music verb family, particles and the
-/// filter words — used by the answer scaffold strip. Markers deliberately
-/// return false (markers are kept in the free-text fallback; they are
-/// dropped only through `markerDroppedVariant`).
-static func isMusicScaffoldToken(_ token: String) -> Bool   // = isMusicDropToken(token) && !isMusicMarkerToken(token)
-/// The music marker family (currently private): भजन, गीत, गाना, संगीत,
-/// सङ्गीत, music, song, bhajan — exposed for the marker-dropped variant.
-static func isMusicMarkerToken(_ token: String) -> Bool
-```
+private enum LegacyNicknameKeys: String, CodingKey { case nickname }
 
-No existing private set changes contents; both accessors read the same tables the extractor uses.
+init(from decoder: Decoder) throws {
+    let container = try decoder.container(keyedBy: CodingKeys.self)
+    // ... existing required fields and optionals unchanged ...
+    preferredVideoApp = (try? container.decode(CallApp.self, forKey: .preferredVideoApp)) ?? .faceTime
+    preferredCallApp  = (try? container.decode(CallApp.self, forKey: .preferredCallApp)) ?? .phone
+    photoFilename     = (try? container.decodeIfPresent(String.self, forKey: .photoFilename)) ?? nil
 
----
-
-### 14. C-MTC-07 — `VoiceSessionStateMachine.swift` edits
-
-Mirroring, never refactoring, the confirmation machinery (L1 §14). Edit list (full signatures in §25):
-
-| # | Member | Edit |
-|---|---|---|
-| 1 | `VoiceSessionState` enum (`:9-17`) | add `case awaitingSlotAnswer` after `awaitingConfirmation` |
-| 2 | `canTransition` (`:21-57`) | entry edges from `.idle` and the busy set (exactly the set that accepts `.awaitingConfirmation` at `:29-38`); exit edges to `[.idle, .error, .stopped]` (mirror of `:39-40`) |
-| 3 | `supportsTalkReset` (`:71-78`) | returns `false` in `.awaitingSlotAnswer`, exactly as in `.awaitingConfirmation` (the dialogue owns the turn) |
-| 4 | `Config` (`:93-96`) | unchanged — `confirmationTimeoutSeconds` (45 s) is the single source for both windows |
-| 5 | callbacks | add `var onSlotAnswerTimeout: (() -> Void)?` beside `onConfirmationTimeout`; the confirmation callback and its spoken notice are untouched |
-| 6 | `transition(to:)` (`:111-127`) | mirrored arms — leaving `.awaitingSlotAnswer` cancels `slotAnswerTimer`; entering it arms |
-| 7 | `openSlotAnswerWindow()` | NEW; mirrors `openConfirmationWindow()` (`:153-181`) — bridge via `.idle`, legal edges only, "the window must EXIST, not merely be attempted" (F14); `@discardableResult`, `Bool` |
-| 8 | `refreshSlotAnswerWindow()` | NEW; true only when already in `.awaitingSlotAnswer` (cancels + re-arms the timer; the re-probe path, L2-D6) |
-| 9 | `armSlotAnswerTimer()` / `cancelSlotAnswerTimer()` | NEW; mirror `armConfirmationTimer` (`:183-203`, incl. the F6 still-open guard `guard self.state == .awaitingSlotAnswer`) and `cancelConfirmationTimer` (`:205-208`) |
-
-Boundary correctness is unchanged from L1 §14: the timer cancels on every resolution and re-checks state before firing (F6 guard); the interception reads the frame's own expiry — an utterance just before expiry is an answer, the same utterance after expiry is a fresh command.
-
-### 15. C-MTC-08 / 08b / 08c — coordinator, contact route, brain chain edits
-
-**`AppCoordinator.swift` (C-MTC-08).**
-
-| # | Member / region | Edit |
-|---|---|---|
-| 1 | stored state | `private let dialogueManager: DialogueManager` — constructed with `answerWindowSeconds: TimeInterval(VoiceSessionStateMachine.Config.confirmationTimeoutSeconds)` at the existing router/wiring point (`:3761` region) |
-| 2 | `extension AppCoordinator: VoiceCommandCoordinating` (`:10856`) | implement the six members (§12.1; each does its main-thread hop mirroring `openConfirmationWindow()` `:7019-7027`) |
-| 3 | `startDialogueFrame` | order pinned: guard `!isAwaitingConfirmation` (false otherwise) → guard `dialogueManager.liveFrame == nil` (false) → `openSlotAnswerWindow()` (false ⇒ return false) → `try dialogueManager.arm(frame)` (throw ⇒ cancel the window, return false) → true. Never speaks |
-| 4 | `noteDialogueAttempt` | `dialogueManager.noteAttempt()` then `refreshSlotAnswerWindow()`; returns the count. Silent |
-| 5 | `resolveDialogueFrame` / `clearDialogueFrame(reason:)` | one funnel: `guard let resolved = dialogueManager.resolve(resolution)` → cancel the timer / close the window through legal edges (`transitionViaIdle`-style) → emit `dialogue_frame_resolved {outcome}` with component `app_coordinator` (`:7327` precedent). Idempotent |
-| 6 | `onSlotAnswerTimeout` handler (fires from `armSlotAnswerTimer`) | resolve `.timedOut`, emit the event, **speak nothing**, never call `recordConfirmationTimeout()` (L1 ADR-MTC-08) |
-| 7 | `openConfirmationWindow()` (`:7019-7027`) | gains, at its top, `_ = dialogueManager.resolve(.superseded)` — the structural funnel that makes the two windows mutually exclusive in the frame direction (arming a confirmation clears any frame; ADR-MTC-03) |
-| 8 | `prepareDialogueAnswerText` | `IntentTranscriptPreparation.prepare(raw, seam: brainChain.transcriptPreparationSeam).prepared` (C-MTC-08c) |
-| 9 | pending-rephrase seams (`:7395-7406`) | unchanged; edit 7 covers them (they pend through the window opener) |
-
-**`VoiceContactSearchRoute.swift` (C-MTC-08b).** `isDirectCallUtterance` `private static func` → `static func` (L2-D2), doc noting the second call site and the unchanged lowercase-input contract.
-
-**`LocalBrainChain.swift` + NEW `IntentTranscriptPreparation.swift` (C-MTC-08c).**
-
-```swift
-// NEW file: IntentTranscriptPreparation.swift at Services/Intents/ (see the §7 map)
-enum IntentTranscriptPreparation {
-    struct Prepared: Equatable {
-        let raw: String                 // the caller's transcript, verbatim
-        let sanitised: String           // InputSanitiser.sanitise(raw, level: .quarantine)
-        let prepared: String            // pair?.pickerBrainInput ?? sanitised (the dialogue answer value)
-        let pair: IntentTranscriptPair? // the STT-corrector + canonicalizer output, nil without a seam
+    // nicknames — L1 §5.2 order, lossless:
+    if let list = (try? container.decodeIfPresent([String].self, forKey: .nicknames)) ?? nil {
+        nicknames = FamilyContact.normalizedNicknames(list)          // presence wins, even empty
+    } else if let legacy = try? decoder.container(keyedBy: LegacyNicknameKeys.self),
+              let single = (try? legacy.decodeIfPresent(String.self, forKey: .nickname)) ?? nil,
+              !single.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        nicknames = [single.trimmingCharacters(in: .whitespacesAndNewlines)]
+    } else {
+        nicknames = []
     }
-    static func prepare(_ transcript: String,
-                        seam: LocalBrainChain.InputSeam?) -> Prepared
+
+    // systemContact — corrupt/empty shapes decode to nil (FR-FCU-002 scenario 3):
+    let decodedLink = (try? container.decodeIfPresent(SystemContactLink.self, forKey: .systemContact)) ?? nil
+    if let link = decodedLink, !link.identifier.isEmpty, !link.numberKey.isEmpty {
+        systemContact = link
+    } else {
+        systemContact = nil
+    }
+    // ... address/email/isEmergencyContact unchanged ...
 }
 ```
 
-`prepare`'s internal order is exactly `LocalBrainChain.turnInput`'s (`:275-285`): nil seam ⇒ `Prepared(raw:, sanitised: raw, prepared: raw, pair: nil)` without calling the sanitiser (byte-parity: `turnInput` returns `plainText: transcript` untouched); non-nil seam ⇒ sanitise first, then `seam.prepare(clean)`, `prepared = pair.pickerBrainInput`. `LocalBrainChain.turnInput` is rewired to call the helper; `plainText(for:raw:)` (`:296-307`) is untouched, so the brain input remains byte-identical. A new accessor `var transcriptPreparationSeam: InputSeam? { inputSeam }` (internal) serves the coordinator.
+`CodingKeys` contains ONLY stored properties (`nicknames`, `systemContact` included); the
+legacy key is read through the separate `LegacyNicknameKeys` container so the synthesized
+`CodingKeys`/encoder stay authoritative. `(try? ...) ?? nil` covers absent key, wrong type and
+unknown shape — decode-degrade, never a failed store read.
 
-### 16. C-MTC-09 — localisation inventory (the reviewable copy artifact)
+### 3.5 AddressBookEntry.identifier (AddressBookDirectory.swift)
 
-16 new `dialogue.*` keys, all ne+en mandatory, sourceLanguage en. Probe text is template-composed only (§8 rules); `%@` placeholders are filled from catalog labels, candidate labels or the user's own words — never generated text.
-
-| Key | ne (draft) | en (draft) | Used by |
-|---|---|---|---|
-| `dialogue.probe.bhajanKind` | कस्तो भजन? %@ … वा आफैँ भन्नुहोस् | What kind of bhajan? %@ … or say it yourself | slotFill probe, bhajan group (%@ = labels) |
-| `dialogue.probe.musicAny` | कस्तो संगीत चाहियो? नाम भन्नुहोस्। | What kind of music? Say the name. | slotFill probe, no group / catalog unavailable |
-| `dialogue.option.bhajan.shiva` | शिव | shiva | catalog label |
-| `dialogue.option.bhajan.durga` | दुर्गा | durga | catalog label |
-| `dialogue.option.bhajan.bishnu` | विष्णु | bishnu | catalog label |
-| `dialogue.option.bhajan.devi` | देवी | devi | catalog label |
-| `dialogue.option.anyPlay` | जे पनि बजाऊ | just play anything | default option label + `C5` anyPlay match |
-| `dialogue.retry` | फेरि सोध्छु — | Let me ask again — | re-probe prefix |
-| `dialogue.understood.no` | मैले बुझिन। | I didn't understand. | didYouMean honest line |
-| `dialogue.didYouMean` | के तपाईंको मतलब %@ हो? | Did you mean %@? | didYouMean probe (%@ = candidate labels) |
-| `dialogue.candidate.news` | समाचार सुनाउने हो? | The news? | candidate labels (§10) |
-| `dialogue.candidate.youtube` | युट्युबमा %@ हेर्ने हो? | Watch %@ on YouTube? | candidate labels (%@ = query/key) |
-| `dialogue.candidate.music` | %@ बजाउने हो? | Play %@? | candidate labels (%@ = query/key) |
-| `dialogue.candidate.appLaunch` | %@ खोल्ने हो? | Open %@? | candidate labels (%@ = key) |
-| `dialogue.cancelled` | ठीक छ। | OK. | cancel ack |
-| `dialogue.escape` | ठीक छ, फेरि भन्नुहोस्। | OK, tell me again. | escape ack |
-| `dialogue.exhausted` | मैले बुझिन। पछि फेरि भन्नुहोस्। | I didn't understand. Try again later. | candidateChoice exhaustion |
-| `dialogue.timeout` | — | — | deliberately absent (silent expiry) |
-
-### 17. C-MTC-10 — release-gate edits
-
-| File | Edit |
-|---|---|
-| `` `ios/tools/` + `check-release-log-safety.py` `` | `FEATURE_ROOTS` (`:141-176`) gains four entries with no trailing slash, matching the existing per-file precedent (`Services/Spotify`, `Services/Plugins/SpotifyPlugin.swift`): `Services/Voice/` `+` `DialogueManager.swift`, `Services/Voice/` `+` `DialogueAnswerPath.swift`, `Services/Voice/` `+` `DialogueCandidateBuilder.swift`, `Services/Voice/` `+` `DialogueOptionCatalog.swift` (single strings, path-span-split here for the sanitiser only) |
-| fixtures module | one fixture entry per new root mirroring the existing per-feature fixtures (a printed console line and a raw content write in each new file must both fail the gate) |
-| `DEFAULT_ALLOW_LIST` path | unchanged — it reads `LogSanitiser.allowedKeys`, so the §26 key additions flow through automatically |
-| runtime `LogSanitiser.allowedKeys` | gains the seven metadata keys of §26 with fixed vocabularies and justified-key comments |
-
-Rationale: the four new files must be inside the gate from the day they land (L1 §22 R9) — the gate then fails any future console write or content-derived field in them, before any release build.
-
-### 18. C-MTC-11 — test seams per suite (cuttable as units)
-
-Paths under the test bundle; every suite has its own **file-private doubles** (the `CommandRouterMusicTests` pattern: doubles are copied per suite because a suite's doubles are `private` there — `MusicMockCoordinator`, `MockObservabilityBus`, `MusicMockSpeaker`, `MusicStubTransport`). The dialogue suites add: `DialogueMockCoordinator` (a `VoiceCommandCoordinating` double scripting `activeDialogueFrame`/`isAwaitingConfirmation`/brainReadiness/medicationVoiceEntries and recording calls), `DialogueMockSpeaker`, `MockObservabilityBus` (copy), and a `DialogueOptionCatalog` built from an inline JSON `Data` literal.
-
-| Suite file | Kind | Covers (test-name groups) |
-|---|---|---|
-| `` `ios/ElderlyAssistantTests/Services/` + `Voice/DialogueFrameTests.swift` `` | NEW | FR-MTC-001 lifecycle: `testArmStampsDeadlineFromTheInjectedWindow`, `testLiveFrameDropsExpiredOnRead`, `testArmThrowsWindowBusy`, `testArmThrowsNoResolution`, `testResolveClearsAllFields`, `testNoteAttemptRestampsTheDeadline` (L2-D6), `testResolveIsIdempotent` |
-| `` `ios/ElderlyAssistantTests/Services/` + `Voice/DialogueAnswerPathTests.swift` `` | NEW | the §22 vectors `V1`–`V14` one test each (`testIndexWordPicksOptionOne`, `testWholeAliasIsOptionName`, `testMarkerDroppedVariantIsRepetition`, `testFreeTextIsKept`, `testMarkerOnlyAnswerIsInvalid`, `testAnyPlayAliasResolvesTheDefaultPick`, `testAmendmentContentIsAnAnswer`, ...); escape/cancel rows (`V8`–`V11`); `testNegationPlusStrongCommandBart` `+` `gesInNotMerges` (L2-D1); barge-in rows `B1`–`B7` one test each incl. `testMusicMatchMidMusicFrameIsNotBargeIn` (FR-MTC-005 scenario 3); over-length `testOverLongRawAnswerIsInvalidNotTruncated` (L2-D5) |
-| `` `ios/ElderlyAssistantTests/Services/` + `Voice/DialogueCandidateBuilderTests.swift` `` | NEW | near-match mapping rows (§10), hypothesis-last rule `testHypothesisAppendedLastOnlyWithNearMatch` (R2), `testEmptyCandidatesReturnsEmpty` (never fabricate) |
-| `` `ios/ElderlyAssistantTests/Services/` + `Voice/DialogueOptionCatalogTests.swift` `` | NEW | resource parses; `testCanonicalQueryWholeValueOnly`; `testGitaDoesNotMatchGeet` (grapheme discipline); `testGroupForMusicQueryFileOrder`; `testMalformedDataThrowsCatalogUnavailable`; bundle gate `testResourceShipsInTheBundle` |
-| `` `ios/ElderlyAssistantTests/Services/` + `Voice/CommandRouterDialogueTests.swift` `` | NEW | interception placement `testAnswerTurnNeverReachesThe` `+` `InterpreterOrCache`; `testEmergencyMidFrameDropsTheFrameAnd` `+` `DispatchIsUnchanged` (dispatch with the clear forced to a no-op, R6); `testBargeInFallsThroughAndExecutesOnce`; `testStaleFrameExpiryLastMomentAnswer` `+` `VersusPostExpiryCommand`; `testProbeSpeaksThroughTheReplyLaneAndNotesSpoken`; `testGibberishMidFrameConsumesNoAttempt` (R7); `testConfirmationHookIsUntouched` `+` `WithALiveFrame`; `testSlotFillExhaustionExecutesThe` `+` `DefaultQuery`; `testCandidateChoiceExhaustionCloses` `+` `WithTheExhaustedLine`; `testReProbePrefixesRetryAndRefreshesTheDeadline` |
-| `` `ios/ElderlyAssistantTests/Services/` + `Voice/DialogueHostileCorpusTests.swift` `` | NEW | the security corpus (R8): answers embedding emergency phrases (`testEmergencyAnswerMidFrameDispatchesEmergency`), injection-marker text, sensitive-call vocabulary (`testSensitivePhraseAnswerNeverMergesAnd` `+` `TheLadderBlocksIt`), candidate-poisoning utterances, authority claims (`testAnswerClaimingATierChangesNothing`) |
-| `` `ios/ElderlyAssistantTests/Services/` + `Intents/IntentTranscriptPreparationTests.swift` `` | NEW | parity rows `T1`–`T4`: same input ⇒ identical `sanitised`/`prepared`/`pair` as the historical `turnInput` outputs, incl. nil seam, corruptor-hit and corruptor-miss fixtures |
-| `` `ios/ElderlyAssistantTests/Services/` + `Intents/DialogueCacheBypassTests.swift` `` | NEW | `testPendingTranscriptStaysNilOnFrameExecution`; `testAnswerTextIsNeverInternedByTheCache`; `testConfirmedExecutionRecordingIsUnchanged` |
-| `` `ios/ElderlyAssistantTests/App/` + `VoiceSessionStateMachineTests.swift` `` | CHANGED | new-state edges legal/illegal; `testOpenSlotAnswerWindowExistsFromEveryLegalState`; timer arm/cancel/refresh; F6 still-open guard; `testSlotAnswerTimeoutIsSilent`; the confirmation suite unchanged |
-| `` `ios/ElderlyAssistantTests/Services/` + `Voice/CommandRouterMusicTests.swift` `` | CHANGED | degenerate trigger replaces the blind search on both intakes (new tests; the existing supersession block stays green — specific queries byte-identical); merged dispatch goes through `fireMusicRequest` (and `dispatchInterpreted` when `activeCommand` exists) |
-| `` `ios/ElderlyAssistantTests/Services/` + `Voice/KeywordIntentRuleTests.swift` `` | CHANGED | provenance rows (content/marker/transcript), `nearMatches` sets, wrapper byte-parity `testMusicQueryWrapperMatchesOutcome` |
-
-**Pins that must stay green in Phase 1** (NFR-MTC-012 evidence): the golden music digest, the prompt digests, the 2_506 baseline, the 3_000 ceiling, `GoldenCorpusTests`, the Spotify suites, the confirmation-protocol suites, and every suite the feature does not touch.
-
-### 19. C-MTC-12 — Phase 2 clause plumbing (R12; ships only with v17)
-
-**Interfaces (pinned now, implemented in the v17 change only).**
+`var identifier: String = ""` added to the stored properties (`Equatable`/`Identifiable`
+unchanged); `make(...)` gains `identifier: String = ""` so every existing labeled call site
+(test fixtures included) compiles unchanged; `fetchKeys` (:333) adds `CNContactIdentifierKey`;
+`allEntries()` passes `contact.identifier` through. Linking is available only for non-empty
+identifiers (the `prefill` guard — §2.2). No persistence of book entries exists, so no
+migration applies. `ContactsAccess` gains the case + helper (same file):
 
 ```swift
-// LlamaCommandInterpreter.swift — InterpreterContext gains a defaulted field
-// (the `addressAs` precedent, :110-117; every pre-feature construction site
-// compiles unchanged):
-struct InterpreterContext {
-    // ... existing fields ...
-    let frameClause: String?    // nil = no dialogue context (Phase 1 default)
-    init(pendingMedications: [String], userLanguageHint: String,
-         addressAs: String? = nil, frameClause: String? = nil)
-}
+enum ContactsAccess: Equatable {
+    case notDetermined, allowed, denied
+    case limited                                    // iOS 18+ "Select Contacts"
 
-// IntentPrompt.swift — the renderer + the insertion point:
-/// "" for nil/empty; else the clause line. The default keeps the Phase 1
-/// prompt byte-identical (the empty render appends nothing).
-static func frameClause(_ clause: String?) -> String
-// build(transcript:context:activePlugins:) inserts \(frameClause(context.frameClause))
-// between the `User said: "\(transcript)"` line and the closing imperative
-// (the fifth interpolation; the stable template prefix above the insertion
-// point is untouched — KV-prefix stability, NFR-MTC-011).
+    /// `.allowed` and `.limited` are READABLE; denial/nagging logic keys on
+    /// `.denied` only — limited never re-prompts (L1 §9.3).
+    var allowsReading: Bool { self == .allowed || self == .limited }
+
+    /// Pure mapping — the ONE iOS-18 availability gate in the feature.
+    static func from(_ status: CNAuthorizationStatus) -> ContactsAccess {
+        if #available(iOS 18.0, *), status == .limited { return .limited }
+        switch status {
+        case .authorized: return .allowed
+        case .denied, .restricted: return .denied
+        case .notDetermined: return .notDetermined
+        @unknown default: return .denied          // future statuses fail closed
+        }
+    }
+}
+// AddressBookDirectory.access() :348 becomes: ContactsAccess.from(CNContactStore.authorizationStatus(for: .contacts))
 ```
 
-**The atomic update list (same change, or the gates fail):** (1) the seed mirror `` `tools/train-intent/seeds/`+`prompt_template.txt` `` updated byte-identically with the interpolation; (2) `check-prompt-mirror.py` `INTERPOLATIONS` (`:56-61`) gains the fifth entry `{frame_clause}` → `frameClause(context.frameClause)`, and its self-test mutations extend to five; (3) `IntentPromptTests` baseline (2_506) and worst-case recomputed (clause ≤ 300 Characters, worst case ≤ 2_886, ceiling 3_000 unchanged); (4) `PinnedSurfaceGuardTests` prompt digests updated; (5) `LlamaCommandInterpreter` threads the frame clause into `InterpreterContext` at its construction site; (6) v17 trains on follow-up turns (FR-MTC-018). Phase 1 ships **no** prompt edits: the interface additions above land with the v17 change only, so the Phase 1 diff contains zero prompt files.
+Every `switch` over `ContactsAccess` (MissedCallContactResolver.resolve, the wizard's
+`searchSection`, CallView's access block) is compile-forced to handle `.limited`.
 
-### 20. C-MTC-13 — Phase 3 (deferred; interface stability notes)
+### 3.6 Snapshot / index lifecycle
 
-No Phase 3 code ships. The interfaces already accommodate it: `DialogueSlot` gains `.reminderTime` / `.calendarTitle` / `.calendarTime`; the trigger points are the current ask-lines of `handleSetReminder` and `handleCreateCalendarEvent`; the merge canonicalises through the existing `NepaliTimeParser` path instead of the music catalog; `.confirm` tiers are unchanged. `DialogueFrame.slotFill`'s factory is slot-parametric, `DialogueManager` is slot-agnostic, and the interception block reads `frame.slot` only through the classifier — so the rollover is additive per ADR-MTC-15. RepetitionGuard sees only confirmed executions (the frame resolves before any confirmation pend; edit 7 of §15 keeps the funnels exclusive).
+- **Index**: rebuilt wholesale inside `familyContacts.didSet` (one choke point — boot restore,
+  add, update, remove, notifier paths all assign through it). `FamilyContactIndex` never
+  disagrees with the published roster by construction (L1 §5.4).
+- **Snapshot**: `verifiedLinks` starts `.empty`; `refreshVerifiedLinks()` early-returns unless
+  some contact carries a stored link (so an unlinked roster NEVER fetches) and otherwise
+  spawns one Task that captures the roster by value, awaits the actor, and publishes on main:
+  publish iff `snapshot.generation > verifiedLinks.generation`; bump `faceEpoch` when
+  `snapshot.links != verifiedLinks.links` (verification-set change). Stale snapshots
+  (lower generation) are dropped. `.empty` ⇒ today's behavior exactly.
 
----
+## 4. Concurrency specification (explicit)
 
-## Interfaces
+### 4.1 Isolation matrix (extends L1 §13.1)
 
-### 21. The answer turn end-to-end (the cross-component call contract)
+| Component | Isolation | Readers | Writers | Mechanism |
+|---|---|---|---|---|
+| `familyContacts`, `familyIndex`, `verifiedLinks`, `faceEpoch`, `systemPhotoTokens` | main thread | views, coordinator methods | the coordinator (main-queue blocks) | ObservableObject main confinement; `@MainActor` on the new async face/link methods |
+| `FamilyContactIndex`, `UnifiedContactSearch`, resolvers, normalizer | pure values | any thread | construction only | no shared mutable state |
+| `SystemContactLinkService` (+ its photo cache) | actor | concurrent `await`s | the actor alone | actor isolation; `NSCache` internal to the actor |
+| `SystemContactPhotoWriter` | actor | — | the actor alone | actor isolation ⇒ writes strictly serial |
+| `DownsampledImageCache` | existing `NSCache` | any thread | any thread | NSCache thread safety (unchanged) |
 
-One utterance, in order, all main-thread inside `route(transcript:)`:
+### 4.2 Single-flight verification with dirty-flag coalescing
 
-1. `recordTranscript(raw)` and `TranscriptSanityGuard` (`:741`/`:747-758`) — unchanged. A rejected utterance speaks `router.reprompt` and leaves the frame armed, consuming no attempt (R7; the deadline bounds it).
-2. Emergency check (`:779-783`) — unchanged, absolute. On dispatch, the post-dispatch clear (`.emergency`) runs; the frame never gates, delays or precedes this path.
-3. Confirmation hook (`:787-886`) — byte-identical. The windows are mutually exclusive structurally (§15 edit 7): arming a confirmation clears a live frame (`.superseded`); `startDialogueFrame` refuses while `isAwaitingConfirmation`.
-4. **Dialogue block** — `coordinator?.activeDialogueFrame` (live, expiry-checked). Nil ⇒ fall through untouched. Live ⇒ `prepareDialogueAnswerText(raw)` (sanitise → seam, L2-D14), then `DialogueAnswerPath.classify(...)`.
-5. Classification arms (the exact switch, §12.2): `.expired` falls through; `.escape`/`.cancel` resolve + speak their acks; `.bargeIn` resolves and falls through (executes once below, with its normal tiers); `.candidatePick`/`.answer`/`.freeFormForCandidate` resolve first, then execute through the domain's own seam (§12.5); `.invalid` increments attempts and re-probes or exhausts.
-6. Every consumed arm returns `.unrecognised(transcript: raw)` (the confirmation hook's own convention); the barge-in arm returns nothing and lets the stages below run.
-7. Fall-through stages (`:888` onward) — unchanged except the two trigger edits (§12.4 edits 5-6).
-
-Guarantees this sequence carries, each pinned by a §18 test: emergency first and unmodified (`E2`); the answer turn never reaches the interpreter or the cache (`CommandRouterDialogueTests` placement rows; `DialogueCacheBypassTests`); one spoken line per outcome, through the existing lanes; no state survives a resolution.
-
-### 22. The capture ladder — ordered algorithm `S1`–`S6` with vectors
-
-All steps operate on the prepared answer (§21 step 4). `normalize` = lowercase + whitespace/punctuation trim (the `containsToken` split idiom, mirrored locally). `stripScaffold` drops tokens that are `KeywordIntentRule.isMusicScaffoldToken` or `DialogueAnswerVocabulary.probeEchoWords` members. `markerDroppedVariant` drops tokens that are `KeywordIntentRule.isMusicMarkerToken` members. `wholeTokenMatch(text, key)` = containment for keys containing Devanagari scalars, whole-token for Latin keys (L2-D10).
-
-| Step | Rule | Failure/continuation |
-|---|---|---|
-| `S1` | normalize the prepared value | empty ⇒ `.invalid(.emptyAfterStrip)` |
-| `S2` | leading index token: first token ∈ `indexWords` and position ≤ the frame's option/candidate count ⇒ slotFill: option `position`'s canonical query (`.answer(.indexWord, .catalog)`); candidateChoice: `.candidatePick(index: position, capture: .indexWord)`. With content after the index token, the token is treated as scaffold and the remainder continues | no index token ⇒ continue with the value |
-| `S3` | scaffold strip the working value (verbs, particles, probe-echo words) | empty ⇒ `.invalid(.emptyAfterStrip)` |
-| `S4` | match, in order: (a) whole stripped value against catalog option aliases (slotFill) ⇒ `.answer(.optionName, .catalog)` with the option's canonical query; against candidate `matchKeys` (candidateChoice) ⇒ `.candidatePick(.optionName)`; (b) the marker-dropped variant against the same tables ⇒ capture `.repetition` | no match ⇒ `S5` |
-| `S5` | slotFill with `defaultQuery != nil`: the stripped value equals the localized `dialogue.option.anyPlay` label (normalized) or ∈ `anyPlayAliases` ⇒ `.answer(.optionName, .defaultQuery)` with `value = frame.defaultQuery` | no match ⇒ `S6` |
-| `S6` | markerDroppedVariant empty (only markers survived) ⇒ `.invalid(.degenerateAnswer)`; candidateChoice: first candidate (list order) whose domain extractor claims the value (music → `musicQuery`; youtube → `YouTubeRoute.extractQuery`) ⇒ `.freeFormForCandidate(index, extracted ?? value)`; otherwise ⇒ `.invalid(.noCandidateClaimed)`; slotFill: ⇒ `.answer(.freeText, .freeText)` with the stripped value (markers kept — the free-text fallback is never marker-stripped) | — |
-
-**Vectors (input/output, fixture text only).**
-
-| # | Frame / input | Outcome |
-|---|---|---|
-| `V1` | slotFill; "पहिलो" | `.answer(value: "shiva bhajan", capture: .indexWord, source: .catalog)` |
-| `V2` | slotFill; "दुर्गा" | `.answer(value: "durga bhajan", capture: .optionName, source: .catalog)` |
-| `V3` | slotFill; "दुर्गा भजन बजाऊ" | `.answer(value: "durga bhajan", capture: .repetition, source: .catalog)` (scaffold drops बजाऊ; the marker-dropped variant matches) |
-| `V4` | slotFill; "दशैं दुर्गा भजन" | `.answer(value: "दशैं दुर्गा भजन", capture: .freeText, source: .freeText)` (owner's merge example; markers kept) |
-| `V5` | slotFill; "गीत चलाऊ" | `.invalid(.degenerateAnswer)` (marker-only survives) |
-| `V6` | slotFill; "कस्तो भजन" | `.invalid(.degenerateAnswer)` (probe-echo + marker) |
-| `V7` | slotFill(defaultQuery "भजन"); "जे पनि बजाऊ" | `.answer(value: "भजन", capture: .optionName, source: .defaultQuery)` |
-| `V8` | slotFill; "फेरि भन्छु" | `.escape` |
-| `V9` | any; "होइन" | `.cancel` |
-| `V10` | slotFill; "होइन, दुर्गा भजन" | amendment: the remainder resolves as `V3` (`.answer(.repetition, .catalog)`) |
-| `V11` | slotFill; "दुर्गा होइन" | NOT a cancel (non-leading negation) ⇒ `.answer(.freeText, .freeText)` with "दुर्गा होइन" (L2-D3) |
-| `V12` | any; "मेरो छोरालाई फोन गर" | `.bargeIn` (B3) |
-| `V13` | candidateChoice; "युट्युब" with a youtube candidate | `.candidatePick(index, .optionName)` |
-| `V14` | any; a 201-Character raw answer | `.invalid(.overLength)` (L2-D5; `InputSanitiser` would clamp — the check runs first) |
-
-### 23. Degenerate detection (both intakes, one helper)
-
-`isDegenerate ⇔ provenance != .content || query == nil` (§13). Intake matrix:
-
-| Intake | Trigger site | Degenerate decision | Non-degenerate path (byte-identical to today) |
-|---|---|---|---|
-| ladder | music arm `:1223-1234` | `musicQueryOutcome(from: preText)` | `fireMusicRequest(query: query ?? preText)` — the previous expression's exact values (`musicQuery` is the wrapper) |
-| interpreted | `.music` dispatch `:3336-3355` | `interpretedQuery` nil (model set no `message`), then `musicQueryOutcome(from: raw)` | `interpretedQuery` non-nil ⇒ `fireMusicRequest(query:)` exactly as today |
-| candidate | pick execution (§12.5) | `musicQueryOutcome(from: picked query/word)` | `fireMusicRequest(query:)`; a degenerate pick chains a fresh slotFill frame sequentially |
-
-Every degenerate arm emits `dialogue_degenerate_query {intake}` before arming (no content in the event; the intake enum only).
-
-### 24. Candidate assembly and exhaustion (interface summary)
-
-Sources in priority order (L1 ADR-MTC-07; §10 mapping): relaxed near-matches (`KeywordIntentRule.nearMatches`, four-domain eligibility, executable-query rule) → the denied rephrase hypothesis appended last and only alongside ≥ 1 near-match (R2) → the live frame's own candidates on a re-probe (re-offered unchanged). Cap `maxCandidates` (3). Empty ⇒ no frame, the honest line stands alone.
-
-| Frame | Attempt-cap exhaustion | Bare cancel at any count |
-|---|---|---|
-| slotFill | execute the pending command with `defaultQuery` (`.defaultExecuted`, same executor as `.answer`) | `.cancelled`, nothing executes |
-| candidateChoice | `.exhausted` + `dialogue.exhausted`, nothing executes (R3) | `.cancelled`, nothing executes |
-
-### 25. State-machine deltas — full signatures
+Inside `SystemContactLinkService`:
 
 ```swift
-// VoiceSessionStateMachine.swift additions (main-queue-confined, existing contract)
-enum VoiceSessionState {
-    // ... existing cases ...
-    case awaitingSlotAnswer        // beside awaitingConfirmation (:9-17)
-}
-
-var onSlotAnswerTimeout: (() -> Void)?     // silent callback; the spoken
-                                           // confirmation notice is untouched
-@discardableResult
-func openSlotAnswerWindow() -> Bool        // mirrors openConfirmationWindow():153-181
-@discardableResult
-func refreshSlotAnswerWindow() -> Bool     // re-arm while already in the state (L2-D6)
-private func armSlotAnswerTimer()          // mirrors armConfirmationTimer():183-203,
-                                           // incl. the F6 guard `state == .awaitingSlotAnswer`
-private func cancelSlotAnswerTimer()       // mirrors cancelConfirmationTimer():205-208
+private var refreshInFlight = false
+private var refreshDirty = false
+private var lastSnapshot: VerifiedLinksSnapshot = .empty
+private var generation: UInt64 = 0
 ```
 
-`canTransition`: entering `.awaitingSlotAnswer` is legal from `.idle` and the busy set that accepts `.awaitingConfirmation`; leaving is legal to `[.idle, .error, .stopped]`. `transitionViaIdle` bridging applies exactly as for confirmation. Any transition out cancels the timer; entering arms it. The confirmation state, timer and spoken timeout line are untouched.
+`refresh(contacts:)`: if `refreshInFlight` → set `refreshDirty = true` and return
+`lastSnapshot`; else set in-flight, run the ONE batched fetch, increment `generation`, publish
+`lastSnapshot`, clear in-flight, and if `refreshDirty` → clear the flag and run exactly one
+follow-up pass (further triggers during that pass set the flag again). Coalescing is therefore
+bounded: any burst of triggers costs at most in-flight + 1 fetch; latest wins
+(generation-monotonic: the coordinator drops any snapshot with a generation ≤ the published one).
 
-### 26. Events and log-gate deltas
+### 4.3 Photo cache constants (L1 §19 item — final)
 
-Four event types, all closed-vocabulary, count/enum metadata only (no probe text, no answer text, no candidate labels, no transcript):
+```swift
+// SystemContactLinkService, both named (no literals anywhere):
+static let photoCacheCountLimit = 24          // ≈ 12 linked contacts × 2 sweep generations
+static let photoCacheTotalCostLimit = 16 * 1024 * 1024    // 16 MiB of raw photo bytes
+static let photoKeyHashPrefixLength = 16      // hex chars of the sha256 cache-key prefix
+```
 
-| Event | Emitter (component) | Metadata keys | Fixed vocabularies |
+`cost` = `data.count` (raw bytes). Eviction: NSCache default (cost-bounded + memory pressure).
+Invalidation: WHOLESALE (`invalidate(identifier: nil)`) on foreground (after which the app
+cannot know whether the user edited a photo in Contacts.app) and PER-IDENTIFIER after our own
+successful `writePhoto`/`clearPhoto`. Reads are cache-aside; a miss costs one CNContact fetch
+(≤12 linked contacts, never a loop).
+
+### 4.4 Face resolution — identity-keyed tasks, stale-completion dropping, refresh epochs
+
+- `faceIdentity(for:)` = `"<id.uuidString>:<token>:<photoFilename ?? "-">:<faceEpoch>"`, where
+  `token` = `systemPhotoTokens[contact.id]` (sha256 prefix of the last-resolved system bytes)
+  or `"-"` (linked, not yet resolved) or `"link-nil"` (no verified link). `systemPhotoTokens`
+  is written ONLY inside the `@MainActor` face methods.
+- Convergence: a foreground epoch bump re-runs `.task(id:)`; the resolve observes new system
+  bytes, updates the token, and the identity changes once more → exactly one extra resolve
+  that now hits the photo cache (bytes unchanged ⇒ same hash ⇒ identity stable). Bounded; no
+  loop.
+- Call sites: `ContactTile.task(id: coordinator.faceIdentity(for: contact))`;
+  the Settings list and CallView batch passes key on the ARRAY of identities. Every task body
+  re-checks `coordinator.faceIdentity(for:)` after its `await` and abandons the assignment on
+  a mismatch (`.task` cancellation is best-effort; the guard is the guarantee).
+- `faceEpoch` bumps (main): `setFamilyContactLink` success; add/update where `systemContact`
+  changed; `verifiedLinks.links` change on publish; every successful `writePhoto`/`clearPhoto`
+  (paired with `invalidate(identifier:)`); every foreground activation (after wholesale cache
+  invalidation — the only way an EXTERNAL photo edit surfaces). Cost: ≤12 re-resolves per
+  foreground, each a cache hit or one bounded fetch.
+
+### 4.5 Refresh-epoch ordering — launch/foreground hooks (L1 §19 item)
+
+- **Launch**: inside `bootRestoreData`'s main block (`AppCoordinator.swift:3955-3986`), the
+  `self.familyContacts = batch.contacts` assignment already fires `didSet` → index rebuild +
+  `refreshVerifiedLinks()`. This lands AFTER the roster publish and BEFORE
+  `startupBoot.advance(to: .preparingVoice)` (the Task spawn is non-blocking; the boot
+  signpost interval semantics are untouched).
+- **Foreground**: in `handleScenePhase(.active)` (`:9967`), after the existing hooks append
+  exactly one call:
+
+```swift
+refreshContactsIdentity()   // (1) await-free: spawns Task { await linkService.invalidate(identifier: nil);
+                            //     faceEpoch += 1 }; then (2) refreshVerifiedLinks()
+```
+
+  Order inside: (1) invalidation + epoch bump, (2) refresh — the refresh's photo reads (if
+  any) then see fresh bytes. Both non-blocking; `.background` is untouched.
+- **Roster mutation**: covered by the `didSet` choke point (add/update/remove/boot all assign).
+- **Access change**: the wizard's `grantAccess()` and CallView's grant path call
+  `refreshVerifiedLinks()` after a successful `requestAccess()` (a newly readable book can
+  verify links); returning from iOS Settings is already covered by the `.active` hook.
+- **After write outcomes**: `.written` → `invalidate(identifier:)` + `faceEpoch += 1`;
+  `.recordGone`/`.identityMismatch` → `refreshVerifiedLinks()` (the link may now degrade —
+  §1.5). No other outcome triggers anything.
+- **No retries, no backoff, no delays, no timeouts** (L1 §13.4). A failed refresh leaves the
+  previous snapshot; the next trigger (mutation/foreground/access/write) re-runs it. If a
+  wait ever became necessary it MUST be a named configurable constant on the existing
+  configuration surface — never a literal. None exists today.
+
+## 5. Error handling and observability
+
+### 5.1 Total outcome→UI mapping
+
+See §1.5 — the table is the complete mapping; `FamilyPhotoEditorState.from` is an exhaustive
+switch (adding a case breaks the build, forcing a UI decision). Byte-level guarantee relied
+on by the fallback copy: the app-local processed JPEG is persisted in the SAME store write as
+the contact, BEFORE any system attempt (L1 §10.2 step 1), so "kept in this app only" is true
+even for `.failed(.readBackMismatch)`, where the system bytes may in fact have landed.
+
+### 5.2 Logging rules per file (NFR-FCU-002)
+
+- New feature-role files (`SystemContactLinkService.swift`, `SystemContactPhotoWriter.swift`,
+  `FamilyContactIndex.swift`): NO console writes at all — any configuration, any build (the
+  gate's rule 3). All diagnostics go through an injected `ObservabilityBus`
+  (`Services/MedicationScheduler/DependencyProtocols.swift:23`) with the closed vocabularies
+  below and only allow-listed metadata keys (`outcome`, `state`, `error_code`, `duration_ms`,
+  `entry_count`, `contact_id_hash` — verified in `LogSanitiser.allowedKeys`).
+- Existing touched files (AppCoordinator, SettingsView, LeafViews, AddressBookDirectory,
+  MissedCallContactResolver, ContactResolver, ContactPhotoStore, ViewCaches): no new console
+  writes; any future line must stay reason-code-only (no names, numbers, identifiers,
+  nicknames, filenames, image bytes, no content-bearing event fields).
+- Events (classification-only; `contact_id_hash` unused — no id is needed to diagnose):
+
+| component | eventType | outcome (closed) | errorCode | metadata |
+|---|---|---|---|---|
+| `contacts_link` | `refresh_completed` | `ok` \| `degraded` | nil \| `fetch_failed` | `{"entry_count": "<verified count>"}` |
+| `contacts_link` | `unlink` | `keeping_local_as_is` \| `keeping_displayed_photo_locally` \| `clear_app_local_photo` | nil | none |
+| `contacts_link` | `claim_refused` | `refused` | `duplicate_claim` | none |
+| `contacts_photo` | `write` | outcome `logToken`: `written` \| `skipped_no_link` \| `skipped_no_authorization` \| `record_gone` \| `identity_mismatch` \| `failed` | failure raw value when `.failed`, else nil | `{"state": <not_determined\|denied\|limited\|full>}` for `skipped_no_authorization`; none otherwise |
+
+`duration_ms` set on `refresh_completed` and `write`. `PhotoWriteIntent.imageBytesHash` (test
+fake + DEBUG assertion) is a hash by construction. No name/number/nickname byte content ever
+enters an event field.
+
+### 5.3 Release-gate wiring
+
+`ios/tools/check-release-log-safety.py` `FEATURE_ROOTS` (source-root-relative) gains:
+
+```py
+    # [FAMILY-CONTACTS-UNIFY design-l2 §5.2] Link/nickname identity + the write seam:
+    # names, nicknames, phone numbers, identifiers and photo bytes are household data.
+    # A Release console write or an unlisted metadata key anywhere in these files
+    # fails the gate; events route through ObservabilityBus with allow-listed keys only.
+    "Services/Contacts/SystemContactLinkService.swift",
+    "Services/Contacts/SystemContactPhotoWriter.swift",
+    "Services/Contacts/FamilyContactIndex.swift",
+```
+
+The fixture harness keeps passing unchanged (positive/negative fixture per rule); the gate
+stays wired into `ios/build.sh` ahead of every test scope. Existing coordinator/UI paths stay
+outside the feature role (they carry pre-existing console writes), but their new lines follow
+the reason-code rule and the transcript rules (gate rules 1-2 walk the whole tree already).
+
+## 6. Performance and security implementation patterns
+
+### 6.1 ≤20 ms budgets (NFR-FCU-001)
+
+- **Build** (once per roster publish): 12 contacts × (1 name + ≤8 nicknames) = ≤108
+  `NepaliTextNormalizer.normalize` calls + ≤108 map insertions — measured sub-millisecond;
+  asserted by `FamilyContactIndexTests` (max-roster build ≤20 ms ceiling).
+- **Search per keystroke**: normalize the query ONCE; `.exactName` compares against
+  `entry.normalizedName` (no per-call normalization); `.nickname` exact via one
+  `idsByNickname[normalizedQuery]` O(1) hit; `.nickname` substring = ≤9 `range(of:)` checks
+  per contact over PREcomputed normalized strings (bounded 12×9 = ≤108 range checks);
+  `.containment` today's raw checks. Strictly cheaper than today's per-call name
+  normalization. Measured assertion ceiling in `UnifiedContactSearchTests`.
+- **Voice per utterance**: one query normalization + variants; per contact: 1 index lookup +
+  ≤9 normalized comparisons (exact nickname) + ≤9 containment checks + relationship + token
+  logic; near-miss walks name + ≤8 nicknames with the early-exit edit distance. Bounded
+  12×(1+9+9) small-string ops; measured ceiling in `ContactResolverTests`.
+- The 8-per-contact editor cap (§2.5) keeps production inside the tested envelope; the MODEL
+  and decoder accept more without failing (budgets degrade gracefully, nothing truncates).
+- Measured values are logged into the test output and recorded at DV; no production timers.
+
+### 6.2 CNSaveRequest confinement — three enforcement layers
+
+1. **File-local construction**: `CNSaveRequest` and `CNMutableContact` are constructed ONLY in
+   `Services/Contacts/SystemContactPhotoWriter.swift` (confirmed absent anywhere today).
+   Pinned by a new source-scan test using `FeatureSourceScan.swiftFiles(in:)` + `codeText(of:)`:
+   every occurrence of `CNSaveRequest`/`CNMutableContact` in `ios/ElderlyAssistant` must be in
+   that one file (`CNContactStore` additionally allowed in `AddressBookDirectory.swift` — read glue).
+2. **Intent-record assertion**: the writer builds `PhotoWriteIntent` before the save and
+   `assert(intent.fields == [.photo])`; the test fake records the same record type and the
+   suite asserts the field-set invariant on every call.
+3. **Read-back byte verification**: after `execute`, re-fetch `CNContactImageDataKey` and
+   compare bytes with the written JPEG — `.written` requires equality; anything else is
+   `.failed(.readBackMismatch)` (never a false success; §10.3's fallback state stands).
+
+Plus the fingerprint re-check AT ATTEMPT TIME (§1.4 step 2): a stale/moved identifier can never
+write to a different person — the write is prevented before `execute`.
+
+### 6.3 STRIDE notes for security-design-review
+
+- **Spoofing** (wrong-contact write): fingerprint re-check + read-back + the
+  identifier→family uniqueness at link time; a re-used identifier fails the fingerprint, never
+  silently redirects.
+- **Tampering** (partial/other-field mutation): the request mutates exactly `imageData`
+  (intent assertion + confinement + source scan); read-back verifies the outcome.
+- **Repudiation**: classification events (§5.2) record refresh/write/unlink/refusal outcomes
+  without content.
+- **Information disclosure**: nothing new leaves the device (NFR-FCU-003); no log content; the
+  photo cache is in-memory only; `PhotoWriteIntent` carries a hash, never bytes.
+- **Denial of service**: bounded batches (≤12 identifiers), serial writes, no retries/backoff,
+  cache bounded by count+cost; a corrupt payload degrades to unlinked (no crash loop).
+- **Elevation of privilege**: the app's only write intent is the edited contact's photo field;
+  there is no API surface to write any other field or any other contact.
+- Unlink never writes to the system record (FR-FCU-005/FR-FCU-006); the never-lose copy runs
+  BEFORE the link clears.
+
+### 6.4 Source-scan pins (new tests)
+
+- `testSystemContactWriteSeamIsTheOnlyCNSaveRequestSite` (§6.2 layer 1).
+- `testSyncContactPhotoResolverIsRemoved` — asserts `func contactPhoto(for` no longer exists
+  anywhere in `ios/ElderlyAssistant` (the §8.1 deletion is pinned).
+- L10n contiguity/coverage pins (§7).
+- `FamilyContactWizardSheet` search uses `UnifiedContactSearch` (assert the call string exists
+  in SettingsView.swift and the old `SystemContactSearch.search` call is gone from the wizard
+  region) — a cheap drift pin for §2.2.
+
+## 7. Localization — FINAL frozen copy (21 keys)
+
+Structure: 8 `family.link.*` + 7 `family.photo.*` (merged with the 3 existing) + 4
+`family.nickname.*` = 19 contiguous `family.*` keys, plus 2 `call.search.*` insertions.
+Placeholders: exactly four keys carry one `%@` (`family.link.linkedTo`, `family.link.alreadyLinked`,
+`family.nickname.removeLabel`, `call.search.linkedBookName`). No key has any other `%`.
+
+| # | Key | en (FROZEN) | ne (FROZEN) |
 |---|---|---|---|
-| `dialogue_degenerate_query` | `command_router` | `intake` | `ladder` / `interpreted` / `candidate` |
-| `dialogue_probe_spoken` | `command_router` | `probe_kind`, `attempt`, `option_count`; `errorCode: "catalogUnavailable"` when degraded (E3) | `slotFill` / `candidateChoice`; attempts `1|2`; count `0..4` |
-| `dialogue_answer` | `command_router` | `capture_form`, `merge_source`; on invalid: outcome `invalid` + `reason` | `indexWord`/`optionName`/`repetition`/`freeText`; `catalog`/`freeText`/`candidate`/`defaultQuery`; reasons §9 |
-| `dialogue_frame_resolved` | `command_router` (turn-time resolutions); `app_coordinator` (timeout, emergency, superseded — the `:7327` component precedent) | `outcome` | the ten-case `DialogueFrameResolution` vocabulary (`answered`, `defaultExecuted`, `candidateSelected`, `exhausted`, `cancelled`, `escaped`, `bargedIn`, `timedOut`, `superseded`, `emergency`) |
+| 1 | family.link.chip | Linked | जोडिएको |
+| 2 | family.link.linkedTo | Linked to %@ | %@सँग जोडिएको |
+| 3 | family.link.unlink | Remove link | लिंक हटाउनुहोस् |
+| 4 | family.link.unlinkHint | This only separates the two records. Nothing is deleted, and your phone's contact is not changed. | यसले दुई रेकर्डलाई मात्र छुट्याउँछ। केही मेटिँदैन, र तपाईंको फोनको सम्पर्क परिवर्तन हुँदैन। |
+| 5 | family.link.alreadyLinked | %@ is already a family contact. | %@ पहिले नै परिवारको सम्पर्क हो। |
+| 6 | family.link.stale | This phone contact is no longer in your address book. The link is ignored. | यो फोन सम्पर्क अब तपाईंको फोनबुकमा छैन। लिंक बेवास्ता गरिएको छ। |
+| 7 | family.link.pickHint | Choose the phone contact this person is in. | यो व्यक्ति फोनमा कुन सम्पर्कको रूपमा छ, त्यो छान्नुहोस्। |
+| 8 | family.link.sectionTitle | Phone contact | फोन सम्पर्क |
+| 9 | family.photo.accessTitle | Update this person's photo in your phone's contacts? | यो व्यक्तिको फोटो फोनको सम्पर्कमा पनि अपडेट गर्ने हो? |
+| 10 | family.photo.accessBody | Allowing contacts access lets the app copy the photo you choose onto this person's contact card. Nothing else in your contacts is changed. The app works fully even if you say no. | सम्पर्क पहुँच अनुमति दिनुभयो भने, तपाईंले छान्नुभएको फोटो यो व्यक्तिको सम्पर्क कार्डमा प्रतिलिपि गर्न सकिन्छ। तपाईंको सम्पर्कमा अरू केही परिवर्तन हुँदैन। तपाईंले नभन्नुभए पनि एप पूरै चल्छ। |
+| 11 | family.photo.accessDeniedBody | Contacts access is off, so the photo will be kept in this app only. You can change this in iPhone Settings. | सम्पर्कको पहुँच बन्द छ, त्यसैले फोटो यही एपमा मात्र रहन्छ। तपाईं आईफोनको सेटिङमा यो बदल्न सक्नुहुन्छ। |
+| 12 | family.photo.state.updatedInSystem | Photo updated in your phone's contacts. | फोटो फोनको सम्पर्कमा अपडेट भयो। |
+| 13 | family.photo.state.keptOnPhone | Kept in this app only. | यही एपमा मात्र राखिएको। |
+| 14 | family.photo.state.systemPhotoRemains | Your phone's contact still has its own photo. Change it in the Contacts app to remove it. | तपाईंको फोनको सम्पर्कमा अझै आफ्नै फोटो छ। हटाउन कन्ट्याक्ट्स एपमा गएर बदल्नुहोस्। |
+| 15 | family.photo.sourceSystem | Shown from your phone's contacts. | फोनको सम्पर्कबाट देखाइएको। |
+| 16 | family.nickname.entryPlaceholder | Add a name or variation (e.g. sanu, सानु) | नाम वा अर्को रूप थप्नुहोस् (जस्तै sanu, सानु) |
+| 17 | family.nickname.add | Add | थप्नुहोस् |
+| 18 | family.nickname.removeLabel | Remove %@ | %@ हटाउनुहोस् |
+| 19 | family.nickname.hint | Any of these names finds this person — typed or spoken. Names are kept exactly as you enter them. | यीमध्ये कुनै नामले यो व्यक्ति भेटिन्छ — टाइप गरेको वा बोलेको। नामहरू तपाईंले लेखेकै रूपमा राखिन्छ। |
+| 20 | call.search.linkedBookName | Also in your phone book as %@ | फोनबुकमा %@ को रूपमा पनि छ |
+| 21 | call.search.accessLimited | Searching shows only the contacts you allowed. | खोज्दा तपाईंले अनुमति दिनुभएका सम्पर्कहरू मात्र देखिन्छन्। |
 
-`LogSanitiser.allowedKeys` gains exactly seven keys — `intake`, `probe_kind`, `attempt`, `option_count`, `capture_form`, `merge_source`, `reason` — each with a justified-key comment and the fixed vocabulary above; `DEFAULT_ALLOW_LIST` in the gate follows automatically (§17). The four new files join `FEATURE_ROOTS` (§17) so no future console write or content-derived field in them can ship. Probe and ack text rides the existing on-device reply surface (`speak(text:)` → `noteAssistantSpoke`, `:3864`); the transcript-recording policy (`recordTranscript`, `:741`) is unchanged. **No new egress**: the feature adds zero network calls; the only network touched by a merged command is the existing music path (Spotify-feature owned), carrying the user's own words through the same seam a directly-spoken music request already uses.
+Wording notes for the reviewer: #16's ne deliberately contains the romanized example "sanu"
+(the store-as-entered showcase) — the ONLY ne value permitted to carry ASCII letters
+(documented exception in the coverage function; the Devanagari-presence rule still applies to
+it). Every other ne value is pure Devanagari (loanwords transliterated, e.g. कन्ट्याक्ट्स,
+फोनबुक, आईफोन, लिंक — matching the dialogue family's convention).
 
-### 27. Configuration parameters
+Catalog placement (exact, alphabetical; the file sorts keys case-insensitively as verified):
 
-| Knob | Default | Home | Notes |
-|---|---|---|---|
-| `DialogueConfig.maxProbes` | 2 | `DialogueManager.swift` | OD-M1; counts probes spoken |
-| `DialogueConfig.maxCandidates` | 3 | same | FR-MTC-004 |
-| `DialogueConfig.maxSlotOptions` | 4 | same | FR-MTC-003 |
-| Answer window | `VoiceSessionStateMachine.Config.confirmationTimeoutSeconds` = 45 s | state machine `:93-96` | single source for both windows and both the frame deadline and the timer (injected into `DialogueManager.init`); never a new literal |
-| Re-probe window refresh | same 45 s value | same | `noteAttempt` restamp + `refreshSlotAnswerWindow` (L2-D6) |
-| `InputSanitiser.maxLength` | 200 Characters | `InputSanitiser.swift` | existing; the raw-answer length bound (L2-D5) — not raised |
-| Capture timeout / watchdog | 22 s / 60 s | `VoicePipeline` / `AppCoordinator` `:4865` | unchanged envelopes; the watchdog only fires while the session is `.listening`, and the window state is not `.listening`, so a live frame coexists exactly as a confirmation window does today |
-| `maxMusicQueryLength` | 100 | `KeywordIntentRule.swift:722` | unchanged |
-| Catalog resource | `DialogueOptionCatalog.json`, version 1 | app bundle | §11 |
+- `family.link.alreadyLinked`, `family.link.chip`, `family.link.linkedTo`, `family.link.pickHint`,
+  `family.link.sectionTitle`, `family.link.stale`, `family.link.unlink`, `family.link.unlinkHint`
+- `family.nickname.add`, `family.nickname.entryPlaceholder`, `family.nickname.hint`,
+  `family.nickname.removeLabel`
+- `family.photo.accessBody`, `family.photo.accessDeniedBody`, `family.photo.accessTitle`,
+  (existing) `family.photo.add`, `family.photo.change`, `family.photo.remove`,
+  `family.photo.sourceSystem`, `family.photo.state.keptOnPhone`,
+  `family.photo.state.systemPhotoRemains`, `family.photo.state.updatedInSystem`
+- `call.search.accessLimited` directly BEFORE `call.search.allowBody`;
+  `call.search.linkedBookName` between the existing `call.search.familyChip` and `call.search.loadFailed`.
 
-**Threading contract.** Frame reads/writes: main queue only (router turn + coordinator hooks). Timer: a `Task` cancelled on every resolution, re-checking window state before firing (F6 guard); it can only clear an already-clear frame (silent by design). Turns never overlap (single in-flight utterance), so no lock, actor or atomic is introduced anywhere.
+L10n test extension (`L10nCatalogCoverageTests.swift`, the established pin pattern):
+- `familyContactsKeys` = the 21 keys; both-languages resolution; values-differ;
+  placeholder-count equality (`%` counting); the verbatim `familyContactsCopy` table = the
+  rows above; source-catalog coverage via the existing extraction-state checks (both values
+  `translated`, ne non-empty + Devanagari, ne ASCII-forbidden with the #16 exemption).
+- Contiguity pin: scan the raw catalog between `family.emergencyToggleHint` (predecessor) and
+  `family.relationship.brother` (successor) and assert the raw key lines are EXACTLY the 19
+  `family.*` keys above in that order (every line in the span carries one of
+  family.link./family.nickname./family.photo.); plus two named-neighbor pins for the
+  `call.search.*` insertions (accessLimited → allowBody; familyChip → linkedBookName → loadFailed).
+- Baseline key-count pin updated DELIBERATELY, count recorded in the test comment: this branch
+  measures 1,389 keys before and 1,410 after the 21 insertions (re-measure and record the
+  post-call-dialer-merge number at implement time; the +21 delta is the constant, not the absolute).
 
-### 28. Security-review focus mapping (workflow gates)
+`Info.plist:115` — replacement `NSContactsUsageDescription` (L1 §12 wording, frozen):
 
-| Workflow focus area | Where this design answers it |
+> Searching from the phone screen can call anyone in your phone book — including people added
+> by WhatsApp, Messenger and other apps. When you set a photo for a family contact who is also
+> in your phone book, the app can save that photo onto the person's contact card if you allow
+> it; it changes nothing else. The app works fully even if you say no.
+
+## 8. L1 §19 dispositions and exact placement
+
+### 8.1 `contactPhoto(for:)` — DELETE (decided)
+
+After the four live call sites migrate (`SettingsView.swift:1596`, `:2710`,
+`LeafViews.swift:1161`, `:2650` — all become the async face path), `AppCoordinator.contactPhoto(for:)`
+(:6492) has ZERO references (verified: comments only). Deleted because: (a) two photo paths
+(sync app-local-only vs the async precedence resolver) are the exact drift hazard L1 §10.1
+forbids; (b) dead code contradicts house practice; (c) deletion is compile-verified. The
+underlying `ContactPhotoStore.load(named:)` STAYS (the resolver's local branch + `loadData`'s
+sibling). Pinned by the source-scan test (§6.4).
+
+### 8.2 Placement table (everything new/changed)
+
+| Symbol | File |
 |---|---|
-| Emergency precedence mid-dialogue | §21 step 2 (check above the block, unchanged); §12.3 (post-dispatch clear only); §18 `E2` (dispatch with the clear forced to a no-op); hostile corpus remains full of emergency-phrase answers |
-| Free-text answer injection | §22 `S1`–`S6` (sanitise + seam before any use, L2-D5/D14); answers can only fill a slot value or pick an enumerated candidate — never select an execution path (§9 `C5`); candidate lists are restricted to the four safe fast-path domains by construction (§10) |
-| Frame-trap resistance | §24 (cancel/escape/barge-in/exhaustion tables), §25 (silent expiry + re-arm), §21 guarantees; one-deep, no persistence |
-| Log sanitisation | §26 (closed vocabularies, seven keys, FEATURE_ROOTS + fixtures) |
-| No new egress | §26 last paragraph; zero new calls; answers reuse the existing music-search seam |
-| Degraded-brain path | §4 deterministic-first (the answer turn returns before the interpreter); PR #156 ladder untouched (no new residents; no model consulted) |
+| `SystemContactLink`; `FamilyContact.normalizedNicknames`; `LegacyNicknameKeys`; `FamilyContact` schema/decoder | `Services/Storage/FamilyContactStore.swift` |
+| `FamilyContactIndex` (+`Entry`, lookups) | NEW `Services/Contacts/FamilyContactIndex.swift` |
+| `VerifiedLinksSnapshot` (+ helpers), `SystemContactReading`, `SystemContactLinkReading`, `SystemContactLinkService` | NEW `Services/Contacts/SystemContactLinkService.swift` |
+| `SystemContactWriteAccess`, `SystemContactWriteFailure`, `SystemContactPhotoWriteOutcome`, `PhotoWriteField`, `SystemContactPhotoWriting`, `FamilyPhotoEditorState` (+total mapping), `SystemContactPhotoWriter` | NEW `Services/Contacts/SystemContactPhotoWriter.swift` |
+| `ContractsAccess.limited`/`allowsReading`/`from(_:)`; `AddressBookDirectory: SystemContactReading`; `fetchKeys` + identifier key; `allEntries` identifier pass-through; `AddressBookEntry.identifier`; `make(..., identifier:)` | `Services/Contacts/AddressBookDirectory.swift` |
+| Contentions e/`MissedCallContactResolver.linkedFamilyMatch`, `resolve(snapshot:)` | `Services/Contacts/MissedCallContactResolver.swift` |
+| `UnifiedContactSearch` signature/Outcome/tier changes (per §1.6) | `Services/Contacts/UnifiedContactSearch.swift` |
+| `ContactResolver` index provider + bands + near-miss | `Services/Intents/ContactResolver.swift` |
+| `ContactPhotoStore.processedJPEG(_:) -> Data?` (static extraction: `scaledForStorage` → `jpegData`; `save` refactored to call it — byte-identical output) + `loadData(named:)` | `Services/Storage/ContactPhotoStore.swift` |
+| Coordinator state, `faceIdentity/faceImage/faceThumbnail`, `SystemContactUnlinkMode`, `unlinkMode`, `setFamilyContactLink`, `syncSystemPhoto`, `refreshVerifiedLinks`, `refreshContactsIdentity`, add/update signatures, link-aware `familyContact(matchingPhone:)` | `App/AppCoordinator.swift` (`familyContact(matchingPhone:)` :8367 delegates to `familyMatch` then `linkedFamilyMatch`; missed-call family pass :8301 uses the same; `refreshNativeMissedCallNames` :8342 passes `verifiedLinks`) |
+| Wizard restructure (state, subviews, steering, save flow), list chip + face migration, `loadDraft` faces | `App/SettingsView.swift` |
+| `CallView` face migration + caption, `UnifiedContactResultRow.caption: String? = nil` + synthesized-row caption render, `ContactTile` face task | `App/LeafViews.swift` |
+| `DownsampledImageCache` doc note for the `sysphoto:` key family (no API change) | `App/ViewCaches.swift` |
+| 21 keys; `L10nCatalogCoverageTests` pins | `Resources/Localizable.xcstrings`; `ElderlyAssistantTests/App/L10nCatalogCoverageTests.swift` |
+| Write disclosure | `Info.plist` (`NSContactsUsageDescription`) |
+| `FEATURE_ROOTS` entries | `ios/tools/check-release-log-safety.py` |
 
----
+### 8.3 Test placement (L1 §17 suites)
 
-## Traceability — every requirement mapped
+- Extended: `FamilyContactStoreTests` (link + nicknames round-trip, legacy lossless, corrupt
+  degrade), `UnifiedContactSearchTests` (Passes 1-5, unlinked parity, `linkedBookNames`,
+  recount, Devanagari nickname pins positive+negative), `ContactResolverTests` (bands,
+  ambiguity consequence table, near-miss), `MissedCallContactResolverTests` (linked-record
+  numbers, identifier remap, `.limited` read), `ContactPhotoStoreTests` (`processedJPEG` pins
+  + `loadData`), `L10nCatalogCoverageTests`.
+- New: `Services/Contacts/FamilyContactIndexTests.swift`,
+  `Services/Contacts/SystemContactLinkServiceTests.swift` (fake `SystemContactReading`),
+  `Services/Contacts/SystemContactPhotoWriterTests.swift` (fake writer; intent confinement;
+  no-attempt matrix; outcome mapping totality incl. `FamilyPhotoEditorState.from`;
+  source-scan pins).
 
-All 32 requirements (FR-MTC-001…020, NFR-MTC-001…012) are touched; none is silently dropped.
+## 9. Technical risks and mitigations
 
-| Requirement | Component(s) | Interface (exact symbol) | Test seam |
+| # | Risk | Mitigation | Pinning test |
 |---|---|---|---|
-| FR-MTC-001 frame lifecycle | C-MTC-01, C-MTC-08 | `DialogueManager.arm/liveFrame/resolve`, `startDialogueFrame` | `DialogueFrameTests` lifecycle rows |
-| FR-MTC-002 degenerate detection | C-MTC-06, C-MTC-05 | `musicQueryOutcome`, `fireMusicRequestOrProbe` | `KeywordIntentRuleTests` provenance; `CommandRouterMusicTests` intake rows |
-| FR-MTC-003 slotFill probe | C-MTC-01, C-MTC-04, C-MTC-09 | `DialogueProbeComposer.probeText`, catalog group, keys §16 | `DialogueFrameTests` composition; `DialogueOptionCatalogTests` |
-| FR-MTC-004 candidateChoice | C-MTC-03, C-MTC-05 | `DialogueCandidateBuilder.build`, `speakDialogueDidYouMeanOrReprompt` | `DialogueCandidateBuilderTests`; `CommandRouterDialogueTests` trigger rows |
-| FR-MTC-005 capture forms | C-MTC-02 | `DialogueAnswerPath.classify` vectors `V1`–`V7`, `V13` | `DialogueAnswerPathTests` (one test per form) |
-| FR-MTC-006 merge/execution | C-MTC-02, C-MTC-05 | `DialogueMerge`, `executeDialogueAnswer`, `merging(message:)` | `DialogueAnswerPathTests` (`V4` owner example); `CommandRouterMusicTests` merged-dispatch rows |
-| FR-MTC-007 probe budget | C-MTC-01, C-MTC-05 | `DialogueConfig.maxProbes`, exhaustion §24 | `DialogueFrameTests` attempts; `CommandRouterDialogueTests` exhaustion rows |
-| FR-MTC-008 escape | C-MTC-02, C-MTC-05 | `.escape`, `dialogue.escape` ack | `DialogueAnswerPathTests` `V8`; router escape row |
-| FR-MTC-009 interception | C-MTC-05, C-MTC-08 | §12.2 block, `activeDialogueFrame` | `CommandRouterDialogueTests` placement rows |
-| FR-MTC-010 cancel | C-MTC-02, C-MTC-05 | `cancelTokens`, `.cancel`/amendment | `DialogueAnswerPathTests` `V9`–`V11` |
-| FR-MTC-011 emergency | C-MTC-05, C-MTC-08 | emergency block + `.emergency` clear | `CommandRouterDialogueTests` `E2`; hostile corpus |
-| FR-MTC-012 barge-in | C-MTC-02 | `isBargeIn` rows `B1`–`B7` | `DialogueAnswerPathTests` one test per row |
-| FR-MTC-013 timeout | C-MTC-07, C-MTC-08 | `onSlotAnswerTimeout`, silent handler | `VoiceSessionStateMachineTests`; router timeout rows |
-| FR-MTC-014 awaitingSlotAnswer | C-MTC-07 | `openSlotAnswerWindow`, edges §25 | `VoiceSessionStateMachineTests` state rows |
-| FR-MTC-015 catalog | C-MTC-04 | `DialogueOptionCatalog` + schema §11 | `DialogueOptionCatalogTests` (incl. bundle gate) |
-| FR-MTC-016 template probes | C-MTC-01, C-MTC-09 | `DialogueProbeComposer` | composition rows; `L10nCatalogCoverageTests` |
-| FR-MTC-017 cache bypass | C-MTC-05 | structural return before interpreter | `DialogueCacheBypassTests` |
-| FR-MTC-018 Phase 2 v17 | C-MTC-12 | `frameClause` plumbing §19 | Phase 2 change set (not Phase 1) |
-| FR-MTC-019 Phase 3 | C-MTC-13 | slot-parametric factories §20 | Phase 3 change set |
-| FR-MTC-020 DV gate | all | DV-1…DV-5 (L1 §6) + Phase 0 smoke | device validation on Anzaan |
-| NFR-MTC-001 turn envelope | C-MTC-07, C-MTC-08 | 22 s / 45 s / 60 s unchanged §27 | timeout-injection tests |
-| NFR-MTC-002 prompt budget | C-MTC-12 | §19 budget arithmetic | Phase 2 pins; Phase 1 zero prompt delta |
-| NFR-MTC-003 no egress | C-MTC-05 | §26 statement; no new call sites | egress grep gate (existing); router tests |
-| NFR-MTC-004 log safety | C-MTC-05, C-MTC-10 | §26 vocabularies; FEATURE_ROOTS §17 | gate fixtures; `DialogueHostileCorpusTests` log rows |
-| NFR-MTC-005 degraded brain | C-MTC-05, C-MTC-08c | §4/§28 deterministic-first | `DialogueAnswerPathTests` (no model touched — structural) |
-| NFR-MTC-006 localisation | C-MTC-09 | §16 (16 keys) | catalog completeness (both languages) |
-| NFR-MTC-007 jetsam | C-MTC-08 | no new residents §27 | DV-5 (PR #156 protocol) |
-| NFR-MTC-008 sanitisation/injection | C-MTC-02, C-MTC-08c | `prepareDialogueAnswerText`, L2-D5 | `IntentTranscriptPreparationTests`; hostile corpus |
-| NFR-MTC-009 voice-only accessibility | C-MTC-01, C-MTC-09 | spoken options + index words §22 | `DialogueFrameTests` composition rows |
-| NFR-MTC-010 trap resistance | C-MTC-01, C-MTC-07 | cancel/escape/barge-in/expiry §21/§24/§25 | trap rows; DV-2/DV-3 |
-| NFR-MTC-011 KV prefix | C-MTC-12 | §19 insertion point | Phase 2 mirror/digest gates |
-| NFR-MTC-012 no regression | all | §18 pins; §12.4 edit list is the full router diff | golden/prompt/confirmation suites unchanged |
+| R1 | **Identifier instability** — iOS may delete/reissue `CNContact.identifier`s (iCloud merges, restores); a stale link must never call the wrong person | Fingerprint re-check at EVERY use: verification (§6.2 L1) at refresh, attempt-time check before any write; unverified links behave as absent; never auto-removed; `family.link.stale` surfaces the state; the number path (dial/routing) still resolves by NUMBER under the trailing-digit rule | `SystemContactLinkServiceTests` degrade matrix; `UnifiedContactSearchTests` unlinked-pair parity; `SystemContactPhotoWriterTests` no-write-on-mismatch |
+| R2 | **Limited access (iOS 18/26)** — granted-subset reads, writes refused for non-granted records, `.limited` currently collapsed into `.denied` by `@unknown default` | `.limited` added end-to-end: readable-everywhere, never re-prompting; distinct honest caption (`call.search.accessLimited`); write detection is attempt-based (`notInGrantedSelection` outcome); UI never claims success or failure it can't verify | `ContactsAccess.from`/`SystemContactWriteAccess.from` pure mapping tests; writer outcome matrix; wizard/call-surface access-switch compile exhaustiveness |
+| R3 | **Unversioned-store migration** — a corrupt/partial payload could crash the boot read or silently drop fields | The optional-field decoder pattern; separate `LegacyNicknameKeys` container keeps the synthesized encoder authoritative; corrupt link fields → nil; decoder pinned by fixtures from every historical shape | `FamilyContactStoreTests` round-trip + legacy blank/whitespace/nil cases + corrupt-link fixture; DV-6 |
+| R4 | **Call-dialer union conflicts** — both features touch AppCoordinator/LeafViews/MethodResolver (in flight on master) | Sequence behind its merge (L1 §16); our resolution UPSTREAM (choose the person), their chain DOWNSTREAM (choose the channel) — never inverted; `MethodResolver` untouched; union-preserving edits in shared structs | call-dialer scoped suites + ours on the merged build; manual chain check at DV |
+| R5 | **Grapheme pin hazards** — nickname matching must not introduce new Character-cluster behavior (Devanagari partial-word semantics are regression-pinned) | All matching funnels through `NepaliTextNormalizer` + the SAME `range(of:options:)` semantics as today; no new grapheme logic; the new nickname tiers are additive branches gated on non-empty nicknames | `UnifiedContactSearchTests` + `ContactResolverTests` Devanagari pins (positive AND negative), including a Character-cluster partial-word case asserted to behave EXACTLY like the name tier |
+| R6 | **Performance budget regression** — index build/query could exceed ≤20 ms at max roster | Precomputed normalized strings, O(1) exact map, ≤108 substring checks; build in one pass; measured assertions with ceilings; the editor caps entries at 8 (tested envelope) | `FamilyContactIndexTests` build ceiling; search/resolve perf tests (measured values recorded) |
+| R7 | **Concurrency regressions** — off-main published-state mutation, stale snapshot/face publication, two saves racing one record | Main-confined published state; actor-isolated services; single-flight refresh with generation ordering; identity-guarded task assignment; strictly serial writes (actor) | `SystemContactLinkServiceTests` coalescing; face identity unit tests; writer serialization test via the fake (no interleaved intents) |
+| R8 | **False-success copy** — any path that shows "updated in your phone's contacts" without byte-verified proof | `.written` requires read-back byte equality; every other attempt outcome maps to kept-on-phone copy; the app-local copy is persisted first (never-lose) so the fallback sentence is always true | `SystemContactPhotoWriterTests` read-back mismatch → `.keptOnPhone`; `FamilyPhotoEditorState.from` totality test |
 
-## Technical risks and mitigations
+## 10. Traceability additions (beyond L1 §18)
 
-| # | Risk | Mitigation (implemented where) | Residual |
-|---|---|---|---|
-| 1 | The interception block perturbs the confirmation flow | The hook is byte-identical; the block sits after its closing brace; extended clear is limited to the emergency branch as a side-effect-only line (§12) | Router-diff review at `review-implementation` |
-| 2 | Barge-in false negatives trap a user who speaks a real command mid-frame | Predicates are conservative by design; the 45 s window + cancel + escape always recover; ambiguity is an answer (never a drop) | Accepted; DV-3 |
-| 3 | `sensitiveCallPhrases` false positives drop a legitimate answer as barge-in | The fall-through path speaks an honest blocked/other line (never silence, never a wrong execution); the frame is gone, so the next utterance is fresh | Accepted, bounded |
-| 4 | The answer strip mis-keeps a marker so a degenerate query executes | `V5`/`V6` pin marker-only invalidity; a merged free-text value executes through the same honest music outcome matrix as any query | None at merge level |
-| 5 | Free-form on candidateChoice weakens "always accepted" | L2-D9 applies it to the domains whose own extractors claim the text; elsewhere the user gets one honest re-probe, then the honest exhausted line — never a fabricated execution | Flagged for `review-l2` (risk 11 in the table below) |
-| 6 | Re-probe timing vs the watchdog | The window state is never `.listening`; the watchdog only fires there; total windows bounded at 2 (§27) | None |
-| 7 | Catalog data drift (aliases miss pronounced forms) | Matching vocabulary is data: extendable without code; the degraded probe (free-text-only) keeps the flow working with an unloadable catalog | Accepted; catalog copy review (§6 gap 3) |
-| 8 | Event metadata smuggling a transcript fragment | All seven keys have fixed vocabularies or bounded integers; the hostile corpus + gate fixtures assert no content | Gate's documented static limits |
-| 9 | New files missed by the Xcode targets | `project.pbxproj` edits (app target: 6 new Swift files + the JSON resource; test target: 8 new test files) are part of the change set | Build-time detection |
-| 10 | `IntentTranscriptPreparation` drifts from `turnInput` behaviour | Parity suite `T1`–`T4` compares both callers on the same fixtures; `plainText(for:raw:)` untouched | None |
-| 11 | R3's reading (candidateChoice exhaustion closes honestly) vs FR-MTC-007's literal wording | Table §24; reconciliation note §6 R3 | Reviewer confirms the reading at `review-l2` |
-| 12 | A frame left live across a Talk-button recovery or watchdog recycle | `supportsTalkReset` false in the state; any session transition out resolves `.superseded` through the coordinator funnel; readings are expiry-checked | None (tested) |
-
-## Not in this design
-
-Explicit boundary (the L1 out-of-scope list and Feature Constraints, restated as non-goals):
-
-- No training run, no model change, no prompt change in Phase 1 (the §19 interface is Phase 2 only; Phase 1 ships zero prompt files).
-- No open-ended conversation/chat; no transcript history in prompts; no model-generated probe text.
-- No new network egress, no cloud/BYO-LLM path, no new storage or persistence of dialogue state (in-memory, one-deep, cold start = no frame).
-- No changes to reminder/calendar behaviour (Phase 3 is separately scoped), no RepetitionGuard edits, no new UI (probes are replies), no Android/platform scope.
-- No database migrations, no new encrypted-store keys, no auth changes — the merge cannot authenticate, cannot bypass a confirmation tier, and cannot reach a sensitive action except through that action's existing gate.
-- No edits to the emergency/medication surfaces beyond the single side-effect clear line of §12.3; no new observability components, no `LogSanitiser.allowedKeys` change beyond the seven §26 keys.
-- No edits to the pinned test surfaces: `IntentPrompt.swift`'s template, `GoldenCorpus.swift`, the seed mirror, and the Spotify/YouTube/confirmation suites are untouched in Phase 1.
+| Requirement | L2 sections |
+|---|---|
+| FR-FCU-002 (degrade, corruption) | §3.4, §9 R1/R3 |
+| FR-FCU-003 (dedupe contract) | §1.6 (Passes 1-5) |
+| FR-FCU-004 (one person everywhere) | §1.3, §1.8, §2.2 |
+| FR-FCU-005 (unlink never loses) | §1.9 (`unlinkMode`, copy-before-clear), §2.6 |
+| FR-FCU-006 (unlink) | §1.9 |
+| FR-FCU-008/009/010 (write, authorization, fallback) | §1.4, §1.5, §2.4, §2.6, §6.2, §6.3 |
+| FR-FCU-011 (storage/migration) | §3.2, §3.4 |
+| FR-FCU-012 (search matching) | §1.6 |
+| FR-FCU-013/014 (voice, ambiguity) | §1.7 |
+| FR-FCU-015 (editor UI, immediate effect) | §2.5 |
+| NFR-FCU-001 (performance) | §6.1 |
+| NFR-FCU-002 (PII/log safety) | §5.2, §5.3 |
+| NFR-FCU-004 (l10n) | §7 |
+| NFR-FCU-005 (a11y) | §2.3, §2.5, §7 |
+| NFR-FCU-006 (reliability) | §3.1-§3.4 |
+| NFR-FCU-007 (Devanagari pin) | §6.1, §9 R5 |
+| NFR-FCU-008 (sequencing) | §9 R4 |
+| NFR-FCU-009 (honest gates) | §8.3, §5.3 |
