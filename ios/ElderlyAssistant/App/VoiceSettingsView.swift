@@ -93,6 +93,7 @@ struct VoicePersonalizationSettingsView: View {
 
                     noiseFilterCard
                     accentBiasCard
+                    correctionCard
                     warmStartCard
                     timingDebugCard
                     biometricSection
@@ -164,6 +165,35 @@ struct VoicePersonalizationSettingsView: View {
             .tint(appearance.colors.accent)
             .frame(minHeight: DesignTokens.minTapTargetSize)
             Text("voiceSettings.accent.caption")
+                .font(.system(size: appearance.typography.captionPointSize))
+                .foregroundStyle(appearance.colors.textSecondary)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
+    }
+
+    // MARK: - Word correction ([CORRECTION-DEFAULT-ON], default ON)
+
+    /// The user-facing switch for the STT word-correction layer. Bound to
+    /// the EFFECTIVE state (`isCorrectionEnabledEffective`): ON on a
+    /// never-touched device (the shipped apply default); flipping it off
+    /// writes the deliberate pin under `intentEncoder.corrector`. All
+    /// correction runs on-device; nothing the layer reads leaves the
+    /// phone, and the safety phrases keep matching the ORIGINAL speech.
+    private var correctionCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle(isOn: Binding(
+                get: { coordinator.isCorrectionEnabledEffective },
+                set: { coordinator.intentCorrectorEnabled = $0 }
+            )) {
+                Text("voiceSettings.correction.title")
+                    .font(.system(size: appearance.typography.bodyPointSize, weight: .semibold))
+                    .foregroundStyle(appearance.colors.textPrimary)
+            }
+            .tint(appearance.colors.accent)
+            .frame(minHeight: DesignTokens.minTapTargetSize)
+            Text("voiceSettings.correction.caption")
                 .font(.system(size: appearance.typography.captionPointSize))
                 .foregroundStyle(appearance.colors.textSecondary)
         }

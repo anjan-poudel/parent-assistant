@@ -1691,7 +1691,12 @@ extension DialectIdentifierTests {
         /// one. Every other fixture asserts the bank is clean, because a
         /// fixture that silently degrades would make its test prove nothing.
         allowingIssues: Bool = false,
-        runRevision: String = "correction-fixture/v1"
+        runRevision: String = "correction-fixture/v1",
+        /// [CORRECTION-REVIVE] The additive n-gram bank, decoded from fixture
+        /// data and attached at decode time — the only way a test can put the
+        /// BANDED gate in force, since `CorrectionLexicon.ngramPrior` is a
+        /// `let`. Nil keeps the legacy single-threshold gate.
+        ngramPrior: NgramPrior? = nil
     ) -> CorrectionLexicon {
         func quoted(_ value: String) -> String {
             let escaped = value
@@ -1802,10 +1807,12 @@ extension DialectIdentifierTests {
 
         guard let lexicon = CorrectionLexicon.decode(
             tableData: Data(table.utf8),
-            phoneticData: Data(phoneticWithUnify.utf8)) else {
+            phoneticData: Data(phoneticWithUnify.utf8),
+            ngramPrior: ngramPrior) else {
             XCTFail("the fixture bank did not decode")
             return CorrectionLexicon.decode(tableData: Data(table.utf8),
-                                            phoneticData: Data(phoneticWithUnify.utf8))!
+                                            phoneticData: Data(phoneticWithUnify.utf8),
+                                            ngramPrior: ngramPrior)!
         }
         if !allowingIssues {
             XCTAssertTrue(lexicon.issues.isEmpty,
@@ -3044,9 +3051,10 @@ extension DialectIdentifierTests {
 
     /// The corrector's arm resolution, pinned: an explicit argument wins, then
     /// a stored three-way mode (the debugger's arm, which must keep working),
-    /// then the card's switch. The switch is what makes the matrix reachable
-    /// with no debugger at all; the stored arm is what keeps a deliberate
-    /// `.shadow` or `.off` pin meaningful.
+    /// then the card's switch when it has been WRITTEN. [CORRECTION-DEFAULT-ON]
+    /// A never-written switch is the shipped apply default (owner decision
+    /// 2026-10-11); a written false is the user's deliberate pin-off. The
+    /// stored arm keeps a debugger's `.shadow` or `.off` pin meaningful.
     func testTheCorrectorSwitchIsTheThirdSourceOfTheArm() {
         let lexicon = makeCorrectionLexicon(threshold: 0.65,
                                             lexicon: ["होस्"],
@@ -3055,15 +3063,26 @@ extension DialectIdentifierTests {
         let settings = STTCorrectionSettings(defaults: isolateDefaults(),
                                              lexicon: lexicon)
 
-        // No stored mode, switch off: the control arm — the shipped state.
-        // (`settings` is here to pin the type's own defaults; the assertions
-        // below go through the store `Policy.runtime` actually reads.)
-        let offDefaults = isolateDefaults()
-        XCTAssertNil(STTCorrectionSettings(defaults: offDefaults, lexicon: lexicon)
+        // No stored mode, no written switch: the APPLY arm — the shipped
+        // default. An absent key is an absent arm, and the new default reads
+        // an absence as the layer the owner ships ON.
+        let freshDefaults = isolateDefaults()
+        XCTAssertNil(STTCorrectionSettings(defaults: freshDefaults, lexicon: lexicon)
             .storedMode, "an absent key is an ABSENT arm, not a stored .off")
+        XCTAssertEqual(STTCorrector.Policy.runtime(defaults: freshDefaults,
+                                                   isCompiledIn: true,
+                                                   lexicon: lexicon).mode, .apply,
+                       "[CORRECTION-DEFAULT-ON] a never-touched device gets "
+                       + "the shipped apply default")
+
+        // No stored mode, switch WRITTEN off: the control arm — a deliberate
+        // user pin, and the only way an untouched switch can be off.
+        let offDefaults = isolateDefaults()
+        IntentEncoderPreferences(defaults: offDefaults).setCorrectorEnabled(false)
         XCTAssertEqual(STTCorrector.Policy.runtime(defaults: offDefaults,
                                                    isCompiledIn: true,
-                                                   lexicon: lexicon).mode, .off)
+                                                   lexicon: lexicon).mode, .off,
+                       "a WRITTEN false is the user's pin-off, not an absence")
 
         // No stored mode, switch on: `.apply` — the card can turn the layer on
         // with no debugger and no second key.
@@ -3104,8 +3123,11 @@ extension DialectIdentifierTests {
                                                    isCompiledIn: true,
                                                    isModeOn: .shadow,
                                                    lexicon: lexicon).mode, .shadow)
-        // The settings type's own reading of an absent key, unchanged by any
-        // of the above: the conservative value.
+        // The settings type's own reading of an absent STORED arm, unchanged
+        // by any of the above: no debugger pin exists, so the debugger's
+        // reading is the control value. (It is NOT the shipped default —
+        // `Policy.runtime` reads the absent stored arm as part of the
+        // [CORRECTION-DEFAULT-ON] resolution above, not as `.off`.)
         XCTAssertEqual(settings.mode, .off)
         XCTAssertNil(settings.threshold, "no debugger has moved the threshold either")
     }
@@ -3147,6 +3169,318 @@ extension DialectIdentifierTests {
                        "reset clears the switch as well as the older key")
         XCTAssertNil(defaults.object(forKey: IntentEncoderPreferences.canonicalizerKey))
         XCTAssertNil(defaults.object(forKey: CanonicalizerPreferences.canonicalizerEnabledKey))
+    }
+
+    // MARK: - [CORRECTION-REVIVE] the banded gate
+
+    /// The additive n-gram bank with the pinned bands attached to a pair
+    /// fixture, so a test can put the banded gate in force. The bands are
+    /// the SHIPPED pin: silent apply at the v3 measured floor, judge-eligible
+    /// from 0.40.
+    private func bandedLexicon(threshold: Double = 0.8125,
+                               lexicon: [String],
+                               bigrams: [String: Int] = [:],
+                               bigramTotal: Int = 100,
+                               folds: [(scalars: [String], occurrences: Int)] = [(["श", "स"], 12)])
+    -> CorrectionLexicon {
+        // The separator U+0001 travels as a JSON escape, never as a raw
+        // control character (raw control chars are invalid JSON).
+        let bigramJSON = bigrams.keys.sorted().map { key in
+            let escaped = key.replacingOccurrences(of: "\u{1}", with: "\\u0001")
+            return "\"\(escaped)\": \(bigrams[key] ?? 0)"
+        }.joined(separator: ",")
+        let lexiconJSON = lexicon.enumerated().map { index, token in
+            "{ \"token\": \"\(token)\", \"occurrences\": \(7 + index) }"
+        }.joined(separator: ",")
+        // The decode guard refuses an EMPTY deletes map (an index with
+        // nothing in it is not an index), so the fixture carries one
+        // real delete-form of the first lexicon token.
+        let deleteKey = STTCorrector.deleteOneForms(of: lexicon[0]).first
+            ?? "\u{1}"
+        let bank = """
+        {
+          "formatVersion": 1,
+          "tableID": "stt-ngram-prior",
+          "generation": { "runRevision": "correction-banks/v4#fixture",
+                          "corpusRevision": "fixture-corpus" },
+          "corpus": { "rows": 100, "revision": "fixture-corpus" },
+          "lexicon": [\(lexiconJSON)],
+          "bigrams": { \(bigramJSON) },
+          "trigrams": {},
+          "totals": { "unigrams": 100, "bigrams": \(bigramTotal),
+                      "trigrams": 0 },
+          "symspell": { "maxEdit": 1, "lexiconCount": \(lexicon.count),
+            "deletes": { "\(deleteKey)": [0] } },
+          "bands": { "surfaceFloor": \(threshold),
+                     "applyTotal": \(threshold),
+                     "judgeMin": 0.40,
+                     "origin": "fixture" }
+        }
+        """
+        guard let prior = NgramPrior.decode(Data(bank.utf8)) else {
+            XCTFail("the fixture n-gram bank did not decode")
+            fatalError("unreachable")
+        }
+        // The pair bank must carry at least one measured row: an empty
+        // entries list makes the WHOLE bank unusable (`emptyEntries`) and
+        // the corrector serves every token as `degraded` — the banded
+        // gate never runs, and every band test would silently prove
+        // nothing.
+        return makeCorrectionLexicon(
+            threshold: threshold,
+            lexicon: lexicon,
+            rows: [("fixture-hos", "होस", "होस्", "truncation", 5)],
+            folds: folds,
+            ngramPrior: prior)
+    }
+
+    /// Below the apply floor but above `judgeMin`: the token is marked
+    /// judge-eligible — a pass-through whose readings travel to the
+    /// conversational bands — and the transcript is untouched.
+    func testBandedGateMarksJudgeEligibleBelowTheApplyFloor() {
+        // "गइ" → "गइए": prefix completion with surface ≈ 0.633 (0.35·0.667
+        // similarity + 0.40·1.0 prefix, no key hit) — under the 0.8125
+        // floor, over the 0.40 judge floor.
+        let lexicon = bandedLexicon(lexicon: ["गइए"])
+        let policy = correctionPolicy(lexicon)
+        let result = STTCorrector.correct("गइ", lexicon: lexicon, policy: policy)
+        XCTAssertTrue(result.isIdentity, "a judge-eligible token is NOT "
+                       + "applied — the text passes through untouched")
+        XCTAssertEqual(result.applications.count, 0)
+        XCTAssertEqual(result.judgeItems.count, 1)
+        XCTAssertEqual(result.judgeItems.first?.surface, "गइ")
+        XCTAssertEqual(result.judgeItems.first?.top, ["गइए"])
+        XCTAssertEqual(result.judgeItems.first?.tokenRange, 0..<2,
+                       "the range is scalar-based (गइ = 2 scalars)")
+        XCTAssertTrue(result.bandsActive)
+        XCTAssertEqual(result.decisions.first?.decision.reason, "judge_eligible")
+    }
+
+    /// At the floor the silent-apply set is the v3-calibrated set even with
+    /// the bands in force: the halanta completion (surface 0.8125) applies.
+    func testBandedGateKeepsTheCalibratedApplySetAtTheFloor() {
+        let lexicon = bandedLexicon(lexicon: ["होस्"])
+        let result = STTCorrector.correct("होस", lexicon: lexicon,
+                                          policy: correctionPolicy(lexicon))
+        XCTAssertEqual(result.corrected, "होस्",
+                       "the floor-pinned apply set is byte-identical to the "
+                       + "v3 calibration")
+        XCTAssertTrue(result.judgeItems.isEmpty)
+    }
+
+    /// The n-gram term can never clear the silent gate ALONE: a candidate
+    /// with surface 0.633 and a maximal corpus prior still lands in the
+    /// judge band, never in the applied set.
+    func testTheNgramTermNeverClearsTheApplyFloorAlone() {
+        let lexicon = bandedLexicon(
+            lexicon: ["गइए"],
+            bigrams: ["भोलि\u{1}गइए": 100])
+        let result = STTCorrector.correct("भोलि गइ", lexicon: lexicon,
+                                          policy: correctionPolicy(lexicon))
+        XCTAssertTrue(result.isIdentity,
+                      "semantic agreement cannot rewrite text the surface "
+                      + "evidence refuses")
+        XCTAssertEqual(result.judgeItems.count, 1)
+        let eligible = result.decisions.first {
+            $0.decision.reason == "judge_eligible"
+        }
+        XCTAssertNotNil(eligible)
+    }
+
+    /// The banded gate requires BOTH clauses for a silent apply: the
+    /// surface clears the (lowered) floor but the margin rule refuses a
+    /// zero-margin tie ⇒ judge-eligible, not applied.
+    func testBandedGateHonoursTheMarginRuleBeforeApplying() {
+        // "गइए" and "गइओ" both complete "गइ" with IDENTICAL surface
+        // (0.35·0.667 similarity + 0.40·1.0 prefix, no key hit) — a
+        // zero-margin tie. The fixture floor 0.60 lets clause 1 pass, so
+        // the MARGIN rule is the clause that refuses: judge-eligible.
+        let lexicon = bandedLexicon(threshold: 0.60,
+                                    lexicon: ["गइए", "गइओ"])
+        let result = STTCorrector.correct("गइ", lexicon: lexicon,
+                                          policy: correctionPolicy(lexicon))
+        XCTAssertTrue(result.isIdentity,
+                      "a near-tie above the floor is a question, not a rewrite")
+        XCTAssertEqual(result.judgeItems.count, 1)
+        // Both readings travel to the judge, scalar-ordered (ए < ओ).
+        XCTAssertEqual(result.judgeItems.first?.top, ["गइए", "गइओ"])
+    }
+
+    /// SymSpell generation from the EXPANDED vocabulary: a candidate the
+    /// pair bank's lexicon never carried is generated, verified and
+    /// attributed to the n-gram bank's own ordinal space.
+    func testSymSpellTierGeneratesAndAttributesNgramCandidates() {
+        // The pair bank knows nothing; the n-gram lexicon holds
+        // "सुनाउनुहोस्", whose delete-form "सुनाउनुहोस" is the query.
+        let ngramJSON = """
+        {
+          "formatVersion": 1,
+          "tableID": "stt-ngram-prior",
+          "generation": { "runRevision": "v4#fixture", "corpusRevision": "c" },
+          "corpus": { "rows": 100, "revision": "c" },
+          "lexicon": [ { "token": "सुनाउनुहोस्", "occurrences": 25 } ],
+          "bigrams": {}, "trigrams": {},
+          "totals": { "unigrams": 25, "bigrams": 100, "trigrams": 0 },
+          "symspell": { "maxEdit": 1, "lexiconCount": 1,
+            "deletes": { "सुनाउनुहोस": [0] } },
+          "bands": { "surfaceFloor": 0.8125, "applyTotal": 0.8125,
+                     "judgeMin": 0.40, "origin": "fixture" }
+        }
+        """
+        guard let prior = NgramPrior.decode(Data(ngramJSON.utf8)) else {
+            XCTFail("the fixture n-gram bank did not decode")
+            return
+        }
+        let lexicon = makeCorrectionLexicon(
+            lexicon: [],
+            rows: [("fixture-hos", "होस", "होस्", "truncation", 5)],
+            allowingIssues: true,
+            ngramPrior: prior)
+        let pool = lexicon.candidates(for: "सुनाउनुहोस")
+        XCTAssertTrue(pool.contains("सुनाउनुहोस्"),
+                      "the symspell tier generates from the expanded bank")
+        let attribution = lexicon.attribution(forToken: "सुनाउनुहोस",
+                                              candidate: "सुनाउनुहोस्")
+        XCTAssertEqual(attribution.entryID, "ngram-lex-0",
+                       "an expanded-vocabulary candidate names the n-gram "
+                       + "bank's own ordinal, never a pair-bank row")
+        XCTAssertEqual(attribution.occurrences, 25)
+    }
+
+    /// Without the additive bank the gate is the legacy single threshold —
+    /// no judge items are produced even when a candidate sits between the
+    /// judge floor and the threshold.
+    func testWithoutTheNgramBankNoJudgeItemsAreProduced() {
+        // The dummy row keeps the pair bank USABLE — an empty entries list
+        // degrades the whole bank and the legacy gate never runs.
+        let lexicon = makeCorrectionLexicon(
+            threshold: 0.8125,
+            lexicon: ["गइए"],
+            rows: [("fixture-hos", "होस", "होस्", "truncation", 5)])
+        let result = STTCorrector.correct("गइ", lexicon: lexicon,
+                                          policy: correctionPolicy(lexicon))
+        XCTAssertTrue(result.isIdentity)
+        XCTAssertTrue(result.judgeItems.isEmpty,
+                      "the conversational bands exist only with the additive "
+                      + "bank active")
+        XCTAssertFalse(result.bandsActive)
+        XCTAssertEqual(result.decisions.first?.decision.reason, "below_threshold")
+    }
+
+    // MARK: - [CORRECTION-REVIVE] reRank + clarification building
+
+    /// A judge-eligible result's fixture: "गइ" with the reading "गइए",
+    /// bands active.
+    private func judgeEligibleResult(_ lexicon: CorrectionLexicon,
+                                     transcript: String = "गइ")
+    -> CorrectionResult {
+        STTCorrector.correct(transcript, lexicon: lexicon,
+                             policy: correctionPolicy(lexicon))
+    }
+
+    /// A confident pick applies through `reRank` — the corrected text
+    /// carries the judged reading, the decision is `.judged`, and the
+    /// application names the n-gram bank's attribution.
+    func testReRankAppliesAConfidentPick() {
+        let lexicon = bandedLexicon(lexicon: ["गइए"])
+        let result = judgeEligibleResult(lexicon)
+        let reranked = STTCorrector.reRank(
+            result,
+            judge: [JudgeVerdict(tokenRange: 0..<2, pick: 0, confidence: 0.9)],
+            lexicon: lexicon)
+        XCTAssertEqual(reranked.corrected, "गइए")
+        XCTAssertEqual(reranked.applications.count, 1)
+        XCTAssertEqual(reranked.decisions.first?.decision.reason, "judged")
+    }
+
+    /// The confidence floor: below it the pick does NOT apply — the
+    /// token stays judge-eligible (the clarification path's input).
+    func testReRankRefusesALowConfidencePick() {
+        let lexicon = bandedLexicon(lexicon: ["गइए"])
+        let result = judgeEligibleResult(lexicon)
+        let reranked = STTCorrector.reRank(
+            result,
+            judge: [JudgeVerdict(tokenRange: 0..<2, pick: 0, confidence: 0.5)],
+            lexicon: lexicon)
+        XCTAssertTrue(reranked.isIdentity)
+        XCTAssertEqual(reranked.decisions.first?.decision.reason,
+                       "judge_eligible")
+    }
+
+    /// An out-of-range pick is a judge bug, treated as an abstention —
+    /// never an application.
+    func testReRankTreatsAnOutOfRangePickAsAbstention() {
+        let lexicon = bandedLexicon(lexicon: ["गइए"])
+        let result = judgeEligibleResult(lexicon)
+        let reranked = STTCorrector.reRank(
+            result,
+            judge: [JudgeVerdict(tokenRange: 0..<2, pick: 7, confidence: 0.9)],
+            lexicon: lexicon)
+        XCTAssertTrue(reranked.isIdentity)
+        XCTAssertEqual(reranked.applications.count, 0)
+    }
+
+    /// The vetoes run LAST: a judge-accepted candidate that touches the
+    /// frozen set becomes `.safetyVeto` and passes through — no judge
+    /// output bypasses the safety refusal.
+    func testReRankVetoesRunAfterJudgeAcceptance() {
+        // A lexicon whose only completion of the token is a frozen-set
+        // hazard: "नखा" → "नखाए" manufactures the refusal's denial verb.
+        let lexicon = makeCorrectionLexicon(
+            threshold: 0.40,
+            lexicon: ["नखाए"],
+            allowingIssues: true,
+            ngramPrior: nil)
+        // The pair bank alone (no additive bank) cannot produce judge
+        // items, so drive reRank directly against a hand-built result.
+        let result = STTCorrector.correct("नखा", lexicon: lexicon,
+                                          policy: correctionPolicy(lexicon))
+        var withItems = result
+        withItems.judgeItems = [JudgeItem(tokenRange: 0..<3, surface: "नखा",
+                                          top: ["नखाए"])]
+        let reranked = STTCorrector.reRank(
+            withItems,
+            judge: [JudgeVerdict(tokenRange: 0..<3, pick: 0, confidence: 0.9)],
+            lexicon: lexicon)
+        XCTAssertTrue(reranked.isIdentity,
+                      "a frozen-set hazard is refused even with a confident "
+                      + "judge behind it")
+        XCTAssertEqual(reranked.decisions.first?.decision.reason, "safety_veto")
+    }
+
+    /// The clarification builder: one reading from the first judge item,
+    /// the stated reason, nil without items or outside the apply arm.
+    func testClarificationBuildsFromJudgeItems() {
+        let lexicon = bandedLexicon(lexicon: ["गइए"])
+        let result = judgeEligibleResult(lexicon)
+        let clarification = CorrectionClarification.build(
+            from: result, reason: .judgeUnavailable)
+        XCTAssertEqual(clarification?.readings.count, 1)
+        XCTAssertEqual(clarification?.readings.first?.surface, "गइ")
+        XCTAssertEqual(clarification?.readings.first?.options, ["गइए"])
+        XCTAssertEqual(clarification?.reason, .judgeUnavailable)
+        XCTAssertNil(CorrectionClarification.build(
+            from: CorrectionResult(corrected: "x", applications: [],
+                                   decisions: [], lexiconRevision: "v",
+                                   thresholdUsed: 0.8, degraded: false,
+                                   mode: .apply, original: "x")))
+    }
+
+    /// The splice helper replaces exactly the token at the scalar range
+    /// and leaves every other scalar byte-identical.
+    func testSpliceReplacementReplacesOnlyTheNamedToken() {
+        // खाना = 4 scalars at 2..<6.
+        XCTAssertEqual(STTCorrector.spliceReplacement("खान", into: "म खाना",
+                                                      at: 2..<6),
+                       "म खान")
+        XCTAssertEqual(STTCorrector.spliceReplacement("होस्", into: "होस भोलि",
+                                                      at: 0..<3),
+                       "होस् भोलि")
+        // A range that names no token leaves the text untouched (the
+        // defensive guard, never a half-splice).
+        XCTAssertEqual(STTCorrector.spliceReplacement("x", into: "abc",
+                                                      at: 99..<100),
+                       "abc")
     }
 
     // MARK: - [PIPELINE-TRACE] the two pre-intent rows at the slot's input

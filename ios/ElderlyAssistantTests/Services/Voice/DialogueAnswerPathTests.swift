@@ -599,6 +599,13 @@ final class DialogueAnswerPathTests: XCTestCase {
                 case .freeFormForCandidate(let index, _):
                     XCTAssertTrue(index >= 0 && index < frame.candidates.count,
                                   "claim \(index) out of range for \(input.debugDescription)")
+                case .correctionPick(let index, _):
+                    // [CORRECTION-REVIVE] A correction pick is bounded by
+                    // the frame's own readings, never by the candidate list.
+                    let options = frame.correctionReadings.first?.options.count ?? 0
+                    XCTAssertTrue(index >= 1 && index <= options,
+                                  "correction pick \(index) out of range for "
+                                  + "\(input.debugDescription)")
                 case .expired, .escape, .cancel, .bargeIn, .answer, .invalid:
                     break
                 }

@@ -136,6 +136,16 @@ struct LogSanitiser {
         "correction_class_origins",
         "correction_best_bucket",
         "correction_margin_bucket",
+        // [CORRECTION-REVIVE] The banded gate's count-only keys: a count of
+        // judge-eligible tokens and the band state of the turn ("active" /
+        // "legacy") — fixed vocabulary and integers by construction, never
+        // a surface, never a score.
+        "correction_judge_eligible",
+        "correction_band",
+        // [CORRECTION-REVIVE] The clarification's reason — the closed
+        // `ClarifyReason` vocabulary (margin_too_small / judge_unavailable /
+        // judge_rejected), never a surface.
+        "correction_clarify_reason",
         // [LIVE-CAMERA-TRANSLATION] The feature's event metadata
         // (`Services/LiveTranslate/` `LiveTranslateEvents.swift`, T-003).
         // ADDITIVE ONLY: nothing above is removed, renamed or reordered.
@@ -446,7 +456,7 @@ struct LogSanitiser {
     /// and `allowedKeys`; the table is read-only either way.
     static let closedVocabularyMetadataKeys: [String: Set<String>] = [
         "intake": ["ladder", "interpreted", "candidate"],
-        "probe_kind": ["slotFill", "candidateChoice"],
+        "probe_kind": ["slotFill", "candidateChoice", "correctionChoice"],
         "attempt": ["1", "2"],
         "option_count": ["0", "1", "2", "3", "4"],
         "capture_form": ["indexWord", "optionName", "repetition", "freeText"],

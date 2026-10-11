@@ -425,7 +425,11 @@ final class LogSanitiserTests: XCTestCase {
     /// tokens are closed at the construction site (M-4), not at the bus.
     private let dialogueClosedVocabularies: [String: Set<String>] = [
         "intake": ["ladder", "interpreted", "candidate"],
-        "probe_kind": ["slotFill", "candidateChoice"],
+        // [CORRECTION-REVIVE] The correction question is the third probe
+        // kind — the same closed-vocabulary discipline, added to the
+        // shipped value set deliberately (a new kind is a contract
+        // change, not an accident the pin should catch).
+        "probe_kind": ["slotFill", "candidateChoice", "correctionChoice"],
         "attempt": ["1", "2"],
         "option_count": ["0", "1", "2", "3", "4"],
         "capture_form": ["indexWord", "optionName", "repetition", "freeText"],
@@ -613,6 +617,13 @@ final class LogSanitiserTests: XCTestCase {
     // MARK: The allow-list diff (E5 producer line)
 
     func testTheAllowListDiffIsExactlyTheSixNewKeysAndReasonIsUntouched() {
+        // [CORRECTION-REVIVE] The corrector's three count-only keys ride
+        // the SAME deliberate-addition discipline: they are part of the
+        // pinned diff, not governed by a closed vocabulary (their values
+        // are integers and fixed states by construction).
+        let correctionKeys: Set<String> = [
+            "correction_band", "correction_judge_eligible",
+            "correction_clarify_reason"]
         // Nothing pre-existing was removed, renamed or re-meant.
         for key in shippedKeysBeforeTheDialogueExtension {
             XCTAssertTrue(LogSanitiser.allowedKeys.contains(key),
@@ -620,15 +631,16 @@ final class LogSanitiserTests: XCTestCase {
         }
         let added = LogSanitiser.allowedKeys
             .subtracting(shippedKeysBeforeTheDialogueExtension)
-        XCTAssertEqual(added, Set(dialogueClosedVocabularies.keys),
+        XCTAssertEqual(added,
+                       Set(dialogueClosedVocabularies.keys).union(correctionKeys),
                        "the extension is exactly the six documented dialogue keys "
-                       + "— a silent widening fails here")
-        XCTAssertEqual(added.count, 6)
+                       + "plus the three correction keys — a silent widening fails here")
+        XCTAssertEqual(added.count, 9)
         XCTAssertEqual(LogSanitiser.allowedKeys.count,
-                       shippedKeysBeforeTheDialogueExtension.count + 6)
+                       shippedKeysBeforeTheDialogueExtension.count + 9)
         XCTAssertFalse(added.contains("reason"),
                        "reason is reused (already in the shipped set), never re-added")
-        for key in added {
+        for key in added.subtracting(correctionKeys) {
             XCTAssertNotNil(LogSanitiser.closedVocabularyMetadataKeys[key],
                             "every added dialogue key is governed by a closed vocabulary")
         }

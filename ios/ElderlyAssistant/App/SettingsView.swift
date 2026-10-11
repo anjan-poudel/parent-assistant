@@ -4062,8 +4062,11 @@ struct AIModelsSettingsView: View {
             // (`STTCorrector.Policy.runtime`,
             // `DialectCanonicalizer.Policy.runtime`); neither row can conjure
             // the encoder into the slot, and neither needs to.
+            // [CORRECTION-DEFAULT-ON] The get reads the EFFECTIVE state, so
+            // the card shows the layer ON on a never-touched device (the
+            // shipped apply default); flipping it off writes the pin.
             Toggle(isOn: Binding(
-                get: { coordinator.intentCorrectorEnabled },
+                get: { coordinator.isCorrectionEnabledEffective },
                 set: { coordinator.intentCorrectorEnabled = $0 }
             )) {
                 Text("settings.encoder.correctorLabel")
