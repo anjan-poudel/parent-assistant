@@ -522,7 +522,10 @@ final class CommandRouterDialogueTests: XCTestCase {
         let hookTail = try range("speak(key: \"router.confirmationAmbiguous\")")
         let emergencyClear = try range("coordinator?.clearDialogueFrame(reason: .emergency)")
         let interception = try range("if let frame = coordinator?.activeDialogueFrame {")
-        let safetyNet = try range("if let safetyResult = routeSafetyNet(raw) {")
+        // [CORRECTION-REVIVE] The safety-net call now reads `safetyRaw`
+        // (the original transcript on a correction re-route — D-1, the
+        // same placement, a more precise argument).
+        let safetyNet = try range("if let safetyResult = routeSafetyNet(safetyRaw) {")
 
         XCTAssertLessThan(hookOpen.lowerBound, hookBody.lowerBound)
         XCTAssertLessThan(hookBody.lowerBound, hookTail.lowerBound)

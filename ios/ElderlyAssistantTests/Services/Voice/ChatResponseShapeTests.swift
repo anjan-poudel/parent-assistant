@@ -289,7 +289,8 @@ final class ChatResponseShapeTests: XCTestCase {
             config: LlamaCommandInterpreter.Config(confidenceThreshold: 0.4,
                                                    maxTokens: 128,
                                                    timeoutSeconds: 10,
-                                                   chatConfidenceFloor: 0.9))
+                                                   chatConfidenceFloor: 0.9,
+                                                   judgeTimeoutSeconds: 1.5))
         interp.generateOverride = { _, _ in
             #"{"intent":"chat","reply":"होला।","confidence":0.7}"#
         }

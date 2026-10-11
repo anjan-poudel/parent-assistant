@@ -152,6 +152,25 @@ protocol VoiceCommandCoordinating: AnyObject {
     /// `.quarantine` sanitise — the same text the default below returns.
     func prepareDialogueAnswerText(_ raw: String) -> String
 
+    // [CORRECTION-REVIVE] The unrecognised path's correction surface:
+    // the LAST turn's `CorrectionResult` (with its judge-eligible items)
+    // and the semantic judge to ask about them. Both are read AFTER the
+    // interpret that produced them, inside `routeKeywordRemainder`.
+
+    /// The last turn's correction result — the judgeItems the banded gate
+    /// produced, or nil when the corrector did not participate. The
+    /// surfaces inside are the user's own words: on-device only, never
+    /// logged, never persisted.
+    var lastTurnCorrection: CorrectionResult? { get }
+
+    /// The pluggable semantic judge (constitution: engines stay
+    /// selectable). The shipped implementation judges on the RESIDENT 4B
+    /// brain only; `isReady == false` (brain not resident, fine-tuned
+    /// brain serving, no LLM build) means the unrecognised path falls
+    /// straight through to the spoken clarification — never to a second
+    /// model load.
+    var correctionJudge: SemanticJudge { get }
+
     /// Call-confirmation correction hook (spec §7.2 correction protocol).
     /// While a call confirmation is outstanding, the router hands each
     /// response utterance here FIRST: an utterance carrying a method
@@ -467,6 +486,12 @@ protocol VoiceCommandCoordinating: AnyObject {
 /// under test) opt in.
 extension VoiceCommandCoordinating {
     var canAnswerLiveQuestionsFromWeb: Bool { false }
+    // [CORRECTION-REVIVE] Inert defaults — a conformer that does not opt
+    // in (every mock/double) has no correction result to judge and no
+    // judge, so the unrecognised path falls through to its existing
+    // did-you-mean/reprompt behavior byte-identically.
+    var lastTurnCorrection: CorrectionResult? { nil }
+    var correctionJudge: SemanticJudge { NoSemanticJudge() }
     var isOnDeviceStack: Bool { false }
     // [DIRECTIONS] (2026-09-07) Navigation defaults — see the requirement
     // docs above. Every member is inert: no candidates, nothing pending,
@@ -801,7 +826,27 @@ final class CommandRouter {
     }
 
     @discardableResult
-    func route(transcript raw: String) -> RoutingResult {
+    /// [CORRECTION-REVIVE] `safetyNetText` is the ORIGINAL transcript when
+    /// this route is a correction re-route (a judged or user-picked
+    /// reading spliced in): the safety-critical stages — the emergency
+    /// check, the confirmation path, `routeSafetyNet` and the keyword
+    /// remainder's sensitive-call block — read IT, never the corrected
+    /// text, so a correction can never gate, suppress or delay a safety
+    /// match (D-1, preserved on the re-route). Every semantic stage
+    /// (contact search, directions, topic, interpreter) reads `raw`,
+    /// which IS the corrected text on the re-route.
+    func route(transcript raw: String,
+               safetyNetText: String? = nil) -> RoutingResult {
+        let safetyRaw = safetyNetText ?? raw
+        // [CORRECTION-REVIVE] A FRESH turn resets the correction budget.
+        // Two shapes are NOT fresh turns: a re-route (`safetyNetText !=
+        // nil` — the same logical turn), and a dialogue ANSWER (a live
+        // frame is open, so this utterance is answering it, not starting
+        // a turn). The consumed flag is the recursion bound that keeps a
+        // failing re-route from arming a second correction question.
+        if safetyNetText == nil, coordinator?.activeDialogueFrame == nil {
+            correctionProbeConsumed = false
+        }
         coordinator?.recordTranscript(raw)
 
         // Whisper hallucination guard: a repetition loop, low-entropy
@@ -836,7 +881,7 @@ final class CommandRouter {
         // re-prompt (device report 2026-09-08). The phrase lists are all
         // single-spaced, so canonicalizing can only turn misses into the
         // correct matches.
-        let preText = raw
+        let preText = safetyRaw
             .lowercased()
             .split(whereSeparator: { $0.isWhitespace })
             .joined(separator: " ")
@@ -1079,6 +1124,13 @@ final class CommandRouter {
                 return executeDialogueCandidate(index - 1, capture: capture,
                                                 queryOverride: nil,
                                                 frame: frame, raw: raw)
+            case .correctionPick(let index, let capture):
+                // [CORRECTION-REVIVE] The elder picked a reading — the
+                // spoken position is 1-based; the executor splices the
+                // chosen reading and re-routes the ORIGINAL turn (safety
+                // net reading the raw transcript).
+                return executeCorrectionPick(index - 1, capture: capture,
+                                             frame: frame, raw: raw)
             case .answer(let merge):
                 return executeDialogueAnswer(merge, frame: frame, raw: raw)
             case .freeFormForCandidate(let index, let value):
@@ -1136,7 +1188,7 @@ final class CommandRouter {
         // always. The REMAINDER of the keyword layer (sensitive-call
         // blocking, generic unrecognised) still runs AFTER the LLM as
         // its fallback — only the safety-critical vocabulary moved.
-        if let safetyResult = routeSafetyNet(raw) {
+        if let safetyResult = routeSafetyNet(safetyRaw) {
             return safetyResult
         }
 
@@ -1770,7 +1822,7 @@ final class CommandRouter {
                         self.pendingTranscript = nil
                     }
                 } else {
-                    _ = self.routeKeywordRemainder(raw)
+                    _ = self.routeKeywordRemainder(safetyRaw)
                 }
                 // The async dispatch has committed its reply (spoken /
                 // queued / declined) — the turn is no longer pending.
@@ -1787,7 +1839,7 @@ final class CommandRouter {
             return .unrecognised(transcript: raw)
         }
 
-        return routeKeywordRemainder(raw)
+        return routeKeywordRemainder(safetyRaw)
     }
 
     /// [INTENT-KEYWORDS] (2026-09-11) Observability for a fired relaxed
@@ -2218,6 +2270,160 @@ final class CommandRouter {
         return nil
     }
 
+    // MARK: - Correction rescue ([CORRECTION-REVIVE])
+
+    /// The unrecognised path's correction rescue — the semantic judge
+    /// first, the spoken question second, never a guess:
+    ///
+    ///   1. No judge-eligible token (or the budget is consumed) ⇒ false,
+    ///      the legacy ladder runs byte-identically.
+    ///   2. Judge ready ⇒ ONE batched call; a confident pick re-routes
+    ///      the corrected turn SILENTLY (safety net reading the raw
+    ///      original); an abstention arms the correction question.
+    ///   3. Judge not ready (brain not resident — the shipped Gemini-
+    ///      first state) ⇒ the correction question directly.
+    ///
+    /// Returns true when this turn was TAKEN (probe armed or re-route
+    /// fired) so the caller ends the ladder here.
+    private func attemptCorrectionRescue(_ raw: String) -> Bool {
+        guard !correctionProbeConsumed,
+              let correction = coordinator?.lastTurnCorrection,
+              correction.mode == .apply,
+              !correction.judgeItems.isEmpty else { return false }
+
+        let judge = coordinator?.correctionJudge ?? NoSemanticJudge()
+        guard judge.isReady else {
+            // The brain is not resident (the shipped Gemini-first turn) —
+            // the spoken question stands in the judge's place.
+            armCorrectionClarification(correction,
+                                       reason: .judgeUnavailable, raw: raw)
+            return true
+        }
+        let batch = JudgeBatch(source: correction.original,
+                               items: [correction.judgeItems[0]])
+        observabilityBus.emit(ObservabilityEvent(
+            component: "command_router",
+            eventType: "correction_judge_started",
+            durationMs: nil,
+            outcome: "info",
+            errorCode: nil,
+            metadata: [:]))
+        judge.judge(batch) { [weak self] verdicts in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                guard let verdict = verdicts.first else {
+                    self.armCorrectionClarification(correction,
+                                                    reason: .judgeRejected,
+                                                    raw: raw)
+                    return
+                }
+                if verdict.pick != nil,
+                   verdict.confidence >= STTCorrector.judgeConfidenceFloor {
+                    // A confident pick — the vetoes run LAST inside
+                    // `reRank`; when they refuse it (the corrected text
+                    // stays the original), the spoken question follows.
+                    let reranked = STTCorrector.reRank(
+                        correction, judge: verdicts,
+                        lexicon: CorrectionLexicon.bundled)
+                    guard reranked.corrected != correction.original else {
+                        self.armCorrectionClarification(correction,
+                                                        reason: .judgeRejected,
+                                                        raw: raw)
+                        return
+                    }
+                    self.correctionProbeConsumed = true
+                    self.observabilityBus.emit(ObservabilityEvent(
+                        component: "command_router",
+                        eventType: "correction_judge_applied",
+                        durationMs: nil,
+                        outcome: "success",
+                        errorCode: nil,
+                        metadata: [:]))
+                    _ = self.route(transcript: reranked.corrected,
+                                   safetyNetText: raw)
+                } else {
+                    self.armCorrectionClarification(correction,
+                                                    reason: .judgeRejected,
+                                                    raw: raw)
+                }
+            }
+        }
+        return true
+    }
+
+    /// Arms the correction question — the one-deep frame, at most once
+    /// per turn — and speaks it. On any failure (no coordinator, a live
+    /// window, no readings) the shipped reprompt line stands
+    /// byte-identically.
+    private func armCorrectionClarification(_ correction: CorrectionResult,
+                                            reason: ClarifyReason,
+                                            raw: String) {
+        correctionProbeConsumed = true
+        guard let clarification = CorrectionClarification.build(
+            from: correction, reason: reason),
+            let coordinator else {
+            speak(key: "router.reprompt")
+            return
+        }
+        let frame = DialogueFrame.correctionChoice(
+            readings: clarification.readings,
+            original: correction.original,
+            sourceTranscript: raw)
+        guard coordinator.startDialogueFrame(frame) else {
+            speak(key: "router.reprompt")
+            return
+        }
+        observabilityBus.emit(ObservabilityEvent(
+            component: "command_router",
+            eventType: "dialogue_probe_spoken",
+            durationMs: nil,
+            outcome: "success",
+            errorCode: nil,
+            metadata: [
+                "probe_kind": frame.probeKind.rawValue,
+                "attempt": String(frame.attempts),
+                "option_count": String(
+                    min(frame.correctionReadings.first?.options.count ?? 0,
+                        DialogueConfig.maxCandidates)),
+                "correction_clarify_reason": reason.rawValue
+            ]
+        ))
+        speak(text: DialogueProbeComposer.probeText(
+            for: frame, catalog: dialogueCatalog, retry: false,
+            locale: coordinator.activeLocale))
+    }
+
+    /// The correction-pick executor: resolve the frame, splice the chosen
+    /// reading into the SANITISED original at the reading's scalar range,
+    /// and re-route — the safety net reading the RAW transcript the frame
+    /// captured, so a correction can never gate or rewrite a safety
+    /// match. An out-of-range pick (defensive; classification already
+    /// bounds it) resolves the frame and speaks the honest reprompt.
+    private func executeCorrectionPick(_ index: Int,
+                                       capture: CaptureForm,
+                                       frame: DialogueFrame,
+                                       raw: String) -> RoutingResult {
+        coordinator?.resolveDialogueFrame(.correctionSelected(index: index))
+        emitDialogueFrameResolved(.correctionSelected(index: index))
+        guard let reading = frame.correctionReadings.first,
+              reading.options.indices.contains(index) else {
+            speak(key: "router.reprompt")
+            return .unrecognised(transcript: raw)
+        }
+        let spliced = STTCorrector.spliceReplacement(
+            reading.options[index],
+            into: frame.correctionOriginal,
+            at: reading.tokenRange)
+        guard spliced != frame.correctionOriginal else {
+            // The range did not address a token (defensive) — the honest
+            // reprompt, never a half-spliced turn.
+            speak(key: "router.reprompt")
+            return .unrecognised(transcript: raw)
+        }
+        return route(transcript: spliced,
+                     safetyNetText: frame.sourceTranscript)
+    }
+
     /// Post-LLM keyword fallback — everything in the keyword layer that
     /// is NOT safety-critical: the blunt sensitive-call block (no entity
     /// extraction available, so any call-ish phrase is blocked rather
@@ -2253,6 +2459,16 @@ final class CommandRouter {
         // hearing assistance.
         switch coordinator?.brainReadiness ?? .available {
         case .available:
+            // [CORRECTION-REVIVE] The correction rescue, FIRST: the
+            // narrowest question — about what was SAID. When the banded
+            // gate marked a token judge-eligible, the resident judge gets
+            // one shot to settle it silently; a confident pick re-routes
+            // the corrected turn, anything less becomes a spoken
+            // correction question. With no judge-eligible token the
+            // legacy ladder below runs byte-identically.
+            if attemptCorrectionRescue(raw) {
+                return .unrecognised(transcript: raw)
+            }
             // [LOCAL-TOOLS] (2026-09-07) Web-search hook: this is the
             // post-interpreter ABSTENTION point (an interpreter listened
             // and did not understand — or did not exist), and the generic
@@ -3097,6 +3313,9 @@ final class CommandRouter {
             return min(group.options.count, DialogueConfig.maxSlotOptions)
         case .candidateChoice:
             return min(frame.candidates.count, DialogueConfig.maxCandidates)
+        case .correctionChoice:
+            return min(frame.correctionReadings.first?.options.count ?? 0,
+                       DialogueConfig.maxCandidates)
         }
     }
 
@@ -3270,6 +3489,14 @@ final class CommandRouter {
             emitDialogueFrameResolved(.exhausted)
             speak(key: "dialogue.exhausted")
             return .unrecognised(transcript: raw)
+        case .correctionChoice:
+            // [CORRECTION-REVIVE] An exhausted correction question closes
+            // honestly like a candidate question — nothing executes
+            // unasked (the same R3 rule).
+            coordinator?.resolveDialogueFrame(.exhausted)
+            emitDialogueFrameResolved(.exhausted)
+            speak(key: "dialogue.exhausted")
+            return .unrecognised(transcript: raw)
         case .slotFill:
             return executeDialogueDefault(frame: frame, raw: raw)
         }
@@ -3321,6 +3548,7 @@ final class CommandRouter {
         case .answered: outcome = "answered"
         case .defaultExecuted: outcome = "defaultExecuted"
         case .candidateSelected: outcome = "candidateSelected"
+        case .correctionSelected: outcome = "correctionSelected"
         case .exhausted: outcome = "exhausted"
         case .cancelled: outcome = "cancelled"
         case .escaped: outcome = "escaped"
@@ -3967,6 +4195,13 @@ final class CommandRouter {
     /// it to the coordinator for cache learning. Single in-flight
     /// interpretation at a time (VoicePipeline serialises utterances).
     private var pendingTranscript: String?
+
+    /// [CORRECTION-REVIVE] The correction question's turn-scoped budget
+    /// (`DialogueConfig.maxCorrectionProbes`): reset at every `route`
+    /// entry, consumed when a correction frame is armed OR a judged
+    /// re-route fires — so a re-route can never arm a second correction
+    /// frame (the recursion bound). In-memory only.
+    private var correctionProbeConsumed = false
 
     /// [NO-GIBBERISH] (2026-09-07) Clock seam for the deterministic
     /// time/date pre-answers (`TopicPreAnswer` reads the current time from

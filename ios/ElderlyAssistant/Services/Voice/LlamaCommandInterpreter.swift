@@ -358,6 +358,33 @@ enum LlamaGrammar {
       "required": ["intent", "reply", "confidence"]
     }
     """
+
+    /// [CORRECTION-REVIVE] The semantic judge's decode schema: one pick per
+    /// item — an index into the item's readings (`0|1|2`) plus the model's
+    /// own confidence. No nullable pick: the model MUST pick an index, and
+    /// the caller's confidence floor decides whether that pick counts or
+    /// the turn falls through to the spoken clarification. (A nullable
+    /// `pick` would let the sampler claim abstention, and the same shape
+    /// is expressed more honestly as a low-confidence pick.)
+    static let judgeJSONSchema: String = """
+    {
+      "type": "object",
+      "properties": {
+        "picks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "pick": {"type": "integer", "minimum": 0, "maximum": 2},
+              "confidence": {"type": "number"}
+            },
+            "required": ["pick", "confidence"]
+          }
+        }
+      },
+      "required": ["picks"]
+    }
+    """
 }
 
 /// [NO-GIBBERISH] Deterministic on-device sampling (2026-09-07), shared by
@@ -410,7 +437,7 @@ final class NullCommandInterpreter: CommandInterpreter {
 /// The `#if canImport(LLM)` guard keeps the file compilable in Phase 1
 /// without either being present.
 final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
-    InterpreterFailureReporting {
+    InterpreterFailureReporting, JudgingCommandInterpreter {
 
     struct Config {
         let confidenceThreshold: Double
@@ -446,6 +473,12 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
         /// it "beside the brain's other thresholds"), and it is only
         /// meaningful where the brain's decoded confidences are read.
         let chatConfidenceFloor: Double
+        /// [CORRECTION-REVIVE] The judge's own inference budget. Shorter
+        /// than the turn's 10 s: the judge runs on the FALLBACK path after
+        /// a failed interpret, and its answer only decides between "silent
+        /// re-route" and "ask the user" — a hung judge must never block
+        /// the reprompt speech for the turn's full timeout.
+        let judgeTimeoutSeconds: Double
         // [NO-GIBBERISH] (2026-09-07): sampling temperature/seed are NOT
         // configurable — determinism is a correctness invariant here, so
         // every interpreter samples through `OnDeviceSampling` (temp 0,
@@ -453,7 +486,8 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
         static let `default` = Config(confidenceThreshold: 0.7,
                                       maxTokens: 128,
                                       timeoutSeconds: 10,
-                                      chatConfidenceFloor: 0.6)
+                                      chatConfidenceFloor: 0.6,
+                                      judgeTimeoutSeconds: 1.5)
     }
 
     private let modelStore: ModelStore
@@ -661,6 +695,155 @@ final class LlamaCommandInterpreter: CommandInterpreter, LLMInterpreterWarming,
                        completion: @escaping (InterpretedCommand?) -> Void) {
         runTurn(transcript: transcript, context: context, shape: .chat,
                 completion: completion)
+    }
+
+    // MARK: - Semantic judge ([CORRECTION-REVIVE])
+
+    /// The judge prompt — a FIXED template, deterministic, never model
+    /// text: the sanitised utterance plus, per item, the heard surface and
+    /// its readings. Nepali, like the intent prompt the brain was
+    /// fine-tuned on. The prompt contains the user's own words (on-device
+    /// only; it is never logged, never persisted, never egressed).
+    static func judgePrompt(for batch: JudgeBatch) -> String {
+        var lines = [
+            "तलको वाक्यमा एउटा शब्द गलत सुनिएको हुन सक्छ। प्रत्येक विकल्पमा, "
+                + "वाक्यको अर्थसँग सबैभन्दा मिल्ने पढाइ छान्नुहोस्।",
+            "वाक्य: \(batch.source)",
+        ]
+        for (index, item) in batch.items.enumerated() {
+            let readings = item.top.enumerated()
+                .map { "\($0.offset)) \($0.element)" }
+                .joined(separator: " ")
+            lines.append("विकल्प \(index + 1) — सुनिएको: \(item.surface) "
+                + "पढाइहरू: \(readings)")
+        }
+        lines.append("हरेक विकल्पको लागि pick मा पढाइको नम्बर र confidence मा "
+            + "० देखि १ सम्मको विश्वास देऊ।")
+        return lines.joined(separator: "\n")
+    }
+
+    /// Judges one batch against the RESIDENT handle. NEVER loads a model —
+    /// the judge's contract (a second 3.4 GB load is the [VOICE-OOM] class
+    /// of bug): no resident handle ⇒ abstention verdicts, the same
+    /// fallback the caller takes for an unavailable judge.
+    func judgeCandidates(_ batch: JudgeBatch,
+                         completion: @escaping @Sendable ([JudgeVerdict]) -> Void) {
+        func abstain() {
+            completion(batch.items.map {
+                JudgeVerdict(tokenRange: $0.tokenRange, pick: nil, confidence: 0)
+            })
+        }
+        guard isAvailable else {
+            abstain()
+            return
+        }
+        #if canImport(LLM)
+        // The seam mirrors the real call: the same prompt and schema reach
+        // the override, so a test observes what llama.cpp is handed.
+        if let generateOverride {
+            Task {
+                do {
+                    let output = try await generateOverride(
+                        Self.judgePrompt(for: batch), LlamaGrammar.judgeJSONSchema)
+                    guard !output.isEmpty else {
+                        emit("judge_empty_output", outcome: "failure")
+                        abstain()
+                        return
+                    }
+                    emit("judge_done", outcome: "success")
+                    completion(Self.parseJudgeVerdicts(output, for: batch))
+                } catch {
+                    abstain()
+                }
+            }
+            return
+        }
+        guard let llm = llmInstance as? LLM else {
+            abstain()
+            return
+        }
+        let formattedPrompt = Self.formattedPrompt(
+            prompt: Self.judgePrompt(for: batch),
+            system: Self.judgeSystemPrompt,
+            format: Self.chatFormat(for: preferredBaseId))
+        Task {
+            enum JudgeOutcome { case success(String); case failed; case timedOut }
+            await withTaskGroup(of: JudgeOutcome.self) { group in
+                group.addTask {
+                    do {
+                        self.lifecycle.beginUse(of: .brain)
+                        defer {
+                            self.lifecycle.endUse(of: .brain)
+                            self.lifecycle.noteUse(of: .brain)
+                        }
+                        let output = try await llm.core.generateWithConstraints(
+                            from: formattedPrompt,
+                            jsonSchema: LlamaGrammar.judgeJSONSchema)
+                        return output.isEmpty ? .failed : .success(output)
+                    } catch {
+                        return .failed
+                    }
+                }
+                group.addTask {
+                    try? await Task.sleep(nanoseconds: UInt64(
+                        self.config.judgeTimeoutSeconds * 1_000_000_000))
+                    llm.stop()
+                    return .timedOut
+                }
+                let result = await group.next() ?? .timedOut
+                group.cancelAll()
+                switch result {
+                case .success(let output):
+                    emit("judge_done", outcome: "success")
+                    completion(Self.parseJudgeVerdicts(output, for: batch))
+                case .failed:
+                    emit("judge_empty_output", outcome: "failure")
+                    abstain()
+                case .timedOut:
+                    emit("judge_timeout", outcome: "failure")
+                    abstain()
+                }
+            }
+        }
+        #else
+        emit("judge_unavailable", outcome: "info")
+        abstain()
+        #endif
+    }
+
+    /// The judge's system line — its own, not the command/chat one, whose
+    /// "spoken reply" instruction would be wrong for a pick. Deliberately
+    /// short: the on-device context is 1,024 tokens.
+    private static let judgeSystemPrompt = """
+    You are Sahayak, checking one misheard word in a sentence. Reply with ONLY \
+    one JSON object (no fences, no other text).
+    """
+
+    /// Decodes the judge's JSON into one verdict per batch item, in order.
+    /// A malformed answer, a missing pick or an out-of-range pick is an
+    /// ABSTENTION for that item — never an invention.
+    static func parseJudgeVerdicts(_ raw: String,
+                                   for batch: JudgeBatch) -> [JudgeVerdict] {
+        guard let data = raw.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data)
+                as? [String: Any],
+              let picks = object["picks"] as? [[String: Any]] else {
+            return batch.items.map {
+                JudgeVerdict(tokenRange: $0.tokenRange, pick: nil, confidence: 0)
+            }
+        }
+        return batch.items.enumerated().map { index, item in
+            guard index < picks.count,
+                  let rawPick = picks[index]["pick"] as? Int,
+                  item.top.indices.contains(rawPick) else {
+                return JudgeVerdict(tokenRange: item.tokenRange, pick: nil,
+                                    confidence: 0)
+            }
+            let confidence = (picks[index]["confidence"] as? Double) ?? 0
+            return JudgeVerdict(tokenRange: item.tokenRange,
+                                pick: rawPick,
+                                confidence: min(max(confidence, 0), 1))
+        }
     }
 
     /// Which of the brain's two response shapes a turn is asked for. The

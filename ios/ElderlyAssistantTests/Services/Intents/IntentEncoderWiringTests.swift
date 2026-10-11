@@ -407,9 +407,13 @@ final class IntentEncoderWiringTests: XCTestCase {
     // MARK: [CORRECTION-TOGGLES] the two pre-intent layers' switches
 
     /// The corrector's and the canonicalizer's switches, in the same
-    /// namespace and under the same rule as the two above: absent ⇒ OFF (the
-    /// shipped default), a flip survives a relaunch, and each switch moves
-    /// only its own key. The four-way matrix the internal-testing card offers
+    /// namespace and under the same rule as the two above: absent ⇒ the raw
+    /// flag is OFF, a flip survives a relaunch, and each switch moves only
+    /// its own key. [CORRECTION-DEFAULT-ON] The corrector adds the
+    /// absent-vs-false distinction the shipped apply default depends on:
+    /// `isCorrectorToggleSet` is false while the key was never written, and
+    /// true after ANY write — including a deliberate false, which is the
+    /// user's pin-off. The four-way matrix the internal-testing card offers
     /// is only expressible because they are separate — one switch could not
     /// say "corrector only".
     func testCorrectionLayerTogglesDefaultOffAndRoundTrip() throws {
@@ -431,6 +435,10 @@ final class IntentEncoderWiringTests: XCTestCase {
 
         XCTAssertFalse(prefs.isCorrectorEnabled, "an absent key reads as OFF")
         XCTAssertFalse(prefs.isCanonicalizerEnabled, "an absent key reads as OFF")
+        XCTAssertFalse(prefs.isCorrectorToggleSet,
+                       "[CORRECTION-DEFAULT-ON] an ABSENT key is not a written "
+                       + "toggle — `Policy.runtime` reads it as the shipped "
+                       + "apply default, not as a pin")
 
         // No other switch may IMPLY either layer: both rewrite the text the
         // model reads, so switching the encoder — or its cascade — on must
@@ -453,6 +461,10 @@ final class IntentEncoderWiringTests: XCTestCase {
 
         prefs.setCorrectorEnabled(false)
         XCTAssertFalse(IntentEncoderPreferences(defaults: suite).isCorrectorEnabled)
+        XCTAssertTrue(IntentEncoderPreferences(defaults: suite).isCorrectorToggleSet,
+                      "[CORRECTION-DEFAULT-ON] a WRITTEN false is a deliberate "
+                      + "pin-off, not an absence — the distinction the shipped "
+                      + "default turns on")
         XCTAssertTrue(prefs.isCanonicalizerEnabled,
                       "and turning one off leaves the other where it was")
     }

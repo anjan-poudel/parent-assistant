@@ -175,6 +175,15 @@ final class LocalBrainChain: CommandInterpreter, InterpreterFailureReporting,
     /// `security-design-review.md`).
     var transcriptPreparationSeam: InputSeam? { inputSeam }
 
+    /// [CORRECTION-REVIVE] The LAST turn's correction result, stored when
+    /// the seam ran (same order as `transcriptPreparationSeam`: one write
+    /// per turn in `turnInput`). The router's unrecognised path reads it —
+    /// AFTER the interpret that produced it — to run the semantic judge
+    /// and, failing that, the spoken clarification. In-memory only; the
+    /// surfaces inside are the user's own words, never logged, never
+    /// persisted, gone with the process.
+    private(set) var lastCorrection: CorrectionResult?
+
     var isAvailable: Bool {
         preferred.isAvailable || standIn.isAvailable
     }
@@ -297,8 +306,10 @@ final class LocalBrainChain: CommandInterpreter, InterpreterFailureReporting,
         let preparation = IntentTranscriptPreparation.prepare(transcript,
                                                              seam: inputSeam)
         guard let pair = preparation.pair else {
+            lastCorrection = nil
             return TurnInput(pair: nil, plainText: preparation.prepared)
         }
+        lastCorrection = pair.correction
         return TurnInput(pair: pair,
                          plainText: Self.plainText(for: pair, raw: transcript))
     }
