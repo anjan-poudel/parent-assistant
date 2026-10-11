@@ -53,3 +53,15 @@ duplicate holders roster order, rebuild, empty parity, legacy payload decode).
 Whole-module build-for-testing green, 0 errors. Scoped run deferred to T-163.
 Not wired: coordinator publish (T-156), search tiers (T-152), resolver provider
 (T-153).
+
+## T-153 — ContactResolver nickname bands — DONE
+
+Commit 65f6fee9. indexProvider init param (nil = per-call build, test-parity);
+band ladder 1.00/0.90/0.85/0.80/0.75/0.60 with the strict < rival rule and
+tie-ambiguity unchanged; nearMiss extended over nickname spellings (exactly-one
+rule counts contacts). Tests 13 -> 37: the F2 consequence table (three
+at-margin decisive rows pinned at 0.15000000000000002, four sub-margin
+ambiguous), index-path parity, Devanagari grapheme pin, 12x8 <=20 ms ceiling
+(measured ~1.7-2.4 ms in the pre-commit harness). Whole-module build green,
+0 errors. Scoped run deferred; handoff: T-156 passes the published index at
+the coordinator construction site.
