@@ -41,3 +41,15 @@ readable arm (own file); ONE mechanical shared-file fix — wizard searchSection
 ContactsAccessTests (9 tests incl. the module-wide single-gate scan).
 Whole-module typecheck green (build-for-testing, exit 0, 0 errors). Scoped run
 deferred to T-163 per speed mode.
+
+## T-151 — FamilyContactIndex — DONE
+
+Commit 7b041b2d. Pure value type per design §1.2/§5.4: Entry set, multi-valued
+idsByNickname map, empty anchor, lookups; normalization via the existing
+NepaliTextNormalizer only (grapheme pin honored). New suite FamilyContactIndexTests
+(17 tests: O(1) map contract, 12x8 perf ceilings incl. 256-char F5 worst case,
+Devanagari positive pin, deliberate negative pin, canonical-variant unification,
+duplicate holders roster order, rebuild, empty parity, legacy payload decode).
+Whole-module build-for-testing green, 0 errors. Scoped run deferred to T-163.
+Not wired: coordinator publish (T-156), search tiers (T-152), resolver provider
+(T-153).
