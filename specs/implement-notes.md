@@ -65,3 +65,17 @@ ambiguous), index-path parity, Devanagari grapheme pin, 12x8 <=20 ms ceiling
 (measured ~1.7-2.4 ms in the pre-commit harness). Whole-module build green,
 0 errors. Scoped run deferred; handoff: T-156 passes the published index at
 the coordinator construction site.
+
+## T-154 — SystemContactPhotoWriter — DONE
+
+Commit 307928d0. The app's first CNSaveRequest surface, confined to one file:
+exact §1.4 attempt sequence (attempt-time fingerprint, checked mutableCopy as?,
+update-only request, do/catch, read-back byte equality with unverifiable never
+success); closed §5.2 event vocabulary; FamilyPhotoEditorState.from exhaustive
+no-default; six internal decisions recorded in the unit notes. Suite: 37 tests
+incl. the F1 source-level pins (only imageData assigned, update-only request,
+ten-marker order pin) and module-wide FeatureSourceScan confinement scans; a
+pre-commit dry-run caught and fixed two defects in the scan tests themselves.
+Whole-module build green, 0 errors. Scoped run deferred. Handoffs: T-155
+FEATURE_ROOTS registration; T-158 injection + preAttemptOutcome use; T-160 label
+rendering.
