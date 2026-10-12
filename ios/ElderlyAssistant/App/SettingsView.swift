@@ -1537,14 +1537,13 @@ struct FamilyContactsSettingsView: View {
     @State private var editorTarget: FamilyContactEditorTarget?
 
     /// Row faces by contact id, resolved OFF the body (design review P2
-    /// — "keep image-file reads out of `body`"). The rows used to call
-    /// `coordinator.contactPhoto(for:)` — a file read plus a full-size
-    /// decode — while composing each card, and every body evaluation of
-    /// this list paid it again for every contact. The pass below runs
-    /// only when the roster or a stored photo actually changes, hands
-    /// each face through the shared downsampling cache (so it is sized
-    /// for the 44pt circle it is drawn in), and the body then reads
-    /// plain state.
+    /// — "keep image-file reads out of `body`"). The pass below runs
+    /// only when a face identity actually changes, hands each face
+    /// through the shared downsampling cache (so it is sized for the
+    /// 44pt circle it is drawn in), and the body then reads plain
+    /// state. T-157: the pass resolves through the coordinator's async
+    /// face path, so a linked contact's SYSTEM photo wins where
+    /// available (design-l1 §10.1).
     @State private var contactPhotos: [UUID: UIImage] = [:]
 
     /// What the add/edit sheet is editing: a blank add, or an existing
@@ -1586,25 +1585,33 @@ struct FamilyContactsSettingsView: View {
         .sheet(item: $editorTarget) { target in
             FamilyContactWizardSheet(target: target)
         }
-        .task(id: contactPhotoKey) {
+        .task(id: faceIdentities) {
             var resolved: [UUID: UIImage] = [:]
             for contact in coordinator.familyContacts {
-                resolved[contact.id] = DownsampledImageCache.shared.contactFace(
+                let identity = coordinator.faceIdentity(for: contact)
+                let face = await coordinator.faceThumbnail(
                     for: contact,
                     diameter: DesignTokens.iconBadgeDiameter,
-                    displayScale: displayScale
-                ) { coordinator.contactPhoto(for: contact) }
+                    displayScale: displayScale)
+                // Post-await identity re-check (design-l2 §4.4):
+                // `.task` cancellation is best-effort, so the guard is
+                // the guarantee — a face resolved for a superseded
+                // identity is dropped, never assigned.
+                guard coordinator.faceIdentity(for: contact) == identity else { continue }
+                if let face { resolved[contact.id] = face }
             }
             contactPhotos = resolved
         }
     }
 
-    /// Identity of everything the row faces depend on: who is on the
-    /// roster, and which file each face lives in. The file name matters
-    /// as much as the id — editing a contact KEEPS its id, so a photo
-    /// added or removed in the wizard would otherwise never re-resolve.
-    private var contactPhotoKey: [String] {
-        coordinator.familyContacts.map { "\($0.id.uuidString):\($0.photoFilename ?? "-")" }
+    /// Identity of everything the row faces depend on (design-l2 §4.4):
+    /// the ARRAY of per-contact face identities — who is on the roster,
+    /// which file each face lives in, the resolved system-photo token
+    /// and the epoch. `.task(id:)` re-runs exactly when one of those
+    /// changes; the id component matters because editing a contact
+    /// KEEPS its id.
+    private var faceIdentities: [String] {
+        coordinator.familyContacts.map { coordinator.faceIdentity(for: $0) }
     }
 
     /// Opens the add sheet (hidden at the cap — nothing to add).
@@ -1986,6 +1993,28 @@ private struct FamilyContactWizardSheet: View {
         .onChange(of: photoPickerItem) { item in
             loadPickedPhoto(item)
         }
+        // The stored face, resolved through the coordinator's async
+        // precedence resolver (T-157, design-l2 §4.4) — system photo
+        // where the contact is verified-linked and one is readable,
+        // the app-local file otherwise, nil for the initials avatar.
+        // Keyed on the face identity, so a link/photo/epoch change
+        // re-resolves. A fresh add has no identity: nothing to resolve.
+        .task(id: storedFaceIdentity) {
+            guard let contact = editingContact else { return }
+            let identity = coordinator.faceIdentity(for: contact)
+            let face = await coordinator.faceImage(for: contact)
+            // Post-await identity re-check (design-l2 §4.4): abandon the
+            // assignment when the identity moved while awaiting — the
+            // re-keyed task resolves the fresh face anyway.
+            guard coordinator.faceIdentity(for: contact) == identity else { return }
+            storedPhoto = face
+        }
+    }
+
+    /// The editing contact's face identity — nil for a fresh add (no
+    /// stored face). The sheet's `.task(id:)` key above.
+    private var storedFaceIdentity: String? {
+        editingContact.map { coordinator.faceIdentity(for: $0) }
     }
 
     // MARK: Sheet chrome
@@ -2715,11 +2744,12 @@ private struct FamilyContactWizardSheet: View {
         relationshipOption = preselectedOption(for: contact.relationship)
         // Stepping back into the search must show the pre-filled fields.
         showManualEntry = true
-        // The stored photo, for the preview and the remove control
-        // (photos are best-effort — a missing file simply means none).
-        if contact.photoFilename != nil {
-            storedPhoto = coordinator.contactPhoto(for: contact)
-        }
+        // The stored face is resolved by the sheet's `.task(id:)` above
+        // through the coordinator's async precedence resolver (T-157,
+        // design-l2 §4.4) — it is the only place a face is ever
+        // assigned, so the sync app-local-only lookup cannot drift back
+        // in. `storedPhoto` stays nil until that first resolution lands
+        // (the initials avatar shows).
     }
 
     /// Maps a stored relationship string onto the dropdown, so an edit

@@ -2,6 +2,10 @@ import Foundation
 import AVFoundation
 import BackgroundTasks
 import Combine
+// CryptoKit (T-157): the face token is a sha256 prefix of resolved
+// system photo bytes — same hashing shape as
+// `SystemContactLinkService.photoCacheKey`, one prefix length.
+import CryptoKit
 import UserNotifications
 import UIKit
 import MessageUI
@@ -6636,15 +6640,132 @@ self.noteTalkContractChanged()
     /// Photo thumbnails for curated contacts (family-and-friends task,
     /// 2026-09-07). Lazy like the intent-layer stores: nothing touches
     /// Application Support paths before launch completes. Photos are
-    /// best-effort visuals — the store is non-throwing, and every call
-    /// site below tolerates a nil filename.
+    /// best-effort visuals — the store is non-throwing, and every face
+    /// call site below tolerates a nil filename.
     lazy var contactPhotoStore = ContactPhotoStore()
 
-    /// The stored thumbnail for a curated contact, or nil when none is
-    /// on file (or the file vanished) — the single lookup every row
-    /// renders through, so the Photo-tab UI needs nothing but a contact.
-    func contactPhoto(for contact: FamilyContact) -> UIImage? {
-        contactPhotoStore.load(named: contact.photoFilename)
+    // MARK: - Faces (T-157; design-l1 §10.1, design-l2 §1.9, §4.4)
+
+    /// The stable `.task(id:)` identity of a contact's face (design-l2
+    /// §4.4): `"<id>:<token>:<filename|->:<faceEpoch>"`.
+    ///
+    /// Token = `systemPhotoTokens[contact.id]` — the 16-hex sha256
+    /// prefix of the last-resolved system photo bytes — or `"-"`
+    /// (linked, not yet resolved) or `"link-nil"` (no verified link).
+    /// The filename component is `"-"` when the contact has no
+    /// app-local photo.
+    ///
+    /// Stable: repeated derivation without an identity change returns
+    /// the identical string. Versioned: any link, filename or epoch
+    /// change — or a freshly resolved system photo — yields a
+    /// different string, so a `.task(id:)` keyed on it re-runs exactly
+    /// when a face could differ, and a UI cache keyed on it rotates
+    /// with it (no stale image is ever served under the new identity).
+    ///
+    /// Reads ONLY main-confined state (`verifiedLinks`, the token map,
+    /// `familyContacts`-derived values, `faceEpoch`) — @MainActor, like
+    /// the two resolvers below, is what makes every read atomic per
+    /// contact: a publish swaps whole values, so no torn identity (an
+    /// id from one revision next to a hash from another) is even
+    /// representable.
+    @MainActor
+    func faceIdentity(for contact: FamilyContact) -> String {
+        let token = verifiedLinks.links[contact.id] != nil
+            ? (systemPhotoTokens[contact.id] ?? "-")
+            : "link-nil"
+        return "\(contact.id.uuidString):\(token):\(contact.photoFilename ?? "-"):\(faceEpoch)"
+    }
+
+    /// The contact's face at its stored size — the ONE precedence
+    /// resolver (design-l1 §10.1, FR-FCU-007): (1) a VERIFIED link whose
+    /// record holds readable photo bytes → the SYSTEM photo; (2) the
+    /// app-local `photoFilename` file; (3) nil — the caller draws the
+    /// existing initials avatar. Any failure at a step degrades to the
+    /// next; never throws (a tile is never blank and never crashes).
+    ///
+    /// "Readable access" is the link service's own gate: its
+    /// `photoImageData` answers nil without touching the store when
+    /// access is not readable, so bytes only ever come back through a
+    /// readable door. System bytes are bounded to
+    /// `ContactPhotoStore.maxDimension` before returning — the same
+    /// 512px envelope a stored family thumbnail lives in — so a
+    /// phone-book full-size photo cannot round into the UI unbounded.
+    @MainActor
+    func faceImage(for contact: FamilyContact) async -> UIImage? {
+        if let system = await resolvedSystemPhoto(for: contact) { return system }
+        return contactPhotoStore.load(named: contact.photoFilename)
+    }
+
+    /// The contact's face thumbnail at `diameter`, through the shared
+    /// bounded downsampling cache — the `sysphoto:` key family
+    /// (`"sysphoto:<identifier>:<token>"`) for system photos, the
+    /// existing `"contact:<filename>"` key for app-local ones, so the
+    /// two sources can never collide (design-l2 §1.9). The token in
+    /// the key IS the bytes' version: new bytes ⇒ new token ⇒ a cache
+    /// miss, never a stale serve.
+    @MainActor
+    func faceThumbnail(for contact: FamilyContact, diameter: CGFloat,
+                       displayScale: CGFloat) async -> UIImage? {
+        if let system = await resolvedSystemPhoto(for: contact),
+           let link = verifiedLinks.links[contact.id],
+           let token = systemPhotoTokens[contact.id] {
+            let thumbnail = DownsampledImageCache.shared.thumbnail(
+                forKey: Self.systemPhotoCacheKey(identifier: link.identifier, token: token),
+                pointSize: diameter,
+                displayScale: displayScale,
+                load: { system })
+            if let thumbnail { return thumbnail }
+        }
+        return DownsampledImageCache.shared.contactFace(
+            for: contact,
+            diameter: diameter,
+            displayScale: displayScale
+        ) { contactPhotoStore.load(named: contact.photoFilename) }
+    }
+
+    /// The verified link's system photo, decoded and bounded to
+    /// `ContactPhotoStore.maxDimension` — nil when the contact has no
+    /// VERIFIED link, the record holds no readable photo, or the bytes
+    /// do not decode.
+    ///
+    /// The ONE system-byte resolver both face methods run, and the only
+    /// writer of `systemPhotoTokens` (design-l2 §4.4: the token map is
+    /// written ONLY from the @MainActor face path, never from a
+    /// background Task): the token is the sha256 prefix of the bytes
+    /// that were just resolved, recorded only on a successful resolve —
+    /// an unresolvable system photo leaves the link's token at `"-"`
+    /// and the identity stable.
+    @MainActor
+    private func resolvedSystemPhoto(for contact: FamilyContact) async -> UIImage? {
+        guard let link = verifiedLinks.links[contact.id], !link.identifier.isEmpty else {
+            return nil
+        }
+        let service = linkService
+        guard let data = await service.photoImageData(forIdentifier: link.identifier),
+              let image = UIImage(data: data) else { return nil }
+        systemPhotoTokens[contact.id] = Self.systemPhotoToken(of: data)
+        return DownsampledImageCache.downsampled(image,
+                                                 maxPixelEdge: ContactPhotoStore.maxDimension)
+    }
+
+    /// The token half of a face identity: the first 16 hex characters
+    /// of sha256 over the resolved system photo bytes (design-l2 §4.4).
+    /// The SAME hashing shape as `SystemContactLinkService.photoCacheKey`,
+    /// through one shared prefix length — and a hash by construction,
+    /// so no identifier or byte content can leave the app through an
+    /// identity string or a cache key (NFR-FCU-002).
+    static func systemPhotoToken(of data: Data) -> String {
+        let digest = SHA256.hash(data: data)
+        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        return String(hex.prefix(SystemContactLinkService.photoKeyHashPrefixLength))
+    }
+
+    /// The `sysphoto:` thumbnail cache key: record identifier plus the
+    /// resolved bytes' token (design-l1 §10.1). Never collides with a
+    /// `contact:<filename>` key — the two families share one bounded
+    /// cache, not one key space.
+    static func systemPhotoCacheKey(identifier: String, token: String) -> String {
+        "sysphoto:\(identifier):\(token)"
     }
 
     // MARK: - Identity: verified links and the family index (T-156; design-l2 §1.9, §3.6)

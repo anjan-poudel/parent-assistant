@@ -114,6 +114,30 @@ enum LocaleFormatters {
 /// downsampled to the size it is actually rendered at, and the cache is
 /// bounded by both entry count and total cost, so scrolling a long list
 /// can neither hitch on repeated decodes nor grow memory without limit.
+///
+/// ## Face key families and the invalidation contract (T-157)
+///
+/// Curated-contact faces enter under one of two key families, chosen so
+/// the two sources can never collide (design-l1 §10.1, design-l2 §1.9):
+///
+/// - `"contact:<filename>"` — an APP-LOCAL stored thumbnail. The file
+///   name is the version: replacing or clearing a contact's photo
+///   changes the name, so the new photo is a cache MISS, never a stale
+///   serve.
+/// - `"sysphoto:<identifier>:<token>"` — a SYSTEM photo from the linked
+///   address-book record, where `<token>` is the 16-hex sha256 prefix
+///   of the resolved bytes. The token is the bytes' version: new bytes
+///   (an external edit, picked up on the next foreground refresh) hash
+///   differently, so the key changes and the old entry is simply never
+///   asked for again.
+///
+/// The `faceEpoch` counter deliberately does NOT appear in these keys:
+/// it exists to re-trigger RESOLUTION (via the coordinator's face
+/// identity, which callers pass as `.task(id:)`), while cache validity
+/// is decided by content — an epoch bump whose re-resolve reads the
+/// same bytes must hit the cache, not duplicate it. No invalidation API
+/// is needed: entries are derivable, bounded (count + decoded-byte
+/// cost) and safe to evict at any moment.
 final class DownsampledImageCache {
 
     static let shared = DownsampledImageCache()
@@ -204,9 +228,16 @@ extension DownsampledImageCache {
     /// decoded once for the whole app (the family list, the phone tiles,
     /// a search row) and every later draw is a memory hit.
     ///
+    /// This is the APP-LOCAL (`contact:<filename>`) branch of the
+    /// coordinator's face path; a system-photo face enters through
+    /// `thumbnail(forKey:)` under the `sysphoto:` family instead (see
+    /// the class doc's key-family note).
+    ///
     /// - Parameters:
     ///   - diameter: the circle's width in points.
-    ///   - resolve: the coordinator's `contactPhoto(for:)` — called only
+    ///   - resolve: the app-local file read
+    ///     (`ContactPhotoStore.load(named:)` via the coordinator's
+    ///     `faceThumbnail(for:diameter:displayScale:)`) — called only
     ///     on a miss, never for a contact with no photo on file.
     func contactFace(for contact: FamilyContact,
                      diameter: CGFloat,
