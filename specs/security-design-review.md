@@ -1,217 +1,131 @@
-# security-design-review — Security design gate (STRIDE)
+# Security Design Review — family-contacts-unify
 
-- Task: security-design-review (ai-sdd workflow call-dialer-primary-secondary); contract: security review of the component design.
-- Workflow exit condition for this task: review.decision == "SECURITY-GO" (specs/call-dialer-primary-secondary/workflow.yaml).
-- Agent: sdd-reviewer (Reviewer). Feature: call-dialer-primary-secondary.
-- Worktree: /Users/anjan/workspace/projects/elderly-ai-assistant-call-dialer-primary-secondary (read-only). Branch: feat/call-dialer-primary-secondary.
-- Disposition: read-only security review — no files written, no git state touched; this report is returned to the orchestrating session for recording at specs/security-design-review.md.
+**Task:** `security-design-review` · **Decision: SECURITY-GO**
+**Worktree:** `/Users/anjan/workspace/projects/elderly-ai-assistant-family-contacts-unify` (branch `feat/family-contacts-unify`, HEAD `f6ba251b`; base master `8089c735`)
+**Date:** 2026-10-12 · **Reviewer:** security reviewer (read-only; no artifacts modified)
+**Artifacts under review:** `specs/design-l1.md` (frozen architecture), `specs/design-l2.md` rev 3 (design commit `e687f075`; `review-l2` GO at `f6ba251b`)
+**Inputs:** `specs/family-contacts-unify/constitution.md`; root `constitution.md` (Safety & Compliance Delta, Standards); `specs/define-requirements.md` + `FR/`/`NFR/` (esp. FR-FCU-005/006/008/009/010/014, NFR-FCU-002/003/007); `.ai-sdd/workflows/family-contacts-unify.yaml` (security-design-review scope comment)
 
-## Artifacts under review
+## 0. Scope, method, and verification limitation
 
-| Artifact | Contract | Size | sha256 (grouped 8x8 for output hygiene) |
+Method: the design's own §6.3 STRIDE notes were explicitly **not** accepted as evidence. Every claim below was re-derived from the design text and independently checked against the worktree code at HEAD; where a claim rests on a pin (source scan, test suite) rather than existing code, the pin's infrastructure was verified to exist and the claim is marked accordingly.
+
+Limitation (stated honestly): this is a **design-stage** review. The new files (`SystemContactLinkService.swift`, `SystemContactPhotoWriter.swift`, `FamilyContactIndex.swift`) do not exist yet; the write seam's real glue (`CNSaveRequest.execute`, read-back) cannot be exercised at unit level (`CNContactStore` is not fakeable) and is covered by the source-scan pin, `security-test`, and the DV-3/DV-4 device gates. The risk of *implementation* diverging from this design belongs to `implement` (paired review + confidence 0.85), `review-implementation`, and `security-test` (SECURITY-GO exit).
+
+## 1. Preconditions verified in the worktree
+
+| # | Claim / precondition | Evidence | Verdict |
 |---|---|---|---|
-| specs/design-l1.md | architecture_l1 | 871 lines | 5446333b 27a6a20a 3cc3f658 7efcc757 da8ec1ba 9d00282c 56b1d09d 3c990c6d |
-| specs/design-l2.md | component_design_l2 | 1245 lines | cd6dedcd d578735b 6e33606e 5e550875 8fe91caa 83eb48fb 74ad81d8 1c96e120 |
-| specs/review-l2.md | review (design-gate record) | 87 lines | 4526d427 9bd31f84 9988f867 b6a9deaa cda75ab4 eeebe7a3 33c8c201 83ef7a33 |
+| P1 | `specs/design-l1.md` exists (frozen) and `specs/design-l2.md` rev 3 is the reviewed revision | files read; `git log`: `e687f075` "design-l2 rev 3"; header names rev 3 | ✓ |
+| P2 | `review-l2` GO exists (dependency satisfied) | `f6ba251b` | ✓ |
+| P3 | No `CNSaveRequest` / `CNMutableContact` anywhere in the app today (the "first write" premise) | `grep -rn` over `ios/` (incl. tests): **0 hits**, both symbols | ✓ |
+| P4 | `CNContactStore` is constructed only in `AddressBookDirectory.swift` today | `grep`: other mentions are comments only (`LeafViews.swift:900`, `MissedCallContactResolver.swift:23`) | ✓ |
+| P5 | The source-scan pin's helper exists | `ios/ElderlyAssistantTests/Services/LiveTranslate/FeatureSourceScan.swift:39` (`swiftFiles(in:)`), `:62` (`codeText(of:)`) | ✓ |
+| P6 | Release log gate is wired into the build | `ios/build.sh:431` runs `tools/check-release-log-safety.sh` | ✓ |
+| P7 | LogSanitiser's allow-list contains every key the design's events use | `LogSanitiser.swift:56-65` — `outcome`, `state`, `error_code`, `duration_ms`, `entry_count`, `contact_id_hash` all present | ✓ |
+| P8 | The runtime sanitise choke point is real | `AppCoordinator.swift:11666` — `let clean = sanitiser.sanitise(event)` on the bus implementation's `emit` | ✓ |
+| P9 | `MissedCallContactResolver.matches` is the floor-8 trailing-digit rule the design reuses | `MissedCallContactResolver.swift:44-53` | ✓ |
+| P10 | `ContactResolver` scores are `Double`; accept 0.6 / margin 0.15 at :61-62; rival rule strict `<` at :83-84 | `ContactResolver.swift:61-62,77,83-84` | ✓ |
+| P11 | `ContactsAccess` currently collapses `.limited` via `@unknown default → .denied` | `AddressBookDirectory.swift:245-249` (enum), `:348-355` | ✓ |
+| P12 | `FamilyContact` custom-decoder degrade pattern exists | `FamilyContactStore.swift:61-150` | ✓ |
+| P13 | `ContactPhotoStore` matches the fallback description: ≤512 px JPEG q0.8, orientation baked, metadata stripped, `.completeFileProtection`, non-throwing, plain-filename guard | `ContactPhotoStore.swift:8-19,27-28,75-104,143-149` | ✓ |
+| P14 | All six scoped suites named by the constitution + L10n suite exist | files present under `ios/ElderlyAssistantTests/` | ✓ |
+| P15 | L10n catalog anchors cited by the design exist where claimed | catalog greps | ✓ |
+| P16 | The five `AddressBookDirectory.access()` consumers + the wizard/switch sites are where the design says | verified per site (AppCoordinator `:8333-8346`, SettingsView `:2117/:2323-2338`, LeafViews `:1343/:1347-1362/:1368-1370/:1379-1388/:1413/:1519`) | ✓ (see F6) |
+| P17 | Duplicate-claim premise: wizard records the picked row's `entry.normalized` as `numberKey` | `UnifiedContactSearch.swift:37-55`, `AddressBookDirectory.swift:46-76` | ✓ |
+| P18 | Four live `contactPhoto(for:)` call sites exist (deletion is compile-verified); `DownsampledImageCache.contactFace` key is `contact:<filename>` | `SettingsView.swift:1596, :2710`; `LeafViews.swift:1161, :2650`; `ViewCaches.swift:211` | ✓ |
 
-The two design hashes match their declared contracts exactly; all three artifacts were re-hashed at the end of this review and were unchanged during it. review-l2.md has no declared contract hash — its content (decision GO; 0 BLOCKER / 1 MAJOR / 4 MINOR / 2 NOTE; findings F-1..F-7) was read verbatim this session and is the disposition baseline this review carries forward.
+## 2. STRIDE threat model (independently verified)
 
-Basis documents consulted (hashes grouped 8x8): specs/define-requirements.lock.yaml — 242 lines, cea80dcd 3f793b0a bcc752f5 8b84af25 23248f80 85629890 c6497648 07758f8 (19 FR / 10 NFR; six security_surfaces; the security-design-review and security-test traceability gates are the basis for the five focus areas); frozen owner design docs/superpowers/specs/2026-10-12-call-dialer-primary-secondary-design.md — 183 lines, 16a5a9c3 822d3ad6 4a460a71 7bd6a219 a78626c0 bbfaa201 47f42672 82941fd8; feature constitution specs/call-dialer-primary-secondary/constitution.md — 101 lines, e5f816c3 a9d56743 26136204 ca657fe7 a739e8f6 671f9dfd d838e243 3a1f43e5; root constitution.md — 159 lines, 7feae062 30b7e58e a2256a4e 332d0b80 7029642c e7a0646f 6ac3ddcd 460c9ef8; workflow specs/call-dialer-primary-secondary/workflow.yaml and its mirror .ai-sdd/workflows/call-dialer-primary-secondary.yaml — 190 lines each, c0ec077b b738e6ad b55eafba 7c30cb97 46fffc78 fabf702f b80df79e 4f8f4ec5 in both copies; byte-identical (diff exit 0).
+### 2.1 Threats
 
-## Verification method
+| ID | Threat (entry point) | Mitigation in the design | Independent verification | Residual verdict |
+|---|---|---|---|---|
+| S-1 | Spoofing: wrong-contact photo write — a stale/reused identifier routes the save to a different person's card | Attempt-time fingerprint re-check BEFORE the request is built (§1.4 step 2, §6.2); read-back byte verification (§1.4 step 4) | The writer fetches by identifier, fingerprints with `matches` (P9), and only then builds the intent/request; a mismatch returns `.identityMismatch` with no request constructed | Acceptable (F8) |
+| S-2 | Spoofing: wrong-person merge — an identifier now resolves to a different person | Refresh verification = record exists AND a current number satisfies `matches`; unverified links treated as ABSENT; stale line surfaced | Consumers read only the snapshot; `.empty`/unverified ⇒ today's unlinked behavior exactly | Acceptable |
+| S-3 | Spoofing: a linked row over-claims reachability | Synthesized rows carry the FAMILY phone and channels; the caption only explains the book-side name | Caption key/`linkedBookNames` shape consistent with `Result.id = "family-<uuid>"` | Acceptable (informational) |
+| S-4 | Spoofing/identity: voice resolution returns the wrong person | Conservative bands (1.00/0.90/0.85/0.80/0.75/0.60), margin 0.15, ties ⇒ ambiguity, near-miss exactly-one, family-roster-only candidates | Scores `Double` (P10); strict `<` rival rule re-derived — see math block | Acceptable (F2) |
+| T-1 | Tampering: partial or other-field mutation of the system record | Single target file for `CNSaveRequest`/`CNMutableContact`; only `imageData` assigned; intent field-set asserted; read-back; actor serialization | Zero such construction today (P3); pin helper exists (P5); update-only, never add/delete | Acceptable (F1) |
+| T-2 | Tampering: corrupt persisted payload | Decoder contract §3.4; separate `LegacyNicknameKeys`; empty identifier/numberKey ⇒ nil; synthesized encoder kept | Decode-degrade pattern verified (P12) | Strong |
+| T-3 | Tampering: a second contact claims the same system record | Wizard steering + coordinator duplicate-claim guard + verification-side uniqueness (first in roster order wins) | `storedClaimant` uses the STORED link — defense in depth | Strong |
+| T-4 | Tampering: unlink loses the displayed photo, or touches the system record | `SystemContactUnlinkMode` with copy-before-clear; `false` ⇒ link NOT cleared; unlink never writes the system record | Mode rule is pure and testable; no `CNSaveRequest` on the unlink path | Acceptable (F3) |
+| T-5 | Tampering: dedupe hides a person or strands a call | Pass 3 fires only on VERIFIED links; SYNTHESIZE keeps the person findable; Pass 4 unchanged for unlinked pairs; recount before the limit slice | Current matched-only dedupe contract verified; `.nickname` tier insertion is additive | Strong |
+| R-1 | Repudiation: write/unlink/refresh/claim-refusal leave no trace | §5.2 closed-vocabulary events, outcomes reason-coded | All metadata keys allow-listed (P7); runtime sanitiser choke point (P8) | Acceptable per house policy |
+| I-1 | Information disclosure: PII reaching logs | Reason-code-only vocabularies; NO console writes in the three new files; FEATURE_ROOTS registration | Allowed keys (P7); gate rules + fixture harness (P6) | Acceptable |
+| I-2 | Information disclosure: photo bytes / source metadata | Only the processed ≤512 px JPEG (metadata stripped) reaches the system record; display bytes downsampled; intent carries a hash; cache in-memory, 24/16 MiB | Pipeline claims verified against `ContactPhotoStore.swift` (P13) | Strong |
+| I-3 | Information disclosure: identifiers in events | `contact_id_hash` declared but UNUSED; no identifier/nickname/name event fields | Key list verified; `imageBytesHash` is a sha256 prefix by construction | Strong |
+| I-4 | Information disclosure: dishonest permission copy | `Info.plist:115` replacement adds the photo-update disclosure | Current copy is read/search-only (gap real); string-only edit — no new usage keys | Strong |
+| I-5 | Information disclosure: alt caption reveals a book name | Re-displays a name already shown on ordinary book rows; suppressed when duplicating the family name | Design-internal | Neutral |
+| D-1 | DoS: unbounded fetches/caches/loops | ≤12 identifiers per batch; NSCache 24/16 MiB; one fetch per cache miss; no retries/backoff/timeouts | `maxContacts = 12` verified; constants named | Acceptable |
+| D-2 | DoS: crash loop from corrupt state | Decode-degrade; snapshot degrade; non-throwing photo store; checked casts; caught throws | Pattern verified; `try!`/force-casts absent from the write-seam contract | Strong |
+| D-3 | DoS: refresh storms | Single-flight drain with latest-roster capture + coalescing; early-return when no link exists | Drain semantics coherent and terminating | Acceptable |
+| D-4 | DoS: oversized strings entering the index/search | Editor caps 8 nicknames/contact; model/decoder accept more without failing | No length bound on entries or book-side names (F5) | Acceptable (low impact); F5 advisory |
+| E-1 | Elevation of privilege: writing any other field or any other contact | Confinement to one file; update-only on the fingerprint-verified contact; single `imageData` assignment; source-scan pin | No such API today (P3); pin infra exists (P5) | Strong (F1 strengthens layer 2) |
+| E-2 | Elevation of privilege: prompting/nagging outside user-initiated flows | Prompts only at the editor's photo step + pre-existing point-of-use paths; denied/limited never re-prompt | Existing `grantAccess` sites are user taps only | Strong |
+| E-3 | Elevation of privilege: `.limited` silently collapsed or equality gates taking the else path | `.limited` + `allowsReading`; per-site enumeration; source-pin suite `ContactsAccessGateTests` | Independent enumeration matches (2 switches + equality sites + coordinator fifth site) | Strong (F6) |
+| E-4 | Elevation of privilege: read-scope expansion under `.limited` | Reads limited to the GRANTED subset; writes attempt-based per-record | Matches Apple's limited-access model; removes a fail-closed collapse, does not widen beyond the grant | Acceptable |
 
-Adversarial, read-only re-verification against the worktree source at this baseline — every load-bearing security claim of the design was re-read from source rather than trusted from the documents. Specifically: the chain algebra (the CallChannelChain listing and its never-dead-end argument) was traced by hand over all 4 x 4 pick pairs x 4 feasibility states (64 cells); the AppCoordinator seams (resolve, request/confirmation, override, perform, launch-fail hop, dial-back, observability) were re-read at the line anchors the L2 cites; the probe path (the canOpenURLOnMain hop, the LeafViews installed probe, Info.plist declared schemes, the address-book handle check) was re-read; the log-safety coverage mechanics (check-release-log-safety.py FEATURE_ROOTS and role matching) were re-read and the release gate was run to a baseline exit 0; the catalog state (five new keys absent; reused keys present) was re-checked; the call-site enumerations (resolvedCallChannel, resolvedMissedCallChannel, PendingCallAction constructions) were re-grepped repo-wide. review-l2 findings F-1..F-7 were re-verified against source, not accepted on their internal evidence alone. Output hygiene: hashes are grouped 8x8 and long paths are broken across spans.
+### 2.2 Identity-integrity math — independent re-derivation
 
-## Summary
+- 1.00 − 0.85 = `0.15000000000000002` → **not** `< 0.15` → name-exact resolves over nickname-exact (FR-FCU-014 scenario 2 holds).
+- 0.90 vs 0.85 = 0.05 → ambiguous; 0.85 vs 0.80 = 0.0499… → ambiguous; 0.85 vs 0.75 = 0.10 → ambiguous; 0.85 vs 0.85 = 0.0 → ambiguous.
+- New pairs from the 0.75 band land exactly on the margin: 0.90 − 0.75 = `0.15000000000000002` and 0.75 − 0.60 = `0.15000000000000002` → both **decisive** by the same representation artifact; not enumerated in the design's table or pins — advisory F2.
+- Fingerprint: stored `numberKey` = the picked row's normalized number; verification accepts ANY current number satisfying `matches` (floor 8, trailing 8-10 digits; ADDED/kept verifies, changed/gone does not). Conservative direction confirmed.
 
-Decision: SECURITY-GO
+### 2.3 Write authority — layer-by-layer verification
 
-0 BLOCKERs. 2 must-fix conditions (M-1, M-2). 6 verify-and-record items (V-1..V-6). 9 evidence obligations for security-test (SA-1..SA-9). 7 accepted residuals (R-1..R-7). 7 STRIDE surfaces modelled (settings persistence, feasibility probes, chain resolution, announcement/confirmation copy, launch-fail hop, observability, localisation strings).
+1. **File-local construction** — HOLDS as a design pin: zero `CNSaveRequest`/`CNMutableContact` today (P3); the only-writer file and source-scan test are specified; scan helper exists (P5); `CNContactStore` allowance list matches reality (P4). No bulk path: `update` of one fetched contact only.
+2. **PhotoWriteIntent field-set assertion** — PARTIAL: single-case `PhotoWriteField` makes `fields == [.photo]` unfalsifiable; the `assert` is DEBUG-only. Effective enforcement = single-assignment construction + file confinement + review/security-test. Advisory F1.
+3. **Read-back byte verification** — HOLDS: `.written` requires byte equality; anything else → `.failed(.readBackMismatch)` → fallback label (never a false success). The acknowledged imperfect-read case errs safe (false negative, never false positive) — F7.
+4. **Attempt-time fingerprint re-check** — HOLDS: fetch → fingerprint → build → execute; a mismatch returns before any request exists — prevented, not detected (S-1).
+5. **mutableCopy crash-safety** — HOLDS: L1's `as!` replaced by checked `as?` → `.failed(.saveRejected)` + DEBUG `assertionFailure`; no `try!`; `execute` throws caught.
+6. **Serialization** — HOLDS: actor isolation; the refresh drain cannot interleave write attempts.
 
-All five workflow focus areas pass as designed: (1) the GSM hard floor cannot be configured away — traced inspection of the chain shows attemptOrder always contains .phone, .phone and .faceTime are unconditionally feasible, equal picks dedupe, route returns only inside the feasible loop, and the vocabulary substitution terminals (.phone for anyChannel/audio, .faceTime for video) are themselves always feasible and permitted; (2) emergency precedence and the override protocol are untouched — the emergency dial is UIKit-direct outside every touched seam and the override gate at AppCoordinator.swift:7665-7669 is marked verify-only/unchanged, with the amended action intentionally dropping provenance; (3) probes are local-only — the shipped canOpenURL hop plus the address-book handle check; no new plist entry, permission, store or egress; (4) announcement honesty — confirmation and announcements compose from fellBackFrom.first plus the routed channel at single sites, with one must-fix (M-1) pinning the disposition of a known pre-existing counterexample the feature makes more reachable; (5) log sanitisation — no new console writes; metadata is [:] and events carry closed-vocabulary raw-value tokens only; Services/Calls joins FEATURE_ROOTS in check-release-log-safety.py so the new file sits inside the release gate.
+### 2.4 Degradation safety — outcome→state totality
 
-The two must-fix conditions are corrections, not guarantee breaks. M-1 pins the disposition review-l2 already required for the .whatsappChat launch-failure row (a source-fact error plus an unpinned disposition for a pre-existing shipped site). M-2 corrects the attempt-order wording ("always ending .phone" is literally false when preferred == .phone) and the planned test name that would encode the false property, so neither documents nor a shipped test can be 'fixed' into reordering the chain away from preferred-first.
+The §1.5 mapping covers every outcome case and payload, total by construction (exhaustive switch, no default). No unhandled case. No false success (`.written` requires read-back equality). No crash paths. Permission states: skip-and-label for notDetermined/denied (no prompt, no nag), attempt-and-detect for limited/full. One comment inconsistency (F4) — no security impact.
 
-## Verification ledger
+## 3. Security checklist (template mapped to this app)
 
-| # | Claim verified | Evidence (source re-read this session) | Verdict |
-|---|---|---|---|
-| 1 | Chain never dead-ends; floor containment; dedupe; vocabulary terminals | CallChannelChain listing (design-l2 section 6) traced over 16 pick pairs x 4 feasibility states; FR-CDP-006/007, NFR-CDP-001 | PASS |
-| 2 | .phone and .faceTime unconditionally feasible; messenger feasible iff handle; whatsApp feasible iff probe | isFeasible semantics in the C1 listing; FR-CDP-004/005/006; CallLinks.swift supportsVideo :80, supportsAudio :83 | PASS |
-| 3 | Override gate byte-identical | AppCoordinator.swift:7656-7686; gate :7665-7669 speaks router.call.messengerNoHandle, original stays pending, returns true; design edit #17 marks verify-only | PASS |
-| 4 | Amended action :7670-7674 compiles with the new defaulted var fields and drops provenance (no stale disclosure re-spoken) | Source :7670-7674 (5-arg construction); design-l2 :491-492 | PASS |
-| 5 | Emergency dial bypasses every touched seam | RedesignComponents.swift:229-237 (trigger calls coordinator.emergencyNotify(), then PhoneDialer.url, then UIApplication.shared.open); emergency notify :6745-6758 is notification + ack and does not place a call | PASS |
-| 6 | Emergency-contact resolution not rewired | AppCoordinator.swift:6463-6480 is NotifyChannel.resolve-based; non-goal in design and requirements index | PASS |
-| 7 | Dial-back routes the ordinary chain only; never delays escalation | :8382-8390 (supportsAudio guard :8386); dial-back call chain :8423-8483 contains no emergencyNotify or NotifyChannel call | PASS |
-| 8 | Probes local-only; no plist delta planned | canOpenURLOnMain :7312-7315; whatsapp:// literal :7270; LeafViews installed probe :1171-1174; Info.plist :59 with whatsapp :94, fb-messenger :69, facetime :66, facetime-audio :67, tel :90 | PASS |
-| 9 | No new console writes; PII out of logs | Design sections 24-25; metadata [:] C9 policy at :7840; LogSanitiser.allowedKeys :56 unchanged; NFR-CDP-003 | PASS (SA-6) |
-| 10 | Release-gate coverage mechanics | check-release-log-safety.py FEATURE_ROOTS :141+ (tail :184-187), role match :821-834 makes the new Services/Calls file feature-role (rules 3-6); coordinator-side files receive rules 1-2 only — source-audit obligation | PASS (SA-6) |
-| 11 | Release gate baseline green | ios/tools/check-release-log-safety.sh run this session: exit 0 (fixture suite proves each rule positive and negative); build.sh :431-434 wiring intact | PASS |
-| 12 | F-1 confirmed and security-reframed | CallLinks.swift:366-370 openWhatsAppChat returns Bool (false when whatsAppChatURL nil, :283-287); doc :360-364 claims unconditional; needsNativeCompose/copiedNumber belong to openWhatsAppCallChat :457-470 (:465-469); AppCoordinator :7755-7765 discards the Bool, speaks router.call.whatsappOpened and calls noteConfirmedCallExecution — a false success claim plus false learning on the voice path | M-1 |
-| 13 | New .phone guard fixes the false-claim class at the voice floor | Source :7723-7732 discards openPhone Bool today (:340-344, false only when no digits); design adds guard + announceNoUsableNumber + no recency on failure | PASS (SA-5) |
-| 14 | PendingCallAction constructions repo-wide: exactly 4 | :7624 and :7670; IntentLogStoreTests.swift :206 and :224 (re-grepped this session) | PASS (V-2 wording) |
-| 15 | resolvedCallChannel production call sites: exactly 2 plus one test helper | LeafViews.swift:1612-1615; AppCoordinator.swift:8387; CallChannelResolutionTests.swift:61 | PASS |
-| 16 | resolvedMissedCallChannel: exactly 1 production site plus tests | AppCoordinator.swift:8432; MissedCallDialBackTests | PASS |
-| 17 | MethodResolver global-default step becomes the settings primary via injected closure | MethodResolver.swift :74-78 (step 4 .phone / .globalDefault); init :22-26; FR-CDP-012 | PASS |
-| 18 | secondaryCallApp persistence mirrors the defaultCallApp pattern; absent/garbage decodes to .phone | :329-335; :2850-2853 (.flatMap(CallApp.init(rawValue:)) ?? .phone); NFR-CDP-005 | PASS |
-| 19 | Confirmation timeout untouched | VoiceSessionStateMachine.swift:135 = 45 seconds | PASS |
-| 20 | Settings UI selection conveyed only by checkmark plus stroke overlay (F-5 evidence) | CallingSettingsView.swift:40-64; no selected trait or accessibility value | CONFIRMED (V-4) |
-| 21 | Five new keys absent; reused keys present | Localizable.xcstrings: the five new keys count 0; settings.calling.title, calling.defaultCaption, app.name.facetime, app.name.whatsapp, call.announce.noPhoneNumber, router.call.messengerNoHandle, router.call.confirmQuestion count 1 each | PASS |
-| 22 | Speech is catalog-bound (no hardcoded user-visible literals on new paths) | Design sections 9 and 12 composition sites; L10nCatalogCoverageTests exists | PASS (SA-8) |
-| 23 | Hop dispatch reuses the shipped openers | LeafViews tile/row funnel :1536-1597; performContactCall :7831-7910; performSystemContactWhatsApp :7971-8000; performSystemContactMessenger :8053-8083 | PASS |
-| 24 | Address-book handle checks unchanged in mechanism | storedMessengerHandle :8009-8011; LeafViews stale-state guard :1573-1580 | PASS |
-| 25 | Observability events stay closed-vocabulary with metadata [:] | :7834-7841 (outcome video:<rawValue>, C9 comment :7840); hop event tokens are raw values | PASS |
-| 26 | Design-l2 section 25 reader/writer list is not exhaustive (F-6) | isAwaitingCallConfirmation :7553, consumer :10717-10723; slot nil'd :10611-10612; recordConfirmationTimeout :10561-10569 reads the slot | V-5 |
-| 27 | New file graded feature-role by directory-prefix match | role assignment code :821-834 (path == feature or startswith feature + os.sep) | CONFIRMED (SA-6) |
-| 28 | No store beyond secondaryCallApp; no per-contact primary/secondary storage | Design edit list; FR-CDP-018 boundary | PASS |
-| 29 | Workflow mirror byte-identical; exit condition string confirmed | diff exit 0; workflow.yaml read | PASS |
-| 30 | review-l2 findings mapped forward | F-1 → M-1; F-2..F-7 → V-1..V-6 (F-7 linked to M-2) | PASS |
+| Checklist item | Verdict | Basis |
+|---|---|---|
+| Data flows identified; transit encryption | PASS — on-device only; no network transit surface exists in this feature at all | NFR-FCU-003 by construction |
+| PII identified with handling specified | PASS with one advisory — names/numbers/nicknames/photos/identifiers/link; display on owner/parent surfaces; logs reason-code-only; caches bounded; strings not length-bounded (F5) | §4.3/§5.2/§3.4, P7/P8/P13 |
+| Input validation for external inputs | PASS with advisory — identifier non-emptiness gated; digits()/matches filtering; plain-filename guard; decode-degrade; Text-only sinks; missing explicit length caps (F5) | P9/P12/P13 |
+| Audit logging covers security-relevant events | PASS — write/unlink/refresh/claim-refusal all reason-coded with allow-listed metadata; console-only sink is the stated residual | §5.2/P7/P8 |
+| Secrets management | PASS (N/A) — no credentials, keys or tokens introduced; access is OS-mediated | §1.4/§9.3 |
+| Least privilege | PASS — photo-field-only write on the verified-linked record; key-scoped fetches; limited access respected per-record; no new usage keys | P3/P4/P11 |
+| Compliance traceability (App Store, disclosure, limited-access honesty) | PASS — point-of-use plain-language copy; honest NSContactsUsageDescription; never claims an unverified write; limited-access honesty on both search surfaces | FR-FCU-009, NFR-FCU-002/003 |
+| Explicit error return types | PASS — typed outcome enums, documented-Optional seams, no `any`/`unknown`; `@unknown default` fails closed | §1.1-§1.9 |
+| Async/external failure modes + recovery | PASS — every seam has a typed degrade path | §1.3-§1.5, §4.5, §5 |
+| Timeouts/retries configurable, not hardcoded | PASS — none introduced; future waits must be named constants; cache/limit constants are named statics | §4.5/§6.2 |
+| Every element traces to an FR/NFR | PASS — L1 §18 and L2 §10 tables | |
+| Design describes what the operator sees on run and failure | PASS — full fallback label table, source caption, stale-link line, steering cards; one internal comment inconsistency (F4) | §1.5/§2.2-§2.6 |
 
-## STRIDE threat model
+## 4. Findings (advisory — **no blocking findings**)
 
-The lock's six security_surfaces expand to the seven implementation surfaces below (the chain floor and feasibility split across chain resolution and probes; PII exposure across observability and localisation). Every control named was verified against the worktree source at the anchors in the ledger. Residuals are labelled R-n and defined in full below.
+- **F1 — LOW — `PhotoWriteIntent` assertion is documentation-grade, not an enforcement layer.** Recommendation (for `security-test` + writer tests): add a source-level assertion that no property other than `imageData` is assigned on the mutable contact and that `CNSaveRequest` usage is `update`-only, alongside the existing confinement scan.
+- **F2 — LOW — Two new band pairs sit exactly on the ambiguity margin and are decisive but unpinned.** 0.90 vs 0.75 and 0.75 vs 0.60 → `0.15000000000000002` ≥ 0.15 → NOT ambiguous. Recommendation: add explicit `ContactResolverTests` consequence-table rows pinning both pairs (and keep the 1.00/0.85 row).
+- **F3 — LOW — `unlinkKeepingDisplayedPhotoLocally` must set the contact's `photoFilename` to the copied file.** State it in the implement task spec and pin it in coordinator tests.
+- **F4 — INFO — §2.6's comment (`.written`/`.skippedNoLink` → dismiss) contradicts §1.5's mapping (`.written` → `.updatedInSystem`, shown).** Both honest; pick one at implement (recommend: show the label) and align the comment.
+- **F5 — INFO — No length bounds on externally-sourced strings.** Recommend: cap stored nickname length in `normalizedNicknames` (e.g. 64 chars) or add a worst-case long-string assertion to the §6.1 perf tests.
+- **F6 — INFO — One adjacent `allEntries()` consumer (`AppCoordinator.makeDialectBiasProfileProvider` :2529) is outside the R2 enumeration.** Behavior unchanged by this feature; record it in §3.5's list (or footnote) so the claim stays exact.
+- **F7 — INFO — Accepted honest false-negative: `.failed(.readBackMismatch)` can show "Kept in this app only" while the system record received the photo.** Safe direction (never a false success); keep as-is.
+- **F8 — INFO — Shared-number fingerprint residual (S-1/S-2):** two distinct cards sharing the dialled number would pass the fingerprint if an identifier is reused. Extremely low likelihood and bounded (one photo field of a card the owner believed was the linked person). Recorded as accepted residual for `security-test`.
 
-### S1 — Settings persistence (secondaryCallApp, UserDefaults)
+## 5. Accepted residual risks (recorded)
 
-| Threat | Scenario | Control (verified) | Verdict |
-|---|---|---|---|
-| Spoofing | A second process faking the stored pick | iOS app-container UserDefaults is single-writer by sandbox; value consumed only via CallApp.init(rawValue:) | PASS |
-| Tampering | User or device-access attacker sets secondary == primary, garbage, or a hostile pick | Equal picks are legal by design and deduped; garbage/absent decodes to .phone (:2850-2853 pattern); no configuration can remove the floor (S3) | PASS |
-| Repudiation | Dispute over what was selected | No security-audit obligation in FR-CDP-003; the picker is visible UI state | PASS |
-| Information disclosure | The stored value is a channel name only (non-PII) | Mirrors defaultCallApp's 'a UI preference, not a secret' (:329-335); cannot exfiltrate numbers | PASS |
-| Denial of service | Corrupt value disabling calling | Decode failure falls back to .phone; dialability never depends on the setting | PASS |
-| Elevation of privilege | Setting bypassing feasibility or emergency | Feasibility re-evaluated per call; the setting cannot force execution on an infeasible channel (openers re-guard); emergency chain untouched | PASS |
+1. Write-seam real glue is unit-untestable (`CNContactStore` not fakeable): covered by source-scan pin + `security-test` + DV-3/DV-4 device evidence.
+2. `request.update` writes the fetched snapshot back; minimal fetch keys limit materialised fields; any throw degrades to a labeled fallback.
+3. New coordinator/UI lines remain outside the gate's rules 3-6 (documented §5.3); bounded by rules 1-2, the runtime allow-list choke point (P8), review, and `security-test`.
+4. Audit events are console-only (existing house infrastructure).
+5. `.limited` readable semantics: a deliberate, bounded scope correction (the user's granted subset), pinned per site (E-3, F6).
+6. English-only usage strings (pre-existing project pattern).
 
-### S2 — Feasibility probes (canOpenURL hop; address-book handle check)
+## 6. Decision
 
-| Threat | Scenario | Control (verified) | Verdict |
-|---|---|---|---|
-| Spoofing | An app registering the whatsapp scheme answers canOpenURL | Bounded by iOS declare-scheme mechanics; mechanism pre-exists (row pill probe :1171-1174) and is unchanged; worst case is an announced attempt + hop | PASS (R-6) |
-| Tampering | Stale or negatively cached probe result | A negative probe routes to the next feasible channel (never blocks a call); a stale positive yields attempt + disclosed hop; staleness accepted at requirements time | PASS (R-1) |
-| Repudiation | n/a — no security decision rests on the probe | — | PASS |
-| Information disclosure | Probe leaking device state | On-device query only; declared schemes (:59, :94) bound what is askable; handle check reads the local address-book store; no egress | PASS |
-| Denial of service | Probe false dead-ending the chain | .phone floor is structural; no new timers, queues or locks; the canOpenURLOnMain hop is reused | PASS |
-| Elevation of privilege | Probe ordering attempts | Probe only orders attempts; no privileged action reachable | PASS |
+**SECURITY-GO.**
 
-### S3 — Chain resolution (CallChannelChain, pure static)
+The STRIDE analysis found no blocking weakness. The write-authority design satisfies the workflow's bar ("a wrong-contact write is prevented, not just detected"): target chosen once (fetch → fingerprint → build → execute), confinement pinned by a source scan, read-back gates every success claim, no crash path, and the wrong-contact direction requires a compound coincidence (F8). Identity integrity holds independently verified (ambiguity math re-derived exactly; ties refuse to dial; stale links degrade without false merges; unlink never writes the system record and never loses the displayed photo). Degradation is total by construction; no false success; PII discipline enforced by verified allow-listed keys, closed vocabularies, and the release gate; no new egress, permissions, or data collection.
 
-| Threat | Scenario | Control (verified) | Verdict |
-|---|---|---|---|
-| Spoofing | A forged Feasibility closure | Openers re-guard at execution time (digits, handle, URL), so a forged claim can only cause an announced attempt + hop, never execution on a truly infeasible channel | PASS |
-| Tampering | Configuration or state removing the floor | Traced 64-cell argument: .phone always in attemptOrder; .phone/.faceTime always feasible; dedupe; route returns inside the feasible loop; vocabulary substitution terminals always feasible and permitted; no dead end for any pair including equals and both-infeasible | PASS (core focus-area-1 assurance; M-2 wording correction) |
-| Repudiation | n/a | — | PASS |
-| Information disclosure | Inputs are channel enums plus a handle-presence Boolean; outputs are enums only | No PII represented or emitted | PASS |
-| Denial of service | Unbounded behaviour | Total function; loop-free; at most three candidates | PASS |
-| Elevation of privilege | Privilege surface | None; the chain appears in no emergency path | PASS |
-
-### S4 — Announcement and confirmation copy
-
-| Threat | Scenario | Control (verified) | Verdict |
-|---|---|---|---|
-| Spoofing | An announcement naming a channel that is not what executes | Copy composes at one site from fellBackFrom.first plus the routed channel the executor switches on; label() maps the same value 1:1 | PASS with M-1 (the known pre-existing counterexample site; disposition must be pinned before that row is implemented) |
-| Tampering | Edited catalog text changing behaviour | Text is speech-only; routing is independent of strings; ne/en parity enforced | PASS |
-| Repudiation | A silent route change | Every fallback announced before execution (FR-CDP-016); the prompt names the routed channel (FR-CDP-013); empty fellBackFrom keeps the shipped prompt (pinned test) | PASS with M-1 |
-| Information disclosure | Spoken copy leaking into logs | Announcements never routed through logging (design; FR-CDP-015 rule); contact name is speech-only | PASS |
-| Denial of service | Longer prompt breaking the confirmation window | At most one clause added inside the unchanged 45-second window (:135) | PASS |
-| Elevation of privilege | n/a | — | PASS |
-
-### S5 — Launch-fail hop
-
-| Threat | Scenario | Control (verified) | Verdict |
-|---|---|---|---|
-| Spoofing | Hop line claiming a channel it does not attempt | Single hop-line site names the next candidate from the same list the dispatcher consumes | PASS |
-| Tampering | Stale candidates or infinite hop | Candidates computed at resolution; dispatch filters messenger-no-handle at consumption; strictly shrinking suffix gives depth at most 2; no re-prompt and no re-pending; only the executed method is taught | PASS |
-| Repudiation | Silent exhaustion | The opening failure line is spoken before the hop decision; exhaustion speaks only the already-spoken shipped line — never silent | PASS |
-| Information disclosure | Hop line content | Channel names plus contact name, speech only; events carry raw-value tokens | PASS |
-| Denial of service | Recursion or repetition | Bounded recursion; finite candidates; single execution per request | PASS |
-| Elevation of privilege | Hop targets | Ordinary channel set only; cannot touch escalation | PASS |
-
-### S6 — Observability (events, outcomes, metadata)
-
-| Threat | Scenario | Control (verified) | Verdict |
-|---|---|---|---|
-| Spoofing | Outcome tokens claiming what executed | Tap outcomes now record the routed channel with a direct/fellBack suffix (an improvement over the legacy preferred-app claim); captures record the executed method | PASS |
-| Tampering | Free text injected into events | Closed vocabularies only (raw values plus fixed suffix strings) | PASS |
-| Repudiation | Missing post-hoc evidence | Per-execution emit unchanged in shape (:7834-7841) | PASS |
-| Information disclosure | Numbers/handles/names in event fields | metadata [:] (C9, :7840); no number, handle or name in any new field; LogSanitiser.allowedKeys unchanged | PASS (SA-6) |
-| Denial of service | Event volume | One additional event per hop | PASS |
-| Elevation of privilege | n/a | — | PASS |
-
-### S7 — Localisation strings (five new ne/en keys)
-
-| Threat | Scenario | Control (verified) | Verdict |
-|---|---|---|---|
-| Spoofing | Copy misdescribing the mechanism | Parameter contracts bind channel labels to app.name.* and routed-channel values; copy cannot alter routing | PASS |
-| Tampering | Catalog edits | Static text; L10nCatalogCoverageTests enforces parity | PASS |
-| Repudiation | n/a | — | PASS |
-| Information disclosure | Placeholders | Filled at speech time only; never logged | PASS |
-| Denial of service | Missing key degrading one line | Coverage test prevents; routing unaffected | PASS |
-| Elevation of privilege | n/a | — | PASS |
-
-## BLOCKER-class findings
-
-None. No finding breaks a security focus area or a constitution constraint as designed: the floor, dedupe and at-most-once, override and emergency preservation, local-only probes, log safety and the five-key bound all hold as written. M-1 and M-2 are corrections required downstream; failing to apply M-1 before the affected row is implemented becomes a release-blocking condition at implement/security-test time (see conditions).
-
-## Conditions carried to plan-tasks / implement
-
-M-1 (must-fix; carried from review-l2 F-1, security-framed — announcement honesty, focus area 4). Before the .whatsappChat row is implemented: (a) correct design-l2.md:799 to state openWhatsAppChat's real signature (returns Bool; false only when whatsAppChatURL is nil — CallLinks.swift:283-287, :366-370) and correct :609 to attribute needsNativeCompose/copiedNumber to openWhatsAppCallChat only (:457-470); (b) record the explicit disposition, one of: (i, recommended) the voice .whatsappChat branch speaks the shipped honest line (call.announce.noPhoneNumber) when the Bool is false and records no success, no learning and no activity, matching the new .phone guard; or (ii) document a shipped-identical exception in design-l2 section 22 with the reachability analysis (new settings configurations and hop targets route more voice calls into this branch). Either disposition is acceptable for SECURITY-GO; silence is not.
-
-M-2 (must-fix; new — attempt-order wording and test contract). design-l1.md:147 and the attemptOrder comment in design-l2 section 6 say 'always ends .phone'; that is literally false when preferred == .phone and secondary differs (the order is [.phone, secondary]). The invariant that actually holds and is load-bearing is containment: .phone is always IN the order, and route therefore never dead-ends. At plan-tasks/implement: correct both wordings to the containment form; write the planned order test (testAssessmentOrderAlwaysEndsPhone, design-l2.md:1171; see V-6) to assert containment plus isFeasible(routed) plus preferred-first — NEVER last-element; and do not reorder attemptOrder to satisfy the old wording — attempting the secondary before the preferred channel would be a behaviour and safety deviation from FR-CDP-007.
-
-Carried without change: review-l2's requirement that F-1 be applied before the affected row is implemented, and its F-2..F-7 required actions, tracked below as V-1..V-6.
-
-## Verify-and-record items
-
-V-1: F-2 — .facebook in the vocabulary case table (design-l2.md:903) is not a CallApp case; replace with .faceTime.
-
-V-2: F-3 — 'five shipped labelled constructions' (design-l2.md:1106) versus four verified PendingCallAction constructions (:7624, :7670; IntentLogStoreTests.swift:206, :224; re-grepped this session); state four (or explicitly 'five-argument').
-
-V-3: F-4 — the replacing() comment (design-l2.md:497-500) claims provenance carries over while fellBackFrom resets to [] by design; reword so the comment matches the deliberate reset.
-
-V-4: F-5 — NFR-CDP-006 (MUST): specify the non-visual selected signal (selected trait or value) for both picker sections and a heading trait (or soften the claim); add the picker-suite assertion (design-l2.md:975, :1174). Verified source reality: selection is checkmark plus stroke overlay only (CallingSettingsView.swift:40-64).
-
-V-5: F-6 — design-l2 section 25 readers/writers: add isAwaitingCallConfirmation (:7553, consumer :10717-10723) to readers and list recordConfirmationTimeout (:10561-10569) as a reader; note the call block nils the slot (:10611-10612) — this matters because removing the early return changes when the slot can be live.
-
-V-6: F-7 — rename testAssessmentOrderAlwaysEndsPhone (design-l2.md:1171) so the name matches the property; the rename rides M-2's containment form.
-
-## Evidence obligations for security-test
-
-SA-1 (focus 1) Chain matrix: exhaustive (preferred, secondary) x (messenger-handle present/absent, whatsApp probe true/false) = 64 cells; per cell assert isFeasible(routed) under the injected closure, .phone in the order, no duplicates, preferred-first, routed vocabulary legality, messenger-without-handle never routed; separately, floor reachability with every other channel infeasible (probe false, no handle) for anyChannel/audio (routed .phone) and video (documented .faceTime terminal per FR-CDP-010).
-
-SA-2 At-most-once and termination: exactly one prompt per request; the hop executes without re-asking; a forced-failure recursion terminates (depth at most 2) with the selection never re-pending; exactly one committed attempt per request.
-
-SA-3 GSM floor per surface: voice anyChannel; voice video-word (video floor == .faceTime); address-book circle rows; family audio tile; family video tile; missed-call dial-back — for each, with preferred infeasible, routed equals the surface floor and the announcement names it.
-
-SA-4 (focus 2) Emergency and override preservation: (a) the change set contains no emergency file; the emergency trigger (RedesignComponents.swift:229-237) is byte-unchanged; (b) override block AppCoordinator.swift:7656-7686 — gate :7665-7669 diff-clean, amended action :7670-7674 still constructs; (c) grep of the whole change set shows zero emergencyNotify / NotifyChannel / preferredEmergencyContact additions; (d) the dial-back call chain contains no escalation-delaying awaits; (e) VoiceSessionStateMachine.confirmationTimeoutSeconds untouched (:135).
-
-SA-5 (focus 4) Announcement honesty: composed prompt/announcement for all matrix cells names the routed channel (and skipped channels in attempt order); one hop line per hop, spoken before the opener's outcome line; fellBackFrom == [] keeps the shipped prompt byte-identical (pinned test); the M-1 disposition's chosen variant is exercised (honest false-case line, or the documented shipped-identical exception with its reachability analysis); the new .phone false-case guard speaks call.announce.noPhoneNumber and records nothing.
-
-SA-6 (focus 5) Log safety: check-release-log-safety.sh exits 0 with Services/Calls present in FEATURE_ROOTS (python :141+ — verify the exact added string matches the directory prefix so role-match :821-834 grades the new file feature-role); source audit of the coordinator-side hunks (AppCoordinator.swift, LeafViews.swift, CallingSettingsView.swift, MethodResolver.swift — rules 1-2 only): no new console writes, metadata [:] or closed-vocabulary tokens only, no phone number, handle or contact name reaching any log call, LogSanitiser.allowedKeys (:56) unchanged, build.sh:431-434 intact.
-
-SA-7 (focus 3) No new surface: Info.plist byte-diff empty (no new scheme or permission); no new network symbol in the change set; secondaryCallApp is the only new store key and stores a channel raw value (non-PII); no per-contact primary/secondary storage (FR-CDP-018).
-
-SA-8 Localisation: exactly five new keys, ne/en parity, no user-visible literals in code, coverage test green.
-
-SA-9 Settings persistence: round-trip; absent/garbage decodes to .phone; equal picks legal and deduped.
-
-## Accepted residuals (explicit)
-
-R-1 Probe staleness (canOpenURL caching) — accepted at requirements time (specs/define-requirements/index.md assumptions); bounded by the hop plus honest failure lines.
-
-R-2 The hop may best-effort attempt WhatsApp even when the probe said not installed — disclosed by the hop line; tap-context attempts land on the shipped honest recoveries; voice-context attempts land on the M-1 disposition.
-
-R-3 performSystemContactWhatsApp treats .invalidPhone as terminal (no hop even when a messenger-handle candidate exists) — conservative and never silent; consistent with FR-CDP-015's recoveries-as-terminal rule.
-
-R-4 Family tiles always pass a non-nil per-contact app as preferred, so the settings primary does not enter those tiles' step-1 when a pick exists — intended (FR-CDP-009 explicit-pick-wins; frozen design); recorded so it is not misfiled as a defect.
-
-R-5 The pre-existing voice .whatsappChat false-claim site (AppCoordinator.swift:7755-7765) remains until M-1's disposition is applied; the feature increases its reachability but does not create the class.
-
-R-6 canOpenURL scheme-registration spoofing is bounded by iOS declare-scheme mechanics and pre-exists the feature (the row pill probe ships today); the mechanism is unchanged.
-
-R-7 Non-load-bearing document imprecisions beyond M-2 (F-2, F-3, F-4, F-7-class) — display-level corrections tracked as V-items; none carries a guarantee.
-
-## Decision
-
-decision: "SECURITY-GO"
-
-0 BLOCKERs. The design satisfies all five workflow security focus areas as written; the two must-fix conditions (M-1, M-2) are required downstream corrections to be applied at plan-tasks/implement time and evidenced at security-test — M-1 before the .whatsappChat row is implemented, M-2 before the order test is written. No design re-cycle is required; no frozen owner decision is re-opened.
+Advisory findings F1-F8 are carried into `security-test` expectations and the implement task specs (F1/F2/F3 close the remaining "enforced vs inferred" gaps); none gates implementation.

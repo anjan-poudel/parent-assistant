@@ -1,371 +1,268 @@
-# Multi-Turn Conversation — Implementation Notes (T-125 … T-143)
-
-- **Description:** Implementation record of the multi-turn-conversation feature run — one-deep dialogue frames with template probes (slot-fill + did-you-mean candidate choice), pre-ladder answer interception, deterministic merge, curated on-device catalog, and the bhajan probe as the first end-to-end case. All 19 units across 7 dependency waves are implemented and reviewed; this file records per-unit status, wave-review verdicts, gate evidence, and the owner/device items that remain open by design.
-- **Feature:** multi-turn-conversation (ai-sdd run, direct dispatch, unit_based execution in topological waves, paired review per wave)
-- **Branch and worktree:** feat/multi-turn-conversation in the dedicated feature worktree; the main checkout was not used for task work.
-- **Date:** 2026-10-10
-- **Scope honoured:** Phase 1 only (FR-MTC-001..017 + the FR-MTC-020 protocol); iOS only; no prompt or model-stack change (zero prompt edits; the Phase 2 frame clause ships only with the v17 training iteration); no new network egress; no emergency/medication behaviour change; no reminder/calendar change.
-
-## 1. Per-unit status (19 units)
-
-| Unit | Title (short) | Wave | Status | Evidence summary |
-|---|---|---|---|---|
-| T-125 | Dialogue frame, manager and probe composer | W1 | DONE | DialogueFrameTests 17/17 (scoped run 15:26; re-verified at the W1 combined gate). Frame core per design-l2 §8. Flagged: wave-order hoist of CaptureForm/MergeSource/DialogueMerge from design-l2 §9 into DialogueManager.swift (contract: T-131 consumes, never re-declares). |
-| T-126 | Curated option catalog and bundled resource | W1 | DONE | DialogueOptionCatalogTests 10/10 (15:49). Catalog loader + bundled DialogueOptionCatalog.json v1 (bhajan.deity) + project.yml resource entry; bundle presence exactly-once, byte-identical (sha e51de88e…) verified. |
-| T-127 | Shared input-seam helper (IntentTranscriptPreparation) | W1 | DONE | IntentTranscriptPreparationTests 8/8 + LocalBrainChainTests 29/29 (15:32, existing suite unmodified). turnInput rewired in place via the helper; C-5 nil-seam parity comment pinned by a source-scan test; transcriptPreparationSeam accessor added for T-136. |
-| T-128 | Barge-in predicate access widenings (L2-D2) | W1 | DONE | Widenings landed: CommandRouter.sensitiveCallPhrases and VoiceContactSearchRoute.isDirectCallUtterance private → internal only, no behaviour change. The unit's scoped run was blocked by the cross-unit compile state (14:28–15:26); executed green at the W1 wave gate: CommandRouterTests 33/33 + VoiceContactSearchRouteTests 28/28. |
-| T-129 | dialogue.* localisation inventory (17 keys) | W1 | DONE | L10nCatalogCoverageTests 10/10 (15:31). Exactly 17 dialogue.* keys added verbatim from design-l2 §16 (catalog 1364 → 1381); dialogue.timeout deliberately absent (C-4). Note: a pre-existing stale Spotify catalog pin (1361) is red at the branch base, unchanged by this unit. |
-| T-130 | Keyword-rule provenance, near-matches and markers | W1 | DONE | KeywordIntentRuleTests 54/54 + KeywordIntentRuleProvenanceTests 23/23 (15:28). MusicQueryExtraction + closed Provenance {content, markerFallback, transcriptFallback}; thin byte-identical musicQuery wrapper (parity over the full fixture corpus); nearMatches for the 4 framable domains (medication excluded). |
-| T-131 | Answer path: classification, merge and barge-in | W2 | DONE | DialogueAnswerPathTests 36/36 (16:41, re-gate r2; first run red at 16:19 — one design-internal root cause, the S3 scaffold-strip vocabulary vs the pinned V13 — resolved in-unit with the public pin unchanged and red-run evidence recorded). classify / isBargeIn (B1–B7) / S1–S6 ladder / merge / merging per design-l2 §9/§11/§22; M-5 totality; E7 pure-merge pin; 14-field Mirror assertion. Post-review W2 F-2/F-3 applied: medicationNames doc corrected (B6 consumes it; B1 does not) and the candidateChoice marker-only degenerate guard added with its classify↔merge mirror pin. Flagged: the medication-photo half of B6 is inert until T-136 passes the live vocabulary (T-136 obligation); S3 strip is frame-kind aware; ladder order per design L2-D1. |
-| T-132 | Candidate assembly for did-you-mean probes | W2 | DONE | DialogueCandidateBuilderTests 29/29 (16:10, first attempt). Pure assembly per design-l2 §10: nearest-match mapping in rule order, hypothesis last only alongside ≥1 near-match, cap = config maxCandidates (parameter), zero candidates → empty list (no frame). Deviations: hypothesis omitted when its mapped message/topic is nil/blank; excludingDomain applies to near-match readings only; slotFillCandidates re-resolves the catalog group fail-closed. |
-| T-133 | Router interception block, protocol and execution | W3 | DONE | CommandRouterDialogueTests 21/21 (17:04; red run 17:00 — 2 compile errors in the new suite, fixed); wave gate 99/99 (17:13). Pre-ladder interception between the confirmation hook and the safety net; six protocol members + inert defaults; emergency clear post-dispatch; FR-MTC-017 consumed-arm returns; C-2 news parity; C-3 direct events; M-5 bounds seam (internal); medicationNames live at the interception site (W2 F-1 discharged); V-2 region scan. Deviations adjudicated ACCEPT at the W3 review: attempts<=maxProbes (confirmed §12.2 erratum vs FR-MTC-007), additive defaulted activeCommand/locale params, .bargedIn over the task Gherkin's "superseded", frame_resolved component split (T-136 funnel: timeout/emergency/supersession only). |
-| T-134 | Degenerate-music triggers and did-you-mean upgrades | W4 | DONE | CommandRouterDegenerateTriggerTests 13/13; combined gate 102/102 (17:51). Four trigger sites wired (ladder, interpreted .music, rephrase "no" + C-5 bind, keyword-remainder reprompt); byte-identity fallbacks (NFR-MTC-012). Post-review: the base NO_GO blocker F-1 lived here — the rephrase "no" branch armed its probe synchronously while the take's queued idle was still pending, so the session-exit observer killed the fresh frame one tick later; fixed by deferring the arm+probe exactly one main tick (take, emit and builder stay synchronous; shipped-line fallbacks byte-identical); the new real-seam integration test (method name in specs/T-134-notes.md) pins frame-live + 45 s window + zero resolved events + answer-path consumption (DialogueCoordinatorWiringTests 17/17); pre-fix red captured 16/17 with the exact superseded signature. Deviations adjudicated ACCEPT: T-133 test-10 fixture swap (now-degenerate utterance); one composed probe utterance (lead sentence already in the composer). |
-| T-135 | awaitingSlotAnswer state and 45 s window | W1 | DONE | VoiceSessionStateMachineTests 24/24 (15:30). New .awaitingSlotAnswer mirroring confirmation; 45 s single-source (command-window param); F14 idle-bridge; F6 still-open guard; additive inert UI mappings in HomeView/HomeSubviews (to confirm at T-136/device). |
-| T-136 | Coordinator wiring: ownership, funnels, timeout | W4 | DONE | DialogueCoordinatorWiringTests 16/16 (17:54; 17 with the F-2 seam test); gate3 101/101. Six protocol members; one resolve funnel (timedOut/emergency/superseded only, component app_coordinator — no double-emit); silent slot timeout; M-1 guard extension (:4830-4831); M-2 four arming sites via openConfirmationWindow + supersede at its top; C-1 window from voiceSession.answerWindowSeconds (one additive accessor in T-135's file, adjudicated ACCEPT); M-3 prepareDialogueAnswerText via the non-nil production seam; live medicationVoiceEntries producer (W2 F-1 producer half discharged). Adjudicated ACCEPT: off-main start refusal (§12.6 literal hop not implementable for a synchronous Bool); funnel-based supersede; init-top construction (phase-1 rule, red gate1). |
-| T-137 | LogSanitiser dialogue metadata keys (M-4) | W1 | DONE | LogSanitiserTests 34/34 (15:31); release-log gate green in the same build. Six keys added (78 → 84) with closed vocabularies per design-l2 §26; reason reused (producer-validated, test-pinned). Deviation: the T-137 task file's parenthetical token lists match no emitting enum and appear nowhere else in the spec tree — design-l2 §26 vocabularies implemented instead (grep-verified). |
-| T-138 | Release log gate: feature roots and fixtures | W3 | DONE | Gate .sh rc=0 (16:46; 24 cases over 12 rules), --falsify rc=0; FEATURE_ROOTS 17→21 (the four dialogue helper files; +12 lines, no rule/allow-list widening); 16 per-root fixture plants + 2 expect files (fixtures 38→55 files; case/rule counts 24/12 unchanged by construction); in-build gate green at the unit build (DialogueOptionCatalogTests 10/10, 16:45) and the wave gate (17:13). Deviation: "mirror the spotify fixtures" has no referent — the profile-interview per-root precedent used instead (adjudicated ACCEPT). |
-| T-139 | Hostile-answer corpus and trap matrix suites | W5 | DONE | DialogueHostileCorpusTests 8/8 + DialogueTrapMatrixTests 8/8; unit run 114/114 (19:12, six suites; red history: run 1 own-file compile fix, run 2 sibling in-flight compile block — retry-not-fix honoured, run 3 one expectation corrected to the verified music normalization); W5 wave gate 157/157 (19:29). E1 forced-no-op clear pair (dispatch side effects asserted with the clear disabled, then the clear-on ordering); five E2 hostile rows with causal control legs (interpreter 0, cache reads/writes 0, hostile text absent from telemetry); injection markers → emptyAfterStrip re-probe attempts=2; control chars → closed catalog repetition; tool-shaped → closed freeText, the frame's own opener only; candidate poisoning → in-list candidate only; authority claim → stripped, the ordinary freeText arm; M-5 route leg re-probe + executor [-1, 1, 12] → three .exhausted. Eight E3 trap rows (cancel/escape/barge-in/timeout/expiry/Talk/watchdog/pipeline events), each terminal with no half-open window, late hourglass no-op, double-resolve no-op; M-1 six-stage sweep + control leg; M-2 Talk refusal + watchdog supersession. Deterministic (no sleeps; expectation-based drains only). Deviations adjudicated ACCEPT: production-installed timeout seam + 1 s clock leg, watchdog precondition+consequence drive, expiry over the real manager's clock seam, normalized candidate expectation. |
-| T-140 | Cache-bypass, log-capture and egress suites | W5 | DONE | DialogueCacheBypassTests 4/4 + DialogueLogAndEgressTests 5/5; unit run 117/117 (19:21; one red run — own-file source-pin fix, red bundle retained); W5 wave gate 157/157 (19:29). E8 seeded-entry causal A/B (the seeded entry is served on the control re-route; on the answer turn interpreter 0, reads/writes 0, no cache_hit; cache state unchanged), answer text never interned, pendingTranscript nil (Mirror + counters + six-region source pin + call-turn positive control), confirmed-execution recording negative control. E4 production bus (LogSanitiser) across probe, answer, merge, cancel, timeout, escape, exhaustion and did-you-mean legs; seven planted marker tokens absent from bus-format sink lines (claim scoped to sink lines per review F-1); E5 runtime out-of-vocabulary redaction + unlisted-key drop + producer-closed reason=overLength + 84-key runtime allow-list pin (reason reused); E6 source audit (four dialogue files + six router regions + coordinator region, zero forbidden symbols) + 20 spy transports silent, only the offline playback helper addressed. V-3 re-verification recorded observed-vs-assumed. Deterministic (no sleeps). Deviations adjudicated ACCEPT: raw-read source pins (comment-stripping scanner vs comment anchors), §12.2 heading anchor, file-private test fake, direct timeout seam, near-match-paired did-you-mean fixture, runtime allow-list re-verification. |
-| T-141 | End-to-end acceptance and no-regression sweep | W6 | DONE | DialogueAcceptanceTests (new; 4 methods over the five Gherkin scenarios: S1 anchor end-to-end with interpreter 0 + control 1 + four egress spies silent + catalog canonical query; S2 reminder/calendar/medication A/B frame-guard with equal routing/spoken/effects; S3 prompt pins re-derived + base-byte digests + feature vocabulary absent; S4 golden music digest re-derived) green 4/4 in both full gates and the scoped run; W1 F-4 discharged (Spotify catalog pin 1341 → 1361; red at base — 1364 vs stale expectation — green at HEAD 1381); one feature-caused regression found and fixed in-unit (LiveTranslateAllowListTests declared six-key delta vs LogSanitiser.allowedKeys 78 → 84) with scoped-green evidence. Full unit gate at HEAD (authoritative run2): 6638 executed / 6620 passed / 8 failed / 10 skipped vs measured base 0cbe4e6 6403 / 6357 / 36 / 10 — base strictly redder in every paired comparison (scoped: base 13 vs HEAD 4 on identical 173 tests); all 8 HEAD failures classified (5 exact-name at base, 2 same-suite family members, 1 load flake green 11/11 isolated) → no new failures attributable to the feature. Sweep record: specs/T-141-notes.md (reviewed GO; F-1/F-2/F-6 corrections applied in place pre-commit). In-build gates green in both full gates (log-safety 24 fixtures / 12 rules; prompt mirror 2717 bytes / 4 placeholders / 7 self-tests). |
-| T-142 | Security evidence index (E1..E8, V-1..V-4, M-1..M-5, R1..R5) | W7 | DONE | specs/MTC-security-evidence-index.md (new; 65 lines). E1..E8 each with producer task, exact reproducible command, observed result with counts and a pointer; V-1..V-4 dispositions with where-verified; M-1..M-5 pinning task + DoD line + observed pin; R1..R5 accepted residual dispositions; 7 coverage-boundary items (W5 F-1 scoped sink-line citation, W5 F-3 no fixture literals, W6 F-3 FR-MTC-019 ask-line boundary, W6 F-5 S3 division of labour, measured base inventory superseding the "~21" estimate, device validation open by design, T-138 fixture scoping). Structural validation (Gherkin S3): E 8/8, V 4/4, M 5/5, R 5/5, all cells non-empty, no cell marked incomplete, 8/8 reproducible E-row pointers, 43/43 cited test tokens resolve in ios/ElderlyAssistantTests, NFR self-scan clean; negative path exercised on a mutated copy (a producerless row fails the record). Reviewed GO 0.90 (specs/implement-review-w7.md); F-1/F-2/F-3 record corrections applied in place pre-commit; corrected-index re-validation FAILURES 0. Docs-only; no builds, no source. |
-| T-143 | DV-1..DV-5 protocol and record (FR-MTC-020) | W5 | DONE | specs/MTC-device-validation-protocol.md (300 lines): protocol body §1-§5, DV-1..DV-5 (§6, verbatim tri-source item texts), record §7 (session-block template; 7.3 all five items BLOCKED / step zero OUTSTANDING — no execution claimed), completion gate §8, capture discipline §9, recording rules §10. Step zero = the outstanding Phase 0 PR #156 smoke (hard prerequisite; a failure stops the session with no partial results). Authoring checks: 15/15 verbatim item texts, 10/10 gate phrases, backtick-parity clean. Execution is owner/device-dependent by design (missing execution is an open gate item at final sign-off, not a missing deliverable). Nine recorded deviations adjudicated ACCEPT. No code, no build. |
-
-## 2. Wave log and review verdicts
-
-| Wave | Units | Commit | Review verdict |
-|---|---|---|---|
-| W1 | T-125, T-126, T-127, T-128, T-129, T-130, T-135, T-137 | 76b28b9 | GO — Confidence 0.90 (specs/implement-review-w1.md; 0 blockers; findings all note-level) |
-| W2 | T-131, T-132 | 3b44c0c | GO — Confidence 0.90 (specs/implement-review-w2.md; 0 blockers; F-1 major cross-wave obligation → T-136 dispatch; F-2/F-3 applied post-review, re-gated at r2 65/65) |
-| W3 | T-133, T-138 | cf416ac | GO — Confidence 0.90 (specs/implement-review-w3.md; 0 blockers; all 8 flagged adjudications ACCEPT; findings all note-level; F-1 notes correction applied pre-commit) |
-| W4 | T-134, T-136 | cc065b0 | GO — Confidence 0.90 (specs/implement-review-w4.md; base review NO_GO — 1 blocker F-1, the rephrase "no"-branch probe-window race — fixed with the reviewer's prescribed one-tick deferral + real-seam integration test, re-gated 204/204, re-review GO 0.90 with 0 blockers; F-7 note-level comment-precision finding recorded) |
-| W5 | T-139, T-140, T-143 | ac89744 | GO — Confidence 0.90 (specs/implement-review-w5.md; 0 blockers; all 20 flagged adjudications ACCEPT; findings: 1 minor (F-1 — scoped marker-scan citation carried to the T-140 row and the T-142 index) + 2 notes; test-only + docs delta, no production source touched) |
-| W6 | T-141 | 5860878 | GO — Confidence 0.90 (specs/implement-review-w6.md; 0 blockers; all flagged adjudications A–G ACCEPT; findings: 3 minor record corrections — F-1 base-scoped family-member count, F-2 run1 pre-fix framing, F-6 dictionary-path family variant — applied in place to specs/T-141-notes.md pre-commit + 3 notes (F-3 FR-MTC-019 ask-line coverage boundary, F-4 calendar comparator title-scope wording, F-5 S3 default-prompt scope) carried to T-142; test-only delta, no production source touched) |
-| W7 | T-142 | 134d77e | GO — Confidence 0.90 (specs/implement-review-w7.md; 0 blockers; all flagged adjudications A–K ACCEPT; findings: 2 minor record corrections — F-1 T-133 C-3 DoD citation :120 corrected to :117, F-2 verification-ledger "rows 25-26" corrected to "row 25" — applied in place to specs/MTC-security-evidence-index.md pre-commit + 1 note (F-3 E2 pointer section name corrected to T-139's actual map section); docs-only delta, no production source touched) |
-
-W1 findings disposition (F-1..F-7, all note-level): F-1 non-redeclaration contract for T-131 — carried into the W2 dispatch brief; F-2/F-3 spec-text clarifications (T-130 task file; design §13b) — deferred to the next spec touch, no code change; F-4 pre-existing Spotify catalog pin red at base — carried to the T-141 full-gate baseline comparison (must not be counted as a W1 regression); F-5 `.awaitingSlotAnswer` UI mappings — compile-forced placeholders, confirm at T-136/device; F-6 did-you-mean copy reading — owner copy review at the feature review; F-7 `intake` vocabulary forward-reference — confirm when T-138/W3 type lands.
-
-W2 findings disposition (F-1..F-7): F-1 (major, T-131/T-136) — the live medication vocabulary must be passed to `classify` at T-136's interception site (with the default, the medication-photo half of B6 is inert) plus the design-l2 §12.2 snippet erratum — carried into the W3 T-136 dispatch; F-2 (comment) and F-3 (merge candidateChoice marker-only degenerate guard, W2 review's own prescription) applied post-review with the classify↔merge mirror pin, re-gated 65/65 at r2; F-4/F-5 spec/design wording queued for the next spec or design touch, no code change; F-6 (M-5 executor bounds-check, consumer side) — carried into the W3 dispatch (T-133/T-136); F-7 both new files join the T-138 log-gate FEATURE_ROOTS with per-root fixtures — carried into the W3 dispatch.
-
-W3 findings disposition (F-1..F-6): F-1 the T-133 notes' claim that CommandRouter.swift is a T-138 feature root was corrected in the notes before the commit (the four roots are the dialogue helper files; the router is covered by the existing transcript/error rules); F-2 erratum-comment citation fixup queued for the next touch — the attempts<=maxProbes binding is confirmed by the W3 review and recorded here so T-134/T-136 do not weaken the re-probe arm; F-3 --falsify rc=0 reported without a retained log — capture at the feature review; F-4 xcresults pruned before the review closed — W4 process note: retain bundles until each wave review completes; F-5 optional V-2 anchor extension at the next touch; F-6 advisory only (device/OOM validation remains with the DV items).
-
-W4 findings disposition (F-1..F-7): F-1 (blocker) — fixed post-review in the rephrase "no" branch region only (take/emit/builder synchronous; arm+probe deferred one main tick so the take's queued idle lands first; fallback legs byte-identical, NFR-MTC-012); the new real-seam test fails on the byte-exact pre-fix revision (16/17, the superseded emission observed) and passes on the fix; re-gated 204/204 (r2). F-2 (minor) — discharged by the same integration test (real AppCoordinator + real router across the take/start seam). F-3 (note) — the gate-2 tally annotated in T-136-notes.md against the retained log (aborted-run summaries unreliable; TEST FAILED + failing list + .ips + rc=65 are the witnesses). F-4 (note) — opener supersede scope beyond the four M-2 sites recorded in T-136-notes.md (pendAppLaunch :7083, startVoiceAckConfirmation :10426; ADR-MTC-03-consistent; A/B test candidate at the next touch). F-5 (note) — V-2 anchor extension recorded in T-136-notes.md, optional at the next touch. F-6 — W1 F-5 UI mappings remain open by design (review/device wave). F-7 (note) — the F-1 ordering comment's rationale wording is imprecise (the observer no-op comes from the resolver's .awaitingSlotAnswer guard, not from frame absence); comment fix at the next CommandRouter.swift touch; recorded here so the fixup is not lost; the notes files were kept byte-exact per the re-review's commit conditions.
-
-W5 findings disposition (F-1..F-3): F-1 (minor) — the T-140 notes' marker-scan sentence reads broader than the reviewed behavior: the suite's scan is scoped to bus-format sink lines (a marker legitimately reaches spoken output on the did-you-mean leg, and the legacy debug print is the accepted residual R1), so the T-140 row above and any T-142 index citation use the scoped claim; the checked-in notes file was left byte-exact per the review's commit conditions. F-2 (note) — the T-140 notes describe cache seeding via IntentRouter.recordConfirmedExecution while the suite seeds cache.record(transcript:command:) directly: identical effect, the control leg proves the entry live (no action). F-3 (note) — T-139-notes.md:194 quotes test-fixture literals in backticks: do not quote them into scanned records (T-141/T-142 index) (awareness only).
-
-W6 findings disposition (F-1..F-6): F-1 (minor) — the T-141 notes' family-membership cell understated base redness ("3 same-signature members in each sample"); corrected in place to "3 at base full / 8 at base scoped" before the commit. F-2 (minor) — run1 was framed as preceding both declaration fixes; run1 in fact postdates the W1 F-4 pin fix (scoped3 green 20:06:53, before run1's 20:09:01 bundle; no Spotify pin failure drawn in run1) and precedes only the allow-list fix; all three passages corrected in place. F-6 (minor) — the dictionary-path row's "exact name reproduced" was inexact: run1's variant is the SessionModel timeout method while the base samples drew the sibling Pipeline consent variant; softened to family membership (suite red 3 full / 8 scoped) with the sibling-suite variant as corroboration; BASELINE unchanged. F-4 (note) — S2's calendar A/B comparator compares request titles only; prose tightened to "calendarEventRequests (titles)". F-3 (note) — FR-MTC-019's literal missing-time / missing-title ask-line cases are untested anywhere (handlers source-untouched; design-l2 scopes Phase-1 reminder/calendar as no-change) → carried to T-142 as a recorded coverage boundary. F-5 (note) — S3's "Address them as" absence covers the default prompt only; the broader pins live in IntentPromptTests → record the division of labour when T-142 cites S3. Naming hazard (awareness): the w6 review file in the worktree carried the Spotify feature's record at the branch base; w1..w5 were already replaced by multi-turn reviews in their wave commits — the PR-time integration owns the collision decision for master's Spotify review files.
-
-W7 findings disposition (F-1..F-3): F-1 (minor) — the M-4 row cited T-133 :120 for the C-3 (carried) DoD item; the C-3 item is at :117 (:120 is the V-1/V-4 DoD item); corrected in place pre-commit. F-2 (minor) — the V-1 row cited verification-ledger "rows 25-26"; row 26 is the candidate-execution-shape / M-5 GAP row and does not support V-1; corrected to "row 25". F-3 (note) — the E2 row cited a section name that does not exist in specs/T-139-notes.md (the name is T-140's); corrected to T-139's actual map section name, with the sibling E3 pointer tightened to the same name in the same pass. Sha chain: index reviewed e6d1c17c9d4e4ed90c0ce88d700c7935939efd87ba7fe8c37839a1dc621d648d → corrected d03d8dc4dc001807018145b6b58a1c99e26872bd532891b1cf84997c4c430617; T-142 notes reviewed bc7ebd847021d4d1db7f51850b4084c95980c350a91dbf04874dc0994100e95a → corrected 753b77bb755820ef779f5610b07a36dc316c7fe7981ed08ceac3d6431b9fc725. Awareness carried to the security-test step: the index's E4 row quotes the gate command in a backtick-prefixed form that matches an INJ-011-class scanner pattern, and its long camelCase method names match the INJ-009-class pattern — honest content in an ungated file (sweep confirms); the security-test content file must avoid the backtick-prefixed gate-command form and the long-camelCase-on-a-run-mentioning-line shape.
-
-## 3. Gate evidence
-
-- W1 wave gate (2026-10-10 15:53–15:54 AEDT): combined scoped run of all eight W1 units' suites under the shared build lock — `cd ios && ./build.sh test:unit DialogueFrameTests DialogueOptionCatalogTests IntentTranscriptPreparationTests LocalBrainChainTests VoiceContactSearchRouteTests CommandRouterTests L10nCatalogCoverageTests KeywordIntentRuleTests KeywordIntentRuleProvenanceTests VoiceSessionStateMachineTests LogSanitiserTests` → rc=0, **270 tests executed, 270 passed, 0 failures** (`Test-ElderlyAssistant-2026.10.10_15-53-36-+1100.xcresult`; log /tmp/mtc-w1-gate.log; "Scoped unit run passed (baseline not advanced)"). Per suite: DialogueFrameTests 17, DialogueOptionCatalogTests 10, IntentTranscriptPreparationTests 8, LocalBrainChainTests 29, VoiceContactSearchRouteTests 28, CommandRouterTests 33, L10nCatalogCoverageTests 10, KeywordIntentRuleTests 54, KeywordIntentRuleProvenanceTests 23, VoiceSessionStateMachineTests 24, LogSanitiserTests 34. The release log-safety gate (24 fixtures over 12 rules) ran green inside the same build.
-- W2 wave gate (2026-10-10 16:29 AEDT): combined scoped run `cd ios && ./build.sh test:unit DialogueAnswerPathTests DialogueCandidateBuilderTests` → rc=0, **64 tests executed, 64 passed, 0 failures** (`Test-ElderlyAssistant-2026.10.10_16-29-31-+1100.xcresult`; log /tmp/mtc-w2-gate.log). T-131's red-run history: 16:19 run, 4 failed assertions over 3 tests, one design-internal root cause, fixed in-unit with evidence.
-- W2 gate r2 (2026-10-10 16:40–16:41 AEDT), after the post-review F-2/F-3 fix: same combined scoped run → rc=0, **65 tests executed, 65 passed, 0 failures** (`Test-ElderlyAssistant-2026.10.10_16-40-17-+1100.xcresult`; log /tmp/mtc-w2-gate-r2.log; per suite: DialogueAnswerPathTests 36, DialogueCandidateBuilderTests 29). The r2 run is the wave-commit gate; the 16:29 run remains the evidence for the reviewed revision.
-- W3 wave gate (2026-10-10 17:13 AEDT): combined scoped run `cd ios && ./build.sh test:unit CommandRouterDialogueTests CommandRouterMusicTests CommandRouterTests DialogueOptionCatalogTests` → rc=0, **99 tests executed, 99 passed, 0 failures** (`Test-ElderlyAssistant-2026.10.10_17-13-06-+1100.xcresult`; log /tmp/mtc-w3-gate.log; per suite: CommandRouterDialogueTests 21, CommandRouterMusicTests 35, CommandRouterTests 33, DialogueOptionCatalogTests 10). In-build: release log-safety gate green with the four new T-138 roots (24 cases over 12 rules) and the prompt mirror. T-133's red-run history: 17:00 run, 2 compile errors in the new suite, fixed (log /tmp/mtc-w3-t133-run1.log).
-- W4 wave gate (2026-10-10 18:01–18:03 AEDT): combined scoped run of both units' suites (10 classes) under the shared build lock — `cd ios && ./build.sh test:unit CommandRouterDialogueTests CommandRouterMusicTests CommandRouterTests CommandRouterDegenerateTriggerTests DialogueCoordinatorWiringTests AppCoordinatorSpotifyWiringTests VoiceSessionStateMachineTests VoiceSessionBindingTests DialogueFrameTests DialogueAnswerPathTests` → rc=0, **203 tests executed, 203 passed, 0 failures** (`Test-ElderlyAssistant-2026.10.10_18-01-58-+1100.xcresult`; log /tmp/mtc-w4-gate.log; per suite: CommandRouterDialogueTests 21, CommandRouterMusicTests 35, CommandRouterTests 33, CommandRouterDegenerateTriggerTests 13, DialogueCoordinatorWiringTests 16, AppCoordinatorSpotifyWiringTests 4, VoiceSessionStateMachineTests 24, VoiceSessionBindingTests 4, DialogueFrameTests 17, DialogueAnswerPathTests 36). This is the revision the base W4 review reviewed.
-- W4 re-gate r2 (2026-10-10 18:26 AEDT), after the F-1 fix: same 10-class command → rc=0, **204 tests executed, 204 passed, 0 failures** (`Test-ElderlyAssistant-2026.10.10_18-26-06-+1100.xcresult`; log /tmp/mtc-w4-gate-r2.log; DialogueCoordinatorWiringTests 17 = +1 real-seam integration test). This is the wave-commit gate. Pre-fix red evidence: the byte-exact pre-fix CommandRouter.swift + the new test → 16 passed / 1 failed, 14 assertion failures naming the superseded emission (`Test-ElderlyAssistant-2026.10.10_18-30-16-+1100.xcresult`; log /tmp/mtc-w4-prefix-f2.log); restored revision re-ran 17/17 (`Test-ElderlyAssistant-2026.10.10_18-32-28-+1100.xcresult`). All W4 bundles retained in /tmp/mtc-w4-evidence/ until the wave review closed (the W3 F-4 process note honoured). In-build gates green in both runs (log-safety 24 cases over 12 rules; prompt mirror; privacy guards).
-- W4 red-run history (unit-level): T-134 runs 1–2 rc=65 (sibling in-flight AppCoordinator compile noise, retry-not-fix honoured), run 3 the deviation-1 fixture collision (1 failed test, fixed by the adjudicated swap); T-136 gate1 build-red (its own file, phase-1 init), gate2 2 test-side mechanics failures (SIGILL diagnosed from the crash .ips).
-- W5 wave gate (2026-10-10 19:29 AEDT): combined scoped run of the four new suites plus five touch-adjacent suites under the shared build lock — `cd ios && ./build.sh test:unit DialogueHostileCorpusTests DialogueTrapMatrixTests DialogueCacheBypassTests DialogueLogAndEgressTests CommandRouterDialogueTests DialogueCoordinatorWiringTests VoiceSessionStateMachineTests DialogueAnswerPathTests LogSanitiserTests` → rc=0, **157 tests executed, 157 passed, 0 failures** (`Test-ElderlyAssistant-2026.10.10_19-29-39-+1100.xcresult`; log /tmp/mtc-w5-gate.log; bundle retained in /tmp/mtc-w5-evidence/ until the wave review closed; per suite: CommandRouterDialogueTests 21, DialogueAnswerPathTests 36, DialogueCacheBypassTests 4, DialogueCoordinatorWiringTests 17, DialogueHostileCorpusTests 8, DialogueLogAndEgressTests 5, DialogueTrapMatrixTests 8, LogSanitiserTests 34, VoiceSessionStateMachineTests 24 — independently walked by the session). Unit red-run histories: T-139 runs 1–3 (own-file compile fix; sibling in-flight compile block with retry-not-fix honoured; one expectation corrected to the verified music normalization, then green 114/114); T-140 run 1 rc=65 (own-file source-pin fix: comment-stripping scanner vs comment anchors; red bundle retained /tmp/t140-gate-red.xcresult, then green 117/117 /tmp/t140-gate2.xcresult). In-build gates green in the wave run (log-safety 24 cases over 12 rules; prompt mirror; privacy guards).
-- W6 full-gate evidence (2026-10-10, T-141; the implement-stage full unit gate): run2 on the frozen tree (authoritative) — rc=65, 6638 executed / 6620 passed / 8 failed / 10 skipped (bundle Test-ElderlyAssistant-2026.10.10_22-00-27-+1100.xcresult; log /tmp/mtc-t141-full2.log; the console aggregate counts duplicate records — the bundle is authoritative). Run1 on the pre-allow-list-fix tree: same totals (bundle 20-09-01). Measured base 0cbe4e6 in a scratch worktree: 6403 / 6357 / 36 / 10 (bundle 20-43-42) — the 36 = 15 pre-existing LiveTranslate timing-family records (incl. SnapshotModeTests 10) + 17 /tmp-checkout path-pinned artifacts + 2 timing margins + the Spotify catalog pin + the plugin glyph; this measured inventory supersedes the old "~21 pre-existing failures" figure. Base scoped 173 / 160 / 13 vs HEAD scoped 173 / 169 / 4 on the identical suite set — base strictly redder in every paired comparison. All six bundles + JSON exports retained in /tmp/mtc-w6-evidence/ (T-142 source); the session independently walked the run2, base-full and base-scoped totals and the run2 green set (DialogueAcceptanceTests 4/4, SpotifyLocalizationTests 9/9, LiveTranslateAllowListTests 28/28). In-build gates green in both full gates (log-safety 24 fixtures / 12 rules; prompt mirror 2717 bytes / 4 placeholders / 7 self-tests).
-- W7 structural gate (2026-10-11, T-142; docs-only unit): no build; the deliverable's own structural validation is the wave gate — E 8/8, V 4/4, M 5/5, R 5/5, non-empty cells, 8/8 reproducible E-row pointers, 43/43 cited test tokens resolve against ios/ElderlyAssistantTests, NFR self-scan clean (devanagari 0, markers 0, fixture literals none); negative path exercised on a mutated copy. Re-checked on the W7-review-corrected index: FAILURES 0 (/tmp/mtc-t142-validate.py; log /tmp/mtc-t142-validate.log). The last executed unit gate remains the W6 full gate at commit 5860878; W7 changes no code, so no re-run is owed.
-- Freshness runs per wave: W3–W6 done via the wave gates above; W7 docs-only (structural validation only — no build).
-- Full unit gate at the end of the implement stage: done (T-141, W6) — see the W6 full-gate evidence bullet.
-- Release log-gate feature roots (T-138, W3) and egress/log-capture suites (T-140, W5): done — see the W3 and W5 gate bullets.
-- Known pre-existing red at the branch base: master's unit gate carries ~21 pre-existing failures in unrelated suites (recorded baseline; not regressions of this feature). Confirmed at W1: no W1 suite is among them (270/270 green scoped). Superseded at W6 by the measured base inventory (36 records / 34 unique across 18 suites, classified; see the W6 full-gate bullet).
-
----
-
-# call-dialer-primary-secondary — Implement notes (Wave 1, units T-144 + T-155)
-
-Description: Wave 1 corrections to the frozen call-dialer design records and the calling-family localisation keys with their scoped catalogue gate. The multi-turn-conversation record above was carried by this file at the branch base and is preserved byte-identical; this section is this feature's W1 record, appended below it, not a replacement.
-
-## Per-unit status (Wave 1)
-
-| Unit | Title (short) | Wave | Status | Evidence summary |
-|---|---|---|---|---|
-| T-144 | Design-record corrections (design-l1 + design-l2) | W1 | Done | Diff limited to the enumerated correction anchors: design-l1 one hunk (1 insertion / 1 deletion), design-l2 13 hunks / 15 changed regions (21 insertions / 15 deletions; 14 regions were the reviewed revision, the 15th is the reviewer-sanctioned deregistration-bullet correction), all enumerated; 0 deletions outside the replaced lines. Retired wordings absent at every anchor and repo-wide (grep of both files exits non-zero). No code, no build. |
-| T-155 | Calling keys + catalogue coverage gate | W1 | Done | Five keys added to Localizable.xcstrings (ne and en, equal placeholder counts, alphabetical placement), catalogue parses at 1389 to 1394 keys; test file extended in the house family pattern. Scoped gate: ios/build.sh test:unit L10nCatalogCoverageTests — 16 executed, 16 passed, 0 failures, exit 0; privacy-guard fixtures and the prompt mirror green inside the same run. |
-
-## Wave log — W1
-
-W1 implementation completed awaiting review. Nothing committed; the changes sit in the worktree.
-
-Flags recorded for the reviewer:
-
-1. No frozen ne/en strings exist anywhere in the design records; the five values were authored at catalog time to the frozen parameter contracts (design-l1 ADR-CDP-10 and design-l2 section 31 both defer copy to catalog time) and pinned verbatim in the test file.
-2. The retired attempt-order wording appeared in four locations across the two records, not three; all four are corrected because the M-2 anchor covers the attempt-order comment plus the section 6 route documentation in design-l2 (the review condition's own scope).
-3. The catalogue total pin in the Spotify localisation test file is already red at the branch base (pin 1381 against 1389 actual, eight over before this unit); that file is outside this unit's ownership and is carried for the follow-up l10n evidence unit.
-4. This feature's section is appended rather than replacing the committed multi-turn-conversation record this file carried at HEAD; no other pre-existing content was modified.
-
----
-
-# call-dialer-primary-secondary — Implement notes (Wave 2, unit T-145)
-
-Description: Wave 2 lands the pure-static channel-chain core (component C1) as a new file plus the never-dead-ends matrix and hop-statics tests in the resolution suite. The W1 record above is preserved; this section is this feature's W2 record, appended below it, not a replacement.
-
-## Per-unit status (Wave 2)
-
-| Unit | Title (short) | Wave | Status | Evidence summary |
-|---|---|---|---|---|
-| T-145 | CallChannelChain core and the never-dead-ends matrix | W2 | Done (review GO 0.95) | New file bytes-identical to the frozen design-l2 section 6 listing (212 lines; process-substitution diff exit 0), Foundation-only, no store/egress/logging/clock/timer/async, nothing throws, no extra API surface. Resolution suite extended additively (+483/-0; 69 to 552 lines; first 68 lines byte-intact; 12 new tests, 19 total). Scoped gate: ios/build.sh test:unit CallChannelResolutionTests — 19 executed, 19 passed, 0 failures, exit 0; privacy guard 24 cases over 12 rules green before the tests; prompt-mirror guard green; xcresult Test-ElderlyAssistant-2026.10.12_05-08-21 readback passedTests 19 / failedTests 0. The one pbxproj delta (+12 lines) is the mandated gate's xcodegen registration of the new file and Calls group (precedent commit 7ccff294); included in the W2 commit. |
-
-## Wave log — W2
-
-W2 implementation reviewed by the paired challenger to GO (confidence 0.95 against the 0.85 threshold; 0 BLOCKER, 0 MAJOR, 7 NOTE), all five implementer claims re-derived independently; report at specs/implement-review-w2.md. Findings carried forward:
-
-1. N-1: the matrix's vocabulary-legality assertion is any-channel-only, disclosed in its own doc comment; the load-bearing audio/video legality is proven by the substitution test (only two out-of-vocabulary pairs exist because the shipped gates are one-sided). Adequate for SA-3 core; per-surface substitution application remains T-146's seam obligation.
-2. N-2: three planned suite names from design-l2 section 28 were delivered under different names; the delivered names are authoritative; the only binding acceptance name, the V-6 rename testOrderContainsPhonePreferredFirst, is exact.
-3. N-3: L2-D1's "Case table 11.4" pointer is dangling (the vocabulary case table is section 10.4); the hop semantics agree on all eight rows; a one-line erratum is owed the next time design-l2 is touched.
-4. N-4: the T-145 note's "stubbed-absent whatsApp" phrasing is looser than the frozen L2-D6 semantics (the decision-time filter drops only messenger; a probe-absent whatsApp stays attemptable best-effort); L2-D6 is authoritative for the security-test reader.
-5. N-5: the retired order-test name survives only inside the two review records that had to name what they retire (security-design-review and review-l2); correct, no action.
-6. N-6: four new test identifiers exceed the 40-character run convention; records citing them must use the identifier-break convention (this file does).
-7. N-7: gate-log per-case lines can drop under parallel workers; the xcresult bundle is the authoritative pass list; the untracked workflow.yaml is engine state outside the artifact surface, per the W1 F-5 convention.
-
----
-
-# call-dialer-primary-secondary — Implement notes (Wave 3, units T-146 + T-156)
-
-Description: Wave 3 wires the chain into the coordinator seams with the secondary settings storage (component C2 plus the storage half of C6) and registers the Calls service root in the release privacy guard (the gate-side half of SA-6). The W1 and W2 records above are preserved; this section is this feature's W3 record, appended below them, not a replacement.
-
-## Per-unit status (Wave 3)
-
-| Unit | Title (short) | Wave | Status | Evidence summary |
-|---|---|---|---|---|
-| T-146 | Resolution seams and secondary settings storage | W3 | Done (review GO 0.93) | Six-argument resolvedCallChannel and five-argument resolvedMissedCallChannel return the chain Result with provenance; shared private resolveChannel helper (vocabulary normalisation plus terminal substitution, design-verbatim, provenance untouched by substitution); probe whatsAppInstalledNow over the shipped canOpenURLOnMain (no new plist entry, permission or egress); private handle predicate per L2-D11; published secondaryCallApp, key "secondaryCallApp", primary-mirroring restore shape, phone default. Old three-argument forms deleted (replace-not-widen, no overloads). Scoped gates: CallChannelResolutionTests 26 executed / 26 passed / exit 0 (7 shipped + 12 T-145 + 7 new seam cells); MissedCallDialBackTests 12/12; ContactCallButtonsTests 16/16; both in-build guards green. Compile-forced deviations (behaviour-preserving, recorded in place in the artifacts): LeafViews row-site bridge (+8/-1), MissedCallDialBackTests 9 call sites (+34/-9), missedCallDialAction seam-call bridge. |
-| T-156 | Log-safety gate: Services/Calls feature root | W3 | Done (review GO 0.96) | "Services/Calls" appended to FEATURE_ROOTS in the shipped per-feature comment pattern (+10/-0); guard clean run exit 0; fixture self-suite 24 cases over 12 rules exit 0; shipped shell entry point exit 0 with build.sh:431 intact; role predicate grades the chain file feature-role; counterfactual (entry stripped) shows the registration is load-bearing; a scratch probe outside every root is reported with exit 1 then deleted. |
-
-## Wave log — W3
-
-Both units were implemented concurrently (file-disjoint) and each reviewed by its own paired challenger; both GO, zero BLOCKER and zero MAJOR across the wave; reports at specs/implement-review-w3-t146.md and specs/implement-review-w3-t156.md.
-
-T-146 carried findings:
-1. N-1: the three compile-forced deviations are minimal and behaviour-preserving; the .phone stand-in for the secondary is the only choice that reproduces the shipped literal floor (a defaultApp stand-in would flip the handle-less-messenger corner). Soft sequencing observation: the row-site bridge passes the live property, so when T-154 lands the picker the row begins honouring the secondary before T-151's disclosure lands; accepted because every unit lands on this branch before the feature's review and merge, so no external state ever exposes the intra-branch gap; T-151's row-announce work remains in its planned wave.
-2. N-2: the probe helper and the handle predicate are forward-declared surface with no in-unit consumers by design (later units wire them); one edge for T-153: a raw handle that normalises to empty is unusable for the predicate but usable for the dial-back site's raw isEmpty derivation (shipped behaviour, design-sanctioned; do not treat the two derivations as identical).
-3. N-3: the secondary restore's absent/unknown-raw to phone semantics are design-verbatim but not test-pinned in this unit; T-154 owes the pin (absent key, unknown raw, round trip), already in its definition of done.
-4. N-4: no console log was retained for the T-146 gate run; the xcresult bundles are the authoritative evidence (the mtime chain covers the reviewed revision) and both in-build guards were re-run green fresh by the reviewer.
-5. N-5: five new test identifiers exceed the 40-character run convention; records citing them use the identifier-break convention.
-6. N-6: bookkeeping as before (workflow.yaml is engine state; the concurrent T-156 guard edit was reviewed separately).
-
-T-156 carried findings:
-1. N-1: "last entry" in the root list is bookkeeping only; the load-bearing property is the prefix scope, empirically proven (the CallsExtra and Calls.swift probes stay role other).
-2. N-2: the guard has no unregistered-file rule; the failure-discipline scenario is satisfied by the universal transcript rule firing outside every root, and the swallow question is answered by the counterfactual (entry stripped goes green) and the in-root probe (three layers fire). The later security-test reader should read that scenario with this semantics.
-3. N-3: the comment block compresses one design clause (announcement labels are speech-only, not bus payloads); no behavioural consequence.
-4. N-4: the guard's success message names only the live-camera-translation sources (pre-existing at HEAD; every prior root addition left it unchanged); the calls root "listed" is the registry line, not console output.
-5. N-5: acceptance-scenario interpretation recorded (registry plus exit zero).
-6. N-6: bookkeeping; T-146's concurrent edits were outside the T-156 review's scope and did not move its diff.
-
----
-
-# call-dialer-primary-secondary — Implement notes (Wave 4, units T-147 + T-154)
-
-Description: Wave 4 lands the method-resolution global-default seam (the resolver half of C6, feeding the chain so the in-call method can never dead-end) and the settings-view half of C6 (the Fallback-dialer picker with the designed non-visual accessibility signals). The W1 through W3 records above are preserved; this section is this feature's W4 record, appended below them, not a replacement.
-
-## Per-unit status (Wave 4)
-
-| Unit | Title (short) | Wave | Status | Evidence summary |
-|---|---|---|---|---|
-| T-147 | MethodResolver global-default seam | W4 | Done (review GO 0.94) | MethodResolver init gains the third parameter `globalDefault: @escaping (_ isVideo: Bool) -> CallMethod = { _ in .phone }` (design-l2 section 8 verbatim); steps 1-3 and `explicitMethod` byte-identical; step 4 returns `globalDefault(isVideo)` with source `.globalDefault`. AppCoordinator takes one hunk (the :1925 anchor had shifted to :1939 after wave 3; found by grep per the brief) swapping the lazy `methodResolver` construction to pass `{ [weak self] isVideo in CallChannelChain.method(for: self?.defaultCallApp ?? .phone, isVideo: isVideo) }`. MethodResolverTests +70/-2: helper extended with an optional globalDefault (the nil path keeps the literal two-arg construction); the 14 pre-existing tests byte-identical; three new tests (testGlobalDefaultClosureMapsCallType, testDefaultConstructionStillPhone, and testGlobalDefaultClosure + ReceivesCallTypeFlag - the 44-char run broken per the identifier-break convention; the flag test asserts seenFlags == [false]). specs/T-147-notes.md kept as the per-task provenance record (reviewer N-3: truthful). Scoped gate: MethodResolverTests 17 executed / 17 passed / 0 failed; bundle Test-ElderlyAssistant-2026.10.12_05-38-46 readback; retained log GATE_EXIT=0; both in-build guards re-run green fresh by the reviewer. |
-| T-154 | Settings: secondary picker and accessibility | W4 | Done (review GO 0.93) | CallingSettingsView +55/-17: two sections (Primary dialer / Fallback dialer) rendered through one shared row pattern with per-section picks; each section's `isSelected` computes against its own coordinator property (`app == selected`), so a row cannot inherit the other section's checkmark - structurally impossible, because the section helper and the row builder never read the coordinator. Row selected trait `.accessibilityAddTraits(isSelected ? [.isSelected] : [])`; the heading trait appears once on the shared section title; the decorative checkmark is `.accessibilityHidden(true)`; labels delegate to CallChannelChain.nameKey (L2-D8), no `app.name.` literal, no sixth user-visible string; every shipped visual token line is context-unchanged under the all-changed-lines enumeration. CallingSettingsSurfaceTests.swift new (330 lines, 7 tests): absent key, garbage value ("carrierPigeon"), and round-trip secondary persistence through the real UserDefaults seam with setUp/tearDown snapshot-and-restore (discharges the W3 N-3 owed pin), SA-9 equal-pair legality, selected-trait and heading pins, nameKey delegation, and the no-sixth-string literal-set scan. project.pbxproj +4 lines mechanical registration (PBXBuildFile, PBXFileReference, group child, test Sources phase). Gate: CallingSettingsSurfaceTests 7 executed / 7 passed / 0 failed, twice (bundles ...05-39-57 and ...05-41-01); the retained /tmp/t154-gate.log shows both in-build guards green ahead of the tests. Device validation carried: DV-1(a) VoiceOver traversal and the derived announcement, DV-1(b) relaunch persistence reading, DV-1(c) Nepali titles. |
-
-## Wave log — W4
-
-Both units were implemented concurrently (file-disjoint; the only shared file, AppCoordinator.swift, takes a single lazy-construction hunk from T-147 only) and each reviewed by its own paired challenger; both GO, zero BLOCKER and zero MAJOR across the wave; reports at specs/implement-review-w4-t147.md and specs/implement-review-w4-t154.md.
-
-T-147 carried findings:
-1. N-1: the reachability disclosure is adjudicated as an honest discharge - step four is reachable only when the call-type flag is false; the video arm is unreachable through `resolve` by design, and the call-type mapping matrix is pinned at the closure-definition site (CallChannelResolutionTests:536-550).
-2. N-2: the 14 pre-existing tests ride the defaulted path; the regression classes are covered by proxy; no action.
-3. N-3: specs/T-147-notes.md verified truthful and kept as provenance for the unit.
-4. N-4: gate evidence re-derived from the bundle (17/0/0) and the retained GATE_EXIT=0 log; both in-build guards were re-run fresh; the concurrent T-154 bundles sitting in the same DerivedData folder were segregated by the reviewer.
-5. N-5: bookkeeping only.
-
-T-154 carried findings:
-1. N-1: the no-sixth-string scan is genuine but shape-partial - it matches `titleKey:` and `Text(` literal shapes only; a future edit could pass a literal by via verbatim Text, an accessibilityLabel or accessibilityValue literal, a bare LocalizedStringKey outside Text, or a constant feeding Text; the delivered literal set was independently enumerated; keep the shape list in mind at the next edit of this view.
-2. N-2: the source pins pin text and counts, not placement; the rendered tree (traversal order, the derived announcement, frames, the ne-locale reading) remains DV-1's obligation, which is the plan-sanctioned split.
-3. N-3: FR-CDP-003's per-channel round-trip clause is witnessed end-to-end for messenger and whatsApp only; faceTime and phone as explicit secondary selections have no round-trip cell; residual risk is one expression wide (single didSet write, single restore flatMap, raw values fixed by the enum); optional strengthening at the next touch: loop all four channels through the round-trip shape.
-4. N-4: the delivered view signatures are a faithful realisation of the design's illustrative listing (explicit `selected:` parameter rather than the listing's drawn form), recorded so the code-vs-listing diff does not read as drift; the delivered shape is the safer one and no shipped visual token moves.
-5. N-5: two new test identifiers exceed the 40-character run convention (testChannelLabelsDelegate + ToTheChainHelper; testTheScreenAdds + NoSixthUserVisibleString); records citing them use the identifier-break convention (this file does).
-6. N-6: the stale CallingSettingsView.swift:70-77 pointer inside CallChannelChain.swift:157-158 is design-inherited (the design's own section 6 listing carries the same comment, and the design's edit plan itself planned that view region to become the delegation); the chain file stays byte-frozen (diff against b4293f50 empty); a wording-only erratum on both the design listing and the chain comment is owed at the next legitimate touch, alongside the W2 N-3 erratum.
-7. N-7: bookkeeping - two gate bundles 7/0/0; run 1's console log was not retained (its bundle substantiates the run, and the guard-before-test ordering is structural in the build script); this W4 section is the unit report the suite header anticipated.
-
----
-
-# call-dialer-primary-secondary — Implement notes (Wave 5, unit T-148)
-
-Description: Wave 5 lands the voice-confirmation half of C3: the chain resolves before the spoken confirmation, the messenger-no-handle early return is replaced by the route-based step 3, and the prompt gains the fallback disclosure clause bound to the pre-existing catalogue key. The W1 through W4 records above are preserved; this section is this feature's W5 record, appended below them, not a replacement.
-
-## Per-unit status (Wave 5)
-
-| Unit | Title (short) | Wave | Status | Evidence summary |
-|---|---|---|---|---|
-| T-148 | Voice confirmation: chain-before-prompt and the disclosure clause | W5 | Done (review GO 0.93) | AppCoordinator +68/-20 across exactly five hunks (every changed line accounted for against the design edit set): PendingCallAction gains requestedAt (var, default Date(); the let-to-var keeps the reset-on-correction clock via the memberwise default), fellBackFrom and hopCandidates (defaulted, design doc comments); replacing(method:hopCandidates:) added verbatim (V-3 corrected comment; forwards contact, transcript, command and requestedAt; fellBackFrom deliberately not passed so it resets to []); requestCallConfirmation step 3 resolves the chain before the slot write (Self.resolvedCallChannel with hasUsableMessengerHandle and whatsAppInstalledNow; the route-based method builds the action; fellBackFrom and hopCandidates from the route) and the messenger-no-handle early return is removed at that site only - the refusal key survives untouched at the override gate (:7794), the system-contact flow (:7940-7941), LeafViews (:1578, :1996) and HistoryView (:211); confirmationPrompt gained the disclosure block verbatim between the unsupported-app notice and the method sentence (slots: skipped label = fellBackFrom.first, contact name, routed label from action.method via the chain helper) using the pre-existing router.call.fallbackDisclosure key; the override block is byte-identical to HEAD (31 lines, independently re-diffed by the reviewer). New suite CallConfirmationWordingTests (402 lines, 4 tests, both locales): testDisclosureNamesSkippedAndRouted (order pinned; two routed cases), testNoFallbackKeepsPromptByteIdentical (exact composition equality; bare, repeat, unsupported and combined cases), testOverrideGateUntouchedPin (comment-stripped source pin), testNewRegionsAddsNoKeysOrConsoleWrites (key surface exactly ten literals, console-write absence; that 39-char name sits under the identifier-run convention). Disclosed deviations, both adjudicated honest: confirmationPrompt private to internal (design section 28 itself names that seam; the house "internal (not private)" precedent verified) and a one-paragraph superset on the requestedAt doc comment. Gate: ios/build.sh test:unit CallConfirmationWordingTests CallChannelResolutionTests - exit 0, 30/30 (4 new + 26 regression), bundle Test-ElderlyAssistant-2026.10.12_05-58-37 readback Passed 30/0/30, retained log with both in-build guards green before the tests; the resolution suite is untouched (empty diff against a5f9f543). |
-
-## Wave log — W5
-
-T-148 implemented alone (HIGH risk, TG-30 opener) and reviewed by its paired challenger: GO at 0.93, zero BLOCKER and zero MAJOR; report at specs/implement-review-w5-t148.md. Carried findings:
-
-1. N-1: the requestedAt doc-comment superset is acceptable - the design's lines are kept verbatim and the added paragraph documents the reset-on-correction clock the var change makes less obvious; no behavioural text.
-2. N-2: the private-to-internal relaxation on confirmationPrompt is minimal and honest - the design's section 28 test-home row names that seam itself, the modifier is nowhere pinned, and the end-to-end alternative is unavailable (familyContacts is private(set) and referenced by zero tests).
-3. N-3: Gherkin scenario 3 discharges honestly at unit level via the removal scan, the step-3 replacement semantics and the green chain-matrix messenger-without-handle cell; the end-to-end slot observation belongs to T-149/DV-2, and the reviewer's independent scan confirms the slot write follows the routed seam by construction.
-4. N-4: the near-miss prefix plus disclosure joined utterance (FR-CDP-014 scenario 3) is compositional and diff-clean but not pinned as a joined string (not constructible in this bundle for the same contact-seeding reason); carry into T-149/DV-2.
-5. N-5: test 1's clause containment rides a shared catalogue path (degraded if the key vanished); test 4 closes it by asserting the key resolves to something other than itself in both locales; one self-guard assertion is cosmetic.
-6. N-6: the untracked workflow.yaml is engine state and stays out of the integration commit (restated because it reappears untracked after each run; no departure from the W1 F-5 convention).
-7. N-7: "byte-identity" is composition equality in the suite (structure, catalogue-resolved, both locales) and literal identity in the code (the reviewer's body diff against HEAD equals the baseline with the disclosure block spliced out); wording nit only.
-
----
-
-# call-dialer-primary-secondary — Implement notes (Wave 6, unit T-149)
-
-Description: Wave 6 lands the launch-fail hop half of C3: a failed launch of the routed channel walks the pre-computed candidate order (at most two further steps), speaking the preset failure line exactly once per hop, recording one hop event per hop, and never re-entering the confirmation path. The W1 through W5 records above are preserved; this section is this feature's W6 record, appended below them, not a replacement.
-
-## Per-unit status (Wave 6)
-
-| Unit | Title (short) | Wave | Status | Evidence summary |
-|---|---|---|---|---|
-| T-149 | Launch-fail hop: walk candidates after a failed open | W6 | Done (review GO 0.90) | AppCoordinator +160/-4 across 9 hunks; the four deletions are exactly the four opener signature lines (no behavioural line deleted; earliest touched old line 7894, so the T-148 override block and all success/recovery branches are byte-untouched). Machinery (design-l2 section 10.2 and the voice-path listing, diffed comments-stripped): `LaunchHop` (candidates + handle), `launchFailHopStep` (the only speaker of call.announce.launchFailedFallback; next via the chain helper; remaining is the strict suffix after next), `noteLaunchFailHop` (component call_launch_fallback, eventType hop, outcome failed:next, empty metadata), `performLaunchFailHop` (tap path) and `hopFromCallAction` (voice path; re-enters performCallAction with `replacing(method:hopCandidates: step.remaining)`, which resets fellBackFrom - no re-spoken disclosure, no re-entry to the prompt path; confirmed by the confirmation-symbol scan). performCallAction wiring is exactly two calls: the FaceTime arm (.unavailable, .invalidHandle) and the Messenger arm (.invalidHandle), each after the shipped line and shipped taps. All four openers gained the defaulted hop parameter: faceTime and messenger hop on their failure branches; the phone floor and WhatsApp accept but never consult it (union of the task-spec letter and design section 14; the floor's failure stays terminal, pinned behaviourally). Failed opens record nothing (no execution note, no number-used record, no history). Tests: CallChannelResolutionTests +685/-0 as one append hunk - the 26 pre-existing tests byte-frozen (base lines 1-824 byte-identical, including the chain-level termination test at :315) plus six new tests: the coordinator-level termination walk testHopStepConsumes + CandidatesNeverRepeats (distinct name after the collision; walks the two-candidate example to exhaustion), testLaunchFailedFallbackSpokenOnce (exact event-payload equality, closed tokens, no name, no digits; survives the LogSanitiser choke point), testMessengerWithoutHandleSkippedInHop (filter, not ban; control leg with handle selects messenger), testAdditiveFieldsKeepOldCallSites (post-T-148 state: the override construction collapsed-equality pinned; IntentLogStoreTests constructions name none of the three new PendingCallAction fields), testHopNeverReEnters + ConfirmationOrAwaits (comment-stripped source scan over the machinery region) and testHopOpenerWiringEndToEnd (hermetic arms driven through the shipped openers; empty-input guards verified pure string normalisation before any platform probe). Honest first-run note: the initial post-test run failed 2 of 32 on two self-inflicted assertion bugs in the new tests only (a needle collapsed while the haystack was raw; a trailing space from a region boundary) - fixed before the green run; production code was green first try and the 26-test precheck was already 26/26. Gate: ios/build.sh test:unit CallChannelResolutionTests - exit 0, 32/32 (6 new + 26 regression), bundle Test-ElderlyAssistant-2026.10.12_06-23-18 readback Passed 32/0/32; retained logs ios/build/t149-gate.log (both in-build guards green before the tests; intent-prompt mirror pristine) and ios/build/t149-precheck.log. |
-
-## Wave log — W6
-
-T-149 implemented alone (HIGH risk, TG-30) and reviewed by its paired challenger: GO at 0.90, zero BLOCKER and zero MAJOR; report at specs/implement-review-w6-t149.md. Carried findings:
-
-1. N-1: the performLaunchFailHop .faceTime leg does not thread the hop (listing and implementation verbatim), so a failed FaceTime hop candidate abandons its suffix. Adjudicated NOTE: unreachable this revision (no live caller passes a hop to the openers yet; the voice path threads correctly through replacing). Coordinator disposition: land the one-line thread along with a two-step pin in wave 8, together with the tap surfaces that make it live (T-151/T-152 share that wave; the AppCoordinator edit rides T-152's ownership); record as a design-l2 erratum alongside the W2/W4 errata.
-2. N-2: the phone opener's never-consulted hop parameter is the accepted union of the task-spec four-opener letter and design section 14's three hopping openers; the floor's failure stays terminal and the new test pins the no-hop event with a hop on board. If the design record is amended, four is the coherent number.
-3. N-3: launchFailHopStep private-to-internal accepted (the same section 28 seam row names the step; the T-148 confirmationPrompt precedent verified in shipped code); the other three machinery pieces stay private.
-4. N-4: the messenger hop carries no phone number, so a hopped floor leg would speak the shipped no-number line although the row has one - latent, no live caller this revision, pinned honestly. Coordinator disposition: reviewer option 1 - extend LaunchHop additively with the row's phone (default-preserving) and thread it from the tap helpers in wave 8, with an honesty pin that the hopped floor leg dials the real number; design clarification recorded with N-1.
-5. N-5: the unused hop on performSystemContactWhatsApp accepted (every outcome is terminal or recovery per section 10.1; the no-re-hop behaviour is pinned).
-6. N-6: the test-name collision was resolved with the distinct coordinator-level name; the chain-level test at :315 is byte-frozen and was not renamed (a rename would have destroyed T-145's frozen evidence).
-7. N-7: "speaks exactly once" is evidenced behaviourally (one spoken-line site, 1:1 step-event count, both catalogues resolving) plus source pins; audio remains DV-2 (speak is a no-op before start()).
-8. N-8: two coverage residuals carried: (a) the source scan's machinery region ends before hopFromCallAction - widen at the next touch of the suite; (b) the integration arm's hermeticity rests on pure empty-input guards in CallLinks/PhoneDialer (outside this unit's ownership) - a source pin for them is owed at the wave that next touches those files, or the W10 sweep. Bookkeeping: the untracked workflow.yaml remains engine state and stays out of the integration commit; one line-number nit in the dev notes (an attribute line vs the declaration line) is recorded as immaterial.
-
----
-
-# call-dialer-primary-secondary — Implement notes (Wave 7, unit T-150)
-
-Description: Wave 7 lands the failure-honesty guards (the M-1 disposition (i) plus the phone-floor guard): both terminal false results speak the shipped no-usable-number line through the shipped helper and record nothing. The W1 through W6 records above are preserved; this section is this feature's W7 record, appended below them, not a replacement.
-
-## Per-unit status (Wave 7)
-
-| Unit | Title (short) | Wave | Status | Evidence summary |
-|---|---|---|---|---|
-| T-150 | Failure-honesty guards: phone floor and whatsappChat disposition | W7 | Done (review GO 0.92) | AppCoordinator +14/-2 across two hunks; the reviewer proved the stronger identity worktree-minus-guards equals base, so every other production line, both success paths and all recovery branches are byte-identical to the wave base. `.phone` case (:7864-7879): the design listing at design-l2:568-577 verbatim (comment included) - the guard consumes the open's Bool; the false path runs announceNoUsableNumber (the shipped helper, :8823-8827 post-shift: failure card plus the shipped call.announce.noPhoneNumber line, resolving en+ne) then returns; the open is called exactly once; the five shipped success statements sit byte-identical below the guard. `.whatsappChat` case (:7907-7923): the opener Boolean is consumed (the design-time silent drop at the stale anchor :7755-7765 is closed); false follows disposition (i) exactly like the phone floor - same helper, no success, no learning, no activity, no hop - with a disclosed 3-line comment in the else body (comment-only; adjudicated); true keeps the shipped four-statement success block byte-identical; the call-chat opener's recovery chain is untouched and pinned (CallLinks.swift diff empty; needsNativeCompose/copiedNumber stay with openWhatsAppCallChat only). No new key (catalogue diff empty; the five-key bound stays T-155's), no console write or event, no plist or pbxproj change; F-6 acknowledged as a recorded no-action input (the reviewer verified the guards are unreachable from a stale/expired slot - performCallAction runs only after the slot-nil write). Carried W6 N-8(a) discharged in this wave: the machinery scan region in the T-149 test widened from hopFromCallAction-exclusive to noteConfirmedCallExecution-exclusive (80 to 97 comment-stripped lines), counts re-derived (`case .phone:` 1 to 1; performCallAction( 0 to 1, the voice re-entry), and the old negative re-expressed as a count pin plus a narrowed tap-helper-region negative so the original semantic (the tap helper never re-enters the voice executor) stays pinned exactly - the reviewer re-derived the interlock. Tests: CallChannelResolutionTests +253/-2, new section :1345-1582 with the two spec-named pins testPhoneFalseSpeaksTheLineNoHop and testWhatsAppChatFalseSpeaksTheLine (comment-stripped scans; guard-first hasPrefix, collapsed guard-block equality, occurrence counts, scoped absence pins incl. the hop and recovery symbols; contactNumberUsed pinned at zero as the shipped shape); suite now 34 tests (26 pre-existing + 6 T-149 + 2). Gate: ios/build.sh test:unit CallChannelResolutionTests - 34/34 exit 0 (first run green), negative control on a temporarily reverted coordinator 32 passed / 2 failed (exactly the two new tests, failing on the guard-placement pins), coordinator restored and md5-verified (58bc45bb0946592a8351b103e671c617), final authoritative bundle Test-ElderlyAssistant-2026.10.12_06-51-15 post-restore at 34/0/0; retained logs ios/build/t150-gate.log (both in-build guards green before the tests) and ios/build/t150-negative-control.log. |
-
-## Wave log — W7
-
-T-150 implemented alone (HIGH risk, TG-30 tail) and reviewed by its paired challenger: GO at 0.92, zero BLOCKER and zero MAJOR; report at specs/implement-review-w7-t150.md. Carried findings:
-
-1. N-1: one citation in the dev notes is base-numbered (the slot-nil site :10929-10930 against the delivered :10941-10942); substance verified true; no behavioural consequence.
-2. N-2: the disclosed 3-line comment inside the whatsappChat guard's else is comment-only, accurate against the disposition anchors, and invisible to the comment-stripped pins; accepted.
-3. N-3: the N-8(a) assertion re-expression preserved and strengthened the original semantic (count pin plus narrowed-region negative plus the untouched hopRegion pin interlock); nothing weakened; accepted as the minimal re-expression.
-4. N-4: no runtime leg for the guards (performCallAction is private, the slot is private(set)) - the source pin is the honest ceiling and the sibling helper behaviour stays covered by T-149's testHopOpenerWiringEndToEnd Arm 0. Residual boundary recorded: the false path's "records nothing" rests on the else body shape plus the helper being unmodified by this delta; a future edit inside announceNoUsableNumber that recorded something would not fail these pins - carry the helper-body containment pin to the next wave that touches the helper.
-5. Bookkeeping: the untracked workflow.yaml remains engine state and stays out of the integration commit; the negative-control bundle's result-store mtime quirk is post-processing and immaterial (content decisive, reviewer-recorded).
-
----
-
-# call-dialer-primary-secondary — Implement notes (Wave 8, units T-151 + T-152)
-
-Description: Wave 8 lands the two tap surfaces — the address-book row (T-151) and the family contact tiles (T-152) — together with the two carried W6 fixes N-1 and N-4, from base 54574bb3. The wave also carries the owner's mid-wave process change (below): reviews and test gates are consolidated to the end of the feature. The W1 through W7 records above are preserved; this section is this feature's W8 record, appended below them, not a replacement.
-
-## Per-unit status (Wave 8)
-
-| Unit | Title (short) | Wave | Status | Evidence summary |
-|---|---|---|---|---|
-| T-151 | Tap rows: row channel state, announce and hop | W8 | Done (compile-verified; suite run deferred to the end sweep) | LeafViews.swift +80/-25. The row's local probe is gone: whatsAppInstalled delegates to the ONE frozen chain probe (CallChannelChain.whatsAppInstalled(canOpen:)). whatsApp(_:hop:) gains a defaulted nil hop (the pill's own tap stays hop-less). dialChannel (design-l2:654-688): the announce (call.announce.fallbackRouted, skipped-label + name + routed-label) runs at RESOLUTION, before any opener, only when the chain skipped a channel; the hop is built ONCE from the row state (L2-D10) and threaded into the faceTime, whatsApp and messenger openers, never into the phone floor (RES-10); the stale-state guard and the shipped messengerNoHandle line are unchanged; dial(_:) is byte-identical. rowChannelState is the five-argument call form over the six-argument seam with the REAL whatsAppInstalledNow probe — the designed supersession of the T-146 bridge's hardcoded true, disclosed as a routing change (a WhatsApp-preferring row on a phone without WhatsApp now falls back instead of opening a dead link). RowChannelState gains fellBackFrom and hopCandidates as var-with-default fields (L2-D3 memberwise lesson). The numberless dead row keeps the shipped call.announce.noPhoneNumber line with no chain attempt. Tests: the Voice suite (CallChannelResolutionTests.swift) +477/-0, pure additive, new section :1583+, 9 tests (probe-false routing, the 64-cell floor-reachability invariant, announce-order plus hop-thread pins, the single-chain-probe pin, the five-argument call form plus dead-row pins, the numberless-dead-row behavioural arm, the N-1 pin, the N-4 pin, the N-4 default arm); the 34 pre-existing tests byte-frozen (T-149's indexed lines untouched); suite 34 pre-existing + 9 = 43 (unaudited-against-run). |
-| T-152 | Family tiles: audio/video routing and hop branches | W8 | Done (compile-verified; suite run deferred to the end sweep) | AppCoordinator.swift +91/-22 shared with T-151 (five removed non-comment lines, all intended). performContactCall (design-l2:694-750): preferred and vocabulary come from the tapped tile (resolvedVideoApp / resolvedAudioApp; explicit nil never appears — source-pinned); the six-argument seam call consumes the settings pair and the real probe; the emit extends additively — the shipped audio- and video-prefixed outcome expression and metadata stay byte-identical with the design-mandated :direct/:fellBack provenance suffix appended (flagged for end-stage arbitration: a strict reading of the DoD's shipped-direct-outcome-strings clause is unsatisfiable alongside the normative section 9.2 listing; flagged, not silently chosen); announce at resolution before the open when fell back; candidates built once from the same snapshot and vocabulary (L2-D10). Arms: the faceTime and messenger failure arms hop exactly once each through the shipped helper; the phone floor is byte-identical and terminal (RES-10); the whatsApp lane is terminal or recovery only and consults no candidates even when handed some. Tests: the Intents suite (ContactCallButtonsTests.swift) +569/-0, pure additive, new section :189+, 9 tests (video/audio vocabulary routing incl. silent substitution, direct outcomes behavioural, floor-with-provenance, substituted-terminal, the messenger hop arm, the WhatsApp never-hops arm, the source-pin head); the 16 pre-existing tests byte-frozen; suite 16 pre-existing + 9 = 25 (unaudited-against-run). No behavioural WhatsApp tile arm (the real probe is not stubbable in the simulator) and no behavioural tile arm hops onto FaceTime (no tile hop can currently land there) — pinned behaviourally through the shipped opener plus structurally; disclosed, not faked. |
-
-## Wave log — W8
-
-Process change (owner directive, 2026-10-12, applied mid-wave): reviews and tests move to the end of the feature instead of per unit. Effective from this wave: the per-unit paired challenger agents are suspended (no review file exists for W8 by design) and the per-unit gate runs and negative controls are deferred to the consolidated end sweep. What still ships per unit: the implementation, the authored tests, the per-unit notes (specs/T-151-notes.md, specs/T-152-notes.md), the unit records, and the wave commit. What moves to the end: the W10 T-157 consolidated family sweep (the family DoD run plus the privacy gate), the W8 negative control (plan recorded below), and the review mandate — carried by review-implementation and security-test. The W1 through W7 waves keep their per-wave review files and gate evidence unchanged.
-
-Carried W6 fixes landed in this wave (shared coordinator hunks; details and pins in specs/T-151-notes.md items 6-7):
-
-1. N-1 — the hop helper's faceTime leg now threads the hop: performFaceTimeCall(name:phone:video:hop:) with LaunchHop(candidates: step.remaining, handle: handle) (the reviewer-prescribed one-line form). Pinned by source equality, the two-step launchFailHopStep walk, and an end-to-end arm through the shipped openers proving the second hop line (faceTime-to-phone) exists only with the thread.
-2. N-4 — LaunchHop gains var phone: String? = nil (var-with-default so every shipped two-label call site compiles unchanged — the L2-D3 lesson); the row hop construction passes phone: result.phone; the messenger opener's hopped floor leg consumes phone: hop?.phone ?? "" so it dials the surface's real number instead of speaking the shipped no-number line. Honest ceiling: the positive direction cannot run inert (a dialable number reaches UIApplication.shared.open for real), so source pins are the ceiling there; the default arm (hop.phone nil, hop-less callers byte-identical) runs behaviourally.
-
-Gate disposition (Wave 8):
-
-1. Attempted run — FAILED AT BUILD (exit 65): the one scoped gate run started before the process change landed (test:unit CallChannelResolutionTests) hit a compile error in the sibling new test file (ContactCallButtonsTests.swift:583:27 — a String(range) initializer misuse, the same construct present in both new sections); fixed to the subscript form, no test semantics changed; no test executed; log retained at ios/build/t151-gate.log (failed bundle Test-ElderlyAssistant-2026.10.12_07-15-41-+1100.xcresult). Disclosed, not hidden.
-2. Compile check — GREEN on the delivered bytes: xcodebuild build-for-testing, TEST BUILD SUCCEEDED, exit 0, zero error lines, both edited test files recompiled in-log (ios/build/t151-compilecheck.log). This is the delivered-bytes evidence; no suite green is claimed.
-3. Scoped unit runs (the two DoD commands) and the briefed negative control — DEFERRED to the consolidated end sweep per the owner directive; the tests are unaudited-against-run. Negative-control plan for the sweep operator (recorded in specs/T-151-notes.md): revert the faceTime leg and the messenger consume line; expected reds live in the Voice suite (testFaceTimeLegThreadsThe + RemainingCandidates, testLaunchHopCarriesThePhone + Additively); the T-152 suite is expected to stay green under those reverts (its fixtures use empty phones) and must not be mistaken for coverage; restore target AppCoordinator md5 0e633131325a4d05a74e2ec1adb58704 (LeafViews 7878d0c9ec475e4b7c2b46e8e1d55b0f).
-
-Wave-closure verification (coordinator, on the delivered bytes): hashes re-computed at closure match the compile-checked delivered bytes (AppCoordinator 0e633131325a4d05a74e2ec1adb58704, LeafViews 7878d0c9ec475e4b7c2b46e8e1d55b0f); numstat matches the dev report exactly (+91/-22, +80/-25, +569/-0, +477/-0); CallChannelChain.swift carries no diff entry (byte-frozen); no new catalogue key (the announce reuses the shipped fallbackRouted lane), no plist or pbxproj change, no new dependency; the untracked workflow.yaml remains engine state and stays out of the integration commit.
-
-Items owed to the end-stage review/sweep:
-
-1. Arbitrate the T-152 emit-suffix reading against the DoD (see the T-152 row) — the reviewer's call, per the dev's own request.
-2. Acknowledge the T-151 real-probe supersession (disclosed routing change) against the T-146 bridge's contract.
-3. W6 N-8(b) still open: the integration arm's hermeticity rests on the CallLinks and PhoneDialer empty-input guards; a source pin is owed at the wave that next touches those files, or at the W10 sweep.
-4. W7-log point 4 residual: the helper-body containment pin for announceNoUsableNumber at its next touch.
-5. The deferred scoped runs and the W8 negative control (Gate disposition item 3).
-
----
-
-# call-dialer-primary-secondary — Implement notes (Wave 9, unit T-153)
-
-Description: Wave 9 lands the missed-call dial-back routing and announcement (TG-31 tail): the dial-route value, the announce at resolution, and the hop dispatch through the shipped hop machinery, with the W3 N-2 raw-handle edge pinned as shipped behaviour. Base 81bad0f7 (the W8 commit). The W1 through W8 records above are preserved; this section is this feature's W9 record, appended below them, not a replacement.
-
-## Per-unit status (Wave 9)
-
-| Unit | Title (short) | Wave | Status | Evidence summary |
-|---|---|---|---|---|
-| T-153 | Missed-call dial-back routing and announcement | W9 | Done (compile-verified; suite run deferred to the end sweep) | AppCoordinator.swift +108/-44, 15 hunks all bounded to the old dial-back regions (:8808-8880). The route value MissedCallDialRoute (action, channel as an optional CallApp, fellBackFrom, hopCandidates) lands per design-l2:393-402; missedCallDialAction (:8835-8878) returns it: the two shipped numberless guards verbatim wrapped in empty routes (channel nil, provenance and candidates empty) returning BEFORE the chain; preferred = familyContact?.resolvedAudioApp ?? defaultApp; the seam call now takes the real secondaryApp and whatsAppInstalled inputs; the RAW shipped derivation messengerHandle?.isEmpty == false is KEPT (not hasUsableMessengerHandle; L2-D9 + W3 N-2 — pinned, not fixed); one snapshot return computing hopCandidates via CallChannelChain.hopCandidates(..., vocabulary: .audio). dialBackMissedCall (:8899-8946): identity and family lookup unchanged; the announce (call.announce.fallbackRouted with skipped-label, identity, channel-label) at resolution BEFORE the switch, gated on fellBackFrom.first plus a non-nil channel (nothing spoken when nothing fell back); the hop LaunchHop(candidates: route.hopCandidates, handle: family?.messengerHandle, phone: entry.phone) — the phone label is the W6 N-4 carry (design :772 shows the two-label form; the defaulted field landed in W8); switch route.action — openPhoneApp unchanged, unusableNumber speaks the shipped line unchanged, the .call floor stays no-hop, and the faceTime, whatsApp and messenger arms each thread hop: hop. Tests: MissedCallDialBackTests.swift +477/-32 (18 hunks; the eight seam-resolution cases and the three row-identity/caption tests byte-frozen; 4 dial-action call sites upgraded to the new signature; 10 new pins: the empty route for both numberless guards; the tel floor with empty provenance; the floor reachable with every other channel infeasible (full route: .call, provenance [.messenger, .whatsApp], candidates empty); the FaceTime-substitution route; the direct-route no-announce condition; the whitespace-handle N-2 divergence pinned at both route and source level; chain-derived hop-candidate cells; the announce-before-dispatch source pin — exactly ONE fallbackRouted site positioned before the switch, hop: hop exactly 3 in the switch with zero before it and in the .call arm, zero observabilityBus/emit in the region, plus the SA-4(d) no-await token scan; and the route-shape and decision source pins — raw derivation needle present, hasUsableMessengerHandle absent, vocabulary .audio on the single return). Suite 12 pre-existing + 10 = 22 tests (unaudited-against-run). |
-
-## Wave log — W9
-
-T-153 implemented alone (HIGH risk, TG-31 tail) under the owner's suspended-gates regime: no test suite was executed, no negative control; exactly ONE compile check (build-for-testing) is the delivered-bytes evidence.
-
-Gate disposition (Wave 9):
-
-1. Scoped unit run (test:unit MissedCallDialBackTests) — NOT RUN; deferred to the consolidated end sweep (the T-157 family run). No green suite claim anywhere.
-2. Compile check — GREEN on the delivered bytes: xcodebuild build-for-testing, TEST BUILD SUCCEEDED (log line 1436), exit 0, zero error lines, both edited files recompiled in-log (ios/build/t153-compilecheck.log). The log's 31 warnings are all pre-existing and none cite the delivered regions (production :8812-8946) or the test file.
-3. Static pin verification — run (not a test suite): a one-off Python emulation of the comment-stripped scan re-derived every region marker, needle and count of the source pins against the delivered bytes; all pass (the check script at /tmp/t153-static-check.py). Recorded as real verification and explicitly not a substitute for the deferred XCTest run.
-4. Negative control — NOT RUN; the five-candidate plan with expected reds per revert is recorded in specs/T-153-notes.md (delete the announce block; revert the hop to the two-label form; drop hop: hop from one arm; swap the raw derivation for the normalised predicate; swap the vocabulary argument), with restore md5s AppCoordinator 7f50894d800b276dbf470c176a444d13 and MissedCallDialBackTests ef6028c9b76d7fc65ca3b6a830aad7ad.
-
-SA-4(d) no-await inspection (recorded per the task file): the dial-back chain region (MissedCallDialRoute + missedCallDialAction + dialBackMissedCall, :8812-8949) and the hop path (launchFailHopStep + performLaunchFailHop, :8005-8057) contain ZERO occurrences of await, sleep, Timer, retry, asyncAfter, DispatchQueue and Task (per-token counts printed; raw and comment-stripped scans both zero). The four dispatch openers are synchronous funcs; the only concurrency shape is the shipped pre-existing one-way GSM handoff (DispatchQueue.main.async at :8273, predating the feature; nothing awaits it). Emergency/escalation preservation: the wave diff greps zero production hits for emergency/escalat; the 15 production hunks are bounded to the dial-back regions; CallChannelChain.swift, the catalogue, Info.plist and the pbxproj carry no diff entry.
-
-Wave-closure verification (coordinator, on the delivered bytes): hashes re-computed at closure match the compile-checked delivered bytes (AppCoordinator 7f50894d800b276dbf470c176a444d13, MissedCallDialBackTests ef6028c9b76d7fc65ca3b6a830aad7ad); numstat matches the dev report exactly (+108/-44, +477/-32); CallChannelChain.swift carries no diff entry (byte-frozen); the untracked workflow.yaml remains engine state and stays out of the integration commit.
-
-Items owed to the end-stage review/sweep:
-
-1. The T-153 coverage note: the vocabulary argument is source-pinned; a behavioural discriminator (the section 10.4 FaceTime-secondary cell) may be added to the hop-candidate test during the sweep if the reviewer wants it — flagged in the notes, deliberately not chased with an edit that would have invalidated the single compile-check evidence.
-2. The five-candidate T-153 negative-control plan (in the notes) — to be run at the sweep alongside the W8 control.
-3. This suite's 22 tests are unaudited-against-run; the family sweep is their first execution.
-
----
-
-# call-dialer-primary-secondary — Implement notes (Wave 10, unit T-157)
-
-Description: Wave 10 is the final barrier (TG-32, final: true) — the consolidated end-of-feature test pass that absorbs the deferred W8/W9 scoped runs and negative controls, the preservation and new-surface audits, the owed test-only pins, and the release-evidence pack. Base 4f17049a (the W9 commit). The full unit report and evidence pack is specs/T-157-notes.md (37457 bytes, sha256 66f48535 ... b3c8dc); the pack sections below cite it. The W1 through W9 records above are preserved; this section is this feature's W10 record, appended below them, not a replacement.
-
-## Per-unit status (Wave 10)
-
-| Unit | Title (short) | Wave | Status | Evidence summary |
-|---|---|---|---|---|
-| T-157 | Final integration and release-evidence sweep | W10 | Done — sweep of record green; four negative controls expected==observed; preservation audit zero drift; evidence pack complete | Test-only change: CallChannelResolutionTests.swift +115 (the two owed pins — the W6 N-8(b) empty-input hermeticity guards in CallLinks and PhoneDialer and the W7-log point 4 announceNoUsableNumber helper-body containment pin), MissedCallDialBackTests.swift +29 (the T-153 section 10.4 audio-vocabulary behavioural leg inside the existing hop-candidate test). Production diff vs HEAD is EMPTY: AppCoordinator.swift restored byte-exact (md5 7f50894d800b276dbf470c176a444d13, the W9-delivered bytes), CallChannelChain.swift untouched, no plist/pbxproj/catalogue diff by this unit. Family sweep of record (seven suites) exit 0, Passed 136/136/0/0, both in-build guards green; direct privacy-guard re-run exit 0 (24 fixtures over 12 rules, Services/Calls registered at check-release-log-safety.py:197); the four negative controls (one W8, three W9 — all five T-153 candidates) each failed exactly the pins they were designed to fail, every restore byte-identical; SA-4/SA-7 audits zero drift; five-key catalogue parity proven (exactly the five keys added, en and ne, 1394 total); DV-1..7 checklist prepared, not executed. Pack: specs/T-157-notes.md. |
-
-## Wave log — W10
-
-The sweep of record is the POST-CONTROL final family run: `ios/build.sh test:unit` with the seven-suite scope (CallChannelResolutionTests MethodResolverTests MissedCallDialBackTests ContactCallButtonsTests CallingSettingsSurfaceTests CallConfirmationWordingTests L10nCatalogCoverageTests) from the worktree root, exit 0, bundle Test-ElderlyAssistant-2026.10.12_08-10-43-+1100.xcresult, Passed 136/136 with zero failures and zero skips: CallChannelResolutionTests 45, MethodResolverTests 17, MissedCallDialBackTests 22, ContactCallButtonsTests 25, CallingSettingsSurfaceTests 7, CallConfirmationWordingTests 4, L10nCatalogCoverageTests 16. Both in-build guards green (log-safety; prompt mirror: the seed mirrors IntentPrompt.build byte-for-byte, 2717 bytes, 4 placeholders, all 7 self-test drift classes rejected).
-
-First-execution declaration discharged: the pre-pin sweep (bundle 2026.10.12_07-46-17) passed 134/134 — the first execution of every W8/W9-authored test, green with zero production repairs, so the "unaudited-against-run" status of the W8 and W9 suites is now closed by execution. The only red of the whole wave was in the two NEW pins' first run: the dev's own expectation strings omitted the region marker that region() includes; the pin was corrected test-side (disclosed; the scan semantics were pre-validated by exact emulation), and the rerun was 67/67 green (CallChannelResolutionTests 45 = 43 + 2 pins; MissedCallDialBackTests 22 with the new leg inside the existing hop-candidate test). No production repair was ever needed in this wave.
-
-Direct privacy-guard re-run (the SA-6 gate half): the guard script run from the worktree root, exit 0; summary: log-safety fixtures 24 cases over 12 rules, every fixture behaves; the feature-root registration for Services/Calls re-verified at check-release-log-safety.py:197.
-
-Negative controls — all deferred obligations discharged; every control restored byte-identically (md5-verified), expected == observed for all four:
-
-1. W8 control — the two carried-fix lines reverted (the faceTime leg back to the old performFaceTimeCall call; the messenger hopped consume back to phone: "" with handle: hop?.handle): exactly the two named Voice-suite reds observed (the faceTime-leg threading pin and the LaunchHop-phone additive pin); ContactCallButtonsTests stayed green as predicted; restore md5-verified; 70 of 70 green after.
-2. W9-A (announce-delete + two-label hop + one-arm hop drop combined): the announce-before-dispatch source pin red (count 1 to 0), then the scan aborts at the missing block — later needles unreached by assertion order, recorded honestly in the pack.
-3. W9-B (raw derivation swapped for the normalised predicate): the decision source pin AND the whitespace-handle behavioural pin red (route resolves .call instead of .messenger).
-4. W9-C (vocabulary argument swapped): the decision source pin AND the new audio-vocabulary leg red (candidates [.faceTime, .phone] instead of [.phone]).
-
-Preservation audit (SA-4) — zero drift: no emergency component file in the change set; the emergency components region RedesignComponents.swift:229-237 byte-unchanged; the override block located by content at actual AppCoordinator.swift:7783-7813 (gate :7792-7796, amended action :7797-7801; the design-era anchors :7656-7686 shifted with the waves — located by content per the brief), diff-clean, provenance dropped; zero additions of emergency notify identifiers, notify-channel types or preferred-emergency-contact storage anywhere in the diff; the confirmation timeout constant at VoiceSessionStateMachine.swift:135 intact; the T-153 no-await inspection re-verified (no await/sleep/retry/timer in the dial-back chain).
-
-New-surface audit (SA-7) — zero drift: Info.plist byte-diff empty; zero network symbols in the diff; secondaryCallApp is the ONLY new store key; no per-contact primary/secondary storage added; FR-CDP-018 traceability of record stated (no router service exists). Five-key catalogue parity proven (SA-8): the catalogue diff adds exactly the five keys — settings.calling.primaryTitle, settings.calling.secondaryTitle, router.call.fallbackDisclosure, call.announce.fallbackRouted, call.announce.launchFailedFallback — each present en and ne, 1394 keys total.
-
-Items owed to the end-stage review (recorded, not defects):
-
-1. T-152 emit-suffix DoD arbitration and the T-151 real-probe supersession acknowledgement — for the review-implementation reader.
-2. Disclosed residuals for the reviewer: no behavioural WhatsApp tile arm and no tile-faceTime hop test.
-3. DV-1..7 prepared as a checklist with pass criteria in the pack, NOT executed — the owner's device run is the downstream gate.
-4. Errata roll-up carried (records, never design edits): W2 N-3 (the case-table pointer section 11.4 should read 10.4), W4 N-6 (the stale CallingSettingsView pointer comment inside CallChannelChain.swift around :157-158), W6 N-1 and W6 N-4 (the hop-thread listing omission; the two-label LaunchHop form landed at W8).
-5. Reviewer orientation: specs/implement-review-w8.md in this worktree is a Spotify-feature artifact (dated 2026-10-07), NOT this feature's W8 review; waves 8-10 have no per-unit review files by the owner's suspended-review directive.
-
-Wave-closure verification (coordinator, on the delivered bytes): numstat matches the dev report exactly (+115, +29, tests only); AppCoordinator md5 matches the W9-delivered value (restoration byte-exact); the authoritative bundle is the post-control sweep; the untracked workflow.yaml remains engine state and stays out of the integration commit.
+# implement — running unit log (family-contacts-unify)
+
+Short per-unit summaries for the engine record (full notes per unit live in
+`specs/T-NNN-notes.md`).
+
+## T-145 — FamilyContact identity model and nicknames — DONE
+
+Commit 5914777e. Model: `nicknames: [String]` replaces the single nickname
+(no shim); new `SystemContactLink` struct; decoder per design §3.4 (presence
+wins, separate legacy-key container, corrupt link → nil, synthesized encoder
+kept); `normalizedNicknames` trim/drop/order; 64-char cap (F5).
+Compile-forced shared-file minimums (marked in code as T-156 debt):
+AppCoordinator add/update still take the single nickname for now;
+SettingsView loadDraft/save; ProfileInterviewSteps pass-through.
+Gate (run before the speed-mode directive): FamilyContactStoreTests 31/31,
+KinDesignationTests 4/4, whole-module build green, zero errors.
+Handoff: T-156 must widen the coordinator seam to `nicknames: [String]` +
+normalization, otherwise multi-nickname contacts lose entries through the
+interim single-field paths.
+
+## T-147 — Frozen L10n keys + disclosure — DONE
+
+Commit 4ffc9389. 21 keys en+ne at the design §7 placements (22-line span
+pin; the 3 pre-existing photo keys at 16-18); NSContactsUsageDescription
+replaced with the frozen write disclosure; L10nCatalogCoverageTests extended
+(coverage + span functions, 14 fixtures, verbatim copy table, the #16
+ASCII-exemption pin). Baseline re-measured: 1389 → 1410 (+21).
+Whole-module typecheck green (build-for-testing, exit 0). Scoped suite
+deferred to T-163 per speed mode. Open: T-144 merge must re-measure the
+absolute baseline; SpotifyLocalizationTests count pin pre-existing red at
+HEAD (untouched, flagged).
+
+## T-148a — ContactsAccess .limited + identifier plumbing — DONE
+
+Commit d162aa16. ContactsAccess gains .limited + allowsReading + from(_:) as
+the single iOS-18 gate; access() delegates; AddressBookEntry.identifier
+plumbing (make default, CNContactIdentifierKey, allEntries pass-through).
+Compile-forced fallout: MissedCallContactResolver resolve gains the .limited
+readable arm (own file); ONE mechanical shared-file fix — wizard searchSection
+:2117 case .allowed, .limited (T-148b debt marked in code). New suite
+ContactsAccessTests (9 tests incl. the module-wide single-gate scan).
+Whole-module typecheck green (build-for-testing, exit 0, 0 errors). Scoped run
+deferred to T-163 per speed mode.
+
+## T-151 — FamilyContactIndex — DONE
+
+Commit 7b041b2d. Pure value type per design §1.2/§5.4: Entry set, multi-valued
+idsByNickname map, empty anchor, lookups; normalization via the existing
+NepaliTextNormalizer only (grapheme pin honored). New suite FamilyContactIndexTests
+(17 tests: O(1) map contract, 12x8 perf ceilings incl. 256-char F5 worst case,
+Devanagari positive pin, deliberate negative pin, canonical-variant unification,
+duplicate holders roster order, rebuild, empty parity, legacy payload decode).
+Whole-module build-for-testing green, 0 errors. Scoped run deferred to T-163.
+Not wired: coordinator publish (T-156), search tiers (T-152), resolver provider
+(T-153).
+
+## T-153 — ContactResolver nickname bands — DONE
+
+Commit 65f6fee9. indexProvider init param (nil = per-call build, test-parity);
+band ladder 1.00/0.90/0.85/0.80/0.75/0.60 with the strict < rival rule and
+tie-ambiguity unchanged; nearMiss extended over nickname spellings (exactly-one
+rule counts contacts). Tests 13 -> 37: the F2 consequence table (three
+at-margin decisive rows pinned at 0.15000000000000002, four sub-margin
+ambiguous), index-path parity, Devanagari grapheme pin, 12x8 <=20 ms ceiling
+(measured ~1.7-2.4 ms in the pre-commit harness). Whole-module build green,
+0 errors. Scoped run deferred; handoff: T-156 passes the published index at
+the coordinator construction site.
+
+## T-154 — SystemContactPhotoWriter — DONE
+
+Commit 307928d0. The app's first CNSaveRequest surface, confined to one file:
+exact §1.4 attempt sequence (attempt-time fingerprint, checked mutableCopy as?,
+update-only request, do/catch, read-back byte equality with unverifiable never
+success); closed §5.2 event vocabulary; FamilyPhotoEditorState.from exhaustive
+no-default; six internal decisions recorded in the unit notes. Suite: 37 tests
+incl. the F1 source-level pins (only imageData assigned, update-only request,
+ten-marker order pin) and module-wide FeatureSourceScan confinement scans; a
+pre-commit dry-run caught and fixed two defects in the scan tests themselves.
+Whole-module build green, 0 errors. Scoped run deferred. Handoffs: T-155
+FEATURE_ROOTS registration; T-158 injection + preAttemptOutcome use; T-160 label
+rendering.
+
+## T-149 — SystemContactLinkService — DONE
+
+Commit 64727330. VerifiedLinksSnapshot + the two reading seams + actor service:
+one batched verification fetch (identifier+phoneNumbers keys only), fingerprint
+rule reused unchanged, duplicate claims first-in-roster-order, single-flight
+drain with latest-roster capture (one documented Task.yield window), photo cache
+(24/16 MiB/16-hex sha256 keys, no negative caching), closed-vocabulary events,
+no console writes. AddressBookDirectory gains the SystemContactReading
+conformance. Suite: 27 tests incl. deterministic gate-forced drain cases.
+Whole-module build green + release log-safety gate passes. Scoped run deferred.
+Handoff: T-156 must pass the FULL roster to refresh.
+
+## T-152 — UnifiedContactSearch tiers and dedupe — DONE
+
+Commit b0e8dc7f. FamilyMatchTier.nickname at raw 2 (containment renumbered 3);
+Outcome.linkedBookNames defaulted; search requires index:, five passes per
+design (nickname exact via O(1) map + Character-safe substring; Pass 3
+drop/synthesize with name-equal suppression; Pass 4 unchanged; Pass 5 recount;
+.empty short-circuit = structural parity). Guards: no phantom drop, one-row-per
+person, stale stored claims never merge. Shared-file fixes: 3 call sites in
+LeafViews (inline index hoists, T-156 interim). Wizard does not call the unified
+search yet (T-159 scope, verified). Tests: 22 existing + 17 new (tier order,
+Devanagari pins positive+negative, Pass 3-5, parity anchors, ambiguity, failure
+paths, <=20 ms ceiling); the one uncertain Foundation behavior probed standalone.
+Whole-module build green, 0 errors. Scoped run deferred.
+
+## T-155 — FEATURE_ROOTS + release-gate coverage — DONE
+
+Commit 432584b8. The three Contacts seam files registered as feature-role
+roots in check-release-log-safety.py (design §5.3 block); 3 positive + 3
+negative fixtures + 3 expect pins. Evidence: full shell gate exit 0 (24
+fixtures/12 rules); injected-PII fixture names each planted file+line;
+falsify green; registration-drift caught in an isolated copy. Whole-module
+typecheck green (attempt 1 red only on T-150's concurrent mid-wave state, per
+protocol waited and retried). Scoped run deferred. One documented limitation
+(rule-3 Debug framing) recorded in the notes.
+
+## T-150 — MissedCallContactResolver link-aware — DONE
+
+Commit 56605e1d. linkedFamilyMatch (roster order, snapshot-only, matches
+reused unchanged) + resolve(snapshot:) with the §1.8 precedence: family own
+phones -> verified links -> native half gated on allowsReading with verified
+link identifier remap; notDetermined -> needsPermission; denial -> unresolved.
+Default .empty keeps all 4-arg callers unchanged; AppCoordinator untouched
+(T-158 wires the real snapshot). Tests: 18 new (32 total) — linked resolution,
+precedence, remap, .limited, denial, unlinked parity matrix, roster-order
+determinism (5x), single-snapshot semantics, dial-back mirror. Whole-module
+build green on a forced recompile of both files (0 errors); release log-safety
+gate passes. Scoped run deferred.
+
+## T-144 — Sequencing gate (master merge) — DONE
+
+Call-dialer PR #171 merged to master (81de796a, marker CallChannelChain.swift
+present); master merged into feat/family-contacts-unify (commit 78d9a34d).
+Conflict resolutions: spec files ours (per-feature records); evidence JSONL
+unioned; L10n baseline pins re-measured to the combined catalog (1,415 keys:
+dialogue 1_396, calling 1_410, family 1_394); FEATURE_ROOTS unioned (our 3
+files + call-dialer's Services/Calls). Merged-tree build-for-testing GREEN
+(exit 0). Frozen call-dialer suites deferred to T-163 per speed mode.
+Line-anchor drift: L10nCatalogCoverageTests + check-release-log-safety.py are
+the union points; downstream units read current file state, not old anchors.
+
+## T-156 — Coordinator identity and link refresh — DONE
+
+Commit 6751cc50. familyContacts.didSet = single roster choke point (index
+rebuild + refreshVerifiedLinks); published familyIndex/verifiedLinks/faceEpoch;
+lazy link-service seam (first use, never init); generation-guarded publish;
+duplicate-claim guard refuses before any write (reason-coded PII-free event);
+add/update widened to nicknames: [String] + link: (interim shims removed);
+ContactResolver reads the published index. Foreground hook appended after
+syncCalendarShare; call-dialer chain untouched (no secondaryCallApp symbols in
+the diff). New suite: 9 tests. Log-safety gate exit 0 (24/24 fixtures);
+whole-module build green, 0 errors. Scoped run deferred.
+
+## T-157 — Coordinator face identity — DONE
+
+Commit a8bc3986 (+ notes 995e6ddb). faceIdentity/faceImage/faceThumbnail async
+accessors; 16-hex sha256 system-photo tokens written only inside the @MainActor
+face path; §10.1 precedence (system > app-local > nil/initials); sysphoto:/contact:
+content-addressed cache families + ViewCaches invalidation-contract doc note; all
+four sync contactPhoto(for:) call sites migrated to .task(id:) with post-await
+identity guards; the sync resolver DELETED per §8.1 (scan: 0 code refs remain).
+New suite: 8 tests incl. format pins, precedence, no-stale-serve, source pins.
+Whole-module build green, 0 errors. Notes use a disambiguated filename
+(T-157-notes.md is call-dialer's merged record). Scoped run deferred.
+
+## T-161 — CallView faces and caption — DONE
+
+Commit 44846df3. UnifiedContactResultRow caption seam (defaulted var) + pure
+composer on the frozen key; all six §3.5 gate sites moved to allowsReading
+(.denied only blocked arm, grantAccess re-reads status); accessLimited caption
+leads the readable block; three search sites read coordinator.familyIndex +
+verifiedLinks (interim hoists gone); call-dialer dial layer untouched (pinned).
+New suite: 10 tests (33 source pins pre-verified via a Python mirror).
+Whole-module build green, 0 errors; concurrent T-158 compiled clean too.
+Deviations recorded (suite naming, dial-back tests untouched). Scoped run
+deferred.
+
+## T-158 — Link/unlink seam and missed-call names — DONE
+
+Commit b23f190b. SystemContactUnlinkMode + pure unlinkMode rule +
+setFamilyContactLink (the only unlink path; F3 copy-before-clear with
+never-lose refusal; one atomic record write; no write-seam symbols in the
+unlink body — source-pinned); lazy injected photo-writer seam +
+syncSystemPhoto outcome mapping (byte-identical payload; .written invalidates
++ bumps; recordGone/identityMismatch refresh); link-aware
+familyContact(matchingPhone:) (own phone first, snapshot only); R4 gate shape
+in refreshNativeMissedCallNames (post-prompt re-read, allowsReading, real
+access + snapshot passthrough). New suite: 16 tests. Whole-module build green,
+0 errors (contention handled by waiting for T-161's build). Scoped run
+deferred.
+
+## T-159 — Wizard find and link steps — DONE
+
+Commit 2bc3817a. Find step converted to UnifiedContactSearch with the
+published roster/index/verified links; pure seam FamilyWizardFindPresentation
+(rows/storedClaimant/draftLink/linkState/bookName); draft link + 4-state link
+section with unlink through setFamilyContactLink; steering micro-flow
+(onSteerTo + parent in-place sheet swap); allowsReading gates + limited
+caption; draftLink passed through Save. New suite FamilyWizardFindStepTests
+(pure seams, engine-integrated Gherkin paths, drift pin, source pins).
+Whole-module build green, 0 errors. CallingSettingsView untouched. 7
+decisions/deviations recorded in the notes. Scoped run deferred.
+
+## T-160 — Wizard photo step and save — DONE
+
+Commit 3294a397. Photo step per §2.4 (source caption pure rule; write-access
+cards for verified-link editing only — shared askCard reusing grantAccess,
+denied line with Settings door; state line with the F4 label mapping); save
+flow per §2.6/§10.2 (store write first, photo Task via syncSystemPhoto, §10.4
+remove recheck through the same resolver, non-nil state stays open with
+common.close footer, nil dismisses); nickname step per §2.5 (enumerated rows,
+≥44pt labeled remove, 8-entry cap, F5 cappedNickname, full list through the
+coordinator seam — interim loss window closed). One production deviation:
+faceImageWithSource coordinator seam (recorded). New suite:
+FamilyWizardPhotoSaveTests. Whole-module build green, 0 errors. Scoped run
+deferred.
+
+## T-162 — Family list chip + legacy deletion — DONE
+
+Commit d8f6fed9. Link chip via pure seam (verified links only) appended to the
+role-chip row; ≥44pt tap floor, VoiceOver label, opens the editor (the
+copy-preserving unlink flow). T-157 face migration verified complete (one
+batch .task(id:) pass, post-await re-check, single publication) + one stale
+doc comment fixed. loadDraft preview confirmed on the T-160 async path.
+Legacy contactPhoto(for:) deletion CONFIRMED: 0 code references across the
+391-file production module (both scan patterns). New suite
+FamilyListLinkChipTests incl. the named deletion pin. Whole-module build
+green, 0 errors (195 warnings, one fewer than baseline). Scoped run deferred.
+
+## T-163 — Acceptance and release gates — DONE
+
+Commit e46c3ed1. Scoped sweep 32/32 suites green (five first-run failures
+were test-side bugs, fixed with in-code markers; ZERO production changes).
+Full unit bundle once on the final tree: 7062 total, 7030 passed, 22 failed,
+10 skipped — zero FCU suites failed; all 22 attributed category (b)
+pre-existing at baseline 81de796a with per-suite baseline evidence; zero (a),
+zero (c). Attempt 1 hung in the pre-existing Piper simulator-audio wedge
+(aborted, recorded); completing run used a disclosed 120s per-test timeout
+guard. Gates: log-safety exit 0, prompt-mirror green, L10n pins held
+(1396/1410/1415), no-egress pins green. Perf all within 20ms ceilings
+(index <=1.6ms, voice <=10.3ms, search 2.78ms). Evidence in
+specs/T-163-acceptance-notes.md. DV-1..6 is T-164, outstanding.
+
+## T-165 — Security evidence and feasibility honesty — DONE
+
+Commit 6e86ebd9. FCU-security-evidence-index.md (F1-F8 closure with verifier
+commands, 21-row STRIDE index, residuals + gaps) + feasibility-honesty report
+(all three asks delivered as specified; device verdicts OUTSTANDING pending
+T-164). F4 comment aligned in design-l2 §2.6 and design-l1 §10.2 step 3; F6
+§3.5 footnote with the post-T-144 verified anchor. F1/F2/F3/F5 CLOSED via the
+T-163 sweep pins; F7 no-action recorded; F8 accepted residual recorded for
+the DV session. 35/35 cited test tokens verified; log gate re-run exit 0.
+No production code touched.
+
+## T-164 — Device validation DV-1..6 protocol — DONE (execution PENDING)
+
+Commit 32e2382f. FCU-device-validation-protocol.md: the six DV items verbatim
+from the constitution with preconditions, shipped-copy steps, expected
+outcomes, pass/fail criteria, a11y spot-checks, evidence slots, record
+templates, build/install pointers (device-install.sh artifact-derived bundle
+id). HONEST STATUS: protocol written, execution PENDING — no Anzaan session;
+every item recorded BLOCKED with its named dependency; no PASS claimed; final
+sign-off gated until a device session executes all six (FR-FCU-017). Owner
+actions OA-1..OA-6 + the pre-release device console check are named in the
+protocol.

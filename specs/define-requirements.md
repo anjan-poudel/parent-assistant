@@ -1,1523 +1,1221 @@
-# Requirements — Call Dialer Primary/Secondary (feature)
+# Requirements — Family Contacts Unify (feature)
 
-**Project:** Elderly AI Assistant · **Feature:** `call-dialer-primary-secondary` ·
-**Branch:** `feat/call-dialer-primary-secondary` (worktree
-`elderly-ai-assistant-call-dialer-primary-secondary`)
+**Project:** Elderly AI Assistant · **Feature:** `family-contacts-unify` (v1) ·
+**Branch:** `feat/family-contacts-unify` (worktree `elderly-ai-assistant-family-contacts-unify`;
+scaffold base master `8089c735`)
 **Task:** `define-requirements` (agent `ba`; contracts `requirements_doc` + `requirements_lock`)
-**Date:** 2026-10-12 · **Status:** submitted for owner HIL approval (risk tier T1, per the feature
-workflow's `define-requirements` task); no owner amendment recorded at requirements time — the
-locked snapshot in `define-requirements.lock.yaml` (produced after the T1 HIL owner sign-off) is
-the drift-detection baseline.
-**Frozen design (the feature brief, owner-approved 2026-10-12):**
-`docs/superpowers/specs/2026-10-12-call-dialer-primary-secondary-design.md`.
+**Date:** 2026-10-12 · **Status:** submitted for owner HIL approval (risk tier T1, per the
+feature workflow's `define-requirements` task). The owner's 2026-10-12 request is settled input
+and both Open Decisions were resolved before the first run; the locked snapshot in
+`define-requirements.lock.yaml` is the drift-detection baseline.
 
 This is the consolidated, human-readable copy of the feature requirements. The structured source
-of the same set is the folder [`define-requirements/`](define-requirements/index.md): one file per
-requirement, with index files at each level. Both are generated from the same content; the
+of the same set is the folder [`define-requirements/`](define-requirements/index.md): one file
+per requirement, with index files at each level. Both are generated from the same content; the
 per-requirement files are the unit of change, this document plus the lock file are the snapshot
 downstream tasks (`design-l1`, `design-l2`, `review-l2`, `security-design-review`, `plan-tasks`,
 `implement`, `review-implementation`, `security-test`, `final-sign-off`) consume.
 
-**ID convention.** Requirement IDs are namespaced `FR-CDP-NNN` / `NFR-CDP-NNN`. The project-level
+**ID convention.** Requirement IDs are namespaced `FR-FCU-NNN` / `NFR-FCU-NNN`. The project-level
 stakeholder brief (`requirements.md`) already uses the bare `FR-NNN` / `NFR-NNN` series, so a
 feature-scoped namespace avoids collisions in downstream traceability — the same convention
 live-camera-translation used (`FR-LCT-NNN`), profile-interview used (`FR-PI-NNN`),
-spotify-music-integration used (`FR-SP-NNN`) and multi-turn-conversation used (`FR-MTC-NNN`). One
-file per requirement; every requirement carries at least one Gherkin scenario (83 scenarios across
-29 requirements), and every safety-relevant requirement carries a failure or edge scenario.
+spotify-music-integration used (`FR-SP-NNN`) and multi-turn-conversation used (`FR-MTC-NNN`).
+One file per requirement; every requirement carries at least one Gherkin scenario, and every
+safety-relevant requirement carries a failure scenario.
 
-**Relationship to the frozen design.** This set elaborates the owner-approved, frozen design
-(2026-10-12) — it does not re-open the design's "Decisions (owner-approved)" 1–5, its non-goals or
-its risks. Where the design fixes mechanics (the chain's shape and `fellBackFrom`, the feasibility
-contract, the reuse of the existing confirmation, the key names), the requirements bind them; where
-the design leaves detail to design-l1 (exact copy wording, the tap-path announcement's trigger
-point, the launch-fail observation point, file placement), that is recorded as an assumption — a
-design input, not a re-opened decision.
+**Stakeholder brief.** There is no `requirements.md` for this feature. The stakeholder input is
+the owner request 2026-10-12 (recorded in the feature constitution "Source of truth" and
+distilled in the workflow scope comment): family and other contacts are duplicated in the app;
+(1) search a system contact and add it as a family contact; (2) when setting a contact's
+picture, update the system contact's photo and pull photos from system contacts for display,
+falling back to the app-local photo when the system record is not updatable; (3) multiple
+nicknames/name variations per family contact (e.g. sanu, syanu, Devanagari forms), indexed,
+matched by name OR any nickname/variation in search and voice resolution — with "if not
+feasible, tell the owner" (feasibility honesty is itself a requirement, FR-FCU-016).
 
-**Relationship to the stakeholder brief (`requirements.md`).** No supersession is needed: the
-brief does not address dialer preferences. Its §1.4 Messenger call-initiation clauses
-(FR-016…FR-019) are the upstream context this feature makes resilient — initiation gains a
-guaranteed attemptable channel — without changing the documented surfaces. Its §4 Post-MVP
-"WhatsApp integration" line was already overtaken by the shipped WhatsApp chat surfaces in
-`CallLinks` that this feature's feasibility probe now gates; this feature extends the shipped
-surfaces rather than re-opening the placement.
+**Scope summary.** 17 functional requirements (`FR-FCU-001` … `FR-FCU-017`, all MUST) and 9
+non-functional requirements (`NFR-FCU-001` … `NFR-FCU-009`, all MUST). The three asks with their
+pre-authorized feasibility fallbacks: LINK (one person everywhere; link-aware dedupe beyond
+today's matched-only normalized-number rule; unlinked pairs keep today's behavior exactly),
+PHOTO (the app's first write into the system address book, confined to the edited contact's
+photo; honest authorization states; the app-local `ContactPhotoStore` fallback with no loss, no
+false success, no crash), NICKNAMES (multiple variants stored as entered — no automatic
+transliteration — indexed, matched in BOTH in-app search and voice resolution through the
+existing matching semantics; the grapheme behavior regression-pinned; an ambiguous nickname
+never silently dials the wrong person). Completion gate: DV-1 … DV-6 on the reference device
+(Anzaan), recorded with the feature spec (FR-FCU-017).
 
-## Summary
+**Relationship to `call-dialer-primary-secondary`.** Explicitly distinct, in flight; this
+feature must not absorb, redesign or merge its scope. Implementation queues behind its PR merge
+(NFR-FCU-008). Expected conflicts (`MethodResolver.swift`, `LeafViews.swift`,
+`AppCoordinator.swift`, `CallingSettingsView.swift`) are resolved as a union preserving
+call-dialer's behavior.
 
-- **Functional requirements: 19** (`FR-CDP-001` … `FR-CDP-019`)
-- **Non-functional requirements: 10** (`NFR-CDP-001` … `NFR-CDP-010`)
-- **Acceptance scenarios: 83** (56 across the FRs, 27 across the NFRs)
-- **Areas covered:** Settings (Primary dialer, Fallback dialer, persistence), Channel Feasibility
-  (Messenger handle-on-file, WhatsApp local probe, FaceTime/phone always feasible), Chain
-  Resolution (chain rules, `fellBackFrom` provenance, preferred input), Call Paths (address-book
-  and family-contact buttons, missed-call dial-back, announcements), Voice Path (MethodResolver
-  global default, spoken confirmation, override protocol), Launch / Recovery (launch-fail hop),
-  Localisation, Safety Boundary / Regression, Validation / Completion Gate. NFR categories:
-  Reliability/Safety, Privacy, Privacy/Security, Performance, Reliability (Persistence),
-  Accessibility, Localisation, Reliability/Testability, Reliability (Regression), Compliance.
-- **Feature scope:** two Settings pickers — **Primary dialer** (`defaultCallApp`) and **Fallback
-  dialer** (new `secondaryCallApp`, default `.phone`) over the four channels (`faceTime`, `phone`,
-  `messenger`, `whatsApp`) — feeding a feasibility-aware chain **preferred → secondary → phone
-  (GSM hard floor), dedupe on equal picks, each channel attempted at most once, never dead-ends**;
-  the chain runs in every call path (address-book + family-contact buttons, missed-call dial-back,
-  voice-initiated calls through MethodResolver's global-default step, which becomes the settings
-  primary mapped `CallApp → CallMethod` by call type); feasibility is local-only (Messenger ⇔
-  handle on file, never gated on app-installed; WhatsApp ⇔ `canOpenURL("whatsapp://")` via an
-  injected closure; FaceTime/phone always feasible); the existing multi-turn confirmation is
-  reused exactly, with the fallback resolved **before** the spoken confirmation, which names the
-  actually-routed channel and discloses the skip; routing is automatic with a spoken announcement
-  (no ask-before-fallback), launch failures hop down the chain and are announced via the existing
-  spoken-outcome lane (never silent); new ne/en strings in `Localizable.xcstrings`; completion is
-  the DV-1..7 device-validation gate on Anzaan.
-- **Primary sources of truth:** the frozen design
-  (`docs/superpowers/specs/2026-10-12-call-dialer-primary-secondary-design.md` — §1–§9, owner
-  Decisions 1–5, non-goals, risks); the feature constitution
-  (`specs/call-dialer-primary-secondary/constitution.md` — Purpose & Scope, Channel Resolution &
-  Feasibility Contract, Safety & Compliance Delta, Feature Constraints 1–12, Integration Surfaces,
-  Success Criteria, DV-1..7 completion gate, "Open Decisions: **None**"); the workflow file
-  (`.ai-sdd/workflows/call-dialer-primary-secondary.yaml` — scope comment, security focus);
-  the project constitution (`constitution.md` — Architecture Constraints 1–6, Standards, Release
-  gates).
-- **Read-only stakeholder brief:** `requirements.md` (see the relationship note above).
-
-## Contents
-
-- [`define-requirements/index.md`](define-requirements/index.md) — top-level feature index
-- [`define-requirements/FR/index.md`](define-requirements/FR/index.md) — functional requirement
-  list (19 files: `define-requirements/FR/FR-CDP-NNN-*.md`)
-- [`define-requirements/NFR/index.md`](define-requirements/NFR/index.md) — non-functional
-  requirement list (10 files: `define-requirements/NFR/NFR-CDP-NNN-*.md`)
-- `define-requirements.lock.yaml` — locked snapshot with per-requirement content hashes (contract
-  `requirements_lock`; produced after the T1 HIL owner sign-off)
-- Sections below: [Functional requirements](#functional-requirements) ·
-  [Non-functional requirements](#non-functional-requirements) ·
-  [Open decisions](#open-decisions) · [Out of scope](#out-of-scope) ·
-  [How this set is verified downstream](#how-this-set-is-verified-downstream)
-
-The `define-requirements/FR/` and `define-requirements/NFR/` folders also still contain the
-previously shipped live-camera-translation (`FR-LCT-*`, `NFR-LCT-*`), profile-interview
-(`FR-PI-*`, `NFR-PI-*`), spotify-music-integration (`FR-SP-*`, `NFR-SP-*`) and
-multi-turn-conversation (`FR-MTC-*`, `NFR-MTC-*`) requirement files, left in place untouched; the
-indexes, this document and the lock cover the `call-dialer-primary-secondary` set only.
-
-### Requirement index
-
-| ID | Title | Area / Category | Priority | File |
-|----|-------|-----------------|----------|------|
-| [FR-CDP-001](define-requirements/FR/FR-CDP-001-primary-dialer-setting.md) | Primary dialer setting — four channels, persisted | Settings / Primary Dialer | MUST | `FR-CDP-001-primary-dialer-setting.md` |
-| [FR-CDP-002](define-requirements/FR/FR-CDP-002-fallback-dialer-setting.md) | Fallback dialer setting — four channels, equal picks legal | Settings / Fallback Dialer | MUST | `FR-CDP-002-fallback-dialer-setting.md` |
-| [FR-CDP-003](define-requirements/FR/FR-CDP-003-secondary-call-app-persistence.md) | `secondaryCallApp` persistence seam with GSM default | Settings / Persistence | MUST | `FR-CDP-003-secondary-call-app-persistence.md` |
-| [FR-CDP-004](define-requirements/FR/FR-CDP-004-messenger-feasibility-handle-on-file.md) | Messenger feasibility — handle on file only | Channel Feasibility / Messenger | MUST | `FR-CDP-004-messenger-feasibility-handle-on-file.md` |
-| [FR-CDP-005](define-requirements/FR/FR-CDP-005-whatsapp-feasibility-installed-probe.md) | WhatsApp feasibility — local installed-app probe via injected closure | Channel Feasibility / WhatsApp | MUST | `FR-CDP-005-whatsapp-feasibility-installed-probe.md` |
-| [FR-CDP-006](define-requirements/FR/FR-CDP-006-facetime-and-phone-always-feasible.md) | FaceTime and phone are always feasible — phone is the GSM hard floor | Channel Feasibility / GSM Hard Floor | MUST | `FR-CDP-006-facetime-and-phone-always-feasible.md` |
-| [FR-CDP-007](define-requirements/FR/FR-CDP-007-chain-preferred-secondary-phone.md) | Chain resolver — preferred → secondary → phone, dedupe, at-most-once, never dead-ends | Chain Resolution / Core | MUST | `FR-CDP-007-chain-preferred-secondary-phone.md` |
-| [FR-CDP-008](define-requirements/FR/FR-CDP-008-fellbackfrom-attempt-order.md) | `fellBackFrom` carries skipped channels in attempt order | Chain Resolution / Announcement Data | MUST | `FR-CDP-008-fellbackfrom-attempt-order.md` |
-| [FR-CDP-009](define-requirements/FR/FR-CDP-009-explicit-pick-wins-as-preferred.md) | Preferred input — an explicit per-contact/family pick wins as the chain's preferred | Chain Resolution / Input | MUST | `FR-CDP-009-explicit-pick-wins-as-preferred.md` |
-| [FR-CDP-010](define-requirements/FR/FR-CDP-010-tap-buttons-route-the-chain.md) | Address-book and family-contact call buttons route the chain | Call Paths / Tap Buttons | MUST | `FR-CDP-010-tap-buttons-route-the-chain.md` |
-| [FR-CDP-011](define-requirements/FR/FR-CDP-011-missed-call-dial-back-routes-the-chain.md) | Missed-call dial-back routes the chain | Call Paths / Missed-Call Dial-back | MUST | `FR-CDP-011-missed-call-dial-back-routes-the-chain.md` |
-| [FR-CDP-012](define-requirements/FR/FR-CDP-012-voice-global-default-settings-primary.md) | Voice path — MethodResolver global default becomes the settings primary, mapped by call type | Voice Path / Method Resolution | MUST | `FR-CDP-012-voice-global-default-settings-primary.md` |
-| [FR-CDP-013](define-requirements/FR/FR-CDP-013-fallback-before-spoken-confirmation.md) | Fallback resolves before the spoken confirmation; the prompt names the routed channel | Voice Path / Spoken Confirmation | MUST | `FR-CDP-013-fallback-before-spoken-confirmation.md` |
-| [FR-CDP-014](define-requirements/FR/FR-CDP-014-override-protocol-preserved.md) | Override protocol and near-miss disclosure preserved unchanged | Voice Path / Override Protocol | MUST | `FR-CDP-014-override-protocol-preserved.md` |
-| [FR-CDP-015](define-requirements/FR/FR-CDP-015-launch-fail-fallback-announced.md) | Launch-fail fallback (best-effort), announced via the existing spoken-outcome lane | Launch / Recovery | MUST | `FR-CDP-015-launch-fail-fallback-announced.md` |
-| [FR-CDP-016](define-requirements/FR/FR-CDP-016-automatic-routing-with-announcement.md) | Automatic routing with a spoken announcement — no ask-before-fallback | Call Paths / Announcement | MUST | `FR-CDP-016-automatic-routing-with-announcement.md` |
-| [FR-CDP-017](define-requirements/FR/FR-CDP-017-localisation-new-strings.md) | Localisation — new ne/en strings; spoken language matches the session | Localisation | MUST | `FR-CDP-017-localisation-new-strings.md` |
-| [FR-CDP-018](define-requirements/FR/FR-CDP-018-preserved-behaviours.md) | Preserved behaviours — no new dialogue flow, emergency semantics untouched, no silent failures | Safety Boundary / Regression | MUST | `FR-CDP-018-preserved-behaviours.md` |
-| [FR-CDP-019](define-requirements/FR/FR-CDP-019-device-validation-completion-gate.md) | DV-1..7 device validation recorded and passed (completion gate) | Validation / Completion Gate | MUST | `FR-CDP-019-device-validation-completion-gate.md` |
-| [NFR-CDP-001](define-requirements/NFR/NFR-CDP-001-chain-never-dead-ends.md) | The chain never dead-ends — zero dead ends across the exhaustive configuration matrix | Reliability / Safety | MUST | `NFR-CDP-001-chain-never-dead-ends.md` |
-| [NFR-CDP-002](define-requirements/NFR/NFR-CDP-002-local-probes-no-new-egress.md) | Feasibility probes are local — no new network, data, identity or privacy surface | Privacy | MUST | `NFR-CDP-002-local-probes-no-new-egress.md` |
-| [NFR-CDP-003](define-requirements/NFR/NFR-CDP-003-log-safety.md) | Log safety — numbers, handles and announcement content never reach logs beyond the existing policy | Privacy / Security | MUST | `NFR-CDP-003-log-safety.md` |
-| [NFR-CDP-004](define-requirements/NFR/NFR-CDP-004-fallback-resolution-latency.md) | Fallback-resolution latency budget — local probes at call time, user-paced | Performance | MUST | `NFR-CDP-004-fallback-resolution-latency.md` |
-| [NFR-CDP-005](define-requirements/NFR/NFR-CDP-005-persistence-round-trip.md) | `secondaryCallApp` persistence round-trip reliability | Reliability (Persistence) | MUST | `NFR-CDP-005-persistence-round-trip.md` |
-| [NFR-CDP-006](define-requirements/NFR/NFR-CDP-006-picker-accessibility.md) | Accessibility of the Primary and Fallback dialer pickers | Accessibility | MUST | `NFR-CDP-006-picker-accessibility.md` |
-| [NFR-CDP-007](define-requirements/NFR/NFR-CDP-007-localisation-completeness.md) | Localisation completeness — 100% ne/en parity for every new string | Localisation | MUST | `NFR-CDP-007-localisation-completeness.md` |
-| [NFR-CDP-008](define-requirements/NFR/NFR-CDP-008-deterministic-testability.md) | Deterministic testability under the scoped-suite gate | Reliability / Testability | MUST | `NFR-CDP-008-deterministic-testability.md` |
-| [NFR-CDP-009](define-requirements/NFR/NFR-CDP-009-no-regression-shipped-call-paths.md) | No regression to the shipped voice pipeline, emergency and dial-back paths | Reliability (Regression) | MUST | `NFR-CDP-009-no-regression-shipped-call-paths.md` |
-| [NFR-CDP-010](define-requirements/NFR/NFR-CDP-010-compliance-and-release-gates.md) | Compliance, review and release gates; DV-1..7 acceptance | Compliance | MUST | `NFR-CDP-010-compliance-and-release-gates.md` |
+---
 
 ## Functional requirements
 
-### FR-CDP-001: Primary dialer setting — four channels, persisted
+### FR-FCU-001: Link a system contact as a family contact (the LINK flow)
 
-#### Metadata
-- **Area:** Settings / Primary Dialer
-- **Priority:** MUST
-- **Source:** Frozen design §1 ("`CallingSettingsView` renders two sections: **Primary dialer** and **Fallback dialer**, each the existing four-channel row pattern") and Goal 1; feature constitution "In scope" bullet 1 and "Integration Surfaces" (`CallingSettingsView.swift` — "New Primary dialer + Fallback dialer sections/pickers"); workflow scope comment ("two settings sections (Primary dialer, Fallback dialer) over the 4 channels ... `defaultCallApp` = primary"); DV-1.
+**Area:** Link / Add Flow · **Priority:** MUST
+**Source:** Owner request 2026-10-12, ask 1; feature constitution Feature Purpose & Scope and
+Link Identity & Dedupe Contract binding property 1; workflow `define-requirements` scope comment.
+Surfaces: `FamilyContactsSettingsView` (`SettingsView.swift:1529`), `AddressBookDirectory`
+(`ContactsAccess` :245, read-only sweep `allEntries()` :386), `FamilyContactStore`.
 
-#### Description
-Calling Settings (the existing `CallingSettingsView`, reached under `settings.calling.title`) **must** present a **Primary dialer** section letting the user choose exactly one of the four channels — FaceTime, phone (GSM), Messenger, WhatsApp — using the existing selectable-row pattern (app-name label + selected-state checkmark; the existing `app.name.*` catalog keys are reused so the option labels agree with every other surface in both scripts).
-
-Selecting a channel **must** bind the coordinator's existing `defaultCallApp` preference (the existing `@Published` + UserDefaults seam, key `defaultCallApp`; `didSet` persists, the single init-time restore assigns directly, and an absent/unknown stored value resolves to `.phone`). The selection **must** persist across relaunch. The section title **must** come from the new catalog key `settings.calling.primaryTitle` (ne/en — FR-CDP-017).
-
-This pick is the chain's preferred input whenever a call target has no explicit per-contact/family pick (FR-CDP-009).
-
-#### Acceptance criteria
-
-```gherkin
-Feature: Primary dialer setting
-
-  Scenario: The Primary dialer section renders the four channels with the current pick selected
-    Given the user opens Settings, Calling
-    Then a "Primary dialer" section is shown with the four channels: FaceTime, phone, Messenger, WhatsApp
-    And each row shows the channel's app-name label
-    And the row matching the current defaultCallApp shows the selected state
-
-  Scenario: Selecting a primary channel persists across relaunch
-    Given the Primary dialer is FaceTime
-    When the user selects WhatsApp
-    Then the coordinator's defaultCallApp is whatsApp
-    And after the app is relaunched the WhatsApp row still shows the selected state
-    And the preference is the global default used by call resolution
-```
-
-#### Related
-- FR: FR-CDP-002 (fallback picker), FR-CDP-003 (secondary persistence seam), FR-CDP-009 (preferred input), FR-CDP-012 (voice-path mapping)
-- NFR: NFR-CDP-005 (persistence round-trip), NFR-CDP-006 (picker accessibility), NFR-CDP-007 (localisation completeness)
-
-### FR-CDP-002: Fallback dialer setting — four channels, equal picks legal
-
-#### Metadata
-- **Area:** Settings / Fallback Dialer
-- **Priority:** MUST
-- **Source:** Frozen design §1 ("`CallingSettingsView` renders two sections ... **Fallback dialer** ... `secondary == primary` is legal and dedupes at routing time") and Goal 1; feature constitution "In scope" bullet 1 and Feature Constraint 4 ("`secondary == primary` is allowed and routes with dedupe"); workflow scope comment; DV-1, DV-4.
-
-#### Description
-Calling Settings **must** present a **Fallback dialer** section beside the Primary dialer section, using the same four-channel selectable-row pattern, letting the user choose exactly one fallback channel. Selecting a channel **must** bind a new coordinator preference `secondaryCallApp` (FR-CDP-003 carries its persistence contract).
-
-Rules:
-- Choosing the same channel as the primary is legal: both sections may show the same selection and the app **must not** block, warn against, or silently alter an equal pick — routing dedupes instead (FR-CDP-007; each channel attempted at most once).
-- Selecting in one section **must not** change the other section's selection (`defaultCallApp` and `secondaryCallApp` are independent).
-- The section title **must** come from the new catalog key `settings.calling.secondaryTitle` (ne/en — FR-CDP-017), and the option labels reuse the existing `app.name.*` keys.
-
-#### Acceptance criteria
+The family contact editor **must** let the family member search the system address book and add
+a found system contact as a family contact whose stored record carries an explicit LINK to that
+system record. Binding properties: the pick produces exactly one family contact carrying the
+link (from creation, the pair is one person); search reuses the existing system-contact read
+path with today's honest point-of-use permission handling; family fields remain the app's own
+data (prefill design-level); a system contact already linked to an existing family contact must
+not be linked a second time (no two identity records for one system record); when the address
+book cannot be consulted (denied/not determined) the flow shows the honest state, degrades to
+today's manual entry, and writes no phantom link; the link is stored under the house migration
+rule (FR-FCU-002).
 
 ```gherkin
-Feature: Fallback dialer setting
+Feature: Add a system contact as a family contact (link)
 
-  Scenario: The Fallback dialer section renders and persists a selection
-    Given the user opens Settings, Calling
-    Then a "Fallback dialer" section is shown with the four channels
-    When the user selects phone as the fallback
-    Then secondaryCallApp is phone
-    And after the app is relaunched the phone row still shows the selected state
+  Scenario: Search, pick, and add a system contact as a linked family contact
+    Given Contacts access allows reading the address book
+    And a system contact "सीता शर्मा" exists with no family contact yet
+    When the family member searches "सीता" in the family editor's add flow and picks the contact
+    Then exactly one family contact is created carrying a stored link to that system record
+    And the person appears once in the call list and in search results
 
-  Scenario: An equal primary and fallback pick is accepted
-    Given the user selects Messenger as the primary
-    When the user selects Messenger as the fallback
-    Then both sections show Messenger as selected
-    And no error, warning or auto-correction is shown
-    And call resolution dedupes the equal channels at routing time
+  Scenario: An already-linked system contact cannot be linked twice
+    Given a system contact is already linked to an existing family contact
+    When the family member searches for it in the add flow
+    Then no second family contact claiming that system record is created
+    And the flow steers to the existing family contact instead
 
-  Scenario: The two pickers are independent
-    Given the primary is FaceTime and the fallback is phone
-    When the user changes the fallback to WhatsApp
-    Then secondaryCallApp is whatsApp
-    And defaultCallApp is still faceTime
+  Scenario: Address book unavailable — honest state, no phantom link (failure)
+    Given Contacts access is denied or not determined
+    When the family member opens the add flow
+    Then the honest permission state is shown, with the point-of-use request where applicable
+    And today's manual entry remains available
+    And no link is stored
 ```
 
-#### Related
-- FR: FR-CDP-001 (primary picker), FR-CDP-003 (persistence), FR-CDP-007 (dedupe in the chain)
-- NFR: NFR-CDP-005 (persistence round-trip), NFR-CDP-006 (picker accessibility), NFR-CDP-007 (localisation completeness)
+**Related:** FR-FCU-002/003/004/005/006/015 · NFR-FCU-002/005/006.
 
-### FR-CDP-003: `secondaryCallApp` persistence seam with GSM default
+### FR-FCU-002: Link reference storage with legacy-safe migration
 
-#### Metadata
-- **Area:** Settings / Persistence
-- **Priority:** MUST
-- **Source:** Frozen design §1 ("`AppCoordinator` gains `secondaryCallApp: CallApp` next to `defaultCallApp` — same `@Published` + UserDefaults pattern, key `secondaryCallApp`, **default `.phone`**"); feature constitution "In scope" bullet 1 and Feature Constraint 4; workflow `design-l1` scope ("persistence for existing installs (secondaryCallApp absent → GSM)"); DV-1.
+**Area:** Link / Storage & Migration · **Priority:** MUST
+**Source:** Feature constitution Link property 5 and Feature Constraint 2; surface:
+`FamilyContactStore` (`FamilyContact` :61, custom decoder :122-150, unversioned store — "an
+optional field IS its migration").
 
-#### Description
-`AppCoordinator` **must** expose `secondaryCallApp: CallApp` next to `defaultCallApp`, using the same persistence pattern the primary preference uses (the existing house seam: a `@Published` property whose `didSet` writes to `UserDefaults` under key `secondaryCallApp`, with the single init-time restore assigning directly so `didSet` does not fire there — `AppCoordinator.swift:330-335, 2851-2853`).
-
-Binding rules:
-- **Default is GSM**: a fresh install — and an existing install upgrading where the key is absent — **must** resolve the fallback to `.phone` with no user action. An unrecognised stored raw value **must** also resolve to `.phone`, mirroring the existing `defaultCallApp` restore rule (`.flatMap(CallApp.init(rawValue:)) ?? .phone`).
-- **Round-trip**: each of the four channels written through the Fallback dialer picker **must** read back identically after relaunch (NFR-CDP-005 carries the measurable target).
-- **No cross-talk**: writing `secondaryCallApp` **must never** mutate `defaultCallApp`, and vice versa.
-
-#### Acceptance criteria
+The link reference **must** be stored on the `FamilyContact` record under the house migration
+rule: new field(s) optional; the custom decoder reads a missing key as "unlinked" (a pre-link
+payload loads unlinked instead of failing the read); save/load round-trips preserve the link and
+every other field; the reference shape (e.g. `CNContact.identifier` stability) is design-l1's to
+settle — the stored value survives the encrypted round-trip and a lookup failure is handled per
+FR-FCU-006; a corrupt/unknown value degrades to "unlinked" (never a failed read, never a crash);
+the link is local-only (NFR-FCU-003).
 
 ```gherkin
-Feature: Fallback dialer persistence
+Feature: Link reference storage and migration
 
-  Scenario: An install without a stored fallback resolves to GSM
-    Given no value has ever been stored for secondaryCallApp (fresh install or an existing install upgrading)
-    When the app launches
-    Then secondaryCallApp is phone
-    And call resolution treats GSM as the fallback channel
+  Scenario: A linked contact round-trips through the encrypted store
+    Given a family contact linked to a system record
+    When it is saved and loaded again
+    Then the link is intact
+    And every other field is unchanged
 
-  Scenario: The fallback selection round-trips across relaunch for every channel
-    Given the user selects a fallback channel in Calling Settings
-    When the app is relaunched
-    Then secondaryCallApp equals the selected channel
-    And this holds for each of FaceTime, phone, Messenger and WhatsApp
+  Scenario: A pre-link payload loads as unlinked
+    Given a store payload written before the link field existed
+    When the store is read
+    Then the contact loads unlinked
+    And no read fails and no contact is lost
 
-  Scenario: An unrecognised stored value falls back to GSM
-    Given the stored secondaryCallApp raw value is unrecognised
-    When the app launches
-    Then secondaryCallApp is phone
+  Scenario: A corrupt link value degrades to unlinked (failure)
+    Given a payload whose link value is unreadable or unknown
+    When the store is read
+    Then the contact loads as unlinked
+    And the read succeeds with all other fields intact
 ```
 
-#### Related
-- FR: FR-CDP-002 (the picker that writes this seam), FR-CDP-007 (the chain that reads it)
-- NFR: NFR-CDP-005 (round-trip reliability target)
+**Related:** FR-FCU-001/003/005/006 · NFR-FCU-003/006.
 
-### FR-CDP-004: Messenger feasibility — handle on file only
+### FR-FCU-003: Link-aware dedupe — one row for a linked person in unified search
 
-#### Metadata
-- **Area:** Channel Feasibility / Messenger
-- **Priority:** MUST
-- **Source:** Frozen design §2 feasibility table ("`messenger` — handle on file for the target contact — **NOT** gated on the app being installed — the m.me web chat still connects, and shipped tap behavior is preserved") and Decision 3; feature constitution "Channel Resolution & Feasibility Contract" and Feature Constraint 2; DV-2.
+**Area:** Search / Dedupe · **Priority:** MUST
+**Source:** Feature constitution Link properties 1–3 and Feature Constraint 6; surfaces:
+`UnifiedContactSearch` (matched-only dedupe :269, `FamilyMatchTier` :155, `familyMatches` :217).
 
-#### Description
-For a given target (family contact or address-book row), the `messenger` channel **must** be treated as feasible if and only if a usable handle is on file for that target — decided by the same normalization the opener uses (`CallLinks.messengerHandle`), so the feasibility gate and the opener can never disagree. The feasibility check **must not** consult whether the Messenger app is installed.
-
-Binding consequences:
-- With a usable handle, `messenger` stays feasible even when the app is absent — shipped tap behaviour is preserved and the existing open-time web-chat fallback (`fb-messenger://user-thread/` absent-app chain → `https://m.me/<handle>`, `fellBackToWeb`) still applies and is disclosed out loud.
-- Without a usable handle, `messenger` is infeasible and the chain (FR-CDP-007) skips it. Today's single hard rule ("a `.messenger` result without a handle drops to `.phone`") becomes one case of the chain rather than a special rule.
-
-#### Acceptance criteria
+`UnifiedContactSearch` dedupe **must** become link-aware beyond today's matched-only
+normalized-number rule: an explicit link is identity evidence independent of number spelling; a
+query matching EITHER side of a linked pair yields exactly one row for that person (matched AND
+unmatched queries); the person stays findable by whatever matched; **unlinked pairs keep today's
+behavior EXACTLY** (an unmatched family twin must not hide the book twin; number-only matches do
+not become more aggressive); which single representation the row renders is design-level.
 
 ```gherkin
-Feature: Messenger feasibility
+Feature: Link-aware dedupe in unified search
 
-  Scenario: A handle on file makes Messenger feasible
-    Given the target contact has a usable Messenger handle on file
-    When the channel chain resolves against this target
-    Then messenger is treated as feasible
-    And the chain's preferred channel is returned without a Messenger skip
+  Scenario: Family-side match hides the linked book twin
+    Given a family contact linked to a system record of the same person
+    When the user searches a query that matches the family record
+    Then exactly one row for that person is returned
+    And the linked book twin does not appear as a second row
 
-  Scenario: No handle makes Messenger infeasible and the chain skips it
-    Given the target contact has no usable Messenger handle
-    When the channel chain resolves with messenger as the preferred channel
-    Then messenger is not resolved as the routed channel
-    And the chain attempts its next step (the fallback, then GSM)
+  Scenario: Book-side-only match still yields one row
+    Given a linked pair where the query matches only the book side (e.g. the book record's name)
+    When the search runs
+    Then exactly one row for that person is returned
+    And the person is findable by the book-side match
 
-  Scenario: An absent Messenger app does not make the channel infeasible
-    Given the target contact has a usable handle on file
-    And the Messenger app is not installed
-    When the chain resolves
-    Then messenger is still treated as feasible
-    And a tap opening this channel keeps the shipped behaviour (the https://m.me web-chat fallback, disclosed out loud)
+  Scenario: A digit query finds the linked person once despite differing number spellings
+    Given a linked pair whose numbers are spelled differently ("+977-98…" vs "98…")
+    When the user searches a digit run of either spelling
+    Then exactly one row for that person is returned
+
+  Scenario: Unlinked pairs keep today's matched-only behavior (regression)
+    Given an unlinked family contact and a book record with the same number
+    When a query matches the book record but NOT the family contact
+    Then the book row still appears — the unmatched family twin must not hide it
+    And the existing matched-only normalized-number dedupe applies exactly as today
 ```
 
-#### Related
-- FR: FR-CDP-005 (WhatsApp probe), FR-CDP-007 (the chain), FR-CDP-009 (preferred input), FR-CDP-010 (tap paths)
-- NFR: NFR-CDP-001 (never dead-ends), NFR-CDP-002 (local-only feasibility)
+**Related:** FR-FCU-001/004/005/006/012 · NFR-FCU-001/002.
 
-### FR-CDP-005: WhatsApp feasibility — local installed-app probe via injected closure
+### FR-FCU-004: One person across every people surface — call list, voice resolution, missed-call correlation
 
-#### Metadata
-- **Area:** Channel Feasibility / WhatsApp
-- **Priority:** MUST
-- **Source:** Frozen design §2 feasibility table ("`whatsApp` — app installed — `canOpenURL("whatsapp://")`, injected as a closure for tests — local probe only") and §3 (closure-injected feasibility); feature constitution "Channel Resolution & Feasibility Contract" and Feature Constraint 3 ("WhatsApp feasibility is the `canOpenURL` probe, injected as a closure so tests stub it deterministically"); DV-3.
+**Area:** Identity / Cross-surface · **Priority:** MUST
+**Source:** Feature constitution Link property 1 and Feature Constraint 6; surfaces: `CallView`
+(`LeafViews.swift:918`; family rows :1747; `UnifiedContactResultRow` :2288), `ContactResolver`,
+`MissedCallContactResolver` ("Number→person correlation must respect links so dial-back renders
+one person").
 
-#### Description
-The `whatsApp` channel **must** be treated as feasible if and only if WhatsApp can be opened on this device, probed as `canOpenURL("whatsapp://")`. The scheme is already declared in `Info.plist` `LSApplicationQueriesSchemes`, so no plist change is required.
-
-Binding rules:
-- **Local probe only**: the check runs on-device at call time and performs no network I/O and launches no app.
-- **Injected seam**: the probe **must** be supplied through injection (a closure/config seam) so tests stub it deterministically and the resolver stays free of platform calls (NFR-CDP-008).
-- **Staleness accepted**: iOS may cache scheme availability; this is an accepted residual risk (design Risks) — the probe still runs at call time, user-paced, and the launch-fail hop (FR-CDP-015) covers the residual case.
-- **Skip when infeasible**: when the probe is false, `whatsApp` is infeasible and the chain skips it (DV-3: WhatsApp not installed → the chain lands on the fallback/GSM with the announcement).
-
-#### Acceptance criteria
+A linked pair **must** render and resolve as ONE person in every surface that shows or resolves
+people: unified search (FR-FCU-003); the call list (one tile/row; double-linking prevented at
+creation); voice call resolution (name/nickname/relationship/number of either side resolves to
+the one family contact — the twin creates no spurious rival and there is exactly one
+confirmation); missed-call correlation (a missed call from either side's number correlates to
+the one person; dial-back names the person once; the correlation reaches the linked person even
+when the dialed number is the system record's). No surface may reintroduce a duplicate for a
+linked pair.
 
 ```gherkin
-Feature: WhatsApp feasibility
+Feature: One person across every people surface
 
-  Scenario: The probe reporting installed makes WhatsApp feasible
-    Given the injected probe reports whatsapp:// can be opened
-    When the channel chain resolves with whatsApp as the preferred channel
-    Then whatsApp is treated as feasible
-    And it can be returned as the routed channel
+  Scenario: The call list shows the linked person once
+    Given a system contact is linked as a family contact
+    When the call list is displayed
+    Then the person appears exactly once in the family rows
+    And no book twin of the same person is presented as a second person
 
-  Scenario: The probe reporting not installed makes WhatsApp infeasible and the chain skips it
-    Given the injected probe reports whatsapp:// cannot be opened
-    When the channel chain resolves with whatsApp preferred
-    Then whatsApp is not resolved as the routed channel
-    And the chain attempts its next step (the fallback, then GSM)
+  Scenario: Voice resolution reaches the one linked person, not a rival twin
+    Given a family contact linked to a system record of the same person
+    When the user says "call <name of either side>"
+    Then the one family contact is resolved
+    And exactly one confirmation is spoken — the system twin creates no ambiguity
 
-  Scenario: Probing is local — no network and no app launch
-    Given a build exercising the feasibility probe
-    When the chain resolves any target
-    Then the probe performs no network request
-    And the probe opens no app
+  Scenario: A missed call from the system record's number dials back as the one person
+    Given a linked pair
+    And a missed call recorded from the system record's number
+    When the missed call is displayed
+    Then it names the one linked person
+    And dial-back targets that one person, not a second entry
 ```
 
-#### Related
-- FR: FR-CDP-004 (Messenger feasibility), FR-CDP-007 (the chain), FR-CDP-015 (launch-fail hop covering probe staleness)
-- NFR: NFR-CDP-002 (no new egress), NFR-CDP-008 (deterministic testability)
+**Related:** FR-FCU-001/003/013/014 · NFR-FCU-002/009.
 
-### FR-CDP-006: FaceTime and phone are always feasible — phone is the GSM hard floor
+### FR-FCU-005: Unlink — reversible, with both records intact
 
-#### Metadata
-- **Area:** Channel Feasibility / GSM Hard Floor
-- **Priority:** MUST
-- **Source:** Frozen design §2 feasibility table ("`faceTime` — always feasible"; "`phone` — always feasible — the GSM hard floor — terminal channel of the chain") and Goal 2; feature constitution Feature Constraint 1 ("GSM hard floor — no dead ends. `phone` is always feasible and is the chain's terminal channel."); DV-4.
+**Area:** Link / Unlink · **Priority:** MUST
+**Source:** Feature constitution Link property 4, Open Decisions note (unlink semantics
+design-level), Safety & Compliance Delta (Identity integrity). Mechanics/UI design-level; the
+safety invariants bind.
 
-#### Description
-`faceTime` and `phone` **must** both be treated as feasible under all circumstances: no installation state, handle state, contact state or picker configuration can make them infeasible pre-flight.
-
-`phone` (GSM, `tel:`) **must** be the chain's terminal channel — the always-feasible hard floor — so that whenever every other channel is infeasible or deduped away, resolution returns `.phone` and the call can still be attempted. This is the feature's core guarantee: no configuration of the pickers (including equal picks) may remove, reorder or make unreachable the floor.
-
-Scope note: "always feasible" is the pre-flight contract only — FaceTime can still fail to open at launch (`FaceTimeOutcome.unavailable`); that residual is covered by the launch-fail hop (FR-CDP-015), not by marking the channel infeasible.
-
-#### Acceptance criteria
+The link **must** be removable, as the safety valve for a wrong link: unlinking never deletes or
+edits the system record (no `CNSaveRequest`; byte-unchanged) and never deletes the family
+contact's data (the family record remains fully usable); after unlink the pair reverts to
+today's behavior exactly (matched-only dedupe; no identity claim); unlinking is lossless and
+reversible; a wrongly merged pair can be separated with no data lost on either side.
 
 ```gherkin
-Feature: Always-feasible channels and the GSM floor
+Feature: Unlink
 
-  Scenario: The GSM floor is reachable whenever every other channel is infeasible
-    Given the preferred channel is infeasible
-    And the fallback channel is infeasible (or deduped into the same infeasible channel)
-    When the chain resolves
-    Then phone is the routed channel
-    And the call can be attempted via tel:
+  Scenario: Unlink restores today's separate-records behavior without data loss
+    Given a linked family contact and system record
+    When the family member removes the link
+    Then the family contact remains, fully usable, with all its fields intact
+    And the system record is unchanged (no write is issued)
+    And search behavior for the pair is exactly today's unlinked behavior
 
-  Scenario: FaceTime and phone are feasible regardless of app and handle state
-    Given the target has no Messenger handle
-    And WhatsApp is not installed
-    When the chain resolves with a preferred channel of faceTime, or of phone
-    Then the channel is treated as feasible and returned as routed
-
-  Scenario: No picker configuration produces a resolution with no attemptable channel
-    Given any pair of primary and fallback picks (including equal picks)
-    And any feasibility state
-    When the chain resolves
-    Then it returns exactly one attemptable channel
-    And phone is always reachable as the floor
+  Scenario: A wrong link is repaired by unlinking (safety)
+    Given two different people were wrongly linked (a mis-link)
+    When the family member unlinks them
+    Then the two records are separate again with no data lost from either side
+    And no identity claim remains between them
+    And the system record was never modified
 ```
 
-#### Related
-- FR: FR-CDP-007 (the chain that ends at the floor), FR-CDP-015 (launch-fail residual), FR-CDP-018 (emergency path untouched)
-- NFR: NFR-CDP-001 (exhaustive never-dead-end matrix)
+**Related:** FR-FCU-001/002/003/006 · NFR-FCU-002.
 
-### FR-CDP-007: Chain resolver — preferred → secondary → phone, dedupe, at-most-once, never dead-ends
+### FR-FCU-006: Stale or broken link degradation — never hide, never crash, never strand a call
 
-#### Metadata
-- **Area:** Chain Resolution / Core
-- **Priority:** MUST
-- **Source:** Frozen design §3 ("Rules: attempt `preferred`; if infeasible, attempt `secondary` (skipped when equal); if that is infeasible too, `phone`. `phone` is always feasible, so the chain never dead-ends.") and Goal 2; feature constitution "Channel Resolution & Feasibility Contract" ("A channel is attempted at most once — `secondary == primary` is legal and simply dedupes. The chain **never dead-ends**") and Feature Constraints 1, 4; workflow scope comment; DV-4.
+**Area:** Link / Degradation · **Priority:** MUST
+**Source:** Feature constitution Link property 4, Safety & Compliance Delta; workflow
+`security-design-review` focus (identity integrity).
 
-#### Description
-Call-channel resolution **must** run a fixed three-step chain:
-
-1. attempt the **preferred** channel (the explicit per-contact/family pick when present, else the settings primary — FR-CDP-009);
-2. if infeasible, attempt the **settings secondary** (`secondaryCallApp`) — skipped when it equals the preferred channel (`secondary == primary` is legal and simply dedupes);
-3. if that is infeasible too, resolve to **`phone`** (the always-feasible GSM floor, FR-CDP-006).
-
-Binding properties:
-- **Each channel is attempted at most once** — including the deduped equal pair.
-- **Never dead-ends** — whatever the picker pair and the feasibility state, resolution returns a channel that can be attempted (NFR-CDP-001 measures this exhaustively).
-- **Pure-static seam** — implemented in the design's new pure-static resolver (the design fixes the contract: `CallChannelChain.route(preferred:secondary:feasibility:)`, with `Feasibility` carrying `messengerHandleAvailable` + `whatsAppInstalled`), following the house-seam pattern of `resolvedCallChannel`: no coordinator state, no platform calls — so the full matrix is unit-testable without stubs (NFR-CDP-008).
-- **Existing seams run it** — `resolvedCallChannel` / `resolvedMissedCallChannel` (and the voice-path mapping, FR-CDP-012) delegate to this one resolver rather than re-implementing the chain.
-
-#### Acceptance criteria
+A stale, broken or mismatched link **must** degrade to today's behavior — never worse: a deleted
+system record leaves the family contact fully usable everywhere; a re-synced/re-created record
+or an identifier that now resolves to a different person **must not merge two different people**
+(an unverifiable/mismatched link is treated as absent for identity/dedupe; design may verify
+identity evidence before trusting a link — the binding result is no false merge); identifier
+lookup failures at any surface (including permission states) are treated as unlinked for that
+surface; never crashes, never hides the person, never strands a call.
 
 ```gherkin
-Feature: Preferred to secondary to GSM chain
+Feature: Stale or broken link degradation
 
-  Scenario: A feasible preferred channel is routed and the secondary is never attempted
-    Given the preferred channel is feasible
-    When the chain resolves
-    Then the routed channel is the preferred channel
-    And the secondary channel is not attempted
+  Scenario: The linked system record was deleted
+    Given a family contact linked to a system record that no longer exists
+    When the person is searched, called by voice, or dialed from the call list
+    Then the family contact behaves exactly as a family contact with no link
+    And nothing crashes and no call path is stranded
 
-  Scenario: An infeasible preferred channel falls to the secondary
-    Given the preferred channel is infeasible
-    And the secondary channel is feasible and different
-    When the chain resolves
-    Then the routed channel is the secondary channel
+  Scenario: The stored identifier now resolves to a different person (failure)
+    Given a link whose stored reference no longer corresponds to the linked person
+    When the identity is resolved
+    Then the two people are NOT merged into one
+    And behavior for both degrades to today's unlinked behavior
+    And no wrong-person resolution or dedupe occurs
 
-  Scenario: Both channels infeasible fall to the GSM floor
-    Given the preferred channel is infeasible
-    And the secondary channel is infeasible
-    When the chain resolves
-    Then the routed channel is phone
-
-  Scenario: An equal primary and fallback dedupes
-    Given the preferred and secondary channels are the same channel
-    And that channel is infeasible
-    When the chain resolves
-    Then the channel is attempted at most once
-    And the routed channel is phone
+  Scenario: Identifier lookup fails at resolve time
+    Given a link that cannot be looked up in the current moment (e.g. permission state)
+    When a surface resolves or displays the pair
+    Then the surface falls back to today's behavior
+    And no error is surfaced to the user
 ```
 
-#### Related
-- FR: FR-CDP-004/005/006 (feasibility inputs), FR-CDP-008 (fellBackFrom output), FR-CDP-009 (preferred input), FR-CDP-013 (voice-path fallback timing)
-- NFR: NFR-CDP-001 (never dead-ends, exhaustively), NFR-CDP-004 (latency budget), NFR-CDP-008 (deterministic matrix)
+**Related:** FR-FCU-002/003/004/005 · NFR-FCU-002/009.
 
-### FR-CDP-008: `fellBackFrom` carries skipped channels in attempt order
+### FR-FCU-007: Photo display precedence — system photo, then app-local, then initials
 
-#### Metadata
-- **Area:** Chain Resolution / Announcement Data
-- **Priority:** MUST
-- **Source:** Frozen design §3 (`Result` field: "Channels that were preferred but infeasible, in attempt order — empty when nothing fell back. Announcements compose from this."); feature constitution "In scope" bullet 3 ("with `fellBackFrom` carried in the result so announcements can name the actually-routed channel"); workflow `security-design-review` focus ("Announcement honesty: the spoken confirmation names the actually-routed channel (`fellBackFrom`); no silent route changes")); DV-2.
+**Area:** Photo / Display · **Priority:** MUST
+**Source:** Owner request ask 2; feature constitution Photo contract property 3 and Success
+Criteria; DV-3. Surfaces: `AppCoordinator.contactPhoto(for:)` (:6492), `ContactPhotoStore`,
+`ContactTile` / `UnifiedContactResultRow` / editor rows (`DownsampledImageCache`), `FaceAvatar`.
 
-#### Description
-The chain's result **must** carry `fellBackFrom`: the channels that were attempted and found infeasible, in attempt order, so announcements and the spoken confirmation can name both the routed channel and what was skipped. Binding properties:
-
-- **Empty when nothing fell back** — a feasible preferred channel produces an empty `fellBackFrom`.
-- **Attempt order** — when the preferred channel is infeasible and the secondary is routed, `fellBackFrom` is `[preferred]`; when both are infeasible and `phone` is routed, it is `[preferred, secondary]` in that order.
-- **The routed channel never appears** in `fellBackFrom`.
-- **Dedupe is not duplicated** — an equal secondary skipped by dedupe is listed at most once.
-- **Single source for copy** — the confirmation disclosure (FR-CDP-013), the routed-channel announcement (FR-CDP-016) and the launch-fail announcement (FR-CDP-015) **must** compose from this field, never from independently re-derived state, so the spoken line always matches the actual routing.
-
-#### Acceptance criteria
+Wherever the app displays a family contact's face, the displayed photo **must** follow the
+precedence: (1) the system contact's photo when present and readable; (2) else the app-local
+`ContactPhotoStore` thumbnail (`photoFilename`); (3) else the existing initials avatar. Applies
+to a family contact with an established system counterpart (the linked record; number-match
+extension for unlinked contacts is design-level). The display reflects the current photo on
+refresh, reusing the existing downsampling path; missing/unreadable/removed system photos fall
+back silently — never an error state. Non-family book rows keep today's initials avatar.
 
 ```gherkin
-Feature: Fallback provenance in the result
+Feature: Photo display precedence for family contacts
 
-  Scenario: A skipped preferred channel is reported in attempt order
-    Given the preferred channel is infeasible
-    And the secondary channel is feasible
-    When the chain resolves
-    Then fellBackFrom contains exactly the preferred channel
-    And the routed channel is not present in fellBackFrom
+  Scenario: The system contact's photo wins when present
+    Given a linked family contact whose system record has a photo
+    And the family contact also has an app-local photo
+    When the family row/tile is displayed
+    Then the system contact's photo is shown
 
-  Scenario: Both skips are reported in order, deduplicated
-    Given the preferred channel is infeasible
-    And the secondary channel is infeasible
-    When the chain resolves
-    Then fellBackFrom contains the preferred channel and the secondary channel in attempt order
-    And with an equal primary and fallback, the channel appears at most once
-    And the routed channel is phone
+  Scenario: No system photo — the app-local photo is shown
+    Given a linked family contact whose system record has no photo
+    And the family contact has an app-local photo
+    When the family row/tile is displayed
+    Then the app-local photo is shown (today's behavior preserved)
 
-  Scenario: Nothing fell back when the preferred channel is feasible
-    Given the preferred channel is feasible
-    When the chain resolves
-    Then fellBackFrom is empty
+  Scenario: Neither photo exists — the initials avatar is shown
+    Given a family contact with no system photo and no app-local photo
+    When the family row/tile is displayed
+    Then the existing initials avatar is shown
+    And no error or placeholder failure state appears
 ```
 
-#### Related
-- FR: FR-CDP-007 (the chain), FR-CDP-013 (confirmation composes from it), FR-CDP-015/016 (announcements compose from it)
-- NFR: NFR-CDP-008 (matrix pins its content)
+**Related:** FR-FCU-008/009/010 · NFR-FCU-002/005.
 
-### FR-CDP-009: Preferred input — an explicit per-contact/family pick wins as the chain's preferred
+### FR-FCU-008: Photo write confined to the edited contact's photo
 
-#### Metadata
-- **Area:** Chain Resolution / Input
-- **Priority:** MUST
-- **Source:** Frozen design §4 ("the explicit per-contact/family pick (when present) is `preferred`, else `defaultCallApp`; `secondaryCallApp` is `secondary`") and Goal 3 ("Per-contact and family picks keep winning as the chain's preferred input"); feature constitution Feature Constraint 5 ("No per-contact primary/secondary storage. Per-contact and family picks keep winning as the input to the chain; this feature adds only the settings-level preference."); workflow scope comment ("per-contact pick wins as preferred").
+**Area:** Photo / Write Path · **Priority:** MUST (safety-critical)
+**Source:** Owner request ask 2; feature constitution Photo contract properties 1 and 5 and
+Feature Constraint 5; workflow `security-design-review` focus (write authority blast radius).
+Surfaces: no `CNSaveRequest` exists in the app today — new injectable write seam (design-l1);
+family editor photo setter (`PhotosPicker` :2485, picked-photo load :2511); `ContactPhotoStore`.
 
-#### Description
-The chain's **preferred** input **must** be determined as follows:
-
-- When the call target has an explicit pick, that pick is preferred. Sources, per existing seam: the address-book row's `ChannelPreferenceStore` preference (`resolvedCallChannel`'s `explicit`), and the family contact's pick as the button/dial-back vocabulary yields it (audio buttons: `FamilyContact.resolvedAudioApp`; video buttons: `resolvedVideoApp`; missed-call dial-back: the matched family contact's audio pick, as today).
-- When no explicit pick exists, the settings **primary** (`defaultCallApp`) is preferred.
-
-The settings **fallback** (`secondaryCallApp`) is always the chain's secondary step, and `.phone` always the terminal floor (FR-CDP-007). Consequence to pin: when an explicit pick exists and is infeasible, the next attempt is the settings fallback — the settings primary is not consulted in that case (the chain is `preferred → secondary → phone`, not `explicit → primary → secondary → phone`).
-
-**No per-contact primary/secondary storage is introduced**: explicit picks remain inputs to the settings-level chain only (Feature Constraint 5, out of scope otherwise).
-
-#### Acceptance criteria
+When a photo is set for a family contact whose system record is writable and linked, the app
+**must** update ONLY that one system contact's photo: `CNContactStore`/`CNSaveRequest` confined
+to the edited contact's own linked record (one contact at a time, never a bulk rewrite, never
+another contact; wrong-target writes prevented by construction); no other field of the system
+record is ever modified; the write carries photo data only while the app-local write continues
+on today's path; a failed/rejected write is a no-op on the system side (never a partial
+mutation); no system write for an unlinked contact (today's behavior exactly); the seam is
+injectable for tests.
 
 ```gherkin
-Feature: Chain preferred input precedence
+Feature: Photo write confined to the edited contact
 
-  Scenario: An explicit per-contact pick is the preferred input
-    Given an address-book row has an explicit channel preference of WhatsApp
-    And the settings primary is FaceTime
-    When the row's call resolves
-    Then the chain's preferred input is whatsApp
+  Scenario: Setting a photo updates only that contact's photo on the system side
+    Given a linked family contact whose system record is writable
+    When the family member sets or changes the contact's photo
+    Then the added system record is exactly the edited contact's linked record
+    And it carries only the photo change — verified by read-back
+    And the app-local photo is stored as today
 
-  Scenario: Without an explicit pick the settings primary is the preferred input
-    Given the target has no per-contact or family pick
-    And the settings primary is Messenger
-    When the call resolves
-    Then the chain's preferred input is messenger
+  Scenario: The save touches no other contact and no other field (confinement)
+    Given any photo set through the editor
+    When the resulting save request is inspected in tests
+    Then it targets exactly one contact — the edited contact's linked record
+    And it contains only the photo field
+    And no bulk or multi-contact mutation exists
 
-  Scenario: An infeasible explicit pick moves to the settings fallback, not the settings primary
-    Given the target's explicit pick is Messenger with no handle on file
-    And the settings primary is FaceTime
-    And the settings fallback is WhatsApp
-    When the call resolves
-    Then the chain attempts whatsApp next
-    And FaceTime is not consulted as a chain step
+  Scenario: A failed write is a no-op on the system side (failure)
+    Given a writable-looking system record and a save that fails
+    When the failure occurs
+    Then the system record is unchanged — no partial mutation, no corruption
+    And the app-local photo is intact
+
+  Scenario: An unlinked contact never triggers a system write
+    Given a family contact with no link
+    When the family member sets a photo
+    Then the photo is stored app-local exactly as today
+    And no system write is attempted
 ```
 
-#### Related
-- FR: FR-CDP-007 (the chain), FR-CDP-010/011 (call paths that supply the explicit input), FR-CDP-012 (voice path's separate chain)
-- NFR: NFR-CDP-009 (regression pin on per-contact behaviour)
+**Related:** FR-FCU-002/007/009/010 · NFR-FCU-002/009.
 
-### FR-CDP-010: Address-book and family-contact call buttons route the chain
+### FR-FCU-009: Write authorization — full, limited and denied are all honest states, detected not assumed
 
-#### Metadata
-- **Area:** Call Paths / Tap Buttons
-- **Priority:** MUST
-- **Source:** Frozen design §4 ("`resolvedCallChannel` ... run the chain ... Call sites updated: address-book row buttons (`LeafViews.swift:1612`), family-contact buttons ...") and Goal 3; feature constitution "In scope" ("Applying the chain to **all** call paths: address-book + family-contact call buttons"); workflow scope comment; DV-6.
+**Area:** Photo / Authorization · **Priority:** MUST (safety-critical)
+**Source:** Feature constitution Photo contract property 2 and Feature Constraints 4–5; Safety &
+Compliance Delta (write authority); workflow `security-design-review`/`security-test` focus.
+Surfaces: `ContactsAccess` (:245; `.restricted` → `.denied`), `Info.plist`
+`NSContactsUsageDescription` (:115 — read/search-oriented copy must gain the write disclosure);
+family editor photo setter; project constitution (point-of-use permissions with plain-language
+explanation).
 
-#### Description
-Every tap-initiated call button **must** resolve through the chain (FR-CDP-007):
-
-- **Address-book row call buttons** (`LeafViews.swift` ~L1612, resolving through `AppCoordinator.resolvedCallChannel`) — the row's explicit `ChannelPreferenceStore` pick (when present) is preferred, else the settings primary; feasibility from the target's handle (FR-CDP-004) and the WhatsApp probe (FR-CDP-005); GSM terminal.
-- **Family-contact call buttons** (audio/video) — the contact's preference as the button vocabulary yields it is preferred, else the settings primary; same chain and feasibility.
-
-Binding properties:
-- The existing button vocabulary **must** be preserved: audio buttons never resolve to FaceTime and video buttons never to the GSM dialer (`CallApp.supportsAudio` / `supportsVideo` gates unchanged); a deliberate tap still needs no voice confirmation (the tap IS the confirmation — unchanged).
-- The previous Messenger-no-handle hard rule **must** become one case of the chain (an infeasible preferred channel hops to the fallback, then GSM).
-- A tap **must never dead-end**: when the row's or contact's preferred channel is infeasible, the chain routes to the next attemptable channel and the call is attempted.
-
-#### Acceptance criteria
+The write path **must** handle authorization honestly: permission requested at the point of use
+(family editor photo setter) with plain-language explanation; full / limited (selected-contacts)
+/ denied / restricted / read-only are all honest states with per-record writability DETECTED,
+not assumed; the app never claims an unverified write succeeded ("updated" only after
+confirmation); `NSContactsUsageDescription` honestly discloses the photo-updating use when the
+write surface ships; the elderly user is never asked to reason about address-book authorization
+(any explanation lives in the family member's editor); denial is never nagged.
 
 ```gherkin
-Feature: Tap call buttons route the chain
+Feature: Honest authorization states for the photo write
 
-  Scenario: An infeasible row preference falls back instead of dead-ending
-    Given an address-book row resolves to Messenger with no handle on file
-    And the settings fallback is phone
-    When the user taps the row's call button
-    Then the call is attempted via the fallback channel
-    And the tap never dead-ends
+  Scenario: Limited access with the edited contact writable
+    Given Contacts access is limited to selected contacts
+    And the edited contact is among the visible, writable ones
+    When a photo is set
+    Then the write proceeds and success is only shown once the save is confirmed
 
-  Scenario: A feasible preference keeps today's behaviour
-    Given a row's preferred channel is feasible
-    When the user taps the row's call button
-    Then the preferred channel is opened exactly as before the feature
+  Scenario: Limited access with the edited contact not writable
+    Given Contacts access is limited and the edited contact is not writable under it
+    When a photo is set
+    Then the contact is detected as non-writable — not assumed
+    And the app-local fallback applies per FR-FCU-010
+    And no false success is shown
 
-  Scenario: Equal picks with an infeasible preferred channel reach the GSM floor
-    Given the preferred and fallback channels are the same infeasible channel
-    When the user taps a row's call button
-    Then the channel is attempted at most once
-    And the call is attempted via tel: (GSM)
+  Scenario: Access denied — no nagging, honest fallback (failure)
+    Given Contacts access is denied or restricted
+    When a photo is set
+    Then no write is attempted or claimed
+    And no repeating permission prompt is shown
+    And the app-local fallback applies per FR-FCU-010
+
+  Scenario: An unverified save is never presented as success
+    Given a save the system does not confirm
+    When the photo flow completes
+    Then the app does not claim the system contact was updated
+
+  Scenario: The permission copy discloses the photo-updating use
+    Given the write surface ships
+    When the Contacts permission prompt is read
+    Then its copy plainly describes reading/searching and updating a contact's photo
 ```
 
-#### Related
-- FR: FR-CDP-004/005 (feasibility inputs), FR-CDP-007 (the chain), FR-CDP-009 (preferred input), FR-CDP-011 (dial-back), FR-CDP-016 (routed-channel announcement)
-- NFR: NFR-CDP-001 (never dead-ends), NFR-CDP-009 (no regression to shipped tap behaviour)
+**Related:** FR-FCU-007/008/010 · NFR-FCU-002/005/009.
 
-### FR-CDP-011: Missed-call dial-back routes the chain
+### FR-FCU-010: Non-writable fallback — no loss, no false success, no crash
 
-#### Metadata
-- **Area:** Call Paths / Missed-Call Dial-back
-- **Priority:** MUST
-- **Source:** Frozen design §4 ("`resolvedMissedCallChannel` ... run the chain ... missed-call dial-back") and Goal 3; feature constitution "In scope" ("missed-call dial-back") and Out of scope ("Emergency-contact semantics"); workflow `security-design-test` focus ("dial-back must never delay an emergency escalation"); DV-6.
+**Area:** Photo / Fallback & Degradation · **Priority:** MUST (safety-critical)
+**Source:** Feature constitution Photo contract properties 4 and 6, Feature Constraint 4
+(pre-authorized fallback); DV-4; workflow `security-test` focus.
 
-#### Description
-Missed-call dial-back **must** run the chain: `resolvedMissedCallChannel` / `missedCallDialAction` resolve preferred → secondary → `.phone` with feasibility from the row's matched family contact (handle availability) and the WhatsApp probe (FR-CDP-005). The preferred input is the matched family contact's audio pick when one exists (as today, FaceTime excluded by the audio vocabulary), else the settings primary (`defaultCallApp`).
-
-Existing honest dial-back behaviours **must** be preserved unchanged:
-- A row with no number opens the Phone app (the call genuinely lives in Recents) — no resolution chain involved.
-- A number that normalizes to nothing dialable speaks the existing honest line (`call.announce.noPhoneNumber`) and places no call — never a silent dead tap.
-- No silent tap: every dial-back outcome is either an open or a spoken line.
-
-Emergency-contact semantics are untouched by this requirement (FR-CDP-018); dial-back routing **must not** delay or reroute an emergency escalation.
-
-#### Acceptance criteria
+When the system contact is not writable — permission denied, limited access without this
+contact, read-only record, save failure — **or there is no link at all**: the picked photo stays
+app-local exactly as today (`ContactPhotoStore` `photoFilename`; non-throwing best-effort stack
+preserved); the photo is never lost and the UI never claims an unverified success; the failure
+is a no-op on the system side (FR-FCU-008) and produces no failure dialog for the elderly user;
+no crash, no thrown error; display per FR-FCU-007 (app-local photo, else initials); the fallback
+is a labeled state in the editor and silent/neutral on the parent's surfaces; a later photo set
+with writable access can update the system record (retroactive push design-level).
 
 ```gherkin
-Feature: Missed-call dial-back routes the chain
+Feature: App-local fallback when the system contact is not writable
 
-  Scenario: A dial-back with an infeasible preferred channel falls back
-    Given a missed-call row matches a family contact
-    And the preferred channel for that dial-back is infeasible (e.g. Messenger with no handle)
-    And the settings fallback is feasible
-    When the user taps the row to dial back
-    Then the chain resolves to the fallback (or GSM) channel
-    And the dial-back is attempted, never dead-ended
+  Scenario: Write access denied — the picked photo stays app-local, nothing lost
+    Given a linked contact whose system record is not writable (denied/limited/read-only)
+    When the family member sets a photo
+    Then the photo is stored app-local exactly as today
+    And it is displayed per the photo precedence
+    And an honest state identifies the photo as kept on this phone
+    And nothing crashes and no photo is lost
 
-  Scenario: A numberless row keeps the honest Phone-app open
-    Given a missed-call row has no number
-    When the user taps the row
-    Then the Phone app opens (the call lives in Recents)
-    And no call is placed by the app
+  Scenario: Save failure keeps the app-local photo, no false success (failure)
+    Given a writable-looking system record and a save that fails
+    When the failure occurs
+    Then the system record is unchanged (no-op)
+    And the picked photo remains app-local
+    And no success is claimed and no failure dialog interrupts the elderly user
 
-  Scenario: A non-dialable number keeps the honest spoken line
-    Given a missed-call row has a number that normalizes to nothing dialable
-    When the user taps the row
-    Then the app speaks the existing honest line (call.announce.noPhoneNumber)
-    And no call is placed
-    And no silent tap occurs
+  Scenario: No link — today's behavior exactly
+    Given a family contact with no link
+    When the family member sets a photo
+    Then the app-local path applies exactly as before this feature
+    And no error appears anywhere
 ```
 
-#### Related
-- FR: FR-CDP-007 (the chain), FR-CDP-009 (preferred input), FR-CDP-010 (button paths), FR-CDP-016 (routed-channel announcement), FR-CDP-018 (emergency semantics untouched)
-- NFR: NFR-CDP-001 (never dead-ends), NFR-CDP-009 (regression pin on dial-back)
+**Related:** FR-FCU-007/008/009 · NFR-FCU-002/005.
 
-### FR-CDP-012: Voice path — MethodResolver global default becomes the settings primary, mapped by call type
+### FR-FCU-011: Multi-nickname storage, as entered, with no-loss migration
 
-#### Metadata
-- **Area:** Voice Path / Method Resolution
-- **Priority:** MUST
-- **Source:** Frozen design §5 bullet 1 ("`MethodResolver`'s global-default step (currently hardcoded `.phone`) becomes the **settings primary**, mapped `CallApp → CallMethod` by call type ... Injected (closure/config struct) so `MethodResolver` stays coordinator-free and unit-testable") and Goal 3; feature constitution "In scope" bullet 4 and "Integration Surfaces"; workflow scope comment ("MethodResolver global-default step → settings primary, mapped CallApp→CallMethod by call type"); DV-6.
+**Area:** Nicknames / Storage & Migration · **Priority:** MUST
+**Source:** Owner request ask 3; feature constitution Nickname contract properties 1 and 7,
+Feature Constraint 2; Open Decision 2 RESOLVED (store-as-entered, no auto-transliteration);
+DV-6. Surface: `FamilyContactStore` (single `nickname` :71, custom decoder :122-150).
 
-#### Description
-`MethodResolver`'s global-default step (step 4, today hardcoded `.phone` at `MethodResolver.swift:74-78`) **must** resolve to the settings primary (`defaultCallApp`), mapped `CallApp → CallMethod` by call type:
-
-| Settings primary | Audio call | Video call |
-|---|---|---|
-| `phone` | `.phone` | `.phone` |
-| `faceTime` | `.facetimeAudio` | `.facetimeVideo` |
-| `messenger` | `.messengerAudio` | `.messengerVideo` |
-| `whatsApp` | `.whatsappChat` | `.whatsappChat` |
-
-Binding rules:
-- Steps 1–3 of the existing chain (explicit mention → family preference → confirmed history) **must** be unchanged and keep outranking the global-default step (`ResolutionSource` values still pin which step won).
-- The mapped value **must** be supplied through injection (closure/config struct) so `MethodResolver` stays coordinator-free and unit-testable — it **must not** read coordinator state directly.
-- Out of the box the settings primary defaults to `.phone`, so the zero-configuration behaviour remains the universal GSM fallback.
-
-#### Acceptance criteria
+Each family contact **must** support MULTIPLE nicknames/name variations, stored explicitly **as
+entered**: no automatic transliteration/romanization ("sanu" and "सानु" are distinct unless both
+stored); the existing single `nickname` migrates into the multi-nickname structure without loss
+and remains matchable in BOTH search and voice (DV-6); payloads from before the field existed
+keep loading; whitespace-only entries are not stored; round-trips preserve entries and order as
+entered; a contact with no nicknames behaves exactly as today; the stored entries are the source
+of truth (any index is derived — NFR-FCU-001).
 
 ```gherkin
-Feature: Voice-path global default
+Feature: Multiple nicknames stored as entered
 
-  Scenario: With nothing else configured, the settings primary is used, mapped by call type
-    Given no explicit app mention, no family preference and no confirmed history
-    And the settings primary is FaceTime
-    When the user asks to call a contact without naming an app (audio)
-    Then the resolved method is .facetimeAudio with source .globalDefault
-    And when the request is a video call, the resolved method is .facetimeVideo
+  Scenario: Multiple variations are stored as entered and survive a round-trip
+    Given a family contact whose name is "सीता शर्मा"
+    When the family member records the nicknames "sanu" and "सानु"
+    Then both entries are stored exactly as entered, with no transliteration applied
+    And both survive a save/load round-trip
 
-  Scenario: The mapping covers every channel
-    Given no explicit app mention, no family preference and no confirmed history
-    Then a settings primary of WhatsApp resolves to .whatsappChat
-    And a settings primary of Messenger resolves to .messengerAudio (audio) or .messengerVideo (video)
-    And a settings primary of phone resolves to .phone
+  Scenario: The pre-change single nickname migrates without loss
+    Given a payload carrying the old single nickname field
+    When the store is read
+    Then the nickname appears in the multi-nickname structure
+    And it still matches in search and in voice resolution
 
-  Scenario: Explicit mentions still outrank the global default
-    Given the settings primary is FaceTime
-    When the user explicitly asks for WhatsApp
-    Then the resolved method is .whatsappChat with source .explicit
-    And family preferences and confirmed history likewise still outrank the settings primary
+  Scenario: A pre-field payload loads nickname-less (migration)
+    Given a payload written before the nickname field existed
+    When the store is read
+    Then the contact loads with no nicknames
+    And it behaves exactly as today
+
+  Scenario: Whitespace-only entries are not stored (edge)
+    Given the family member enters only spaces as a nickname
+    When the contact is saved
+    Then no nickname entry is stored
+    And no query can match on an empty entry
 ```
 
-#### Related
-- FR: FR-CDP-013 (fallback applied before the confirmation), FR-CDP-017 (localised copy), FR-CDP-014 (override preserved)
-- NFR: NFR-CDP-008 (MethodResolverTests pin the mapping), NFR-CDP-009 (no regression to steps 1–3)
+**Related:** FR-FCU-012/013/015 · NFR-FCU-001/006.
 
-### FR-CDP-013: Fallback resolves before the spoken confirmation; the prompt names the routed channel
+### FR-FCU-012: Nickname matching in in-app search
 
-#### Metadata
-- **Area:** Voice Path / Spoken Confirmation
-- **Priority:** MUST
-- **Source:** Frozen design §5 bullet 2 ("`requestCallConfirmation` runs the feasibility fallback BEFORE pending the action ... The confirmation prompt names the routed channel and discloses what was skipped — \"Messenger isn't available — call Syanu via WhatsApp, okay?\"") + Goal 4 + Decision 5; feature constitution "In scope" bullet 5 and Feature Constraint 6; workflow `security-design-review` focus ("the spoken confirmation names the actually-routed channel (`fellBackFrom`); no silent route changes"); DV-2.
+**Area:** Nicknames / Search Matching · **Priority:** MUST
+**Source:** Owner request ask 3; feature constitution Nickname contract properties 2–5 and
+Feature Constraint 3; DV-5. Surfaces: `UnifiedContactSearch.familyMatches` (:217 — nickname NOT
+matched today), `FamilyMatchTier` (:155), `NepaliTextNormalizer`.
 
-#### Description
-`requestCallConfirmation` **must** run the feasibility fallback **before** pending the action and rendering the prompt:
-
-- The existing Messenger-no-handle refusal becomes a chain hop: Messenger without a usable handle → the settings secondary → GSM. The elder is never asked to yes/no an action that can only fail (the existing no-yes/no-trap property is preserved).
-- The confirmation prompt **must** name the actually-routed channel and disclose what was skipped, composed from `fellBackFrom` (FR-CDP-008) — e.g. "Messenger isn't available — call Syanu via WhatsApp, okay?" — via the new catalog key `router.call.fallbackDisclosure` (ne/en, FR-CDP-017).
-- On "yes", the call executes on the routed channel; the context carries the routed channel (not the originally-preferred one) into execution and the flywheel capture.
-- The existing multi-turn confirmation machinery **must** be reused exactly (Decision 5, Feature Constraint 6): pend → open the existing confirmation window → yes/no → execute/override/timeout, with **no new dialogue flow**, no new question kind and no new state.
-- When nothing falls back, the prompt is exactly today's wording.
-
-#### Acceptance criteria
+`UnifiedContactSearch` **must** match a typed query against the stored name OR ANY
+nickname/variation, with semantics IDENTICAL to today's family-name matching — reuse, do not
+fork: `NepaliTextNormalizer` folding (NFC forms, Devanagari digits, lowercasing, punctuation);
+Character-safe substring with `[.caseInsensitive, .diacriticInsensitive]`; the grapheme
+behavior regression-pinned (NFR-FCU-007, no "fixes"); tier discipline — a nickname hit ranks
+below an exact stored-name match and above raw containment, with the relationship tier unchanged
+(exact tier insertion design-l1's to fix); linked pairs found via nickname still yield one row
+(FR-FCU-003); no transliteration bridging (cross-script matches only when both spellings
+stored).
 
 ```gherkin
-Feature: Fallback applied before the spoken confirmation
+Feature: Nickname matching in in-app search
 
-  Scenario: The prompt names the routed channel and discloses the skip
-    Given the settings primary is Messenger and the contact has no handle on file
-    And the settings fallback is WhatsApp
-    When the user asks to call the contact without naming an app
-    Then the pending action is built for WhatsApp (not the infeasible Messenger)
-    And the spoken confirmation names WhatsApp as the channel and discloses that Messenger was unavailable
-    And on "yes" the call executes via WhatsApp
+  Scenario: The query equals a stored nickname
+    Given a family contact with the nickname "sanu"
+    When the user types "sanu"
+    Then the contact matches
 
-  Scenario: Both channels infeasible route to GSM with the floor announced
-    Given the settings primary and fallback are both infeasible for the target
-    When the user asks to call the contact
-    Then the pending action is a phone (GSM) call
-    And the spoken confirmation names the phone channel via the floor
+  Scenario: The query is a substring of a nickname
+    Given a family contact with the nickname "सानु"
+    When the user types "सान"
+    Then the contact matches under the same substring semantics as name matching
 
-  Scenario: No fallback keeps today's prompt
-    Given the preferred channel is feasible
-    When the user asks to call the contact
-    Then the confirmation prompt is unchanged from before the feature
-    And no fallback disclosure is appended
+  Scenario: An exact stored-name match outranks a nickname match
+    Given contact A matches the query exactly by stored name
+    And contact B matches the same query by nickname
+    When results are ranked
+    Then A ranks above B
+
+  Scenario: Cross-script is not bridged (failure/edge)
+    Given a family contact whose only nickname is "सानु"
+    When the user types "sanu"
+    Then the contact does not match
+    And no transliteration is attempted
 ```
 
-#### Related
-- FR: FR-CDP-007/008 (chain + provenance), FR-CDP-012 (method resolution feeding this), FR-CDP-014 (override lines compose with the disclosure), FR-CDP-016 (no ask-before-fallback)
-- NFR: NFR-CDP-003 (no content leakage in prompts/logs), NFR-CDP-008 (wording pinned by tests)
+**Related:** FR-FCU-003/011/013/014 · NFR-FCU-001/004/007.
 
-### FR-CDP-014: Override protocol and near-miss disclosure preserved unchanged
+### FR-FCU-013: Nickname matching in voice call resolution
 
-#### Metadata
-- **Area:** Voice Path / Override Protocol
-- **Priority:** MUST
-- **Source:** Frozen design §5 bullet 2 ("The override protocol and near-miss disclosure are preserved unchanged") + Goal 4 + Decision 5; feature constitution Feature Constraint 6 ("the override protocol (\"होइन, फोन नै गर\") is preserved unchanged"); workflow scope comment; DV-5.
+**Area:** Nicknames / Voice Resolution · **Priority:** MUST
+**Source:** Owner request ask 3; feature constitution Nickname contract properties 2 and 5 and
+Feature Constraint 7; DV-2. Surfaces: `ContactResolver` (anchors :41, scoring :93, accept 0.6 /
+margin 0.15 :61–62), `MethodResolver` (`resolve` :47 — also edited by call-dialer; sequence per
+NFR-FCU-008).
 
-#### Description
-The call-confirmation correction protocol **must** keep working exactly as today (`handleCallConfirmationOverride`):
-
-- "होइन, फोन नै गर" (or any method-amendment utterance) **must** still amend the pending call action's method, re-confirm once, and let the following yes/no execute as normal — the override pair remains the flywheel's capture.
-- The existing no-handle gate on overrides **must** be preserved: amending to Messenger for a contact with no usable handle speaks the existing refusal line (`router.call.messengerNoHandle`) and keeps the original action pending, so "हो" still places the original and a further correction still re-plans.
-- The **near-miss disclosure** **must** be preserved: a near-miss contact resolution is still disclosed in the same utterance as the confirmation (heard name + proposed name), before the yes that gates the call.
-- The fallback disclosure (FR-CDP-013) **must** compose with — never replace or suppress — these existing lines; an override after a fallback still executes the amended method through the normal confirmation.
-
-#### Acceptance criteria
+Voice call resolution **must** resolve a spoken name OR any nickname/variation (including
+Devanagari forms), reusing the existing deterministic path: same normalization/scoring discipline
+(`NepaliTextNormalizer` folding, honorific stripping, existing bands) — no fork; a nickname hit
+is never upgraded to an exact-name match; the accept threshold (0.6) and ambiguity margin (0.15)
+discipline preserved; relationship anchors unchanged; "LLM proposes, code disposes" preserved;
+once resolved, `MethodResolver`'s chain (explicit → family preference → confirmed history →
+global default) is unchanged; cross-script not bridged (existing honest not-found/near-miss
+behavior applies).
 
 ```gherkin
-Feature: Override protocol and near-miss disclosure preserved
+Feature: Nickname matching in voice call resolution
 
-  Scenario: The phone override still switches the call and re-confirms once
-    Given a call confirmation is pending (with a fallback disclosure if a fallback occurred)
-    When the user says "होइन, फोन नै गर"
-    Then the pending method is amended to a phone call
-    And the confirmation is re-asked once
-    And a following "हो" executes the phone call
+  Scenario: "call <nickname>" reaches the right person
+    Given a family contact with the nickname "sanu"
+    When the user says "sanu लाई कल गर" / "call sanu"
+    Then that contact is resolved and the standard confirmation names them
 
-  Scenario: The override no-handle gate is preserved
-    Given a call confirmation is pending for a contact with no usable Messenger handle
-    When the user overrides to Messenger
-    Then the existing refusal line is spoken
-    And the original pending action stays pending
-    And "हो" still places the original call
+  Scenario: A Devanagari variation resolves
+    Given a family contact with the Devanagari nickname "सानु"
+    When the user says "सानुलाई फोन गर"
+    Then that contact is resolved
 
-  Scenario: Near-miss disclosure is preserved alongside a fallback disclosure
-    Given the heard name resolves only as a near miss and the chain fell back to another channel
-    When the confirmation is spoken
-    Then the utterance discloses the heard name and the proposed name
-    And it also names the routed channel and the skipped channel
-    And the call executes only after "yes"
+  Scenario: A nickname is never upgraded to the exact-name band
+    Given a contact whose nickname equals the spoken query
+    And another contact whose stored name equals the same query
+    When resolution runs
+    Then the exact stored-name match outranks the nickname hit
+    And the nickname is not treated as an exact-name match
+
+  Scenario: Cross-script is not bridged (failure/edge)
+    Given a contact whose only nickname is "सानु"
+    When the user says "sanu"
+    Then the contact is not resolved from that alone
+    And the existing honest not-found/near-miss behavior applies
 ```
 
-#### Related
-- FR: FR-CDP-012/013 (voice path + fallback disclosure), FR-CDP-018 (no new dialogue flow)
-- NFR: NFR-CDP-009 (regression pin on the override machinery)
+**Related:** FR-FCU-004/011/012/014 · NFR-FCU-001/007/008.
 
-### FR-CDP-015: Launch-fail fallback (best-effort), announced via the existing spoken-outcome lane
+### FR-FCU-014: An ambiguous nickname never silently dials the wrong person
 
-#### Metadata
-- **Area:** Launch / Recovery
-- **Priority:** MUST
-- **Source:** Frozen design §6 ("If the resolved channel's open itself fails (iOS reports failure, or `CallLinks` returns a failure outcome), attempt the fallback, then `phone`, announcing via the existing spoken-outcome lane. Never silent.") and Decision 1 ("Fallback trigger = pre-flight feasibility + launch-failure"); feature constitution "In scope" bullet 6 and Feature Constraint 8; DV-3.
+**Area:** Nicknames / Ambiguity Safety · **Priority:** MUST (safety-critical)
+**Source:** Feature constitution Nickname property 6 (core guarantee); Safety & Compliance
+Delta; DV-2. Surface: `ContactResolver` rivals rule + `.ambiguous` outcome + `nearMiss`
+discipline.
 
-#### Description
-If the resolved channel's open itself fails — iOS reports the open failed, or `CallLinks` returns a failure outcome (e.g. `FaceTimeOutcome.unavailable`, an open refused) — the app **must** attempt the next channel down the chain (the remaining fallback step, then `.phone` as the floor), announcing the outcome via the existing spoken-outcome lane (new key `call.announce.launchFailedFallback`, ne/en).
-
-Binding rules:
-- The hop is **best-effort** (an extra attempt is made); the binding guarantees are: it is attempted **automatically** (no ask — FR-CDP-016), and a launch failure is **never silent** — the final outcome is always spoken through the existing lane.
-- This covers the accepted `canOpenURL` staleness residual (FR-CDP-005): even a stale probe whose channel then fails to open lands on an announced fallback.
-- The failure announcement **must not** leak raw error detail beyond the existing log policy (NFR-CDP-003); it names the channel outcome in the user's language, not internal error content.
-- Emergency paths are untouched (FR-CDP-018): this hop applies to ordinary call initiation, never to emergency escalation.
-
-#### Acceptance criteria
+When a nickname/variation matches several contacts, resolution **must** be conservative and
+deterministic, mirroring `ContactResolver`'s existing rivals rule: two or more plausible matches
+within the margin → ambiguous (the system asks; it never guesses); **core guarantee: resolution
+must never silently dial the wrong person** — no dial until unambiguous or explicitly confirmed;
+deterministic outcomes/ordering (no random tie-breaks); a nickname hit competing with an exact
+name follows the bands (exact name wins); the phone-search list showing all matches is
+legitimate — the guarantee binds the resolution/dial decisions; a unique nickname resolves
+directly (no false disambiguation).
 
 ```gherkin
-Feature: Launch-fail fallback
+Feature: Ambiguity safety for nicknames
 
-  Scenario: A failed open attempts the next chain step and is announced
-    Given the resolved channel's open fails
-    And a fallback step remains
-    When the call is initiated
-    Then the next channel is attempted automatically
-    And the outcome (the fallback routing/failure) is announced via the existing spoken-outcome lane
+  Scenario: An ambiguous nickname asks instead of dialing
+    Given the nickname "sanu" matches two contacts within the ambiguity margin
+    When the user says "call sanu"
+    Then the system reports ambiguity and asks which person
+    And no call is placed until the choice is resolved
+    And the finally chosen person is the one dialed
 
-  Scenario: A failed open with no fallback left attempts GSM
-    Given the resolved channel's open fails
-    And the fallback step was already used or deduped
-    When the call is initiated
-    Then phone (tel:) is attempted as the floor
-    And the outcome is announced — never silent
+  Scenario: Exact name beats a competing nickname (no wrong dial)
+    Given the spoken query exactly equals contact A's stored name
+    And the same query matches contact B only by nickname
+    When resolution runs
+    Then contact A is resolved
+    And contact B is not dialed off that utterance
 
-  Scenario: A launch failure is never a silent failure
-    Given any open fails at launch time
-    When the chain exhausts
-    Then a spoken-outcome line is always produced
-    And no failure detail beyond the existing policy reaches logs
+  Scenario: Resolution is deterministic across runs
+    Given the same contact set and the same ambiguous nickname
+    When resolution is run repeatedly
+    Then the outcome and candidate ordering are identical every time
+    And no flaky or random selection occurs
+
+  Scenario: A unique nickname resolves without false disambiguation
+    Given a nickname recorded for exactly one contact
+    When the user says that nickname
+    Then that contact resolves directly
+    And no unnecessary disambiguation is triggered
 ```
 
-#### Related
-- FR: FR-CDP-005 (probe staleness residual), FR-CDP-006 (floor), FR-CDP-007 (chain), FR-CDP-016 (automatic announced routing), FR-CDP-018 (emergency untouched)
-- NFR: NFR-CDP-003 (log safety), NFR-CDP-001 (never dead-ends)
+**Related:** FR-FCU-004/011/013 · NFR-FCU-005/009.
 
-### FR-CDP-016: Automatic routing with a spoken announcement — no ask-before-fallback
+### FR-FCU-015: Family-editor nickname management UI
 
-#### Metadata
-- **Area:** Call Paths / Announcement
-- **Priority:** MUST
-- **Source:** Frozen design "Decisions (owner-approved)" 1 ("Fallback trigger = pre-flight feasibility + launch-failure; routing is automatic with a spoken announcement — no ask-before-fallback step for the elder"); design §7 (new key `call.announce.fallbackRouted` — "routed-channel announcement"); feature constitution Success ("the call completes via the fallback with a spoken announcement naming the actually-routed channel"); workflow `security-design-review` focus ("no silent route changes"); DV-2, DV-3.
+**Area:** Nicknames / Editor UI · **Priority:** MUST
+**Source:** Owner request ask 3; workflow scope comment (editor + ne/en copy); Feature
+Constraints 11 and 2; surfaces: `FamilyContactsSettingsView` (`SettingsView.swift:1529`;
+nickname step :2575), `AppCoordinator` plumbing (`addFamilyContact` :6515, `updateFamilyContact`
+:6566), `FamilyContactValidation`.
 
-#### Description
-Fallback routing **must** be automatic: the elder is **never** asked "may I fall back?" before the chain routes — the routing happens, and the spoken output names what happened (owner decision 1).
-
-Whenever the chain routes away from the preferred channel, the app **must** speak the routed channel and the skip:
-
-- **Voice path** — inside the existing confirmation utterance (FR-CDP-013), composing from `fellBackFrom`; the confirmation is the announcement (no extra question).
-- **Tap and dial-back paths** — via the existing spoken-outcome lane (the `call.announce.*` family the tap paths already use), composed from `fellBackFrom`, under the new key `call.announce.fallbackRouted` (ne/en).
-- **Launch failure** — via the same lane, under `call.announce.launchFailedFallback` (FR-CDP-015).
-
-Binding rules: there **must** be no silent route change on any path; and when nothing fell back, no fallback announcement is spoken (no added noise for the unchanged case). The exact trigger point of the tap-path announcement (at the open) is design's to fix at design-l1 — the existence, the routed-channel content and the ne/en key are binding.
-
-#### Acceptance criteria
+The family editor **must** let the family member manage multiple nicknames per contact: add,
+edit, remove entries (control shape design-level); the legacy single nickname pre-populates the
+new control (migration visible); saving writes through the normal store path and takes effect
+immediately in search and voice (no restart); a removed entry stops matching immediately; the
+management surface lives with the family contact management in Settings, localized ne/en and
+accessible per house standards; save-gate rules extended only if design makes the new fields
+gate Save (migrating a legacy contact and saving must never be blocked by a new rule).
 
 ```gherkin
-Feature: Automatic, announced fallback routing
+Feature: Nickname management in the family editor
 
-  Scenario: A tap-path fallback routes automatically and speaks the routed channel
-    Given a tap resolves to an infeasible preferred channel
-    When the user taps the call button
-    Then the chain routes without asking the user first
-    And the routed channel is spoken (call.announce.fallbackRouted), naming what was skipped
+  Scenario: Add two variations and use them immediately
+    Given the family member edits a contact
+    When they add the nicknames "sanu" and "सानु" and save
+    Then both are stored
+    And both are immediately matchable in search and in voice resolution
 
-  Scenario: The voice path carries routing and disclosure in one confirmation
-    Given the preferred channel is infeasible for the target
-    When the user asks to call the contact
-    Then a single confirmation utterance carries the routing decision and the disclosure
-    And no separate ask-before-fallback question is spoken
+  Scenario: Editing and removing entries takes effect immediately
+    Given a contact with nicknames "sanu" and "syanu"
+    When the family member removes "syanu" and saves
+    Then "syanu" no longer matches in search or voice
+    And "sanu" still matches
 
-  Scenario: No fallback produces no fallback announcement
-    Given the preferred channel is feasible
-    When any call path initiates the call
-    Then no fallback announcement is spoken
+  Scenario: A legacy contact opens with its nickname pre-populated
+    Given a contact saved with the old single nickname field
+    When the editor opens it
+    Then the old nickname appears as one nickname entry
+    And saving without changes preserves it (no loss)
 ```
 
-#### Related
-- FR: FR-CDP-008 (provenance driving the copy), FR-CDP-013 (voice-path disclosure), FR-CDP-015 (launch-fail lane), FR-CDP-017 (localised keys)
-- NFR: NFR-CDP-003 (announcement content/log policy), NFR-CDP-007 (localisation)
+**Related:** FR-FCU-001/011/012/013 · NFR-FCU-004/005/006.
 
-### FR-CDP-017: Localisation — new ne/en strings; spoken language matches the session
+### FR-FCU-016: Feasibility honesty — the three asks reported explicitly, no silent drop
 
-#### Metadata
-- **Area:** Localisation
-- **Priority:** MUST
-- **Source:** Frozen design §7 ("New ne/en keys in `Localizable.xcstrings`: settings section titles (`settings.calling.primaryTitle`, `settings.calling.secondaryTitle`), confirmation fallback disclosure template (`router.call.fallbackDisclosure`), routed-channel announcement (`call.announce.fallbackRouted`), launch-fail announcement (`call.announce.launchFailedFallback`)"); feature constitution Feature Constraint 9 ("Localization discipline"); project Standards (Localisation); DV-7.
+**Area:** Delivery / Feasibility Reporting · **Priority:** MUST
+**Source:** Owner request 2026-10-12 ("If not feasible, tell the owner"); feature constitution
+Feature Constraint 12 and Success Criteria; workflow design-l1 scope comment.
 
-#### Description
-All new user-visible strings of this feature **must** be externalised in `ios/ElderlyAssistant/Resources/Localizable.xcstrings` with Nepali **and** English values:
-
-| Key | Surface |
-|---|---|
-| `settings.calling.primaryTitle` | Primary dialer section title |
-| `settings.calling.secondaryTitle` | Fallback dialer section title |
-| `router.call.fallbackDisclosure` | Spoken-confirmation fallback disclosure template (contact name + routed channel + skipped channel) |
-| `call.announce.fallbackRouted` | Routed-channel announcement on tap/dial-back paths |
-| `call.announce.launchFailedFallback` | Launch-fail announcement via the spoken-outcome lane |
-
-Binding rules:
-- No hard-coded user-visible string may be introduced; templates take their contact/channel parameters through the existing `L10n.fmt` discipline.
-- Spoken output **must** use the session's active language (`activeLocale`), matching the rest of the call flow.
-- Channel names **must** reuse the existing `app.name.*` catalog keys, so the picker labels, the confirmation and the announcements agree in both scripts.
-- A missing or unknown key **must never** be spoken raw (NFR-CDP-007 pins the completeness check).
-
-#### Acceptance criteria
+The feature's design and sign-off artifacts **must** state, explicitly and per ask (LINK, PHOTO
+unification, NICKNAMES), whether each is feasible and delivered as specified: the statement is
+part of the design record from design-l1 forward and of the final sign-off record (owner-visible
+at the T1 story gate and the T2 sign-off); any infeasible or partially infeasible ask is named
+with the ask, the constraint, the behavior actually delivered, and the pre-authorized fallback
+taken — no silent drop and no claim of delivery; a partially infeasible sub-capability (e.g.
+writes under limited access) is reported as a bounded behavior with its honest fallback; nothing
+about the three asks may be silently omitted.
 
 ```gherkin
-Feature: Localisation of the new strings
+Feature: Feasibility honesty for the three owner asks
 
-  Scenario: A Nepali session hears and sees Nepali
-    Given the session's active language is Nepali
-    When the user opens the dialer settings and a fallback/launch-fail occurs on a call
-    Then the two section titles render in Nepali
-    And the confirmation disclosure and both announcements are spoken in Nepali
-    And the channel names match the picker labels
+  Scenario: All three asks feasible — the report says so with evidence
+    Given LINK, PHOTO unification and NICKNAMES are all feasible as specified
+    When the design and sign-off artifacts are produced
+    Then each ask is stated as delivered
+    And evidence pointers (design sections, tests, DV items) are cited
 
-  Scenario: An English session hears and sees English
-    Given the session's active language is English
-    When the same surfaces are exercised
-    Then every new string renders and is spoken in English
-    And the channel names still match the picker labels
+  Scenario: An infeasible ask is named with its fallback (failure)
+    Given one of the three asks cannot be delivered as specified on the target iOS
+    When the design record and final sign-off are produced
+    Then that ask is named explicitly
+    And the platform constraint and the fallback actually taken are stated
+    And the feature does not claim the ask delivered
 
-  Scenario: No user-visible surface falls back to a raw key
-    Given both language resources are present
-    When the new surfaces are exercised in either language
-    Then no raw catalog key or untranslated fallback string is shown or spoken
+  Scenario: A partially infeasible sub-capability is bounded, not dropped
+    Given a sub-capability (e.g. the write under limited access) delivers only conditionally
+    When the report is produced
+    Then the limitation is stated as a bounded behavior with its honest fallback
+    And it is neither omitted nor overstated
 ```
 
-#### Related
-- FR: FR-CDP-001/002 (section titles), FR-CDP-013 (disclosure), FR-CDP-015/016 (announcements)
-- NFR: NFR-CDP-007 (completeness/parity check)
+**Related:** FR-FCU-009/010/017 · NFR-FCU-009.
 
-### FR-CDP-018: Preserved behaviours — no new dialogue flow, emergency semantics untouched, no silent failures
+### FR-FCU-017: DV-* device validation recorded and passed (completion gate)
 
-#### Metadata
-- **Area:** Safety Boundary / Regression
-- **Priority:** MUST
-- **Source:** Frozen design Goal 4 and non-goals ("No dedicated `CallRouter` service"; "Emergency-contact semantics untouched"; "No changes to the just-shipped voice pipeline beyond the named MethodResolver seam") + Decision 5; feature constitution Out of scope ("A dedicated `CallRouter` service"; "Per-contact primary/secondary storage"; "Emergency-contact semantics"; "A new dialogue flow"; "The no-silent-failure principle ...") and Feature Constraints 6, 7, 8; workflow scope non-goals ("no change to emergency-contact semantics; a new dialogue flow; any new network surface") and `security-design-review` focus ("Emergency precedence untouched ... dial-back must never delay an emergency escalation").
+**Area:** Validation / Completion Gate · **Priority:** MUST
+**Source:** Feature constitution Success Criteria & Completion Gate (DV-1 … DV-6); workflow
+`final-sign-off` comment; house precedent (FR-MTC-020, SP/LCT device-validation protocols).
 
-#### Description
-The feature **must not** change the following behaviours:
-
-- **No new dialogue flow** — the existing multi-turn confirmation (pend → existing confirmation window → yes/no → override/timeout → execute) is reused exactly; no new question kind, no new session state, no new prompt sequence (Decision 5, Feature Constraint 6).
-- **Emergency-contact semantics untouched** — emergency-contact resolution (the existing `NotifyChannel.resolve`-based path) and emergency escalation keep their exact current semantics; the feasibility chain, the probes and the fallback announcements **must not** wrap, reroute or delay emergency paths (Feature Constraint 7's non-goal; workflow security focus).
-- **No silent failures** — every infeasible-preferred, both-infeasible and launch-fail outcome on the new paths is announced through an existing lane (FR-CDP-013/015/016); the existing honest lines (dial-back dead row, override refusal, web-chat disclosure) stay intact.
-- **No `CallRouter` service** — the feature extends the existing resolution seams only; **no per-contact primary/secondary storage** — explicit picks remain chain inputs only (Feature Constraints 5, 7).
-
-#### Acceptance criteria
-
-```gherkin
-Feature: Preserved behaviours at the safety boundary
-
-  Scenario: The emergency path is functionally unchanged
-    Given the emergency-contact resolution and escalation paths
-    When their existing matrix is exercised against a build with this feature
-    Then their outputs are identical to pre-feature behaviour
-    And the chain, feasibility probes and fallback announcements are not applied to them
-    And no escalation is delayed or rerouted
-
-  Scenario: The confirmation mechanics introduce no new dialogue
-    Given a call confirmation is pending
-    When the user answers yes, no, overrides, or lets it time out
-    Then each behaviour is exactly as before the feature
-    And no new question, state or prompt appears
-
-  Scenario: No outcome on the new paths is silent
-    Given an infeasible preferred channel, an infeasible pair, or a launch failure
-    When the call is initiated on any path (tap, dial-back, voice)
-    Then a spoken line names the outcome
-    And zero silent failures occur
-```
-
-#### Related
-- FR: FR-CDP-013/014 (reused confirmation + override), FR-CDP-015/016 (never-silent announcements), FR-CDP-011 (dial-back does not delay escalation)
-- NFR: NFR-CDP-009 (regression evidence), NFR-CDP-002 (no new surface)
-
-### FR-CDP-019: DV-1..7 device validation recorded and passed (completion gate)
-
-#### Metadata
-- **Area:** Validation / Completion Gate
-- **Priority:** MUST
-- **Source:** Feature constitution "Success Criteria & Completion Gate" (DV-1 … DV-7 on the reference device, the DV pattern of prior shipped features, recorded with the feature spec); frozen design §9 ("Completion gate: DV-1..7 device validation on Anzaan"); workflow `final-sign-off` comment ("DV-* device validation on Anzaan is part of the completion gate ...").
-
-#### Description
-The feature **must not** be considered complete until the DV-1..7 checklist from the feature constitution is executed on the reference device (Anzaan), recorded with this feature set, and passed:
-
-- **DV-1** — Settings: Primary + Fallback pickers persist across relaunch (`secondaryCallApp` next to `defaultCallApp`).
-- **DV-2** — Primary infeasible (Messenger, no handle on file) → the call completes via the fallback with the spoken announcement naming the routed channel.
-- **DV-3** — WhatsApp not installed (`canOpenURL` false) → the chain lands on the fallback/GSM with the announcement; a launch failure is announced via the existing spoken-outcome lane (no silent failure).
-- **DV-4** — `secondary == primary` dedupes; both primary and secondary infeasible → `phone` is attempted; zero dead ends.
-- **DV-5** — Override preserved: "होइन, फोन नै गर" still switches to a phone call.
-- **DV-6** — All call paths route the chain: address-book row, family-contact, missed-call dial-back, voice-initiated call (MethodResolver global default).
-- **DV-7** — ne/en copy: pickers, confirmation and announcement strings localised; spoken language matches the session.
-
-Any unresolved or failed DV item **must** block sign-off (the `final-sign-off` task is T2 + HIL); a partial pass is not a completion. The release log-safety gate (`ios/tools/check-release-log-safety.sh`) must also exit 0 as part of the same closure (NFR-CDP-003, NFR-CDP-010).
-
-#### Acceptance criteria
+The feature **must not** be considered done until the DV-* checklist is executed on the
+reference device (Anzaan) and recorded with the feature spec: **DV-1** — link a system contact
+as a family contact → the person appears ONCE in search results (matched AND unmatched queries)
+and in the call list; **DV-2** — voice: "call `<nickname>`" including a Devanagari variation
+reaches the right person, and an ambiguous nickname never silently dials a wrong person;
+**DV-3** — photo write: setting a photo updates the system contact when permission allows, and
+the displayed photo reflects the system contact; **DV-4** — fallback: with write access
+denied/limited (or a read-only system contact) the photo stays app-local, honestly surfaced, no
+loss, no crash; **DV-5** — search by name and by each recorded nickname/variation (Devanagari
+included) finds the single linked row; **DV-6** — migration: an existing install's pre-change
+payloads load and the pre-change single nickname still matches. Each item recorded as passed/
+failed with evidence attached to the feature spec; a failure blocks final sign-off until fixed
+and re-run — no silent waiver. The release-build log-surface evidence accompanies the DV record
+(NFR-FCU-002/009).
 
 ```gherkin
 Feature: Device-validation completion gate
 
-  Scenario: The DV checklist is recorded and passed
-    Given the feature build is installed on the reference device (Anzaan)
-    When DV-1 through DV-7 are executed per the constitution's checklist
-    Then each item passes and its evidence is recorded with the feature spec
-    And the completion gate is satisfied for sign-off
+  Scenario: Every DV item is executed on Anzaan and recorded
+    Given the implementation is complete and the scoped test gates are green
+    When device validation runs
+    Then DV-1 through DV-6 are each executed on the reference device
+    And each result (pass/fail with evidence) is recorded with the feature spec
 
-  Scenario: An unresolved DV item blocks completion
-    Given any DV item is unresolved or fails on the device
-    When final sign-off is considered
-    Then the feature is not signed off
-    And the item is reworked and re-validated (no partial pass)
+  Scenario: Migration is validated on a real existing install (DV-6)
+    Given an existing install with pre-change payloads
+    When the new build is installed over it
+    Then all pre-change contacts load
+    And the pre-change single nickname still matches in search and voice
+
+  Scenario: A failed DV item blocks completion (failure)
+    Given any DV item fails (e.g. the linked person still appears twice)
+    When completion is assessed
+    Then the feature does not pass final sign-off
+    And the failure is fixed and the item re-run before sign-off proceeds
 ```
 
-#### Related
-- FR: FR-CDP-001/002/003 (DV-1), FR-CDP-013 (DV-2), FR-CDP-005 (DV-3), FR-CDP-007 (DV-4), FR-CDP-014 (DV-5), FR-CDP-010/011/012 (DV-6), FR-CDP-017 (DV-7)
-- NFR: NFR-CDP-010 (release/compliance gates the closure runs), NFR-CDP-003 (release log gate)
+**Related:** FR-FCU-001..014 · NFR-FCU-006/009.
+
+---
 
 ## Non-functional requirements
 
-### NFR-CDP-001: The chain never dead-ends — zero dead ends across the exhaustive configuration matrix
+### NFR-FCU-001: Nickname index and matching performance stay within the interaction envelope
 
-#### Metadata
-- **Category:** Reliability / Safety
-- **Priority:** MUST
-- **Source:** Feature constitution Feature Constraint 1 ("GSM hard floor — no dead ends ... Any resolution returns an attemptable channel even when primary and secondary are both infeasible. This is the feature's core guarantee.") and Success ("Calls never dead-end: zero dead-end call attempts when the primary is infeasible"); frozen design Goal 2 ("A call never dead-ends"); workflow `security-design-review` focus ("GSM hard floor ... no configuration (including secondary == primary) may produce a dead-end chain"); DV-4.
+**Category:** Performance · **Priority:** MUST
+**Source:** Feature constitution Nickname property 2 ("Indexed for match performance") and
+Feature Constraint 7; surfaces: `UnifiedContactSearch.search` (per-keystroke; family half
+`familyMatches` :217), `ContactResolver.resolve` (per-utterance).
 
-#### Description
-The resolution chain **must** return an attemptable channel under every possible configuration. Measurable properties:
-
-- **Exhaustive matrix**: for all 4 preferred channels × 4 secondary channels × 4 feasibility states (Messenger handle {available, not on file} × WhatsApp {installed, not installed}) — 64 combinations — the resolver returns exactly one attemptable channel: **100% of combinations, 0 dead ends**.
-- **GSM reachability**: in every combination where the preferred and secondary channels are both infeasible (including a deduped equal pair), the result is `.phone`: **100% of those cells**.
-- **Attempt-at-most-once**: **0** combinations route through the same channel more than once.
-- **No configuration escapes the floor**: no picker pair (including equal values and any ordering) can produce a resolution with no attemptable channel; verified by the exhaustive unit matrix (NFR-CDP-008) rather than by sampling.
-
-#### Acceptance criteria
+Nickname matching **must** be indexed so matching cost is bounded and the interaction envelope
+is not regressed: the index is derived from the stored entries (source of truth) and maintained
+on every add/edit/remove (removed never matches; added matches immediately); measurable
+envelope on the reference device (Anzaan) — with the maximum roster (12 contacts × up to 8
+nicknames = 96 keys) plus address-book entries, the family half of one search query completes in
+**≤ 20 ms** and voice resolution adds **≤ 20 ms**; no unbounded raw-string scans per keystroke;
+index memory proportional to entry count; contacts without nicknames perform exactly as today.
 
 ```gherkin
-Feature: Zero dead ends — the GSM floor guarantee
+Feature: Nickname index and match performance
 
-  Scenario: The exhaustive configuration matrix never dead-ends
-    Given all 4 preferred × 4 secondary × 4 feasibility combinations (64 cells)
-    When the chain resolves each cell
-    Then every cell returns exactly one attemptable channel
-    And zero cells dead-end
+  Scenario: Full-roster matching stays under the latency bounds
+    Given 12 family contacts each with 8 stored nicknames
+    When the family-half search runs for a query and voice resolution runs for a nickname
+    Then the family-half query completes in ≤ 20 ms on the reference device
+    And voice resolution adds ≤ 20 ms
+    And typing/confirmation stays responsive with no perceived regression
 
-  Scenario: Dedupe cannot remove the floor
-    Given secondary == primary
-    And that channel is infeasible
-    When the chain resolves
-    Then the channel is attempted at most once
-    And the result is phone (the floor is still reachable)
+  Scenario: The index reflects edits immediately
+    Given a contact whose nickname was just added or removed
+    When the next query runs
+    Then the added nickname matches and the removed nickname does not
+    And no stale index entry produces a false match
 
-  Scenario: The floor is the terminal result whenever nothing else is attemptable
-    Given the preferred and secondary channels are infeasible
-    When the chain resolves
-    Then phone is returned in 100% of those cases
+  Scenario: No-nickname contacts behave as today
+    Given contacts with no nicknames
+    When search and voice resolution run
+    Then their matching cost and behavior are unchanged from today
 ```
 
-#### Related
-- FR: FR-CDP-006 (always-feasible channels / floor), FR-CDP-007 (chain), FR-CDP-010/011 (tap paths)
-- NFR: NFR-CDP-008 (deterministic matrix proves this), NFR-CDP-009 (regression evidence)
+**Related:** FR-FCU-011/012/013/015 · NFR-FCU-006/009.
 
-### NFR-CDP-002: Feasibility probes are local — no new network, data, identity or privacy surface
+### NFR-FCU-002: PII / log safety — names, nicknames, numbers, links and photos never reach logs
 
-#### Metadata
-- **Category:** Privacy
-- **Priority:** MUST
-- **Source:** Frozen design non-goals ("No new network, data, identity, or privacy surface — feasibility probes are local") and §2 ("local probe only"); feature constitution "Safety & Compliance Delta" ("no new data, network, identity, or privacy surface — the feasibility probes are local (`canOpenURL`, address-book handle check)") and Feature Constraint 8; workflow `security-design-review` focus ("Feasibility probes are local-only: canOpenURL + address-book handle check; no new egress, no new data collection (handles/numbers are PII)").
+**Category:** Privacy / Security · **Priority:** MUST
+**Source:** Feature constitution Safety & Compliance Delta (PII/log discipline, B2/T-050
+precedent) and Feature Constraint 8; workflow `security-design-review`/`security-test` focus;
+project constitution Standards and Release gates.
 
-#### Description
-The feature **must** add no network, data, identity or privacy surface. Measurable properties:
-
-- **Zero new egress**: neither the Messenger handle check nor the WhatsApp probe performs network I/O — **0** socket/HTTP operations on the resolution path (the probe is a local `canOpenURL` scheme check; the handle check reads the existing on-device store).
-- **Zero new hosts/endpoints/permissions**: no new URL host, no new `Info.plist` permission or query-scheme entry (the schemes are already declared), no new entitlement.
-- **Zero new data stores**: the only new persisted datum is the `secondaryCallApp` preference string; numbers/handles remain in their existing stores under the existing policy; no new telemetry or analytics event carries target content.
-- **PII stays local**: no phone number, handle or contact name leaves the device through any new path; the existing egress surfaces and their disclosures are untouched.
-
-#### Acceptance criteria
-
-```gherkin
-Feature: Local-only feasibility
-
-  Scenario: Resolution performs no network I/O
-    Given a build exercising the feasibility probe and handle check
-    When any target is resolved through the chain
-    Then zero network requests are made by the resolution path
-    And the probe only queries the local scheme availability
-
-  Scenario: No new permission, store or host is introduced
-    Given the feature's build diff
-    When permissions, Info.plist declarations, stored data and network hosts are inspected
-    Then zero additions exist beyond the secondaryCallApp preference string
-    And the existing privacy surfaces and disclosures are unchanged
-```
-
-#### Related
-- FR: FR-CDP-004/005 (the two probes), FR-CDP-018 (no new surface)
-- NFR: NFR-CDP-003 (log surface), NFR-CDP-010 (compliance gates)
-
-### NFR-CDP-003: Log safety — numbers, handles and announcement content never reach logs beyond the existing policy
-
-#### Metadata
-- **Category:** Privacy / Security
-- **Priority:** MUST
-- **Source:** Workflow `security-design-review` focus ("Log sanitisation: numbers/handles must not reach logs beyond the existing transcript policy (B2/T-050)") and the workflow header ("The release-build log-surface gate `ios/tools/check-release-log-safety.sh` (wired into ios/build.sh) must cover the new fallback/announcement paths"); project constitution Release gates (release-build log-surface gate; pre-release device check) and Standards (logs must not contain PII — log sanitiser required); feature constitution "Safety & Compliance Delta".
-
-#### Description
-No phone number, Messenger handle, contact name or announcement content **must** reach any log, telemetry event or diagnostic surface beyond the existing transcript policy (the B2/T-050 precedent is binding). Measurable properties:
-
-- **Zero raw content**: a Release build exercising the chain (a fallback hop, a dedupe-to-GSM, a launch failure, a tap and a voice fallback) produces **0** raw numbers, handles, contact names or announcement strings in console/log output.
-- **Classification-only observability**: chain/fallback events may carry non-content classifications (event name, channel enum values, `fellBackFrom` channel enum values) — never the target's number, handle or name.
-- **Release gate**: `ios/tools/check-release-log-safety.sh` (wired into `ios/build.sh` ahead of every test scope) **exits 0** with the new chain/fallback/announcement paths in scope.
-- **Pre-release device check**: the pre-release console/sysdiagnose check covers a fallback and a launch failure on the reference device.
-
-#### Acceptance criteria
+No raw personal data from the new paths **must** reach any log, telemetry event or diagnostic
+surface beyond the existing transcript policy (B2/T-050): zero occurrences of raw contact names,
+nicknames, phone numbers, system-contact identifiers/link values, photo data or address-book
+contents across a Release-build exercise of the new paths (link/dedupe, photo write and
+failure, fallback, nickname resolution, ambiguity, unlink, stale-link degradation);
+classification-only observability (event kind, outcome, reason code — never content); errors
+(`CNSaveRequest` failures, lookup failures) log reason codes, never payloads or identities;
+`ios/tools/check-release-log-safety.sh` exits 0 with the new write/fallback/resolution/dedupe
+source paths covered, plus the pre-release device console check; existing B1/B2 disciplines
+intact across the touched files.
 
 ```gherkin
-Feature: Log safety for the chain and fallback paths
+Feature: Log safety for the contacts-unify paths
 
-  Scenario: Exercising the fallback paths produces no PII in logs
+  Scenario: A Release exercise of the new paths logs no content
     Given a Release build
-    When a preferred-infeasible fallback, a dedupe-to-GSM and a launch failure are exercised on tap and voice paths
-    Then zero raw numbers, handles, contact names or announcement strings appear in the console or logs
+    When link/dedupe, a photo write, the fallback, nickname resolution and an ambiguity outcome are exercised
+    Then no name, nickname, number, identifier or photo data appears in the console or logs
     And only non-content classifications are emitted
 
   Scenario: The release log-safety gate covers the new paths and exits 0
-    Given the feature's chain, fallback and announcement paths exist in the build
+    Given the feature's write/fallback/resolution paths exist in the build
     When ios/tools/check-release-log-safety.sh runs
     Then it exits 0
-    And it inspects the new resolution/announcement call sites
+    And its coverage includes the new source paths
+
+  Scenario: Error paths log no raw content (failure)
+    Given a CNSaveRequest failure or a link-lookup failure
+    When the error is handled
+    Then only a reason classification is recorded
+    And no contact name, number, nickname or identifier reaches the log
 ```
 
-#### Related
-- FR: FR-CDP-013 (confirmation content), FR-CDP-015/016 (announcements), FR-CDP-018 (no silent failures)
-- NFR: NFR-CDP-002 (local-only probes), NFR-CDP-010 (release gates)
+**Related:** FR-FCU-005/006/008/009/010/012/013/014 · NFR-FCU-003/007/009.
 
-### NFR-CDP-004: Fallback-resolution latency budget — local probes at call time, user-paced
+### NFR-FCU-003: No new network egress — contacts, links, nicknames and photos stay on-device
 
-#### Metadata
-- **Category:** Performance
-- **Priority:** MUST
-- **Source:** Frozen design Risks ("`canOpenURL` probe staleness: iOS caches scheme availability; acceptable here — probes run at call time, user-paced, and the launch-fail hop covers the residual case"); workflow scope comment (probes "local", injected); workflow `define-requirements` ("Fallback-resolution latency budget (local probes at call time, user-paced)").
+**Category:** Privacy · **Priority:** MUST
+**Source:** Feature constitution Out of scope and Feature Constraint 8; Safety & Compliance
+Delta; workflow non-goals; project constitution Architecture Constraint 1.
 
-#### Description
-Chain resolution (handle check + local scheme probe + the pure chain computation) **must** add no perceptible delay to call initiation. Measurable properties (reference device: Anzaan):
-
-- **Added latency budget**: ≤ **100 ms** p95 added to the tap path (tap → open attempt) and to the voice path (final utterance → confirmation prompt rendered/spoken), measured over repeated runs.
-- **Zero network waits**: the resolution path performs 0 network operations, so it can add no network-dependent wait (0 ms network-attributable latency).
-- **Call-time evaluation**: probes are evaluated at call time (no background polling loops, no periodic re-probing) — matching the design's "runs at call time, user-paced" model.
-- **No trade against safety**: meeting the budget **must not** be achieved by weakening the never-dead-end guarantee (NFR-CDP-001) or the never-silent announcements (FR-CDP-015/016).
-- **Failure mode**: a probe that cannot answer (platform refusal) is a local, immediate result (treated per the feasibility contract) — it never blocks on a timeout.
-
-#### Acceptance criteria
+The feature **must** add no network surface and no data collection: the link reference,
+nickname entries, system-contact reads and the photo write stay on-device; nothing is
+transmitted anywhere; no telemetry of the new paths' content (NFR-FCU-002's classifications are
+local logging discipline, not an upload); no new `Info.plist` privacy usage keys (the existing
+Contacts authorization, its disclosure updated per FR-FCU-009, is the only permission touch);
+measurable — the diff introduces zero new outbound hosts/APIs and a full Release-build exercise
+makes zero network requests attributable to the feature, completing fully offline.
 
 ```gherkin
-Feature: Resolution stays within the latency budget
+Feature: No new network egress
 
-  Scenario: The tap path stays within the added-latency budget
-    Given the reference device
-    When a call button with a fallback is tapped repeatedly
-    Then the added resolution latency is ≤ 100 ms p95
-    And no network wait contributes to the total
+  Scenario: The feature diff adds no network surface
+    Given the complete feature change set
+    When it is inspected for outbound calls, endpoints and new permission keys
+    Then zero new outbound hosts/APIs exist
+    And no new Info.plist privacy usage keys are added
 
-  Scenario: The voice path is not perceptibly delayed
-    Given a voice-initiated call that falls back
-    When the confirmation prompt is rendered
-    Then the prompt appears within the existing turn envelope with ≤ 100 ms added resolution latency
-    And the guarantee of naming the routed channel is intact
+  Scenario: The flows work offline and transmit nothing
+    Given a Release build with networking unavailable
+    When linking, photo set/fallback, nickname search/voice match and ambiguity are exercised
+    Then every flow completes on-device
+    And no network request attributable to the feature is made
 ```
 
-#### Related
-- FR: FR-CDP-005 (the probe), FR-CDP-007 (the chain), FR-CDP-013 (confirmation timing)
-- NFR: NFR-CDP-001 (guarantees preserved while meeting the budget), NFR-CDP-002 (zero network)
+**Related:** FR-FCU-001..015 (all on-device flows), FR-FCU-009 · NFR-FCU-002/009.
 
-### NFR-CDP-005: `secondaryCallApp` persistence round-trip reliability
+### NFR-FCU-004: Localisation — every new user-visible string exists in ne and en
 
-#### Metadata
-- **Category:** Reliability (Persistence)
-- **Priority:** MUST
-- **Source:** Frozen design §1 (UserDefaults seam, default `.phone`) and §8 ("Settings persistence: `secondaryCallApp` round-trip + `.phone` default"); feature constitution Feature Constraint 4 and DV-1; workflow `design-l1` scope ("persistence for existing installs (secondaryCallApp absent → GSM)").
+**Category:** Localisation · **Priority:** MUST
+**Source:** Feature constitution Feature Constraint 11 and In scope; workflow scope comment;
+project constitution Standards; house precedent `L10nCatalogCoverageTests`.
 
-#### Description
-The `secondaryCallApp` preference **must** be durably persisted through the existing house seam. Measurable properties:
-
-- **Round-trip**: for each of the four channels, select → relaunch → the restored value equals the selection in **100%** of runs of the settings-persistence suite (0 mismatches across repeated runs).
-- **Default**: a fresh install and an upgraded install without the key resolve to `.phone` in **100%** of runs; an unrecognised raw value also resolves to `.phone`.
-- **Immediate durability**: the write is bound to the selection action (`didSet` house pattern) and survives a process kill immediately after selection (relaunch returns the just-selected value).
-- **Isolation**: writing `secondaryCallApp` never mutates `defaultCallApp` and vice versa — **0 cross-writes** in the suite; no other stored key changes value on a fallback selection.
-
-#### Acceptance criteria
+Every new user-visible string (link flow, photo states/fallback labels, permission copy where
+user-visible, nickname management, new empty/honest states) **must** exist in both Nepali and
+English in `ios/ElderlyAssistant/Resources/Localizable.xcstrings`: each new key resolves via
+`L10n.str` in both shipped languages (`en-US`, `ne-NP`) to a non-key value, with the two
+resolutions differing (the coverage-suite discipline — a ne copy pasted from en fails); no
+missing-key fallback text user-visible; the catalog coverage suite extended with the feature's
+keys and passing.
 
 ```gherkin
-Feature: Fallback preference durability
+Feature: Localisation coverage of the new strings
 
-  Scenario: Every channel round-trips identically
-    Given each of FaceTime, phone, Messenger and WhatsApp is selected as the fallback in turn
-    When the app relaunches after each selection
-    Then the restored secondaryCallApp equals the selection in 100% of runs
+  Scenario: Every new key resolves in both shipped languages
+    Given the feature's new user-visible keys
+    When the catalog coverage suite runs
+    Then each key resolves in ne and en via L10n.str to a non-key value
+    And the two resolutions differ
 
-  Scenario: Upgraded installs default to GSM
-    Given an install whose stored state has no secondaryCallApp key
-    When the app launches after the upgrade
-    Then the fallback is phone with no user action required
+  Scenario: A missing or short-copied translation fails the suite (failure)
+    Given a new key without a ne entry (or with an en-copied ne value)
+    When the coverage suite runs
+    Then it fails naming the key
 
-  Scenario: The two preferences are isolated
-    Given a stored primary and a stored fallback
-    When either preference is re-selected
-    Then the other preference's stored value is unchanged
+  Scenario: The in-app surfaces render in the active language
+    Given the active language is Nepali
+    When the family editor, the photo fallback state and the nickname management render
+    Then all new copy is the Nepali string
 ```
 
-#### Related
-- FR: FR-CDP-003 (the seam), FR-CDP-002 (the picker), FR-CDP-007 (the chain reading it)
-- NFR: NFR-CDP-008 (the suite that pins this), NFR-CDP-010 (DV-1 evidence)
+**Related:** FR-FCU-001/009/010/015 · NFR-FCU-005/009.
 
-### NFR-CDP-006: Accessibility of the Primary and Fallback dialer pickers
+### NFR-FCU-005: Accessibility — voice-first capability, house touch standards, no authorization reasoning for the elderly user
 
-#### Metadata
-- **Category:** Accessibility
-- **Priority:** MUST
-- **Source:** Project constitution Standards — Accessibility ("Touch UI ... must use large tap targets (minimum 44x44 pt iOS) ... minimum 18pt font size for body text"; voice-first) and requirements.md NFR-019…NFR-022; frozen design §1 ("each the existing four-channel row pattern" — the elderly first audience); DV-1; feature constitution "Primary user: the elderly parent".
+**Category:** Accessibility · **Priority:** MUST
+**Source:** Feature constitution Photo property 6 and Success Criteria (voice-first); project
+constitution Standards (voice-first; ≥44×44 pt targets; 18pt body) and Target Users.
 
-#### Description
-Both new settings sections **must** be accessible to elderly users on the reference device. Measurable properties:
-
-- **Tap targets**: every channel row in both sections is ≥ **44 × 44 pt**; the whole row remains the tap target (the existing full-width row pattern).
-- **Text size**: visible labels are ≥ **18 pt** and respect Dynamic Type; at the largest accessibility text size **no channel label or section title is clipped, truncated to ambiguity, or shrunk below the minimum**; the sizes are consistent with the app's typography tokens (`appearance.typography`).
-- **VoiceOver**: each row exposes section title + channel name + selected state; the selected row is announced as selected (checkmark is not the only selected signal — the state is conveyed non-visually).
-- **Contrast**: the picker text and selected-state affordance meet WCAG AA (≥ 4.5:1 body text, ≥ 3:1 UI components).
-
-#### Acceptance criteria
+The new capabilities **must** meet the house accessibility standards: voice-first — a nickname
+(Devanagari included) resolves and calls with zero touch (FR-FCU-013/014); touch standards where
+touch exists — every new interactive control ≥ 44×44 pt, text through the appearance typography
+tokens (Dynamic Type without clipping, no fixed-point fonts), nothing clipped at Accessibility
+XXXL; no authorization reasoning asked of the elderly user — no permission explanation, dialog
+or write-failure state on their surfaces (the fallback is a labeled state in the editor,
+silent/neutral elsewhere; FR-FCU-010); VoiceOver — new controls labeled; photos hidden from
+VoiceOver per the existing pattern where a label would add nothing; nickname entries readable
+and removable via standard accessible interactions.
 
 ```gherkin
-Feature: Accessible dialer pickers
+Feature: Accessibility of the new capabilities
 
-  Scenario: VoiceOver announces the pickers usefully
-    Given VoiceOver is enabled
-    When the user moves through the Primary and Fallback dialer sections
-    Then each row announces its section, the channel name and, for the selected row, that it is selected
-    And the checkmark is not the only indication of selection
+  Scenario: A nickname call completes voice-only, with zero touch
+    Given a contact with a recorded nickname
+    When the user speaks the nickname and confirms by voice
+    Then the call flow completes without any touch interaction
 
-  Scenario: The largest text size does not break the pickers
-    Given the system text size is set to the largest accessibility size
-    When the dialer settings are shown
-    Then both section titles and all four channel labels in each section remain fully readable
-    And no label is clipped or reduced below the 18 pt minimum
+  Scenario: House touch standards hold on the new controls
+    Given the family editor's new link/photo/nickname controls
+    When rendered at Accessibility XXXL on the reference device
+    Then every interactive control measures at least 44×44 pt
+    And no label or control clips or truncates
+    And text scales through the appearance typography tokens
 
-  Scenario: Minimum target and contrast requirements hold
-    Given the rendered picker rows
-    Then every channel row provides at least a 44 × 44 pt tap target
-    And text/component contrast meets WCAG AA
+  Scenario: No authorization reasoning is asked of the elderly user (failure-adjacent)
+    Given the write falls back (denied/limited/read-only)
+    When the elderly user's surfaces are displayed
+    Then no authorization explanation, dialog or failure state appears
+    And the photo simply shows per the display precedence
 ```
 
-#### Related
-- FR: FR-CDP-001/002 (the pickers), FR-CDP-017 (localised labels)
-- NFR: NFR-CDP-007 (labels present in both languages)
+**Related:** FR-FCU-010/013/014/015 · NFR-FCU-004/009.
 
-### NFR-CDP-007: Localisation completeness — 100% ne/en parity for every new string
+### NFR-FCU-006: Migration compatibility — legacy payloads load, nothing is lost
 
-#### Metadata
-- **Category:** Localisation
-- **Priority:** MUST
-- **Source:** Project constitution Standards (Localisation — "all UI strings must be externalised"; minimum: support the primary user's configured language for all TTS) and requirements.md NFR-023/NFR-024; frozen design §7 (the new key list); feature constitution Feature Constraint 9; DV-7.
+**Category:** Reliability · **Priority:** MUST
+**Source:** Feature constitution Feature Constraint 2, Link property 5, Nickname property 7,
+Success Criteria; DV-6; surface: `FamilyContactStore` custom decoder :122-150; tests
+`FamilyContactStoreTests`.
 
-#### Description
-Every new user-visible string **must** be fully localised in Nepali and English. Measurable properties:
-
-- **Key parity**: each new key — `settings.calling.primaryTitle`, `settings.calling.secondaryTitle`, `router.call.fallbackDisclosure`, `call.announce.fallbackRouted`, `call.announce.launchFailedFallback` — has **both** a non-empty `ne` and `en` value in `Localizable.xcstrings`: **100% of keys, 0 missing** (automated catalog check).
-- **No raw keys**: **0** user-visible surfaces show or speak a raw key or an untranslated fallback string in either language.
-- **Template integrity**: parameterised strings (contact name, channel name, skipped channel) render with the parameters substituted correctly in both languages through the existing `L10n.fmt` discipline — **0** format-break placeholders (no `%@`/`%@@` leftovers).
-- **Spoken language matches the session**: in **100%** of the DV-7 checks, spoken picker-adjacent copy, confirmation disclosure and announcements use the session's active language.
-- **Shared channel labels**: picker, confirmation and announcements reference the same `app.name.*` strings per language (single source — no divergent channel wording).
-
-#### Acceptance criteria
+Existing installs **must** keep working with zero data loss: family-contact payloads in every
+historical shape (no nickname field, single nickname, no photo, pre-link, pre-address/email,
+current) decode without error under the custom-decoder rule, and the store read never fails on
+legacy data; the pre-change single nickname remains matchable in BOTH search and voice after
+migration (DV-6); load→save→load round-trips preserve every legacy and new field; measurable —
+`FamilyContactStoreTests` extended with pre-change fixtures (zero decode failures, all fields
+preserved) and DV-6 executed on-device on an upgrade over an existing install.
 
 ```gherkin
-Feature: Localisation completeness
+Feature: Migration compatibility of the family-contact store
 
-  Scenario: Every new key has both languages
-    Given the Localizable.xcstrings catalog with this feature's keys
-    When the parity check runs
-    Then every new key has non-empty ne and en values
-    And zero new keys are missing either language
+  Scenario: The full legacy fixture set loads with zero failures
+    Given payloads from every historical shape (pre-nickname, single nickname, pre-photo, pre-link, current)
+    When the store is read
+    Then every contact decodes
+    And zero reads fail and zero contacts are lost
 
-  Scenario: Nepali and English sessions both render fully
-    Given the session language is Nepali, and repeated with English
-    When the pickers, a fallback confirmation and both announcements are exercised
-    Then every string renders/spoken in the session language
-    And no raw key or format placeholder remains visible
+  Scenario: A load-save-load round-trip preserves everything
+    Given a legacy contact and a fully-populated new contact
+    When each is loaded, saved and loaded again
+    Then all legacy fields and all new fields are identical across the round-trip
 
-  Scenario: Channel wording is single-sourced
-    Given a fallback in either language
-    When the picker label, the confirmation and the announcement name the channel
-    Then they use the same catalog string for that channel
+  Scenario: The pre-change single nickname still matches (DV-6 unit pin)
+    Given a contact saved with the old single nickname field
+    When search and voice resolution run for that nickname
+    Then both surfaces still match the contact
 ```
 
-#### Related
-- FR: FR-CDP-017 (the localisation requirement), FR-CDP-013/015/016 (announcement surfaces)
-- NFR: NFR-CDP-006 (accessibility of the rendered labels), NFR-CDP-010 (DV-7 evidence)
+**Related:** FR-FCU-002/011/017 · NFR-FCU-001/009.
 
-### NFR-CDP-008: Deterministic testability under the scoped-suite gate
+### NFR-FCU-007: Devanagari substring / grapheme-cluster behavior regression-pinned
 
-#### Metadata
-- **Category:** Reliability / Testability
-- **Priority:** MUST
-- **Source:** Frozen design §8 ("scoped suites — the honest gate; full-bundle baseline is pre-existing red") and Risks ("the resolver is pure-static and closure-injected; scoped tests pin the matrix"); feature constitution Feature Constraint 12 ("Scoped/focused test suites are the honest gate ... The new resolver is pure-static and closure-injected so the chain matrix is deterministic without platform stubs."); workflow scope comment; project house practice (unit gates: focused tests + typecheck per unit; full suite once at the end).
+**Category:** Reliability · **Priority:** MUST
+**Source:** Feature constitution Out of scope and Feature Constraint 3, Nickname property 4;
+workflow `security-test` focus ("no grapheme 'fixes'"); project memory (pin as regression, do
+not "fix").
 
-#### Description
-The chain and its integration **must** be testable deterministically, without platform stubs. Measurable properties:
-
-- **Zero platform dependencies in the matrix**: the WhatsApp probe is injected as a closure, Messenger handle availability is a plain boolean, and the resolver is pure-static — the chain matrix runs with **0 network calls and 0 app-installation requirements**.
-- **Named scoped suites exist and pass**:
-  - `CallChannelResolutionTests` — the full chain matrix: preferred feasible; preferred infeasible → secondary; both infeasible → phone; `secondary == primary` dedupe; per-contact pick wins as preferred; `fellBackFrom` content; the exhaustive 64-combination never-dead-end case (NFR-CDP-001).
-  - `MethodResolverTests` — global-default step = settings primary mapped by call type; fallback applied before the confirmation.
-  - Settings persistence — `secondaryCallApp` round-trip + `.phone` default (NFR-CDP-005).
-  - Confirmation-prompt wording — the fallback disclosure names the routed channel.
-  - Picker UI — the two sections render and persist.
-- **Gate discipline**: scoped `-only-testing` runs are the honest gate; the full-bundle pre-existing red baseline is **recorded, not silently included or excluded**; the touched scoped suites show **0 new failures** versus the recorded baseline.
-
-#### Acceptance criteria
+The existing Character-safe substring / grapheme-cluster behavior is **frozen**: nickname
+matching reuses the exact existing semantics (`Character`-safe `range(of:options:)` with
+`[.caseInsensitive, .diacriticInsensitive]`, `NepaliTextNormalizer` folding, exactly as the name
+path) with no new options, no cluster normalization, no partial-word "improvements"; the pin is
+test-enforced — existing expectation cases in `NepaliTextNormalizerTests`,
+`UnifiedContactSearchTests`, `ContactResolverTests` stay unchanged and green, and new nickname
+cases assert identical semantics; any deviation fails the suites (the pin is load-bearing).
 
 ```gherkin
-Feature: Deterministic coverage of the chain
+Feature: The grapheme/substring behavior stays pinned
 
-  Scenario: The chain matrix runs without platform stubs
-    Given the scoped test suites on a machine with no device and no installed apps
-    When CallChannelResolutionTests runs the full matrix including the 64-combination case
-    Then it completes deterministically with zero network calls
-    And every cell's routed channel and fellBackFrom are asserted
+  Scenario: Existing behavior holds exactly
+    Given the existing normalizer and substring-matching test cases
+    When the suites run after this feature
+    Then every existing expectation passes with unchanged assertions
+    And no grapheme-cluster behavior was modified or "fixed"
 
-  Scenario: The named suites cover the integration seams
-    Given the feature's scoped suites
-    When MethodResolverTests, the settings-persistence suite, the confirmation-wording checks and the picker-UI checks run
-    Then each passes
-    And the pre-existing full-bundle baseline is recorded alongside the results
+  Scenario: Nickname matching uses the identical semantics
+    Given a nickname exercising the same grapheme edge cases as a name
+    When search and voice matching run over it
+    Then matching behaves exactly as the name path does
+    And the same compare options and folding are used (reuse, not a fork)
 
-  Scenario: No new failures are introduced in touched suites
-    Given the recorded pre-feature baseline for the touched suites
-    When the suites run against the feature build
-    Then zero new failures appear
+  Scenario: A semantic deviation fails the pin (failure)
+    Given the nickname path's matching options or folding are altered
+    When the pinned suites run
+    Then the regression tests fail
 ```
 
-#### Related
-- FR: FR-CDP-005 (injected probe), FR-CDP-007/008 (the chain and its output), FR-CDP-012/013 (MethodResolver and wording)
-- NFR: NFR-CDP-001 (the matrix that proves never-dead-ends), NFR-CDP-009 (baseline discipline)
+**Related:** FR-FCU-012/013 · NFR-FCU-001/009.
 
-### NFR-CDP-009: No regression to the shipped voice pipeline, emergency and dial-back paths
+### NFR-FCU-008: Delivery sequencing and scope separation vs call-dialer-primary-secondary
 
-#### Metadata
-- **Category:** Reliability (Regression)
-- **Priority:** MUST
-- **Source:** Frozen design Risks ("Regression on just-shipped call paths (PRs #161–#168): the chain replaces only the single Messenger hard-rule and the hardcoded voice default; the resolver is pure-static and closure-injected; scoped tests pin the matrix") and non-goals ("No changes to the just-shipped voice pipeline beyond the named MethodResolver seam"); feature constitution Feature Constraint 7 ("The regression risk is to the just-shipped voice pipeline, emergency-contact and dial-back paths (PRs #161–#168) — do not refactor beyond the named seams"); workflow `security-design-review`/`security-test` focus (emergency precedence; dial-back).
+**Category:** Compliance · **Priority:** MUST
+**Source:** Feature constitution Feature Constraint 1 and Sequencing Note; workflow SEQUENCING
+block and Out of scope; owner instruction (this is an NFR/constraint, not a design task here).
 
-#### Description
-The feature **must** leave every behaviour it does not explicitly re-specify identical to the pre-feature build, and its change surface **must** stay limited to the named seams. Measurable properties:
-
-- **Change surface**: the touched production files are the named seams only — `resolvedCallChannel`, `resolvedMissedCallChannel`/`missedCallDialAction`, MethodResolver's global-default step, `requestCallConfirmation`'s gating/prompt composition, the new pure-static resolver, `CallingSettingsView`, `AppCoordinator`'s new preference, and the string catalog: **0 refactors beyond**.
-- **Emergency path**: emergency-contact resolution outputs are **identical to pre-feature** for its pinned matrix (0 diffs in its suite); nothing on the emergency path consults the chain.
-- **Dial-back path**: dial-back identity resolution and the honest lines (numberless row → Phone app; non-dialable number → spoken line) are unchanged (0 diffs in their pinned cases).
-- **Voice pipeline (#161–#168)**: the override protocol, near-miss disclosure and multi-turn confirmation mechanics behave identically; their suites show **0 new failures** versus the recorded pre-feature baseline.
-- **Scoped-suite evidence**: the touched suites run green against the baseline; deviations are reworked, not waived.
-
-#### Acceptance criteria
+The feature is **explicitly distinct** from `call-dialer-primary-secondary` and must not absorb
+or redesign it: implementation merges master AFTER call-dialer's PR merges (queue behind it)
+before implementation work starts; expected conflicts in the family-contact call surfaces
+(`MethodResolver.swift`, `LeafViews.swift`, `AppCoordinator.swift`,
+`CallingSettingsView.swift`) resolve as a union preserving call-dialer's shipped behavior, with
+no redesign or absorption in the feature's diff; if call-dialer is unmerged, implementation
+waits — no parallel edits of the conflicting surfaces; measurable — git evidence (the master
+merge includes the call-dialer PR) and review evidence (the diff touches the named surfaces only
+through the requirement seams, with call-dialer behavior regression-checked after the merge).
 
 ```gherkin
-Feature: No regression outside the re-specified behaviour
+Feature: Sequencing and scope separation vs call-dialer
 
-  Scenario: Emergency behaviour is bit-identical
-    Given the emergency-contact resolution matrix
-    When it is exercised against the feature build and compared with the pre-feature baseline
-    Then zero output differences exist
-    And the emergency path performs no chain resolution
+  Scenario: Implementation starts only after the dependency merged
+    Given call-dialer-primary-secondary's PR exists in flight
+    When implementation of this feature begins
+    Then the branch has merged master including that PR (git evidence recorded)
+    And no conflicting surface was edited before that merge
 
-  Scenario: Dial-back and voice-pipeline suites stay green
-    Given the recorded pre-feature baselines for the dial-back, override, near-miss and multi-turn confirmation suites
-    When the feature build runs the same suites
-    Then zero new failures exist
-    And the honest dial-back lines behave exactly as before
+  Scenario: The diff does not absorb call-dialer's scope
+    Given the feature's completed diff after the merge
+    When it is reviewed against call-dialer's scope
+    Then no call-routing/dialer redesign is present
+    And the conflicting files resolve to a union preserving call-dialer's behavior
 
-  Scenario: The change surface stays within the named seams
-    Given the feature's build diff
-    Then it touches only the named seams, the new resolver, the settings view and the catalog
-    And no CallRouter service or per-contact preference storage is introduced
+  Scenario: Unmerged dependency blocks parallel edits (failure/guard)
+    Given call-dialer's PR is not yet merged
+    When implementation work is about to edit the conflicting surfaces
+    Then the work waits rather than forking the surface
 ```
 
-#### Related
-- FR: FR-CDP-011 (dial-back), FR-CDP-014 (override/near-miss), FR-CDP-018 (preserved behaviours)
-- NFR: NFR-CDP-008 (scoped suites and baseline discipline), NFR-CDP-010 (gates)
+**Related:** FR-FCU-004/013 · NFR-FCU-009.
 
-### NFR-CDP-010: Compliance, review and release gates; DV-1..7 acceptance
+### NFR-FCU-009: Test gate, release gates and baseline honesty
 
-#### Metadata
-- **Category:** Compliance
-- **Priority:** MUST
-- **Source:** Workflow `call-dialer-primary-secondary.yaml` (`review-l2` GO; `security-design-review` SECURITY-GO with the five focus areas; `security-test` SECURITY-GO; `final-sign-off` T2 + HIL; "The release-build log-surface gate `ios/tools/check-release-log-safety.sh` (wired into ios/build.sh) must cover the new fallback/announcement paths"); project constitution Release gates and Standards/Quality (paired review, 0.85 confidence, max rework 5); feature constitution "Safety & Compliance Delta" and completion gate.
+**Category:** Compliance · **Priority:** MUST
+**Source:** Feature constitution Feature Constraint 10 and the release-gate note; workflow
+`implement` overlays, `security-design-review`/`security-test` exits, `final-sign-off`; project
+constitution Release gates and Quality standards.
 
-#### Description
-The feature **must** pass its workflow gates with **no new compliance surface**:
-
-- **Design/review gates**: `review.decision == GO` (review-l2).
-- **Security gates**: `security-design-review` returns `SECURITY-GO` with a STRIDE threat model covering the five workflow focus areas — (1) the GSM hard floor can never be configured away (no dead-end chain, including `secondary == primary`); (2) emergency-contact semantics and the override protocol unchanged, dial-back never delays escalation; (3) feasibility probes local-only, no new egress, handles/numbers remain PII with no new collection; (4) announcement honesty — the spoken confirmation/announcements always name the actually-routed channel from `fellBackFrom`, no silent route changes; (5) log sanitisation of numbers/handles. `security-test` returns `SECURITY-GO` with chain-matrix and log evidence.
-- **Release gate**: `ios/tools/check-release-log-safety.sh` exits **0** with the new fallback/announcement paths in scope (wired into `ios/build.sh`).
-- **Sign-off**: `final-sign-off` is T2 (senior human approval) + HIL with the DV-1..7 results (FR-CDP-019) recorded; implementation runs paired review at the 0.85 confidence threshold, max rework 5.
-- **No new compliance regime**: 0 new permissions, data stores, egress hosts or privacy disclosures; the existing privacy/consent surfaces are untouched (NFR-CDP-002).
-
-#### Acceptance criteria
+The feature's verification is honest and gate-complete: the honest test gate is scoped/focused
+XCTest suites (the full-bundle baseline carries known pre-existing failures) — at minimum
+`UnifiedContactSearchTests`, `FamilyContactStoreTests`, `FamilyContactValidationTests`,
+`ContactPhotoStoreTests`, `ContactResolverTests`, `MethodResolverTests`,
+`MissedCallContactResolverTests`, plus the new write-seam tests and the extended
+`L10nCatalogCoverageTests`; implementation runs focused tests + typecheck per unit (house rule)
+with scoped runs at the gates; `ios/tools/check-release-log-safety.sh` exits 0 (build-blocking)
+and the pre-release device check covers the new paths; workflow gates apply (paired review +
+confidence ≥ 0.85 on implement; security-design-review and security-test exit SECURITY-GO with
+STRIDE; final-sign-off at T2 + HIL); pre-existing suite failures are recorded with attribution —
+never silently counted as passes or excluded; device truth lives in the DV gate (FR-FCU-017) —
+no mock-only evidence substitutes.
 
 ```gherkin
-Feature: Compliance and release gates
+Feature: Test and release gates
 
-  Scenario: The review and security gates pass with the named focus areas
-    Given the feature's design and implementation
-    When review-l2, security-design-review and security-test are executed
-    Then review-l2 returns GO
-    And both security gates return SECURITY-GO with the five focus areas covered
+  Scenario: The named scoped suites pass before the review gates
+    Given the implementation is complete
+    When the scoped suites (contacts, storage, intents, photo, localization coverage, write-seam) run
+    Then every named suite passes
 
-  Scenario: The release log-safety gate passes with the new paths in scope
-    Given a build with the feature
+  Scenario: The release log-safety gate exits 0
+    Given a Release build configuration
     When ios/tools/check-release-log-safety.sh runs
-    Then it exits 0
-    And the new fallback and announcement paths are covered
+    Then it exits 0 with the new paths covered
 
-  Scenario: Completion is recorded at T2 with the DV evidence
-    Given the DV-1..7 results from the reference device
-    When final sign-off is executed
-    Then it runs at risk tier T2 with HIL
-    And the DV evidence is recorded with the feature spec
-    And no new permission, store, egress host or compliance regime was introduced
+  Scenario: The known baseline stays honestly recorded
+    Given the known pre-existing full-bundle failures
+    When the test evidence is assembled
+    Then each baseline failure is recorded with attribution
+    And it is neither counted as a pass nor silently excluded
 ```
 
-#### Related
-- FR: FR-CDP-019 (DV completion gate), FR-CDP-018 (preserved boundaries)
-- NFR: NFR-CDP-003 (log safety gate), NFR-CDP-002 (no new surface), NFR-CDP-009 (regression evidence)
+**Related:** FR-FCU-016/017 · NFR-FCU-002/006/007/008.
+
+---
+
+## Assumptions recorded during this requirements pass
+
+Recorded so nothing is silently assumed; design-input notes, not scope changes. The full list is
+in the lock file (`assumptions`).
+
+- The integration surfaces exist as named in the feature constitution; the cited anchors were
+  spot-verified against the worktree source at requirements time (`FamilyContact` struct at
+  `FamilyContactStore.swift:61`, single `nickname` :71, `photoFilename` :69, custom decoder
+  :122-150; `UnifiedContactSearch.dedupe` :269, `FamilyMatchTier` :155, `familyMatches` :217;
+  `ContactsAccess` `AddressBookDirectory.swift:245`, `allEntries()` :386, fetch keys :333;
+  `ContactResolver.relationshipAnchors` :41, scoring :93, accept 0.6 / margin 0.15 :61–62;
+  `MethodResolver.resolve` :47; `ContactPhotoStore` non-throwing save/load/delete;
+  `FamilyContactsSettingsView` `SettingsView.swift:1529`, nickname step :2575, `PhotosPicker`
+  :2485, picked-photo load :2511; `CallView` `LeafViews.swift:918`, family rows :1747,
+  `UnifiedContactResultRow` :2288, `ContactTile` avatar :2559+; `AppCoordinator.contactPhoto` 
+  :6492, `addFamilyContact` :6515; `NSContactsUsageDescription` `Info.plist:115`; no
+  `CNSaveRequest` exists in the app today; `Localizable.xcstrings` present;
+  `L10nCatalogCoverageTests` and `check-release-log-safety.sh` present).
+- Design-level choices deliberately left open (bound by invariants in the requirements): the
+  link's storage shape and identifier strategy (FR-FCU-002/006); the system-contact write seam's
+  file/name and injection shape (FR-FCU-008); the nickname index structure (NFR-FCU-001); unlink
+  mechanics and UI (FR-FCU-005); which representation a linked row renders (FR-FCU-003); whether
+  strict number-matching may establish a counterpart for an UNLINKED family contact for photo
+  display (FR-FCU-007; not required by this set); removal semantics for a linked contact's photo
+  (beyond the invariants of FR-FCU-008/010); whether nicknames feed `ContactResolver.nearMiss`
+  (not required; the existing name-only discipline may be extended conservatively at design's
+  option).
+- Non-family book rows (system contacts without a family record) keep today's presentation —
+  initials avatar, no photo rendering — unchanged by this feature.
+- Exact user-facing copy (link flow, photo fallback labels, permission copy, nickname editor) is
+  design-dependent and localization-bound; the ne/en keys must exist per NFR-FCU-004.
+- The known pre-existing full-bundle test failures remain the baseline for NFR-FCU-009; the
+  feature's own and touched suites must pass, with baseline failures recorded rather than
+  silently included or excluded.
 
 ## Open decisions
 
-**None.** The feature constitution records "Open Decisions: **None**" — the design is approved and
-frozen (owner sign-off 2026-10-12), including secondary defaulting to GSM, Messenger feasibility
-as "handle on file", the WhatsApp `canOpenURL` probe, the GSM hard floor, dedupe on equal picks,
-and the reuse of the existing confirmation flow. This requirements pass found **no new
-owner-level ambiguity**: every behaviour it binds traces to the frozen design, the feature
-constitution or the project constitution. Items the design explicitly leaves to the design phase
-are recorded as assumptions (below) — design inputs, not re-opened decisions, and not silently
-resolved.
+**None open.** Both Open Decisions in the feature constitution were resolved by the parent
+session on 2026-10-12 before the first run (loggable defaults under the standing
+workstream-autonomy grant; recorded for the audit trail) — the design phases elaborate this
+supplement, they do not re-open it:
 
-### Assumptions recorded during this requirements pass
+| # | Decision | Resolution |
+|---|---|---|
+| OD-1 | Design path — brainstorming/frozen-design phase first, or straight to design-l1? | **RESOLVED: straight to design-l1.** The owner request is concrete with pre-authorized fallbacks; the T1 owner-story HIL (this task's gate) is the review point. |
+| OD-2 | Automatic transliteration/romanization ("sanu" ↔ "सानु")? | **RESOLVED: no — store-as-entered.** Each script matches only when recorded; auto-bridging risks a wrong-person call (bound in FR-FCU-011/012/013). |
 
-Recorded so nothing is silently assumed; all are design-input notes, not scope changes. The full
-list belongs in the lock file (`assumptions`) when the lock is produced.
-
-- The frozen design doc
-  (`docs/superpowers/specs/2026-10-12-call-dialer-primary-secondary-design.md`) is present on the
-  feature branch at requirements time — the constitution's precondition for this pass.
-- Integration anchors were spot-verified against the worktree source at requirements time:
-  `defaultCallApp` property `AppCoordinator.swift:330-335` and its restore default (`? .phone`) at
-  `:2851-2853`; `resolvedCallChannel` `:2099-2105`; `resolvedMissedCallChannel` `:8382-8390`;
-  `missedCallDialAction` `:8423-8443`; `dialBackMissedCall` `:8457+`; `requestCallConfirmation`
-  `:7587-7647` (Messenger-no-handle gate at `:7620-7623`); `handleCallConfirmationOverride`
-  `:7656-7686` (override no-handle gate at `:7665-7669`); `confirmationPrompt` `:7688-7707`;
-  `MethodResolver` step 4 `MethodResolver.swift:74-78`; `CallApp` enum `CallLinks.swift:66-84`
-  with its open outcomes (`MessengerOutcome` `openedThread`/`fellBackToWeb`/`invalidHandle` at
-  `:145-157`, `FaceTimeOutcome.unavailable` at `:114-123`); `FamilyContact.resolvedAudioApp`
-  `FamilyContactStore.swift:162-164`; `CallingSettingsView` four-channel rows `:22-77`;
-  `LeafViews` row channel state ~`:1612`; the emergency path via `NotifyChannel.resolve` at
-  `AppCoordinator.swift:6464-6468`; existing catalog keys (`settings.calling.title`,
-  `router.call.*`, `call.announce.*`) — the five new keys were confirmed absent from
-  `Localizable.xcstrings` at requirements time.
-- Exact user-facing copy (section titles' wording, the fallback disclosure sentence, the two
-  announcements) is design/catalog-time copy: the design's example ("Messenger isn't available —
-  call Syanu via WhatsApp, okay?") is illustrative; the **keys** and the content they must carry
-  (routed channel, skipped channel, contact name) are binding (FR-CDP-013/016/017).
-- The tap-path `call.announce.fallbackRouted` announcement's exact trigger point (with the open)
-  is the design's to fix at design-l1; its existence, routed-channel content and ne/en key are
-  binding (FR-CDP-016).
-- The ≤ 100 ms p95 added-latency budget (NFR-CDP-004) is this requirement set's measurement
-  threshold elaborating the design's "probes run at call time, user-paced"; design-l1 may refine
-  the number but not weaken the never-dead-end / never-silent guarantees.
-- The `canOpenURL` probe's staleness is an accepted residual risk (design Risks); the launch-fail
-  hop covers it, and no caching requirement is implied.
-- The chain resolver's file placement/name
-  (`CallChannelChain.route(preferred:secondary:feasibility:)` with `Result.fellBackFrom`) is the
-  design's frozen shape; requirements bind behaviour and the pure-static, closure-injected
-  properties — exact placement is design's.
-- The existing audio/video button vocabulary gates (`supportsAudio` / `supportsVideo`, FaceTime
-  excluded from audio buttons and dial-back) are preserved; the feature changes only the
-  global-default/secondary resolution inside them.
-- Emergency-contact resolution (`NotifyChannel.resolve`-based) is **not** rewired to the chain
-  (non-goal); FR-CDP-018 / FR-CDP-011 pin its no-change.
-- The full-bundle unit baseline is pre-existing red (house practice); scoped `-only-testing`
-  suites are the honest gate (NFR-CDP-008), with baseline failures recorded rather than silently
-  included or excluded.
-- DV-1..7 are the constitution's completion gate on the reference device (Anzaan), executed at
-  `final-sign-off` (T2 + HIL) — FR-CDP-019.
+No genuine owner-level question was raised during elicitation beyond these two resolved items.
 
 ## Out of scope
 
-Explicitly not in scope (feature constitution "Out of scope (must not change)" plus the design's
-non-goals and the workflow scope comment's explicit non-goals) — recorded so nothing is silently
-half-built:
+Explicitly not in scope (feature constitution "Out of scope (must not change)" plus the workflow
+scope comment's non-goals):
 
-| Non-goal | Why it is stated |
-|---|---|
-| A dedicated `CallRouter` service | The feature extends the existing resolution seams only (`resolvedCallChannel` / `resolvedMissedCallChannel`, MethodResolver's global-default step, `requestCallConfirmation`) — no new routing service (constitution Constraint 7; design non-goals). |
-| Per-contact primary/secondary storage | Per-contact and family picks keep winning as the **input** to the chain; the chain itself is settings-level (constitution Constraint 5; FR-CDP-009). |
-| Emergency-contact semantics changes | Emergency-contact resolution and escalation are untouched; the chain, probes and announcements never wrap or delay them (design non-goals; FR-CDP-018). |
-| A new dialogue flow | The existing multi-turn confirmation is reused exactly; no new question kind, state or prompt sequence (design Goal 4 / Decision 5; FR-CDP-013/018). |
-| Any new network, data, identity or privacy surface | Feasibility probes are local (`canOpenURL`, address-book handle check); no new egress, permission, data store or collection (constitution Constraint 8; NFR-CDP-002). |
-| Changes to the just-shipped voice pipeline beyond the named MethodResolver seam | Regression context PRs #161–#168: the chain replaces only the single Messenger hard-rule and the hardcoded voice default; no refactoring beyond the named seams (constitution Constraint 7; NFR-CDP-009). |
-| Any Android scope, new compliance regime, permission widening or analytics addition | No platform scope beyond the existing iOS app; no new compliance category, permission, data store or egress host (feature constitution; NFR-CDP-002/010). |
-
-## How this set is verified downstream
-
-| Gate | What it checks against this set |
-|---|---|
-| `design-l1` / `design-l2` | Resolve/design the mechanical details the frozen design leaves open: the feasibility resolver's shape and injectable seams (the `canOpenURL` closure, handle lookup) for tests; the chain's integration points in `resolvedCallChannel` / `resolvedMissedCallChannel` and every tap call site (`LeafViews` address-book rows ~L1612, family-contact buttons); the MethodResolver global-default replacement and the `CallApp`→`CallMethod` mapping per call type; where the fallback decision sits relative to the confirmation window and `PendingCallAction` so the confirmation names the routed channel; the announcement strings and their ne/en catalog entries; persistence for existing installs (`secondaryCallApp` absent → GSM); the launch-fail observation point and its interaction with the spoken-outcome lane; the tap-path `call.announce.fallbackRouted` trigger point. Conflicts with the frozen design are recorded amendments, never silent resolutions. |
-| `review-l2` | `review.decision == GO` against the component design and this set. |
-| `security-design-review` | STRIDE with the five workflow focus areas: (1) the GSM hard floor can never be configured away — no dead-end chain, including `secondary == primary` (NFR-CDP-001, FR-CDP-006/007); (2) emergency-contact semantics and the override protocol unchanged, dial-back never delays escalation (FR-CDP-011/014/018, NFR-CDP-009); (3) probes local-only, no new egress, handles/numbers remain PII (NFR-CDP-002, FR-CDP-004/005); (4) announcement honesty — the confirmation/announcements always name the actually-routed channel from `fellBackFrom`, no silent route changes (FR-CDP-008/013/015/016); (5) log sanitisation of numbers/handles (NFR-CDP-003). `SECURITY-GO` required. |
-| `plan-tasks` / `implement` | Units trace back to `FR-CDP-*` / `NFR-CDP-*` ids; paired review and the 0.85 confidence threshold on implementation output; rework bound 5; unit-based dependency waves. |
-| `security-test` | Evidence: the chain never dead-ends for any (primary, fallback) pair — including equal values (dedupe) and uninstalled apps — and the GSM floor is reachable with every other channel infeasible (NFR-CDP-001); the confirmation wording always names the routed channel (FR-CDP-013); emergency/dial-back escalation is unaffected (FR-CDP-018, NFR-CDP-009); number/handle PII does not reach logs, with `check-release-log-safety.sh` coverage of the new paths (NFR-CDP-003); no new egress from the feasibility probes (NFR-CDP-002). `SECURITY-GO` required. |
-| `final-sign-off` | T2 + HIL; release gate `ios/tools/check-release-log-safety.sh` (wired into `ios/build.sh`) exits 0 (NFR-CDP-003/010); the DV-1..7 checklist is recorded and passed on the reference device Anzaan — settings persistence; primary-infeasible fallback with the spoken routed-channel announcement; WhatsApp-not-installed chain + launch-fail announcement; dedupe/GSM floor; override preserved; all call paths route the chain; ne/en copy (FR-CDP-019). |
+- **`call-dialer-primary-secondary`** — explicitly distinct, in flight; no absorption,
+  redesign or scope merge; implementation queues behind its merge (NFR-FCU-008).
+- **Bulk address-book sync/import** and editing any system-contact field other than the photo
+  (no name/number writes, no bulk rewrites) — FR-FCU-008.
+- **Automatic transliteration / romanization** — "sanu" and "सानु" distinct unless both stored
+  (OD-2; FR-FCU-011/012/013).
+- **Redesigning the call-resolution chain** — `ContactResolver`/`MethodResolver` structure beyond
+  the named nickname seam is unchanged.
+- **Any new network surface; any new data collection; anything leaving the device** —
+  NFR-FCU-003.
+- **The Devanagari substring/grapheme-cluster behavior** — regression-pinned, not "fixed"
+  (NFR-FCU-007).
+- **Emergency-contact semantics** — unchanged.
+- **Per-contact ownership across devices; non-family book-row photo display** — book rows keep
+  today's initials avatar.
+- **Android** — no platform scope beyond the existing iOS app.
 
 ## Related
 
-- Consolidated copy: [`define-requirements.md`](define-requirements.md) (this document)
-- Folder index: [`define-requirements/index.md`](define-requirements/index.md)
-- FR index: [`define-requirements/FR/index.md`](define-requirements/FR/index.md) ·
-  NFR index: [`define-requirements/NFR/index.md`](define-requirements/NFR/index.md)
-- Feature constitution: [`specs/call-dialer-primary-secondary/constitution.md`](specs/call-dialer-primary-secondary/constitution.md)
-- Feature workflow (scope comment + security focus):
-  [`.ai-sdd/workflows/call-dialer-primary-secondary.yaml`](.ai-sdd/workflows/call-dialer-primary-secondary.yaml)
-- Frozen design (the feature brief):
-  [`docs/superpowers/specs/2026-10-12-call-dialer-primary-secondary-design.md`](docs/superpowers/specs/2026-10-12-call-dialer-primary-secondary-design.md)
-- Project constitution: [`constitution.md`](constitution.md) · Stakeholder brief
-  (read-only): [`requirements.md`](requirements.md)
+- Structured set: [`define-requirements/index.md`](define-requirements/index.md) ·
+  [`define-requirements/FR/index.md`](define-requirements/FR/index.md) ·
+  [`define-requirements/NFR/index.md`](define-requirements/NFR/index.md)
+- Locked snapshot: [`define-requirements.lock.yaml`](define-requirements.lock.yaml)
+- Feature constitution: [`specs/family-contacts-unify/constitution.md`](family-contacts-unify/constitution.md)
+- Feature workflow (scope comment): [`specs/family-contacts-unify/workflow.yaml`](family-contacts-unify/workflow.yaml)

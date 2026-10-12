@@ -1,140 +1,178 @@
-# T-147 — MethodResolver global-default closure — implement notes
+# T-147 — Frozen L10n keys (21, en+ne), coverage pins and NSContactsUsageDescription — implement notes
 
-Worktree: `/Users/anjan/workspace/projects/elderly-ai-assistant-call-dialer-primary-secondary`
-(branch `feat/call-dialer-primary-secondary`, base eafa4bcc = wave 3). Unit: TG-29, wave 4,
-risk MEDIUM, effort S. Depends on T-144; blocks T-149. Requirement: FR-CDP-012. Design
-references: design-l2 §8 (`:447-472`), §14 row C3 (`:1052`), §15 step 3 (`:1063`), §19 test
-list (`:1178`). Task spec: `specs/plan-tasks/tasks/TG-29-chain-core-and-record-corrections.md`
-T-147 section (`:213-257`).
+Worktree: `/Users/anjan/workspace/projects/elderly-ai-assistant-family-contacts-unify`
+(branch `feat/family-contacts-unify`, base 804e7645). Unit: TG-29; Agent: dev;
+Effort M; Risk MEDIUM. Requirements: FR-FCU-009, NFR-FCU-002, NFR-FCU-004.
+Design references: design-l2 §7 (`:1176-1257` — frozen copy, placement, pins),
+§8.2 (`:1288-1289` placement table); plan amendment 1 (the T-144 gate narrowed
+to the shared surfaces — this unit's files are file-disjoint and unblocked).
 
 ## Status
 
-**Done — scoped gate green, nothing committed (coordinator records after paired review).**
-Exactly the three owned files changed, one region each. No commit, no push, no ai-sdd
-command, no new dependency, no network symbol. The wave-3 artifacts (CallChannelChain,
-six-argument seams, `secondaryCallApp`) are consumed unchanged; T-154's parallel files
-(`CallingSettingsView.swift`, the new `CallingSettingsSurfaceTests.swift`) were not opened.
+**Done.** 21 frozen keys landed en+ne, the `NSContactsUsageDescription`
+disclosure replaced, `L10nCatalogCoverageTests` extended with the pins. Gate per
+the 2026-10-12 owner speed-mode directive: the scoped suite run is **deferred to
+phase end (T-163)**; the whole-module typecheck ran instead and is green. No
+push.
 
 ## Files changed
 
-| File | numstat (+/-) |
-|------|---------------|
-| `ios/ElderlyAssistant/Services/Intents/MethodResolver.swift` | 22 / 5 |
-| `ios/ElderlyAssistant/App/AppCoordinator.swift` | 9 / 2 |
-| `ios/ElderlyAssistantTests/Services/Intents/MethodResolverTests.swift` | 70 / 2 |
+- `ios/ElderlyAssistant/Resources/Localizable.xcstrings` — +357 lines, 0
+  deletions (insertion-only; verified via `git diff --numstat`): 19 new
+  `family.*` keys + the 2 `call.search.*` keys, in the catalog's canonical
+  format (`extractionState: manual`, both localizations `translated`).
+- `ios/ElderlyAssistant/Info.plist` — `NSContactsUsageDescription` replaced
+  (1/1) with the design-l2 §7 frozen disclosure: read/search + the photo write
+  + its limit + the honest no-permission state. No new usage keys.
+- `ios/ElderlyAssistantTests/App/L10nCatalogCoverageTests.swift` — +706/-2:
+  the T-147 sections (2 MARK blocks, 7 tests, 2 pure check functions, 5
+  helpers) plus the deliberate dialogue-baseline bump.
+- `specs/T-147-notes.md` (this file).
 
-The pbxproj delta visible in the worktree (`ios/seniOS.xcodeproj/project.pbxproj`, 4 added
-lines) is T-154's mechanical xcodegen registration of `CallingSettingsSurfaceTests.swift`
-only — this unit added no files, so no regeneration was triggered here.
+## Key-count delta (recorded deliberately — acceptance criteria: no stale pin, no guessing)
+
+- Measured on this tree immediately **before** the insertions: **1,389** keys
+  (JSON parse of the catalog; the existing dialogue pin measured the same
+  tree).
+- **After** the 21 insertions: **1,410**. Delta **+21** — the constant; the
+  absolute is re-measured, never guessed.
+- New pin: `familyContactsBaselineKeyCount = 1_389`, asserted as
+  `count == 1_389 + 21`.
+- Dialogue pin updated deliberately: `dialogueBaselineKeyCount` 1_370 → **1_391**
+  (1_391 + 19 = 1_410), with the delta recorded in the comment chain.
+- The T-144 call-dialer merge was still open at implement time and its design
+  adds its own settings keys (`docs/superpowers/specs/2026-10-12-call-dialer-primary-secondary-design.md:142`).
+  The rebase re-measures this absolute deliberately; the obligation is recorded
+  in the test comment next to the pin.
+- Pre-existing drift found and **not** touched: `SpotifyLocalizationTests` pins
+  `catalog.count == 1361 + 20 = 1381`, but the tree already held 1,389 keys
+  before this unit (1,410 after) — that suite's count test is red at HEAD
+  independent of this unit (8 keys landed in post-Spotify merges without the
+  deliberate bump). It is outside this unit's file set; flagged here for
+  T-163 / a later rebase.
 
 ## What was built
 
-### 1. Resolver initialiser (design-l2 §8, verbatim shape)
+### 1. The 21 frozen keys (design-l2 §7), exact placement
 
-```swift
-init(preferenceStore: CallMethodPreferenceStore,
-     historyStore: ConfirmedMethodHistoryStore,
-     globalDefault: @escaping (_ isVideo: Bool) -> CallMethod = { _ in .phone }) {
-```
+Structure: 8 `family.link.*`, 4 `family.nickname.*`, 7 new `family.photo.*`
+merged with the 3 pre-existing, 2 `call.search.*` insertions.
 
-Stored as `private let globalDefault: (Bool) -> CallMethod`. The defaulted closure maps
-every call type to `.phone`, so both existing construction sites (the coordinator's lazy
-property and the test helper) compile and behave identically.
+Placement, verified in-file before the commit (and pinned by the tests):
 
-### 2. Step 4 consults the closure
+- before the pre-existing `family.photo.add`: the 12 `family.link.`/
+  `family.nickname.` keys in alphabetical order, then
+  `family.photo.accessBody`, `family.photo.accessDeniedBody`,
+  `family.photo.accessTitle`;
+- after `family.photo.remove`: `family.photo.sourceSystem`,
+  `family.photo.state.keptOnPhone`, `family.photo.state.systemPhotoRemains`,
+  `family.photo.state.updatedInSystem`;
+- `call.search.accessLimited` directly BEFORE `call.search.allowBody` (after
+  `call.openWhatsAppContacts`); `call.search.linkedBookName` between
+  `call.search.familyChip` and `call.search.loadFailed`.
 
-Steps one to three of `resolve` and the `explicitMethod` static are byte-for-byte
-untouched (diff confirms no hunk inside either). Step 4 replaces the hardcoded `.phone`
-with `globalDefault(isVideo)`, keeping `source: .globalDefault`:
+The 22-line span between `family.emergencyToggleHint` and
+`family.relationship.brother` (both excluded) is exactly design §7's corrected
+list 1–22, with the pre-existing `family.photo.add/change/remove` at positions
+16–18.
 
-```swift
-let isVideo = callType.map {
-    $0.lowercased().contains("video") || $0.contains("भिडियो")
-} ?? false
-return ResolvedMethod(method: globalDefault(isVideo),
-                      unsupportedRequestedApp: nil,
-                      source: .globalDefault)
-```
+Copy: extracted **programmatically** from the design file's frozen table (no
+hand transcription), which also let the placeholder rule be audited before the
+edit: exactly four keys carry one `%@`
+(`family.link.linkedTo`, `family.link.alreadyLinked`,
+`family.nickname.removeLabel`, `call.search.linkedBookName`); no other key
+carries any `%`. Every `ne` value is pure Devanagari except key #16's
+deliberate romanized example ("sanu", the store-as-entered showcase), which is
+the single documented exception in the coverage function.
 
-The call-type sense is the same video-word test step 1 uses (duplicated deliberately:
-extracting it would have edited step 1's helper, which the unit forbids).
+### 2. `App/L10n.swift` — no change needed (pattern checked first)
 
-### 3. Coordinator construction site (one region, `AppCoordinator.swift:1942`)
+The house accessor pattern is plain key-string resolution — `L10n.str(key,
+locale:)` for non-View code, `Text("key")` in views — with **no per-key
+registration table** in `L10n.swift`. The new keys therefore require no code
+change; consumers arrive with T-159…T-162.
 
-```swift
-private lazy var methodResolver = MethodResolver(
-    preferenceStore: callMethodPreferences,
-    historyStore: confirmedMethodHistory,
-    // FR-CDP-012: the settings primary, mapped by call type — a
-    // video-word call versus a plain call (design-l2 §8). Read per
-    // resolution, so a settings change applies from the next call.
-    globalDefault: { [weak self] isVideo in
-        CallChannelChain.method(for: self?.defaultCallApp ?? .phone, isVideo: isVideo)
-    })
-```
+### 3. Test pins (`L10nCatalogCoverageTests`)
 
-The closure body is design-l2 §8's snippet verbatim. It reads `defaultCallApp` at call
-time (not at construction), so a settings change applies from the next resolution; the
-`weak self` avoids a coordinator → resolver → closure retain cycle; `?? .phone` keeps the
-shipped floor if the coordinator is gone.
+- `testEveryFamilyContactsKeyResolvesInBothLanguages` — the behavioural half:
+  all 21 resolve through the shipped lproj bundles in en and ne, non-empty,
+  values differ, ne Devanagari.
+- `testTheFamilyContactsFamilyPassesTheCoverageCheck` — the source half: the
+  count pin (1,389 + 21), the coverage check over the parsed catalog, and the
+  value pins on the `call.search.*` insertion neighbours.
+- `testTheCoverageCheckFailsNamingTheMissingFamilyContactValue` — 11 fixtures,
+  each a one-rule mutant of the parsed catalog: ne removed, en removed, entry
+  removed, blank ne, en copied into ne, placeholder dropped, stray `%` in a
+  non-format key, ASCII in an unexempted ne, stray `family.link.*` key, stray
+  `family.photo.*` key, and the count-pin delta semantics.
+- `testTheSpanCheckFailsOnAMovedOrSmuggledFamilyContactsKey` — 3 fixtures over
+  the raw key-line array: a moved key, a swapped `call.search.*` neighbour, and
+  an unpinned key smuggled into the span. The check itself rejects each mutant,
+  so the contiguity rule is gate-enforced, not merely asserted.
+- `testTheFamilyContactsBlockSitsContiguouslyBetweenItsNeighbours` — the real
+  file: the exact 22-line span plus the two named `call.search.*` neighbour
+  pairs.
+- `testTheFamilyContactsCopyMatchesTheDesignFrozenTableVerbatim` — the
+  `familyContactsCopy` table equals the design §7 rows verbatim, both
+  languages, and the table order equals the pinned inventory.
+- `testOnlyTheNicknamesPlaceholderCarriesASCIIInNepali` — the #16 exemption is
+  pinned as *exactly* the romanized example: the value must contain "sanu",
+  stripping it must leave no ASCII, and every other key's ne must be ASCII-free
+  (the ONLY permitted carrier).
+- `testTheFamilyContactsPlaceholderRuleHoldsInBothLanguages` — the four
+  placeholder keys carry exactly one `%@`, other keys carry none, both
+  languages agree.
+- `testTheContactsDisclosureStatesReadingAndThePhotoWrite` — the plist string
+  equals the frozen copy verbatim, the old read/search-only string is gone, the
+  read and write uses + the limit + the no-permission state are present, and
+  the string is English-only (accepted security residual; no Info.plist
+  localisation).
+- `testThePlistAddsNoNewUsageDescriptionKeys` — the 12-key usage-description
+  set is pinned, and no write-only contacts descriptor may appear (the designed
+  write seam needs read-and-write access).
+- Pure functions `familyContactsCoverageFailures(in:)` and
+  `familyContactsSpanFailures(in:)` carry the rules so every failure path runs
+  against fixtures (the dialogue suite's discipline).
 
-### 4. Tests (`MethodResolverTests.swift`)
+### 4. Decisions
 
-All 14 pre-existing tests and their assertions are untouched. The stub-storage helper
-gained an optional third parameter (`globalDefault: ((Bool) -> CallMethod)? = nil`); when
-nil it still constructs via the shipped two-argument initialiser, so every pre-existing
-test exercises the unchanged call shape. Three tests added:
+- `familyContactsKeys` is in **design table order 1..21** (not catalog order),
+  so the copy table maps 1:1 to the design rows; the 22-line span array is kept
+  separately in file order.
+- The disclosure is pinned **verbatim** against the design's frozen text; the
+  string written to the plist was verified equal to the extracted design text
+  at edit time.
+- The `family.photo.*` stray rule pins the family as the 10 = 3 pre-existing +
+  7 new; `family.link.`/`family.nickname.` are wholly new namespaces, so any
+  unpinned key there fails.
+- No refactor of the dialogue half beyond the baseline bump (kept the diff
+  scoped); the raw key-line scan is shared into one helper for the new tests.
 
-| Test | Scenario |
-|------|----------|
-| `testGlobalDefaultClosureMapsCallType` | Coordinator-shaped closure with settings primary `.faceTime`: closure returns `.facetimeVideo` for a video call; a bare call resolves at step four to `.facetimeAudio` (the unchanged voice mapping) with channel `.faceTime` and source `.globalDefault` |
-| `testDefaultConstructionStillPhone` | Two-argument initialiser with absent stores: bare call → method `.phone`, channel `.phone`, source `.globalDefault`, nil unsupported-app |
-| `testGlobalDefaultClosureReceivesCallTypeFlag` | Closed map: the closure records the flag `resolve` passes (`[false]` after a bare call) and returns per it; a bare video word returns at step 1 as `.explicit` `.facetimeVideo` without consulting the closure (steps 1–3 intact) |
+## Gate results
 
-## Gate
+- **Whole-module typecheck: GREEN.** `xcodebuild build-for-testing -project
+  seniOS.xcodeproj -scheme ElderlyAssistant -destination 'platform=iOS
+  Simulator,id=0D2CED77-002C-4081-A4C7-6A0A97E60F18' -derivedDataPath
+  build/DerivedDataTests -skip-testing:ElderlyAssistantUITests` →
+  `** TEST BUILD SUCCEEDED **`, `COMPILECHECK_EXIT=0`, with the log showing the
+  `SwiftCompile … L10nCatalogCoverageTests.swift` task for the final content
+  (app + unit + UI test bundles compiled; log kept at
+  `ios/build/t147-typecheck2.log`, gitignored). Zero warnings attributable to
+  the changed file (the 11 warnings in the log are pre-existing, in other
+  files).
+- **Scoped `L10nCatalogCoverageTests` run: deferred** to phase end (T-163) per
+  the coordinator's speed-mode directive.
+- Additional static verification before the commit: every coverage rule and the
+  span/neighbour arithmetic replicated over the real catalog in Python — zero
+  failures; catalog count 1,410; plist string == design frozen copy; usage-key
+  set == the pinned 12; catalog diff insertion-only.
 
-Command (from the worktree root): `ios/build.sh test:unit MethodResolverTests`
+## Risks / open items
 
-- Exit code: 0 — `=== Scoped unit run passed (baseline not advanced) ===`
-- `Executed 17 tests, with 0 failures (0 unexpected)` (14 pre-existing + 3 new)
-- Source privacy guard: green (24 fixtures over 12 rules, all positive/negative cases
-  behaved)
-- Intent-prompt mirror guard: green (seed mirrors `IntentPrompt.build` byte-for-byte,
-  2717 bytes, 4 placeholders; all 7 drift self-tests rejected)
-- No build-database lock contention encountered.
-
-## Decisions and notes for the reviewer
-
-1. **Design followed, not improvised.** The initialiser signature matches design-l2 §8
-   (`:452-458`) and §14 row C3 (`:1052`) exactly; the coordinator shape matches §8's
-   snippet (`:464-469`) exactly. No signature discrepancy was found between design and
-   shipped code.
-2. **Reachability observation (flag for review, disclosed in code and tests).** Through
-   `resolve` with steps 1–3 unchanged, step 4 is only reachable when `requestedApp` is
-   nil/empty and the call-type sense is false: a bare video word already returns at step 1
-   as an explicit FaceTime choice (`explicitMethod`'s own comment: "asking for video IS a
-   method choice"). So the closure's video arm is unreachable through this entry point
-   today; the closure is wired exactly as the design freezes it, and
-   `testGlobalDefaultClosureReceivesCallTypeFlag` proves what actually arrives is
-   observable (`[false]`), rather than asserting a green that would depend on step 1
-   coincidentally producing FaceTime. The video arm's mapping is pinned by the closure
-   construction assertion in `testGlobalDefaultClosureMapsCallType`. A comment in step 4
-   records the same fact for future readers.
-3. **Behaviour-identity for existing call sites.** The default closure ignores both stores
-   and all settings, so no stored preference or settings value changes behaviour for a
-   two-argument construction beyond the shipped steps 2–3.
-4. **Integration coverage.** The coordinator edit is compile-verified by the gate (app
-   target builds and links) and its closure shape is exercised at the resolver seam by
-   `testGlobalDefaultClosureMapsCallType`; end-to-end voice-path coverage (settings
-   primary → confirmation → execution) belongs to T-149 per the plan and is not claimed
-   here.
-
-## Definition of done
-
-- [x] Resolver init extended with the defaulted closure; existing constructions compile
-      unchanged
-- [x] Coordinator construction site maps the settings primary by call type
-- [x] New and existing resolver tests green: `ios/build.sh test:unit MethodResolverTests`
-- [x] Scoped run reports the privacy guard executed and passed (and the prompt-mirror
-      guard, which runs in the same gate)
-- [ ] Code reviewed and merged — coordinator's paired review + integration commit
+- The absolute baseline pins depend on the T-144 merge happening before
+  phase-end acceptance; the deliberate re-measure obligation is recorded in the
+  test comment (the +21 delta is the constant).
+- `SpotifyLocalizationTests` count pin is pre-existing red at HEAD (see above).
+- The `L10n.str` resolution half runs only at the phase-end gate; the lproj is
+  generated from this same catalog at build time (no independent risk
+  identified).

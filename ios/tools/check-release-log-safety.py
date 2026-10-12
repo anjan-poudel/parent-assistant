@@ -185,6 +185,13 @@ FEATURE_ROOTS = [
     "Services/Voice/DialogueAnswerPath.swift",
     "Services/Voice/DialogueCandidateBuilder.swift",
     "Services/Voice/DialogueOptionCatalog.swift",
+    # [FAMILY-CONTACTS-UNIFY design-l2 §5.2] Link/nickname identity + the write seam:
+    # names, nicknames, phone numbers, identifiers and photo bytes are household data.
+    # A Release console write or an unlisted metadata key anywhere in these files
+    # fails the gate; events route through ObservabilityBus with allow-listed keys only.
+    "Services/Contacts/SystemContactLinkService.swift",
+    "Services/Contacts/SystemContactPhotoWriter.swift",
+    "Services/Contacts/FamilyContactIndex.swift",
     # [CALL-DIALER-PRIMARY-SECONDARY T-156 / design-l2 §13 L2-D12] The
     # primary/secondary call-dialer feature's own root: the chain file
     # routes between the household's call apps, and the hop metadata and

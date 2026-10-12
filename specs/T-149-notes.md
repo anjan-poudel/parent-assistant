@@ -1,325 +1,299 @@
-# T-149 — Launch-fail hop machinery and opener threading — implement notes
+# T-149 — `SystemContactLinkService` — implement notes
 
-Worktree: `/Users/anjan/workspace/projects/elderly-ai-assistant-call-dialer-primary-secondary`
-(branch `feat/call-dialer-primary-secondary`, base `9165174b` = wave 5, T-148). Unit: TG-30,
-wave 6, risk HIGH, effort L, component C5 (design-l2 §10). Depends on T-148 (landed); blocks
-T-150/T-152/T-153. Requirements: FR-CDP-015, FR-CDP-016, NFR-CDP-004. Design references:
-design-l2 §10.1 failure classification table (`:794-…`), §10.2 listings, §10.3 termination proof,
-§10.4 vocabulary case table, the voice-path region (`:592-609`), §13 edit rows 12/14/15, §14
-interface summary, §15 steps 5-8, §21 (LaunchHop = internal nested type), §22-24 (taxonomy +
-hop event), §28 (suite/seam rows). Task spec:
-`specs/plan-tasks/tasks/TG-30-voice-confirmation-and-launch-fail-hop.md` T-149 section
-(`:86-142`).
+Worktree: `/Users/anjan/workspace/projects/elderly-ai-assistant-family-contacts-unify`
+(branch `feat/family-contacts-unify`). Unit: TG-30 "contacts access, link
+verification and matching", the verification half. Agent: dev. Design
+references: design-l2 §1.3 (types + failure paths), §4.1 (actor isolation),
+§4.2 (single-flight drain with latest-roster capture), §4.3 (photo cache
+constants + cache-aside), §4.4–§4.5 (invalidation hooks), §5.2 (closed event
+vocabulary), §0 deviation 1 (`invalidate` is `async`); design-l1 §6.1/§6.2/§6.3
+(link semantics, duplicate-claim refusal, reachable numbers). Requirements:
+FR-FCU-002/004/006, FR-FCU-009, NFR-FCU-001/002/003.
 
 ## Status
 
-**Done — scoped gate green (32/32), nothing committed, nothing pushed.** Two owned files
-touched and nothing else; no new catalogue key (the hop line `call.announce.launchFailedFallback`
-pre-exists), no new console write (speech + the one event), no new dependency, no ai-sdd
-command, no commit, no push, no `git clean`/`restore`.
+**Done** — service + seam conformance + test suite written, whole-module
+typecheck GREEN, release log-safety gate passes, committed (no push).
+Per the 2026-10-12 speed-mode directive: the scoped test-suite RUN is
+**deferred to phase end (T-163)** — the tests must exist and compile, and they
+do (see "Gate results"). The service is **not** wired into `AppCoordinator`
+(T-156's unit).
 
 ## Files changed
 
-| File | numstat (+/-) |
-|------|---------------|
-| `ios/ElderlyAssistant/App/AppCoordinator.swift` | 160 / 4 |
-| `ios/ElderlyAssistantTests/Services/Voice/CallChannelResolutionTests.swift` | 685 / 0 |
-
-`git diff -U0` shows the ONLY four removed lines are the four opener signatures (rewritten with
-the additive `hop` parameter) — `performSystemContactCall(name:phone:)`,
-`performFaceTimeCall(name:phone:video:)`, `performSystemContactWhatsApp(name:phone:)`,
-`performSystemContactMessenger(name:handle:)`. Every other hunk is a pure insertion, and every
-success/recovery branch of the four openers is byte-untouched. The test file has **zero
-deletions**: all 26 pre-existing tests are byte-intact, including the T-145 chain-level
-termination test `testHopConsumesCandidatesNeverLoops` (`:315`).
+- `ios/ElderlyAssistant/Services/Contacts/SystemContactLinkService.swift`
+  (**NEW**, 419 lines) — `VerifiedLinksSnapshot`; `SystemContactReading` /
+  `SystemContactLinkReading` seams; `actor SystemContactLinkService`
+  (verification pass, single-flight drain, photo cache, closed-vocabulary
+  events). No console writes, no network (both pinned by tests + the repo
+  gate).
+- `ios/ElderlyAssistant/Services/Contacts/AddressBookDirectory.swift`
+  (+26) — `extension AddressBookDirectory: SystemContactReading`
+  (`currentAccess()` delegating to the single T-148a mapping;
+  `contacts(identifiers:keysToFetch:)` as one identifier-predicate batched
+  read over the private store).
+- `ios/ElderlyAssistantTests/Services/Contacts/SystemContactLinkServiceTests.swift`
+  (**NEW**, 880 lines, 27 tests) — fake `SystemContactReading`; verification
+  matrix, degrade paths, duplicate claims, snapshot lookups, drain cases,
+  photo-cache contract, event vocabulary, source hygiene.
+- `ios/seniOS.xcodeproj/project.pbxproj` — the 8 lines for my two files are
+  **already in HEAD**: T-154's commit `0686369a` swept them in with their own
+  (same worktree, shared index). Verified:
+  `git show HEAD:ios/seniOS.xcodeproj/project.pbxproj | grep -c SystemContactLinkService`
+  = 8, and the working tree has no pbxproj delta left for this unit. Nothing
+  was re-staged.
+- `specs/T-149-notes.md` (this file).
 
 ## What was built
 
-### 1. `LaunchHop` + `launchFailHopStep` — the ONE spoken site (`:7969`, `:7984`)
+### 1. `VerifiedLinksSnapshot` + the two seams (§1.3)
 
-```swift
-    struct LaunchHop: Equatable {
-        let candidates: [CallApp]
-        let handle: String?
-    }
+- `VerifiedLinksSnapshot` is the only thing consumers read: `links`
+  (`UUID → SystemContactLink`, verified only), `linkedRecordNumbers`
+  (`record identifier → that record's CURRENT normalized numbers`, verified
+  links only), `generation`. `.empty` (generation 0) is the unlinked anchor —
+  the "today's behavior exactly" value of design-l1 §6.2.
+- `familyID(forIdentifier:)` — the record→family lookup; deterministic `min`
+  tiebreak so even a hand-built (duplicate) snapshot answers reproducibly.
+- `familyID(matchingRecordNumber:)` — the number→family lookup, built on
+  `MissedCallContactResolver.matches` reused **unchanged** (trailing-digit
+  rule, floor 8). Only verified links are consulted: a changed number can
+  never resolve to the wrong person. Sorted identifiers keep the answer
+  deterministic when two relatives share a landline.
+- `SystemContactReading`: `currentAccess()` + one batched
+  `contacts(identifiers:keysToFetch:)`. `CNContactStore` is neither
+  constructible nor fakeable in unit tests, so this seam is where every test
+  scripts the book.
+- `SystemContactLinkReading`: `refresh(contacts:)`, `photoImageData(forIdentifier:)`,
+  `invalidate(identifier:)`. The caller owns the "record is still verified"
+  precondition for photos (§10.1): `photoImageData` answers "what bytes does
+  record X hold", not "is X still linked".
 
-    func launchFailHopStep(after failed: CallApp, candidates: [CallApp],
-                           handle: String?, name: String,
-                           locale: Locale) -> (next: CallApp, remaining: [CallApp])? {
-        guard let next = CallChannelChain.nextLaunchFailCandidate(
-                after: failed,
-                attemptOrder: candidates,
-                messengerHandleAvailable: hasUsableMessengerHandle(handle)) else {
-            return nil
-        }
-        noteLaunchFailHop(after: failed, next: next)
-        speak(text: L10n.fmt("call.announce.launchFailedFallback", locale: locale,
-                             CallChannelChain.label(failed, locale: locale),
-                             name,
-                             CallChannelChain.label(next, locale: locale)))
-        let remaining = Array(candidates.drop(while: { $0 != next }).dropFirst())
-        return (next, remaining)
-    }
-```
+### 2. Verification pass (§1.3)
 
-Design-l2 §10.2 listing verbatim (the only added doc paragraph records the access relaxation —
-deviation 1). The catalogue key pre-exists (T-155: en `%1$@ didn't open for %2$@ — trying %3$@.`,
-ne `%2$@ को %1$@ खुलेन — %3$@ मार्फत प्रयास गर्दैछु।`); the argument order binds the failed
-label, the contact name and the next label — exactly the listing's slots.
+One pass, per the design's failure-path table:
 
-### 2. `noteLaunchFailHop` — the hop event (`:8036`)
+1. Build `stored` in roster order, skipping empty `identifier`/`numberKey`
+   (the model's "no linkable record" contract, re-checked).
+2. Nothing to verify ⇒ publish the empty snapshot **without a store call** —
+   which also means a roster that dropped a link drops the previous
+   snapshot's verified link (no link outlives the roster that claimed it).
+3. `currentAccess().allowsReading` guard ⇒ **no store call**, snapshot
+   unchanged, `degraded` event with `errorCode: nil` (nothing failed; access
+   is off) — no retries, no backoff (L1 §13.4), the next trigger re-runs it.
+4. ONE batched fetch (`verificationKeys = [identifier, phoneNumbers]`).
+   `throw` ⇒ snapshot unchanged, generation **not** bumped, `degraded` +
+   `fetch_failed` (stale serves; no empty-snapshot flap).
+5. Per stored link, in roster order: first claim of an identifier owns it
+   (`claimed` set — later duplicates stay unverified even if their own
+   fingerprint would have matched); record absent (deleted, or withheld under
+   limited access) ⇒ link excluded, never presented, never a crash; verified
+   iff one of the record's current normalized numbers satisfies
+   `MissedCallContactResolver.matches(storedKey, currentNumber)` (number
+   added or kept ⇒ verified; number changed ⇒ stale).
+6. Publish: generation +1, snapshot, `ok` event.
 
-```swift
-    private func noteLaunchFailHop(after failed: CallApp, next: CallApp) {
-        observabilityBus.emit(ObservabilityEvent(
-            component: "call_launch_fallback",
-            eventType: "hop",
-            durationMs: nil,
-            outcome: "\(failed.rawValue):\(next.rawValue)",
-            errorCode: nil,
-            metadata: [:]
-        ))
-    }
-```
+### 3. Single-flight drain (§4.2)
 
-SA-6: closed tokens only — component, event type, and the `failed:next` channel raw values;
-`metadata: [:]`. Never a name, never a number, never a handle. No console write is introduced —
-the event rides the existing `ConsoleObservabilityBus`/`LogSanitiser` seam.
+- `refresh` fast path: sets `refreshInFlight`, loops passes, returns the
+  snapshot as of its last pass.
+- Coalesced path (drain in flight): the roster **overwrites**
+  `pendingContacts` (latest wins; never merged, never queued) and the call
+  returns the snapshot published so far — an early return the consumer drops
+  with its generation guard.
+- Capture window: exactly one `await Task.yield()` per loop iteration,
+  between the pass and the `pendingContacts` read. Rationale (in-code
+  comment): `SystemContactReading.contacts` is synchronous, so without a
+  suspension point the whole drain would be atomic with respect to other
+  `refresh` calls, `pendingContacts` could never be written, and the
+  coalesced path — the Gherkin's "trigger during a drain" — would be dead
+  code. The yield is the documented capture window; the in-flight flag stays
+  set for the entire drain, so a trigger arriving during any pass takes the
+  coalesced path and its roster becomes the follow-up batch. A future edit
+  that removes the yield is caught by the coalescing test (it degrades to
+  one pass per trigger, which that test fails on).
 
-### 3. `performLaunchFailHop` — the tap path (`:8009`)
+### 4. Photo cache (§4.3) and invalidation (§4.4/§4.5)
 
-```swift
-    @discardableResult
-    private func performLaunchFailHop(after failed: CallApp,
-                                      candidates: [CallApp],
-                                      name: String, phone: String, handle: String?,
-                                      isVideo: Bool, locale: Locale) -> Bool {
-        guard let step = launchFailHopStep(after: failed, candidates: candidates,
-                                           handle: handle, name: name,
-                                           locale: locale) else { return false }
-        switch step.next {
-        case .phone:
-            performSystemContactCall(name: name, phone: phone)   // floor: its own honest line
-        case .faceTime:
-            performFaceTimeCall(name: name, phone: phone, video: isVideo)
-        case .whatsApp:
-            performSystemContactWhatsApp(name: name, phone: phone,
-                                         hop: LaunchHop(candidates: step.remaining, handle: handle))
-        case .messenger:
-            guard let handle, !handle.isEmpty else { return true }  // filtered above; defensive
-            performSystemContactMessenger(name: name, handle: handle,
-                                          hop: LaunchHop(candidates: step.remaining, handle: handle))
-        }
-        return true
-    }
-```
+- Named constants: `photoCacheCountLimit = 24` (≈ 12 contacts × 2 sweep
+  generations), `photoCacheTotalCostLimit = 16 * 1024 * 1024` (raw bytes,
+  `cost: data.count`), `photoKeyHashPrefixLength = 16`.
+- Cache key = first 16 hex chars of `sha256(identifier)` — a hash by
+  construction; no identifier, or slice of one, is ever a cache-internal
+  value that could reach a log or a crash dump (§5.2).
+- Cache-aside read: hit ⇒ served without touching the store; miss ⇒ ONE
+  fetch for ONE identifier with `photoKeys = [identifier, imageData]` only
+  (data minimisation: no names, no numbers). `nil` for absent / store
+  failure / unreadable access (no store call in the last case). `nil` is NOT
+  cached — an absent photo is re-checked next ask, never remembered as
+  absent.
+- `invalidate(identifier: nil)` = wholesale (the foreground hook); one
+  identifier after our own write. Both are the entire mutation surface.
 
-Design listing verbatim. Its callers land in T-151/T-153 (tap surfaces); this unit exercises it
-through the shipped openers' own failure branches (`testHopOpenerWiringEndToEnd`).
+### 5. Observability (§5.2)
 
-### 4. `hopFromCallAction` — the voice path (`:8052`) and its wiring
+One event per completed pass: `component = contacts_link`,
+`eventType = refresh_completed`, outcome `ok`/`degraded`, error code
+`nil`/`fetch_failed`, `durationMs` set, metadata `{"entry_count": "<count>"}`
+— allow-listed keys only, count-shaped values only. **This file writes
+nothing to the console in any build** (§5.2 rule 3): the release log-safety
+gate passes, and a source-scan test pins the five console-write tokens.
 
-```swift
-    private func hopFromCallAction(after failed: CallApp, action: PendingCallAction,
-                                   isVideo: Bool, locale: Locale) {
-        guard let step = launchFailHopStep(after: failed,
-                                           candidates: action.hopCandidates,
-                                           handle: action.contact.messengerHandle,
-                                           name: action.contact.name,
-                                           locale: locale) else { return }
-        performCallAction(action.replacing(
-            method: CallChannelChain.method(for: step.next, isVideo: isVideo),
-            hopCandidates: step.remaining))
-    }
-```
+### 6. `AddressBookDirectory` conformance
 
-Wired in `performCallAction` AFTER each shipped failure line has spoken — the FaceTime arm
-(`:7895-7899`):
+Thin glue, nothing decided here: `currentAccess()` delegates to the same
+`ContactsAccess.from` mapping every read path uses (re-mapping the status
+here would be exactly the version-gate drift `ContactsAccessTests` exists to
+catch), and `contacts(...)` is one `CNContact.predicateForContacts(withIdentifiers:)`
+fetch over the private store. A withheld record is simply absent from the
+result — never an error, never invented.
 
-```swift
-                speak(text: L10n.str("router.call.facetimeUnavailable", locale: locale))
-                // FR-CDP-015 (L2 §10.1): the shipped honest line just
-                // spoke; a remaining candidate hops — announced by the
-                // shared step, then re-entered through THIS executor.
-                hopFromCallAction(after: .faceTime, action: action,
-                                  isVideo: isVideo, locale: locale)
-```
+## Gate results
 
-and the Messenger arm (`:7946-7950`):
+- **Whole-module typecheck: GREEN.** `xcodebuild build-for-testing -project
+  seniOS.xcodeproj -scheme ElderlyAssistant -destination 'platform=iOS
+  Simulator,id=0D2CED77-002C-4081-A4C7-6A0A97E60F18' -derivedDataPath
+  build/DerivedDataTests -skip-testing:ElderlyAssistantUITests` (log:
+  `ios/build/t149-typecheck4.log`) → `** TEST BUILD SUCCEEDED **`, exit 0,
+  **0 errors**. All three touched/created files recompiled in that run
+  (forced with `touch`): 0 warnings from `SystemContactLinkService.swift` and
+  `SystemContactLinkServiceTests.swift`. The single warning in the log is
+  `AddressBookDirectory.swift:282:9: warning: switch must be exhaustive` —
+  the pre-existing-in-kind T-148a mapping-switch warning, documented in
+  `T-148a-notes.md`, not introduced here.
+- **Release log-safety gate: PASS.** `python3 ios/tools/check-release-log-safety.py`
+  (repo gate) — the no-console-write and no-content-bearing-event rules cover
+  this file.
+- **Project regeneration:** `xcodegen generate` ran after the test file
+  landed; the resulting pbxproj delta for this unit is 8 lines (2 file refs +
+  2 file refs + 4 group/Sources memberships), already committed by T-154's
+  `0686369a` (see "Files changed").
+- **Scoped `SystemContactLinkServiceTests` run: deferred** to phase end
+  (T-163) per the speed-mode directive. Everything below is
+  compile-verified and reasoning-checked, **not yet executed** — the first
+  T-163 run is the first execution.
 
-```swift
-                speak(text: L10n.fmt("router.call.messengerNoHandle", locale: locale, action.contact.name))
-                // Same rule as the FaceTime arm (L2 §10.1): the honest
-                // line has spoken, then a remaining candidate hops.
-                hopFromCallAction(after: .messenger, action: action,
-                                  isVideo: action.method == .messengerVideo, locale: locale)
-```
+## Test coverage (27 tests, written; run deferred)
 
-The `.phone` case, the `.whatsappChat` case and **every success branch** are untouched. Records
-nothing on failure stays exactly as shipped (no learning, no activity, no history from a failed
-open — the hop only decides, says and re-attempts).
+Fake-first: `FakeSystemContactReader` (lock-protected `access` / `records` /
+`failure` / per-fetch `identifiers`+`keys` / `fetchCount` /
+`peakConcurrentFetches` / an `onFetch` arrival hook) + a lock-protected `Box`
+for spawned-task capture. Records are `CNMutableContact`s — real framework
+records whose `identifier` is framework-assigned per instance and get-only
+(tests read it back and build the stored link from it, as the wizard does; a
+`XCTAssertFalse(identifier.isEmpty)` guard fails loudly rather than silently
+linking against nothing).
 
-### 5. Opener threading — additive `hop: LaunchHop? = nil`, failure branches only
+- **Verification (§1.3)** — verifies with record numbers + one generation
+  bump per drain; ONE batched fetch with exactly `[identifier, phoneNumbers]`
+  (names/photos asserted absent — data minimisation); number added ⇒ still
+  verified; duplicate claim: first in roster order wins, later duplicates
+  unverified (and: a stale first claim still owns the identifier, so a
+  corrupt payload cannot flip the record→family mapping).
+- **Degradation (FR-FCU-006)** — stale (record gone): excluded, generation
+  still bumps, stored claim untouched, family contact still resolves by
+  number; stale (number changed): excluded, no reachable numbers; fetch
+  throw: previous snapshot equal, generation NOT bumped, `fetch_failed`;
+  denied/notDetermined: no store call, snapshot equal, `degraded` with nil
+  error code; `.limited`: granted record verifies, withheld record absent,
+  outcome `ok` (not degraded), no re-prompt; link-less roster: empty
+  snapshot, generation bumps, zero store calls, replaces an older snapshot.
+- **Snapshot lookups** — by identifier and by number (country-code/format
+  tolerance, 8-digit floor, 7-digit no-match); unverified links are
+  unreachable by number.
+- **Drain (§4.2)** — four tests (see "Determinism of the drain tests").
+- **Photo cache (§4.3)** — fetched once then cached; key set exactly
+  `[identifier, imageData]`; key = 16-hex-char sha256 prefix, deterministic,
+  not a slice of the identifier; the three budget constants pinned; wholesale
+  invalidation re-reads, per-identifier invalidation leaves the other record
+  cached; nil for absent/unreadable/not-readable and nil is not negative
+  cached.
+- **Observability + hygiene (§5.2, NFR-FCU-002/003)** — one event per pass
+  with the closed vocabulary, `durationMs` set, metadata exactly
+  `["entry_count": "1"]` and a subset of `LogSanitiser.allowedKeys`; source
+  scan: no `print(`/`debugPrint(`/`NSLog(`/`os_log(`/`fputs(`, no
+  `URLSession`/`URLRequest`/`NWConnection`/`NWPathMonitor`/`CFNetwork`.
 
-- `performFaceTimeCall(name:phone:video:hop:)` (`:8215`) — in `.unavailable, .invalidHandle`
-  after the shipped honest line:
-  `performLaunchFailHop(after: .faceTime, candidates: hop?.candidates ?? [], name: name, phone: phone, handle: hop?.handle, isVideo: video, locale: locale)`.
-- `performSystemContactMessenger(name:handle:hop:)` (`:8343`) — in `.invalidHandle` after the
-  shipped line and the shipped tap event:
-  `performLaunchFailHop(after: .messenger, candidates: hop?.candidates ?? [], name: name, phone: "", handle: hop?.handle, isVideo: false, locale: locale)`.
-- `performSystemContactWhatsApp(name:phone:hop:)` (`:8253`) — parameter accepted, **never
-  consulted**: every outcome is TERMINAL (`.invalidPhone`) or a RECOVERY
-  (`.needsNativeCompose`, `.copiedNumber`) per §10.1; only a failure-with-hop row may hop
-  (RES-10). The call-chat opener's recovery chain stays non-hopping, as the task spec requires.
-- `performSystemContactCall(name:phone:hop:)` (`:8189`) — parameter accepted for call-site
-  uniformity per the task spec, deliberately never consulted: the GSM floor is TERMINAL
-  (design-l2 §10.1, "the floor is the last resort"). See deviation 2.
+### Determinism of the drain tests (reasoned at authoring time)
 
-## Termination proof statement (for the unit report)
+The design's "trigger during a pass" is a race; the assertions were chosen to
+hold under EVERY interleaving, or the interleaving is forced:
 
-> The hop walks strictly shrinking candidates: each step selects the first remaining candidate
-> that is not the failed channel and, for Messenger, has a usable handle on file
-> (`CallChannelChain.nextLaunchFailCandidate`), then consumes the list through
-> `drop(while: != next).dropFirst()` — a suffix consumption that removes `next` and everything
-> before it, so the next step sees a strictly smaller list. `|hopCandidates| ≤ 2` by construction
-> (`hopCandidates` is the attempt-order suffix after the routed channel, and the vocabulary
-> terminal is appended only when that suffix is empty), so the depth is at most two and no
-> channel is ever attempted twice; a vocabulary-substituted routed channel yields no candidates
-> at all; the floor never re-hops; and exhaustion returns `nil` while speaking nothing beyond
-> the caller's already-spoken failure line. No hop step re-enters the confirmation flow — the
-> voice path re-enters `performCallAction` (the executor a fresh confirmation reaches) with
-> `action.replacing(...)`, so there is no re-pending and no re-prompt. Synchronous throughout
-> (NFR-CDP-004): no `await`, no timer, no queue, no detached task anywhere in the chain.
+- *Trigger arriving mid-pass* (test-side call while pass 1 is in flight,
+  synchronised on `fetchCount`): fetch order `[A], [B]`, count 2, `max`
+  generation 2, `min` generation 1, and the returned snapshot always matches
+  the pass it stands for (switch on `generation`). Both outcomes of the race
+  — coalesced follow-up, or the late call running its own pass — satisfy all
+  of these.
+- *Two overlapping drains* (`async let`): exactly 2 fetches, peak
+  concurrency 1, exactly one call carries generation 2.
+- *Trigger after quiescence*: trivially sequential, generations 1 then 2.
+- *Coalescing bound (forced, not raced)*: pass 1's fetch blocks on a
+  `DispatchSemaphore` gate, so the actor is held while two roster triggers
+  arrive; their calls are parked on the actor before the drain's capture
+  read, so **both** take the coalesced path: exactly 2 fetches, the
+  follow-up pass verifies the LATEST roster only, the superseded roster is
+  never fetched, and both coalesced callers get the generation-1 snapshot
+  back. The two 100 ms margins only give each task BODY time to issue its
+  call (microseconds of work) while the actor is provably held; no assertion
+  depends on them. (Spawning triggers from inside `onFetch` without the gate
+  was written first and discarded: a late-spawning body legitimately costs
+  its own pass, so `fetchCount ≤ 2` was not an invariant.)
 
-Pinned by `testHopStepConsumesCandidatesNeverRepeats` (behavioural: the §10.4 worked example
-plus the 64-cell matrix through the real step, `XCTAssertEqual(cells, 64)`) and
-`testHopNeverReEntersConfirmationOrAwaits` (source: the re-entry site, the absence of
-confirmation symbols, the absence of await/schedule/loop statements).
+## Decisions
 
-## Tests added (6, all in `CallChannelResolutionTests.swift`)
+1. **`invalidate(identifier:)` is `async`** — design-l2 §0 deviation 1,
+   implemented as flagged. An actor method cannot satisfy a synchronous
+   protocol requirement while touching actor state (`#ConformanceIsolation`
+   hard error on this toolchain); `@preconcurrency` would silence it but adds
+   a runtime isolation trap for protocol-typed callers. Every call site
+   already awaits the actor (§4.5). Documented in-code.
+2. **The `Task.yield()` capture window** — the one place this file adds a
+   suspension the design text implies but does not spell out (see §3 above
+   for the rationale and the test that guards it).
+3. **Duplicate claims are dropped silently** — the closed §5.2 vocabulary for
+   `contacts_link refresh_completed` has no duplicate-specific reason code,
+   and §5.2's `claim_refused` row is the coordinator's WRITE-side refusal
+   (L1 §6.1), not a verification outcome. Verification's job is to not
+   present the duplicate; the write-side unit already prevents persisting
+   one.
+4. **`entry_count` = the verified-link count that STANDS after the pass** —
+   the newly published count on `ok`, the unchanged published count on
+   `degraded` (not 0). It is "how many links are live", the number a monitor
+   can act on; a degraded pass must not read as "all links gone".
+5. **No negative caching of photos** — absent is re-checked each ask rather
+   than remembered as absent (a photo can be added in Contacts.app at any
+   time; the foreground invalidation hook only covers cache entries).
+6. **Key-set constants are typed constants, not literals at call sites** —
+   `verificationKeys`/`photoKeys` are the single source for both production
+   and the tests' pins (`CNContact*Key` constants are `String` in this SDK;
+   the arrays are bridged once at the declaration).
+7. **First record wins for duplicate identifiers in a fetch result**
+   (defensive only; a store cannot return two records with one identifier).
+8. **`SystemContactLinkReading` photos do not re-verify the link** — the
+   caller owns that precondition (§10.1), so the cache stays ignorable: the
+   service never invents a link, it only serves bytes for a record handle it
+   was handed.
 
-| Test (`:line`) | Scenario | What it pins |
-|------|----------|--------------|
-| `testHopStepConsumesCandidatesNeverRepeats` (`:870`) | "Candidates never loop (failure)" | The voice worked example (`[.whatsApp, .phone]` after a failed `.messenger`, attempted `[.messenger, .whatsApp, .phone]`, sizes `[2, 1, 0]`, 2 steps); the same walk over the whole 64-cell matrix through the REAL step (each step returns a member of its own list, never a repeat, strictly shrinking; depth ≤ 2; the exhaustion residual is only a handle-less messenger; cells counted at 64; `hopEventLines == sweepSteps`); exhaustion (empty list, messenger-only-without-handle, and the vocabulary-substituted `[]` case) returns nil and emits nothing. |
-| `testLaunchFailedFallbackSpokenOnce` (`:987`) | "A failed launch hops to the next candidate once" | The hop step speaks exactly once per hop: one captured event whose payload is pinned byte-exactly (from `[call_launch_fallback]`: `hop outcome=faceTime:phone metadata=[:]` — closed tokens, no name, no digits); a second call over the consumed list exhausts with no further line; source-pinned single key site (1 literal in the whole coordinator), exactly one `speak(text:` in the step region, the collapsed spoken listing matching the step verbatim (catalogue slot order); the key resolves in both en and ne. |
-| `testMessengerWithoutHandleSkippedInHop` (`:1051`) | "A messenger candidate without a handle is skipped inside the hop" | Handle-less messenger is dropped and the floor proceeds; the control leg (same list, `maya.gurung`) selects messenger — a feasibility filter, not a ban; suffix consumption `[.phone]`; the two hop lines in order; the component occurs exactly twice (the dropped candidate is never announced); a messenger-only list without a handle is exhaustion. |
-| `testAdditiveFieldsKeepOldCallSites` (`:1104`) | "The additive fields keep the shipped call sites compiling" | The override's amended construction (whitespace-collapsed, token-exact) names none of the three new fields; the TWO `IntentLogStoreTests` constructions (read via source scan — the file is outside this unit's ownership) name the five shipped labels and none of the new fields; the voice step names `fellBackFrom`/`hopCandidates` (the T-148 edit, by design) and not the clock; `replacing` names `requestedAt`/`hopCandidates` and not `fellBackFrom`; plus runtime defaults (empty provenance/hop list) and `replacing` semantics (clock preserved, provenance reset, flywheel slot follows the hopped method). |
-| `testHopNeverReEntersConfirmationOrAwaits` (`:1207`) | "Candidates never loop" (second half) | `hopFromCallAction` re-enters `performCallAction(action.replacing(` exactly once and touches no confirmation symbol (`pendingCallAction`, `requestCallConfirmation`, `confirmationPrompt`, override/response handlers, `isAwaitingCallConfirmation`); the machinery holds no await/async/Task/DispatchQueue/Timer/sleep/schedule and no loop statement at all; the floor dispatch is dispatched once through the shipped floor opener, and the tap helper never re-enters the voice executor. |
-| `testHopOpenerWiringEndToEnd` (`:1256`) | Integration leg (FR-CDP-015) | Hermetic end-to-end through the SHIPPED openers: Arm 0 — the floor opener with a hop on board produces no hop event and its own honest line (terminal); Arm A — `performSystemContactMessenger(handle: "")` (fails without building any URL, so nothing is probed or opened) speaks its shipped tap event FIRST, then one hop line `messenger:phone`, then the floor's `call.announce.noPhoneNumber`; Arm B — the same failure hopping to WhatsApp ends on `.invalidPhone` (TERMINAL per §10.1) with exactly one hop line and the `whatsapp:invalidPhone` tap event; `activityLog` count unchanged across all arms (a failed open records nothing). |
+## Deviations
 
-The suite now executes **32 tests** (26 pre-existing + 6 new).
+None beyond the design's own flagged ones (§0 deviation 1, decisions 1 above).
 
-## Gate
+## Risks / open items
 
-Command (from the worktree root): `ios/build.sh test:unit CallChannelResolutionTests`
-
-- Exit code: **0** — `** TEST SUCCEEDED **`.
-- `Selected tests` / xctest bundle: **Executed 32 tests, with 0 failures (0 unexpected)** in
-  0.475 s.
-- xcresult (authoritative pass list):
-  `ios/build/DerivedDataTests/Logs/Test/Test-ElderlyAssistant-2026.10.12_06-23-18-+1100.xcresult`
-- Retained log: `ios/build/t149-gate.log` (same command, `tee`d). A pre-test compile-only log
-  from the checkpoint run is retained at `ios/build/t149-precheck.log` (26/26 at that point).
-- In-build guards, both green **before** the tests: the source-privacy guard (all rules with
-  their positive/negative fixtures behaved — including `feature-console-write` and
-  `feature-unlisted-metadata-key`, so the hop event adds no console write and no unlisted
-  metadata key) and the intent-prompt mirror guard (seed mirrors `IntentPrompt.build`
-  byte-for-byte, 2717 bytes, 4 placeholders; all 7 drift self-tests rejected).
-- No build-database lock contention occurred on either run; no retry needed.
-- Honest note: the FIRST gate run (after the test additions, 06:21) failed 2/32 — both were
-  self-inflicted assertion bugs in the NEW tests, fixed before the green run: (a) one source
-  pin collapsed only the needle while matching against the raw region (fixed: collapse both
-  sides); (b) the collapsed equality carried a trailing space from the region boundary (fixed:
-  trim both sides). The production code was green on the first run (26/26) before any test was
-  added. The two pins failing-first is also evidence they are load-bearing, not tautologies.
-
-## Deviations from the design / task spec (with reason)
-
-1. **`launchFailHopStep` access: `private` → internal.** The §28 seam for the hop behaviour
-   suite is the step driven with the real catalogue; a `private` member is unreachable across
-   files. The relaxation mirrors T-148's `confirmationPrompt` precedent exactly, is recorded in
-   the function's doc comment, and changes no signature or body line (the design listing does
-   not pin the modifier). `performLaunchFailHop`, `noteLaunchFailHop` and `hopFromCallAction`
-   stay `private` as listed. The alternative — driving every assertion through the real openers
-   — is not fully available in the unit bundle: a FaceTime or `tel:` open would place a real
-   call on a device, and the WhatsApp opener's happy paths leave the hermetic envelope. The
-   one hermetic integration leg (messenger `.invalidHandle`) IS driven through the shipped
-   action-level call sites (`testHopOpenerWiringEndToEnd`).
-2. **The system phone opener gained a `hop` parameter it never consults — task spec says four
-   openers, design §14 says three search-shaped openers.** The task spec
-   ("Implementation notes") names four openers that gain the additive parameter, including the
-   system phone opener; the design's §10.1 table classifies the floor as TERMINAL and the §14
-   interface summary lists the hop parameter only on the three hopping openers. Implemented as
-   the UNION, conservatively: the parameter exists on all four (call-site uniformity — T-151/
-   T-153 call sites can pass a hop uniformly), and `performSystemContactCall` never reads it —
-   the floor is terminal per §10.1 and a caller-side error can never silently introduce a hop
-   the failure table forbids. Doc comment records the reconciliation. **For the reviewer to
-   adjudicate** whether the design should be amended to four or the parameter dropped from the
-   floor opener (dropping it would make the four call sites asymmetric in the same wave).
-3. **`performLaunchFailHop`'s `.faceTime` leg does not thread the hop onward — design listing
-   verbatim.** Consequence: a mid-list `.faceTime` candidate (reachable when the vocabulary
-   falls back to FaceTime, e.g. routed `.messenger` with candidates `[.faceTime, .phone]`)
-   drops its remaining suffix if FaceTime itself fails to open. This is conservative (never a
-   loop — the depth bound holds), and the listing is followed verbatim rather than "improved";
-   flagged for the challenger to probe against §10.1 rows 11-12 and the §10.3 proof.
-4. **Unused `hop` parameter on `performSystemContactWhatsApp`** (design §14 signature, task spec
-   verbatim): documented as accepted-for-uniformity, never consulted — all its rows are
-   terminal or recovery. Pinned behaviourally in Arm B (the hopped WhatsApp leg does not
-   re-hop).
-5. **The messenger opener's hop carries no phone number** (design §14 gives it
-   `name:handle:` only): a hopped `.phone` leg therefore lands on the shipped
-   `call.announce.noPhoneNumber` line (pinned in Arm A) instead of dialing. Honest and terminal;
-   recorded in the opener's doc comment. The call-site surfaces that DO hold the number keep it
-   on their own floor path (T-151/T-153's job).
-6. **Test-name collision resolved by the distinct name (dispatch option b).**
-   `testHopConsumesCandidatesNeverLoops` already existed at `:315` (T-145's chain-level SA-2
-   statics walk + 64-cell sweep) and is byte-frozen — the test file diff is +685/-0. Editing it
-   would have destroyed T-145's frozen evidence, so the coordinator/hop-step-level termination
-   proof lands under the distinct name `testHopStepConsumesCandidatesNeverRepeats`. The task
-   spec's "extend the resolution suite: testHopConsumesCandidatesNeverLoops, …" is satisfied in
-   substance: the suite's termination coverage now spans the chain statics (existing tests 26)
-   AND the real hop step (new test), and the four named capabilities all exist by name.
-7. **"Speaks exactly once" is evidenced behaviourally plus at the source, not by audio.** A unit
-   test drives the coordinator before `start()`, where `speak` is a documented no-op (no queue,
-   no `noteAssistantSpoke`). The single spoken-line SITE (1 key literal, 1 `speak(text:` in the
-   step, the collapsed listing equality, both catalogues resolving) plus the one-hop-one-event
-   count is the honest unit-level evidence; the audio itself stays DV-2 territory — the same
-   scoping T-148 recorded.
-
-## Notes for the paired challenger
-
-1. **Probe deviation 3 first**: drive `performLaunchFailHop` with `after: .messenger, candidates:
-   [.faceTime, .phone]` (routed `.messenger` under `.anyChannel`) and confirm the intended
-   reading of §10.1 — the listing's `.faceTime` leg omits the hop, so the `.phone` suffix is
-   abandoned. If the design intends the hop to continue, it is a one-line listing fix ({hop:
-   LaunchHop(candidates: step.remaining, handle: handle)}) — decide and record.
-2. **Probe the floor's terminality directly**: `performSystemContactCall(name:phone:"",hop:)`
-   with any candidate list must produce no hop event (Arm 0) — confirm the parameter can never
-   be consulted by a future edit without failing that test (it would need someone to *delete*
-   the pin, which is the point).
-3. **Check the hermeticity claim**: `CallLinks.openMessengerThread(handle: "")` returns
-   `.invalidHandle` BEFORE building any URL (no `canOpenURL`, no `open`), and
-   `CallLinks.openWhatsAppCallChat("")` returns `.invalidPhone` before its probe; the floor leg
-   uses `phone: ""` so `PhoneDialer.url` is nil. If any of those guards ever reorders, the
-   integration test could start probing the platform — worth a source pin in a later wave
-   (outside this unit's ownership: `CallLinks.swift`, `RedesignComponents.swift`).
-4. **The event-shape pin** excludes only the timestamp (slices from `[call_launch_fallback]`);
-   confirm no sanitiser path could add metadata keys (`LogSanitiser` passes component/eventType/
-   outcome through and filters metadata — an added key would fail the exact-equality pin).
-5. **The collapse/trim helpers are duplicated across suites** (`CallConfirmationWordingTests`,
-   `DialogueCoordinatorWiringTests`, now here) — a house extraction is possible but was not done
-   (outside this unit's owned files). The two new-file failures in the first gate run came from
-   exactly this fragility; the pins are now collapse-both-sides + trim.
-
-## Definition of done
-
-- [x] Hop walks strictly shrinking candidates, depth at most two, single spoken line site
-      (behavioural 64-cell walk + source pins; termination statement above)
-- [x] Hop event shape pinned: closed tokens, empty metadata, no numbers or handles anywhere
-      (exact-payload equality + no-name/no-digit assertions)
-- [x] Openers take the additive hop parameter; the shipped constructions pin green
-      (two coordinator sites + two log-store sites pinned; floor/whatsApp parameters documented
-      as never-consulted)
-- [x] Scoped run green: `ios/build.sh test:unit CallChannelResolutionTests` (32/32, exit 0)
-- [x] No new console writes beyond the single hop event; privacy guard green
-- [ ] Code reviewed and merged — coordinator's paired review + integration commit
+- **T-156 (AppCoordinator) must pass the FULL roster to `refresh`** — a pass
+  publishes exactly its batch's verified set (that is the §1.3 "dropped
+  contact ⇒ dropped link" rule), so a partial batch would publish a
+  partial snapshot. The drain's coalescing assumes callers hand it the
+  current whole roster.
+- The coalescing guarantee is bounded by the capture window: a trigger that
+  arrives after the drain's last capture read runs its OWN pass (correct, and
+  covered by the "quiescence" test). The suite pins the follow-up-pass
+  behaviour, not the timing.
+- The pbxproj entries for this unit live in T-154's commit `0686369a`
+  (shared index). If that commit is ever amended or rebased, re-run
+  `xcodegen generate` and stage the two entries with whichever unit's commit
+  lands next.
+- `.limited`-withheld records degrade links to unverified with no
+  user-visible signal yet — the honest-caption UX is TG-30's access half
+  (T-148b) / the coordinator's surface, not this unit.

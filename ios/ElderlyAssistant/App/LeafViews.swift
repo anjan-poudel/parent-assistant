@@ -912,9 +912,11 @@ struct RemindersView: View {
 /// search surface as before (field, voice search, access cards, ranked
 /// rows) as an explicit mode; clearing the field to empty, or tapping
 /// the mode's back button, returns to the curated list. The photos come
-/// from the coordinator's `contactPhoto(for:)` contract
-/// (contact-photos task, 2026-09-07): a photo resolves when the
-/// contact has a `photoFilename`, otherwise the initials avatar stays.
+/// from the coordinator's face resolver
+/// (`faceThumbnail(for:diameter:displayScale:)`; contact-photos task,
+/// 2026-09-07; unified precedence T-157): a photo resolves when the
+/// contact has a readable linked system photo or an app-local
+/// `photoFilename`, otherwise the initials avatar stays.
 struct CallView: View {
     @Environment(\.appAppearance) private var appearance
     @EnvironmentObject var coordinator: AppCoordinator
@@ -974,11 +976,11 @@ struct CallView: View {
 
     /// Faces for the current search's family rows, resolved OFF the body
     /// (design review P2 — "keep image-file reads out of `body`"). The
-    /// results pass used to call `coordinator.contactPhoto(for:)` — a
-    /// file read plus a full-size decode — once per family row, inside
-    /// `body`, so every keystroke re-read every face. One keyed pass
-    /// fills this instead and the rows only index it; each face is also
-    /// downsampled to the 52pt circle it is drawn in.
+    /// results pass used to resolve each face inside `body` — a file
+    /// read plus a full-size decode per family row per keystroke. One
+    /// keyed pass through the coordinator's async face path fills this
+    /// instead and the rows only index it; each face is also downsampled
+    /// to the 52pt circle it is drawn in.
     @State private var resultPhotos: [String: UIImage] = [:]
 
     var body: some View {
@@ -1017,10 +1019,13 @@ struct CallView: View {
             // keeps showing.
             coordinator.refreshMissedCallCorrelations(promptIfNeeded: true)
         }
-        // Re-resolve the search rows' faces when the query or the roster
-        // changes — never during body evaluation (see `resultPhotos`).
-        .task(id: resultPhotoKey) {
-            resultPhotos = resolveResultPhotos()
+        // Re-resolve the search rows' faces when the query or any face
+        // identity changes — never during body evaluation (see
+        // `resultPhotos`). T-157: the resolver is the coordinator's
+        // async face path, so a linked contact's SYSTEM photo wins where
+        // available (design-l1 §10.1).
+        .task(id: resultFaceKey) {
+            resultPhotos = await resolveResultPhotos()
         }
         .onChange(of: coordinator.pendingContactSearchRequest?.id) { _ in
             consumePendingVoiceRequestIfPresent()
@@ -1131,34 +1136,45 @@ struct CallView: View {
     private var isSearching: Bool { !trimmedQuery.isEmpty }
 
     /// What the resolved faces depend on: the query the rows matched and
-    /// each family contact's stored file (a photo edit keeps the contact
-    /// id, so the file name has to be part of the identity).
+    /// the ARRAY of per-contact face identities (design-l2 §4.4 — the
+    /// batch passes key on the array; a photo or link edit keeps the
+    /// contact id, so the identity's other components carry the change).
     /// `recency` deliberately stays out — re-ranking a row never changes
     /// its face.
-    private var resultPhotoKey: String {
-        let family = coordinator.familyContacts
-            .map { "\($0.id.uuidString):\($0.photoFilename ?? "-")" }
-            .joined(separator: ",")
-        return "\(trimmedQuery)|\(family)"
+    private var resultFaceKey: [String] {
+        [trimmedQuery] + coordinator.familyContacts.map { coordinator.faceIdentity(for: $0) }
     }
 
-    /// One pass over the current search outcome's `.family` rows,
-    /// through the shared downsampling cache — a face already decoded at
-    /// this size (this screen, the family list, a tile) is a memory hit.
-    private func resolveResultPhotos() -> [String: UIImage] {
+    /// One pass over the current search outcome's `.family` rows through
+    /// the coordinator's async face path (shared downsampling cache
+    /// underneath: a face already decoded at this size — this screen,
+    /// the family list, a tile — is a memory hit).
+    private func resolveResultPhotos() async -> [String: UIImage] {
         guard isSearching, let entries else { return [:] }
+        // The coordinator's PUBLISHED index and verified-link snapshot
+        // (T-156; design-l2 §3.6) — the same pair `resultsArea` renders
+        // from, so the faces resolved here can never come from a roster
+        // or a link set the rows do not see.
         let outcome = UnifiedContactSearch.search(query: trimmedQuery,
                                                   family: coordinator.familyContacts,
+                                                  index: coordinator.familyIndex,
                                                   in: entries,
+                                                  verifiedLinks: coordinator.verifiedLinks,
                                                   recency: recency)
         var resolved: [String: UIImage] = [:]
         for row in outcome.entries {
             guard case .family(let contact) = row else { continue }
-            resolved[row.id] = DownsampledImageCache.shared.contactFace(
+            let identity = coordinator.faceIdentity(for: contact)
+            let face = await coordinator.faceThumbnail(
                 for: contact,
                 diameter: UnifiedContactResultRow.avatarDiameter,
-                displayScale: displayScale
-            ) { coordinator.contactPhoto(for: contact) }
+                displayScale: displayScale)
+            // Post-await identity re-check (design-l2 §4.4):
+            // `.task` cancellation is best-effort, so the guard is the
+            // guarantee — a face resolved for a superseded identity is
+            // dropped, never assigned.
+            guard coordinator.faceIdentity(for: contact) == identity else { continue }
+            if let face { resolved[row.id] = face }
         }
         return resolved
     }
@@ -1343,11 +1359,28 @@ struct CallView: View {
     private var searchArea: some View {
         HStack(spacing: 10) {
             searchExitButton
-            if access == .allowed {
+            if access?.allowsReading == true {
                 searchField
             }
         }
-        if access == .allowed {
+        if access?.allowsReading == true {
+            // `.limited` (iOS 18 "Select Contacts") is a granted,
+            // READABLE subset — it takes today's `.allowed` display
+            // path, led by the honest caption (design-l2 §3.5): the
+            // FIRST line of the readable block, directly under the
+            // field row and above the mic caption, so a search over a
+            // partial book never silently pretends to search
+            // everything. `.denied` stays the only blocked arm;
+            // `.limited` never re-prompts (it can never render the
+            // empty dead area `allowsReading` exists to prevent).
+            if access == .limited {
+                Text(L10n.str("call.search.accessLimited", locale: coordinator.activeLocale))
+                    .font(.system(size: appearance.typography.captionPointSize))
+                    .foregroundStyle(appearance.colors.textSecondary)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 6)
+            }
             micCaption
             if entries == nil {
                 if loadFailed {
@@ -1370,7 +1403,7 @@ struct CallView: View {
     private func refreshDirectory() {
         let status = AddressBookDirectory.access()
         access = status
-        guard status == .allowed else { return }
+        guard status.allowsReading else { return }
         recency = coordinator.contactCallRecency
         if entries == nil || loadFailed {
             loadEntries()
@@ -1378,12 +1411,16 @@ struct CallView: View {
     }
 
     /// The user tapped Allow on the access card — the ONE place the
-    /// permission prompt may fire (point of use, constitution).
+    /// permission prompt may fire (point of use, constitution). The
+    /// system sheet may yield `.limited` (iOS 18 Select Contacts), so
+    /// the load decision reads the RE-READ status, never the binary
+    /// request result (design-l2 §3.5): a limited selection still
+    /// loads its granted set.
     private func grantAccess() {
         Task {
-            let granted = await directory.requestAccess()
+            _ = await directory.requestAccess()
             access = AddressBookDirectory.access()
-            if granted {
+            if access?.allowsReading == true {
                 recency = coordinator.contactCallRecency
                 loadEntries()
             }
@@ -1413,7 +1450,7 @@ struct CallView: View {
     /// as visible — the ask happens at the tap (point of use); a denial
     /// flips `micHidden` for the rest of this visit.
     private var micButtonVisible: Bool {
-        guard !micHidden, access == .allowed else { return false }
+        guard !micHidden, access?.allowsReading == true else { return false }
         switch SFSpeechRecognizer.authorizationStatus() {
         case .authorized, .notDetermined: break
         case .denied, .restricted: return false
@@ -1519,14 +1556,19 @@ struct CallView: View {
     private func announceVoiceResultIfReady() {
         guard let voice = voiceRequest,
               announcedVoiceSearchID != voice.id,
-              access == .allowed,
+              access?.allowsReading == true,
               let entries,
               !loadFailed,
               trimmedQuery == voice.query else { return }
         announcedVoiceSearchID = voice.id
+        // The coordinator's published index + verified-link snapshot
+        // (T-156; design-l2 §3.6) — the announced first row is the
+        // rendered first row by construction.
         let outcome = UnifiedContactSearch.search(query: trimmedQuery,
                                                   family: coordinator.familyContacts,
+                                                  index: coordinator.familyIndex,
                                                   in: entries,
+                                                  verifiedLinks: coordinator.verifiedLinks,
                                                   recency: recency)
         let locale = coordinator.activeLocale
         if let name = outcome.entries.first?.name {
@@ -1730,9 +1772,15 @@ struct CallView: View {
     @ViewBuilder
     private var resultsArea: some View {
         if let entries {
+            // The coordinator's published index + verified-link
+            // snapshot (T-156; design-l2 §3.6) — one consistent
+            // snapshot per pass, never an inline rebuild that could
+            // disagree with the link state the faces resolved under.
             let outcome = UnifiedContactSearch.search(query: trimmedQuery,
                                                       family: coordinator.familyContacts,
+                                                      index: coordinator.familyIndex,
                                                       in: entries,
+                                                      verifiedLinks: coordinator.verifiedLinks,
                                                       recency: recency)
             if outcome.moreAvailable {
                 Text("call.search.moreAvailable")
@@ -1773,6 +1821,9 @@ struct CallView: View {
                     ForEach(outcome.entries) { result in
                         UnifiedContactResultRow(result: result,
                                                 photo: resultPhotos[result.id],
+                                                caption: CallResultRowText.linkedBookCaption(
+                                                    for: result, in: outcome,
+                                                    locale: coordinator.activeLocale),
                                                 channelState: channelStates[result.id]
                                                     ?? rowChannelState(for: result),
                                                 dial: { dialChannel(result) },
@@ -2352,11 +2403,21 @@ private struct UnifiedContactResultRow: View {
     let result: UnifiedContactSearch.Result
     /// The row's leading photo thumbnail (contact-photos task,
     /// 2026-09-07): ONLY `.family` rows carry one — the leaf resolves
-    /// it once per search outcome from
-    /// `AppCoordinator.contactPhoto(for:)` — book rows pass nil and
-    /// keep the initials avatar. Caller-driven like everything else in
-    /// the row; the row never touches the photo resolver itself.
+    /// it once per search outcome through
+    /// `AppCoordinator.faceThumbnail(for:diameter:displayScale:)` —
+    /// book rows pass nil and keep the initials avatar. Caller-driven
+    /// like everything else in the row; the row never touches the photo
+    /// resolver itself.
     let photo: UIImage?
+    /// The synthesized-row alt caption — "Also in your phone book as …"
+    /// (design-l1 §7.2; family-contacts-unify T-161): composed by
+    /// `CallView` through `CallResultRowText` from the outcome's
+    /// `linkedBookNames` map, which holds SYNTHESIZED rows only. nil
+    /// for every other row — no extra line, today's layout exactly.
+    /// `var` with a default so the memberwise initializer keeps every
+    /// existing construction compiling (the house defaulted-field
+    /// pattern, e.g. `RowChannelState.fellBackFrom`).
+    var caption: String? = nil
     /// The leaf-resolved channel truth for this row (see `RowChannelState`).
     let channelState: RowChannelState
     /// Dial the RESOLVED channel (`CallView.dialChannel`) — the circle
@@ -2414,6 +2475,18 @@ private struct UnifiedContactResultRow: View {
                             .font(.system(size: appearance.typography.captionPointSize))
                             .foregroundStyle(appearance.colors.textSecondary)
                             .lineLimit(2)
+                    }
+                    if let caption {
+                        // The synthesized-row explanation (design-l1
+                        // §7.2): why a name the user did not type into
+                        // the family record surfaces this row — its
+                        // own caption line under the number line, same
+                        // caption token.
+                        Text(caption)
+                            .font(.system(size: appearance.typography.captionPointSize))
+                            .foregroundStyle(appearance.colors.textSecondary)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
                     }
                 }
                 Spacer(minLength: 8)
@@ -2618,6 +2691,30 @@ private struct UnifiedContactResultRow: View {
     }
 }
 
+/// The call-surface search rows' composed text (family-contacts-unify
+/// T-161; the house `<Surface>RowText` seam — mirror of
+/// `ActivityRowText` in HistoryView.swift): the synthesized family
+/// row's alt caption composed OUTSIDE the view, so the caption-parity
+/// claim (one frozen key, one wording, on every search surface) is
+/// pinnable without a view instance.
+enum CallResultRowText {
+    /// The extra caption line for a row the link merge SYNTHESIZED
+    /// (design-l1 §7.2): the person is also stored in the phone book
+    /// under `linkedBookNames[result.id]`, so the row explains why a
+    /// name the user did not type into the family record appears.
+    /// nil for every other row — the map holds synthesized rows only —
+    /// and an empty stored name is suppressed rather than rendered as
+    /// a dangling "…as " (never a fabricated identity).
+    static func linkedBookCaption(for result: UnifiedContactSearch.Result,
+                                  in outcome: UnifiedContactSearch.Outcome,
+                                  locale: Locale) -> String? {
+        guard let bookName = outcome.linkedBookNames[result.id], !bookName.isEmpty else {
+            return nil
+        }
+        return L10n.fmt("call.search.linkedBookName", locale: locale, bookName)
+    }
+}
+
 /// Face/photo avatar + name, with per-contact VIDEO and AUDIO call
 /// buttons — no list picker in between (redesign spec §3.1 "one face,
 /// one tap"; contact-call-buttons task 2026-09-06). Each button opens
@@ -2626,9 +2723,11 @@ private struct UnifiedContactResultRow: View {
 /// deferred follow-up) through `AppCoordinator.performContactCall`,
 /// which also announces the opened surface aloud.
 ///
-/// The leading face (contact-photos task, 2026-09-07) is the contact's
-/// own photo thumbnail when the coordinator resolves one from the
-/// contact's `photoFilename` (`AppCoordinator.contactPhoto(for:)`),
+/// The leading face (contact-photos task, 2026-09-07; unified resolver
+/// T-157) is the contact's own photo thumbnail when the coordinator
+/// resolves one — the SYSTEM photo where the contact is verified-linked
+/// and one is readable, the app-local file otherwise
+/// (`AppCoordinator.faceThumbnail(for:diameter:displayScale:)`) —
 /// otherwise the initials FaceAvatar — same 52pt circle either way, so
 /// a curated row of tiles keeps a uniform face column.
 struct ContactTile: View {
@@ -2638,13 +2737,13 @@ struct ContactTile: View {
     @Environment(\.locale) private var locale
     @Environment(\.displayScale) private var displayScale
 
-    /// DESIGN-REVIEW (P2): the tile used to call
-    /// `coordinator.contactPhoto(for:)` — a file read plus a full-size
-    /// decode — while composing the row, i.e. once per contact per body
+    /// DESIGN-REVIEW (P2): the tile used to read and decode the photo
+    /// file while composing the row, i.e. once per contact per body
     /// evaluation. The face is now resolved in `.task` (off the body)
-    /// through the shared downsampling cache, so a re-render costs a
-    /// dictionary lookup and the bitmap it holds is sized for a 52pt
-    /// circle rather than the 512pt file on disk.
+    /// through the coordinator's async precedence path and the shared
+    /// downsampling cache, so a re-render costs a dictionary lookup and
+    /// the bitmap it holds is sized for a 52pt circle rather than the
+    /// 512pt file on disk.
     @State private var photo: UIImage?
 
     /// The tile's face circle — photo or initials (see the struct doc).
@@ -2701,15 +2800,21 @@ struct ContactTile: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity).appSurface(role: .card, cornerRadius: DesignTokens.cardCornerRadius)
-        // Keyed by the stored file name, so replacing a contact's photo
-        // (or clearing it) re-resolves the face; an unchanged contact
-        // costs one cached lookup per appearance.
-        .task(id: contact.photoFilename ?? "") {
-            photo = DownsampledImageCache.shared.contactFace(
+        // Keyed by the face identity (design-l2 §4.4), so replacing a
+        // contact's photo, linking/unlinking the record or an epoch bump
+        // re-resolves the face; an unchanged contact costs one cached
+        // lookup per appearance.
+        .task(id: coordinator.faceIdentity(for: contact)) {
+            let identity = coordinator.faceIdentity(for: contact)
+            let face = await coordinator.faceThumbnail(
                 for: contact,
                 diameter: Self.avatarDiameter,
-                displayScale: displayScale
-            ) { coordinator.contactPhoto(for: contact) }
+                displayScale: displayScale)
+            // Post-await identity re-check (design-l2 §4.4): abandon the
+            // assignment when the identity moved while awaiting — the
+            // re-keyed task resolves the fresh face anyway.
+            guard coordinator.faceIdentity(for: contact) == identity else { return }
+            photo = face
         }
     }
 

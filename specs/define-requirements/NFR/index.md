@@ -1,44 +1,32 @@
-# Non-Functional Requirements — Call Dialer Primary/Secondary
+# Non-Functional Requirements — Family Contacts Unify (v1)
 
-10 non-functional requirements. IDs are namespaced `NFR-CDP-NNN` to avoid colliding with the
+9 non-functional requirements. IDs are namespaced `NFR-FCU-NNN` to avoid colliding with the
 project-level `NFR-NNN` set in the root stakeholder brief (`requirements.md`) — the same
 convention live-camera-translation used (`NFR-LCT-NNN`), profile-interview used (`NFR-PI-NNN`),
 spotify-music-integration used (`NFR-SP-NNN`) and multi-turn-conversation used (`NFR-MTC-NNN`).
-This page covers the `call-dialer-primary-secondary` set (`NFR-CDP-*`) only; the earlier feature
-files remain in this folder and are not part of this feature's requirements or lock.
-
-Every NFR carries a measurable target or threshold (the never-dead-end matrix, the ≤ 100 ms
-latency budget, the 100% persistence round-trip, the 100% ne/en key parity, the release log-gate
-exit 0).
+This page covers the `family-contacts-unify` set (`NFR-FCU-*`) only; the earlier feature files
+remain in this folder and are not part of this feature's requirements or lock.
 
 | ID | Title | Category | Priority |
 |----|-------|----------|----------|
-| [NFR-CDP-001](NFR-CDP-001-chain-never-dead-ends.md) | The chain never dead-ends — zero dead ends across the exhaustive configuration matrix | Reliability / Safety | MUST |
-| [NFR-CDP-002](NFR-CDP-002-local-probes-no-new-egress.md) | Feasibility probes are local — no new network, data, identity or privacy surface | Privacy | MUST |
-| [NFR-CDP-003](NFR-CDP-003-log-safety.md) | Log safety — numbers, handles and announcement content never reach logs beyond the existing policy | Privacy / Security | MUST |
-| [NFR-CDP-004](NFR-CDP-004-fallback-resolution-latency.md) | Fallback-resolution latency budget — local probes at call time, user-paced | Performance | MUST |
-| [NFR-CDP-005](NFR-CDP-005-persistence-round-trip.md) | `secondaryCallApp` persistence round-trip reliability | Reliability (Persistence) | MUST |
-| [NFR-CDP-006](NFR-CDP-006-picker-accessibility.md) | Accessibility of the Primary and Fallback dialer pickers | Accessibility | MUST |
-| [NFR-CDP-007](NFR-CDP-007-localisation-completeness.md) | Localisation completeness — 100% ne/en parity for every new string | Localisation | MUST |
-| [NFR-CDP-008](NFR-CDP-008-deterministic-testability.md) | Deterministic testability under the scoped-suite gate | Reliability / Testability | MUST |
-| [NFR-CDP-009](NFR-CDP-009-no-regression-shipped-call-paths.md) | No regression to the shipped voice pipeline, emergency and dial-back paths | Reliability (Regression) | MUST |
-| [NFR-CDP-010](NFR-CDP-010-compliance-and-release-gates.md) | Compliance, review and release gates; DV-1..7 acceptance | Compliance | MUST |
+| [NFR-FCU-001](NFR-FCU-001-nickname-index-and-match-performance.md) | Nickname index and matching performance stay within the interaction envelope | Performance | MUST |
+| [NFR-FCU-002](NFR-FCU-002-pii-log-safety.md) | PII / log safety — names, nicknames, numbers, links and photos never reach logs | Privacy / Security | MUST |
+| [NFR-FCU-003](NFR-FCU-003-no-new-network-egress.md) | No new network egress — contacts, links, nicknames and photos stay on-device | Privacy | MUST |
+| [NFR-FCU-004](NFR-FCU-004-localisation-ne-en.md) | Localisation — every new user-visible string exists in ne and en | Localisation | MUST |
+| [NFR-FCU-005](NFR-FCU-005-accessibility-voice-first.md) | Accessibility — voice-first capability, house touch standards, no authorization reasoning for the elderly user | Accessibility | MUST |
+| [NFR-FCU-006](NFR-FCU-006-migration-compatibility.md) | Migration compatibility — legacy payloads load, nothing is lost | Reliability | MUST |
+| [NFR-FCU-007](NFR-FCU-007-grapheme-regression-pin.md) | Devanagari substring / grapheme-cluster behavior regression-pinned | Reliability | MUST |
+| [NFR-FCU-008](NFR-FCU-008-delivery-sequencing-call-dialer.md) | Delivery sequencing and scope separation vs call-dialer-primary-secondary | Compliance | MUST |
+| [NFR-FCU-009](NFR-FCU-009-test-and-release-gates.md) | Test gate, release gates and baseline honesty | Compliance | MUST |
 
 ## Coverage of the security-relevant surfaces (workflow focus areas)
 
-The workflow's `security-design-review` and `security-test` carry five named focus areas; each
-maps onto this set as follows:
-
-| Focus area (workflow) | Covered by |
+| Surface (workflow `security-design-review` / `security-test` focus) | Covered by |
 |---|---|
-| GSM hard floor: no configuration (including `secondary == primary`) may produce a dead-end chain | [NFR-CDP-001](NFR-CDP-001-chain-never-dead-ends.md), [FR-CDP-006](../FR/FR-CDP-006-facetime-and-phone-always-feasible.md), [FR-CDP-007](../FR/FR-CDP-007-chain-preferred-secondary-phone.md) |
-| Emergency precedence untouched: emergency semantics and the override protocol survive routing; dial-back never delays escalation | [FR-CDP-018](../FR/FR-CDP-018-preserved-behaviours.md), [FR-CDP-014](../FR/FR-CDP-014-override-protocol-preserved.md), [FR-CDP-011](../FR/FR-CDP-011-missed-call-dial-back-routes-the-chain.md), [NFR-CDP-009](NFR-CDP-009-no-regression-shipped-call-paths.md) |
-| Feasibility probes local-only: no new egress, no new data collection (handles/numbers are PII) | [NFR-CDP-002](NFR-CDP-002-local-probes-no-new-egress.md), [FR-CDP-004](../FR/FR-CDP-004-messenger-feasibility-handle-on-file.md), [FR-CDP-005](../FR/FR-CDP-005-whatsapp-feasibility-installed-probe.md) |
-| Announcement honesty: the spoken confirmation/announcements name the actually-routed channel (`fellBackFrom`); no silent route changes | [FR-CDP-008](../FR/FR-CDP-008-fellbackfrom-attempt-order.md), [FR-CDP-013](../FR/FR-CDP-013-fallback-before-spoken-confirmation.md), [FR-CDP-015](../FR/FR-CDP-015-launch-fail-fallback-announced.md), [FR-CDP-016](../FR/FR-CDP-016-automatic-routing-with-announcement.md) |
-| Log sanitisation: numbers/handles must not reach logs beyond the existing transcript policy (B2/T-050) | [NFR-CDP-003](NFR-CDP-003-log-safety.md), [NFR-CDP-010](NFR-CDP-010-compliance-and-release-gates.md) |
-
-## Related
-
-- [FR index](../FR/index.md) — 19 functional requirements
-- [Requirements index](../index.md)
-- [Consolidated copy](../../define-requirements.md)
+| Write authority — the app's first write into the shared system address book; blast radius confined to the edited contact's photo; no bulk mutation; wrong-contact write prevented by construction | [FR-FCU-008](../FR/FR-FCU-008-photo-write-confined-to-edited-contact.md), [FR-FCU-009](../FR/FR-FCU-009-write-authorization-honest-states.md), [NFR-FCU-009](NFR-FCU-009-test-and-release-gates.md) |
+| Identity integrity — a wrong link merges two people; a nickname matching several contacts must never silently dial the wrong person; unlink semantics; stale-link degradation | [FR-FCU-005](../FR/FR-FCU-005-unlink-both-records-intact.md), [FR-FCU-006](../FR/FR-FCU-006-stale-link-degradation.md), [FR-FCU-014](../FR/FR-FCU-014-ambiguous-nickname-never-wrong-person.md), [FR-FCU-003](../FR/FR-FCU-003-link-aware-dedupe-unified-search.md) |
+| Degradation safety — permission denied/limited/read-only or a failed save falls back to the app-local photo with honest UI; no data loss, no false success, no crash | [FR-FCU-009](../FR/FR-FCU-009-write-authorization-honest-states.md), [FR-FCU-010](../FR/FR-FCU-010-non-writable-photo-fallback.md), [FR-FCU-007](../FR/FR-FCU-007-photo-display-precedence.md) |
+| PII discipline — names/numbers/photos off the logs beyond B2/T-050; `check-release-log-safety.sh` covers the new write/fallback/resolution paths | [NFR-FCU-002](NFR-FCU-002-pii-log-safety.md), [FR-FCU-006](../FR/FR-FCU-006-stale-link-degradation.md) |
+| No new egress — nothing leaves the device; no new network surface or data collection | [NFR-FCU-003](NFR-FCU-003-no-new-network-egress.md) |
+| Matching-semantics integrity — reuse not fork; grapheme behavior regression-pinned (no "fixes") | [NFR-FCU-007](NFR-FCU-007-grapheme-regression-pin.md), [FR-FCU-012](../FR/FR-FCU-012-nickname-matching-in-search.md), [FR-FCU-013](../FR/FR-FCU-013-nickname-matching-in-voice-resolution.md) |
+| Migration integrity — pre-change payloads load; the pre-change single nickname still matches; no loss | [NFR-FCU-006](NFR-FCU-006-migration-compatibility.md), [FR-FCU-002](../FR/FR-FCU-002-link-reference-storage-and-migration.md), [FR-FCU-011](../FR/FR-FCU-011-multi-nickname-storage-and-migration.md) |

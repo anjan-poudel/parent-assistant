@@ -1,4 +1,4 @@
-# Requirements lock — Call Dialer Primary/Secondary (feature)
+# Requirements lock — Family Contacts Unify (v1)
 #
 # Contract: requirements_lock (ai-sdd task define-requirements).
 # Snapshot of the feature requirements set produced from
@@ -10,233 +10,335 @@
 # lock.
 #
 # Status: submitted for owner HIL approval (risk tier T1). Re-lock after any
-# sign-off change; the hashes below are the drift-detection baseline.
+# sign-off change; the hashes below are the drift-detection baseline. Both
+# feature Open Decisions (OD-1, OD-2) were resolved by the parent session on
+# 2026-10-12 before the first run (straight to design-l1; store-as-entered, no
+# automatic transliteration) — recorded in specs/define-requirements/index.md
+# and the feature constitution; nothing is open.
 #
 # Note on scope: the FR/ and NFR/ folders also still contain the previously
-# shipped live-camera-translation (FR-LCT-*), multi-turn-conversation
-# (FR-MTC-*), profile-interview (FR-PI-*) and spotify-music-integration
-# (FR-SP-*) files; they are left in place and are NOT part of this lock. This
-# lock covers the call-dialer-primary-secondary set only (FR-CDP-* /
-# NFR-CDP-*).
+# shipped live-camera-translation files (FR-LCT-NNN-*, NFR-LCT-NNN-*),
+# profile-interview files (FR-PI-NNN-*, NFR-PI-NNN-*),
+# spotify-music-integration files (FR-SP-NNN-*, NFR-SP-NNN-*) and
+# multi-turn-conversation files (FR-MTC-NNN-*, NFR-MTC-NNN-*); they are left
+# in place and are NOT part of this lock. This lock covers the
+# family-contacts-unify set only (FR-FCU-* / NFR-FCU-*).
 
 version: "1"
 task: define-requirements
-feature: call-dialer-primary-secondary
+feature: family-contacts-unify
 agent: ba
 contract: requirements_lock
-locked_at: "2026-10-11T16:08:08Z"
+locked_at: "2026-10-11T17:24:45Z"
 snapshot_of: "specs/define-requirements.md"
-snapshot_sha256: e0075c30b3eef9f193e0f8f0c3fc3434d564049a58e770c79fd533d5276916b7
+snapshot_sha256: b78a0e1527ec9229ebb27ffaee30cf8d730facf89e113ff67c4e2d049abee702
 index: "specs/define-requirements/index.md"
 counts:
-  functional_requirements: 19
-  non_functional_requirements: 10
+  functional_requirements: 17
+  non_functional_requirements: 9
 
 requirements:
-  - id: FR-CDP
-    title: "Primary dialer setting — four channels, persisted"
+  - id: FR-FCU-001
+    title: "Link a system contact as a family contact (the LINK flow)"
     kind: FR
-    file: specs/define-requirements/FR/FR-CDP-001-primary-dialer-setting.md
-    sha256: 1198e2b4a116f365b7e595fbeada49d5d6471f3715214d2f8074816d26996261
-  - id: FR-CDP
-    title: "Fallback dialer setting — four channels, equal picks legal"
+    area: "Link / Add Flow"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-FCU-001-link-system-contact-as-family.md
+    sha256: a636f9c806a901f37cce6ca34927d5124d8473ea2491bf2ccffef88dd12929db
+    acceptance_scenarios: 3
+  - id: FR-FCU-002
+    title: "Link reference storage with legacy-safe migration"
     kind: FR
-    file: specs/define-requirements/FR/FR-CDP-002-fallback-dialer-setting.md
-    sha256: c572c642eb3bb8de6dfe7dcb4ee790082a8b7fe8b06b7f168109ac6a0758c7f6
-  - id: FR-CDP
-    title: "`secondaryCallApp` persistence seam with GSM default"
+    area: "Link / Storage & Migration"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-FCU-002-link-reference-storage-and-migration.md
+    sha256: 49a020096a2aaff192c4b48db605e60b654c870fefe4a9053928886219d50b97
+    acceptance_scenarios: 3
+  - id: FR-FCU-003
+    title: "Link-aware dedupe — one row for a linked person in unified search"
     kind: FR
-    file: specs/define-requirements/FR/FR-CDP-003-secondary-call-app-persistence.md
-    sha256: 40dd8a78ef48a781a7cb1ef7d267b191497ce6d03055a1fa56cfac50198f9323
-  - id: FR-CDP
-    title: "Messenger feasibility — handle on file only"
+    area: "Search / Dedupe"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-FCU-003-link-aware-dedupe-unified-search.md
+    sha256: bac7bcdcb574a6c70cf0f67bfc19f6eebe7f87fe83cad497e5309ad4cdbc78f9
+    acceptance_scenarios: 4
+  - id: FR-FCU-004
+    title: "One person across every people surface — call list, voice resolution, missed-call correlation"
     kind: FR
-    file: specs/define-requirements/FR/FR-CDP-004-messenger-feasibility-handle-on-file.md
-    sha256: 1ce56de620b2c089f97b63207cb531d3a2f671939749f86a4ba32a927427de3e
-  - id: FR-CDP
-    title: "WhatsApp feasibility — local installed-app probe via injected closure"
+    area: "Identity / Cross-surface"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-FCU-004-one-person-every-surface.md
+    sha256: 5d83b0e8247e30dbf63823bb554d75a8c13f337b16b72f07473a2e1c025b7271
+    acceptance_scenarios: 3
+  - id: FR-FCU-005
+    title: "Unlink — reversible, with both records intact"
     kind: FR
-    file: specs/define-requirements/FR/FR-CDP-005-whatsapp-feasibility-installed-probe.md
-    sha256: 82cb045334f82dac07a189055dc28044ee0047d942cd7942bd85187ce6a17939
-  - id: FR-CDP
-    title: "FaceTime and phone are always feasible — phone is the GSM hard floor"
+    area: "Link / Unlink"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-FCU-005-unlink-both-records-intact.md
+    sha256: 6c4632b5e99a8ae98452ab279a20c5034e51ad2618580fc285a2087a1e85f894
+    acceptance_scenarios: 2
+  - id: FR-FCU-006
+    title: "Stale or broken link degradation — never hide, never crash, never strand a call"
     kind: FR
-    file: specs/define-requirements/FR/FR-CDP-006-facetime-and-phone-always-feasible.md
-    sha256: c5504744d37e5d966da344ddc52aefdc48ff433655bdeb4678ef44acb2b6af46
-  - id: FR-CDP
-    title: "Chain resolver — preferred → secondary → phone, dedupe, at-most-once, never dead-ends"
+    area: "Link / Degradation"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-FCU-006-stale-link-degradation.md
+    sha256: c2b0d94e30e03d008d5de5a1e4b9ff90d1b0bdfa8b793b7d1dc98d67db2f7703
+    acceptance_scenarios: 3
+  - id: FR-FCU-007
+    title: "Photo display precedence — system photo, then app-local, then initials"
     kind: FR
-    file: specs/define-requirements/FR/FR-CDP-007-chain-preferred-secondary-phone.md
-    sha256: 570b2ffea72c0e639945be8f63b65136570689af3c55f69b2a0b72946af7da8b
-  - id: FR-CDP
-    title: "`fellBackFrom` carries skipped channels in attempt order"
+    area: "Photo / Display"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-FCU-007-photo-display-precedence.md
+    sha256: d090b68d4d8cec8371857995654952c362047deeb02f0aa9ca667066f8e60858
+    acceptance_scenarios: 3
+  - id: FR-FCU-008
+    title: "Photo write confined to the edited contact's photo"
     kind: FR
-    file: specs/define-requirements/FR/FR-CDP-008-fellbackfrom-attempt-order.md
-    sha256: 322d2fde5e501fa0669d170fe50c4a4f4914fe52100e2f469beeba164269fbdb
-  - id: FR-CDP
-    title: "Preferred input — an explicit per-contact/family pick wins as the chain's preferred"
+    area: "Photo / Write Path"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-FCU-008-photo-write-confined-to-edited-contact.md
+    sha256: 8b026cea9626c44c910db05d6910057e4f431742315aa2bbe1b09bd26296337e
+    acceptance_scenarios: 4
+  - id: FR-FCU-009
+    title: "Write authorization — full, limited and denied are all honest states, detected not assumed"
     kind: FR
-    file: specs/define-requirements/FR/FR-CDP-009-explicit-pick-wins-as-preferred.md
-    sha256: 71f84e4693db7811ec2cfaf78dd2eb45343355b7798f91c826e6a2594619e277
-  - id: FR-CDP
-    title: "Address-book and family-contact call buttons route the chain"
+    area: "Photo / Authorization"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-FCU-009-write-authorization-honest-states.md
+    sha256: 82c2f7cab0516bf4d1743acfa8be0eaa803113958661b97c11d90ed2e879237b
+    acceptance_scenarios: 5
+  - id: FR-FCU-010
+    title: "Non-writable fallback — no loss, no false success, no crash"
     kind: FR
-    file: specs/define-requirements/FR/FR-CDP-010-tap-buttons-route-the-chain.md
-    sha256: a75fb80db980d042829d185a1cef635dbac78e7d37d5b1e7de070fb446c335f1
-  - id: FR-CDP
-    title: "Missed-call dial-back routes the chain"
+    area: "Photo / Fallback & Degradation"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-FCU-010-non-writable-photo-fallback.md
+    sha256: 189e7f95031763dd94ab7fb91325c59d8e8981c9b144c3a04ff1b293c10ff23a
+    acceptance_scenarios: 3
+  - id: FR-FCU-011
+    title: "Multi-nickname storage, as entered, with no-loss migration"
     kind: FR
-    file: specs/define-requirements/FR/FR-CDP-011-missed-call-dial-back-routes-the-chain.md
-    sha256: 2eeb9eff3b96fba505a2c258b6513680c5fca47638f83a4e4bb90058b2dbd5de
-  - id: FR-CDP
-    title: "Voice path — MethodResolver global default becomes the settings primary, mapped by call type"
+    area: "Nicknames / Storage & Migration"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-FCU-011-multi-nickname-storage-and-migration.md
+    sha256: f385fdec857c1024ff8477612dc09584e10794131fdb4c0a271f82a85644d592
+    acceptance_scenarios: 4
+  - id: FR-FCU-012
+    title: "Nickname matching in in-app search"
     kind: FR
-    file: specs/define-requirements/FR/FR-CDP-012-voice-global-default-settings-primary.md
-    sha256: 206c9398ce0586e0a3c015e8acf1dc6a33b23c6d56f0dbb4c69a8a52a4d92e42
-  - id: FR-CDP
-    title: "Fallback resolves before the spoken confirmation; the prompt names the routed channel"
+    area: "Nicknames / Search Matching"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-FCU-012-nickname-matching-in-search.md
+    sha256: 29655134d5c47b91f1bf25c0b56c9255d1827220c7b8c9cee1e4e57278248432
+    acceptance_scenarios: 4
+  - id: FR-FCU-013
+    title: "Nickname matching in voice call resolution"
     kind: FR
-    file: specs/define-requirements/FR/FR-CDP-013-fallback-before-spoken-confirmation.md
-    sha256: fe2fdcc83545c7dfb01a73f437906001393be6ab28dd5538fa0caf219b0cc036
-  - id: FR-CDP
-    title: "Override protocol and near-miss disclosure preserved unchanged"
+    area: "Nicknames / Voice Resolution"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-FCU-013-nickname-matching-in-voice-resolution.md
+    sha256: 0154361088011aad8d211d37f8312f8de7d2c69c1145724f3b4ab6918bfd0d92
+    acceptance_scenarios: 4
+  - id: FR-FCU-014
+    title: "An ambiguous nickname never silently dials the wrong person"
     kind: FR
-    file: specs/define-requirements/FR/FR-CDP-014-override-protocol-preserved.md
-    sha256: b3b7bcb12ae4f127fc77a891b0570d98cb8243589ab5dea15f3c77bbbd3b5cfb
-  - id: FR-CDP
-    title: "Launch-fail fallback (best-effort), announced via the existing spoken-outcome lane"
+    area: "Nicknames / Ambiguity Safety"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-FCU-014-ambiguous-nickname-never-wrong-person.md
+    sha256: b2ccbe07859127f483a9001c4dae28604a6c59bd3a31a8fb1274e379f79aa177
+    acceptance_scenarios: 4
+  - id: FR-FCU-015
+    title: "Family-editor nickname management UI"
     kind: FR
-    file: specs/define-requirements/FR/FR-CDP-015-launch-fail-fallback-announced.md
-    sha256: c4dcabca3bd4d8c6241a4da2a64abfde539c9cbccdf430e63644d089c33fdbc5
-  - id: FR-CDP
-    title: "Automatic routing with a spoken announcement — no ask-before-fallback"
+    area: "Nicknames / Editor UI"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-FCU-015-nickname-management-editor-ui.md
+    sha256: 90ba8ec9431e0cb1c21f874335b5c29f4b65be6fe87f06559a368ca8a0d621a6
+    acceptance_scenarios: 3
+  - id: FR-FCU-016
+    title: "Feasibility honesty — the three asks reported explicitly, no silent drop"
     kind: FR
-    file: specs/define-requirements/FR/FR-CDP-016-automatic-routing-with-announcement.md
-    sha256: fb93ad5bb5aed56e12a5eec79a082c9a2f03c983f72a176ce121df942f9a4624
-  - id: FR-CDP
-    title: "Localisation — new ne/en strings; spoken language matches the session"
+    area: "Delivery / Feasibility Reporting"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-FCU-016-feasibility-honesty-reporting.md
+    sha256: 4f6968109303783fa3aa9de520f98c4e6726a065f79b927935e6d61843d9ea21
+    acceptance_scenarios: 3
+  - id: FR-FCU-017
+    title: "DV-* device validation recorded and passed (completion gate)"
     kind: FR
-    file: specs/define-requirements/FR/FR-CDP-017-localisation-new-strings.md
-    sha256: 312af2cdde6f89c70de4b8be01d9bf4151258b93ff926f5b8069da12315bb9ef
-  - id: FR-CDP
-    title: "Preserved behaviours — no new dialogue flow, emergency semantics untouched, no silent failures"
-    kind: FR
-    file: specs/define-requirements/FR/FR-CDP-018-preserved-behaviours.md
-    sha256: cbcd72d07e92243eb9d9c74f326dc0ab469b954a127a8847784de39cbed8f933
-  - id: FR-CDP
-    title: "DV-1..7 device validation recorded and passed (completion gate)"
-    kind: FR
-    file: specs/define-requirements/FR/FR-CDP-019-device-validation-completion-gate.md
-    sha256: f0d3f5d7a735508efb819af671fc9452f690afbcdb4b228725771ceaf3685629
-  - id: NFR-CDP
-    title: "The chain never dead-ends — zero dead ends across the exhaustive configuration matrix"
+    area: "Validation / Completion Gate"
+    priority: MUST
+    file: specs/define-requirements/FR/FR-FCU-017-device-validation-completion-gate.md
+    sha256: b9d5bff854316a39139d296789c92fbcb6f82ba378faf69670e0c9a21ac9ffad
+    acceptance_scenarios: 3
+  - id: NFR-FCU-001
+    title: "Nickname index and matching performance stay within the interaction envelope"
     kind: NFR
-    file: specs/define-requirements/NFR/NFR-CDP-001-chain-never-dead-ends.md
-    sha256: 1da51c386be46371832eba4639e8f556cacbb2c95b72314724daabcbe2b8c3a7
-  - id: NFR-CDP
-    title: "Feasibility probes are local — no new network, data, identity or privacy surface"
+    area: Performance
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-FCU-001-nickname-index-and-match-performance.md
+    sha256: 24ac306b60a125fcd04d8c0e48658a9f3471f5269142f201714f5ca6843c6bae
+    acceptance_scenarios: 3
+  - id: NFR-FCU-002
+    title: "PII / log safety — names, nicknames, numbers, links and photos never reach logs"
     kind: NFR
-    file: specs/define-requirements/NFR/NFR-CDP-002-local-probes-no-new-egress.md
-    sha256: 78e2712712b7a35f4e07743cf95f6866aa5ff97eec33e3fb93cc1999c1e5b509
-  - id: NFR-CDP
-    title: "Log safety — numbers, handles and announcement content never reach logs beyond the existing policy"
+    area: "Privacy / Security"
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-FCU-002-pii-log-safety.md
+    sha256: 91b094cb9920b4af16438dfdad83c7c7d18c7ee4e7ac111db7b275438b034b00
+    acceptance_scenarios: 3
+  - id: NFR-FCU-003
+    title: "No new network egress — contacts, links, nicknames and photos stay on-device"
     kind: NFR
-    file: specs/define-requirements/NFR/NFR-CDP-003-log-safety.md
-    sha256: 0266a8bc67ae92b14285c440e5afb292e0cc02222e2fe1ce6d168ca5996368f4
-  - id: NFR-CDP
-    title: "Fallback-resolution latency budget — local probes at call time, user-paced"
+    area: Privacy
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-FCU-003-no-new-network-egress.md
+    sha256: d85745c7760cd7a509121f9446f9be7877b813e3fed36e8a3834dc1e2d346501
+    acceptance_scenarios: 2
+  - id: NFR-FCU-004
+    title: "Localisation — every new user-visible string exists in ne and en"
     kind: NFR
-    file: specs/define-requirements/NFR/NFR-CDP-004-fallback-resolution-latency.md
-    sha256: 412dd5857053a684d73052649323f42f1e807f7471539b71beeaa6667d53e770
-  - id: NFR-CDP
-    title: "`secondaryCallApp` persistence round-trip reliability"
+    area: Localisation
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-FCU-004-localisation-ne-en.md
+    sha256: b32fd05bcab07a300e714d34e493a6f88b47cd1824d7f325efce9a5403910b23
+    acceptance_scenarios: 3
+  - id: NFR-FCU-005
+    title: "Accessibility — voice-first capability, house touch standards, no authorization reasoning for the elderly user"
     kind: NFR
-    file: specs/define-requirements/NFR/NFR-CDP-005-persistence-round-trip.md
-    sha256: 1ee64d1870a50c822913282be5a83f21daa32d77cc92193f18203dc557e7c5e8
-  - id: NFR-CDP
-    title: "Accessibility of the Primary and Fallback dialer pickers"
+    area: Accessibility
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-FCU-005-accessibility-voice-first.md
+    sha256: ec5693ed708a54034a18828658ccd30266a2a58b3b732a95f3d7600e58f31228
+    acceptance_scenarios: 3
+  - id: NFR-FCU-006
+    title: "Migration compatibility — legacy payloads load, nothing is lost"
     kind: NFR
-    file: specs/define-requirements/NFR/NFR-CDP-006-picker-accessibility.md
-    sha256: 356f8d6e06273d3c4980dcbe931b690c75982f06c0adf2c63c7a1ca3b0bdb680
-  - id: NFR-CDP
-    title: "Localisation completeness — 100% ne/en parity for every new string"
+    area: Reliability
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-FCU-006-migration-compatibility.md
+    sha256: 2291aec717fa124894a231faaa63c9d91aa61a3f384b8c6c2641d1528fb2c2de
+    acceptance_scenarios: 3
+  - id: NFR-FCU-007
+    title: "Devanagari substring / grapheme-cluster behavior regression-pinned"
     kind: NFR
-    file: specs/define-requirements/NFR/NFR-CDP-007-localisation-completeness.md
-    sha256: 04f24a8243bb48400f8e612d723b29f2809948c940146004f0963ea0d11471a8
-  - id: NFR-CDP
-    title: "Deterministic testability under the scoped-suite gate"
+    area: Reliability
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-FCU-007-grapheme-regression-pin.md
+    sha256: 120544ea4fbc05782dbf4c6856423090d3dcb53445f1f4a14b30374fb82c0260
+    acceptance_scenarios: 3
+  - id: NFR-FCU-008
+    title: "Delivery sequencing and scope separation vs call-dialer-primary-secondary"
     kind: NFR
-    file: specs/define-requirements/NFR/NFR-CDP-008-deterministic-testability.md
-    sha256: 36db74afca2501126aa0ab50130b1241d0ac08ead09e6be824eb5943865317f4
-  - id: NFR-CDP
-    title: "No regression to the shipped voice pipeline, emergency and dial-back paths"
+    area: Compliance
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-FCU-008-delivery-sequencing-call-dialer.md
+    sha256: 30effab972345e7533aa910bc96ef80d0d5bba7bd14c98da65da1726adeaf2df
+    acceptance_scenarios: 3
+  - id: NFR-FCU-009
+    title: "Test gate, release gates and baseline honesty"
     kind: NFR
-    file: specs/define-requirements/NFR/NFR-CDP-009-no-regression-shipped-call-paths.md
-    sha256: d7c51e6242b367771b451884aa0fe9cf7d73bfe0c62f9f3f800c934eb8cce760
-  - id: NFR-CDP
-    title: "Compliance, review and release gates; DV-1..7 acceptance"
-    kind: NFR
-    file: specs/define-requirements/NFR/NFR-CDP-010-compliance-and-release-gates.md
-    sha256: e360a957eb0b207466d0ea4663a5780a4fa42ed2284531d373eda975acbe3006
+    area: Compliance
+    priority: MUST
+    file: specs/define-requirements/NFR/NFR-FCU-009-test-and-release-gates.md
+    sha256: 43640a44ffc1c0e33930a03f6249c51b9c56f948873a8842cd0ad9ec0fd51e7c
+    acceptance_scenarios: 3
+
+assumptions:
+  - id: A1
+    statement: "The integration surfaces exist as named in the feature constitution; the cited anchors were spot-verified against the worktree source at requirements time (FamilyContact struct at FamilyContactStore.swift:61, single nickname :71, photoFilename :69, custom decoder :122-150; UnifiedContactSearch.dedupe(matchedFamily:in:) :269, FamilyMatchTier :155, familyMatches :217; ContactsAccess AddressBookDirectory.swift:245, allEntries() :386, fetch keys :333; ContactResolver.relationshipAnchors :41, scoring :93, accept 0.6 / ambiguity margin 0.15 :61-62; MethodResolver.resolve :47; ContactPhotoStore non-throwing save/load/delete; FamilyContactsSettingsView SettingsView.swift:1529, nickname step :2575, PhotosPicker :2485, picked-photo load :2511; CallView LeafViews.swift:918, family rows :1747, UnifiedContactResultRow :2288, ContactTile avatar :2559+; AppCoordinator.contactPhoto(for:) :6492, addFamilyContact :6515, updateFamilyContact :6566; NSContactsUsageDescription Info.plist:115; Localizable.xcstrings present; L10nCatalogCoverageTests and ios/tools/check-release-log-safety.sh present)."
+  - id: A2
+    statement: "Design-level choices are deliberately left open and are NOT requirements: the link's storage shape and identifier strategy (FR-FCU-002/006); the system-contact write seam's file/name and injection shape (FR-FCU-008); the nickname index structure (NFR-FCU-001); unlink mechanics and UI (FR-FCU-005); which representation a linked row renders (FR-FCU-003); whether strict number-matching may establish a counterpart for an UNLINKED family contact for photo display (FR-FCU-007; not required); removal semantics for a linked contact's photo beyond the FR-FCU-008/010 invariants; whether nicknames feed ContactResolver.nearMiss (not required; the name-only discipline may be extended conservatively at design's option)."
+  - id: A3
+    statement: "Non-family book rows (system contacts without a family record) keep today's presentation — initials avatar, no photo rendering — unchanged by this feature."
+  - id: A4
+    statement: "Exact user-facing copy (link flow, photo fallback labels, permission copy, nickname editor) is design-dependent and localization-bound; the ne/en keys must exist per NFR-FCU-004."
+  - id: A5
+    statement: "The project's known pre-existing full-bundle test failures (unrelated to this feature) remain the baseline for NFR-FCU-009; the feature's own and touched suites must pass, with baseline failures recorded rather than silently included or excluded."
+
+constraints:
+  - id: C1
+    statement: "Explicitly distinct from call-dialer-primary-secondary; sequencing. Do not absorb or redesign it. Implementation merges master AFTER its PR merges (queue behind it), expecting conflicts in MethodResolver.swift / LeafViews.swift family-contact call surfaces."
+    source: "feature constitution Feature Constraint 1; Sequencing Note (scaffold base master 8089c735)"
+  - id: C2
+    statement: "Migration rule. New model fields optional with custom-decoder defaults; pre-existing payloads (single nickname, photoFilename) must keep loading; the existing single nickname migrates into the multi-nickname structure without loss."
+    source: "feature constitution Feature Constraint 2"
+  - id: C3
+    statement: "Matching semantics reused; grapheme behavior pinned. Nickname matching MUST reuse existing name-matching semantics (NepaliTextNormalizer folding + [.caseInsensitive, .diacriticInsensitive] Character-safe substring; relationship anchors on ContactResolver's table). The Devanagari substring / grapheme-cluster behavior is regression-pinned — do not \"fix\" it."
+    source: "feature constitution Feature Constraint 3"
+  - id: C4
+    statement: "Photo write is best-effort with the pre-authorized fallback. Permission denied / limited access / read-only contact degrades to the app-local photo (ContactPhotoStore photoFilename) — never crash, never lose the picked photo, never claim an unverified success."
+    source: "feature constitution Feature Constraint 4"
+  - id: C5
+    statement: "CNSaveRequest only, photo only. Writes are limited to the edited contact's photo; no bulk rewrites; no editing other fields of system contacts."
+    source: "feature constitution Feature Constraint 5"
+  - id: C6
+    statement: "One person, one row. A linked pair is one person everywhere (search, call list, voice resolution); dedupe becomes link-aware beyond today's matched-only normalized-number rule; unlinked pairs keep today's matched-only behavior."
+    source: "feature constitution Feature Constraint 6"
+  - id: C7
+    statement: "Nicknames indexed and matched in both surfaces. Multiple nicknames are indexed for match performance and match in BOTH search and voice resolution (ContactResolver/MethodResolver seams)."
+    source: "feature constitution Feature Constraint 7"
+  - id: C8
+    statement: "No new network surface; no new data collection; PII discipline. Names, numbers and photos must not reach logs beyond existing policy (B2/T-050)."
+    source: "feature constitution Feature Constraint 8"
+  - id: C9
+    statement: "Delivery — house rule (inherited). Work ONLY in the sibling worktree /Users/anjan/workspace/projects/elderly-ai-assistant-family-contacts-unify (branch feat/family-contacts-unify); integrate via PR against master; never the main checkout."
+    source: "feature constitution Feature Constraint 9; project CLAUDE.md working rule"
+  - id: C10
+    statement: "Test gate. Scoped/focused XCTest suites are the honest gate (the full-bundle baseline has pre-existing failures): UnifiedContactSearchTests, FamilyContactStoreTests, ContactResolverTests, MethodResolverTests, ContactPhotoStoreTests, MissedCallContactResolverTests."
+    source: "feature constitution Feature Constraint 10; project constitution Release gates"
+  - id: C11
+    statement: "Localization. All new user-visible strings ne/en in ios/ElderlyAssistant/Resources/Localizable.xcstrings."
+    source: "feature constitution Feature Constraint 11"
+  - id: C12
+    statement: "Feasibility honesty. If any of the three asks proves infeasible on iOS (e.g. the write-permission model), the deliverable states it explicitly for the owner — no silent drop (the owner asked to be told)."
+    source: "feature constitution Feature Constraint 12; owner request 2026-10-12"
+
+open_decisions:  # none open — OD-1/OD-2 resolved 2026-10-12 before first run (straight to design-l1; store-as-entered, no automatic transliteration)
+  []
+
+out_of_scope:
+  - "call-dialer-primary-secondary — explicitly distinct, in flight; no absorption, redesign or scope merge; implementation queues behind its merge (NFR-FCU-008)"
+  - "Bulk address-book sync/import, and editing any system-contact field other than the photo (no name/number writes, no bulk rewrites) — FR-FCU-008, C5"
+  - "Automatic transliteration / romanization — \"sanu\" and \"सानु\" are distinct spellings unless both are stored (OD-2 resolved; FR-FCU-011/012/013)"
+  - "Redesigning the call-resolution chain — ContactResolver/MethodResolver structure beyond the named nickname seam is unchanged"
+  - "Any new network surface; any new data collection; anything leaving the device — NFR-FCU-003"
+  - "The Devanagari substring/grapheme-cluster behavior — regression-pinned; must not be \"fixed\" (NFR-FCU-007, C3)"
+  - "Emergency-contact semantics — unchanged by this feature"
+  - "Per-contact ownership across devices, and non-family book-row photo display — book rows keep today's initials avatar (A3)"
+  - "Android — no platform scope beyond the existing iOS app"
 
 security_surfaces:
-  - surface: "Chain dead-end: any (primary, secondary, feasibility) combination must resolve to
-      an attemptable channel — GSM is the hard floor; the exhaustive configuration matrix
-      (including equal picks) must show zero dead ends"
-    requirements: ["NFR-CDP-001", "FR-CDP-006", "FR-CDP-007"]
-  - surface: "Emergency precedence: emergency-contact semantics are untouched; missed-call
-      dial-back and voice-initiated calls must never delay or divert an emergency escalation"
-    requirements: ["FR-CDP-018", "FR-CDP-011", "FR-CDP-012"]
-  - surface: "Announcement honesty: the spoken confirmation and the launch-fail announcement
-      always name the actually-routed channel (fellBackFrom); no silent route changes"
-    requirements: ["FR-CDP-013", "FR-CDP-015", "FR-CDP-016"]
-  - surface: "Override protocol preserved: \"होइन, फोन नै गर\" still switches to a phone
-      call pre-confirmation — a fallback hop must not bypass or weaken it"
-    requirements: ["FR-CDP-014"]
-  - surface: "PII exposure: numbers/handles (address-book + Messenger handles) must not reach
-      logs beyond the existing transcript policy (B2/T-050); check-release-log-safety.sh must
-      cover the new fallback/announcement paths"
-    requirements: ["NFR-CDP-003", "NFR-CDP-010"]
-  - surface: "No new egress: feasibility probes are local-only (canOpenURL + address-book
-      handle check) — no new network, data, identity or privacy surface"
-    requirements: ["NFR-CDP-002"]
+  - surface: "Write authority — the app's first write into the shared system address book; blast radius confined to the edited contact's photo; no bulk mutation; wrong-target write prevented by construction; no other field ever modified"
+    requirements: ["FR-FCU-008", "FR-FCU-009", "NFR-FCU-002", "NFR-FCU-009"]
+  - surface: "Identity integrity — a wrong link merges two people; a nickname matching several contacts must never silently dial the wrong person; unlink as the safety valve; stale/mismatched link degradation without false merge"
+    requirements: ["FR-FCU-003", "FR-FCU-005", "FR-FCU-006", "FR-FCU-014"]
+  - surface: "Degradation safety — permission denied/limited/read-only or a failed save falls back to the app-local photo with honest UI; no data loss, no false success, no crash, no authorization reasoning asked of the elderly user"
+    requirements: ["FR-FCU-007", "FR-FCU-009", "FR-FCU-010", "NFR-FCU-005"]
+  - surface: "PII / log discipline — names, nicknames, numbers, link identifiers and photo data must not reach logs beyond B2/T-050; check-release-log-safety.sh coverage of the new write/fallback/resolution paths"
+    requirements: ["NFR-FCU-002", "FR-FCU-006"]
+  - surface: "No new egress — contacts, links, nicknames and photos stay on-device; no new network surface, no new data collection, no new permission keys"
+    requirements: ["NFR-FCU-003"]
+  - surface: "Matching-semantics integrity — reuse not fork; grapheme behavior regression-pinned (no \"fixes\"); no transliteration bridging; deterministic ambiguity handling"
+    requirements: ["FR-FCU-012", "FR-FCU-013", "NFR-FCU-007"]
+  - surface: "Migration integrity — legacy payloads (pre-nickname, single nickname, pre-link) load with zero loss; the pre-change single nickname still matches (DV-6)"
+    requirements: ["FR-FCU-002", "FR-FCU-011", "NFR-FCU-006"]
 
 traceability:
   - gate: "design-l1"
-    checks: "Resolve the frozen design into L1 architecture: pure-static chain resolver
-      placement + Feasibility/Result shapes (fellBackFrom attempt order); the
-      resolvedCallChannel / resolvedMissedCallChannel seam changes; MethodResolver's
-      global-default step made the settings primary (CallApp→CallMethod mapped by call type,
-      injected); secondaryCallApp persistence (default .phone); fallback resolved before the
-      spoken confirmation; launch-fail hop via the existing spoken-outcome lane; ne/en key
-      catalog. The assumptions recorded at requirements time (copy wording, tap-announcement
-      trigger point, launch-fail observation point, resolver placement) resolve here — none
-      re-opens the frozen design."
+    checks: "Resolve the design-level choices this set deliberately leaves open, bound by the requirements' invariants: link storage shape + identifier strategy (FR-FCU-002/006); write-seam file/name + injection shape (FR-FCU-008); nickname index structure (NFR-FCU-001); unlink mechanics/UI (FR-FCU-005); linked-row representation (FR-FCU-003); exact tier placement of nickname hits in FamilyMatchTier (FR-FCU-012). OD-1 (straight to design-l1) and OD-2 (store-as-entered) are settled inputs — do not re-open. The three-ask feasibility statement starts here (FR-FCU-016)."
   - gate: "design-l2"
-    checks: "Component design against this set: interface contracts for the chain resolver
-      (pure-static, closure-injected feasibility), the AppCoordinator seams, the MethodResolver
-      injection, the settings sections/pickers, and announcement composition from fellBackFrom."
+    checks: "Component design against this set; interface contracts for the link reference, the CNSaveRequest seam, the nickname structure + index, the editor UI and the permission handling; sequencing vs call-dialer (NFR-FCU-008)."
   - gate: "review-l2"
     checks: "review.decision == GO against the component design and this set."
   - gate: "security-design-review"
-    checks: "STRIDE with the named focus: the GSM hard floor can never be configured away (no
-      dead-end chain, including secondary == primary) (FR-CDP-006/007, NFR-CDP-001);
-      emergency-contact semantics and the override protocol unchanged — dial-back never delays
-      escalation (FR-CDP-014/018); feasibility probes local-only, handles/numbers are PII
-      (NFR-CDP-002/003); the spoken confirmation always names the actually-routed channel
-      (FR-CDP-013/015/016); SECURITY-GO required."
+    checks: "STRIDE with the new write surface and identity/link semantics as named focus areas: write authority blast radius confined to the edited contact's photo (FR-FCU-008/009, C5); identity integrity — wrong link, ambiguous nickname never silently dialing the wrong person (FR-FCU-003/005/006/014); degradation safety — denied/limited/read-only/failed-save fallback with honest UI (FR-FCU-010, NFR-FCU-005); PII off the logs beyond B2/T-050 (NFR-FCU-002); no new egress (NFR-FCU-003); matching-semantics integrity (NFR-FCU-007); SECURITY-GO required."
   - gate: "plan-tasks / implement"
-    checks: "Units trace back to FR-CDP-* / NFR-CDP-* ids; paired review and the 0.85
-      confidence threshold on implementation output; rework bound 5; unit-based dependency
-      waves; no CallRouter service and no per-contact primary/secondary storage (FR-CDP-018)."
+    checks: "Units trace back to FR-FCU-* / NFR-FCU-* ids; implementation queues behind call-dialer-primary-secondary's merge and resolves the conflicting surfaces as a union preserving its behavior (NFR-FCU-008, C1); paired review and the 0.85 confidence threshold on implementation output; focused tests + typecheck per unit (NFR-FCU-009, C10)."
   - gate: "security-test"
-    checks: "Evidence: the chain never dead-ends for any (primary, secondary) pair including
-      equal values (dedupe) and uninstalled apps (NFR-CDP-001, FR-CDP-007); the GSM floor is
-      reachable with every other channel infeasible (FR-CDP-006); the confirmation wording
-      names the routed channel (FR-CDP-013); emergency/dial-back escalation unaffected
-      (FR-CDP-018); number/handle PII is absent from logs and check-release-log-safety.sh
-      covers the new paths (NFR-CDP-003, NFR-CDP-010); no new egress from the probes
-      (NFR-CDP-002); SECURITY-GO required."
+    checks: "Evidence: photo write confined to the edited contact's photo and a failed save is a no-op (FR-FCU-008); authorization states detected not assumed, no false success (FR-FCU-009); fallback keeps the app-local photo with no loss (FR-FCU-010); names/nicknames/numbers/links/photos never reach logs and check-release-log-safety.sh covers the new paths (NFR-FCU-002); grapheme pin holds (NFR-FCU-007); migration fixtures load with zero loss (NFR-FCU-006); SECURITY-GO required."
   - gate: "final-sign-off"
-    checks: "T2 + HIL; DV-1..7 recorded and passed on the reference device (Anzaan)
-      (FR-CDP-019); ios/tools/check-release-log-safety.sh exits 0 (NFR-CDP-003, NFR-CDP-010)."
+    checks: "T2 + HIL; spec/plan reflect the final state; ios/tools/check-release-log-safety.sh exits 0 (NFR-FCU-002/009); the DV-1..DV-6 checklist is recorded and passed on the reference device (FR-FCU-017); the three-ask feasibility statement is explicit for the owner (FR-FCU-016)."

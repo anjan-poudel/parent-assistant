@@ -1,871 +1,854 @@
-# Design L1 — Call Dialer Primary/Secondary
+# Design L1 — Family Contacts Unify
 
-| Field | Value |
+| | |
 |---|---|
-| Task | `design-l1` (ai-sdd workflow `call-dialer-primary-secondary`) |
-| Contract | `architecture_l1` — requires literal `## Overview`, `## Architecture`, `## Components` headers |
-| Feature | `call-dialer-primary-secondary` |
-| Worktree / branch | `elderly-ai-assistant-call-dialer-primary-secondary` / `feat/call-dialer-primary-secondary` |
-| Agent | `sdd-architect` |
+| Task | `design-l1` (agent: `system-architect`), contract `architecture_l1` |
+| Feature | `family-contacts-unify`, branch `feat/family-contacts-unify` |
+| Worktree | `/Users/anjan/workspace/projects/elderly-ai-assistant-family-contacts-unify` |
+| Base | master `8089c735` (call-dialer-primary-secondary NOT yet merged — see §16) |
 | Date | 2026-10-12 |
-| Status | Draft for `review-l2` (GO gate) then `security-design-review` (SECURITY-GO) |
-| Stack | Swift / SwiftUI iOS app — no web stack; REST/OpenAPI and Docker sections are adapted honestly below (this platform has none) |
+| Inputs | `specs/family-contacts-unify/constitution.md`; `specs/define-requirements.md` + `specs/define-requirements/` (17 FR-FCU, 9 NFR-FCU, all MUST); `.ai-sdd/workflows/family-contacts-unify.yaml` scope; project `constitution.md` |
+| OD status | Both feature ODs resolved before the run (OD-1 straight to design-l1; OD-2 store-as-entered, no auto-transliteration) |
 
-Inputs read for this design (all on the feature branch):
+Line numbers cited below are orientation anchors into base `8089c735`, not contracts; symbol
+names are the contracts. This document designs; it does not implement (no production code, no
+migrations are written here). Every interface below specifies its error paths (agent principle:
+explicit error return types), its isolation (agent principle: concurrency explicit), and adds
+no timeouts (agent principle: timeouts are configuration — see §13.4).
 
-1. `specs/call-dialer-primary-secondary/constitution.md` — Feature Constraints 1–12, channel
-   table, integration surfaces, DV-1..7 completion gate, "Open Decisions: None".
-2. `specs/define-requirements.md` + `specs/define-requirements/index.md` + `FR/index.md` +
-   `NFR/index.md` — 19 `FR-CDP-*` + 10 `NFR-CDP-*`, all MUST; lock baseline
-   `specs/define-requirements.lock.yaml` (every locked requirement is covered by the
-   traceability matrix at the end of this document).
-3. `docs/superpowers/specs/2026-10-12-call-dialer-primary-secondary-design.md` — the frozen,
-   owner-approved design (2026-10-12). Authoritative for types, shapes and flow; divergences
-   are recorded as numbered resolutions/amendments in the closing section — none are silent.
-4. `.ai-sdd/workflows/call-dialer-primary-secondary.yaml` — scope comment and the five security
-   focus areas (pre-mapped in the Security section).
-5. The worktree source itself — every integration point below carries a verified `file:line`.
+---
 
-## Overview
+## 1. Scope and method
 
-### Context
+This L1 fixes the architecture for the three owner asks — LINK, PHOTO, NICKNAMES — as bound by
+the feature constitution's three contracts (Link Identity & Dedupe, Photo Unification, Nickname
+& Variation) and the 26 locked requirements. It translates the generic architect template
+(REST surface, OpenAPI, Docker topology, auth strategy) to this codebase's idioms:
 
-The app today has a single global dialer preference (`AppCoordinator.defaultCallApp`,
-`ios/ElderlyAssistant/App/AppCoordinator.swift:330`, restored at `:2851-2853`, key
-`defaultCallApp`), picked as one of four rows in `CallingSettingsView.swift:22-64`. When the
-picked channel cannot actually place the call — Messenger with no handle on file, WhatsApp not
-installed — the app either dead-ends the tap or silently drops to a different surface, and the
-elderly, voice-first user cannot recover.
+- **"REST API surface" → the in-process seam surface**: the small set of modules other modules
+  may call (Swift protocols/structs with explicit outcome enums), plus the on-device UI seams.
+- **"Data model" → the persisted `FamilyContact` schema** and its unversioned-store migration
+  contract (decoder defaults; "an optional field IS its migration").
+- **"Infrastructure topology" → the process/thread topology**: `@MainActor`-confined
+  coordinator state, dedicated actors for the new system-contact IO, pure values everywhere
+  else (§13).
+- **"Auth strategy" → the Contacts authorization model**, including iOS 18+ `.limited` and the
+  honest degraded states, since this feature adds the app's first WRITE into the shared system
+  address book (§9.3).
 
-This feature adds a settings-level **Primary** and **Fallback** dialer (four channels:
-`faceTime`, `phone`, `messenger`, `whatsApp`) and routes every call path through a
-feasibility-aware chain: **preferred → secondary → phone (GSM hard floor)** — dedupe on equal
-picks, each channel attempted at most once, never dead-ends. The fallback resolves *before* the
-existing spoken confirmation, which names the actually-routed channel; tap paths announce the
-routing out loud; launch failures hop down the chain and are announced via the existing spoken
-outcome lane; emergency-contact semantics and the override protocol are untouched.
+There is no network surface anywhere in this design, by requirement (NFR-FCU-003, §15).
 
-### Goals (traceable to frozen design Goals 1–4)
+## 2. Feasibility statement (FR-FCU-016)
 
-1. Two Settings pickers (Primary + Fallback), persisted through the existing `AppCoordinator`
-   UserDefaults seam; `secondaryCallApp` defaults to `.phone`.
-2. A pure-static feasibility resolver (`CallChannelChain`) whose result — channel plus
-   `fellBackFrom` provenance — feeds every announcement and confirmation.
-3. The chain runs on **all** call paths: address-book rows, family-contact buttons,
-   missed-call dial-back, and voice-initiated calls via MethodResolver's global-default step.
-4. The existing multi-turn confirmation is reused exactly, with no new dialogue flow, state or
-   question kind; the override protocol is preserved unchanged.
+All three asks are feasible on the target iOS as specified. No silent drops; no ask is
+partially answered without being named here.
 
-### In scope
-
-As frozen (constitution lines 13–21): the two pickers and persistence; the pure-static resolver
-with injected feasibility closures; chain application to all four call-path families; fallback
-resolved before the spoken confirmation; launch-fail hop announced via the spoken-outcome lane;
-ne/en localization of every new string; scoped test suites.
-
-### Non-goals (binding — must not change)
-
-| Non-goal | Source |
-|---|---|
-| No dedicated `CallRouter` service — extend the existing seams only | Constitution Constraint 7; frozen design Non-goals |
-| No per-contact primary/secondary storage — picks stay the chain's *input* | Constitution Constraint 5 |
-| Emergency-contact semantics untouched (`emergencyContacts` at `AppCoordinator.swift:6463` and the `NotifyChannel.resolve` path at `Services/FamilyNotifier/NotifyChannel.swift:39,58` are **not** rewired) | Constitution "Out of scope"; FR-CDP-018 |
-| No new dialogue flow — the multi-turn confirmation machinery is reused exactly | Constitution Constraint 6; Decision 5 |
-| No new network, data, identity or privacy surface — probes are local (`canOpenURL`, handle-on-file check); numbers/handles are PII | Constitution Constraint 8; NFR-CDP-002 |
-| Do not refactor the just-shipped voice pipeline beyond the named MethodResolver seam (PRs #161–#168) | Constitution Constraint 7; NFR-CDP-009 |
-
-### Out-of-scope platform surfaces (honest adaptation)
-
-This is a native iOS app, not a web service. Three sections of the generic architecture
-template do not exist here, and this design says so explicitly instead of inventing them:
-
-- **REST API surface / OpenAPI paths — none.** The feature's "API" is a set of internal Swift
-  seams (enumerated in Components) plus user-visible surfaces. No HTTP endpoint, no schema, no
-  service boundary is added.
-- **Infrastructure topology (Docker services) — none.** Build and test infrastructure is
-  `xcodebuild` in the worktree, run through `ios/build.sh` (whose release log gate at
-  `ios/build.sh:431` is part of the acceptance evidence), with scoped `-only-testing` suites as
-  the honest unit gate and the DV-1..7 device sweep on Anzaan (reference device) as the
-  completion gate. No container, no server process is part of this feature.
-- **Auth strategy — no change.** Settings remain local-only (UserDefaults, same store and
-  protection class as `defaultCallApp`); no credential, session, token or identity surface is
-  added. The trust model is unchanged: the owner configures the phone, the elder uses it; a tap
-  on the elder's own unlocked phone is its own confirmation (unchanged, `AppCoordinator.swift:7822-7829`).
-
-## Architecture
-
-### System context
-
-```
-        ┌──────────────────────────── Settings (owner) ───────────────────────────┐
-        │  CallingSettingsView:  Primary dialer  (defaultCallApp)                  │
-        │                        Fallback dialer (secondaryCallApp — NEW, def .phone)
-        └────────────────────────────────────┬─────────────────────────────────────┘
-                                             │ UserDefaults seam (AppCoordinator)
-     ┌───────────────────────┐    ┌──────────▼──────────┐
-     │ Feasibility producers │    │  CallChannelChain    │  (NEW, pure static)
-     │  handle on file ──────┼───▶│  route(preferred,    │
-     │  canOpenURL probe ────┼───▶│   secondary, feas.)  │──▶ Result{ channel,
-     │  (injected closure)   │    │  → never dead-ends   │        fellBackFrom }
-     └───────────────────────┘    └──────────┬──────────┘
-                                             │
-   Call paths consuming the Result:          │
-   1. Address-book row dial     (LeafViews) ─┤─▶ announce (call.announce.fallbackRouted)
-   2. Family audio/video buttons (tiles)   ──┤─▶ open via CallLinks (one tested home)
-   3. Missed-call dial-back                ──┤─▶ launch-fail hop (call.announce.launchFailedFallback)
-   4. Voice path                (MethodResolver global-default → requestCallConfirmation)
-                                             │
-              Spoken confirmation (existing multi-turn window, reused exactly):
-              fallback resolved BEFORE pending; prompt composes the disclosure
-              (router.call.fallbackDisclosure) from fellBackFrom; override unchanged
-```
-
-### ADR-CDP-01 — The chain resolver is a new pure-static file under `Services/Calls/`
-
-**Context.** The frozen design (`§3`) fixes the type shape (`CallChannelChain.Feasibility`,
-`CallChannelChain.Result` with `fellBackFrom`, `static func route(preferred:secondary:feasibility:)`)
-and names the file only illustratively ("e.g. `Services/Voice/CallChannelChain.swift`"). The
-requirements explicitly leave placement to design (index, "Assumptions", lines 153–155).
-
-**Decision.** New file `ios/ElderlyAssistant/Services/Calls/CallChannelChain.swift` (new
-`Services/Calls/` group — the feature's own service home; `Services/` currently has Intents,
-Voice, Contacts, Storage, FamilyNotifier, Observability, and no Calls directory). The file
-contains exactly:
-
-```swift
-enum CallChannelChain {
-    struct Feasibility: Equatable {
-        let messengerHandleAvailable: Bool
-        let whatsAppInstalled: Bool
-    }
-    struct Result: Equatable {
-        let channel: CallApp
-        let fellBackFrom: [CallApp]        // attempt order; empty when nothing fell back
-    }
-    static func route(preferred: CallApp, secondary: CallApp,
-                      feasibility: Feasibility) -> Result
-    static func attemptOrder(preferred: CallApp, secondary: CallApp) -> [CallApp]  // deduped; .phone always IN the order — never dead-ends
-    static let whatsAppProbeURL: URL                                   // URL(string: "whatsapp://")!
-    static func whatsAppInstalled(canOpen: (URL) -> Bool) -> Bool      // injected closure (FR-CDP-005)
-    static func method(for channel: CallApp, isVideo: Bool) -> CallMethod   // frozen §5 mapping
-    static func channel(for method: CallMethod) -> CallApp                  // inverse mapping
-    static func nextLaunchFailCandidate(after failed: CallApp,
-                                        attemptOrder: [CallApp],
-                                        messengerHandleAvailable: Bool) -> CallApp?
-}
-enum CallChannelVocabulary: Equatable {   // path vocabulary, applied at the AppCoordinator seam
-    case anyChannel, audio, video         // permits(_:) + terminal (see ADR-CDP-04)
-}
-```
-
-**Consequences.** One tested home for routing; deterministic matrices need no platform stubs
-(Constraint 12); the frozen shape is implemented verbatim, with three additive statics
-(`attemptOrder`, `nextLaunchFailCandidate`, plus the vocabulary enum) justified by FR-CDP-015's
-hop and FR-CDP-010's vocabulary — recorded as resolutions RES-1 and RES-6, not silent.
-
-### ADR-CDP-02 — Feasibility producers: handle-on-file is data, the WhatsApp probe is an injected closure
-
-**Context.** Feasibility = local-only checks (FR-CDP-004/005/006). Messenger ⇔ handle on file
-(never app-installed); WhatsApp ⇔ `canOpenURL("whatsapp://")`; FaceTime/phone always feasible.
-`Info.plist` already lists the `whatsapp` scheme under `LSApplicationQueriesSchemes`
-(`ios/ElderlyAssistant/Info.plist:94`) — no plist change. A probe that cannot answer is a
-local, immediate result — never a timeout (NFR-CDP-004).
-
-**Decision.** A single probe home on the coordinator: `whatsAppInstalledNow: Bool` computed via
-`CallChannelChain.whatsAppInstalled(canOpen: canOpenURLOnMain)` — the existing main-thread
-probe hop `canOpenURLOnMain(_:)` at `AppCoordinator.swift:7312-7315` (already the house probe
-for Maps/WhatsApp surfaces). The probe URL is the compiled constraint constant
-`CallChannelChain.whatsAppProbeURL` (precedent: the `whatsapp://` constant at
-`AppCoordinator.swift:7270`). LeafViews' existing view-level probe
-(`LeafViews.swift:1171-1174`) is rewritten to delegate to the same static, so there is exactly
-one probe implementation. `canOpenURL` returning false for any reason (including platform
-refusal) is treated as **not installed** — an immediate local `false`, chain hops on, announced
-(never a hang, never a silent retain). Messenger feasibility is the handle-on-file data check:
-`CallLinks.messengerHandle(_:)` at `Services/Intents/CallLinks.swift:234-243` (returns "" for
-unusable) / `storedMessengerHandle(forNormalizedPhone:)` at `AppCoordinator.swift:8009`.
-Handles and numbers are PII and never enter logs (see Log safety).
-
-**Consequences.** Deterministic tests stub the closure (`whatsAppInstalled(canOpen:)` is called
-with `{ _ in true/false }` in unit tests; the coordinator seam takes the Bool as a parameter).
-No caching, no polling: probes run at call time only (NFR-CDP-004; the staleness residual is
-covered by the launch-fail hop, frozen Risks).
-
-### ADR-CDP-03 — The resolution seams return the chain `Result` (provenance-carrying), not a bare channel
-
-**Context.** `resolvedCallChannel(explicit:defaultApp:messengerHandleAvailable:)` at
-`AppCoordinator.swift:2099-2105` currently returns a `CallApp` and implements the one hard rule
-(Messenger-no-handle → `.phone`). `resolvedMissedCallChannel(familyContact:defaultApp:messengerHandleAvailable:)`
-at `:8382-8390` delegates to it behind the shipped `supportsAudio` guard. FR-CDP-016 requires
-the tap paths to speak what was skipped — the provenance must reach the tap.
-
-**Decision.** Both seams keep their names (constitution "Integration Surfaces"; frozen §4) and
-their pure-static nature, and their **return becomes `CallChannelChain.Result`**; channel-only
-consumers read `.channel`. Full signatures:
-
-```swift
-static func resolvedCallChannel(explicit: CallApp?,
-                                defaultApp: CallApp,
-                                secondaryApp: CallApp,
-                                messengerHandleAvailable: Bool,
-                                whatsAppInstalled: Bool,
-                                vocabulary: CallChannelVocabulary = .anyChannel) -> CallChannelChain.Result
-
-static func resolvedMissedCallChannel(familyContact: FamilyContact?,
-                                      defaultApp: CallApp,
-                                      secondaryApp: CallApp,
-                                      messengerHandleAvailable: Bool,
-                                      whatsAppInstalled: Bool) -> CallChannelChain.Result   // vocabulary .audio
-```
-
-Resolution algorithm (one shared private helper):
-
-1. `preferred = (explicit ?? defaultApp)` normalized through the vocabulary (ADR-CDP-04).
-2. `CallChannelChain.route(preferred:secondary:feasibility:)` — the single chain
-   implementation; the Messenger-no-handle hard rule disappears (it is now one case of the
-   chain, frozen §4).
-3. Post-check: if the routed channel is vocabulary-illegal, substitute the vocabulary terminal
-   (ADR-CDP-04); `fellBackFrom` is unchanged by the substitution.
-4. The missed-call seam adds the shipped `supportsAudio` normalization as step 1's vocabulary
-   (`.audio`): a FaceTime audio-preference still routes to `.phone` — today's behavior,
-   preserved exactly.
-
-**Consequences.** The row circle, chooser and dial-back keep reading a channel via
-`.channel`; the tap paths get `fellBackFrom` for the announcement. `CallChannelResolutionTests`
-extends its `assertResolved` helper to `.channel` and adds provenance assertions. Recorded as
-RES-2.
-
-### ADR-CDP-04 — Path vocabulary is preserved at the seam (audio never FaceTime, video never GSM)
-
-**Context.** FR-CDP-010 binds: "audio buttons never resolve to FaceTime and video buttons never
-to the GSM dialer (`CallApp.supportsAudio`/`supportsVideo` gates unchanged)". The frozen
-`route` returns `.phone` as the terminal; on a *video* button that would violate the binding.
-Conversely a routed `.faceTime` on an *audio* path would violate it. The frozen design did not
-fix this interplay — the requirements did; the mechanism is design's.
-
-**Decision.** `CallChannelVocabulary` applied only at the AppCoordinator seam (the frozen
-`route` is untouched):
-
-| Vocabulary | `permits(_:)` | `terminal` | Used by |
+| Ask | Verdict | What is delivered | Bound / honesty note |
 |---|---|---|---|
-| `.anyChannel` | all four channels | `.phone` | address-book rows (GSM floor per FR-CDP-010 scenario 3); voice path |
-| `.audio` | `faceTime` excluded | `.phone` | family audio button; missed-call dial-back |
-| `.video` | `phone` excluded | `.faceTime` (the only always-feasible video channel) | family video button |
+| LINK | FEASIBLE as specified | `SystemContactLink` stored on `FamilyContact` (§5.1); verified-link snapshot (§6.2); link-aware dedupe for matched AND unmatched queries (§7); every duplicate-render surface audited (§7.3); unlink without touching the system record (§6.4) | Bounded by `CNContact.identifier` stability + fingerprint verification; a stale identifier degrades to unlinked (never a wrong merge), §6.2 |
+| PHOTO | FEASIBLE with a stated bound | System photo displayed when present and readable; app writes ONLY the edited contact's photo via confined `CNSaveRequest` (§9); honest full/limited/denied states; app-local `ContactPhotoStore` fallback (owner-pre-authorized) with no loss, no false success, no crash (§10) | Bounded by iOS Contacts authorization: when access is denied/limited-without-grant, the system photo cannot be read or written and the app-local photo stands (today's behavior), explicitly labeled (§10.3). This is the pre-authorized fallback, not a gap |
+| NICKNAMES | FEASIBLE as specified | `nicknames: [String]` on `FamilyContact` with lossless legacy migration (§5.2); indexed matching (§5.4); name OR any variant matches in BOTH in-app search (§7.1) and voice (§8.3); ambiguity never silently dials the wrong person (§8.3) | Bounded by OD-2: no automatic transliteration — a variant matches only when recorded (store-as-entered) |
 
-- Step 1 normalizes the preferred input (`resolvedVideoApp`/`resolvedAudioApp` at
-  `Services/Storage/FamilyContactStore.swift:156-164` already do the shipped part of this;
-  the seam re-applies it defensively).
-- Step 3 substitutes: audio/any routed `.faceTime` → `.phone`; video routed `.phone` →
-  `.faceTime`. The substitution never fabricates provenance: `fellBackFrom` keeps only the
-  feasibility-skipped channels, and the announcement (composed from `fellBackFrom` +
-  `.channel`) always names the channel that will actually open.
-- The voice path uses `.anyChannel`: MethodResolver's vocabulary already includes
-  `.facetimeAudio`, so the chain must not narrow it (RES-9).
+## 3. Architecture overview
 
-**Consequences.** No `supportsAudio`/`supportsVideo` gate changes; the family buttons and
-dial-back keep their exact channel vocabularies; every routed channel is attemptable and
-legal for its surface. Matrix tests pin the substitution cells.
+```
+                 ┌─────────────────────────────────────────────────────────────┐
+                 │ AppCoordinator (main-thread confined, ObservableObject)     │
+                 │  familyContacts:[FamilyContact]  (EncryptedLocalStorage)    │
+                 │  familyIndex: FamilyContactIndex   (derived, rebuilt on μ)  │
+                 │  verifiedLinks: VerifiedLinksSnapshot (async refresh)       │
+                 │  faceEpoch: UInt64                (photo cache invalidation)│
+                 └───────┬──────────────┬───────────────┬──────────────────────┘
+                         │              │               │
+        ┌────────────────▼──┐  ┌────────▼─────────┐  ┌──▼───────────────────────┐
+        │ UnifiedContactSearch│ │ ContactResolver  │  │ MissedCallContactResolver│
+        │ (pure enum/struct)  │ │ (pure struct)    │  │ (pure enum)              │
+        │ family+book, dedupe │ │ voice scoring    │  │ correlation + dial-back  │
+        └───────┬─────────────┘ └──────────────────┘  └──────────────────────────┘
+                │
+        ┌───────▼─────────────┐        ┌─────────────────────────────┐
+        │ AddressBookDirectory│        │ SystemContactLinkService    │  actor
+        │ (read-only CNContact│        │  batch verify (identifier + │
+        │  Store; entry ident.)│       │  number fingerprint), record│
+        └─────────────────────┘        │  numbers, photo data + cache│
+                                       └─────────────┬───────────────┘
+                                                     │
+                                       ┌─────────────▼───────────────┐
+                                       │ SystemContactPhotoWriter    │  actor
+                                       │  confined CNSaveRequest     │
+                                       │  (photo field only) +       │
+                                       │  read-back verification     │
+                                       └─────────────────────────────┘
 
-### ADR-CDP-05 — Fallback resolves BEFORE the spoken confirmation; the disclosure composes from `fellBackFrom`; the override path is untouched
-
-**Context.** `requestCallConfirmation(contactQuery:callType:requestedApp:sourceTranscript:sourceCommand:)`
-at `AppCoordinator.swift:7587-7647` resolves the method (MethodResolver, `:7609-7611`), refuses
-Messenger-without-handle with `router.call.messengerNoHandle` (`:7620-7623`), then pends a
-`PendingCallAction` (`:7624-7628`, struct at `:7518-7550`) into the existing confirmation
-window (`openConfirmationWindow()`, `:7635`, definition `:7170-7189`). Near-miss disclosure is
-prepended at `:7641-7645`. FR-CDP-013 requires the chain to run before the pending action and
-the prompt to name the routed channel; FR-CDP-014 requires the override and near-miss lines
-preserved.
-
-**Decision.** New order inside `requestCallConfirmation`:
-
-1. Contact resolution unchanged (including the near-miss path at `:7604-7608`).
-2. `methodResolver.resolve(...)` unchanged (`:7609-7611`).
-3. NEW chain step: `intentIsVideo = (resolved.method == .facetimeVideo || .messengerVideo)`;
-   `preferred = CallChannelChain.channel(for: resolved.method)`; feasibility =
-   (handle-on-file for this contact, `whatsAppInstalledNow`); route via `resolvedCallChannel`
-   (ADR-CDP-03, vocabulary `.anyChannel`); routed method =
-   `CallChannelChain.method(for: route.channel, isVideo: intentIsVideo)`.
-4. `PendingCallAction` is built with the **routed** method (not the originally preferred one),
-   `unsupportedRequestedApp` as before, plus two additive fields:
-   `fellBackFrom: [CallApp] = []` and `hopCandidates: [CallApp] = []` (attempt-order suffix
-   after the routed channel, messenger-without-handle filtered — the launch-fail input,
-   ADR-CDP-08).
-5. The Messenger-no-handle early return (`:7620-7623`) is **removed from this function** — the
-   refusal became a chain hop (frozen §5). The same refusal line and gate remain fully intact
-   on the **override** path (`handleCallConfirmationOverride`, `:7665-7669`) per FR-CDP-014
-   scenario 2 — that is what "preserved unchanged" binds.
-6. `repetitionGuard` (`:7632`), `openConfirmationWindow()` (`:7635`) and the near-miss prefix
-   (`:7641-7645`) are unchanged.
-7. `confirmationPrompt(for:isRepeat:)` (`:7688-7709`) gains, when
-   `!action.fellBackFrom.isEmpty`, the disclosure clause — `L10n.fmt("router.call.fallbackDisclosure", …)`
-   — placed after the repeat/unsupported notices and before the method sentence, so the final
-   utterance order is: `[near-miss prefix][repeat notice][unsupported-app notice][fallback
-   disclosure][method sentence][confirm question]`. The question stays terminal; no extra
-   question is added (FR-CDP-016 scenario 2). When nothing fell back, the exact previous
-   wording is produced (FR-CDP-013 scenario 3).
-8. On "yes", `handleConfirmationResponse` (`:10576+`, call block `:10611-10628`) executes the
-   pending action's routed method through `performCallAction` (`:7720-7803`) and the flywheel
-   capture records the routed method (`capture` on `PendingCallAction`; `noteConfirmedCallExecution`,
-   `:7811-7818`) — the routed channel, never the preferred one, is what executes and teaches.
-9. The override path keeps its shipped shape (`:7656-7686`): no-handle gate intact, amended
-   action re-confirmed once, `appendCapture(…, .corrected, …)` intact — the amended action omits
-   the new fields, so a stale disclosure is never re-spoken after an override.
-
-**Consequences.** One utterance carries routing + disclosure (no ask-before-fallback). The
-pending action's contract grows two defaulted fields (RES-7). `router.call.messengerNoHandle`
-remains in use (override gate, and stale-state guard at `LeafViews.swift:1573-1580`),
-so the key is not orphaned.
-
-### ADR-CDP-06 — MethodResolver's global-default step becomes the settings primary via an injected closure
-
-**Context.** `MethodResolver.resolve(contactId:requestedApp:callType:)` at
-`Services/Intents/MethodResolver.swift:47-79` runs four steps; step 4 (`:74-78`) hardcodes
-`.phone` with `source: .globalDefault`. The class is deliberately coordinator-free (init
-`:22-26`, stores only). Frozen §5: the step becomes the settings primary, mapped
-`CallApp → CallMethod` by call type, injected so the resolver stays unit-testable.
-
-**Decision.** `MethodResolver.init` gains a third parameter:
-
-```swift
-init(preferenceStore: CallMethodPreferenceStore,
-     historyStore: ConfirmedMethodHistoryStore,
-     globalDefault: @escaping (_ isVideo: Bool) -> CallMethod = { _ in .phone })
+UI consumers: FamilyContactsSettingsView (link/photo/nickname editing),
+CallView (tiles + result rows + alt caption), CallingSettingsView (untouched,
+call-dialer's), MissedCall UI via coordinator.
 ```
 
-Default value preserves today's behavior (and keeps existing constructions compiling).
-`AppCoordinator` constructs it at `:1925-1926` with:
+Data flow for the LINK ask: the wizard stores a `SystemContactLink` on save → coordinator
+refreshes `VerifiedLinksSnapshot` via `SystemContactLinkService` → every consumer (search,
+resolver, missed-call correlation, dial-back) reads the snapshot + `FamilyContactIndex`.
+The snapshot is the ONLY place "is this link good right now" is decided, so identity semantics
+cannot drift between surfaces.
+
+Data flow for PHOTO: the wizard saves the processed JPEG app-local first (never-lose rule),
+then attempts the system write through the writer actor; the outcome drives the honest editor
+state (§10.3) and a `faceEpoch` bump; all face display resolves asynchronously through one
+coordinator method with system → app-local → initials precedence (§10.1).
+
+## 4. Module boundaries and responsibilities
+
+| File | Status | Responsibility | Requirements |
+|---|---|---|---|
+| `Services/Storage/FamilyContactStore.swift` | CHANGED | `FamilyContact` gains `systemContact: SystemContactLink?` + `nicknames: [String]`; decoder migration; `normalizedNicknames` helper; `FamilyContactStore` itself unchanged (12-contact cap, storageKey `family.contacts`) | FR-FCU-002, 011; NFR-FCU-006 |
+| `Services/Contacts/FamilyContactIndex.swift` | NEW (pure) | Derived search index: normalized names + nicknames, nickname→ids reverse map; rebuilt wholesale on roster mutation | FR-FCU-012; NFR-FCU-001 |
+| `Services/Contacts/UnifiedContactSearch.swift` | CHANGED | `FamilyMatchTier` gains `.nickname`; `familyMatches` matches nicknames via the index; new link-aware dedupe pass; `Outcome.linkedBookNames` side table; `moreAvailable` recount | FR-FCU-003, 004, 005, 012 |
+| `Services/Contacts/AddressBookDirectory.swift` | CHANGED | `AddressBookEntry.identifier`; `fetchKeys` adds `CNContactIdentifierKey`; `ContactsAccess` gains `.limited` via availability-gated pure mapping `ContactsAccess.from(_:)` | FR-FCU-007, 009 |
+| `Services/Contacts/SystemContactLinkService.swift` | NEW (actor) | Batch link verification (identifier fetch + number fingerprint), per-record numbers, system photo data with bounded cache; protocol `SystemContactLinkReading` for tests | FR-FCU-002, 004, 007 |
+| `Services/Contacts/SystemContactPhotoWriter.swift` | NEW (actor) | The app's FIRST write seam: `SystemContactPhotoWriting` protocol; real `CNContactStore`/`CNSaveRequest` glue confined to the edited contact's photo; read-back verification; outcome enum | FR-FCU-008, 009, 010 |
+| `Services/Intents/ContactResolver.swift` | CHANGED | Nickname scoring bands; near-miss candidate set extended over nicknames; ambiguity semantics unchanged (accept 0.6, margin 0.15) | FR-FCU-013, 014 |
+| `Services/Intents/MethodResolver.swift` | UNTOUCHED | Verified: `resolve(contactId:requestedApp:callType:)` (:47) takes an already-resolved contactId; links/nicknames resolve upstream | FR-FCU-005; NFR-FCU-008 |
+| `Services/Contacts/MissedCallContactResolver.swift` | CHANGED | Link-aware phone resolution: family phone → linked-record numbers (fingerprint rule reused) → native; native hit remaps to the family person via identifier | FR-FCU-004, 005 |
+| `Services/Storage/ContactPhotoStore.swift` | CHANGED (small) | Extract the existing scale/orientation/JPEG pipeline as `static func processedJPEG(_:) -> Data?` so app-local and system copies are the SAME bytes (one encode, two destinations) | FR-FCU-010; NFR-FCU-003 |
+| `App/AppCoordinator.swift` | CHANGED | `nicknames` in add/update signatures; verified-links snapshot lifecycle; email-like minimal searchText policy unchanged; `faceIdentity(for:)` + async `faceImage/faceThumbnail(for:)`; write orchestration; unlink API | all |
+| `App/SettingsView.swift` | CHANGED | Wizard find step hosts link UI (no new step, "Step N of 5" untouched); photo step gains access card + honest outcome labels; nickname step becomes a managed list; family row link chip | FR-FCU-001, 006, 009, 010, 015 |
+| `App/LeafViews.swift` | CHANGED | `CallView` face resolution via the async coordinator path; `UnifiedContactResultRow` gains optional `caption` (alt caption); `ContactTile` same face path | FR-FCU-003, 005, 007 |
+| `App/ViewCaches.swift` | CHANGED (small) | `DownsampledImageCache` keyed by face identity string (`sysphoto:<id>:<hash-prefix>` / `contact:<filename>`); existing budget unchanged | NFR-FCU-001 |
+| `App/CallingSettingsView.swift` | UNTOUCHED | call-dialer territory (NFR-FCU-008) | — |
+| `Resources/Localizable.xcstrings`, `App/L10n.swift`, `ElderlyAssistantTests/.../L10nCatalogCoverageTests.swift` | CHANGED | ~20 new keys en+ne; pinned-key suite extended | NFR-FCU-004 |
+| `Info.plist` | CHANGED | `NSContactsUsageDescription` gains the photo-updating disclosure | FR-FCU-009 |
+| `ios/tools/check-release-log-safety.sh(.py)` | CHANGED (registration) | New write/link seam files registered with the stricter "feature" role | NFR-FCU-002 |
+
+## 5. Data model
+
+### 5.1 `SystemContactLink` on `FamilyContact`
 
 ```swift
-MethodResolver(preferenceStore: callMethodPreferences,
-               historyStore: confirmedMethodHistory,
-               globalDefault: { [weak self] isVideo in
-                   CallChannelChain.method(for: self?.defaultCallApp ?? .phone, isVideo: isVideo)
-               })
+/// A pointer to one record in the system address book, with the fingerprint
+/// needed to prove it is still the same person. Local-only; never transmitted.
+struct SystemContactLink: Codable, Equatable {
+    var identifier: String   // CNContact.identifier at link time
+    var numberKey: String    // ContactNumberKey.normalized of the FIRST dialable
+                             // number of the picked entry at link time
+}
 ```
 
-Mapping (frozen §5 table, implemented as `CallChannelChain.method(for:isVideo:)`):
-`phone → .phone`; `faceTime → video ? .facetimeVideo : .facetimeAudio`;
-`messenger → video ? .messengerVideo : .messengerAudio`; `whatsApp → .whatsappChat`.
-Steps 1–3 are byte-for-byte unchanged. Note the shipped property that a bare "video call"
-never reaches step 4 (step 1 returns `.facetimeVideo` — `explicitMethod`, `:87-114`), so the
-global-default step serves audio-shaped requests; the mapping stays general regardless.
+- `FamilyContact` gains `var systemContact: SystemContactLink?` (default nil) and
+  `var nicknames: [String]` (§5.2). Both are covered by the custom decoder at
+  `FamilyContactStore.swift:122-150` using the established pattern
+  `(try? container.decodeIfPresent(...)) ?? nil` — an absent key, wrong type, or unknown shape
+  decodes to "unlinked / no nicknames". There is no store version field and none is added
+  (unversioned payload; the optional field IS its migration; NFR-FCU-006, DV-6).
+- Corrupt/empty link fields (empty `identifier` or `numberKey`) decode to `nil` — FR-FCU-002
+  scenario 3 turns "corrupt payload" into "unlinked", never a crash and never a merge.
+- Encoding uses the synthesized `Encodable`; nil optionals are omitted (encodeIfPresent), so a
+  pre-feature payload → new build → save produces a clean payload with `systemContact` present
+  only when linked.
+- The link is written ONLY by the wizard save path (§11.1) and removed only by unlink (§6.4).
+  It never stores a photo, a name, or a number list — the fingerprint is one normalized digit
+  string (the same shape already stored in `phone`), so it adds no new PII class (§15).
 
-**Consequences.** `MethodResolverTests` gains cases driving the closure (primary Messenger,
-primary WhatsApp) and an assertion that the default construction still yields `.phone`.
-The feasibility fallback itself does NOT live in MethodResolver — it lives one step later in
-`requestCallConfirmation` (ADR-CDP-05), keeping the resolver a pure method mapper (single
-responsibility; RES-7).
+### 5.2 Multi-nickname model + migration
 
-### ADR-CDP-07 — Tap-path announcement trigger: at resolution, before the open attempt
+- `FamilyContact.nickname: String?` (currently :71) is REPLACED by `var nicknames: [String]`.
+  No computed `nickname` shim is kept — one source of truth; all readers migrate (§18 call
+  inventory: `SettingsView.swift:2690`, `AppCoordinator.swift:6578`,
+  `ProfileInterviewSteps.swift:530-541` pass-through).
+- Decode contract (lossless, FR-FCU-011, NFR-FCU-006, DV-6):
+  1. If `nicknames` decodes to `[String]` → use it, after `normalizedNicknames` (trim each;
+     drop empty/whitespace-only entries; preserve order and duplicates as entered).
+  2. Else if the legacy `nickname` key decodes to a non-blank `String` → `[thatValue]`
+     (trimmed). A legacy blank/whitespace-only value → `[]`.
+  3. Else `[]`.
+  Implementation note: the legacy key is read through a SEPARATE private
+  `keyedBy: LegacyNicknameKeys` container so `CodingKeys` contains only stored properties and
+  the synthesized encoder stays authoritative.
+- Explicitly REJECTED: a mirrored legacy `nickname` key on encode (downgrade builds would read
+  it). It would require a hand-written `encode(to:)`, which risks silently dropping a field on
+  save — a data-loss hazard directly against NFR-FCU-006 — for a downgrade convenience nothing
+  requires. The synthesized encoder is kept; downgrade reads simply show no nickname.
+- Whitespace-only entries are never stored (FR-FCU-011): enforced at entry, at
+  `normalizedNicknames` on decode, and at the save path.
+- No auto-transliteration anywhere (OD-2): "sanu" and "सानु" are distinct entries.
 
-**Context.** FR-CDP-016 fixes the trigger point as design's to choose ("The exact trigger point
-of the tap-path announcement (at the open) is design's to fix at design-l1"). The spoken-outcome
-lane already exists: `setOutcome` (`:752`), `speak(key:)` (`:5397`), `speak(text:)` (`:5405+`,
-queued Announcement `.interactive` lane).
+### 5.3 `AddressBookEntry.identifier`
 
-**Decision.** The announcement is spoken **immediately after the chain resolves and before the
-open is attempted**:
+`AddressBookEntry` gains `let identifier: String` (default `""` in `make(...)`/init to keep
+test construction trivial). `AddressBookDirectory.fetchKeys` (:333) adds
+`CNContactIdentifierKey` and `allEntries()` (:386) passes `contact.identifier` through. All
+matching logic (`SystemContactSearch.matches`) is unchanged. Linking is available only for
+entries with a non-empty identifier (a defensive `canLink` guard; real store fetches always
+populate it). No persistence of book entries exists anywhere, so no migration applies.
 
-- Address-book row: inside `dialChannel` (`LeafViews.swift:1564-1584`), the row state is
-  computed once (`rowChannelState`, `:1605-1620` — the seam call at `:1612-1615` gains
-  `secondaryApp:` and `whatsAppInstalled:`); when `fellBackFrom` is non-empty,
-  `coordinator.speak(text: L10n.fmt("call.announce.fallbackRouted", …))` fires before the
-  channel switch at `:1565` dispatches.
-- Family buttons: at the top of `performContactCall` (`:7831-7910`) after the chain call and
-  before the open switch (the existing observability emit at `:7834-7841` stays; its outcome
-  string is extended to classify the routing, e.g. `"video:faceTime:fellBack"` — still
-  classification-only, `metadata: [:]`).
-- Missed-call dial-back: in `dialBackMissedCall` (`:8457-8483`) after the route decision and
-  before dispatching the action.
+### 5.4 `FamilyContactIndex` (pure) — the nickname index
 
-Rationale: (a) a successful open may background the app before a post-open utterance could be
-heard — pre-open is the only ordering that guarantees the phrase is spoken; (b) it matches the
-frozen example's declarative tone ("…— call Syanu via WhatsApp"); (c) if the open then fails,
-the launch-fail announcement (ADR-CDP-08) follows in the same lane — never silent, and never a
-claim about an outcome that did not happen. When `fellBackFrom` is empty, nothing is spoken
-(FR-CDP-016 scenario 3 — no added noise).
+```swift
+/// Derived, value-type index over the family roster. Rebuilt wholesale on every
+/// roster mutation; never persisted; never mutated in place.
+struct FamilyContactIndex: Equatable {
+    struct Entry: Equatable {
+        let id: UUID
+        let normalizedName: String        // NepaliTextNormalizer.normalize
+        let normalizedNicknames: [String] // per entry, order preserved
+    }
+    private(set) var entries: [Entry]                 // roster order preserved
+    private(set) var idsByNickname: [String: [UUID]]  // normalized exact key → ids
 
-### ADR-CDP-08 — Launch-fail hop: one helper, observed at every open outcome, candidates from the attempt order
+    init(family: [FamilyContact])
+    func nicknameEntries(for id: UUID) -> [String]
+    func exactNicknameHolders(_ normalizedQuery: String) -> [UUID]
+}
+```
 
-**Context.** Frozen §6 + FR-CDP-015: if the resolved channel's open itself fails (iOS reports
-failure, or `CallLinks` returns a failure outcome), attempt the next channel (remaining
-fallback step, then `phone`), announcing via the spoken-outcome lane. The failure outcomes
-already exist as structured enums: `FaceTimeOutcome.unavailable/.invalidHandle`
-(`CallLinks.swift:114-123`), `MessengerOutcome.invalidHandle` (`:145-157`), phone via the
-`openPhone` Bool (`:340-344`). WhatsApp has no hard failure case: `WhatsAppCallOutcome`
-(`:177-190`) walks the shipped absent-app chain (`needsNativeCompose`, `copiedNumber`) — those
-are shipped success-side recoveries with their own spoken disclosures, not launch failures.
+- Structure: precomputed normalized strings (one `NepaliTextNormalizer.normalize` pass per
+  name/nickname at build) + a reverse exact-key map for O(1) "which contacts hold this exact
+  nickname". Substring/containment checks still run Character-safe
+  `range(of:options:[.caseInsensitive, .diacriticInsensitive])` over the normalized strings
+  (no new grapheme logic; NFR-FCU-007).
+- Maintenance: published by the coordinator as `@Published private(set) var familyIndex`;
+  rebuilt inside every mutation path (`addFamilyContact`, `updateFamilyContact`,
+  `removeFamilyContact`, the launch batch load :3957) — the same places that mutate
+  `familyContacts`. Because the rebuild is wholesale, drift is impossible; because it derives
+  only from `familyContacts`, it can never disagree with the store.
+- Cost: one build ≈ 12 contacts × (1 name + ≤8 nicknames) = ≤108 normalizations (measured
+  sub-millisecond); query side is exact-map lookups plus ≤9 substring checks per contact. At
+  empty nicknames it degenerates to exactly today's name-only behavior.
+- Empty index (no nicknames) reproduces today's behavior byte-for-byte — the compatibility
+  anchor for "unlinked pairs keep today's behavior exactly".
 
-**Decision.**
+## 6. Link identity contract (FR-FCU-001, 002, 004, 005, 006)
 
-- **Observation points** (every open, exactly once):
-  `performCallAction` voice branches (`:7746-7753` FaceTime, `:7794-7800` Messenger),
-  `performFaceTimeCall` (`:7955-7959`), `performSystemContactWhatsApp` (`:7992-7998`
-  `invalidPhone` = data failure, no hop — nothing dialable anywhere), 
-  `performSystemContactMessenger` (`:8074-8081`), `performContactCall`'s per-channel outcomes
-  (`:7854-7858`, `:7886-7888`), and the phone Bool checks (`:7860-7862` family; the voice
-  `.phone` branch `:7723-7732` currently ignores the Bool — it stops ignoring it, below).
-- **Candidates**: `hopCandidates` = the deduped `attemptOrder(preferred:secondary:)` suffix
-  after the routed channel, filtered by `nextLaunchFailCandidate(after:in:messengerHandleAvailable:)`
-  — dropping only messenger-without-handle (data-authoritative). WhatsApp is attempted even if
-  the probe earlier said absent (best-effort: the stale-probe residual is exactly what this hop
-  covers; the open then lands on the shipped `needsNativeCompose`/`copiedNumber` recoveries,
-  which speak their own disclosures).
-- **The hop**: on a failure outcome with a candidate, speak
-  `L10n.fmt("call.announce.launchFailedFallback", …)` (failed channel + next channel), then
-  attempt the next channel via the existing per-channel open for the context (the routed
-  method re-derived with `method(for:isVideo:)`; voice path re-enters `performCallAction` with
-  a copied action whose method is the next channel's). At most one announcement per hop; hop
-  recursion terminates because candidates are deduped and consumed. Learning follows the
-  shipped rule unchanged: a failed open records nothing (`:7746-7750` comment) — teaching never
-  happens from a failure.
-- **Exhaustion**: a non-phone failure with no candidate can only happen at the floor. The
-  `.phone` branch now checks the `openPhone` Bool; false → the shipped honest line
-  `call.announce.noPhoneNumber` (the same line the family path already speaks at `:7860-7862`
-  and `announceNoUsableNumber` at `:8493-8497`) — a spoken outcome, never a claim. No sixth
-  catalog key is needed (RES-8). This closes FR-CDP-015 scenario 3 ("never silent") with the
-  five-key budget intact.
-- Emergency paths are untouched: none of the above touches `emergencyContacts` or
-  `NotifyChannel.resolve`; no probe or hop ever wraps escalation.
+### 6.1 Creation and uniqueness
 
-### ADR-CDP-09 — Persistence: `secondaryCallApp` on the existing UserDefaults seam; existing installs default to GSM
+- Created in the wizard's find step (in-app search, §11.4): picking a result row stores
+  `SystemContactLink(identifier: entry.identifier, numberKey: entry.normalized)` in the draft;
+  committed with Save. Not stored for un-saved drafts, never inferred, never auto-created.
+- One family contact per system record: the wizard detects an identifier already linked to
+  another family contact and steers instead of creating a second record (§11.1); the
+  coordinator's add/update guard re-checks and refuses to persist a duplicate claim
+  (defense in depth).
+- At most one link per family contact (single optional field; replacing a link is a normal
+  update — the old claim is simply replaced).
 
-**Context.** Frozen §1: `AppCoordinator.secondaryCallApp: CallApp` next to `defaultCallApp`,
-same `@Published` + UserDefaults pattern, key `secondaryCallApp`, default `.phone`.
-`defaultCallApp` is a `@Published` var with `didSet` persistence (`:330-335`) and an init
-restore using `.flatMap(CallApp.init(rawValue:)) ?? .phone` (`:2851-2853`).
+### 6.2 Verification and degradation (identifier stability)
 
-**Decision.** `secondaryCallApp` is declared identically (property with `didSet` writing the
-raw value under key `secondaryCallApp`; restore at the same init site with the same
-`.flatMap(CallApp.init(rawValue:)) ?? .phone` shape). An existing install has no stored value →
-`.phone` (GSM) — exactly the frozen default and Feature Constraint 4. `secondary == primary`
-is legal; dedupe happens at routing time in the chain, not at storage. No migration, no
-version bump, no new store. `NFR-CDP-005` round-trip is a unit test over the same
-UserDefaults-stepping seam the settings tests already use.
+- `SystemContactLinkService.refresh(contacts:)` (actor) performs ONE batched fetch
+  (`unifiedContacts(matching: predicate by identifier, keysToFetch: [CNContactIdentifierKey,
+  CNContactPhoneNumbersKey])`, ≤12 identifiers) and, per link:
+  - **verified** iff a record with that identifier exists AND any of its current normalized
+    numbers satisfies `MissedCallContactResolver.matches(storedNumberKey, current)` (the
+    existing trailing-digit rule, floor 8). Number ADDED/kept → verified; number changed or
+    record gone → NOT verified.
+  - Duplicate identifier claims (only possible from a corrupt payload): first claim in roster
+    order wins the snapshot; later duplicates are treated as unverified, reason-coded.
+- Snapshot published on main as `VerifiedLinksSnapshot { links: [UUID: SystemContactLink],
+  linkedRecordNumbers: [String: [String]], generation: UInt64 }`, `.empty` default. Every
+  consumer reads only the snapshot. **Empty snapshot ⇒ today's behavior exactly.**
+- Refresh triggers: roster mutation; launch/foreground; Contacts access change; after a
+  successful photo write (numbers unchanged, so links hold; generation bumps for cache/UI
+  identity); verification epoch bump. Single-flight: at most one refresh runs; a trigger while
+  one is in flight sets a dirty flag and re-runs after — latest snapshot wins (deterministic;
+  §13.2).
+- Unverified links are NOT auto-removed. Display/search/dedupe treat them as absent
+  (unlinked semantics); the wizard shows the stale-link line (`family.link.stale`) so the owner
+  can unlink or re-link. Never a crash, never a merge (FR-FCU-002 scenario 3).
 
-### ADR-CDP-10 — Localisation: the frozen five keys, ne/en parity, composition rules
+### 6.3 Link-aware number reach
 
-**Context.** Frozen §7 lists five new keys; all five were confirmed **absent** from
-`ios/ElderlyAssistant/Resources/Localizable.xcstrings` at requirements time and again during
-this design. Existing keys reused: `settings.calling.title`, `calling.defaultCaption`,
-`app.name.facetime|phone|messenger|whatsapp`, `router.call.confirmQuestion`,
-`router.call.messengerNoHandle`, `router.call.method*`, `call.announce.*`.
-`L10n.str(_:locale:)` / `L10n.fmt(_:locale:_:)` (`App/L10n.swift`) are the resolution
-discipline; `L10nCatalogCoverageTests` is the en/ne parity automation.
+`linkedRecordNumbers` (all current normalized numbers of each verified linked record) is a
+first-class input to `MissedCallContactResolver` (§7.3, §8) so a call from a linked person's
+book-record number resolves to the FAMILY person — the "number of either side resolves to the
+one family contact" invariant of FR-FCU-004. The existing number-format tolerance
+(`matches`/`digits()`) is reused unchanged.
 
-**Decision.** Five new ne/en entries with fixed parameter contracts (all formatted via
-`L10n.fmt`, never string-concatenated):
+### 6.4 Unlink (FR-FCU-006)
 
-| Key | Surface | Parameters (contract) |
+- The wizard's link area offers `family.link.unlink` with `family.link.unlinkHint` ("This only
+  separates the two records. Nothing is deleted, and your phone's contact is not changed.").
+- `AppCoordinator.setFamilyContactLink(id:mode:)` with
+  `enum SystemContactUnlinkMode { case unlinkKeepingLocalAsIs, unlinkKeepingDisplayedPhotoLocally,
+  unlinkAndClearAppLocalPhoto }`:
+  - `unlinkKeepingLocalAsIs` (default): clears `systemContact`; app-local file untouched.
+  - `unlinkKeepingDisplayedPhotoLocally`: offered when the current display source is the
+    SYSTEM photo and no app-local file exists — copies the already-fetched system bytes into
+    `ContactPhotoStore` (one encode via `processedJPEG`), then clears the link. No loss of the
+    photo the owner is looking at.
+  - `unlinkAndClearAppLocalPhoto`: clears the link and the app-local file (explicit choice).
+- Unlink NEVER writes to the system record, never deletes the system contact, works for
+  unverified/stale links, and bumps the face epoch + verification epoch. Wrong-person remedy =
+  unlink + re-link (documented in the editor help line): even a mistaken link cannot dial a
+  person the owner cannot reach; it only changes which stored name/routing the app applies,
+  and unlink restores.
+
+## 7. Link-aware dedupe contract (FR-FCU-003, 004, 005)
+
+### 7.1 Rules
+
+Inputs: `query`; roster + `FamilyContactIndex`; `entries` (with identifiers); `verifiedLinks`
+snapshot; `recency`. Output: `Outcome { results: [Result], moreAvailable: Bool,
+linkedBookNames: [String: String] }`.
+
+- **Pass 1 — family matches (widened by nicknames):** `familyMatches(query:family:index:)`
+  keeps today's tiers and adds nickname tiers per §8.1. `matchedFamily` = matched contacts.
+- **Pass 2 — book matches (unchanged):** `SystemContactSearch.matches` over entries.
+- **Pass 3 — link pass (NEW):** for each matched book row `b` whose `b.identifier` equals the
+  verified link of some family contact `f` (unique by §6.2):
+  - `f ∈ matchedFamily` → DROP `b` (the family row is the person).
+  - `f ∉ matchedFamily` (query matched only the book-side name or number spelling) →
+    SYNTHESIZE a family row for `f` (tier `.containment`, id `family-<uuid>`) and DROP `b`;
+    record `linkedBookNames["family-<uuid>"] = b.displayName` (suppressed when equal to the
+    family name after normalization).
+- **Pass 4 — today's number rule (UNCHANGED, applied to remaining book rows):** drop any
+  remaining book row whose normalized number equals a matched family row's normalized number.
+  After Pass 3 the remaining linked book rows are gone, so this rule now fires only for
+  UNLINKED pairs — byte-for-byte today's behavior (C6 exactness).
+- **Pass 5 — recount:** `results` = family group (matched + synthesized), then book group
+  (existing `rank`/order semantics; rawValue quality order auto-sorts `.nickname` correctly);
+  `moreAvailable` is recomputed on the post-pass row count before the limit slice — dropping
+  linked twins can turn `moreAvailable` false (FR-FCU-003 scenario 4).
+
+Correctness notes: digit queries with differently spelled numbers for a linked pair
+("+977-98…" vs "98…") now dedupe by identifier (Pass 3), not by number equality — one row
+(FR-FCU-003 scenario 3). Unmatched-query/empty-query rendering is untouched (no rows are
+produced from a non-matching query, so "one row per linked person for matched AND unmatched
+queries" holds trivially, and the steady-state CallView renders family tiles once per family
+record). Unlinked pairs take identical code paths to today because every new branch is gated
+on a verified link.
+
+### 7.2 Representation and the alt caption
+
+- `Result` enum arity is NOT changed (protects the call-dialer union, §16). The alt caption
+  travels in the new `Outcome.linkedBookNames: [String: String]` (family result id → phone-book
+  display name), default `[:]`.
+- `UnifiedContactResultRow` gains `caption: String? = nil`; `CallView` looks up
+  `outcome.linkedBookNames[entry.id]` and renders `call.search.linkedBookName`
+  ("Also in your phone book as %@") for synthesized rows. Honest UI: the row explains why a
+  name the user did not type into the family record appears.
+- A synthesized row carries the family phone (dial, channels, photo all take the family path).
+
+### 7.3 Surface audit — where the pair could render twice
+
+| Surface | Today | With a verified link |
 |---|---|---|
-| `settings.calling.primaryTitle` | Settings section title | none |
-| `settings.calling.secondaryTitle` | Settings section title | none |
-| `router.call.fallbackDisclosure` | confirmation disclosure clause | `%1$@` skipped-channel label, `%2$@` contact name, `%3$@` routed-channel label |
-| `call.announce.fallbackRouted` | tap/dial-back announcement | `%1$@` skipped-channel label, `%2$@` contact name, `%3$@` routed-channel label |
-| `call.announce.launchFailedFallback` | launch-fail hop announcement | `%1$@` failed-channel label, `%2$@` contact name, `%3$@` next-channel label |
+| `CallView` search results (`resultsArea`, LeafViews.swift:1680) | family row + book row when querying the book-side spelling/number | ONE row (§7.1 Pass 3) |
+| `CallView` family tiles (`familyArea`, :1741, `ContactTile` :2572) | one tile per family record | unchanged — one family record exists (write-side uniqueness §6.1); book never renders here |
+| Voice resolution (`ContactResolver`) | family-only candidates | unchanged candidate set; nickname tiers added (§8) — a name/nickname/relationship yields ONE candidate |
+| Missed-call name correlation (AppCoordinator `refreshMissedCallCorrelations` :8294, `refreshNativeMissedCallNames` :8327) | native hit shows the book name even when the family person is the same human | native hit whose identifier is a verified link remaps to the FAMILY name (`MissedCallContactResolver` link-aware, §6.3) |
+| Missed-call dial-back (`familyContact(matchingPhone:)` :8367, `missedCallDialAction` :8423, `dialBackMissedCall` :8457) | family phone only | family phone → linked-record numbers → native; the chosen FamilyContact is the ONE person (§6.3) |
+| Wizard search (find step) | family + book rows | same `UnifiedContactSearch` dedupe + already-linked steering (§11.1) |
+| Settings family list (SettingsView) | one row per family record | unchanged; link chip added; corrupt duplicate links show an unlinkable state, never hidden records (§6.2) |
+| Call-confirmation dialog / dialing | resolved family contact | unchanged (single contact) |
+| `ProfileInterviewSteps` kin list | family-only | unchanged |
 
-Channel labels resolve through the existing `app.name.*` keys via one shared helper
-(`channelLabel(_:locale:)`); the skipped-channel label is `fellBackFrom.first` (attempt order —
-the preferred channel that was skipped). When two channels were both infeasible, the clause
-names the primary skip and the routed channel; naming the full two-item list would require an
-additional list-connector key beyond the frozen five, which FR-CDP-013/016 acceptance does not
-require (their scenarios bind: routed channel named + what was skipped disclosed + honest copy)
-— recorded as RES-4. Because both templates take (skipped, name, routed) in the same order, one
-composition helper serves the confirmation and the tap announcement (single source for copy,
-FR-CDP-008). All values are authored ne/en at implementation; sample English copy (illustrative
-only — the keys/parameters above are the binding part): `"Messenger isn't available — call Syanu
-via WhatsApp"`, `"FaceTime didn't open — trying WhatsApp"`.
+## 8. Name / nickname resolution — match order, voice bands, ambiguity (FR-FCU-012, 013, 014)
 
-### ADR-CDP-11 — Interfaces, data model and topology: adapted honestly (no REST, no DB, no Docker, no auth change)
+### 8.1 Tier order (search side)
 
-**Decision.** The feature's interface surface is its Swift seams (Components below); its data
-model is local UserDefaults plus the string catalog (Data model section); its "infrastructure"
-is the xcodebuild/test/device pipeline (DV-1..7); there is no auth surface to change. These
-statements are part of the design so downstream reviewers do not look for artifacts this
-platform does not have.
+`FamilyMatchTier` (UnifiedContactSearch.swift:155; rawValue IS quality order) gains `.nickname`
+between `.relationship` and `.containment`:
 
-## Components
+| Tier | rawValue | Matches on |
+|---|---|---|
+| `.exactName` | 0 | normalized name == normalized query |
+| `.relationship` | 1 | existing relationship-anchor logic (unchanged) |
+| `.nickname` | 2 (NEW) | any stored nickname: exact or Character-safe substring |
+| `.containment` | 3 (was 2) | name containment / digit containment (unchanged logic) |
 
-Component map (C1–C7 are design units, not new modules — five are existing files):
+Within `.nickname`: exact > substring. Sort/rank logic is rawValue-based and needs no other
+change; exhaustive switches over the enum are updated at implement (grep — rank + tests).
+Tier is transient (never persisted), so renumbering is safe.
 
-| ID | Name | File | Status |
-|---|---|---|---|
-| C1 | `CallChannelChain` (+ `CallChannelVocabulary`) | `ios/ElderlyAssistant/Services/Calls/CallChannelChain.swift` | NEW |
-| C2 | Resolution seams (`resolvedCallChannel`, `resolvedMissedCallChannel`, `missedCallDialAction`, feasibility producers) | `AppCoordinator.swift:2099`,`:8382`,`:8423`,`:7312` | extended |
-| C3 | Voice path (`MethodResolver` global default + `requestCallConfirmation` + `PendingCallAction` + `confirmationPrompt`) | `MethodResolver.swift:47`, `AppCoordinator.swift:7587`,`:7518`,`:7688` | extended |
-| C4 | Tap paths (address-book rows; family buttons; missed-call dial-back) | `LeafViews.swift:1564-1620`, `AppCoordinator.swift:7831`,`:8457` | extended |
-| C5 | Launch-fail hop + announcement composition | `AppCoordinator.swift` (new private helper) + open sites (`:7720`,`:7944`,`:7971`,`:8053`,`:7831`) | NEW helper |
-| C6 | Settings + persistence | `CallingSettingsView.swift` (whole file), `AppCoordinator.swift:330`/`:2851` | extended |
-| C7 | Localization catalog | `ios/ElderlyAssistant/Resources/Localizable.xcstrings` | +5 keys |
+### 8.2 Normalization reuse (pin)
 
-### C1 — `CallChannelChain` (new, pure static)
+All new matching funnels through `NepaliTextNormalizer.normalize` and Character-safe
+substring comparison exactly as today — no fork, no transliteration, no grapheme "fixes"
+(NFR-FCU-007, OD-2). Devanagari nickname/substring behavior gets regression tests (positive
+and negative pins) rather than corrections.
 
-**Responsibilities.** The complete, total routing function plus the pure supporting statics:
-route, attempt order, candidate hop step, WhatsApp probe helper, channel↔method mappings, and
-the path-vocabulary value type.
+### 8.3 Voice bands and ambiguity (ContactResolver)
 
-**Interfaces.** As listed in ADR-CDP-01. Signatures are frozen-shape (`route`,
-`Feasibility`, `Result`) plus the additive statics (RES-1/RES-6).
+Scoring bands (replacing/extending the table at ContactResolver.swift:93; accept 0.6 and
+ambiguity margin 0.15 remain the private constants at :61-62):
 
-**Error paths.** None by construction: `route` is total over its enum/struct inputs — every
-input combination returns a `Result`; there is no throw, no optionals, no failure case, and no
-input can produce an empty `fellBackFrom` with a non-attemptable `channel` (the floor is
-unconditional). `nextLaunchFailCandidate` returns `nil` exactly when no candidate remains
-(exhaustion), which callers must treat as "speak the shipped outcome line" — a defined state,
-not an error. `method(for:isVideo:)`/`channel(for:)` are total bijections on the documented
-pairs.
+| Band | Score | Condition |
+|---|---|---|
+| exact name | 1.00 | normalized equality |
+| relationship | 0.90 | relationshipAnchor (unchanged) |
+| exact nickname | 0.85 | any nickname normalized-equal (NEW) |
+| name containment | 0.80 | unchanged |
+| nickname containment | 0.75 | NEW |
+| near-miss (typo) | 0.60 | edit distance ≤2 over name OR nickname |
 
-**Concurrency / isolation.** Value types with no mutable state — callable from any isolation
-domain; all production call sites are already main-actor (SwiftUI/coordinator), so no new hop
-or lock is introduced.
+- Ambiguity rule unchanged: top−runner < 0.15 ⇒ ambiguous (never guess). Consequence table:
+  name-exact vs nickname-exact gap 0.15 ⇒ resolves to the NAME-exact person (name exact stays
+  strongest); nickname-exact vs relationship (0.05), vs name containment (0.05), vs another
+  nickname-exact (0.0), vs nickname containment (0.10) ⇒ ALL ambiguous — two people sharing a
+  nickname, or a nickname colliding with a weaker signal, never silently dials (FR-FCU-014).
+- Ties are ambiguity, not order — determinism comes from the comparison, not from roster
+  order.
+- Near-miss extension: candidate set = contacts whose name OR any nickname is within edit
+  distance 2 of the query; the existing exactly-one-in-budget rule (budget 2) is preserved —
+  if a name-near-miss and a nickname-near-miss both land in budget, there are two candidates
+  and the near-miss path abstains (existing behavior shape).
+- The linked system twin is never a candidate (ContactResolver consults the family roster
+  only), so a linked pair can produce at most ONE spoken confirmation by construction
+  (FR-FCU-004 scenario 2).
+- `ContactResolver` init gains an index provider (`indexProvider: (() -> FamilyContactIndex)?`
+  with nil ⇒ build internally from the contacts provider on the fly, pure) so tests keep
+  compiling and the hot path uses the published index.
 
-**Timeouts / limits.** None and none added: the function is O(1) with at most three candidate
-comparisons; no probe, no clock, no I/O. The latency budget (NFR-CDP-004) is met structurally
-(pure computation + at most two local probes at the call sites).
+### 8.4 Performance budget and measurement (NFR-FCU-001)
 
-### C2 — Resolution seams (`AppCoordinator`)
+- Targets at max roster (12 contacts × 8 nicknames, Devanagari included): family-half search
+  ≤20 ms per keystroke; voice `resolve()` ≤20 ms per utterance. Budgets hold because build is
+  O(roster×nicknames) once per mutation and queries are exact-map + short substring scans over
+  precomputed normalized strings (strictly cheaper per query than today's per-call
+  normalization of names alone).
+- Verification: measured XCTest perf tests (§17) with assertion ceilings; measured values are
+  logged in the test output and recorded at the DV step. No production timer or timeout is
+  introduced (§13.4).
 
-**Responsibilities.** Assemble inputs (explicit pick, `defaultCallApp`, `secondaryCallApp`,
-handle availability, WhatsApp probe), apply the path vocabulary, run C1, expose the `Result`;
-own the pure statics that the view layer and tests call.
+## 9. System-contact WRITE seam (FR-FCU-008, 009, 010)
 
-**Interfaces.**
+### 9.1 Interfaces and error paths (first-class)
 
-```swift
-static func resolvedCallChannel(explicit:defaultApp:secondaryApp:
-                                messengerHandleAvailable:whatsAppInstalled:
-                                vocabulary:) -> CallChannelChain.Result
-static func resolvedMissedCallChannel(familyContact:defaultApp:secondaryApp:
-                                      messengerHandleAvailable:whatsAppInstalled:)
-                                      -> CallChannelChain.Result
-static func missedCallDialAction(phone:familyContact:defaultApp:secondaryApp:
-                                 messengerHandleAvailable:whatsAppInstalled:name:)
-                                 -> MissedCallDialRoute      // { action, channel, fellBackFrom }
-var whatsAppInstalledNow: Bool                               // CallChannelChain.whatsAppInstalled(canOpen: canOpenURLOnMain)
-```
-
-**Error paths.** All total; `explicit: nil` is the default-input case (settings primary);
-`whatsAppInstalled: false` biases to the floor — never throws. `missedCallDialAction` keeps its
-shipped guards (empty family contact → the plain `dialPhone` action; empty phone →
-`announceNoUsableNumber`, `:8493-8497`). Emergency resolution is deliberately **not** part of
-these seams (non-goal; `emergencyContacts` `:6463` untouched).
-
-**Concurrency / isolation.** Pure statics; the probe helper runs on the main actor (the
-existing `canOpenURLOnMain` hop, `:7312-7315`). No mutation of coordinator state inside the
-seams — resolution is a pure function of (settings snapshot, contact data, probe result).
-
-**Timeouts / limits.** No timeout exists or is added; probe non-answer = immediate `false`
-(treated as not installed, chain hops on). The only configurable window in the feature remains
-`VoiceSessionStateMachine.config.confirmationTimeoutSeconds` (default 45,
-`ios/ElderlyAssistant/App/VoiceSessionStateMachine.swift:135`) — reused unchanged, not
-duplicated anywhere.
-
-### C3 — Voice path (MethodResolver + confirmation)
-
-**Responsibilities.** Map the settings primary into the global-default step; run the chain
-before pending; carry provenance into the prompt; keep the override path byte-for-byte.
-
-**Interfaces.** `MethodResolver.init(preferenceStore:historyStore:globalDefault:)` (default
-`{ _ in .phone }`); `resolve(...)` unchanged signature and sources; `PendingCallAction` fields:
-existing ones (`AppCoordinator.swift:7518-7550`) plus `fellBackFrom: [CallApp] = []`,
-`hopCandidates: [CallApp] = []`; `confirmationPrompt(for:isRepeat:)` unchanged signature.
-
-**Error paths.** `methodResolver.resolve` keeps its no-throw contract. `requestCallConfirmation`
-keeps its `String?` return contract; the Messenger-no-handle early return is replaced by the
-hop (ADR-CDP-05); the no-contact path (nil) is unchanged. Unsupported-requested-app disclosure
-(`ResolvedMethod.unsupportedRequestedApp`) is unchanged and composes with the fallback
-disclosure (both compose, neither replaces — FR-CDP-014 scenario 3). The override no-handle
-gate (`:7665-7669`) keeps speaking `router.call.messengerNoHandle` and keeps the original
-action pending.
-
-**Concurrency / isolation.** Main-actor coordinator code; the confirmation window
-(`openConfirmationWindow` `:7170-7189`) and timeout (`:10561-10569` today,
-`VoiceSessionStateMachine.swift:276-319`) are the existing isolation — no new state machine,
-no parallel pending action (the single `pendingCallAction` slot at `:7552` is the concurrency
-boundary; the chain computation completes before it is written).
-
-**Timeouts / limits.** Reused, configurable, single-sourced: `confirmationTimeoutSeconds`.
-No new timer, no probe timeout, no retry loop.
-
-### C4 — Tap paths
-
-**Responsibilities.** Route rows/tiles/dial-back through C2, announce the routing at
-resolution (ADR-CDP-07), open through the shipped per-channel functions.
-
-**Interfaces (seams consumed / extended).**
-
-- `LeafViews.rowChannelState(for:)` (`:1605-1620`) — seam call updated to C2's six-argument
-  form; `RowChannelState` (`:2249-2266`) gains `fellBackFrom: [CallApp] = []`.
-- `LeafViews.dialChannel(_:)` (`:1564-1584`) — announce-then-switch (ADR-CDP-07); dispatch
-  branches unchanged (including the stale-state `messengerNoHandle` guard at `:1573-1580`).
-- `LeafViews.whatsAppInstalled` (`:1171-1174`) — delegates to `CallChannelChain`.
-- `performContactCall(_:kind:)` (`:7831-7910`) — chain at the top with
-  `.video`/`.audio` vocabulary; routed channel drives the existing switch.
-- `missedCallDialAction` / `dialBackMissedCall` (`:8423-8443` / `:8457-8483`) — new parameters;
-  the route struct carries `fellBackFrom` to the announcement.
-- Family tiles reach `performContactCall` via `ContactTile.videoCall()/audioCall()`
-  (`LeafViews.swift:2654-2660`).
-
-**Error paths.** Every branch keeps its shipped no-silent-failure line
-(`router.call.facetimeUnavailable`, `call.announce.messenger*`, `call.announce.noPhoneNumber`,
-`announceNoUsableNumber`). The hop (C5) intervenes only between failure outcomes and their
-existing lines. A tap never dead-ends (FR-CDP-010 scenarios 1/3).
-
-**Concurrency / isolation.** All view/coordinator code on the main actor; `channelStateVersion`
-bump (`:1592-1597`) remains the re-resolution trigger after a chooser pick. The chain runs
-synchronously inside the tap handler — no async boundary, no interleaving window.
-
-**Timeouts / limits.** None in the tap paths; the probe is synchronous and local
-(NFR-CDP-004). Tap target size/accessibility tokens unchanged (`DesignTokens` pattern).
-
-### C5 — Launch-fail hop (new private helper)
-
-**Responsibilities.** Observe failure outcomes at every open site; compute the next candidate;
-announce; re-attempt; stop honestly.
-
-**Interfaces (internal).**
+New file `Services/Contacts/SystemContactPhotoWriter.swift`:
 
 ```swift
-private func performLaunchFailHop(after failed: CallApp,
-                                  candidates: [CallApp],
-                                  name: String, phone: String, handle: String?,
-                                  isVideo: Bool, locale: Locale) -> Bool   // true if a hop was attempted
+enum SystemContactWriteAccess: Equatable {
+    case notDetermined, denied, limited, full
+}
+
+enum SystemContactWriteFailure: String {        // reason codes only — log-safe (§15)
+    case fetchFailed, notInGrantedSelection, saveRejected, readBackMismatch
+}
+
+enum SystemContactPhotoWriteOutcome: Equatable {
+    case written                                   // saved AND verified by read-back
+    case skippedNoLink                             // unlinked/unverified → no attempt (today's behavior)
+    case skippedNoAuthorization(SystemContactWriteAccess)
+    case recordGone                                // identifier no longer resolves
+    case identityMismatch                          // fingerprint failed at attempt time
+    case failed(SystemContactWriteFailure)
+}
+
+protocol SystemContactPhotoWriting: AnyObject {
+    func writeAccess() async -> SystemContactWriteAccess        // detected, never assumed
+    func writePhoto(_ jpeg: Data, to link: SystemContactLink) async -> SystemContactPhotoWriteOutcome
+    func clearPhoto(from link: SystemContactLink) async -> SystemContactPhotoWriteOutcome
+}
 ```
 
-plus `hopCandidates` threaded through the executes (`PendingCallAction.hopCandidates`;
-optional parameters with `= []` default on `performFaceTimeCall`, `performSystemContactWhatsApp`,
-`performSystemContactMessenger`).
+Every seam call returns an outcome value — no throwing, no silent failure; the actor may not
+crash the app (no `try!`; `CNSaveRequest.execute` `throws` is caught and mapped). The
+outcome→UI mapping is total (§10.3).
 
-**Error paths.** Candidate computation is total (pure static). A hop attempt that itself fails
-recurse-terminates on the consumed candidate list; exhaustion speaks the shipped outcome line
-(ADR-CDP-08). Failed opens never record learning and never write history (shipped rule,
-`:7746-7750`). No raw error content is spoken or logged — the announcement names channels, in
-the session language (NFR-CDP-003).
+### 9.2 Real glue: confined `CNSaveRequest` + read-back verification
 
-**Concurrency / isolation.** Runs inline on the main actor immediately after the failed open
-returns; no new queue, no detached task. At most one in-flight hop per tap (synchronous
-recursion), so no interleaving and no double-attempt of a channel.
+`actor SystemContactPhotoWriter: SystemContactPhotoWriting` — the ONLY file permitted to
+touch `CNSaveRequest`/`CNMutableContact` (new files; confirmed absent anywhere today):
 
-**Timeouts / limits.** The candidate count is bounded by the chain (≤ 2 hops: secondary, then
-floor); no timers. "iOS reports failure" is the open call's own return value, never a wait.
+1. `writeAccess()` → availability-gated pure mapping (§9.3). No prompt is ever triggered from
+   here — prompting is a deliberate user action in the editor's ask card (§11.1).
+2. `writePhoto(jpeg, link)`:
+   - fetch by identifier with keys `[CNContactIdentifierKey, CNContactPhoneNumbersKey,
+     CNContactImageDataKey, CNContactImageDataAvailableKey]`; fetch failure → `.fetchFailed`
+     (under limited access, a not-granted record fails here → `.notInGrantedSelection`);
+     empty result → `.recordGone`.
+   - fingerprint re-check at attempt time (same `matches` rule) → mismatch → `.identityMismatch`
+     (a wrong-contact write is prevented, not just detected).
+   - `mutable = contact.mutableCopy() as! CNMutableContact`; assign ONLY `imageData` (the
+     already-processed JPEG bytes from `ContactPhotoStore.processedJPEG` — same bytes the
+     app-local store holds); `CNSaveRequest().update(mutable)`; `execute` in `do/catch` →
+     `.saveRejected`.
+   - read-back: re-fetch `CNContactImageDataKey`; byte equality → `.written`; else
+     `.readBackMismatch` (never a false success; the fallback state stands).
+   - Confinement is enforced three ways: request built only inside this file; intent record
+     asserts the field set (below); source-review in security-design-review + security-test.
+3. `clearPhoto(from:)` — same sequence with `imageData = nil`.
+4. Serialization: actor isolation makes writes strictly serial; one write at a time
+   (≤12 linked contacts; typically one per Save).
 
-### C6 — Settings + persistence
+`SystemContactLinkService` (actor, `Services/Contacts/SystemContactLinkService.swift`)
+implements `SystemContactLinkReading`:
 
-**Responsibilities.** Two pickers (Primary + Fallback) over the four channels; persistence
-through the coordinator seam; accessibility parity with the shipped rows.
+```swift
+struct VerifiedLinksSnapshot: Equatable {
+    var links: [UUID: SystemContactLink]
+    var linkedRecordNumbers: [String: [String]]
+    var generation: UInt64
+    static let empty = VerifiedLinksSnapshot(links: [:], linkedRecordNumbers: [:], generation: 0)
+}
 
-**Interfaces.** `AppCoordinator.secondaryCallApp: CallApp` (`@Published`, `didSet` →
-UserDefaults key `secondaryCallApp`, restore `?? .phone`). `CallingSettingsView` renders two
-sections: Primary = existing rows bound to `defaultCallApp` under `settings.calling.primaryTitle`;
-Fallback = the same row pattern bound to `secondaryCallApp` under `settings.calling.secondaryTitle`;
-`channelRow` (`:40-64`) gains a selection binding parameter; `nameKey` (`:70-77`) and the
-`app.name.*` labels are reused verbatim.
+protocol SystemContactLinkReading: AnyObject {
+    func refresh(contacts: [FamilyContact]) async -> VerifiedLinksSnapshot
+    func photoImageData(forIdentifier id: String) async -> Data?   // nil: absent/unreadable
+    func invalidate(identifier: String?)                           // one record, or all
+}
+```
 
-**Error paths.** None: binding writes are total; a corrupted/absent stored raw value restores
-to `.phone` (fail-safe GSM default). `secondary == primary` is accepted and legal by design.
+It caches system photo bytes keyed by identifier with a bounded in-memory guard (cache
+wholesale-invalidated on foreground and on our own writes; constants finalized in L2). Read
+access is checked BEFORE any fetch; `.denied`/`.notDetermined` ⇒ no store call, snapshot
+survives unchanged.
 
-**Concurrency / isolation.** Main-actor SwiftUI state, identical to `defaultCallApp`'s shipped
-pattern; the two properties are independent (no cross-talk).
+### 9.3 Authorization model (full / limited / denied — detected, not assumed)
 
-**Timeouts / limits.** None.
+- Pure mappings, testable without a store instance:
+  - `ContactsAccess.from(_ status: CNAuthorizationStatus) -> ContactsAccess` — adds
+    `.limited` (iOS 18+) via `if #available(iOS 18.0, *)`; `@unknown default` → `.denied`.
+  - `SystemContactWriteAccess.from(_ status:) -> SystemContactWriteAccess` — same shape;
+    `.authorized → .full`, `.denied/.restricted → .denied`, `.limited → .limited` (gated),
+    `@unknown → .denied`.
+- `AddressBookDirectory.access()` (:348) currently funnels `.limited` into `@unknown default →
+  .denied`, so iOS 18/26 limited users are treated as denied on BOTH read and write. This
+  design deliberately adds `.limited` to `ContactsAccess` and treats `.allowed` and `.limited`
+  as readable (`allowsReading` helper) with a distinct honest access-card copy; this is a
+  minimal supporting change so that "system photo displayed when present" is true for a
+  granted contact under limited access, and search shows the granted set instead of claiming
+  the book is off. Denial/nagging logic continues to key on `.denied` only — limited never
+  re-prompts.
+- Prompting: only via the editor's photo-step ask card (point of use, plain language, §11.1)
+  calling the existing `requestAccess()`; iOS 18 may return `.limited` from that flow — both
+  statuses proceed to attempt-and-detect. No prompt from search or display paths.
+- Write detection is attempt-based even under `.full`: every outcome comes from the store's
+  actual response (fetch/save/read-back), never from the status alone. A read-only/restricted
+  save → `.saveRejected` → fallback state; nothing is claimed that did not happen.
 
-### C7 — Localization catalog (+5 keys)
+### 9.4 Test double + intent record
 
-**Responsibilities.** ne/en entries with the parameter contracts of ADR-CDP-10.
+`FakeSystemContactPhotoWriter: SystemContactPhotoWriting` records
+`PhotoWriteIntent { identifier: String, fields: Set<PhotoWriteField> /* invariant == [.photo] */,
+imageBytesHash: String /* sha256 prefix — never the bytes */ }` and returns scripted outcomes.
+Tests assert: field-set invariant (photo only), fingerprint precondition (no write on
+mismatch), no attempt on unlinked/denied, and the outcome→state mapping (§17). The fake is
+injected through the same protocol the coordinator holds, so no test touches `CNContactStore`.
 
-**Error paths.** A missing/format-mismatched key fails `L10nCatalogCoverageTests` (and the
-build-time catalog checks); `L10n.str`/`L10n.fmt` behavior for absent keys is the shipped
-behavior and is not changed by this feature. Format strings never concatenate — every
-new string with parameters is `L10n.fmt` with numbered positionals, so ne/en argument order
-cannot drift.
+## 10. Photo display precedence and the fallback state machine (FR-FCU-007, 010)
 
-**Concurrency / isolation.** Static resources; read-only.
+### 10.1 Precedence resolver (async, honest)
 
-**Timeouts / limits.** None.
+One coordinator entry point; UI never computes precedence in `body`:
 
-## Integration points (verified `file:line` at design time)
+```swift
+func faceImage(for contact: FamilyContact) async -> UIImage?   // UIImage? = show initials
+func faceThumbnail(for contact: FamilyContact, diameter: CGFloat, displayScale: CGFloat) async -> UIImage?
+func faceIdentity(for contact: FamilyContact) -> String        // ".task(id:)" key
+```
 
-| # | File:line | Current role | Feature change |
-|---|---|---|---|
-| 1 | `AppCoordinator.swift:330-335` | `defaultCallApp` + UserDefaults didSet (key `defaultCallApp`) | unchanged; new sibling property added |
-| 2 | `AppCoordinator.swift:2851-2853` | init restore `.flatMap(CallApp.init(rawValue:)) ?? .phone` | `secondaryCallApp` restore added with the same shape, default `.phone` |
-| 3 | `AppCoordinator.swift:2099-2105` | `resolvedCallChannel` — per-contact pick wins; Messenger-no-handle hard rule | runs the chain, returns `CallChannelChain.Result`; six-arg signature |
-| 4 | `AppCoordinator.swift:8382-8390` | `resolvedMissedCallChannel` — `supportsAudio` guard + delegate | runs the chain (vocab `.audio`), returns `Result` |
-| 5 | `AppCoordinator.swift:8423-8443` | `missedCallDialAction` — pure decision | new params; returns `MissedCallDialRoute` (action + channel + `fellBackFrom`) |
-| 6 | `AppCoordinator.swift:8457-8483` | `dialBackMissedCall` dispatch | announce at resolution, then dispatch; hop candidates threaded |
-| 7 | `AppCoordinator.swift:7587-7647` | `requestCallConfirmation`; Messenger-no-handle early return `:7620-7623` | chain before pending; early return replaced by hop; prompt disclosure |
-| 8 | `AppCoordinator.swift:7518-7550` / `:7552` / `:7553` | `PendingCallAction` + singleton slot + `isAwaitingCallConfirmation` | + `fellBackFrom`, + `hopCandidates` (defaulted) |
-| 9 | `AppCoordinator.swift:7656-7686` | `handleCallConfirmationOverride` (`:7665-7669` no-handle gate) | unchanged (FR-CDP-014); amended action drops provenance |
-| 10 | `AppCoordinator.swift:7688-7709` | `confirmationPrompt(for:isRepeat:)` | composes `router.call.fallbackDisclosure` when `fellBackFrom` non-empty |
-| 11 | `AppCoordinator.swift:7720-7803` | `performCallAction` (voice execution) | failure branches hop; `.phone` branch checks `openPhone` Bool |
-| 12 | `AppCoordinator.swift:7831-7910` | `performContactCall` (family tiles; observability `:7834-7841`) | chain + vocab + announcement at top; hop in failure branches |
-| 13 | `AppCoordinator.swift:7944-7961` / `:7971-8000` / `:8053-8083` | per-channel openers for rows/search | optional `hopCandidates`; failure branches hop |
-| 14 | `AppCoordinator.swift:8009-8011` | `storedMessengerHandle` | feasibility input (unchanged) |
-| 15 | `AppCoordinator.swift:7312-7315` | `canOpenURLOnMain` | the WhatsApp probe seam (unchanged) |
-| 16 | `AppCoordinator.swift:1925-1926` | `methodResolver` construction | third closure argument (ADR-CDP-06) |
-| 17 | `AppCoordinator.swift:6463-6480`; `NotifyChannel.swift:39,58` | emergency resolution | **untouched** (non-goal) |
-| 18 | `AppCoordinator.swift:752`, `:5397`, `:5405+`; `:7170-7189`; `:10611-10628` | outcome lane, speak, window, yes/no execution | reused as-is |
-| 19 | `LeafViews.swift:1605-1620` (call at `:1612-1615`) | `rowChannelState` 3-arg seam call | 5-arg seam call + `fellBackFrom` on `RowChannelState` (`:2249-2266`) |
-| 20 | `LeafViews.swift:1564-1584` | `dialChannel` switch on resolved channel | announcement before the switch |
-| 21 | `LeafViews.swift:1171-1174` | local `whatsAppInstalled` probe | delegates to `CallChannelChain` |
-| 22 | `LeafViews.swift:2654-2660` | tile video/audio call actions | unchanged call surface into `performContactCall` |
-| 23 | `MethodResolver.swift:22-26`, `:47-79` (step 4 `:74-78`) | resolver init + 4-step chain | injected `globalDefault`; steps 1–3 unchanged |
-| 24 | `FamilyContactStore.swift:156-164` | `resolvedVideoApp` / `resolvedAudioApp` | the vocabulary-respecting picks (unchanged; feed the seam) |
-| 25 | `CallMethod.swift:32-39,45-84,98-144` | method enum + preference/history stores | unchanged |
-| 26 | `CallOverrideParser.swift:17-49` | override utterance → `CallMethod` | unchanged |
-| 27 | `CallLinks.swift:114-190` (outcomes), `:340-344` (`openPhone` Bool), `:400-470` (openers) | open outcomes | consumed as launch-fail signals (C5) |
-| 28 | `CallingSettingsView.swift:22,40-64,70-77` | one picker | two sections; same rows/labels |
-| 29 | `VoiceSessionStateMachine.swift:135` | `confirmationTimeoutSeconds = 45` | reused, unchanged (the only configurable window) |
-| 30 | `Info.plist:94` | `LSApplicationQueriesSchemes` includes `whatsapp` | no change needed |
-| 31 | `ios/build.sh:431` | release log-safety gate wiring | must stay exit 0 (NFR-CDP-003/010) |
+Resolution order per call: (1) verified link + readable access + `photoImageData` succeeds →
+SYSTEM photo; (2) app-local `photoFilename` loads → app-local; (3) nil ⇒ existing initials
+avatar. Any failure at a step degrades to the next — a tile is never blank (FR-FCU-010
+no-crash/no-loss). `faceIdentity` = `"<id>:<sysphoto-hash or link-nil>:<filename>:
+<faceEpoch>"` so `.task(id:)` re-runs exactly on link/photo/epoch changes. Thumbnails go
+through `DownsampledImageCache` keyed `sysphoto:<identifier>:<sha256-prefix>` or
+`contact:<filename>` (same budget; two sources can never collide). The three current
+app-local-only call sites (SettingsView.swift:1592, LeafViews.swift:1157, :2646) migrate to
+this method; the old sync `contactPhoto(for:)` remains only if still referenced (L2 detail).
+The editor additionally shows `family.photo.sourceSystem` when the displayed photo is the
+system one — the only surface that needs the label (FR-FCU-007 honest display).
 
-## Data model & persistence
+### 10.2 Editor save flow (write sequencing)
 
-No database, no schema, no migration. The feature's persisted data:
+1. Existing sync store write runs FIRST (unchanged semantics: failure keeps the draft,
+   `SettingsView.swift:2762-2776`). The processed JPEG is persisted app-local in the same
+   write — the picked photo can never be lost to a later system-write failure (FR-FCU-010).
+2. If the store write succeeded AND a NEW/CHANGED photo exists AND the contact is linked
+   (verified) → attempt in a `Task`: notDetermined/denied → `.skippedNoAuthorization`
+   (fallback state, no prompt); else `writePhoto(jpeg, to:)` with the same processed bytes.
+3. `.written` → bump `faceEpoch`, invalidate the identifier's photo cache, show the honest
+   label (§10.3: `.updatedInSystem`; the sheet stays open — the F4 wording alignment applied
+   at T-165, matching §10.3's own table and design-l2 §1.5). Any other outcome → set the
+   outcome state (§10.3), KEEP the sheet open, and switch the primary button to Done
+   (auto-dismiss only when no post-save state is shown — `.skippedNoLink` or no photo change).
+   The owner sees exactly what happened; nothing is claimed that did not happen.
+4. No photo changed → dismiss as today; no write attempted.
 
-| Store | Key | Type | Default | Notes |
+### 10.3 Fallback / degradation state machine
+
+| Condition | Attempt? | Outcome | Editor state (label) | Display afterwards |
 |---|---|---|---|---|
-| UserDefaults (existing seam) | `defaultCallApp` | `CallApp` raw value string | `.phone` | unchanged |
-| UserDefaults (this feature) | `secondaryCallApp` | `CallApp` raw value string | `.phone` (absent → GSM; ADR-CDP-09) | new; same protection class and lifecycle as `defaultCallApp` |
-| `ChannelPreferenceStore` | per-contact pick | `CallApp` | none | unchanged; the chain's `explicit` input |
-| `CallMethodPreferenceStore` / `ConfirmedMethodHistoryStore` | `call.methodPreferences` / `call.confirmedMethodHistory` | existing formats | — | unchanged; MethodResolver steps 2–3 |
-| `MessengerHandleStore` | per normalized phone | handle string (PII) | none | unchanged; feasibility input only |
-| `Localizable.xcstrings` | 5 new keys | ne/en values | — | ADR-CDP-10 |
+| Unlinked/unverified link | no | `.skippedNoLink` | none (today's behavior) | app-local or initials |
+| Access `.notDetermined` | no (ask card offers Allow) | `.skippedNoAuthorization(.notDetermined)` | `family.photo.state.keptOnPhone` | app-local |
+| Access `.denied` | no | `.skippedNoAuthorization(.denied)` | `family.photo.state.keptOnPhone` + `family.photo.accessDeniedBody` | app-local |
+| Access `.limited`, record not granted | yes → fetch fails | `.notInGrantedSelection` | `family.photo.state.keptOnPhone` | app-local |
+| Record vanished since verification | yes | `.recordGone` | `family.photo.state.keptOnPhone`; link will degrade on next refresh (§6.2) | app-local |
+| Fingerprint mismatch at attempt | yes (prevented) | `.identityMismatch` | `family.photo.state.keptOnPhone`; wizard shows stale-link line | app-local |
+| Save rejected (read-only etc.) | yes | `.failed(.saveRejected)` | `family.photo.state.keptOnPhone` | app-local |
+| Save ok, read-back differs | yes | `.failed(.readBackMismatch)` | `family.photo.state.keptOnPhone` (never false success) | system fetch decides; else app-local |
+| Success + verified | yes | `.written` | `family.photo.state.updatedInSystem` | SYSTEM photo (identical bytes to what was picked) |
 
-## Localization
+### 10.4 Remove semantics
 
-- New keys: the five in ADR-CDP-10 (ne/en, both required; parity enforced by
-  `L10nCatalogCoverageTests`, which resolves every key in both locales and requires the values
-  to differ).
-- Reused keys: `settings.calling.title`, `calling.defaultCaption`, `app.name.*`,
-  `router.call.confirmQuestion`, `router.call.messengerNoHandle`, `router.call.method*`,
-  `call.announce.*`.
-- Spoken language follows the session (`activeLocale` → `L10n.fmt(_:locale:_:)`), matching the
-  shipped dual-channel honesty convention (`LeafViews.swift:1577` precedent).
-- Numbered positional placeholders (`%1$@ … %3$@`) in every parameterized string; composition
-  happens in Swift, never by concatenating catalog values.
+Existing three-state draft (picked / removingStored / untouched) is preserved. On a successful
+store update with removal: app-local deleted (today) AND, if linked+verified+writable, a
+best-effort `clearPhoto` runs; if a system photo still remains (clear skipped or failed — e.g.
+the record's photo was not ours or save was rejected), the editor shows
+`family.photo.state.systemPhotoRemains` (honest, actionable in the Contacts app). Unlinked →
+today's behavior exactly, no label.
 
-## Log safety
+## 11. UI surfaces
 
-- No new console writes, prints, `os_log` or `NSLog` anywhere in the feature. All surface
-  signals ride the existing observability bus with classification-only outcomes (precedent:
-  `"audio:whatsapp"` at `:7838`, `"whatsapp:openedChat"` at `:7978`) and `metadata: [:]` — no
-  numbers, no handles, no names (C9 policy comment at `:7840`).
-- New/updated outcome tokens classify routing and hops only (e.g. `phone:hop`,
-  `faceTime:launchFailed`) — category strings, not content.
-- The announcement strings carry names/numbers **spoken to the user in the session language**;
-  they never route through logging APIs (NFR-CDP-003).
-- `ios/tools/check-release-log-safety.sh` (wired at `ios/build.sh:431`) flags transcript
-  mentions, raw error prints and feature-root console writes; the feature must keep it at
-  exit 0 — a release gate item in NFR-CDP-010.
+### 11.1 Family editor wizard (`FamilyContactWizardSheet`, SettingsView.swift:1529ff)
 
-## Security pre-map (STRIDE seed for `security-design-review`)
+- Steps stay five; the indicator ("Step N of 5") is untouched. Link UI lives INSIDE the find
+  step; nickname management inside the nickname step.
+- Find step: in-app search results gain a linked-state affordance. Tapping a result for a
+  contact already linked to ANOTHER family contact does not select it — it shows
+  `family.link.alreadyLinked` + the existing contact as entry to its editor (steering).
+  Tapping an unlinked result selects it as today AND records the link in the draft;
+  `family.link.linkedTo` shows the chosen book name with an unlink action
+  (`family.link.unlink`/`family.link.unlinkHint`). A stale/unverified link renders
+  `family.link.stale`. `family.link.pickHint` labels the affordance. No link is stored until
+  Save. Pre-filled edits of an already-linked contact show the link area pre-populated.
+- Photo step: existing `PhotosPicker` + `displayedPhoto` (picked > stored) behavior unchanged;
+  adds (a) source caption `family.photo.sourceSystem` when displaying the system photo;
+  (b) the write-access card when linked and access is `.notDetermined` (`family.photo.accessTitle`
+  /`family.photo.accessBody`, Allow reusing `call.search.allowButton`, decline = continue with
+  fallback); (c) `family.photo.accessDeniedBody` line when `.denied` (no nag; Open Settings
+  reuses the existing link); (d) outcome state labels per §10.3.
+- Nickname step: replaces the single `TextField` (:2575) with a managed list — chips/rows of
+  saved entries each with a remove control (≥44 pt, a11y label `family.nickname.removeLabel`),
+  plus an add field (`family.nickname.entryPlaceholder`) + Add button (`family.nickname.add`),
+  hint `family.nickname.hint` (covers store-as-entered). `normalizedNicknames` filters
+  whitespace-only entries at save; saving with the list unchanged is a no-op for the store.
+  Changes take effect immediately after Save (index rebuild on the roster mutation; no
+  restart — FR-FCU-015). Removal is a save-time edit like every other field.
+- Save path signatures: `addFamilyContact(..., nicknames: [String] = [], ...)` (defaulted —
+  onboarding/ProfileInterview callers unchanged) and `updateFamilyContact(..., nicknames:
+  [String], ...)` — REQUIRED (no default) so no caller can silently wipe the list; the two
+  existing callers are updated: ProfilesInterviewSteps:530-541 passes
+  `entry.contact.nicknames` through; the wizard passes the draft.
 
-Pre-mapped to the workflow's five focus areas; each row is design-level evidence the security
-review will verify against the implementation.
+### 11.2 Family list and settings
 
-| # | Focus area | STRIDE seed | Design anchor / mitigation |
-|---|---|---|---|
-| 1 | GSM hard floor — no configuration dead-ends | **Tampering** (misconfiguration removing the floor), **Denial of service** (chain stalls) | `route` is total with an unconditional `.phone` terminal (C1); dedupe can only shorten, never empty, the attempt order; vocabulary substitution preserves attemptability (`.video` lands `.faceTime` — always feasible); NFR-CDP-001's exhaustive 64-cell matrix is a required test; no timeout/blocking exists to DoS (ADR-02/04/08) |
-| 2 | Emergency precedence untouched | **Tampering / Elevation** (routing wrapping escalation) | `emergencyContacts` (`:6463`) and `NotifyChannel.resolve` (`NotifyChannel.swift:39,58`) are outside every changed seam; no probe, chain or hop runs on the emergency path; FR-CDP-018 pins it; NFR-CDP-009 regression tests |
-| 3 | Probes local-only; no new egress/collection | **Information disclosure** (scheme probing leaking, new egress) | Only `canOpenURL` (local XPC to LaunchServices) and the handle-on-file check; zero network calls in the feature; no new permission or plist entry (Info.plist unchanged at `:94`); handles/numbers never leave the seam inputs |
-| 4 | Announcement honesty — no silent route changes | **Spoofing / Repudiation** (spoken line diverging from executed action) | All copy composes from the same `CallLink Result.fellBackFrom` + `.channel` (single source, FR-CDP-008); the pending action stores the routed method (what executes and teaches); tap announcements precede the open; launch-fail lines name the outcome; tests pin wording and the no-fallback case (no added noise) |
-| 5 | Log sanitisation | **Information disclosure** (PII in logs) | No new log statements; classification-only observability outcomes; release log gate (`build.sh:431`) must exit 0 (NFR-CDP-003/010) |
+Family rows gain a compact link chip (`family.link.chip`) and use the new async face path.
+No new screen; no reordering. Kin/emergency surfaces untouched (out of scope).
 
-Additional seeds: **Elevation** — override protocol still routes through the same pending-action
-gate (no side-door execution); **Tampering** — settings are local-only, same store as the
-shipped preference, no remote input path exists.
+### 11.3 Call surfaces
 
-## Testability & deterministic seams
+`CallView` tiles and result rows migrate to `faceThumbnail` (§10.1) and render
+`linkedBookNames` captions (§7.2). Zoom/layout untouched; `UnifiedContactResultRow` gains
+only `caption: String? = nil`. This is the exact seam contact with call-dialer (§16): their
+dial-layer edits and our face/caption layer coexist in the same structs without redesign.
 
-| Seam | Determinism mechanism | Gate suite (scoped `-only-testing`) |
+### 11.4 Pick mechanism: in-app search over `CNContactPickerViewController`
+
+DECISION: in-app search (existing wizard pattern). Rationale: (1) linking requires the
+`CNContact.identifier` and ONGOING read access for verification, photo read/write, and dedupe
+across surfaces — the system picker grants per-pick access without a persistent identifier
+fetch story, so it cannot support §6.2 verification; (2) the already-linked steering (§11.1)
+needs result rows the picker does not offer; (3) the wizard's search + access cards are
+already localized, accessible, and test-covered; (4) `CNContactPickerViewController` would be
+a third interaction paradigm in one sheet. Rejected accordingly (the picker remains
+`NSContactsUsageDescription`-covered but unused).
+
+## 12. Localization and permission disclosure (NFR-FCU-004, FR-FCU-009)
+
+New keys (all en + ne, added to `Resources/Localizable.xcstrings`, resolved via `L10n.str`):
+
+| Key | en (intent; final wording frozen in L2) | Placeholders |
 |---|---|---|
-| `CallChannelChain.route` / `attemptOrder` / `nextLaunchFailCandidate` | pure statics over enums/structs; exhaustive enumeration, no stubs needed | `CallChannelResolutionTests` — full chain matrix incl. the 64-combination never-dead-end case (4×4×4), dedupe, `fellBackFrom` content/order, vocabulary substitution cells |
-| WhatsApp probe | `whatsAppInstalled(canOpen:)` closure — tests pass `{ _ in true/false }`; coordinator seam takes the Bool | `CallChannelResolutionTests`, `MethodResolverTests` |
-| Messenger feasibility | handle-on-file Bool input | same |
-| MethodResolver global default | injected `globalDefault` closure; stub stores (house `StubEncryptedStorage` pattern in `MethodResolverTests.swift`) | `MethodResolverTests` |
-| Confirmation prompt wording | `L10n.fmt` output asserted against the catalog; no-fallback case asserted byte-identical to the shipped wording | confirmation-wording tests (FR-CDP-013/014) |
-| Settings persistence | real stores over the UserDefaults seam (house pattern of `SpotifySettingsSurfaceTests.swift`); round-trip + `.phone` default | settings persistence tests |
-| Picker UI / accessibility | value-level assertions + `FeatureSourceScan` modifier pin (rendered-tree limits recorded as DV items — house pattern) | picker UI tests (FR-CDP-001/002, NFR-CDP-006) |
-| Catalog parity | every new key resolves in both locales and differs | `L10nCatalogCoverageTests` (extended) |
-| Dial-back | `MissedCallDialBackTests.swift` extended to the route struct + provenance | `MissedCallDialBackTests` |
+| `family.link.chip` | Linked | — |
+| `family.link.linkedTo` | Linked to %@ | 1 |
+| `family.link.unlink` | Remove link | — |
+| `family.link.unlinkHint` | This only separates the two records. Nothing is deleted, and your phone's contact is not changed. | — |
+| `family.link.alreadyLinked` | %@ is already a family contact. | 1 |
+| `family.link.stale` | This phone contact is no longer in your address book. The link is ignored. | — |
+| `family.link.pickHint` | Choose the phone contact this person is in. | — |
+| `family.link.sectionTitle` | Phone contact | — |
+| `family.photo.accessTitle` | Update this person's photo in your phone's contacts? | — |
+| `family.photo.accessBody` | Allowing contacts access lets the app copy the photo you choose onto this person's contact card. Nothing else in your contacts is changed. The app works fully even if you say no. | — |
+| `family.photo.accessDeniedBody` | Contacts access is off, so the photo will be kept in this app only. You can change this in iPhone Settings. | — |
+| `family.photo.state.updatedInSystem` | Photo updated in your phone's contacts. | — |
+| `family.photo.state.keptOnPhone` | Kept in this app only. | — |
+| `family.photo.state.systemPhotoRemains` | Your phone's contact still has its own photo. Change it in the Contacts app to remove it. | — |
+| `family.photo.sourceSystem` | Shown from your phone's contacts. | — |
+| `family.nickname.entryPlaceholder` | Add a name or variation (e.g. sanu, सानु) | — |
+| `family.nickname.add` | Add | — |
+| `family.nickname.removeLabel` | Remove %@ | 1 (a11y) |
+| `family.nickname.hint` | Any of these names finds this person — typed or spoken. Names are kept exactly as you enter them. | — |
+| `call.search.linkedBookName` | Also in your phone book as %@ | 1 |
+| `call.search.accessLimited` | Searching shows only the contacts you allowed. | — |
 
-Baseline discipline: the full-bundle unit baseline is pre-existing red; scoped suites are the
-honest gate, with baseline failures recorded rather than silently included or excluded
-(NFR-CDP-008). The new resolver requires no platform stubs (Constraint 12).
+`L10nCatalogCoverageTests` is extended with a pinned `familyContactsKeys` array + the existing
+both-languages / values-differ / placeholder-count tests, following the established pattern
+(baseline key-count pin is updated deliberately with the count recorded).
 
-## Device validation plan (DV-1..7, Anzaan)
+`Info.plist` (:115) `NSContactsUsageDescription` gains the write disclosure (plist-only; no
+`InfoPlist.strings` exists in this project — all usage strings are English-only today, kept
+consistent):
 
-Executed at `final-sign-off` (T2 + HIL); each item records evidence into the feature spec
-(FR-CDP-019). Design hook per item:
+> Searching from the phone screen can call anyone in your phone book — including people added
+> by WhatsApp, Messenger and other apps. When you set a photo for a family contact who is also
+> in your phone book, the app can save that photo onto the person's contact card if you allow
+> it; it changes nothing else. The app works fully even if you say no.
 
-| DV | Constitution text (abridged) | Design coverage / how to observe |
+## 13. Concurrency and isolation (explicit)
+
+### 13.1 Matrix
+
+| Component | Isolation | Concurrent access |
 |---|---|---|
-| DV-1 | Settings Primary + Fallback persist across relaunch | C6 paths + `secondaryCallApp` restore (ADR-CDP-09): set both, relaunch, reopen Settings |
-| DV-2 | Primary infeasible (Messenger, no handle) → call completes via fallback with spoken announcement naming the routed channel | ADR-05 + ADR-07: voice request and a row tap both speak the routed channel; prompt disclosure present |
-| DV-3 | WhatsApp not installed → chain lands on fallback/GSM with announcement; launch failure announced (no silent failure) | ADR-02 probe false → hops; C5: force a FaceTime/other failure → hop line heard |
-| DV-4 | `secondary == primary` dedupes; both infeasible → `phone`; zero dead ends | ADR-04 + C1: equal picks, tap, hear the routing, GSM opens; repeat per path |
-| DV-5 | Override preserved: "होइन, फोन नै गर" still switches to a phone call | ADR-05 step 9: override after a fallback-bearing confirmation |
-| DV-6 | All call paths route the chain: row, family, dial-back, voice | C4 + ADR-06: one fallback-triggering exercise per path, announcement each time |
-| DV-7 | ne/en copy localized; spoken language matches the session | ADR-CDP-10 + L10n session wiring: repeat DV-2/3 in Nepali |
+| `AppCoordinator` state (`familyContacts`, `familyIndex`, `verifiedLinks`, `faceEpoch`) | main thread (existing `ObservableObject` confinement) | UI + `Task { @MainActor }` continuations |
+| `FamilyContactIndex`, `UnifiedContactSearch`, `ContactResolver`, `MissedCallContactResolver`, `NepaliTextNormalizer` | pure values/stateless — safe anywhere | called from main; no shared mutable state |
+| `SystemContactLinkService` | actor | serialized verification/photo reads; concurrent callers await; internal cache behind the actor |
+| `SystemContactPhotoWriter` | actor | writes strictly serialized (one `CNSaveRequest` at a time) |
+| `DownsampledImageCache` | existing `NSCache` (thread-safe) | unchanged |
 
-## Traceability matrix (lock coverage — every FR-CDP/NFR-CDP)
+### 13.2 Single-flight and ordering rules
 
-| Requirement | Design coverage | Primary component(s) | Test/DV evidence |
+- Link verification: at most ONE in-flight refresh; concurrent triggers set a dirty flag and
+  coalesce into one follow-up run; the latest snapshot wins (generation-monotonic).
+- Face resolution: idempotent async reads; stale completions are dropped by comparing
+  `faceIdentity` before applying (the `.task(id:)` pattern's cancel/re-run semantics do the
+  rest).
+- Write path: Save orchestrates store-write → local file → system attempt sequentially inside
+  one `Task`; the actor additionally serializes across saves. No parallel writes to one
+  record.
+- UI state (outcome labels, sheets) is only mutated on main.
+
+### 13.3 Shared-state rules
+
+No new global mutable state; the snapshot and the index are the ONLY derived state consumers
+read (single decision point). Pure types take inputs explicitly — no ambient singletons in
+the decision cores (house seam pattern).
+
+### 13.4 Timeouts
+
+No timeouts, retries, or delays are introduced. There is no network and no blocking call on
+the main thread; `CNContactStore` offers no timeout knob, so exposure is bounded structurally
+(≤12 identifiers per batch, fetch only for visible/linked rows, no loops or backoff). Should
+a wait ever be needed, it must be a named configurable constant routed through the existing
+configuration surface — never a literal (inherited agent principle). None is needed now.
+
+## 14. Error-path catalogue
+
+| Interface | Failure | Returned outcome | Consumer behavior |
 |---|---|---|---|
-| FR-CDP-001 primary dialer setting | ADR-09, C6 | C6, C2 (input) | picker UI suite; DV-1 |
-| FR-CDP-002 fallback dialer setting (equal picks legal) | ADR-09, ADR-04 (dedupe), C6 | C6, C1 | picker UI suite; DV-1, DV-4 |
-| FR-CDP-003 `secondaryCallApp` persistence, GSM default | ADR-09 | C6 | persistence suite; DV-1 |
-| FR-CDP-004 Messenger feasibility = handle on file | ADR-02 | C1 (`Feasibility`), C2 | chain matrix; DV-2 |
-| FR-CDP-005 WhatsApp probe via injected closure, local only | ADR-02 | C1 (`whatsAppInstalled`), C2 | chain matrix with stubbed closure; DV-3 |
-| FR-CDP-006 FaceTime/phone always feasible; phone floor | ADR-01, ADR-04 | C1 | 64-cell matrix; DV-4 |
-| FR-CDP-007 chain preferred→secondary→phone, dedupe, at-most-once | ADR-01, ADR-03 | C1, C2 | `CallChannelResolutionTests` |
-| FR-CDP-008 `fellBackFrom` attempt order, single source | ADR-01, ADR-05, ADR-10 | C1, C3, C4 | chain matrix provenance assertions; wording tests |
-| FR-CDP-009 explicit pick wins as preferred | ADR-03, ADR-04 | C2, C4 | matrix "pick wins" cells; DV-6 |
-| FR-CDP-010 tap buttons route the chain, vocabulary preserved | ADR-04, ADR-07, C4 | C4 | row/tile tests; DV-6 |
-| FR-CDP-011 missed-call dial-back routes the chain | ADR-03, C4 | C2, C4 | `MissedCallDialBackTests`; DV-6 |
-| FR-CDP-012 MethodResolver global default = settings primary, mapped by call type | ADR-06 | C3 | `MethodResolverTests`; DV-6 |
-| FR-CDP-013 fallback before spoken confirmation; prompt names routed channel | ADR-05 | C3 | wording tests; DV-2 |
-| FR-CDP-014 override + near-miss preserved | ADR-05 (step 9), C3 | C3 | override tests; DV-5 |
-| FR-CDP-015 launch-fail hop announced (never silent) | ADR-08 | C5 | hop tests; DV-3 |
-| FR-CDP-016 automatic routing + announcement (no ask) | ADR-07, ADR-05 (step 7), ADR-10 | C4, C3 | announcement tests; DV-2/3 |
-| FR-CDP-017 ne/en new strings | ADR-10, C7 | C7 | `L10nCatalogCoverageTests`; DV-7 |
-| FR-CDP-018 preserved behaviours (no new dialogue, emergency untouched, no silent failures) | ADR-05, ADR-08, non-goals, integration #17 | C3, C5 | regression suites; DV-5/6 |
-| FR-CDP-019 DV-1..7 gate recorded | Device validation plan | all | DV evidence pack at final-sign-off |
-| NFR-CDP-001 zero dead ends across 64 cells | ADR-01, ADR-04 | C1 | exhaustive matrix (deterministic) |
-| NFR-CDP-002 probes local, no new surface | ADR-02, ADR-11 | C2 | zero-network assertion; review |
-| NFR-CDP-003 log safety | Log safety section, ADR-08 | C5, C7 | release log gate exit 0; observability tokens |
-| NFR-CDP-004 ≤ 100 ms added latency; probe non-answer immediate | ADR-02, C1–C5 timeouts | C1, C2 | on-device timing measurements (DV-2 run); no-timeout design |
-| NFR-CDP-005 persistence round-trip | ADR-09 | C6 | round-trip suite; DV-1 |
-| NFR-CDP-006 picker accessibility | C6 (+ house token pattern) | C6 | picker UI tests; DV-1 (VoiceOver on device) |
-| NFR-CDP-007 100% ne/en parity | ADR-10 | C7 | `L10nCatalogCoverageTests`; DV-7 |
-| NFR-CDP-008 deterministic scoped suites | Testability section | all | scoped `-only-testing` runs recorded |
-| NFR-CDP-009 no regression (voice pipeline, emergency, dial-back) | Non-goals; integrations #17/#23 | C3, C2 | scoped regression suites; baseline recorded |
-| NFR-CDP-010 compliance/review/release gates; DV acceptance | Security pre-map; DV plan | all | GO/SECURITY-GO gates; log gate; DV pack |
+| `FamilyContactStore` load (decode) | corrupt link/nickname shapes | `nil` / `[]` (decode-degrade) | unlinked/no-nickname semantics; no crash |
+| `FamilyContactStore` save | storage failure | existing `Bool` false | draft kept (today) |
+| `UnifiedContactSearch` | never throws | pure values | n/a |
+| `SystemContactLinkReading.refresh` | fetch/authorization failure | previous snapshot survives (per-link degrade) | unverified links treated as absent |
+| `photoImageData(forIdentifier:)` | absent/unreadable | `nil` | next display precedence step |
+| `SystemContactPhotoWriting.writeAccess` | unknown status | `.denied` mapping (`@unknown default`) | fallback state, no attempt |
+| `writePhoto/clearPhoto` | fetch/save/read-back failures | typed `SystemContactPhotoWriteOutcome` (never throws) | §10.3 mapping (total) |
+| `requestAccess` | iOS returns limited | `.limited` | proceed to attempt-and-detect |
+| Coordinator link write (duplicate claim) | guard refusal | `Bool` false + reason-coded log | wizard steering shown; nothing persisted |
 
-## Amendments and design-time resolutions to the frozen design
+## 15. PII, log safety, no egress, release gate wiring (NFR-FCU-002, 003)
 
-No amendment to the frozen design's owner decisions (1–5), type shapes (`Feasibility`,
-`Result.route`) or flow is required. The items below are the design choices the frozen design
-or the requirements explicitly left to `design-l1`, plus two additive shapes required by
-locked requirements; each is recorded rather than resolved silently.
+- Reason codes only: outcome enums (`SystemContactWriteFailure` raw values, degrade reasons)
+  may be logged; names, numbers, identifiers, image bytes, and nicknames NEVER reach logs or
+  diagnostics beyond the existing transcript policy (B2/T-050). `PhotoWriteIntent.imageBytesHash`
+  is a hash, by construction.
+- No new egress: every seam is on-device (`CNContactStore` is the system address book on the
+  same device); no new network client, no analytics, no new collection (NFR-FCU-003). The
+  processed JPEG pipeline strips source image metadata (existing behavior, now shared by the
+  system write).
+- `ios/tools/check-release-log-safety.sh(.py)` walks the entire `ios/ElderlyAssistant` tree
+  already; the two NEW seam files (`SystemContactPhotoWriter.swift`,
+  `SystemContactLinkService.swift`) are added to `FEATURE_ROOTS` (stricter "feature" role),
+  and the fixture suite must keep passing unchanged. The gate stays wired into `ios/build.sh`
+  ahead of every test scope.
 
-| ID | Item | Resolution | Authority |
+## 16. Call-dialer union and sequencing plan (NFR-FCU-008)
+
+Process gate: implementation merges master ONLY after `call-dialer-primary-secondary`'s PR
+has merged. First implementation step verifies the merge landed (call-dialer's merge commit
+present on master AND `Services/Calls/CallChannelChain.swift` exists), then merges master into
+`feat/family-contacts-unify` BEFORE any conflicted-file work. If call-dialer has not merged,
+implementation waits — no parallel edit of the same surfaces.
+
+| File | call-dialer's change | Our change | Union rule |
 |---|---|---|---|
-| RES-1 | Resolver file placement (frozen §3 says "e.g. `Services/Voice/…`") | `ios/ElderlyAssistant/Services/Calls/CallChannelChain.swift` — the feature's own service group; requirement index leaves placement to design | Frozen §3 "e.g."; requirements index assumption |
-| RES-2 | `resolvedCallChannel`/`resolvedMissedCallChannel` return type | Return `CallChannelChain.Result` (channel + provenance); channel-only consumers read `.channel` | FR-CDP-016 needs provenance at the tap seams; frozen §4 wording ("run the chain") preserved |
-| RES-3 | Vocabulary application mechanism (FR-CDP-010 vs the raw chain floor) | `CallChannelVocabulary` at the AppCoordinator seam; the frozen `route` is untouched; `.video` terminal is `.faceTime`, `.audio`/`.anyChannel` terminal `.phone` | FR-CDP-010 binding; frozen §3 shape unchanged |
-| RES-4 | Skipped-channel naming with multiple skips | Disclosure/announcement copy names `fellBackFrom.first` (the primary skip) + the routed channel — within the frozen five-key budget; FR-CDP-013/016 scenarios bind no more than this; the copy never asserts anything false | ADR-CDP-10; scope discipline |
-| RES-5 | Tap-path announcement trigger point (frozen §FR-CDP-016 leaves it to design) | Spoken immediately after resolution, before the open attempt, via the existing lane | ADR-CDP-07 rationale (app-switch may silence post-open speech) |
-| RES-6 | `attemptOrder` / `nextLaunchFailCandidate` statics | Added to `CallChannelChain` (pure, testable) to power the FR-CDP-015 hop | FR-CDP-015; frozen §6 |
-| RES-7 | `PendingCallAction` gains `fellBackFrom` and `hopCandidates` (defaulted); `MethodResolver` gains the injected `globalDefault` closure (defaulted to today's `.phone`) | Additive, defaulted — existing constructions and shipped behavior unchanged | FR-CDP-013 provenance; frozen §5 injection requirement |
-| RES-8 | Launch-fail exhaust-case copy key | The hop speaks `call.announce.launchFailedFallback`; an exhausted floor-open speaks the shipped `call.announce.noPhoneNumber` line — no sixth catalog key added (five-key budget intact) | FR-CDP-015 scenario 3; frozen §7 key list |
-| RES-9 | Voice-path vocabulary | `.anyChannel` (no path filter): MethodResolver's vocabulary already includes `.facetimeAudio`, and the resolved method's `isVideo` shapes the re-mapped method; bare video requests never reach the global-default step | Frozen §5; FR-CDP-012 |
-| RES-10 | Launch-fail observation points | Every open outcome site enumerated in ADR-CDP-08; WhatsApp's `needsNativeCompose`/`copiedNumber` remain shipped recoveries (not launch failures); failed opens never teach | Frozen §6; FR-CDP-018/NFR-CDP-009 (shipped behavior preserved) |
+| `Services/Intents/MethodResolver.swift` | adds its global-default step / chain consultation | NONE (verified: `resolve(contactId:...)` already takes the resolved id) | keep theirs intact |
+| `App/AppCoordinator.swift` | `resolvedCallChannel`/`resolvedMissedCallChannel` chain + `secondaryCallApp` | link-aware `familyContact(matchingPhone:)` upstream + snapshot lifecycle | our lookup feeds their chain, unchanged; never inline their chain into ours |
+| `App/LeafViews.swift` | row dial layer / whatsApp probe delegation (~:1171-1174) | face path + `caption` param on the same structs | both layers coexist; their dial code untouched by us, our face/caption code untouched by them |
+| `App/CallingSettingsView.swift` | Primary/Fallback pickers | NONE | theirs only; we do not touch |
+| Tests | their suites | our suites | disjoint; both run post-merge |
 
-## Open items
+Post-merge regression: run call-dialer's scoped suites AND ours; manually re-check the
+chain still fires (their DV class) on the merged build. Semantic conflict rule if their
+refactor moved `familyContact(matchingPhone:)`: our link-aware resolution must sit UPSTREAM
+(choose the person), their chain DOWNSTREAM (choose the channel) — never the reverse.
 
-None at design level. Items the requirements recorded as design-inputs are all resolved above
-(RES-1..RES-10); copy wording beyond the binding key parameters is catalog-time work inside
-C7. Anything discovered during `review-l2`/`security-design-review` that would change a frozen
-shape returns here as a numbered amendment rather than a silent edit.
+## 17. Test plan and gates (NFR-FCU-009, FR-FCU-017)
+
+- Extended suites: `FamilyContactStoreTests` (link + nicknames round-trip; legacy single
+  nickname lossless; corrupt payload degrade), `UnifiedContactSearchTests` (Pass 1-5 rules;
+  unlinked pairs exactly today's results; digit-spelling dedupe; `linkedBookNames`;
+  `moreAvailable` recount; Devanagari substring pins positive+negative), `ContactResolverTests`
+  (band table; ambiguity consequences; near-miss extension; determinism),
+  `MissedCallContactResolverTests` (linked-record numbers; identifier remap),
+  `ContactPhotoStoreTests` (extracted `processedJPEG` pins preserved),
+  `L10nCatalogCoverageTests` (new keys both languages).
+- New suites: `FamilyContactIndexTests` (build/mutate/delete; nickname exact/substring;
+  Devanagari; max-roster build ≤20 ms), `SystemContactPhotoWriterTests` (fake writer: intent
+  confinement `[.photo]`; no-attempt matrix; outcome mapping is total),
+  `SystemContactLinkServiceTests` (verification degrade matrix via injected directory fake;
+  duplicate-claim uniqueness; empty snapshot ⇒ unlinked semantics).
+- Performance: search ≤20 ms and `resolve()` ≤20 ms at 12×8 roster with assertion ceilings;
+  measurements recorded.
+- Device gate FR-FCU-017: DV-1 … DV-6 on Anzaan, recorded with the feature spec. Release gate:
+  `check-release-log-safety.sh` exits 0 (§15).
+- Honesty: scoped tests per unit; full suite once at the end; any baseline failures recorded
+  with attribution (master currently carries known pre-existing failures — do not mask).
+
+## 18. Traceability
+
+| Requirement | Sections |
+|---|---|
+| FR-FCU-001 link add flow, one person everywhere | 5.1, 6.1, 7, 11.1 |
+| FR-FCU-002 storage & migration, local-only, degrade | 5.1, 6.2, 15 |
+| FR-FCU-003 search/dedupe contract | 7.1, 7.2, 7.3 |
+| FR-FCU-004 identity across surfaces (incl. voice "one confirmation") | 6.3, 7.3, 8.3, 11.3 |
+| FR-FCU-005 call list / cross-surface | 7.3, 11.2, 11.3 |
+| FR-FCU-006 unlink | 6.4, 11.1 |
+| FR-FCU-007 display precedence (system photo) | 10.1, 11.3 |
+| FR-FCU-008 write path confined to edited contact's photo | 9.1, 9.2 |
+| FR-FCU-009 authorization full/limited/denied, disclosure, no nag | 9.3, 11.1, 12 |
+| FR-FCU-010 fallback & degradation | 10.2, 10.3, 10.4, 14 |
+| FR-FCU-011 nickname storage & migration | 5.2 |
+| FR-FCU-012 nickname search matching | 5.4, 7.1, 8.1, 8.2 |
+| FR-FCU-013 nickname voice resolution | 8.3 |
+| FR-FCU-014 ambiguity safety | 8.3 |
+| FR-FCU-015 nickname editor UI, immediate effect | 11.1 |
+| FR-FCU-016 feasibility honesty | 2 |
+| FR-FCU-017 DV gate | 17 |
+| NFR-FCU-001 performance (≤20 ms) | 5.4, 8.4, 17 |
+| NFR-FCU-002 PII / log safety | 9.1, 9.4, 15 |
+| NFR-FCU-003 no egress / no new collection | 3, 8, 15 |
+| NFR-FCU-004 localisation ne/en | 12 |
+| NFR-FCU-005 accessibility (targets, labels) | 11.1, 12 |
+| NFR-FCU-006 reliability / lossless migration | 5.1, 5.2, 6.2, 14 |
+| NFR-FCU-007 Devanagari pin, no "fixes" | 8.2, 17 |
+| NFR-FCU-008 sequencing | 16 |
+| NFR-FCU-009 honest gates | 16, 17 |
+
+## 19. Deferred to design-l2
+
+- Component-level breakdown of the wizard sheet restructure (state flow, subviews) and of the
+  coordinator's new methods; exact file/symbol placement of `normalizedNicknames`.
+- Final en/ne wording for the §12 keys (keys fixed here; wording frozen with the L10n tests).
+- Cache constants for `SystemContactLinkService.photoImageData` (capacity/eviction) and the
+  worker's exact retry-free sequencing around refresh epochs.
+- The already-linked steering micro-flow (tap targets, back-navigation into the other
+  contact's editor).
+- Whether the now-unreferenced sync `contactPhoto(for:)` is deleted or retained.
+- Verification scheduling details (launch/foreground hook ordering); a11y labels per control.
+- Unit/task decomposition and wave ordering (plan-tasks follows approval of this design).
+
+## 20. Assumptions
+
+- A1: Reference device Anzaan runs iOS 26-class, so `.limited` is reachable; deployment target
+  iOS 16 means every `.limited` reference is availability-gated (compiled against the current
+  SDK).
+- A2: No `requirements.md` exists for this feature; the constitution + locked requirement set
+  are the inputs (index.md of the requirements folder).
+- A3: `FamilyContact` payloads are unversioned; the optional-field decoder pattern remains the
+  migration mechanism (verified in existing code).
+- A4: Book rows (non-family results) keep today's initials avatar; photo unification is a
+  family-contact concern (recorded scope assumption).
+- A5: The call-dialer branch remains design-only until its implementation and merge land;
+  §16's process gate re-verifies at implementation start.

@@ -1,0 +1,9 @@
+
+--- 2026-10-11T16:43:58.326Z task=design-l1 ---
+[stderr] [claude-code:unrecognized_model] {"model":"deepseek-v4-pro[1m]","query_source":"sdk"}
+
+--- 2026-10-11T16:53:59.437Z task=design-l1 ---
+[stderr] [claude-code:unrecognized_model] {"model":"deepseek-v4-pro[1m]","query_source":"sdk"}
+
+--- 2026-10-11T17:04:01.548Z task=design-l1 ---
+[stderr] [claude-code:unrecognized_model] {"model":"deepseek-v4-pro[1m]","query_source":"sdk"}

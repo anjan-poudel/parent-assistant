@@ -1,0 +1,588 @@
+{
+  "version": "1",
+  "workflow_name": "family-contacts-unify",
+  "built_at": "2026-10-11T16:38:09.784Z",
+  "nodes": [
+    {
+      "id": "define-requirements",
+      "type": "task",
+      "label": "Elicit and document project requirements. Produce a structured folder of\nrequirements: one file per FR, one file per NFR, with Gherkin acceptance\ncriteria embedded in each file, and index files at each folder level.\nAfter stakeholder HIL sign-off, produce a requirements lock file that\ncaptures a stable snapshot for downstream drift detection.\n",
+      "hash": "sha256:f629d47aebb26467ca6ac2354521007578e6de26d722875083d5db06f32862b2",
+      "metadata": {
+        "agent": "ba",
+        "phase": "requirements",
+        "status": "HIL_PENDING"
+      }
+    },
+    {
+      "id": "design-l1",
+      "type": "task",
+      "label": "Produce the L1 system architecture document. Define system components,\ntechnology stack, integration points, and key architectural decisions.\nConsult the requirements lock file (specs/<requirements-task-id>.lock.yaml)\nto ensure the architecture covers all locked FRs and NFRs.\n",
+      "hash": "sha256:a089f4eac72293f1562ea6d09994887d74c1b5489a802598b12710ddb3535eaf",
+      "metadata": {
+        "agent": "architect",
+        "phase": "design",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "design-l2",
+      "type": "task",
+      "label": "Produce L2 component design documents. Define component interfaces,\ndata models, error handling strategy, and observability approach.\nConsult the requirements lock file (specs/<requirements-task-id>.lock.yaml)\nand the L1 architecture document to ensure component designs stay within scope.\n",
+      "hash": "sha256:bf5d4420c185b048f81719a4d7f389103ddd708ffa9c80c473bf7aa31d6432fa",
+      "metadata": {
+        "agent": "pe",
+        "phase": "design",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "review-l2",
+      "type": "task",
+      "label": "Review the L2 component design. Verify component interfaces are correct,\ndata models are complete, and the design aligns with L1 architecture.\nIssue GO/NO_GO decision.\n",
+      "hash": "sha256:7621f054b471e34bda2d07f8d5b7229aeb5b291fe4937339f9e01c2510702565",
+      "metadata": {
+        "agent": "reviewer",
+        "phase": "review",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "security-design-review",
+      "type": "task",
+      "label": "Security-focused design review. Check: STRIDE threat model completeness,\nall data flows encrypted in transit, PII identified with handling specified,\ninput validation specified for all external inputs, audit logging covers\nsecurity-relevant events, secrets management sound, least-privilege auth,\ncompliance requirements traceable to design decisions.\nIssue SECURITY-GO or SECURITY-NO_GO.\n",
+      "hash": "sha256:71e5120c67134d2fa5085059a8c0d679294cf5aa64f9bfbcbac47c6daa47446b",
+      "metadata": {
+        "agent": "reviewer",
+        "phase": "review",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "plan-tasks",
+      "type": "task",
+      "label": "Break down the component designs into concrete implementation tasks.\nDefine acceptance criteria (including Gherkin tests) per task, identify\ndependencies, and estimate effort. Output is a folder of one file per task\nplus an index.\n",
+      "hash": "sha256:a8c50f6435f7bffef83aa4ab4794eee69e9055c3bc1ddb403622e67b0a739eff",
+      "metadata": {
+        "agent": "le",
+        "phase": "planning",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "implement",
+      "type": "task",
+      "label": "Implement the feature per the task specification. Write unit tests,\nensure all acceptance criteria pass, fix lint and type errors.\n",
+      "hash": "sha256:9e845529f804e7936633b031c16b824dfa9f18d607b1af899f998c45039650be",
+      "metadata": {
+        "agent": "dev",
+        "phase": "implement",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "review-implementation",
+      "type": "task",
+      "label": "Review the implementation. Check code quality, test coverage, security,\nand conformance to the design. Issue GO/NO_GO decision.\n",
+      "hash": "sha256:e604de503319b459e3ff2ce2f685a18d651f0752641e02149509e9892aac4c3b",
+      "metadata": {
+        "agent": "reviewer",
+        "phase": "review",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "security-test",
+      "type": "task",
+      "label": "Security testing pass on the implementation. Test:\n- SQL injection: parameterised queries used everywhere, no string concat\n- Input validation: malformed/oversized/special-char inputs return 400\n- Auth bypass: unauthenticated requests return 401/403\n- PII in logs: confirm PII is masked in all log entries\n- Secrets in output: scan all output files for secret patterns\n- Audit log completeness: each auditable event produces a log entry\n- Error leakage: errors don't expose stack traces or internals\nIssue SECURITY-GO or SECURITY-NO_GO per category.\n",
+      "hash": "sha256:1c0a246628c159582d0b1b1f078f875d697f931fc1b00b1ad947b2fb01d20514",
+      "metadata": {
+        "agent": "reviewer",
+        "phase": "review",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "final-sign-off",
+      "type": "task",
+      "label": "Produce change summary document for human sign-off. Include:\n- Change summary: what was built and what changed\n- Requirements traceability: FR/NFR → implementation → test evidence\n- Security posture: summary of security design review + security test results\n- Open items: known issues, deferred items, post-deploy monitoring\n- Rollback plan: how to revert if the change causes production issues\n- Compliance checklist: confirm each applicable compliance item is satisfied\n",
+      "hash": "sha256:c02257caf7133e47e9fc718241db04570abdd910a05ca619d6e4ad888a029487",
+      "metadata": {
+        "agent": "reviewer",
+        "phase": "sign-off",
+        "status": "PENDING"
+      }
+    },
+    {
+      "id": "define-requirements:output:specs/define-requirements.md",
+      "type": "output",
+      "label": "specs/define-requirements.md",
+      "hash": "sha256:75f555959adb405761e57ddefad9e79535a2e357758094a5f2c37a60ae934b55",
+      "metadata": {
+        "task_id": "define-requirements",
+        "contract": "requirements_doc"
+      }
+    },
+    {
+      "id": "define-requirements:output:specs/define-requirements.lock.yaml",
+      "type": "output",
+      "label": "specs/define-requirements.lock.yaml",
+      "hash": "sha256:ff55fba50f383d0f4040aa231552345cff57dc6ed227ff06c795a8374692ccf3",
+      "metadata": {
+        "task_id": "define-requirements",
+        "contract": "requirements_lock"
+      }
+    },
+    {
+      "id": "design-l1:output:specs/design-l1.md",
+      "type": "output",
+      "label": "specs/design-l1.md",
+      "hash": "sha256:cf8cb3c7df0a669a41ca006dc7c247669998f9e6e9bb5cbd6a56540928b44e28",
+      "metadata": {
+        "task_id": "design-l1",
+        "contract": "architecture_l1"
+      }
+    },
+    {
+      "id": "design-l2:output:specs/design-l2.md",
+      "type": "output",
+      "label": "specs/design-l2.md",
+      "hash": "sha256:8cc30ccf2496102d889a5598e5d58b0dac9fdf9c1517e8b474f69634b19a91d8",
+      "metadata": {
+        "task_id": "design-l2",
+        "contract": "component_design_l2"
+      }
+    },
+    {
+      "id": "review-l2:output:specs/review-l2.md",
+      "type": "output",
+      "label": "specs/review-l2.md",
+      "hash": "sha256:13a5057e96f8878d8c74c89e933f88b0135c821973dea85f7e3f3f203d2d6f7c",
+      "metadata": {
+        "task_id": "review-l2",
+        "contract": "review_report"
+      }
+    },
+    {
+      "id": "security-design-review:output:specs/security-design-review.md",
+      "type": "output",
+      "label": "specs/security-design-review.md",
+      "hash": "sha256:b70ba3cc3aaaf68196526d554a7988e13dcbcc8dac8507566c0e993e2a9c32b6",
+      "metadata": {
+        "task_id": "security-design-review",
+        "contract": "review_report"
+      }
+    },
+    {
+      "id": "plan-tasks:output:specs/plan-tasks/plan.md",
+      "type": "output",
+      "label": "specs/plan-tasks/plan.md",
+      "hash": "sha256:ed7639b75f7530a91c81ae5509015c6a8b6b259185a0c6cffb89656d2837578d",
+      "metadata": {
+        "task_id": "plan-tasks",
+        "contract": "task_breakdown_l3"
+      }
+    },
+    {
+      "id": "plan-tasks:output:specs/plan-tasks/tasks/",
+      "type": "output",
+      "label": "specs/plan-tasks/tasks/",
+      "hash": "sha256:d9706c3405fa6930ed6e105a4fdddff050eefc61a8437ebb6aedf7eb1e1e76a2",
+      "metadata": {
+        "task_id": "plan-tasks"
+      }
+    },
+    {
+      "id": "implement:output:specs/implement-notes.md",
+      "type": "output",
+      "label": "specs/implement-notes.md",
+      "hash": "sha256:23f3b8cc53fe17d9bbd1673a382681ed1c7e6e12616a0984515b3f42e40b0114",
+      "metadata": {
+        "task_id": "implement",
+        "contract": "implementation"
+      }
+    },
+    {
+      "id": "review-implementation:output:specs/review-implementation.md",
+      "type": "output",
+      "label": "specs/review-implementation.md",
+      "hash": "sha256:2d03760237e8bf38e363556077047b79c5085e4d0c77c004db4d98024a9ce943",
+      "metadata": {
+        "task_id": "review-implementation",
+        "contract": "review_report"
+      }
+    },
+    {
+      "id": "security-test:output:specs/security-test.md",
+      "type": "output",
+      "label": "specs/security-test.md",
+      "hash": "sha256:111a666788bf4ca10b8df025815106f0f11b3d08ebd375ab6b088258a6c3c9d0",
+      "metadata": {
+        "task_id": "security-test",
+        "contract": "review_report"
+      }
+    },
+    {
+      "id": "final-sign-off:output:specs/final-sign-off.md",
+      "type": "output",
+      "label": "specs/final-sign-off.md",
+      "hash": "sha256:9f59ea338bf799fed3b33c8e1bd28965821cf89e11ac313f61a7fba1c40aea03",
+      "metadata": {
+        "task_id": "final-sign-off",
+        "contract": "review_report"
+      }
+    },
+    {
+      "id": "FR-MTC-001",
+      "type": "requirement",
+      "label": "Dialogue frame lifecycle and one-deep state",
+      "hash": "sha256:7e3d533a949f49c0d27a12c0f86c711b3d4f4c223fa4f01a8050f4564cb44234",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MTC-002",
+      "type": "requirement",
+      "label": "Degenerate music-query detection before playback",
+      "hash": "sha256:dd74ac5bf69162a5e5c4cee672504c432d0d3f4a095755fba64da8ea02d7ee2b",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MTC-003",
+      "type": "requirement",
+      "label": "`.slotFill` probe — a short kind-of-request question with options and a default",
+      "hash": "sha256:4a8782eaafd5bbaf08f7b5a16271d9683267d45e40f86473548ed692de7e53d8",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MTC-004",
+      "type": "requirement",
+      "label": "`.candidateChoice` (didYouMean) probe — honest not-understood line plus narrowing candidates",
+      "hash": "sha256:863d4b76ff9d17b849bfde87125416caeac8550dea72c520d44301c4f17431a6",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MTC-005",
+      "type": "requirement",
+      "label": "Voice answer capture — name, index word, repetition, free-form",
+      "hash": "sha256:e712fed6c04280bba56963ce9965f1212cca194bd350b70c50fdcf7ec488656e",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MTC-006",
+      "type": "requirement",
+      "label": "Deterministic frame merge and execution",
+      "hash": "sha256:9f0c68be80c074aba95e31b5f9ea6e50789e7ac88e43ade1712cf27884f154b5",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MTC-007",
+      "type": "requirement",
+      "label": "Probe budget — bounded probes, then execute with defaults",
+      "hash": "sha256:cfd2bbdfc5d91a2fad8482e812d4704b2c79314a8ff16149a9b0c0844b01da9f",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MTC-008",
+      "type": "requirement",
+      "label": "\"No — let me say it again\" escape re-arms a fresh capture",
+      "hash": "sha256:db68042e9c7bff582b5453aa908664fef3b3b097af5f1fc38591c055d6732471",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MTC-009",
+      "type": "requirement",
+      "label": "Pre-ladder answer interception",
+      "hash": "sha256:f36f198c09fb31592c02253c927d5e7ceaa3309f7227bd7953ed658a88239e2e",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MTC-010",
+      "type": "requirement",
+      "label": "Cancel words drop the frame with an honest line",
+      "hash": "sha256:3ea3316fb9ba8238cabd720752f056efab1d617fd50806d87a3d9e3d3dc4ed7b",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MTC-011",
+      "type": "requirement",
+      "label": "Emergency precedence is absolute mid-frame",
+      "hash": "sha256:37c22a0572843d0995b823ee3c8983b6af5c56bdeb98cd920d0dc8e90f6373f6",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MTC-012",
+      "type": "requirement",
+      "label": "Barge-in — a strong new command drops the frame",
+      "hash": "sha256:387d89c3fdd7c82062b69008055e50b27978153b1732863e0f1367545de13732",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MTC-013",
+      "type": "requirement",
+      "label": "45 s timeout — silent drop and re-arm",
+      "hash": "sha256:a6a53c1e91786ab88b56c986cfa8071e86cf3f7b89f5a9e66d57fa523c7a6444",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MTC-014",
+      "type": "requirement",
+      "label": "`awaitingSlotAnswer` session state with the 45 s timer reuse",
+      "hash": "sha256:b5001463f41e646daeb2a16c2ae1e255acb518c6718d24cbe2159d1773834c4c",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MTC-015",
+      "type": "requirement",
+      "label": "Curated on-device option catalog",
+      "hash": "sha256:bfb4cf36a0310f344901f39a2c390011f253c67dea5b2aa88b603e1210b3fc5e",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MTC-016",
+      "type": "requirement",
+      "label": "Template-generated probes, localized ne/en — never model-generated",
+      "hash": "sha256:1378bbd147febfe4fa7c6bcef2cb1d326c33b4398c137ce7526d97bd93a85ae9",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MTC-017",
+      "type": "requirement",
+      "label": "Transcript-cache bypass during answer capture",
+      "hash": "sha256:a8cc07c86c2f42b8e680022ab2e24a201692883d58d740afa13797ff43f3bc30",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MTC-018",
+      "type": "requirement",
+      "label": "Phase 2 — follow-up NLU fine-tune v17 with the frame clause",
+      "hash": "sha256:72c2c6d64ab31f1fcce1aae760d289a4b06e087b904d8edfa18bbbc80f951f48",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MTC-019",
+      "type": "requirement",
+      "label": "Phase 3 — reminder/calendar missing-slot re-prompts on the frame path",
+      "hash": "sha256:c6d8aca159adf5074781f7a6a1a498233f3afac4bc91845f4cc7e7d8e8f45e33",
+      "metadata": {}
+    },
+    {
+      "id": "FR-MTC-020",
+      "type": "requirement",
+      "label": "DV-* device validation recorded and passed (completion gate)",
+      "hash": "sha256:2bbaa4ecbc22cf91564a465b434a77b939ccabd6fd0e0fa036fd4fe93c28f089",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-MTC-001",
+      "type": "requirement",
+      "label": "Probe and answer turns stay within the existing turn envelope",
+      "hash": "sha256:0c1867c2ac409c1f8f684d99c9298c459a50e78443c64f49df104bc2201851a9",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-MTC-002",
+      "type": "requirement",
+      "label": "1024-token ceiling and the pinned prompt budget are preserved",
+      "hash": "sha256:c06b8addf79e4890d1961193155508f9354b8e4616680661c7d670381e2d7ea0",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-MTC-003",
+      "type": "requirement",
+      "label": "No new network egress — probes and answers stay on-device",
+      "hash": "sha256:30f6da64b3f1d69c7ea44763cee87b9e4f3ef8e213723ef870ea1bc2fa31ba82",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-MTC-004",
+      "type": "requirement",
+      "label": "Log safety — probe and answer text never reach logs",
+      "hash": "sha256:4432229614096684b5e0f1256f4dcbe14ce4682cc25d412009d4803900117523",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-MTC-005",
+      "type": "requirement",
+      "label": "The frame survives a degraded or absent brain — deterministic path",
+      "hash": "sha256:30d1b0c08378836a12b14a4922907c184349b33b27c5615ad1a9e642314fa291",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-MTC-006",
+      "type": "requirement",
+      "label": "Localisation of every dialogue string (ne/en)",
+      "hash": "sha256:0af4b3fed67418b9f0479a3d4366a4bd3b40970f8c30d90bd6a0f1c4f1ad14a0",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-MTC-007",
+      "type": "requirement",
+      "label": "Sustained multi-turn stability on 6 GB devices — no jetsam",
+      "hash": "sha256:00795a7e08a286de18bfbd025812f8cfdf78a7328e2f87a394aafb0b1ccf0168",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-MTC-008",
+      "type": "requirement",
+      "label": "Answer-path sanitisation and injection safety",
+      "hash": "sha256:005f4cefd93b80861461f9cc37b3361268f4bcec42c9a932b70cc9757cf0dc04",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-MTC-009",
+      "type": "requirement",
+      "label": "Voice-only accessibility of probes and answer capture",
+      "hash": "sha256:787194d1c33db43636c5a4778c64a2da601e0e8369542eddb93aa336054b9576",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-MTC-010",
+      "type": "requirement",
+      "label": "Frame-trap resistance — zero stuck states",
+      "hash": "sha256:947cadce6d716e71af480396330e99202e63f726dcb4e28b59fee64865fa41a0",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-MTC-011",
+      "type": "requirement",
+      "label": "KV-prefix stability — the frame clause never mutates the template prefix",
+      "hash": "sha256:cde06ae0d5cc31656dd25aafe02d5d8ab00352a8e2f213379b50f1204427517f",
+      "metadata": {}
+    },
+    {
+      "id": "NFR-MTC-012",
+      "type": "requirement",
+      "label": "Compliance, no-regression and release gates",
+      "hash": "sha256:0b76023cb0834aaa3c7b3f7611c23b0487eca21113e20c08514f32b932b399f2",
+      "metadata": {}
+    }
+  ],
+  "edges": [
+    {
+      "source": "design-l1",
+      "target": "define-requirements",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "design-l2",
+      "target": "design-l1",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "review-l2",
+      "target": "design-l2",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "security-design-review",
+      "target": "review-l2",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "plan-tasks",
+      "target": "security-design-review",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "implement",
+      "target": "plan-tasks",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "review-implementation",
+      "target": "implement",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "security-test",
+      "target": "review-implementation",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "final-sign-off",
+      "target": "security-test",
+      "type": "depends_on",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "define-requirements",
+      "target": "define-requirements:output:specs/define-requirements.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "define-requirements",
+      "target": "define-requirements:output:specs/define-requirements.lock.yaml",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "design-l1",
+      "target": "design-l1:output:specs/design-l1.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "design-l2",
+      "target": "design-l2:output:specs/design-l2.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "review-l2",
+      "target": "review-l2:output:specs/review-l2.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "security-design-review",
+      "target": "security-design-review:output:specs/security-design-review.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "plan-tasks",
+      "target": "plan-tasks:output:specs/plan-tasks/plan.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "plan-tasks",
+      "target": "plan-tasks:output:specs/plan-tasks/tasks/",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "implement",
+      "target": "implement:output:specs/implement-notes.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "review-implementation",
+      "target": "review-implementation:output:specs/review-implementation.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "security-test",
+      "target": "security-test:output:specs/security-test.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    },
+    {
+      "source": "final-sign-off",
+      "target": "final-sign-off:output:specs/final-sign-off.md",
+      "type": "produces",
+      "confidence": "deterministic"
+    }
+  ]
+}
