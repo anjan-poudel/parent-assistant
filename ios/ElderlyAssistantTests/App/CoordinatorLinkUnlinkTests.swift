@@ -191,10 +191,17 @@ final class CoordinatorLinkUnlinkTests: XCTestCase {
 
     /// The `systemContactPhotoWriter` lazy slot via Mirror — which sees the
     /// stored Optional WITHOUT triggering the lazy initializer.
+    ///
+    /// [T-163 first-run correction] a `lazy var`'s Mirror child is
+    /// labelled `$__lazy_storage_$_<name>`, never the plain name: matching
+    /// only `systemContactPhotoWriter` read every state as "empty" — the
+    /// must-NOT-build pins below were vacuous. Both labels are matched.
     private func writerSlotIsEmpty(_ coordinator: AppCoordinator) -> Bool {
-        guard let child = Mirror(reflecting: coordinator).children
-            .first(where: { $0.label == "systemContactPhotoWriter" })?.value else { return true }
-        return (child as? SystemContactPhotoWriting) == nil
+        let slot = Mirror(reflecting: coordinator).children
+            .first { $0.label == "systemContactPhotoWriter"
+                || $0.label == "$__lazy_storage_$_systemContactPhotoWriter" }?
+            .value as? SystemContactPhotoWriting
+        return slot == nil
     }
 
     // MARK: Solid-colour fixture + pixel probe (the copy is visible)
@@ -243,10 +250,11 @@ final class CoordinatorLinkUnlinkTests: XCTestCase {
     @discardableResult
     private func linkContact(_ coordinator: AppCoordinator, id: UUID,
                              name: String = "Sita", phone: String = "9841000000",
+                             photo: UIImage? = nil,
                              link: SystemContactLink,
                              file: StaticString = #filePath, line: UInt = #line) async -> Bool {
         let added = coordinator.addFamilyContact(id: id, name: name, phone: phone,
-                                                 relationship: "daughter")
+                                                 relationship: "daughter", photo: photo)
         XCTAssertTrue(added, "the add must persist", file: file, line: line)
         await waitUntil("the add republishes", file: file, line: line) {
             coordinator.familyContacts.contains { $0.id == id }
@@ -578,48 +586,42 @@ final class CoordinatorLinkUnlinkTests: XCTestCase {
     }
 
     func testSyncSystemPhotoSkipsWithoutWriteAuthorizationAndAttemptsUnderLimited() async {
-        let record = recordIdentifier()
-        let link = claim(record, "9841000000")
         let service = FakeLinkReading()
         let coordinator = makeCoordinator(linkService: service)
         await clearRoster(coordinator)
 
-        let id = UUID()
-        await linkContact(coordinator, id: id, name: "Sita", link: link)
-
-        // Denied: no attempt at all — the honest fallback state.
+        // Denied: no attempt at all — the honest fallback state. Each
+        // coordinator learns the roster through its OWN add/link seam:
+        // init deliberately starts with an empty published roster (the
+        // boot phase owns the store load), so a fresh coordinator in a
+        // unit test never "sees the shared store" on its own. [T-163
+        // first-run correction: the original test waited on exactly that
+        // impossible pickup.]
         let deniedWriter = FakeSystemContactPhotoWriter()
         deniedWriter.access = .denied
         let deniedCoordinator = makeCoordinator(linkService: service, writer: deniedWriter)
-        // The second coordinator shares the store, so it sees the roster.
-        await waitUntil("the second coordinator sees the roster") {
-            deniedCoordinator.familyContacts.contains { $0.id == id }
-        }
-        // Give it the verified snapshot through its own refresh.
-        deniedCoordinator.refreshVerifiedLinks()
-        await waitUntil("the second coordinator verifies the link") {
-            deniedCoordinator.verifiedLinks.links[id] == link
-        }
-        let denied = await deniedCoordinator.syncSystemPhoto(forContactID: id, clearing: false)
+        let deniedID = UUID()
+        await linkContact(deniedCoordinator, id: deniedID,
+                          link: claim(recordIdentifier(), "9841000000"))
+        let denied = await deniedCoordinator.syncSystemPhoto(forContactID: deniedID, clearing: false)
         XCTAssertEqual(denied, .skippedNoAuthorization(.denied))
         XCTAssertEqual(deniedWriter.accessRequests, 1)
         XCTAssertTrue(deniedWriter.writes.isEmpty)
         XCTAssertTrue(deniedWriter.intents.isEmpty, "no request is built without authorization")
 
         // Limited: a granted SUBSET may attempt — and the attempt goes
-        // through with the real payload.
+        // through with the real payload (the app-local photo; without one
+        // the coordinator honestly reports .failed(.fetchFailed) instead
+        // of ever reaching the writer).
         let limitedWriter = FakeSystemContactPhotoWriter()
         limitedWriter.access = .limited
         limitedWriter.outcome = .written
         let limitedCoordinator = makeCoordinator(linkService: service, writer: limitedWriter)
-        await waitUntil("the third coordinator sees the roster") {
-            limitedCoordinator.familyContacts.contains { $0.id == id }
-        }
-        limitedCoordinator.refreshVerifiedLinks()
-        await waitUntil("the third coordinator verifies the link") {
-            limitedCoordinator.verifiedLinks.links[id] == link
-        }
-        let limited = await limitedCoordinator.syncSystemPhoto(forContactID: id, clearing: false)
+        let limitedID = UUID()
+        await linkContact(limitedCoordinator, id: limitedID, photo: solidImage(.systemBlue),
+                          link: claim(recordIdentifier(), "9841000000"))
+        let limited = await limitedCoordinator.syncSystemPhoto(forContactID: limitedID,
+                                                               clearing: false)
         XCTAssertEqual(limited, .written)
         XCTAssertEqual(limitedWriter.writes.count, 1,
                        ".limited is a readable/writable-attempt state — the attempt runs")
@@ -683,7 +685,13 @@ final class CoordinatorLinkUnlinkTests: XCTestCase {
         await clearRoster(coordinator)
 
         let id = UUID()
-        await linkContact(coordinator, id: id, name: "Sita", link: link)
+        // The write needs an app-local payload to reach the writer seam:
+        // without one the coordinator honestly reports
+        // .failed(.fetchFailed) before any attempt. [T-163 first-run
+        // correction: the original fixture linked a photo-less contact
+        // and expected the scripted writer outcomes.]
+        await linkContact(coordinator, id: id, name: "Sita", photo: solidImage(.systemBlue),
+                          link: link)
 
         for outcome in [SystemContactPhotoWriteOutcome.recordGone,
                         .identityMismatch] {
@@ -887,7 +895,13 @@ final class CoordinatorLinkUnlinkTests: XCTestCase {
                                                 in: source))
         XCTAssertTrue(native.contains("_ = await directory.requestAccess()"))
         let requestIndex = try XCTUnwrap(native.range(of: "requestAccess()")).lowerBound
-        let reReadIndex = try XCTUnwrap(native.range(of: "access = AddressBookDirectory.access()")).lowerBound
+        // BOUNDED search: the pre-prompt `var access = AddressBookDirectory.access()`
+        // also contains the `access = AddressBookDirectory.access()` substring, so
+        // an unbounded first-match anchors on the INITIAL read and inverts the pin.
+        // [T-163 first-run correction — the production shape is correct]
+        let reReadIndex = try XCTUnwrap(native.range(of: "access = AddressBookDirectory.access()",
+                                                     range: requestIndex..<native.endIndex),
+                                        "the status must be RE-READ after the prompt").lowerBound
         XCTAssertTrue(requestIndex < reReadIndex,
                       "the status is RE-READ after the prompt (a limited sheet must not collapse to .allowed)")
         XCTAssertFalse(native.contains("granted"),

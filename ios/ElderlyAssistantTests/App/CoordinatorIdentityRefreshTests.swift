@@ -186,22 +186,32 @@ final class CoordinatorIdentityRefreshTests: XCTestCase {
         await MainActor.run {}
     }
 
-    /// Whether the `linkService` lazy slot is still UNFILLED, read through
-    /// Mirror — which sees the stored Optional WITHOUT triggering the lazy
-    /// initializer. A missing child or a nil Optional both read as
-    /// "not built yet"; a filled Optional lifts through the dynamic cast
-    /// and reads as "built".
-    private func linkServiceSlotIsEmpty(_ coordinator: AppCoordinator) -> Bool {
-        guard let child = Mirror(reflecting: coordinator).children
-            .first(where: { $0.label == "linkService" })?.value else { return true }
-        return (child as? SystemContactLinkReading) == nil
+    /// The `linkService` lazy slot through Mirror — which sees the stored
+    /// Optional WITHOUT triggering the lazy initializer (the single `as?`
+    /// cast lifts one Optional level, the toolchain behaviour the Spotify
+    /// suite documents).
+    ///
+    /// [T-163 first-run correction] a `lazy var`'s Mirror child is
+    /// labelled `$__lazy_storage_$_<name>`, never the plain name: matching
+    /// only `linkService` read EVERY state as "empty", which vacuously
+    /// passed the must-NOT-build pins and deterministically failed the
+    /// first-use pin. Both labels are matched (the plain name would be the
+    /// storage of a resolved non-lazy property of the same name).
+    private func linkServiceSlotValue(_ coordinator: AppCoordinator) -> SystemContactLinkReading? {
+        Mirror(reflecting: coordinator).children
+            .first { $0.label == "linkService" || $0.label == "$__lazy_storage_$_linkService" }?
+            .value as? SystemContactLinkReading
     }
 
-    /// The resolved lazy seam, once something has read it (the cast lifts
-    /// through the stored Optional — see `linkServiceSlotIsEmpty`).
+    /// Whether the `linkService` lazy slot is still UNFILLED.
+    private func linkServiceSlotIsEmpty(_ coordinator: AppCoordinator) -> Bool {
+        linkServiceSlotValue(coordinator) == nil
+    }
+
+    /// The resolved lazy seam, once something has read it — nil while the
+    /// slot is unfilled (see `linkServiceSlotValue`).
     private func resolvedLinkService(_ coordinator: AppCoordinator) -> SystemContactLinkReading? {
-        Mirror(reflecting: coordinator).children
-            .first(where: { $0.label == "linkService" })?.value as? SystemContactLinkReading
+        linkServiceSlotValue(coordinator)
     }
 
     private func storedContact(_ coordinator: AppCoordinator, id: UUID) -> FamilyContact? {

@@ -356,13 +356,21 @@ final class UnifiedContactSearchTests: XCTestCase {
         let roster = [byContainment, byNickname, byRelationship, exactName]
         let index = FamilyContactIndex(family: roster)
 
+        // `familyMatches` is the matcher: it assigns each contact its BEST
+        // tier and returns them in ROSTER order — ordering is `rank(...)`'s
+        // contract (its only production caller, `search`, re-ranks).
+        // [T-163 first-run correction] the original assertions expected
+        // this roster-ordered helper to come back ranked; the tier
+        // ASSIGNMENT is asserted order-independently here, and the tier
+        // ORDER is pinned through `search`'s ranked outcome below.
         let matches = UnifiedContactSearch.familyMatches(query: "छोरी", in: roster, index: index)
-        XCTAssertEqual(matches.map { $0.tier },
-                       [.exactName, .relationship, .nickname, .containment])
-        XCTAssertEqual(matches.map { $0.contact.name },
-                       ["छोरी", "Maya", "Mina", "छोरी कुमारी"])
+        XCTAssertEqual(Dictionary(uniqueKeysWithValues: matches.map { ($0.contact.name, $0.tier) }),
+                       ["छोरी": .exactName, "Maya": .relationship,
+                        "Mina": .nickname, "छोरी कुमारी": .containment],
+                       "one contact per tier, each keeping its BEST tier")
 
-        // End to end: the ranking preserves the tier order.
+        // End to end: the ranking preserves the tier order
+        // (exactName < relationship < nickname < containment).
         let outcome = UnifiedContactSearch.search(query: "छोरी", family: roster,
                                                   index: index, in: [])
         XCTAssertEqual(outcome.entries.map { $0.name },

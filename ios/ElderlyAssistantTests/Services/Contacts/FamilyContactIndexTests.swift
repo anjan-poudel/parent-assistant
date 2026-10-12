@@ -167,9 +167,14 @@ final class FamilyContactIndexTests: XCTestCase {
         // (worst-case assertion, not average-only)". The 64-char editor
         // cap (T-145/T-160) is defence-in-depth; the index must stay
         // safe for longer STORED values.
-        let longNickname = String(repeating: "सीता", count: 64)
+        // "सीता" is TWO grapheme clusters (सी + ता — each vowel sign
+        // combines into its consonant's cluster), so 64 repetitions only
+        // ever stored 128 Characters. [T-163 first-run correction] 128
+        // repetitions store the 256-Character value the F5 scenario
+        // (and the assertions below) name.
+        let longNickname = String(repeating: "सीता", count: 128)
         let longName = String(repeating: "ज्यू", count: 256)
-        XCTAssertEqual(longNickname.count, 256, "fixture guard: 64 x 4-Character clusters")
+        XCTAssertEqual(longNickname.count, 256, "fixture guard: 128 x 2-Character clusters")
         XCTAssertEqual(longName.count, 256, "fixture guard: 256 x 1-Character multi-scalar clusters")
 
         let contact = makeContact(name: longName, nicknames: [longNickname])

@@ -121,6 +121,13 @@ final class SystemContactLinkServiceTests: XCTestCase {
         init(_ value: Value) { self.value = value }
         var current: Value { lock.lock(); defer { lock.unlock() }; return value }
         func set(_ newValue: Value) { lock.lock(); defer { lock.unlock() }; value = newValue }
+        /// Atomic read-modify-write, for collectors two concurrent callers
+        /// append to — a `set(current + [x])` pair is a lost-update race
+        /// (T-163: the coalesced-trigger test read [1] instead of [1, 1]).
+        func mutate(_ body: (inout Value) -> Void) {
+            lock.lock(); defer { lock.unlock() }
+            body(&value)
+        }
     }
 
     // MARK: - Fixtures
@@ -603,7 +610,10 @@ final class SystemContactLinkServiceTests: XCTestCase {
         arrived.expectedFulfillmentCount = 2
         let returnedGenerations = Box<[UInt64]>([])
         let collect = { (generation: UInt64) in
-            returnedGenerations.set(returnedGenerations.current + [generation])
+            // Atomic append (T-163): the two coalesced callers resume on
+            // different threads, so `set(current + [generation])` lost one
+            // of the two generations in the first full run.
+            returnedGenerations.mutate { $0.append(generation) }
         }
         Task {
             let snapshot = await service.refresh(contacts: rosterB)
@@ -792,7 +802,13 @@ final class SystemContactLinkServiceTests: XCTestCase {
 
         let requests = photoRequests(in: reader)
         XCTAssertEqual(requests.count, 3, "only the invalidated record was re-fetched")
-        XCTAssertEqual(requests.last?.identifiers, [identifierB],
+        // [T-163 first-run correction] the last fetch is the INVALIDATED
+        // record's re-read (its cache entry was removed, so it missed and
+        // re-fetched). The surviving record's re-read came AFTER it and
+        // was served from cache — that is why there is no fourth request.
+        // The original expectation named the survivor, contradicting its
+        // own "served from its cache" message.
+        XCTAssertEqual(requests.last?.identifiers, [identifierA],
                        "…and the surviving record was served from its cache")
     }
 
