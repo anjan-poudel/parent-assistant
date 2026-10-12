@@ -205,14 +205,12 @@ struct FamilyContact: Codable, Identifiable, Equatable {
     /// save path) while this projection stays faithful; the worst-case
     /// long-string performance assertion lives in T-151, not here.
     ///
-    /// Applied here at the decoder (defensive for hand-edited/corrupt
-    /// payloads) and at the editor/submission seam (`cappedNickname`).
-    /// Design-l2 §3.2 places the third application — the coordinator's
-    /// add/update save path, the one point every caller passes through —
-    /// in T-156 together with the widened `nicknames: [String]`
-    /// signature; until then a caller that hands over a raw list is the
-    /// only way a whitespace-only entry could reach the store, and no
-    /// shipped caller does.
+    /// Applied at the decoder (defensive for hand-edited/corrupt
+    /// payloads), at the editor/submission seam (`cappedNickname`) AND —
+    /// since T-156 landed the widened `nicknames: [String]` signature —
+    /// at the coordinator's add/update save path, the one point every
+    /// caller passes through, so no raw or whitespace-only entry can
+    /// reach the store whatever the caller hands over.
     static func normalizedNicknames(_ raw: [String]) -> [String] {
         raw.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
            .filter { !$0.isEmpty }

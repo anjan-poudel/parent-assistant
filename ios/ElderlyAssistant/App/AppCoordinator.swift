@@ -950,8 +950,69 @@ final class AppCoordinator: ObservableObject {
 
     /// The curated "Family and friends" list (spec §4.4.2) — persisted
     /// encrypted, feeds the notifier whenever the list changes.
+    ///
+    /// T-156 (design-l2 §1.9, §3.6): this assignment is THE roster
+    /// choke point — boot restore, add, update and remove all assign
+    /// here, so the derived index is rebuilt and the verified-link
+    /// refresh is triggered from one place and the published pair can
+    /// never drift from the roster it was derived from.
     let familyContactStore: FamilyContactStore
-    @Published private(set) var familyContacts: [FamilyContact]
+    @Published private(set) var familyContacts: [FamilyContact] {
+        didSet {
+            // Wholesale rebuild: the index derives ONLY from the roster
+            // it was handed, so it cannot disagree with it (a rebuild
+            // swaps a whole value — no torn read is even representable).
+            familyIndex = FamilyContactIndex(family: familyContacts)
+            // Then the link refresh — a no-op unless some contact
+            // carries a stored link, so an unlinked roster never reads
+            // the address book at all (design-l2 §3.6).
+            refreshVerifiedLinks()
+        }
+    }
+
+    /// The derived identity index over the roster (T-151, design-l2
+    /// §1.2/§3.6) — rebuilt wholesale inside `familyContacts.didSet`,
+    /// never persisted, never mutated in place. Consumers: the voice
+    /// resolver's `indexProvider` below, the unified search tiers, the
+    /// face surfaces.
+    @Published private(set) var familyIndex: FamilyContactIndex = .empty
+
+    /// The VERIFIED-link snapshot (T-149, design-l2 §1.3/§3.6) — starts
+    /// `.empty` ⇒ today's unlinked behaviour exactly. Published only by
+    /// `refreshVerifiedLinks`' completion, and only when the incoming
+    /// generation is newer than the published one; a stored link that
+    /// failed verification is simply absent (FR-FCU-006: stale links
+    /// degrade to unlinked, they are never presented).
+    @Published private(set) var verifiedLinks: VerifiedLinksSnapshot = .empty
+
+    /// Identity/face epoch (design-l2 §4.4): bumps exactly once per
+    /// identity change — a publish whose links differ from the
+    /// published set, a successful link write/clear (T-158) and every
+    /// foreground activation (the only way an EXTERNAL contact edit
+    /// surfaces). Face consumers (T-157) key their caches on it.
+    @Published private(set) var faceEpoch: UInt64 = 0
+
+    /// Last-resolved system photo hash prefixes, per contact id
+    /// (design-l2 §4.4) — the token half of the face identity. Written
+    /// ONLY inside the `@MainActor` face methods (T-157 owns them;
+    /// declared here because it is part of this identity-state block).
+    private var systemPhotoTokens: [UUID: String] = [:]
+
+    /// The verified-link service this coordinator consumes (T-149; the
+    /// single owner of the snapshot drain and the photo cache — a second
+    /// instance would mean two truths).
+    ///
+    /// `lazy` ([BOOT-REVIEW P0-1] first use, not `init()`: building it
+    /// constructs a `CNContactStore`, and a launch whose roster carries
+    /// no link must never need an address-book handle). Resolved on the
+    /// caller's context before any Task captures it, never inside one.
+    private lazy var linkService: SystemContactLinkReading =
+        injectedLinkService ?? SystemContactLinkService(observabilityBus: observabilityBus)
+
+    /// Test seam (T-156): the scripted link service `linkService` hands
+    /// out in place of the real actor. nil — the app's own construction —
+    /// builds the real one at first use. Set once in `init`.
+    private var injectedLinkService: SystemContactLinkReading? = nil
 
     /// Saved places for voice navigation (directions task, 2026-09-07) —
     /// see `SavedPlaceStore` for the cap and the default-home rules.
@@ -1936,7 +1997,15 @@ final class AppCoordinator: ObservableObject {
     // MARK: - Intent layer services (spec 2026-09-05)
     /// Deterministic slot resolution + learning stores. Lazy so `storage`
     /// and `familyContacts` exist before first use.
-    private lazy var contactResolver = ContactResolver { [weak self] in self?.familyContacts ?? [] }
+    ///
+    /// T-156: the resolver reads the PUBLISHED index (T-151) instead of
+    /// building a throwaway one per call — the coordinator's index is
+    /// rebuilt at the roster choke point, so the resolver and the search
+    /// tiers judge one projection. The resolver's own nil-fallback keeps
+    /// it whole (test-parity) if the index has not been published yet.
+    private lazy var contactResolver = ContactResolver(
+        contactsProvider: { [weak self] in self?.familyContacts ?? [] },
+        indexProvider: { [weak self] in self?.familyIndex ?? .empty })
     private lazy var callMethodPreferences = CallMethodPreferenceStore(storage: storage)
     private lazy var confirmedMethodHistory = ConfirmedMethodHistoryStore(storage: storage)
     private lazy var methodResolver = MethodResolver(
@@ -2606,8 +2675,14 @@ final class AppCoordinator: ObservableObject {
     ///     built. The app always wires it (the wizard needs it); a test
     ///     exercising the nil-safe consumers passes false and reads
     ///     `profilePersonalization` as nil (design-l2 §5.6).
+    ///   - systemContactLinkService: the verified-link service the
+    ///     coordinator consumes (T-156). nil (the app's own construction)
+    ///     = the real `SystemContactLinkService` actor, built at FIRST
+    ///     USE, not here; the coordinator suites inject a scripted fake
+    ///     through this seam so no `CNContactStore` ever enters a test.
     init(profileStorage: ProfilePayloadStorage? = nil,
-         wireProfilePersonalization: Bool = true) {
+         wireProfilePersonalization: Bool = true,
+         systemContactLinkService: SystemContactLinkReading? = nil) {
         // [BOOT-REVIEW P0 item 1] `bootstrap-init` — the composition root's
         // own cost, measured separately from every other startup metric:
         // this is what runs before the app exists at all (the App struct's
@@ -2712,6 +2787,13 @@ final class AppCoordinator: ObservableObject {
         // SAME `load()` calls run, just off-main.
         let contactStore = FamilyContactStore(storage: storage)
         self.familyContactStore = contactStore
+        // T-156: the identity-state seam, armed before the roster's first
+        // assignment below (whose `didSet` — when this init runs late
+        // enough for observers to fire — rebuilds the index and runs the
+        // link refresh; on an empty roster that refresh early-returns
+        // before touching the service, so no address-book handle is ever
+        // built here).
+        self.injectedLinkService = systemContactLinkService
         self.familyContacts = []
         self.familyNotifier = APNsFamilyNotifier(
             contacts: [],
@@ -6565,20 +6647,120 @@ self.noteTalkContractChanged()
         contactPhotoStore.load(named: contact.photoFilename)
     }
 
+    // MARK: - Identity: verified links and the family index (T-156; design-l2 §1.9, §3.6)
+
+    /// Refresh entry point for VERIFIED links (design-l2 §1.9, §3.6).
+    ///
+    /// Early-returns — no fetch, no generation bump — unless some roster
+    /// contact carries a stored link, so a roster with no links never
+    /// touches the address book at all (the unlinked-parity anchor: this
+    /// feature is invisible until the first link exists).
+    ///
+    /// Otherwise: one Task, a roster captured BY VALUE (the published
+    /// array stays main-confined; the task reads its own snapshot), and
+    /// the actor's drain does the verification. The result publishes on
+    /// main only when its generation is NEWER than the published one —
+    /// the counter orders publication, so a slow refresh that finished
+    /// after a newer one is discarded, never published (FR-FCU-006:
+    /// stale serves; no flap). The epoch bumps once per identity change
+    /// and never on a no-op refresh.
+    ///
+    /// No retries, no backoff, no delays (L1 §13.4): a failed or
+    /// unreadable pass leaves the previous snapshot in place and the
+    /// next trigger — a roster mutation, a foreground activation, an
+    /// access change, a write outcome — re-runs this.
+    func refreshVerifiedLinks() {
+        guard familyContacts.contains(where: { $0.systemContact != nil }) else { return }
+        let roster = familyContacts
+        // Resolve the seam HERE, on the caller's (main) context: the lazy
+        // seam is built at first use, never inside the Task.
+        let service = linkService
+        Task { [weak self] in
+            let snapshot = await service.refresh(contacts: roster)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                guard snapshot.generation > self.verifiedLinks.generation else {
+                    return   // an older generation never overwrites a newer snapshot
+                }
+                if snapshot.links != self.verifiedLinks.links {
+                    self.faceEpoch += 1   // identity changed — exactly once per change
+                }
+                self.verifiedLinks = snapshot
+            }
+        }
+    }
+
+    /// Foreground identity hook (design-l2 §4.5), wired into
+    /// `handleScenePhase(.active)`: wholesale photo-cache invalidation +
+    /// one epoch bump — the only way an EXTERNAL contact edit (photos
+    /// changed in Contacts.app while this app was backgrounded) can
+    /// surface — then the ordinary link refresh.
+    ///
+    /// Both steps are await-free from the caller's seat. The Task's
+    /// internal ORDER is what matters: invalidate FIRST, bump SECOND, so
+    /// by the time a face consumer re-resolves under the new epoch the
+    /// cache is already cold (a bump that outran its invalidation could
+    /// serve the bytes it was meant to drop).
+    func refreshContactsIdentity() {
+        let service = linkService
+        Task { [weak self] in
+            await service.invalidate(identifier: nil)
+            await MainActor.run { [weak self] in self?.faceEpoch += 1 }
+        }
+        refreshVerifiedLinks()
+    }
+
+    /// Whether `claim` names a record ANOTHER roster contact's stored link
+    /// already owns (design-l2 §1.9 clause 4; L1 §6.1) — the duplicate-
+    /// claim guard's whole rule, pure and static so both write paths and
+    /// the suites judge by the SAME expression. An empty identifier is
+    /// "no linkable record" (§3.5), never a claim.
+    static func isDuplicateLinkClaim(_ claim: SystemContactLink?,
+                                     in roster: [FamilyContact],
+                                     excluding id: UUID?) -> Bool {
+        guard let identifier = claim?.identifier, !identifier.isEmpty else { return false }
+        return roster.contains { $0.id != id && $0.systemContact?.identifier == identifier }
+    }
+
+    /// One reason-coded event for a write REFUSED by the duplicate-claim
+    /// guard: the `command_router` rejection shape — closed vocabulary
+    /// (`rejected` / `duplicate_claim`), `metadata: [:]`, and nothing
+    /// about the person, the number or the identifier in any field
+    /// (NFR-FCU-002, design-l2 §5.2).
+    private func emitDuplicateLinkClaimRefusal() {
+        observabilityBus.emit(ObservabilityEvent(
+            component: "family_contacts",
+            eventType: "family_contact_write_refused",
+            durationMs: nil,
+            outcome: "rejected",
+            errorCode: "duplicate_claim",
+            metadata: [:]
+        ))
+    }
+
     /// Adds a curated contact (spec §4.4.2). `photo`, when given, is
     /// persisted to `ContactPhotoStore` FIRST and its file name stored
     /// on the contact — and if the store rejects the contact (list full)
     /// the just-written file is deleted again, so a failed add never
     /// orphans a photo on disk.
     ///
-    /// `nickname` (family-wizard task, 2026-09-07): the optional
-    /// informal name from the wizard's last step; defaulted so the
-    /// onboarding call site (which never collects one) is unchanged.
+    /// `id` (T-156, design-l2 §1.9): the identity the caller already
+    /// knows — the wizard stages a draft id across its steps — defaulted
+    /// so every pre-existing call site compiles unchanged.
     ///
-    /// T-145 (family-contacts-unify, 2026-10-12) COMPILE-FORCED MINIMAL
-    /// FIX: the model field became `nicknames: [String]`. This seam
-    /// still takes the single value; T-156 owns the real signature
-    /// change (and the save-path normalisation applied there).
+    /// `nicknames` (T-156, design-l2 §1.9/§3.2 — the REAL signature; the
+    /// interim single-value shim is gone): the informal names, passed
+    /// through `FamilyContact.normalizedNicknames` HERE, the one point
+    /// every caller passes through, so no untrimmed or whitespace-only
+    /// entry can reach the store and order is preserved exactly as the
+    /// family entered it.
+    ///
+    /// `link` (T-156, design-l2 §1.9): a non-nil claim is stored on the
+    /// new contact — nil means unlinked. A claim on an identifier
+    /// ANOTHER contact already stores is REFUSED before anything is
+    /// written (defense in depth per L1 §6.1 — the wizard's steering
+    /// prevents the path; the refusal is reason-coded rather than
+    /// silent).
     ///
     /// `address` (directions task, 2026-09-07) is the contact's optional
     /// home address for voice navigation — blank text is stored as nil.
@@ -6589,21 +6771,28 @@ self.noteTalkContractChanged()
     /// Defaulted so the onboarding call site (which has no toggle) is
     /// unchanged; an add written before the flag simply stores false.
     @discardableResult
-    func addFamilyContact(name: String, phone: String, relationship: String,
+    func addFamilyContact(id: UUID = UUID(),
+                          name: String, phone: String, relationship: String,
                           messengerHandle: String? = nil,
                           photo: UIImage? = nil,
-                          nickname: String? = nil,
+                          nicknames: [String] = [],
                           address: String? = nil,
                           email: String? = nil,
-                          isEmergencyContact: Bool = false) -> Bool {
+                          isEmergencyContact: Bool = false,
+                          link: SystemContactLink? = nil) -> Bool {
+        guard !Self.isDuplicateLinkClaim(link, in: familyContacts, excluding: nil) else {
+            emitDuplicateLinkClaimRefusal()
+            return false
+        }
         let filename = photo.flatMap { contactPhotoStore.save($0) }
-        let contact = FamilyContact(name: name, phone: phone, relationship: relationship,
+        let contact = FamilyContact(id: id, name: name, phone: phone, relationship: relationship,
                                     messengerHandle: messengerHandle,
                                     photoFilename: filename,
-                                    nicknames: nickname.map { [$0] } ?? [],
+                                    nicknames: FamilyContact.normalizedNicknames(nicknames),
                                     address: Self.normalizedOptionalText(address),
                                     email: FamilyContactValidation.normalizedEmail(email),
-                                    isEmergencyContact: isEmergencyContact)
+                                    isEmergencyContact: isEmergencyContact,
+                                    systemContact: link)
         guard familyContactStore.add(contact) else {
             if let filename { contactPhotoStore.delete(named: filename) }
             return false
@@ -6627,20 +6816,18 @@ self.noteTalkContractChanged()
     /// deleted after the new record is safely persisted, so a failed
     /// edit never loses the photo the contact already had.
     ///
-    /// `nickname` (family-wizard task, 2026-09-07): the wizard's
-    /// optional informal name; nil clears a stored one, defaulted so
-    /// pre-wizard callers compile unchanged.
+    /// `nicknames` (T-156, design-l2 §1.9 — the widened, REAL signature;
+    /// the interim single-value shim is gone): the contact's full list of
+    /// informal names, passed through `FamilyContact.normalizedNicknames`
+    /// before persisting. An empty list clears the stored nicknames; the
+    /// caller passes the complete intended list (the save REPLACES it).
     ///
-    /// T-145 (family-contacts-unify, 2026-10-12) COMPILE-FORCED MINIMAL
-    /// FIX: the model field became `nicknames: [String]`, so this seam
-    /// now writes the single carried value as a one-entry list (and nil
-    /// as an empty list). KNOWN INTERIM LOSS (T-156 owns the fix): a
-    /// contact holding several nicknames loses the entries after the
-    /// first when this seam saves it — the wizard's draft carries only
-    /// one string until T-160, and the T-100 kin-designation pass
-    /// through carries `nicknames.first`. Widening this signature to
-    /// `nicknames: [String]` (plus the save-path normalisation) is the
-    /// first thing T-156 must land.
+    /// `link` (T-156, design-l2 §1.9): non-nil sets or REPLACES the
+    /// stored `SystemContactLink` claim; nil leaves the stored link
+    /// UNCHANGED — clearing a link is `setFamilyContactLink` only
+    /// (T-158), never this seam. A claim on an identifier ANOTHER
+    /// contact already stores is REFUSED before anything is written
+    /// (defense in depth, L1 §6.1).
     ///
     /// `isEmergencyContact` (family-emergency task, 2026-09-07): the
     /// editor's current "Emergency contact" toggle value — the save
@@ -6654,16 +6841,26 @@ self.noteTalkContractChanged()
     func updateFamilyContact(id: UUID, name: String, phone: String, relationship: String,
                              messengerHandle: String?,
                              photo: UIImage? = nil, removingPhoto: Bool = false,
-                             nickname: String? = nil,
+                             nicknames: [String] = [],
                              address: String? = nil,
                              email: String? = nil,
-                             isEmergencyContact: Bool = false) -> Bool {
+                             isEmergencyContact: Bool = false,
+                             link: SystemContactLink? = nil) -> Bool {
+        // The duplicate-claim guard runs FIRST: a refused write persists
+        // nothing, so no photo is saved and no orphan can be created.
+        guard !Self.isDuplicateLinkClaim(link, in: familyContacts, excluding: id) else {
+            emitDuplicateLinkClaimRefusal()
+            return false
+        }
         guard var contact = familyContacts.first(where: { $0.id == id }) else { return false }
         contact.name = name
         contact.phone = phone
         contact.relationship = relationship
         contact.messengerHandle = messengerHandle
-        contact.nicknames = nickname.map { [$0] } ?? []
+        contact.nicknames = FamilyContact.normalizedNicknames(nicknames)
+        // `link` non-nil sets/replaces the claim; nil keeps the stored
+        // link UNCHANGED (unlink is `setFamilyContactLink` only, T-158).
+        if let link { contact.systemContact = link }
         contact.isEmergencyContact = isEmergencyContact
         // The editor passes the CURRENT text each save; blank clears the
         // stored address (nil), so "remove the address" is an edit, not a
@@ -10501,6 +10698,13 @@ self.noteTalkContractChanged()
             // its own timer because a foreground return is the only
             // moment the elder's device is reliably online.
             syncCalendarShare()
+            // [FAMILY-CONTACTS-UNIFY T-156] (2026-10-12) Identity refresh
+            // (design-l2 §4.5): one wholesale photo-cache invalidation +
+            // epoch bump (an EXTERNAL photo edit in Contacts.app
+            // surfaces here and only here), then the ordinary link
+            // refresh against the live address book. Both steps are
+            // non-blocking; `.background` is untouched.
+            refreshContactsIdentity()
         case .background:
             // [MODEL-WARDEN] Step 0/1 — the scene-phase hook. A backgrounded
             // app is judged against a much smaller jetsam limit and its

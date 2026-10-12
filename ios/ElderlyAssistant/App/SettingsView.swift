@@ -2692,12 +2692,12 @@ private struct FamilyContactWizardSheet: View {
         name = contact.name
         phone = contact.phone
         messengerHandle = contact.messengerHandle ?? ""
-        // T-145 COMPILE-FORCED MINIMAL FIX: the stored value is now a
-        // list; this single-field draft shows the FIRST entry until
-        // T-160 replaces it with the §2.5 list editor. The other stored
-        // entries are untouched by a save only because the coordinator
-        // seam is still single-value (the list round-trips intact until
-        // T-156 widens it) — see the T-160 note in the task report.
+        // The stored value is a list; this single-field draft shows the
+        // FIRST entry until T-160 replaces it with the §2.5 list editor.
+        // The coordinator seam now round-trips the full list (T-156),
+        // so the interim loss window is exactly this wizard: a save here
+        // writes the one draft value and drops the entries beyond the
+        // first — T-160's list editor closes it (see the T-156 notes).
         nickname = contact.nicknames.first ?? ""
         address = contact.address ?? ""
         // The stored invitation address, so re-opening the editor shows
@@ -2751,13 +2751,15 @@ private struct FamilyContactWizardSheet: View {
 
     private func save() {
         let messenger = trimmedOrNil(messengerHandle)
-        // T-145 (family-contacts-unify, 2026-10-12) COMPILE-FORCED
-        // MINIMAL FIX — the model field became `nicknames: [String]`;
-        // this wizard keeps its single free-text draft until T-160
-        // builds the list editor (§2.5). The draft now passes through
-        // the editor/submission seam's length bound (security advisory
-        // F5: 64 chars, blank becomes nil) so nothing over-long is
-        // stored even in this interim shape.
+        // T-156 (family-contacts-unify, 2026-10-12) — the coordinator
+        // seam is now `nicknames: [String]` (the interim single-value
+        // shim is gone). This wizard still keeps its single free-text
+        // draft until T-160 builds the §2.5 list editor, so the draft's
+        // one value passes as a one-entry list; the family list and the
+        // T-100 kin-designation pass carry/round-trip the full list.
+        // The value still passes through the editor/submission seam's
+        // length bound (security advisory F5: 64 chars, blank becomes
+        // nil) so nothing over-long is stored.
         let nick = FamilyContact.cappedNickname(nickname)
         // Blank address saves as nil — no address = not a navigation
         // target (directions task, 2026-09-07).
@@ -2780,14 +2782,16 @@ private struct FamilyContactWizardSheet: View {
                 id: contact.id, name: trimmedName, phone: phone,
                 relationship: relationshipText, messengerHandle: messenger,
                 photo: pickedPhoto, removingPhoto: removingStoredPhoto,
-                nickname: nick, address: homeAddress, email: contactEmail,
+                nicknames: nick.map { [$0] } ?? [],
+                address: homeAddress, email: contactEmail,
                 isEmergencyContact: isEmergencyContact)
         } else {
             succeeded = coordinator.addFamilyContact(
                 name: trimmedName, phone: phone,
                 relationship: relationshipText, messengerHandle: messenger,
-                photo: pickedPhoto, nickname: nick, address: homeAddress,
-                email: contactEmail,
+                photo: pickedPhoto,
+                nicknames: nick.map { [$0] } ?? [],
+                address: homeAddress, email: contactEmail,
                 isEmergencyContact: isEmergencyContact)
         }
         if succeeded { dismiss() }

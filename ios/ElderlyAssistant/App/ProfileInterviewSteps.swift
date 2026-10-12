@@ -533,12 +533,12 @@ struct EmergencyContactsStep: View {
                 phone: entry.contact.phone,
                 relationship: entry.contact.relationship,
                 messengerHandle: entry.contact.messengerHandle,
-                // T-145 (family-contacts-unify, 2026-10-12): the single
-                // stored nickname became a list. This pass-through feeds
-                // the coordinator's still single-value seam, so the
-                // FIRST entry is the one it can carry — the coordinator
-                // signature (and the full list) lands in T-156.
-                nickname: entry.contact.nicknames.first,
+                // T-156 (family-contacts-unify, 2026-10-12): the widened
+                // coordinator seam takes the full list, so this
+                // pass-through carries the contact's stored nicknames
+                // VERBATIM — a flag write can no longer drop the
+                // entries past the first.
+                nicknames: entry.contact.nicknames,
                 address: entry.contact.address,
                 email: entry.contact.email,
                 isEmergencyContact: entry.isEmergencyContact) {
