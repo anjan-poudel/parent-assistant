@@ -129,3 +129,15 @@ precedence, remap, .limited, denial, unlinked parity matrix, roster-order
 determinism (5x), single-snapshot semantics, dial-back mirror. Whole-module
 build green on a forced recompile of both files (0 errors); release log-safety
 gate passes. Scoped run deferred.
+
+## T-144 — Sequencing gate (master merge) — DONE
+
+Call-dialer PR #171 merged to master (81de796a, marker CallChannelChain.swift
+present); master merged into feat/family-contacts-unify (commit 78d9a34d).
+Conflict resolutions: spec files ours (per-feature records); evidence JSONL
+unioned; L10n baseline pins re-measured to the combined catalog (1,415 keys:
+dialogue 1_396, calling 1_410, family 1_394); FEATURE_ROOTS unioned (our 3
+files + call-dialer's Services/Calls). Merged-tree build-for-testing GREEN
+(exit 0). Frozen call-dialer suites deferred to T-163 per speed mode.
+Line-anchor drift: L10nCatalogCoverageTests + check-release-log-safety.py are
+the union points; downstream units read current file state, not old anchors.
